@@ -419,7 +419,7 @@ final class MatchingCommandAdmission {
         while (candidates.hasNext()) {
             long orderId = candidates.next();
             if (orderId == excludedOrderId || orderId == placement.orderId()) continue;
-            OrderRuntime order = owner.runtimeOrder(orderId);
+            OrderRuntime order = owner.activeOrderIndex.activeOrderRuntime(orderId);
             if (order == null || order.status() != com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN
                     || order.side() == placement.side()) continue;
             boolean crosses = placement.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
@@ -719,7 +719,7 @@ final class MatchingCommandAdmission {
                 long orderId = operation == CommandSlot.Operation.REPLACE
                         ? decodedCommand.replaceOrder().originalOrderId()
                         : decodedCommand.amendOrder().originalOrderId();
-                var order = owner.runtimeState.order(orderId);
+                var order = owner.activeOrderIndex.activeOrderRuntime(orderId);
                 yield order == null ? "" : owner.identities.instrumentId(order.symbolId());
             }
             case TRIGGER -> {

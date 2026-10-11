@@ -52,9 +52,8 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
     private final Map<String, LongHashSet> idsBySymbol = new HashMap<>(INITIAL_INDEX_CAPACITY);
     private final Long2ObjectHashMap<IndexedOrder> ordersById =
             new Long2ObjectHashMap<>(INITIAL_INDEX_CAPACITY, 0.65f, false);
-    /** Non-state wrapper pool; terminal orders cannot be observed through this holder. */
-    private static final ThreadLocal<ArrayDeque<IndexedOrder>> RECYCLED_ORDERS =
-            ThreadLocal.withInitial(() -> new ArrayDeque<>(INITIAL_INDEX_CAPACITY));
+    /** Owner-only wrapper pool; its lifetime follows this index and retains no terminal values. */
+    private final ArrayDeque<IndexedOrder> recycledOrders = new ArrayDeque<>(INITIAL_INDEX_CAPACITY);
     private RuntimeIdentityRegistry recoveryIdentities;
 
     /** One Owner-owned index entry per active order; updates reuse the Lane's immutable value. */
@@ -423,13 +422,13 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
                 remove(idsByUser, previous.userId(), orderId);
                 remove(idsBySymbol, previous.instrumentId(), orderId);
                 previous.clear();
-                RECYCLED_ORDERS.get().addFirst(previous);
+                recycledOrders.addFirst(previous);
             }
             return;
         }
         IndexedOrder previous = ordersById.get(orderId);
         if (previous == null) {
-            IndexedOrder entry = RECYCLED_ORDERS.get().pollFirst();
+            IndexedOrder entry = recycledOrders.pollFirst();
             if (entry == null) entry = new IndexedOrder(current, instrumentId);
             else entry.reset(current, instrumentId);
             add(entry);

@@ -1168,6 +1168,21 @@ class CoreOrderedOrderBatchTest {
                 state.admissions.validatePendingCancel(single, decoded);
                 assertThat(state.admissions.matchingSymbol(single, CommandSlot.Operation.CANCEL, decoded))
                         .isEqualTo("1");
+                var amendSingle = command(CoreMessageType.AMEND_ORDER, UUID.randomUUID(), 5,
+                        TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(
+                                13_101, 13_103, "route-amend", 900L, 1L, CoreTimeInForce.GTC, false)), 1001);
+                assertThat(state.admissions.matchingSymbol(amendSingle, CommandSlot.Operation.AMEND,
+                        com.surprising.aeron.service.command.order.DecodedMatchingCommand.decode(amendSingle)))
+                        .isEqualTo("1");
+                var replaceSingle = command(CoreMessageType.REPLACE_ORDER, UUID.randomUUID(), 5,
+                        TradingCommandCodec.encodeReplaceOrder(new com.surprising.aeron.protocol.ReplaceOrderCommand(
+                                13_101, place(13_103, "route-replace", 900))), 1001);
+                assertThat(state.admissions.matchingSymbol(replaceSingle, CommandSlot.Operation.REPLACE,
+                        com.surprising.aeron.service.command.order.DecodedMatchingCommand.decode(replaceSingle)))
+                        .isEqualTo("1");
+                assertThat(state.admissions.preMatchingSelfTradeCancellations(1001,
+                        linearOrder(13_103, "route-self-trade", CoreOrderSide.SELL, 900, 1), 0, 900))
+                        .containsExactly(13_101);
                 var foreignSingle = command(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 5,
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(13_102)), 1001);
                 assertThatThrownBy(() -> state.admissions.validatePendingCancel(foreignSingle,

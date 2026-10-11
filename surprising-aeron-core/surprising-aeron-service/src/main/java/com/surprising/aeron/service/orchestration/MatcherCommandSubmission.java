@@ -224,7 +224,7 @@ final class MatcherCommandSubmission {
         ArrayList<DeterministicExchangeCoreAdapter.CancellationOrder> orders =
                 new ArrayList<>(orderIds.size());
         for (long orderId : orderIds) {
-            OrderRuntime order = owner.runtimeOrder(orderId);
+            OrderRuntime order = owner.activeOrderIndex.activeOrderRuntime(orderId);
             if (order != null && order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN) {
                 orders.add(new DeterministicExchangeCoreAdapter.CancellationOrder(
                         order.orderId(), order.userId(), owner.runtimeOrderSymbol(order)));
