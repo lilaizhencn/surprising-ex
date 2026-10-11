@@ -1,5 +1,5 @@
 {
-  "at": "2026-10-11T02:09:53.843641+00:00",
+  "at": "2026-10-11T02:16:34.927691+00:00",
   "change": "采用实验目录已修复的多线程Lane实现到master",
   "experimentalBase": "2ca69ba6c5a9a6c21452c9019ece215391824d8a",
   "experimentalWorkingTree": "four preexisting low-allocation changes plus single/batch cancellation Owner read fixes",
@@ -61,6 +61,33 @@
       "source": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/adopted-experiment-1-source.json",
       "jars": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/adopted-experiment-1-jars.json",
       "analysis": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/adopted-experiment-1-analysis-cleanup.json"
+    },
+    {
+      "run": "adopted-experiment-2",
+      "functionalAcceptance": true,
+      "observedBusinessOpsPerSec": 381484.346,
+      "observedCoreMessagesPerSec": 36447.798,
+      "measurementSeconds": 60.018222,
+      "fundsChecks": [
+        "mixedRiskDrain=PASS batchPages=75 continuationPages=74",
+        "mixedRiskDrain=PASS batchPages=0 continuationPages=0",
+        "mixedLiquidationCancellation=PASS pages=1",
+        "mixedLossLifecycle=PASS liquidation=true insurance=true adl=true",
+        "mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=4260 businessHash=51dce139a8602d12",
+        "mixedCapacity=PASS elapsedSeconds=60.023 terminalBusinessOperations=22898692 offeredBusinessOperations=22898692 terminalCoreMessages=2187780 offeredCoreMessages=2187780 businessOpsPerSec=381499.332 coreMessagesPerSec=36449.095 fills=5450240 fillsPerSec=90802.694 queries=0 unfinished=0 peakInFlight=256 measuredCycles=2129 totalCycles=4260 triggerExecutions=0"
+      ],
+      "measurementSystemSamples": 12,
+      "measurementCpuSpeedLimits": [
+        66,
+        68,
+        70,
+        72,
+        75,
+        77
+      ],
+      "source": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/adopted-experiment-2-source.json",
+      "jars": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/adopted-experiment-2-jars.json",
+      "analysis": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/adopted-experiment-2-analysis-cleanup.json"
     }
   ],
   "beforeAdoptionMainObservedBusinessOpsPerSec": 179497.542,
@@ -76,5 +103,7 @@
     "历史低分配版本仅恢复11个改动，仍缺8个原始执行文件；不是完整历史工作区"
   ],
   "snapshotRecoveryWalletScenarios": false,
-  "userDirtyPerformanceValidationPreserved": true
+  "userDirtyPerformanceValidationPreserved": true,
+  "adoptionCodeCommit": "5a46d779db2d082fb4a83551b97a4ba388e01b51",
+  "adoptionCodePushedToOriginMaster": true
 }
