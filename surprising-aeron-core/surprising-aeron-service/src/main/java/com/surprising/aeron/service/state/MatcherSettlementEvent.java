@@ -55,6 +55,8 @@ public final class MatcherSettlementEvent implements
     private boolean treasuryTrades;
     private long[] completedLanes;
     private boolean collected;
+    /** One retained financial slot for this pooled fact; never a second ledger. */
+    private volatile TreasurySettlement treasurySettlement;
     /** Owner 已以 acquire 观察到的完成位；本代事件不会倒退，复用时清零。 */
     private long observedCompletedLaneMask;
 
@@ -813,6 +815,7 @@ public final class MatcherSettlementEvent implements
         if (!complete() || changes != null) {
             throw new IllegalStateException("cannot recycle an incomplete matcher settlement");
         }
+        if (treasurySettlement != null) treasurySettlement.clear();
         direct = false; cancellation = false; directPublished = false; directFailure = null; dispatched = false;
         matcherOwnedPublication = false;
         queuedLaneMask = 0;
@@ -941,11 +944,13 @@ public final class MatcherSettlementEvent implements
             throw new IllegalStateException("account lane completed the same matcher fact twice");
         }
         boolean directCompletion = direct;
+        SystemLedgerLane ledgerToWake = treasurySettlement == null ? null : treasurySettlement.ledger;
         if (LATENCY_DIAGNOSTICS && matcherPublishedNanos != 0) {
             completedLanes[completionOffset + 1] = startedNanos;
             completedLanes[completionOffset + 2] = finishedNanos;
         }
         LONGS.setRelease(completedLanes, completionOffset, 1L);
+        if (ledgerToWake != null) ledgerToWake.signalWork();
         if (directCompletion) completionRuntime.publishDirectMatcherSettlementReady(laneId);
         else completionRuntime.publishMatcherSettlementReady(laneId, completionSequence);
     }
@@ -1079,6 +1084,18 @@ public final class MatcherSettlementEvent implements
         return observedCompletedLaneMask;
     }
 
+    /** Ledger reads release markers without mutating the Owner's completion cache or running a Lane. */
+    boolean accountLanesCompleteForLedger() {
+        if (!ready()) return false;
+        long remaining = routedLaneMask();
+        while (remaining != 0) {
+            int laneId = Long.numberOfTrailingZeros(remaining);
+            remaining &= remaining - 1;
+            if ((long) LONGS.getAcquire(completedLanes, laneId * CACHE_LINE_LONGS) == 0) return false;
+        }
+        return true;
+    }
+
     public void ensureLanesExecuted() {
         if (!ready() || runtime == null || runtime.accountLanesStarted || direct && !dispatched) return;
         long remaining = routedLaneMask() & ~completedLaneMask();
@@ -1095,7 +1112,8 @@ public final class MatcherSettlementEvent implements
     public boolean complete() {
         if (!ready()) return false;
         ensureLanesExecuted();
-        return completedLaneMask() == routedLaneMask();
+        return completedLaneMask() == routedLaneMask()
+                && (treasurySettlement == null || treasurySettlement.ledger == null || treasurySettlement.completed);
     }
     public MatcherSettlementPlan plan() { return plan; }
     int planCount() { return batchPlans == null ? 1 : batchPlanCount; }
@@ -1126,9 +1144,19 @@ public final class MatcherSettlementEvent implements
     }
 
     RuntimeTreasuryDelta collectTreasuryDelta() {
+        return collectTreasuryDelta(null);
+    }
+
+    RuntimeTreasuryDelta collectTreasuryDelta(RuntimeFundsAccumulator target) {
         if (!complete()) return null;
         if (collected) throw new IllegalStateException("matcher settlement event was already collected");
+        if (hasLedgerSettlement() && target != null) transferLedgerFundsTo(target);
         collected = true;
+        if (treasurySettlement != null && treasurySettlement.queued) return EMPTY_TREASURY_DELTA;
+        return mergeTreasuryDeltas();
+    }
+
+    private RuntimeTreasuryDelta mergeTreasuryDeltas() {
         if (!treasuryTrades) return EMPTY_TREASURY_DELTA;
         RuntimeTreasuryDelta aggregate = null;
         for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) {
@@ -1137,6 +1165,56 @@ public final class MatcherSettlementEvent implements
         }
         if (aggregate == null) throw new IllegalStateException("matcher settlement event has no lane delta");
         return aggregate;
+    }
+
+    boolean submitTreasurySettlement(SystemLedgerLane ledger) {
+        if (ledger == null || runtime == null || changes == null || collected)
+            throw new IllegalStateException("Ledger settlement requires retained isolated account facts");
+        if (treasurySettlement == null) treasurySettlement = new TreasurySettlement();
+        if (treasurySettlement.queued) throw new IllegalStateException("Treasury settlement was already queued");
+        treasurySettlement.ledger = ledger;
+        if (!ledger.offer(treasurySettlement)) return false;
+        treasurySettlement.queued = true;
+        return true;
+    }
+
+    boolean hasLedgerSettlement() { return treasurySettlement != null && treasurySettlement.queued; }
+
+    private void transferLedgerFundsTo(RuntimeFundsAccumulator target) {
+        if (!hasLedgerSettlement() || !treasurySettlement.completed)
+            throw new IllegalStateException("Ledger funds receipt is incomplete");
+        treasurySettlement.funds.transferToEmpty(target);
+    }
+
+    private final class TreasurySettlement implements SystemLedgerLane.Entry {
+        private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
+        private volatile SystemLedgerLane ledger;
+        private boolean queued;
+        private volatile boolean completed;
+
+        @Override public boolean ready() { return accountLanesCompleteForLedger(); }
+
+        @Override public void apply(TreasuryRuntime treasury) {
+            if (!ready() || completed || treasury.hasChangedValues())
+                throw new IllegalStateException("invalid Ledger financial scope");
+            mergeTreasuryDeltas().apply(treasury);
+            changes.appendFundsDelta(requiredLaneMask, funds);
+            treasury.appendFundsDelta(funds);
+            funds.requireConserved(false);
+            treasury.clearChangedKeys();
+            TradingRuntimeState completionRuntime = runtime;
+            // Owner may immediately move the buffers and recycle this slot. Capture the wake
+            // target first and never read any slot/event fields after publishing completion.
+            completed = true;
+            completionRuntime.signalOwnerCompletion();
+        }
+
+        void clear() {
+            if (ledger != null && !completed) throw new IllegalStateException("Ledger still owns this settlement");
+            funds.clear();
+            ledger = null;
+            queued = completed = false;
+        }
     }
 
     private int laneSlot(int laneId) {

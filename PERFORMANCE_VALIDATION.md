@@ -5149,3 +5149,23 @@ HotSpot Corretto JDK27/G1，248项资金/并发回归及50项源码/协议/bench
 具体命令、JDK/JVM、开始/结束、源/JAR SHA、测试XML、JMH JSON、探针源码/结果、JFR summary/事件见 artifact `../performance-artifacts/lane-parallel-20261010T144735Z/` 的 `system-ledger-*` 与 build9记录。原始149172B JFR以gzip保存，解压SHA核验一致后删除raw；仅删除自己的探针编译类，全部原始生成进程终止。清理为 `system-ledger-foundation-cleanup.json`，紧凑报告为 `docs/validation/system-ledger-foundation-20261011.json`。
 
 结论：基础邮件队列的单写者/顺序/唤醒/异常/预热后零分配已验证；生产成交、批量、保险、资金费、强平、ADL、交割的准入与完成/回滚/查询仍需一起迁移。没有把基础测试或局部微基准写作全L2、Shared-Nothing或50万验收。本模块不执行快照、恢复或wallet，未重复无业务路径改动的真实Aeron压测；生产接线完成后再锁定最新构建真实单节点与独立JFR。
+
+
+## 2026-10-11 Matcher 财务回执：采集前计划
+
+当前 master `09ef5642` 加本轮未提交的 `MatcherSettlementEvent` / `TradingRuntimeState` / 跨 Lane 用例及局部基准。Owner 保留命令槽，账户 Lane 独立结算并释放完成位；独立账本只读取完成位，在原 Treasury 上记账、验证资金守恒，然后释放财务完成标记，Owner 收集原语结果并回收槽。专用账本尚未接入生产运行时，禁止据此宣称 Owner 已退出资金写入或主线吞吐提升。
+
+门槛：真实跨 Lane 成交手续费等于 2；另一账户在一侧阻塞时仍推进；提前回收/重复收集拒绝；旧账本通知尚未返回时复用槽仍安全；受影响资金及源码边界回归通过。JDK 27/G1；局部 JMH 的 1/4 Account workers 各 1 fork、1 thread，预热 3×1s、测量 5×1s，独立 `-prof gc` 归因；复用无成交撤单事实，不是 API 请求或永续容量。预锁局部分配门槛 ≤16 B/technical stage op，非零必须如实记录。单独 JFR 覆盖本轮方法。对照提交不适用，仅当前 master；本轮未启用生产账本，因此不做把局部路径冒充生产接线的 native 验收。不测试快照、恢复及 wallet。完整计划和命令保存于 `performance-artifacts/lane-parallel-20261010T144735Z/matcher-ledger-receipt-plan.json`。
+
+
+## 2026-10-11 Matcher 财务回执：结果与边界
+
+在 master `09ef5642` 的本轮改动中，账户 Lane 独立推进；账本只 acquire 读取完成位，不改 Owner 完成缓存。专属账本在原 Treasury 上应用财务 delta，核对守恒，再释放完成标记。Owner 交换原语缓冲后回收槽位。容量 1 的满队列用例验证：账户已完成但财务尚未入队时，事件保持未完成；不能退回 Owner 记账或提前收集。跨 Lane 实际成交手续费为 2；旧账本通知尚未返回时重用事件、重复收集、非空目标拒绝且不消费回执均有检查。
+
+最终 JDK 27/G1：`matcher-ledger-financial-verified` 254 项、`matcher-ledger-boundaries-verified` 44 项、`matcher-ledger-benchmark-boundaries` 6 项均通过，源码在各轮稳定。20 模块 `clean package` 通过，1804 源文件指纹、1755 组编译类/JAR 字节核对一致（`l1-owner-routing-12-*`）。局部 JMH 1/4 workers 的无成交撤单事实，每次仅一个账户 Lane 参与；分数分别 137670.015±34024.854、123144.019±9663.535 technical stage ops/s（误差以原 JSON 为准），分配 0.046194/0.051465B/次，GC=0，满足预锁 ≤16B 门槛。此基准逐次等待局部财务回执，不是全局 window256 的 Core 发压，不可拿局部分数解释 43 万或验收 50 万。
+
+独立 `matcher-ledger-receipt-profile` JFR 覆盖实际财务槽方法，Ledger run 259 个 execution samples、readiness 45、apply 2，DataLoss=0；录制包含启动/预热/测量，标为 `UNSCOPED_RECORDING`，采样不能证明精确零分配。summary、事件聚合和完整命令保留。gzip 解压 SHA 与原 JFR 一致后删除本轮原始 JFR 及临时 events JSON，未创建 native 集群。
+
+失败记录保留：`matcher-ledger-recycle-final` 误从已移除活动订单中读取测试夹具，改为启动 worker 前保留引用后通过；首轮 `matcher-ledger-receipt-jmh` 两个参数重复使用 Core 序号被拒绝，虽进程返回 0 但有效结果为 0，标为失败；修正版递增序号并启用 `-foe true`。
+
+结论为局部回执边界已验证，生产 `SystemLedgerLane` 尚未接线，Owner 全部资金职责退出、L1 全部状态归属、整链路零分配及真实容量仍未完成。未测生产接线/native、快照、恢复、wallet；依据为路径尚未激活及用户明确排除场景。当前 Owner 的资金费、保险、強平、提交/查询等路径仍需迁移。结构化证据见 `docs/validation/matcher-ledger-receipt-20261011.json`，所有命令与失败/成功结果保留在同一 artifactRoot。

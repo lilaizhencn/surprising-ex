@@ -49,6 +49,44 @@ class OrderBatchSettlementWaitTest {
     }
 
     @Test
+    void ledgerReadinessDoesNotMutateOwnerCompletionCacheOrExecuteAccounts() throws Exception {
+        var event = incompleteEvent();
+        var mask = MatcherSettlementEvent.class.getDeclaredField("requiredLaneMask"); mask.setAccessible(true);
+        mask.setLong(event, 3);
+        var reset = MatcherSettlementEvent.class.getDeclaredMethod("resetCompletions", int.class); reset.setAccessible(true);
+        reset.invoke(event, 2);
+        var slotsField = MatcherSettlementEvent.class.getDeclaredField("completedLanes"); slotsField.setAccessible(true);
+        long[] slots = (long[]) slotsField.get(event);
+        var cache = MatcherSettlementEvent.class.getDeclaredField("observedCompletedLaneMask"); cache.setAccessible(true);
+        var longs = java.lang.invoke.MethodHandles.arrayElementVarHandle(long[].class);
+        var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var done = new java.util.concurrent.CountDownLatch(1);
+        try (var ledger = new SystemLedgerLane(new TreasuryRuntime(), 256, failure::set)) {
+            assertThat(ledger.offer(new SystemLedgerLane.Entry() {
+                @Override public boolean ready() { return event.accountLanesCompleteForLedger(); }
+                @Override public void apply(TreasuryRuntime actual) { done.countDown(); }
+            })).isTrue();
+            try {
+                assertThat(event.accountLanesCompleteForLedger()).isFalse();
+                assertThat(cache.getLong(event)).isZero();
+                longs.setRelease(slots, 0, 1L);
+                assertThat(event.accountLanesCompleteForLedger()).isFalse();
+                assertThat(cache.getLong(event)).isZero();
+                assertThat(done.getCount()).isOne();
+            } finally { longs.setRelease(slots, 16, 1L); ledger.signalWork(); }
+            assertThat(done.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            assertThat(failure.get()).isNull();
+            assertThat(event.accountLanesCompleteForLedger()).isTrue();
+            assertThat(cache.getLong(event)).isZero();
+            assertThat(event.completedLaneMask()).isEqualTo(3);
+            assertThat(cache.getLong(event)).isEqualTo(3);
+        }
+        reset.invoke(event, 2);
+        assertThat(event.accountLanesCompleteForLedger()).isFalse();
+        assertThat(cache.getLong(event)).isZero();
+    }
+
+    @Test
     void completionCacheWaitsForEveryLaneAndResetsBeforeReuse() throws Exception {
         var event = incompleteEvent();
         var mask = MatcherSettlementEvent.class.getDeclaredField("requiredLaneMask"); mask.setAccessible(true);

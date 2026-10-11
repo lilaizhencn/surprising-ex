@@ -33,8 +33,14 @@ Harness 只保存最后一份批量 payload，每次新批量终态覆盖它，�
 
 ## 当前账户所有权下的正确性判定
 
-`LinearPerpetualBenchmarkSupport.fill` 核对双方实际成交持仓、账户资金与手续费/保险资金守恒、剩余订单数量和 accepted/terminal 完成性。账户工作线程已移除，逻辑分区继续隔离；队列高水位不再能证明跨账户成交结算正确，不能把旧的“至少两个账户工作线程执行”当作通过条件。
+`LinearPerpetualBenchmarkSupport.fill` 核对双方实际成交持仓、账户资金与手续费/保险资金守恒、剩余订单数量和 accepted/terminal 完成性。当前主线由常驻 `SettlementLaneWorker` 执行账户工作；队列高水位只表明队列被使用，跨账户成交仍须核对两侧实际资金、持仓及终态结果。
 
 `qualify-aeron-async-stages.sh` 要求 `summarize-aeron-async-stage.py` 的 `clientPass=true`，即同时出现 `mixedCapacity=PASS` 与 `mixedVerify=PASS`。JMH 启动器即使在 fork 失败后返回 0，脚本也必须以失败退出，并保留录制及日志。资金核对缺失不能记为性能通过。
 
 CPU 汇总的 `jfr.coverage` 记录实际首末 CPU 事件及请求测量边界：`MEASUREMENT`、`PARTIAL_MEASUREMENT`、`UNSCOPED_RECORDING` 或 `MISSING`。周期事件允许 2 秒边界误差；maxsize 滚动即使不产生 DataLoss，也必须标为局部窗口，不能用启动/预热 CPU 或截断样本代表完整稳定测量。
+
+## Matcher 财务回执局部基准
+
+`MatcherTreasuryReceiptBenchmark.completeFinancialReceipt` 使用常驻 Account workers 和原 Treasury 的专属账本线程，测量复用事实投递、账户完成位、资金回执和槽位回收。每次无成交撤单事实只涉及一个账户 Lane，1/4 参数表示启动的 worker 数量；它不代表跨 Lane 成交吞吐，也不是 API 容量测试。Core 序号逐次增加，固定 native payload 仅作为不可变无成交夹具。
+
+JDK 27/G1，1 fork/1 thread，3×1s 预热、5×1s 测量的独立 `-prof gc` 结果约 0.046–0.052B/technical stage op，GC 为 0；另一个 JFR fork覆盖实际财务槽方法，包含启动及预热，不是 Core 稳定窗口。实际跨 Lane 成交的非零手续费由 `MatcherTreasurySettlementTest` 核对。生产接线及全链路分配仍未完成，详见根 `PERFORMANCE_VALIDATION.md`。

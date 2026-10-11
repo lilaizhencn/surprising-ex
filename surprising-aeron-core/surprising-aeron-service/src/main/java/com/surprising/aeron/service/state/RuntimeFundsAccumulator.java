@@ -106,7 +106,8 @@ public final class RuntimeFundsAccumulator {
     }
 
     /**
-     * 将已汇总的资金缓冲交给空目标，源接回空缓冲；两者必须由同一执行线程独占。
+     * 将已汇总的资金缓冲交给空目标，源接回空缓冲；转移时两者必须由当前线程独占。
+     * 跨线程转移须先以完成标记交接所有权，原生产者发布完成后不再访问源缓冲。
      * 用于命令挂起/恢复，不重新合并 posting，也不改变 posting 顺序及溢出校验结果。
      */
     public void transferToEmpty(RuntimeFundsAccumulator target) {

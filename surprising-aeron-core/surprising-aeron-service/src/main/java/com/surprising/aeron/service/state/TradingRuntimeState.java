@@ -1481,7 +1481,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
         assertOwner();
         if (event == null || !event.complete()) return null;
-        RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta();
+        RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta(fundsAccumulator);
+        boolean ledgerFunds = event.hasLedgerSettlement();
         if (event.replacementIdentityAllocations() != 0)
             event.identities().recordLaneClientAllocations(event.replacementIdentityAllocations());
         boolean ownerPending = pendingReservations.pendingReservationsBySequence.containsKey(event.plan().coreSequence());
@@ -1504,7 +1505,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 }
                 else {
                     completed += changes.completedPending[laneId];
-                    if (fundsAccumulator != null) fundsAccumulator.add(changes.laneFundsDeltas[laneId]);
+                    if (fundsAccumulator != null && !ledgerFunds) fundsAccumulator.add(changes.laneFundsDeltas[laneId]);
                     if (changes.directPositionIdentities) {
                         var positions = changes.laneDeltas[laneId].positions;
                         for (int index = 0; index < positions.size; index++)
