@@ -1,0 +1,141 @@
+{
+  "at": "2026-10-11T05:19:34.760445+00:00",
+  "status": "partial validation; L1 ordinary PLACE boundary migrated, remaining Owner business/ledger authority pending",
+  "baseHead": "484cc4903e58e1c8b35b22b09167a95bc02ca6a0",
+  "comparisonCommit": "not applicable; only current master tested",
+  "sourceFiles": {
+    "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/state/OrderAdmissionAllocationBenchmark.java": "89fcfa76861cec8cc052fee78efbdb1cddc386fba571194961364fdf288f04c1",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CommandSlot.java": "5ea21f927b7eeefc80273f520d082c82b6b87c2b62bbc30b859e0505593d42ce",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/MatcherCommandSubmission.java": "fb5de28e29f9a971c4a353a4b0ccf660b963c6e6ff96b000a45268c1a1557be4",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/MatchingCommandAdmission.java": "2211c6587d61567982a6271333a07e01c8f356db5bb18361d0525dc8a5fab249",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderedCommitCoordinator.java": "f50910b5b518aa9b3e4dd09216896d2a88d68aea8355f051c4a8b9a6f2507c58",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/MatcherSettlementEvent.java": "538dc2cd0de1e45b80a3962bab79342663290a3ad30154430977689a1156bed4",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/PlaceAdmissionEvent.java": "601ec37ea51a1e2e7982825c89cc3d0c68d8a999beb612f0891c2ef39fa85075",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/PositionCloseCapacity.java": "f1476e81dcace37e619d97a86377e45d13610bf3a2738e058d1e3684702cc013",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreMatchingStateTest.java": "7be9400e0fc59c43fc70dd5f5558cb93837cde6520d955ee0cf3269523429fc2",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/LaneCloseCapacityTest.java": "ef1a95ef18e87d0cde74c7d456e4b4950b3c4e482d9437301b9f78a372ba7420"
+  },
+  "cleanPackage": {
+    "modules": 20,
+    "sourceFiles": 1798,
+    "jarClassChecks": 1728,
+    "passed": true
+  },
+  "nativeRuns": [
+    {
+      "run": "l1-owner-routing-6",
+      "businessOpsPerSec": 417223.03,
+      "coreMessagesPerSec": 39851.446,
+      "seconds": 60.005451,
+      "fundsChecks": [
+        "mixedRiskDrain=PASS batchPages=75 continuationPages=74",
+        "mixedRiskDrain=PASS batchPages=0 continuationPages=0",
+        "mixedLiquidationCancellation=PASS pages=1",
+        "mixedLossLifecycle=PASS liquidation=true insurance=true adl=true",
+        "mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=4571 businessHash=58e1d1a7dbf4fe1e",
+        "mixedCapacity=PASS elapsedSeconds=60.010 terminalBusinessOperations=25038344 offeredBusinessOperations=25038344 terminalCoreMessages=2391560 offeredCoreMessages=2391560 businessOpsPerSec=417238.501 coreMessagesPerSec=39852.912 fills=5959680 fillsPerSec=99311.997 queries=0 unfinished=0 peakInFlight=256 measuredCycles=2328 totalCycles=4571 triggerExecutions=0"
+      ],
+      "cpuSpeedLimits": [
+        70,
+        72,
+        75
+      ],
+      "sourceUnchangedDuringRun": true,
+      "capacityAcceptance": false,
+      "profile": false
+    },
+    {
+      "run": "l1-owner-routing-7",
+      "businessOpsPerSec": 428543.832,
+      "coreMessagesPerSec": 40930.437,
+      "seconds": 60.026161,
+      "fundsChecks": [
+        "mixedRiskDrain=PASS batchPages=75 continuationPages=74",
+        "mixedRiskDrain=PASS batchPages=0 continuationPages=0",
+        "mixedLiquidationCancellation=PASS pages=1",
+        "mixedLossLifecycle=PASS liquidation=true insurance=true adl=true",
+        "mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=4716 businessHash=cecf5bfee582b619",
+        "mixedCapacity=PASS elapsedSeconds=60.032 terminalBusinessOperations=25726510 offeredBusinessOperations=25726510 terminalCoreMessages=2457134 offeredCoreMessages=2457134 businessOpsPerSec=428545.636 coreMessagesPerSec=40930.311 fills=6123520 fillsPerSec=102004.033 queries=0 unfinished=0 peakInFlight=256 measuredCycles=2392 totalCycles=4716 triggerExecutions=0"
+      ],
+      "cpuSpeedLimits": [
+        72,
+        75
+      ],
+      "sourceUnchangedDuringRun": true,
+      "capacityAcceptance": false,
+      "profile": false
+    },
+    {
+      "run": "l1-lane-close-jfr",
+      "businessOpsPerSec": 392974.711,
+      "coreMessagesPerSec": 37542.322,
+      "seconds": 60.014429,
+      "fundsChecks": [
+        "mixedRiskDrain=PASS batchPages=75 continuationPages=74",
+        "mixedRiskDrain=PASS batchPages=0 continuationPages=0",
+        "mixedLiquidationCancellation=PASS pages=1",
+        "mixedLossLifecycle=PASS liquidation=true insurance=true adl=true",
+        "mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=4331 businessHash=f42d277d4f7ab0dd",
+        "mixedCapacity=PASS elapsedSeconds=60.019 terminalBusinessOperations=23586836 offeredBusinessOperations=23586836 terminalCoreMessages=2253332 offeredCoreMessages=2253332 businessOpsPerSec=392988.316 coreMessagesPerSec=37543.533 fills=5614080 fillsPerSec=93538.101 queries=0 unfinished=0 peakInFlight=256 measuredCycles=2193 totalCycles=4331 triggerExecutions=0"
+      ],
+      "cpuSpeedLimits": [
+        72,
+        75
+      ],
+      "sourceUnchangedDuringRun": true,
+      "capacityAcceptance": false,
+      "profile": true
+    }
+  ],
+  "jmhSource": "lane-close-capacity-jmh.json",
+  "excluded": [
+    "snapshot",
+    "recovery",
+    "wallet"
+  ],
+  "artifactRoot": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z",
+  "previousEightRunCleanup": "current-eight-runs-final-cleanup.json",
+  "tests": [
+    {
+      "run": "lane-close-prefix-financial-final",
+      "totals": {
+        "tests": 232,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "sourceUnchangedDuringTest": true
+    },
+    {
+      "run": "lane-close-prefix-boundaries-final",
+      "totals": {
+        "tests": 50,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "sourceUnchangedDuringTest": true
+    }
+  ],
+  "jfr": {
+    "formalWindowEpochMillis": [
+      1791695664054,
+      1791695724068
+    ],
+    "approximateCoreAllocationBytesPerSecond": 467608751.407,
+    "approximateCoreAllocationBytesPerBusinessOperation": 1189.920720895956,
+    "gcPauses": {
+      "count": 93,
+      "totalNanos": 456497631,
+      "maxNanos": 11124532
+    },
+    "wholeRecordingDataLoss": [
+      "0"
+    ],
+    "monitorAttribution": "All three formal monitor events are JFR internal StringPool; two are on Owner (320.231us,41.980us), none are business monitors."
+  },
+  "cleanup": [
+    "lane-close-final-cleanup.json",
+    "three-profiles-verified-jfr-archives.json"
+  ]
+}

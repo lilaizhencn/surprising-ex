@@ -560,8 +560,9 @@ class CoreMatchingStateTest {
         }
     }
 
-    @Test
-    void normalCloseCancelsNewestConflictingReduceOnlyOrderBeforeMatcherSubmission() {
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void normalCloseCancelsNewestConflictingReduceOnlyOrderBeforeMatcherSubmission(boolean asynchronous) {
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
@@ -579,9 +580,12 @@ class CoreMatchingStateTest {
                     place(204, CoreOrderSide.SELL, 120, 1, true,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 1));
 
-            apply(state, 7, 22, CoreMessageType.PLACE_ORDER,
+            var close = message(state, 7, 22, CoreMessageType.PLACE_ORDER,
                     place(205, CoreOrderSide.SELL, 130, 1, false,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            var response = asynchronous ? CoreTestCompletion.applyAsynchronously(state, close)
+                    : drainMatching(state, state.apply(close), close);
+            assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
 
             assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.OPEN);
             assertThat(state.terminalRetention().containsOrder(204, 22, "")).isTrue();
@@ -602,6 +606,104 @@ class CoreMatchingStateTest {
             assertThat(state.terminalRetention().containsOrder(205, 22, "")).isTrue();
             assertThat(state.tradingState().order(205)).isNull();
             assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps()).isZero();
+        }
+    }
+
+    @Test
+    void rejectedLaneCloseAdmissionKeepsConflictingOrdersAndFunds() {
+        try (var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+            applyInstrument(state);
+            for (long user : new long[]{11, 22})
+                apply(state, user == 11 ? 1 : 2, user, CoreMessageType.ADJUST_BALANCE,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+                    place(202, CoreOrderSide.BUY, 100, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            apply(state, 5, 22, CoreMessageType.PLACE_ORDER,
+                    place(203, CoreOrderSide.SELL, 110, 2, true,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 1));
+            var balances = state.tradingState().user(22).balances();
+            var request = message(state, 6, 22, CoreMessageType.PLACE_ORDER,
+                    place(204, CoreOrderSide.SELL, 130, 1_000_000, false,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 1));
+            var rejected = CoreTestCompletion.applyAsynchronously(state, request);
+            assertThat(rejected.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
+            assertThat(state.tradingState().order(203).remainingQuantitySteps()).isEqualTo(2);
+            assertThat(state.tradingState().order(204)).isNull();
+            assertThat(state.tradingState().user(22).balances()).isEqualTo(balances);
+            assertThat(state.tradingState().user(22).reservations()).containsKey(203L).doesNotContainKey(204L);
+            assertThat(total(state, "USDT")).isEqualTo(4_000);
+            var duplicate = CoreTestCompletion.applyAsynchronously(state, request);
+            assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
+            assertThat(duplicate.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+        }
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void laneCloseAndOwnerSelfTradeCancellationsAreAppliedOnce(boolean asynchronous) {
+        try (var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+            applyInstrument(state);
+            for (long user : new long[]{11, 22})
+                apply(state, user == 11 ? 1 : 2, user, CoreMessageType.ADJUST_BALANCE,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+                    place(202, CoreOrderSide.BUY, 100, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            apply(state, 5, 22, CoreMessageType.PLACE_ORDER,
+                    place(203, CoreOrderSide.SELL, 130, 2, true,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 1));
+            apply(state, 6, 22, CoreMessageType.PLACE_ORDER,
+                    place(301, CoreOrderSide.BUY, 110, 1, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            var request = message(state, 7, 22, CoreMessageType.PLACE_ORDER,
+                    place(204, CoreOrderSide.SELL, 110, 1, false,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            var response = asynchronous ? CoreTestCompletion.applyAsynchronously(state, request)
+                    : drainMatching(state, state.apply(request), request);
+            assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.tradingState().order(203)).isNull();
+            assertThat(state.tradingState().order(301)).isNull();
+            assertThat(state.tradingState().order(204).executedQuantitySteps()).isZero();
+            assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps()).isEqualTo(2);
+            assertThat(state.tradingState().user(22).reservations()).doesNotContainKeys(203L, 301L).containsKey(204L);
+            assertThat(total(state, "USDT")).isEqualTo(4_000);
+            assertThat(state.fatalFailure).isNull();
+        }
+    }
+
+    @Test
+    void postOnlyCloseFailureCommitsOnlyLaneAuthorizedCancellations() {
+        try (var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+            applyInstrument(state);
+            for (long user : new long[]{11, 22})
+                apply(state, user == 11 ? 1 : 2, user, CoreMessageType.ADJUST_BALANCE,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+                    place(202, CoreOrderSide.BUY, 100, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            apply(state, 5, 22, CoreMessageType.PLACE_ORDER,
+                    place(203, CoreOrderSide.SELL, 130, 2, true,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 1));
+            apply(state, 6, 11, CoreMessageType.PLACE_ORDER,
+                    place(301, CoreOrderSide.BUY, 110, 1, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            var request = message(state, 7, 22, CoreMessageType.PLACE_ORDER,
+                    placeWithFees(204, CoreOrderSide.SELL, 110, 1, false,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 200,
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTX, 110, true, 0, 0));
+            var rejected = CoreTestCompletion.applyAsynchronously(state, request);
+            assertThat(rejected.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
+            assertThat(state.tradingState().order(203)).isNull();
+            assertThat(state.tradingState().order(204).status()).isEqualTo(CoreOrderStatus.REJECTED);
+            assertThat(state.tradingState().order(301).remainingQuantitySteps()).isEqualTo(1);
+            assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps()).isEqualTo(2);
+            assertThat(state.tradingState().user(22).reservations()).doesNotContainKeys(203L, 204L);
+            assertThat(total(state, "USDT")).isEqualTo(4_000);
+            assertThat(state.fatalFailure).isNull();
         }
     }
 

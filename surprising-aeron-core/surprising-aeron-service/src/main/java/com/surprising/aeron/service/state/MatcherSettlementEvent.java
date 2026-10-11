@@ -381,6 +381,9 @@ public final class MatcherSettlementEvent implements
             directNativeItemCount = 1;
             directNativeAccepted = result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
                     || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
+            // A rejected placement may still have an accepted cancellation prefix.
+            // Preserve that outcome so commit validates the Lane's final authorization.
+            directNativeStateChanged = directAcceptedCancellationCount != 0 && !directNativeAccepted;
             if (sourceTrigger != null) {
                 batchPlans[0].completeTrigger(directNativeAccepted
                         ? RuntimeTriggerOrderStateTransitions.prepareMatchedCompletion(sourceTrigger,
@@ -498,8 +501,46 @@ public final class MatcherSettlementEvent implements
                 || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
     }
 
+    /** Matcher combines Owner routing decisions with the accepted Lane admission receipt. */
+    public void addAdmissionCancellations(java.util.List<Long> orderIds) {
+        if (!direct || directPublished || !admissionResolved || !admissionAccepted)
+            throw new IllegalStateException("place admission cancellations are not ready");
+        if (orderIds.isEmpty()) return;
+        var combined = new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
+        for (int index = 0; index < authorizedCancellations.size(); index++)
+            combined.add(cancellationIdAt(authorizedCancellations, index));
+        for (int index = 0; index < orderIds.size(); index++) {
+            long orderId = cancellationIdAt(orderIds, index);
+            if (orderId <= 0) throw new IllegalArgumentException("invalid admission cancellation order");
+            combined.add(orderId);
+        }
+        long[] sorted = combined.toArray();
+        java.util.Arrays.sort(sorted);
+        authorizedCancellations = com.surprising.aeron.service.command.ImmutableLongArrayList.takeOwnership(sorted);
+    }
+
+    /** Matcher reads the combined decision after consuming admission, before publication. */
+    public java.util.List<Long> admissionCancellations() {
+        if (!direct || !admissionResolved || !admissionAccepted)
+            throw new IllegalStateException("place admission cancellations are not ready");
+        return authorizedCancellations;
+    }
+
+    /** Owner validates a completed native prefix against the final immutable authorization. */
+    public java.util.List<Long> completedPreMatchingCancellations() {
+        requireDirectResult();
+        return authorizedCancellations;
+    }
+
+    private static long cancellationIdAt(java.util.List<Long> orderIds, int index) {
+        return orderIds instanceof com.surprising.aeron.service.command.ImmutableLongArrayList primitive
+                ? primitive.valueAt(index) : orderIds.get(index);
+    }
+
     public void recordDirectPreCancellation(long orderId) {
-        if (!direct || directPublished || orderId <= 0 || !authorizedCancellations.contains(orderId))
+        boolean authorized = authorizedCancellations instanceof com.surprising.aeron.service.command.ImmutableLongArrayList primitive
+                ? primitive.containsLong(orderId) : authorizedCancellations.contains(orderId);
+        if (!direct || directPublished || orderId <= 0 || !authorized)
             throw new IllegalStateException("unauthorized direct pre-cancellation");
         if (directAcceptedCancellations == null)
             directAcceptedCancellations = new long[Math.max(4, authorizedCancellations.size())];

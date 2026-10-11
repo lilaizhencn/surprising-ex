@@ -2,6 +2,7 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreResultCode;
 import java.util.UUID;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
@@ -27,6 +28,8 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     private long reservedAmount;
     private long admittedAccountVersion;
     private RuntimeException rejection;
+    /** Lane-owned decision; only immutable order IDs cross the admission boundary. */
+    private List<Long> closeCapacityCancellations = List.of();
     /** Volatile publication is sufficient: all payload fields are written before completion. */
     private volatile boolean completed;
     private volatile boolean matcherConsumed;
@@ -73,6 +76,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         this.runtime = runtime;
         admittedAccountVersion = 0;
         rejection = null;
+        closeCapacityCancellations = List.of();
         reservedAmount = 0;
         completed = false;
         matcherConsumed = false;
@@ -94,6 +98,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         identities = null;
         admittedAccountVersion = 0;
         rejection = null;
+        closeCapacityCancellations = List.of();
         reservedAmount = 0;
         matcherWaitRequired = false;
         matcherConsumed = false;
@@ -121,6 +126,15 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
                         lane.admissionOrderIndex(symbolId), preparedClientKey, symbolId, positionKey,
                         lifecycleSettled, fundingInProgress);
                 reservedAmount = requiredReservation;
+                PositionRuntime currentPosition = positionKey == 0 ? null : lane.positions.get(positionKey);
+                if (instrument().contractType().productLine().isDerivative() && !reduceOnly()
+                        && currentPosition != null && currentPosition.signedQuantitySteps() != 0
+                        && (currentPosition.signedQuantitySteps() > 0)
+                        != (side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
+                    closeCapacityCancellations = PositionCloseCapacity.inspectLane(
+                            lane, userId, symbolId, positionKey, positionSide(), side(), orderId())
+                            .conflictsFor(quantitySteps());
+                }
                 runtime.placeOrderInLane(lane, userId, this, commandId,
                         requiredReservation, preparedClientKey, symbolId, assetId, coreSequence, null, timestamp, position);
                 admittedAccountVersion = lane.users.get(userId).revision();
@@ -157,6 +171,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         identities = null;
         admittedAccountVersion = 0;
         rejection = null;
+        closeCapacityCancellations = List.of();
         reservedAmount = 0;
         identityAllocations = 0;
         coreSequence = 0;
@@ -199,6 +214,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
                 : CoreResultCode.INVALID_COMMAND;
         target.admissionReceipt(orderId(), admittedAccountVersion, reservedAmount,
                 rejection == null, resultCode.wireCode());
+        if (rejection == null) target.addAdmissionCancellations(closeCapacityCancellations);
         // Capture the callback target before publishing consumption. The Owner may observe the
         // volatile flag immediately, clear this pooled event and null runtime before this Matcher
         // thread performs the wake-up. No event field may be read after matcherConsumed becomes
@@ -209,6 +225,11 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     }
 
     public boolean matcherConsumed() { return !matcherWaitRequired || matcherConsumed; }
+
+    public List<Long> closeCapacityCancellations() {
+        if (!complete()) throw new IllegalStateException("place admission is incomplete");
+        return rejection == null ? closeCapacityCancellations : List.of();
+    }
 
     /** Admission rejection can retire without entering the Matcher queue. */
     public void cancelMatcherWait() {

@@ -118,6 +118,36 @@ public record PositionCloseCapacity(
                 Math.subtractExact(positionQuantity, committed), commitments == null ? List.of() : commitments);
     }
 
+    /** Account Lane inspects its own live orders, excluding uncommitted reservations. */
+    static PositionCloseCapacity inspectLane(AccountLaneState lane, long userId, int symbolId,
+            long positionKey, CorePositionSide positionSide, CoreOrderSide closeSide, long excludedOrderId) {
+        PositionRuntime position = lane.positions.get(positionKey);
+        long positionQuantity = position == null ? 0 : Math.absExact(position.signedQuantitySteps());
+        long requestedQuantity = 0;
+        ArrayList<Commitment> commitments = null;
+        var ids = lane.activeOrderIdsByUser.get(userId);
+        if (ids != null) {
+            var iterator = ids.longIterator();
+            while (iterator.hasNext()) {
+                long orderId = iterator.next();
+                if (orderId == excludedOrderId || lane.pendingReservationSequences.containsKey(orderId)) continue;
+                OrderRuntime order = lane.orders.get(orderId);
+                if (order == null || order.status() != CoreOrderStatus.OPEN || order.userId() != userId
+                        || order.symbolId() != symbolId || order.positionSide() != positionSide
+                        || order.side() != closeSide) continue;
+                if (order.reduceOnly()) {
+                    if (commitments == null) commitments = new ArrayList<>();
+                    commitments.add(new Commitment(orderId, order.remainingQuantitySteps(), order.clusterPosition()));
+                }
+                requestedQuantity = Math.addExact(requestedQuantity, order.remainingQuantitySteps());
+            }
+        }
+        if (commitments != null) commitments.sort(NEWEST_FIRST);
+        long committed = Math.min(positionQuantity, requestedQuantity);
+        return new PositionCloseCapacity(positionQuantity, requestedQuantity, committed,
+                Math.subtractExact(positionQuantity, committed), commitments == null ? List.of() : commitments);
+    }
+
     public void require(long quantitySteps) {
         if (quantitySteps <= 0) throw new IllegalArgumentException("close quantity must be positive");
         if (quantitySteps > availableQuantitySteps) {

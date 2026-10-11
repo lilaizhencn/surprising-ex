@@ -19,6 +19,7 @@ import org.openjdk.jmh.annotations.Fork;
 import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
@@ -54,5 +55,32 @@ public class OrderAdmissionAllocationBenchmark {
         blackhole.consume(reservation.release(0).consume(0).withRemainingUnits(100));
         return TradingRuntimeState.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7, resolved,
                 commandId, 0, 1000, 2000);
+    }
+
+    /** Actual close-capacity decision moved from the Owner into Account Lane admission. */
+    @Benchmark public java.util.List<Long> laneCloseCapacityDecision(CloseCapacityState state) {
+        return PositionCloseCapacity.inspectLane(state.lane, 7, 0, 1,
+                CorePositionSide.NET, CoreOrderSide.SELL, 0).conflictsFor(1);
+    }
+
+    @State(Scope.Thread)
+    public static class CloseCapacityState {
+        @Param({"0", "8", "64"}) public int liveOrders;
+        AccountLaneState lane;
+
+        @Setup public void setup() {
+            var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
+                    new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                            "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+            lane = new AccountLaneState(0, 256);
+            long quantity = Math.max(1, liveOrders);
+            lane.positions.put(1, new PositionRuntime(7, 0, 0, CoreMarginMode.CROSS, CorePositionSide.NET,
+                    instrument, quantity, 100, quantity * 100, 0, quantity * 10));
+            for (int index = 0; index < liveOrders; index++) {
+                lane.putOrder(new OrderRuntime(index + 1, 7, 0, instrument, CoreOrderSide.SELL, 110,
+                        true, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                        CoreTimeInForce.GTC, 0, 0, 1, 0, 1, false).withCommitMetadata(1000, index + 1));
+            }
+        }
     }
 }

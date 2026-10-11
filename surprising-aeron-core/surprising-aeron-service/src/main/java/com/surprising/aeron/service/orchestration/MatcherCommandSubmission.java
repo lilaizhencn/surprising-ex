@@ -28,7 +28,9 @@ final class MatcherCommandSubmission {
         }
         try {
             List<DeterministicExchangeCoreAdapter.CancellationOrder> preMatchingCancellations =
-                    preMatchingCancellationOrders(pending);
+                    pending.operation() == CommandSlot.Operation.PLACE && direct != null
+                            && pending.placeAdmission() != null
+                    ? List.of() : preMatchingCancellationOrders(pending);
             long userId = pending.command().header().userId();
             if (pending.operation() == CommandSlot.Operation.PLACE && direct != null) {
                 var command = pending.decodedCommand().placeOrder();

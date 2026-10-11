@@ -937,7 +937,8 @@ final class OrderedCommitCoordinator {
         }
         if (result.outcome()
                 == MatchingResult.Outcome.KNOWN_PREFIX_APPLIED) {
-            List<Long> expected = pending.preMatchingCancellationOrderIds();
+            List<Long> expected = result instanceof com.surprising.aeron.service.state.MatcherSettlementEvent direct
+                    ? direct.completedPreMatchingCancellations() : pending.preMatchingCancellationOrderIds();
             var replacement = pending.orderBatch != null
                     ? pending.orderBatch.replacementAdmission : pending.matchingAdmission();
             long replacedOrderId = replacement != null

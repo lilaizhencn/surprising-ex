@@ -385,8 +385,13 @@ final class MatchingCommandAdmission {
                 return List.of();
             }
         }
-        List<Long> closeCapacity = preMatchingCloseCapacityCancellations(
-                message.header().userId(), placement, excludedOrderId);
+        List<Long> closeCapacity;
+        if (operation == CommandSlot.Operation.PLACE && placeAdmission != null) {
+            // An incomplete Lane receipt is consumed by the Matcher continuation, never waited on here.
+            closeCapacity = placeAdmission.complete() ? placeAdmission.closeCapacityCancellations() : List.of();
+        } else {
+            closeCapacity = preMatchingCloseCapacityCancellations(message.header().userId(), placement, excludedOrderId);
+        }
         long matchingPrice = resolved == null
                 ? CoreOrderDecisionResolver.resolve(owner.runtimeState, owner.identities,
                         message.header().userId(), placement, owner.currentClusterTimestamp).matchingPriceTicks()

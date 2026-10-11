@@ -881,6 +881,23 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                         settlement.admissionResultCode(), settlement);
                 return settlement;
             }
+            var cancellations = settlement.admissionCancellations();
+            var place = decodedCommand.placeOrder();
+            for (int index = 0; index < cancellations.size(); index++) {
+                long orderId = cancellations instanceof ImmutableLongArrayList primitive
+                        ? primitive.valueAt(index) : cancellations.get(index);
+                var result = owner.matchingAdapter.cancelDirectPrefix(
+                        command.header().submittedAtEpochMillis(), command.header().userId(),
+                        orderId, place.instrumentId());
+                if (result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
+                        || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED) {
+                    settlement.recordDirectPreCancellation(orderId);
+                } else {
+                    return owner.matchingAdapter.publishDirectPrefixFailure(
+                            matcherShard, coreSequence, command.header().commandId(), place.orderId(),
+                            command.header().submittedAtEpochMillis(), result, settlement);
+                }
+            }
             return original.get();
         }
     }

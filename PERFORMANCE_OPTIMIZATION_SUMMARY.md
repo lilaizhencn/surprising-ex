@@ -13,8 +13,12 @@
 
 JMH metadataAndSequenceFanout（1线程/每配置1fork，3×1s预热+5×1s测量，4Lane/256、-prof gc）：BUSY_SPIN 814,531.136±52,095.011技术提交项/s、1,472.047B/项；BLOCKING 784,347.812±37,947.371、1,472.049B/项。99.9%区间重叠，微基准不是完整Core吞吐，也不能证明零堆分配。
 
-此前独立 JFR 正式窗口估算主要 Core 线程合计427.23MB/s、约1,187.13B/业务项，线程观察区间略有差异，非精确对象数。Owner/Lane JavaMonitorEnter为0、录制DataLoss为0。订单快照、撮合结果、协议和集合仍有分配。删除ThreadLocal不等于删除业务对象分配。
+最新同 build5 的三项单因素诊断：2 Lane 421,317.217、service BACKOFF 423,504.424、Owner BUSY_SPIN 433,385.854 终态业务项/s。均资金差/未完成0、源码稳定；正式窗口CPU限频72–75，使容量和因果增速对照无效。未改生产默认配置，也未折算不限频成绩。
+
+最新独立 JFR（l5-current-scopes-jfr）正式窗口1791693540294–1791693600310估算主要Core线程459.80MB/s、约1,191.24B/业务项；与上一轮1,187.13B同量级，没有整链路分配下降的证据。各线程观察区间略有差异，非精确对象数。GC pause92次、总445.48ms、最长5.39ms，DataLoss0。唯一Owner监视器事件是JFR内部StringPool，耗时1.24µs，未捕获业务锁争用。主要分配仍在preparedOrder、OrderRuntime.snapshot、MatcherResult.from及编解码。Lane正式窗口ThreadPark各25–38次；该事件不能统计生产者unpark调用量。
+
+普通PLACE平仓容量检查已迁入所属Lane，仅通过完成收据交出撤单ID；Matcher在资金准入成功后合并自成交撤单并撮合。余额不足保留原单，post-only拒绝的新单正确提交已执行的撤单前缀。最新232项资金/顺序回归与50项边界测试执行、20模块clean package通过。相同最新build6的两轮观测417,223.030和428,543.832业务项/s，资金差/未完成0，CPU限频仍使容量无效。独立JFR约1189.92B/业务项，仍无整体分配下降证据；Owner两次监视器事件均来自JFR内部StringPool。局部平仓决策有8/64个存量订单时分配560/3904B/次，下一步需要削减其集合物化成本。详见[普通下单验证](docs/validation/lane-place-close-capacity-20261011.json)。
 
 pendingReservationSequences监视器暂留，待剩余Owner读取迁入Lane并落实所有权断言后一起移除。Owner仍有权威读取、Treasury写入及风险/输出职责，不宣称所有权已彻底切开。按用户范围，本轮不执行快照、恢复或wallet场景。
 
-证据与范围见 [验证记录](docs/validation/lane-owned-scopes-wakeup-20261011.json)。原始数据位于 ../performance-artifacts/lane-parallel-20261010T144735Z/，保留源码/JAR SHA、日志、测量/资金指标、系统采样、XML、JMH及JFR窗口聚合。后续按锁定计划，仅改变一个因素验证2vs4Lane、service等待策略和Owner等待策略。
+证据与范围见 [验证记录](docs/validation/lane-owned-scopes-wakeup-20261011.json)。原始数据位于 ../performance-artifacts/lane-parallel-20261010T144735Z/，保留源码/JAR SHA、日志、测量/资金指标、系统采样、XML、JMH及JFR窗口聚合；单因素汇总见current-factors-results.json，最新JFR见l5-current-scopes-jfr-window-analysis.json。

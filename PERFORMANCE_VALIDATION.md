@@ -5089,3 +5089,29 @@ JFR60秒窗节点ThreadAllocationStatistics估算230.844 MB/s、1165.08 B/业务
 之前native4观测393216.691业务项/s、资金差/未完成0，CPU68/70/72/75且运行期间Gateway测试辅助文件漂移，whole-tree sourceUnchanged=false；运行JAR事后SHA一致，但不据此认定源码整体稳定。该轮还先于Owner/Lane作用域交叉清除修复，最终验收只看后续修复轮。资格说明存 l1-owner-routing-4-source-drift-qualification.json。
 
 Owner权威业务读取和系统资金写入未迁完；拒绝无独占写者的新路由Map，pendingReservationSequences保护暂留。真实Shared-Nothing和整链路零heap未完成。独立JFR此前正式窗估算1187B/业务项，不把删ThreadLocal当作删对象。下步已锁定current-factors-plan.json：同一最新build5只改Lane数2vs4、service BACKOFF及Owner等待策略；任何资金/终态错误仍判业务失败。按用户要求不运行快照、恢复或wallet。临时集群data已在校验保留日志/指标后清除，余下本轮Aeron/tmp目录将在全部测量结束后清理并追加状态。
+
+
+## 2026-10-11 当前配置诊断、JFR与普通下单Lane迁移计划
+
+master 484cc490已推送。相同build5、固定256窗口、1成员/1Matcher、LP MIXED batch20/symbol128，各正式60秒且未运行其他采集：基线4Lane/Owner ADAPTIVE/service YIELDING为408903.948业务项/s；仅2Lane为421317.217；仅service BACKOFF为423504.424；仅Owner BUSY_SPIN为433385.854。四轮accepted=terminal、unfinished=0、fundsDiff=0、资金/预留/持仓/订单核对PASS，源码/JAR稳定。正式窗CPU_Speed_Limit分别70/72/75、72/75、72/75、72，容量与因果对照证据无效。不能据此选择统计确定的最优设置，未修改生产默认配置。详情current-factors-results.json及各l4-current-*记录。
+
+独立同build5 JFR正式窗1791693540294–1791693600310，385988.179业务项/s。主要Core线程ThreadAllocationStatistics首尾差分估算459802833.398B/s、1191.235531B/业务项，各观察区间约58.601秒/59样本；与前轮1187.13B同量级，不证明分配下降。GC pause92次/445.48ms/max5.39ms，DataLoss0；唯一Owner JavaMonitorEnter来自JFR内部StringPool.storeString，1.24µs，无业务锁事件。主要分配为preparedOrder、OrderRuntime.snapshot、MatcherResult.from、resolveValues与decode。正式窗四Lane各25–38次ThreadPark，不能由此统计生产者unpark调用次数。该轮CPU70/72/75同样使容量证据无效。证据l5-current-scopes-jfr-window-analysis.json、window.tsv、summary及monitor.json。
+
+下一模块计划在采集前锁定于lane-close-validation-plan.json：普通PLACE的平仓容量/存量订单权威读取在PlaceAdmissionEvent的Lane线程执行，只交出不可变撤单ID；Matcher在资金准入成功后按确定顺序合并自成交/平仓撤单并下单。必须覆盖多线程最新冲突单、资金不足不撤单、self-trade并集合并一次、post-only前缀失败的冻结/终态，扩大六产品资金/顺序回归。随后执行受影响决策JMH -prof gc和当前源码两轮真实单节点（warm60/measure60），以及独立JFR；全局窗口256，工作负载不变，禁止构建/测试/分析重叠正式采集。仅验证当前master，不重跑旧代码；同机限频使容量无效。其余触发/批量/资金账本Owner迁移未完成，本轮不运行快照、恢复或wallet。
+
+
+## 2026-10-11 普通下单平仓容量迁入Lane（部分验证）
+
+PlaceAdmissionEvent在所属Lane检查持仓/存量订单并选最新冲突reduce-only订单，只交出撤单ID；Matcher资金准入成功后合并Owner自成交路由ID、去重排序执行。准入被拒绝不会撤单；撤单前缀已执行但新单post-only拒绝时明确标记已改变状态，Owner校验最终收据授权。ID收据在matcherConsumed发布前复制到结算事件，复用时清空，未增加业务全局镜像或Owner等待阶段。触发、批量及Ledger剩余Owner读取/写入仍未完成。
+
+HotSpot Corretto27/Maven3.9.16：最新232项资金/顺序/并发回归和50项边界/benchmark测试执行全通过，sourceUnchanged=true，20模块clean package通过，1798源码指纹及1728JAR class字节核验一致。新增真实Lane普通平仓、余额不足保留订单/冻结、self-trade与平仓并集只执行一次、post-only前缀拒绝资金守恒，以及Lane内同账户/币对/持仓侧/订单侧/终态/未提交预留过滤检查。前两次失败为新增测试使用不合法GTC+postOnly及误期望REJECTED订单立即移除，已修正测试；日志/XML保留，不抹去失败记录。
+
+真实最新单节点LP MIXED、1Matcher/4Lane/global256/batch20/symbol128/G1/warm60/measure60，同一build6无profiler：l1-owner-routing-6观测417223.030业务项/s、39851.446Core消息/s、60.005451秒；-7观测428543.832/40930.437、60.026161秒。两轮accepted/offered=terminal、unfinished=0、fundsDiff=0，资金/预留/持仓/订单/亏损生命周期核对PASS，源码未变。正式窗CPU速度限制分别70/72/75与72/75，使容量及因果增速对照无效；未折算50万。
+
+受影响检查JMH：1线程/每参数1fork，3x1s预热+5x1s测量、G1、-prof gc；liveOrders=0/8/64分别217350107.752±8165016.696、5411639.189±173622.905、477521.770±55957.280决策/s，约0.000029/560.001/3904.014B/决策，GC次数0/47/30。微基准是单次平仓容量决策；订单数增多时仍有Commitment/集合分配，不能宣称此路径全场景零分配或把决策/s当Core吞吐。
+
+独立相同包JFR：392974.711业务项/s，仅归因；正式窗1791695664054–1791695724068，Core线程ThreadAllocationStatistics估算467608751.407B/s、1189.920721B/业务项（59样本/线程，实际观察区间58.642秒，非精确对象数）。与此前1191.24B同量级，无整链路分配下降证据。GC pause93次、总456.50ms/max11.12ms，DataLoss0。正式窗3个JavaMonitorEnter均来自JFR StringPool：Archive1次，Owner2次（320.231us/41.980us），未捕获业务锁事件。主要分配仍在订单构造/快照及native结果；Owner资金读写仍待迁移。CPU72/75使容量无效；完整尾延迟/native长稳证据仍有缺口。
+
+完整命令、环境、源码/JAR、系统样本、业务/资金输出和测试XML/JMH/JFR归因见 ../performance-artifacts/lane-parallel-20261010T144735Z/lane-close-validation-{plan,results}.json、l1-owner-routing-{6,7}-*.json及l1-lane-close-jfr-*。仓库摘要docs/validation/lane-place-close-capacity-20261011.json。本模块不运行快照、恢复或wallet。前八轮确认本轮进程退出后已校验保留日志/指标/JFR SHA并清除Aeron/tmp，清理证明current-eight-runs-final-cleanup.json；本三轮临时目录将在下条清理记录补充。
+
+本增量清理完成：三轮运行的原始交易日志/指标/协议命令和录制SHA核验通过，进程已退出，Aeron/tmp目录已清除，见lane-close-final-cleanup.json。前后3次独立JFR的9份原始录制已以gzip归档，解压后的SHA逐份与原录制完全一致后删除原文件，见three-profiles-verified-jfr-archives.json。测量期间没有构建、测试、分析或压缩并行运行。源码/JAR、测试XML、完整日志/JMH、JFR聚合和可还原的录制保留。
