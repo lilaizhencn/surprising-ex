@@ -18,6 +18,8 @@ class AccountLaneCommitBenchmarkTest {
             assertEquals(256, benchmark.metadataAndSequenceFanout(state));
             assertEquals(512, benchmark.sequenceLocalFanout(state));
             assertEquals(768, benchmark.metadataAndSequenceFanout(state));
+            assertEquals(1024, benchmark.finalBatchResponseFanout(state));
+            assertEquals(1280, benchmark.sequenceLocalFanout(state));
         } finally { state.tearDown(); }
     }
 }

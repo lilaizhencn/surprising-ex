@@ -1,0 +1,2788 @@
+{
+  "time": "2026-10-11T22:58:54.238942+00:00",
+  "module": "最终账户提交及批次响应迁移",
+  "headBefore": "3ac2bfef",
+  "scope": [
+    "订单提交元数据写入与关闭触发单取消由实际所属Lane执行",
+    "Owner不为最终提交路由读取账户订单表",
+    "顺序/部分拒单/全拒单批次结果在所属Lane读取与编码",
+    "连续AMEND的路由复用已有批次回执，无新增业务镜像"
+  ],
+  "fullOwnerMigrationComplete": false,
+  "remaining": [
+    "生产SystemLedger接线与全部费用/保险/资金费/生命周期资金写入",
+    "Owner其余账户读取/控制准备路径",
+    "全链路分配及线程数优化"
+  ],
+  "snapshotRecoveryWalletScenarios": false,
+  "sourceFiles": [
+    {
+      "path": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/orchestration/AccountLaneCommitBenchmark.java",
+      "sha256": "e1acb0c9ab9f462687ba0084b9ea489c8e2d25aad5d5d052c50f1c4513581ef5"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-benchmarks/src/test/java/com/surprising/aeron/service/orchestration/AccountLaneCommitBenchmarkTest.java",
+      "sha256": "e758b8dc0972bb9e10eec17e505f55c3a634f344f540ca6fe40120f4445432ac"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBatchExecutor.java",
+      "sha256": "1fdce148ccb4a4c0e4de38c7cadc79a9b7141ea252d0d50f637be251f9ea7667"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/LaneCommitEvent.java",
+      "sha256": "ded457e084ee980c0a38276849c6bfc00489ca570119d893f88a2ef1b58e9baf"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/LaneOrderResultTarget.java",
+      "sha256": "52b3604cc586a388ab33a854150db762c34b97df209604ad654b9b88289c6785"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java",
+      "sha256": "ac69c57233b24cb881dc4b653e37d4b7839cb580d4dcc8ac359127f9c7ebd30a"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreOrderedOrderBatchTest.java",
+      "sha256": "87138e8b5fa1f01d0d6467357aeacaf0061e7698b641476a69c9e1353d91e15f"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/TradingRuntimeStateTest.java",
+      "sha256": "256fce50df8c6fbc6862bd598bad1880c3806f6cf25d6d93ff0cd09d8cf5b469"
+    }
+  ],
+  "build": {
+    "sourceManifest": "l1-owner-routing-16-source.json",
+    "sourceFilesCount": 1809,
+    "jars": [
+      {
+        "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+        "bytes": 135315655,
+        "sha256": "907a2601632e0e8c0c9298561cf2446056cbdd8190cc49ed53166233752c33fc"
+      },
+      {
+        "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+        "bytes": 179612756,
+        "sha256": "949907a403dfdeec315421f5a62892f8f0ff4858740d26c4460992e10d0ee194"
+      }
+    ],
+    "classChecks": 1772,
+    "sourceUnchanged": true
+  },
+  "regressions": [
+    {
+      "label": "owner-final-metadata-01",
+      "executions": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sourceUnchanged": true,
+      "start": "2026-10-11T22:33:05.119055+00:00",
+      "end": "2026-10-11T22:33:29.465372+00:00",
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-protocol,surprising-realtime/surprising-realtime-api",
+        "-am",
+        "-Dtest=TradingRuntimeStateTest#commitEventStampsOnLanesPublishesOnOwnerAndClearsReusedMetadata,TriggerOrderIndexTest#closeTriggerCommitPublishesOnlyAfterLanesAndDoesNotRepeatOnReuse,CoreOrderedOrderBatchTest#spotAmendReusesLockedFundsAndRejectsUnaffordableIncreaseBeforeMatching+spotBatchPreservesEarlierFillProceedsForLaterItemAdmission+deferredAllRejectedBatchStillPublishesItsTerminalBetweenAdjacentBatches+executesCancelAndAmendBatchesWithOrderedPerItemOutcomes+amendBatchRejectsReplacementIdOnAnotherLaneBeforeCancelingOriginal",
+        "-Dsurefire.failIfNoSpecifiedTests=false",
+        "test"
+      ]
+    },
+    {
+      "label": "owner-final-response-03",
+      "executions": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sourceUnchanged": true,
+      "start": "2026-10-11T22:38:18.060274+00:00",
+      "end": "2026-10-11T22:38:37.928477+00:00",
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-protocol,surprising-realtime/surprising-realtime-api",
+        "-am",
+        "-Dtest=CoreOrderedOrderBatchTest#finalAmendBatchResolvesChainedAndRejectedItemsWithoutOwnerOrderReads",
+        "-Dsurefire.failIfNoSpecifiedTests=false",
+        "test"
+      ]
+    },
+    {
+      "label": "owner-final-financial-04",
+      "executions": 269,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sourceUnchanged": true,
+      "start": "2026-10-11T22:39:26.969994+00:00",
+      "end": "2026-10-11T22:40:13.399730+00:00",
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-protocol,surprising-realtime/surprising-realtime-api",
+        "-am",
+        "-Dtest=LaneCloseCapacityTest#capacityUsesOnlyLiveCommittedOrdersInTheSamePositionAndCancelsNewestFirst,ClusterCommandPipelineTest#cancelBatchSettlesOnLaneWithoutAnOwnerTurnAfterMatcherFinishes+cancelSettlesOnLaneWithoutAnOwnerTurnAfterMatcherFinishes+canonicalInstrumentIdsCompleteWithoutSchedulingTimers+independentBatchesSharingLanesKeepSettlementSequenceOrdered+rejectedBatchAndIndependentOrdinaryOrderKeepProgressAndFunds+sameAccountCannotSpendTheSameBalanceTwiceAcrossSymbols,CommandSlotTest#batchContextSurvivesCommandRewriteAndIsClearedForNextSlotGeneration+batchOrderingDetachesMiddleHeadAndTailAcrossRingReuse+clearsControlResultAndWorkBeforeReusingTheSameSlot+preservesCommandStateAcrossDeferredMatchingUpdates,ControlLaneDispatcherTest#businessRejectionWaitsForOtherLanesAndDoesNotPoisonTheNextCommand+controlTasksExecuteOnPermanentWorkersAndPublishOnlyAfterCompletion+invalidDispatchThrowsIllegalStateException+reservationAndAccountStateAccessibleAfterDispatch,CoreDeliveryOptionFinancialMatrixTest#cancelsOpenDeliveryOrderAndReleasesOwnerReservation+cancelsOpenOptionOrderBeforeSettlementAndReleasesReservation+coversDeliveryAndOptionMoneyness+rejectsFundingForDeliveryAndOptionWithoutStateMutation+settlingIsolatedLossKeepsUnrelatedCrossStateAndReservationIntact,CoreLifecycleStateTest#adlAtomicallyDeleveragesProfitableCounterpartyAndCoversResidual+deliveryAndOptionSettlementReleaseMarginFlattenPositionsAndConserveFunds+duplicateSettlementIsIdempotentAfterPositionsAndOrdersAreClosed+fundingApplicationEmitsActualZeroSumPaymentFacts+fundingFactsPreserveHedgedLegsAndCapDebitsAtAvailableCash+insuranceShortfallIsProRataAndIndependentOfLaneLiquidationOrder+lifecycleSettlementProcessesOpenOrdersInBoundedOrderChunks+liquidationCannotCompleteWhileDeficitRemains+liquidationCreatesExplicitDeficitAndInsuranceReceiptClosesIt+liquidationRejectsStaleTriggerSequenceWithoutMutation+partialInsuranceCoverageLeavesOnlyResidualForAdl+runtimeAdlRejectsStaleMarkChangedPositionAndInsufficientProfit+runtimeFundingRejectsMissingMarkStaleSettlementAndInvalidCursor+settlementUsesTheRegisteredCanonicalInstrument,CoreMatchingStateTest#amendPatchReadsOriginalInsideCoreAndReturnsReplacement+coreDerivesTheFullDerivativeCloseReservation+derivativeCloseReverseAndReduceOnlyCapacityAreAuthoritative+emptyNotificationProbeStillDetectsAFailedLaneWithoutACompletion+everyProductLineMatchConservesSettlementFundsWithNonzeroFees+finalMatcherFactCarriesTheRestingOrderWithoutExportingPendingState+inFlightIdempotencyUsesPendingIndexWithoutPollutingTerminalResultLedger+inFlightSynchronousRejectionIsPublishedAsReadyAndDoesNotBlockThePendingHead+laneCloseAndOwnerSelfTradeCancellationsAreAppliedOnce+linearPerpetualActiveCloseAcceptsBetterFillThanSellMarketProtectionPrice+linearPerpetualMatchConservesFundsWithMakerTakerFees+linearPerpetualPostOnlyRejectionPreservesFundsAndReservations+marketOrderUsesProtectionPriceAndNeverRestsOnBook+multiMakerPerpetualSettlementPublishesOnlyAfterTheUnifiedLaneBarrier+nonOptionDerivativeLinesCreatePositionMarginFromMatchedReservations+normalCloseCancelsNewestConflictingReduceOnlyOrderBeforeMatcherSubmission+optionFillTransfersPremiumAndCreatesBuyerSellerPositions+postOnlyCloseFailureCommitsOnlyLaneAuthorizedCancellations+postOnlyRejectionLeavesNoOrderOrReservedFunds+rejectedLaneCloseAdmissionKeepsConflictingOrdersAndFunds+sameUserCrossCancelsTheRestingOrderBeforeSubmittingTheTaker+spotMatchCommitsTheChangedTreasuryBalance,CorePerpetualFinancialMatrixTest#crossLaneAdlMutatesOnlyTheTargetAndLiquidationOwners+crossLaneFundingReturnsOwnerContributionsBeforeSequencerTreasuryApply,MatcherSettlementPlanTest#directEventCannotRecycleBeforeReservedNonTradingLanesConsumeTheirTickets+expectedCancellationsAreWrittenInAdmissionOrderIntoReusablePlanStorage+orderIdViewFollowsPlanLifetimeWithoutCopyingStorage+ownerMayRecycleAfterReadinessWhileMatcherIsStillSignalling+ownerPredispatchWaitsForMatcherReadinessBeforeApplyingAccounts+pooledPlanSwitchesFromDeepMakerLaneIndexBackToOneFillWithoutStaleLinks+readySuffixPredispatchCannotOvertakeEarlierAccountSettlement+rejectedDirectCancelLeavesOrderUnchangedWithoutInstrumentMetadata+reusedPlanAndScratchDoNotRetainPriorMakerOrTriggerState+settlementPublicationFailureReachesOwnerInsteadOfLeavingDeadMatcher+sharedMakerQuantityIsValidatedAcrossItemsBeforeAnyLaneApplies+singleCommandSlotReusesPlanWithoutLeakingPriorOrdersOrCancellations+singleEventAndRepeatedMakerBothRejectExcessBeforeStateMutation+singleItemBatchBuilderUsesThePooledTargetForInitialIdentity+smallerBatchReusesCapacityAndIgnoresStaleTailPlans,OrderBatchSlotReuseTest#laneResponseRequiresEveryItemAndIsDetachedFromReusableSlots+reuseClearsPriorInputsAndLaneResultsAcrossDifferentBatchSizes,RuntimePerpetualFundingProcessorTest#fundingCursorStartsFromTheIndexedTailInsteadOfRescanningEarlierUsers,RuntimeTreasuryDeltaTest#aggregatesContributionsWithoutNettingDifferentAssets+appliesOnlyChangedTreasuryEntriesAndPreservesRuntimeParity+clearingTwicePreservesFundsAndCapturesTheNextBeforeValue+derivesLaneTreasuryAcknowledgementFromPrimitiveFundsPostings+everyTreasurySubledgerContributesToTheBusinessStateHash+keepsSeparateAssetBeforeValuesAcrossRepeatedTransactions+projectsEveryTreasurySubledgerWithoutDroppingFunds+recordsFirstTreasuryValuesAndIncludesAllSevenSubledgersInFundsAndRollback+rejectsOverflowInSingleOrLaterAssetBeforeWritingAnyFunds+rejectsUserOnlySubledgersForTreasuryOwner,SettlementChangesReuseTest#mixedSettlementKeepsFinalCountersAndTerminalCleanupAcrossReuse+pooledChangesMoveBetweenLanesWithoutRetainingPreviousOrdersOrPendingCounts+positionPublicationTracksChangedPositions,SettlementLaneWorkerTest#admissionPublishedAfterParkingAnnouncementKeepsMakingProgress+controlOwnershipHandoffIsPolledAndQueuedWorkResumesOnlyAfterRelease+ownerObservesNonNegativeDepthWhileMatcherAndLaneAdvance+parkedAndActiveHandoffsKeepOrderAndDrainBeforeClose+realLaneFailurePublishesTheOriginalExceptionBeforeOwnerChecks,CoreStateQueryCodecTest#directOrderEncodingMatchesCollectionWireFormatForUtf8AndOffsetBuffers+executionTotalsSurviveOrderAndOpenOrderEncoding+rejectsTruncatedCommandResult+rejectsTruncatedOpenOrdersView+rejectsTruncatedQueryView+roundTripsBookStateWithExportWatermark+roundTripsBoundedBookQuery+roundTripsCommandResultOrdersAndExecutions+roundTripsCommandResultQuery+roundTripsFundingProgressQueryAndResponse+roundTripsOpenOrdersQueryAndView+roundTripsStateHashAsExplicitQueryPayload+roundTripsUserAndOrderViews,RealtimeFrameCodecTest#decodesBoundedHeapDirectAndReadOnlyBuffersWithoutBorrowingTheirStorage+directEncodingPreservesWireBytesAndPayloadIsolation+orderEnvelopeMatchesExistingWireFormatForAllProductsAndUtf8+rejectsMalformedAndOversizedEnvelopes+roundTripsEveryProductAndKindWithoutPrecisionLoss,RealtimeWireCompatibilityTest#retainsVersionOneBytesForEveryKindAndUtf8Boundary,TradingCommandCodecTest#decodedTextOwnsItsBytesAndRespectsAnEmbeddedAmendFrame+leverageRepricingRequiresAnExplicitVersionAndKeepsOldJournalBytes+preservesAppendOnlyWireCodes+registerInstrumentRoundTripPreservesTradingAdmissionSettings+rejectsInstrumentPayloadWithoutRiskPolicy+rejectsInvalidSingleActionOrderBoundsFromWire+rejectsTruncatedAndTrailingPayloads+rejectsV2PlaceOrder+replacementDecodesWithinItsFrameAndDoesNotRetainTheInput+roundTripsAllP2Commands+roundTripsProductTransferCommands,CoreMessageCodecTest#encodesCommittedResponseDirectlyIntoReusableDestination+encodesIntoReusableDestinationWithoutTouchingItsTail+matchesCurrentSchemaGoldenMessage+preservesTheCanonicalCommandFingerprintVector+rejectsImplicitOrUnknownRoute+rejectsMalformedTruncatedTrailingAndOversizedFrames+rejectsNonCurrentHeaderLength+rejectsNonCurrentSchema+reusedFingerprintCalculatorsPreserveCanonicalBytesAndEarlierResults,RealtimeTerminalEmissionTest#committedOrdersEmitOncePerEntity,RealtimeDeltaCommandTest#preservesRedisKeysVersionsAndFrameBytes,ActiveOrderIndexTest#boundedTurnoverKeepsStorageAndIndependentQueryCursors+maintainsRiskAggregatesAcrossOrderUpdates+pageUsesExclusiveCursorAndTheBoundedLifecycleLimit+primitiveIntersectionIsIndependentAndMatchesBothIndexDirections+primitiveSortedCursorAvoidsBoxedCompatibilityView+rebuildUsesOpenOrderLifecycle+runtimeScopeChangesReplaceMembershipWithoutRetainingThePreviousParticipant+terminalRemovalIsIdempotentAndPreservesOtherAccountAndSymbolOrders,RuntimeLeverageLookupTest#ownerLookupSurvivesAnotherLanesCompleteLookupAndCleanup,CoreMessageFlyweightDecoderTest#decodesDirectBufferIntoOwnedPayload+readersBelongToTheirDecoderAndCanBeReusedWithoutChangingOwnedMessages+tracedFixedHeaderExtensionMatchesArrayDecoderAndPreservesPayloadOwnership,CoreTracePropagationTest#boundsAndValidatesUntrustedTraceMetadata+realtimeFramesPreserveTheSameTraceInBothArrayAndBorrowedBufferDecoders,RuntimeDerivativeFillCalculatorTest#addsMarginOnlyForTheNewQuantityAtItsFillPrice+opensLinearPositionAndPreservesExplainedLockedFunds+partiallyClosesPositionAndRealizesProfit+reversesPositionAtFillPrice,RuntimeIdentityRegistryTest#clientIdentityReferenceProtectsAReusedKeyFromAnOlderTerminalRelease+exactIdentityHitsPreserveNormalizationAndRejectInvalidMisses+laneOwnsPreparationAndDuplicateRollbackPreservesLiveIdentity+lanesKeepReadingPreparedKeysWhileOwnerExpandsTheDictionary+preparedDerivativePositionProbeMatchesStringIdentityWithoutRebuildingItsName+streamedIdentityHashExactlyMatchesJavaUtf8IncludingMalformedSurrogates,RuntimeExecutionScopeTest#ownerCompatibilityScopeCannotClearTheWorkersActiveScope+unrelatedReaderCannotInheritAnActiveOwnerLaneScope,MatcherPipelineGroupTest#completesOneSymbolShardWhileAnotherShardIsBlocked+drainsCompletedShardHeadsWithoutProbingPendingSequences+emptyProbeDoesNotLoseALaterMatcherPublication+matcherPublishesWithoutOwnerDrainAndTransportRetirementDoesNotTouchReusedSlot+sequenceSlotRejectsDuplicateRoutesAndRecoversAfterQueueRejection,MatcherCommandPipelineTest#concurrentBookReadsKeepTheirIndividualFencesAndBoundedCapacity+keepsABoundedWindowAndPublishesCompletionsInCommandOrder+probingANonHeadCompletionDoesNotViolateShardOrder+propagatesMatcherFailureToTheOwner+wakesAfterRepeatedIdleAndBurstCyclesWithoutLosingACompletion,SystemLedgerLaneTest#accountReceiptPublishedInsideParkingWindowCannotLoseWakeup+closedMailboxRejectsFurtherMoneyWrites+fullMailboxDoesNotAcceptAnUnownedSlotAndRejectsForeignProducers+originalTreasuryHasOneWriterUntilWorkerShutdown+overflowIsFatalAndDoesNotPublishCompletionOrPartiallyWriteFunds+queuedMoneyWaitsForItsAccountReceiptAndKeepsLogOrder+repeatedSlotsPublishActualFundsBeforeCompletionAndRetainCapacity+shutdownRejectsUnreadyFinancialWorkInsteadOfSilentlyDroppingIt,MatcherTreasurySettlementTest#independentAccountWritersThenOriginalLedgerSettleFeesBeforeOwnerCollects,OrderBatchSettlementWaitTest#completionCacheWaitsForEveryLaneAndResetsBeforeReuse+incompleteItemCannotBeCollectedOrRecycled+laneCommitInterruptionDoesNotClearInterruptOrClaimCompletion+laneCommitTimeoutPreservesUnfinishedSequenceAndCannotRecycle+ledgerReadinessDoesNotMutateOwnerCompletionCacheOrExecuteAccounts,ReplacementAdmissionEventTest#laneAloneReadsAccountTablesAndReusesItsAdmissionAfterRejection,MatchingNotificationProbeTest#batchAdmissionWakeBitsAreShardScopedAndCoalesce+concurrentLaneSettlementsCannotBeLostWhileOwnerClearsReadyBits+cursorProbeDoesNotConsumeTheLastLaneSettlementNotification+lateSettlementNotificationRemainsVisibleAfterFirstIsConsumed,CoreOrderedOrderBatchTest#amendBatchRejectsReplacementIdOnAnotherLaneBeforeCancelingOriginal+alternatingSingleOrdersAndBatchesReleaseContextsBeforeTheNextBatchResumes+amendBatchAdmissionReadsOnlyItsLaneAndRetainsTheEventUntilCollected+amendPartialMatcherFailureMustFailStickyBeforeRecordingBusinessRejection+asynchronousCancelBatchSubmitsLaterChunkAfterMissingOrder+cancelIdentityAndPreparationNeverReadLaneOrderTables+executesCancelAndAmendBatchesWithOrderedPerItemOutcomes+perpetualBatchAdmissionIncludesEarlierItemsAndConservesReservedFunds+rejectsMixedUserCancelBatchBeforeAnyMutation,PendingOpenInterestTest#completedLaneChangesIncludeBothHedgedLegsAndCrossLaneMakerWithoutChangingCommittedTotals+overflowDoesNotRetainScratchOrMutateCommittedTotals,CoreOrderedOrderBatchTest#finalAmendBatchResolvesChainedAndRejectedItemsWithoutOwnerOrderReads",
+        "-Dsurefire.failIfNoSpecifiedTests=false",
+        "test"
+      ]
+    },
+    {
+      "label": "owner-final-benchmark-05",
+      "executions": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sourceUnchanged": true,
+      "start": "2026-10-11T22:40:54.356198+00:00",
+      "end": "2026-10-11T22:41:18.333680+00:00",
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-aeron-core/surprising-aeron-benchmarks",
+        "-am",
+        "-Dtest=AccountLaneCommitBenchmarkTest,ProductionSourceBoundaryTest",
+        "-Dsurefire.failIfNoSpecifiedTests=false",
+        "test"
+      ]
+    }
+  ],
+  "regressionExecutions": 286,
+  "regressionCountMeaning": "执行次数，含相同方法在不同轮次的重复执行，并非不同测试数",
+  "JMH": [
+    {
+      "mode": "plain",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.finalBatchResponseFanout",
+      "parameters": {
+        "accountLanes": "1",
+        "maxInFlight": "256",
+        "waitStrategy": "BUSY_SPIN"
+      },
+      "metric": {
+        "score": 824104.1798808186,
+        "scoreError": 53862.74519167534,
+        "scoreConfidence": [
+          770241.4346891432,
+          877966.925072494
+        ],
+        "scorePercentiles": {
+          "0.0": 811422.6595322263,
+          "50.0": 818911.0575046625,
+          "90.0": 846900.7436139316,
+          "95.0": 846900.7436139316,
+          "99.0": 846900.7436139316,
+          "99.9": 846900.7436139316,
+          "99.99": 846900.7436139316,
+          "99.999": 846900.7436139316,
+          "99.9999": 846900.7436139316,
+          "100.0": 846900.7436139316
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            811422.6595322263,
+            846900.7436139316,
+            816027.6462868806,
+            818911.0575046625,
+            827258.7924663922
+          ]
+        ]
+      },
+      "secondaryMetrics": {}
+    },
+    {
+      "mode": "plain",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.finalBatchResponseFanout",
+      "parameters": {
+        "accountLanes": "1",
+        "maxInFlight": "256",
+        "waitStrategy": "BLOCKING"
+      },
+      "metric": {
+        "score": 759349.5785117086,
+        "scoreError": 98683.60259613156,
+        "scoreConfidence": [
+          660665.975915577,
+          858033.1811078403
+        ],
+        "scorePercentiles": {
+          "0.0": 722913.0779680937,
+          "50.0": 759214.088076892,
+          "90.0": 785048.9523220883,
+          "95.0": 785048.9523220883,
+          "99.0": 785048.9523220883,
+          "99.9": 785048.9523220883,
+          "99.99": 785048.9523220883,
+          "99.999": 785048.9523220883,
+          "99.9999": 785048.9523220883,
+          "100.0": 785048.9523220883
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            747757.4018545941,
+            785048.9523220883,
+            759214.088076892,
+            781814.3723368755,
+            722913.0779680937
+          ]
+        ]
+      },
+      "secondaryMetrics": {}
+    },
+    {
+      "mode": "plain",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.finalBatchResponseFanout",
+      "parameters": {
+        "accountLanes": "4",
+        "maxInFlight": "256",
+        "waitStrategy": "BUSY_SPIN"
+      },
+      "metric": {
+        "score": 707337.562555575,
+        "scoreError": 98905.45453002691,
+        "scoreConfidence": [
+          608432.1080255482,
+          806243.0170856019
+        ],
+        "scorePercentiles": {
+          "0.0": 676897.6818424271,
+          "50.0": 717335.5207960682,
+          "90.0": 734583.2096945848,
+          "95.0": 734583.2096945848,
+          "99.0": 734583.2096945848,
+          "99.9": 734583.2096945848,
+          "99.99": 734583.2096945848,
+          "99.999": 734583.2096945848,
+          "99.9999": 734583.2096945848,
+          "100.0": 734583.2096945848
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            724514.2039561159,
+            683357.1964886785,
+            734583.2096945848,
+            676897.6818424271,
+            717335.5207960682
+          ]
+        ]
+      },
+      "secondaryMetrics": {}
+    },
+    {
+      "mode": "plain",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.finalBatchResponseFanout",
+      "parameters": {
+        "accountLanes": "4",
+        "maxInFlight": "256",
+        "waitStrategy": "BLOCKING"
+      },
+      "metric": {
+        "score": 476798.5038182334,
+        "scoreError": 124082.48396126296,
+        "scoreConfidence": [
+          352716.0198569704,
+          600880.9877794964
+        ],
+        "scorePercentiles": {
+          "0.0": 428212.047600905,
+          "50.0": 494794.40466297464,
+          "90.0": 504137.5455643346,
+          "95.0": 504137.5455643346,
+          "99.0": 504137.5455643346,
+          "99.9": 504137.5455643346,
+          "99.99": 504137.5455643346,
+          "99.999": 504137.5455643346,
+          "99.9999": 504137.5455643346,
+          "100.0": 504137.5455643346
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            428212.047600905,
+            497349.04026597453,
+            494794.40466297464,
+            459499.4809969783,
+            504137.5455643346
+          ]
+        ]
+      },
+      "secondaryMetrics": {}
+    },
+    {
+      "mode": "plain",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.metadataAndSequenceFanout",
+      "parameters": {
+        "accountLanes": "1",
+        "maxInFlight": "256",
+        "waitStrategy": "BUSY_SPIN"
+      },
+      "metric": {
+        "score": 3671072.561034955,
+        "scoreError": 299848.58577829046,
+        "scoreConfidence": [
+          3371223.9752566647,
+          3970921.1468132455
+        ],
+        "scorePercentiles": {
+          "0.0": 3552706.9668066534,
+          "50.0": 3675336.777188825,
+          "90.0": 3754352.930604078,
+          "95.0": 3754352.930604078,
+          "99.0": 3754352.930604078,
+          "99.9": 3754352.930604078,
+          "99.99": 3754352.930604078,
+          "99.999": 3754352.930604078,
+          "99.9999": 3754352.930604078,
+          "100.0": 3754352.930604078
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            3754352.930604078,
+            3675336.777188825,
+            3552706.9668066534,
+            3648962.458059682,
+            3724003.6725155367
+          ]
+        ]
+      },
+      "secondaryMetrics": {}
+    },
+    {
+      "mode": "plain",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.metadataAndSequenceFanout",
+      "parameters": {
+        "accountLanes": "1",
+        "maxInFlight": "256",
+        "waitStrategy": "BLOCKING"
+      },
+      "metric": {
+        "score": 3660928.545101229,
+        "scoreError": 480156.05353186716,
+        "scoreConfidence": [
+          3180772.491569362,
+          4141084.598633096
+        ],
+        "scorePercentiles": {
+          "0.0": 3504119.9570612926,
+          "50.0": 3677315.3430340113,
+          "90.0": 3827993.2453849344,
+          "95.0": 3827993.2453849344,
+          "99.0": 3827993.2453849344,
+          "99.9": 3827993.2453849344,
+          "99.99": 3827993.2453849344,
+          "99.999": 3827993.2453849344,
+          "99.9999": 3827993.2453849344,
+          "100.0": 3827993.2453849344
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            3504119.9570612926,
+            3580255.8555998835,
+            3714958.324426024,
+            3677315.3430340113,
+            3827993.2453849344
+          ]
+        ]
+      },
+      "secondaryMetrics": {}
+    },
+    {
+      "mode": "plain",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.metadataAndSequenceFanout",
+      "parameters": {
+        "accountLanes": "4",
+        "maxInFlight": "256",
+        "waitStrategy": "BUSY_SPIN"
+      },
+      "metric": {
+        "score": 1311070.1979070636,
+        "scoreError": 152119.77750072937,
+        "scoreConfidence": [
+          1158950.4204063343,
+          1463189.975407793
+        ],
+        "scorePercentiles": {
+          "0.0": 1268819.253286122,
+          "50.0": 1297231.3945208332,
+          "90.0": 1359085.3074591057,
+          "95.0": 1359085.3074591057,
+          "99.0": 1359085.3074591057,
+          "99.9": 1359085.3074591057,
+          "99.99": 1359085.3074591057,
+          "99.999": 1359085.3074591057,
+          "99.9999": 1359085.3074591057,
+          "100.0": 1359085.3074591057
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            1284060.118095245,
+            1346154.916174012,
+            1297231.3945208332,
+            1359085.3074591057,
+            1268819.253286122
+          ]
+        ]
+      },
+      "secondaryMetrics": {}
+    },
+    {
+      "mode": "plain",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.metadataAndSequenceFanout",
+      "parameters": {
+        "accountLanes": "4",
+        "maxInFlight": "256",
+        "waitStrategy": "BLOCKING"
+      },
+      "metric": {
+        "score": 203387.5203277095,
+        "scoreError": 167445.79355786447,
+        "scoreConfidence": [
+          35941.72676984503,
+          370833.313885574
+        ],
+        "scorePercentiles": {
+          "0.0": 150499.29557035444,
+          "50.0": 199877.00610177204,
+          "90.0": 267904.3251426666,
+          "95.0": 267904.3251426666,
+          "99.0": 267904.3251426666,
+          "99.9": 267904.3251426666,
+          "99.99": 267904.3251426666,
+          "99.999": 267904.3251426666,
+          "99.9999": 267904.3251426666,
+          "100.0": 267904.3251426666
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            199877.00610177204,
+            216046.3261994403,
+            182610.64862431417,
+            150499.29557035444,
+            267904.3251426666
+          ]
+        ]
+      },
+      "secondaryMetrics": {}
+    },
+    {
+      "mode": "gc",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.finalBatchResponseFanout",
+      "parameters": {
+        "accountLanes": "1",
+        "maxInFlight": "256",
+        "waitStrategy": "BUSY_SPIN"
+      },
+      "metric": {
+        "score": 812838.2544058218,
+        "scoreError": 70368.41946804625,
+        "scoreConfidence": [
+          742469.8349377755,
+          883206.6738738681
+        ],
+        "scorePercentiles": {
+          "0.0": 783600.9240210769,
+          "50.0": 820474.0277962647,
+          "90.0": 827416.912075115,
+          "95.0": 827416.912075115,
+          "99.0": 827416.912075115,
+          "99.9": 827416.912075115,
+          "99.99": 827416.912075115,
+          "99.999": 827416.912075115,
+          "99.9999": 827416.912075115,
+          "100.0": 827416.912075115
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            825980.3450755631,
+            820474.0277962647,
+            827416.912075115,
+            783600.9240210769,
+            806719.0630610893
+          ]
+        ]
+      },
+      "secondaryMetrics": {
+        "gc.alloc.rate": {
+          "score": 322.250785517925,
+          "scoreError": 28.175308048164112,
+          "scoreConfidence": [
+            294.0754774697609,
+            350.4260935660891
+          ],
+          "scorePercentiles": {
+            "0.0": 310.7779592701629,
+            "50.0": 325.4159845234394,
+            "90.0": 328.1765211796313,
+            "95.0": 328.1765211796313,
+            "99.0": 328.1765211796313,
+            "99.9": 328.1765211796313,
+            "99.99": 328.1765211796313,
+            "99.999": 328.1765211796313,
+            "99.9999": 328.1765211796313,
+            "100.0": 328.1765211796313
+          },
+          "scoreUnit": "MB/sec",
+          "rawData": [
+            [
+              327.59870786167363,
+              325.4159845234394,
+              328.1765211796313,
+              310.7779592701629,
+              319.28475475471816
+            ]
+          ]
+        },
+        "gc.alloc.rate.norm": {
+          "score": 416.04734738204814,
+          "scoreError": 0.3403491674083985,
+          "scoreConfidence": [
+            415.7069982146397,
+            416.38769654945656
+          ],
+          "scorePercentiles": {
+            "0.0": 416.0076964727723,
+            "50.0": 416.0077519379845,
+            "90.0": 416.2054596571249,
+            "95.0": 416.2054596571249,
+            "99.0": 416.2054596571249,
+            "99.9": 416.2054596571249,
+            "99.99": 416.2054596571249,
+            "99.999": 416.2054596571249,
+            "99.9999": 416.2054596571249,
+            "100.0": 416.2054596571249
+          },
+          "scoreUnit": "B/op",
+          "rawData": [
+            [
+              416.0076964727723,
+              416.0077519379845,
+              416.0077303648732,
+              416.0080984774862,
+              416.2054596571249
+            ]
+          ]
+        },
+        "gc.count": {
+          "score": 6.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            6.0,
+            6.0
+          ],
+          "scorePercentiles": {
+            "0.0": 1.0,
+            "50.0": 1.0,
+            "90.0": 2.0,
+            "95.0": 2.0,
+            "99.0": 2.0,
+            "99.9": 2.0,
+            "99.99": 2.0,
+            "99.999": 2.0,
+            "99.9999": 2.0,
+            "100.0": 2.0
+          },
+          "scoreUnit": "counts",
+          "rawData": [
+            [
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              2.0
+            ]
+          ]
+        },
+        "gc.time": {
+          "score": 18.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            18.0,
+            18.0
+          ],
+          "scorePercentiles": {
+            "0.0": 3.0,
+            "50.0": 3.0,
+            "90.0": 6.0,
+            "95.0": 6.0,
+            "99.0": 6.0,
+            "99.9": 6.0,
+            "99.99": 6.0,
+            "99.999": 6.0,
+            "99.9999": 6.0,
+            "100.0": 6.0
+          },
+          "scoreUnit": "ms",
+          "rawData": [
+            [
+              3.0,
+              3.0,
+              3.0,
+              3.0,
+              6.0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "mode": "gc",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.finalBatchResponseFanout",
+      "parameters": {
+        "accountLanes": "1",
+        "maxInFlight": "256",
+        "waitStrategy": "BLOCKING"
+      },
+      "metric": {
+        "score": 751472.0029393341,
+        "scoreError": 68310.53277855212,
+        "scoreConfidence": [
+          683161.470160782,
+          819782.5357178863
+        ],
+        "scorePercentiles": {
+          "0.0": 732783.4765670558,
+          "50.0": 746369.5169700725,
+          "90.0": 774120.8404131344,
+          "95.0": 774120.8404131344,
+          "99.0": 774120.8404131344,
+          "99.9": 774120.8404131344,
+          "99.99": 774120.8404131344,
+          "99.999": 774120.8404131344,
+          "99.9999": 774120.8404131344,
+          "100.0": 774120.8404131344
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            746369.5169700725,
+            774120.8404131344,
+            738443.1651237801,
+            765643.0156226272,
+            732783.4765670558
+          ]
+        ]
+      },
+      "secondaryMetrics": {
+        "gc.alloc.rate": {
+          "score": 297.9513018038233,
+          "scoreError": 27.607010880087874,
+          "scoreConfidence": [
+            270.3442909237354,
+            325.5583126839112
+          ],
+          "scorePercentiles": {
+            "0.0": 290.1334215757996,
+            "50.0": 296.0528856700319,
+            "90.0": 307.0398235136708,
+            "95.0": 307.0398235136708,
+            "99.0": 307.0398235136708,
+            "99.9": 307.0398235136708,
+            "99.99": 307.0398235136708,
+            "99.999": 307.0398235136708,
+            "99.9999": 307.0398235136708,
+            "100.0": 307.0398235136708
+          },
+          "scoreUnit": "MB/sec",
+          "rawData": [
+            [
+              296.0528856700319,
+              307.0398235136708,
+              292.8761856959703,
+              303.65419256364396,
+              290.1334215757996
+            ]
+          ]
+        },
+        "gc.alloc.rate.norm": {
+          "score": 416.0523047173703,
+          "scoreError": 0.37763345940143145,
+          "scoreConfidence": [
+            415.6746712579689,
+            416.4299381767717
+          ],
+          "scorePercentiles": {
+            "0.0": 416.0082644628099,
+            "50.0": 416.0085704490915,
+            "90.0": 416.2277377835951,
+            "95.0": 416.2277377835951,
+            "99.0": 416.2277377835951,
+            "99.9": 416.2277377835951,
+            "99.99": 416.2277377835951,
+            "99.999": 416.2277377835951,
+            "99.9999": 416.2277377835951,
+            "100.0": 416.2277377835951
+          },
+          "scoreUnit": "B/op",
+          "rawData": [
+            [
+              416.0085704490915,
+              416.0082644628099,
+              416.0086535133264,
+              416.00829737802854,
+              416.2277377835951
+            ]
+          ]
+        },
+        "gc.count": {
+          "score": 5.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            5.0,
+            5.0
+          ],
+          "scorePercentiles": {
+            "0.0": 1.0,
+            "50.0": 1.0,
+            "90.0": 1.0,
+            "95.0": 1.0,
+            "99.0": 1.0,
+            "99.9": 1.0,
+            "99.99": 1.0,
+            "99.999": 1.0,
+            "99.9999": 1.0,
+            "100.0": 1.0
+          },
+          "scoreUnit": "counts",
+          "rawData": [
+            [
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          ]
+        },
+        "gc.time": {
+          "score": 15.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            15.0,
+            15.0
+          ],
+          "scorePercentiles": {
+            "0.0": 3.0,
+            "50.0": 3.0,
+            "90.0": 3.0,
+            "95.0": 3.0,
+            "99.0": 3.0,
+            "99.9": 3.0,
+            "99.99": 3.0,
+            "99.999": 3.0,
+            "99.9999": 3.0,
+            "100.0": 3.0
+          },
+          "scoreUnit": "ms",
+          "rawData": [
+            [
+              3.0,
+              3.0,
+              3.0,
+              3.0,
+              3.0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "mode": "gc",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.finalBatchResponseFanout",
+      "parameters": {
+        "accountLanes": "4",
+        "maxInFlight": "256",
+        "waitStrategy": "BUSY_SPIN"
+      },
+      "metric": {
+        "score": 744760.6159778268,
+        "scoreError": 83248.9361116058,
+        "scoreConfidence": [
+          661511.6798662209,
+          828009.5520894326
+        ],
+        "scorePercentiles": {
+          "0.0": 722108.5810288704,
+          "50.0": 739564.8774840028,
+          "90.0": 770005.8561126236,
+          "95.0": 770005.8561126236,
+          "99.0": 770005.8561126236,
+          "99.9": 770005.8561126236,
+          "99.99": 770005.8561126236,
+          "99.999": 770005.8561126236,
+          "99.9999": 770005.8561126236,
+          "100.0": 770005.8561126236
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            722108.5810288704,
+            727504.009809382,
+            764619.7554542541,
+            739564.8774840028,
+            770005.8561126236
+          ]
+        ]
+      },
+      "secondaryMetrics": {
+        "gc.alloc.rate": {
+          "score": 1078.8984683543558,
+          "scoreError": 118.24073451222557,
+          "scoreConfidence": [
+            960.6577338421303,
+            1197.1392028665814
+          ],
+          "scorePercentiles": {
+            "0.0": 1046.5355751164145,
+            "50.0": 1071.785656829492,
+            "90.0": 1113.7208704788936,
+            "95.0": 1113.7208704788936,
+            "99.0": 1113.7208704788936,
+            "99.9": 1113.7208704788936,
+            "99.99": 1113.7208704788936,
+            "99.999": 1113.7208704788936,
+            "99.9999": 1113.7208704788936,
+            "100.0": 1113.7208704788936
+          },
+          "scoreUnit": "MB/sec",
+          "rawData": [
+            [
+              1046.5355751164145,
+              1054.2970573742355,
+              1108.1531819727436,
+              1071.785656829492,
+              1113.7208704788936
+            ]
+          ]
+        },
+        "gc.alloc.rate.norm": {
+          "score": 1520.0500570221652,
+          "scoreError": 0.35675769493442966,
+          "scoreConfidence": [
+            1519.6932993272308,
+            1520.4068147170997
+          ],
+          "scorePercentiles": {
+            "0.0": 1520.008347245409,
+            "50.0": 1520.0087168758716,
+            "90.0": 1520.2157919689973,
+            "95.0": 1520.2157919689973,
+            "99.0": 1520.2157919689973,
+            "99.9": 1520.2157919689973,
+            "99.99": 1520.2157919689973,
+            "99.999": 1520.2157919689973,
+            "99.9999": 1520.2157919689973,
+            "100.0": 1520.2157919689973
+          },
+          "scoreUnit": "B/op",
+          "rawData": [
+            [
+              1520.0088526912182,
+              1520.0087168758716,
+              1520.008347245409,
+              1520.008576329331,
+              1520.2157919689973
+            ]
+          ]
+        },
+        "gc.count": {
+          "score": 18.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            18.0,
+            18.0
+          ],
+          "scorePercentiles": {
+            "0.0": 3.0,
+            "50.0": 4.0,
+            "90.0": 4.0,
+            "95.0": 4.0,
+            "99.0": 4.0,
+            "99.9": 4.0,
+            "99.99": 4.0,
+            "99.999": 4.0,
+            "99.9999": 4.0,
+            "100.0": 4.0
+          },
+          "scoreUnit": "counts",
+          "rawData": [
+            [
+              4.0,
+              3.0,
+              4.0,
+              3.0,
+              4.0
+            ]
+          ]
+        },
+        "gc.time": {
+          "score": 32.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            32.0,
+            32.0
+          ],
+          "scorePercentiles": {
+            "0.0": 4.0,
+            "50.0": 6.0,
+            "90.0": 11.0,
+            "95.0": 11.0,
+            "99.0": 11.0,
+            "99.9": 11.0,
+            "99.99": 11.0,
+            "99.999": 11.0,
+            "99.9999": 11.0,
+            "100.0": 11.0
+          },
+          "scoreUnit": "ms",
+          "rawData": [
+            [
+              11.0,
+              6.0,
+              5.0,
+              4.0,
+              6.0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "mode": "gc",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.finalBatchResponseFanout",
+      "parameters": {
+        "accountLanes": "4",
+        "maxInFlight": "256",
+        "waitStrategy": "BLOCKING"
+      },
+      "metric": {
+        "score": 402876.51198702387,
+        "scoreError": 286487.2351620858,
+        "scoreConfidence": [
+          116389.27682493808,
+          689363.7471491096
+        ],
+        "scorePercentiles": {
+          "0.0": 320822.76873065525,
+          "50.0": 419398.8526885667,
+          "90.0": 498919.8059089312,
+          "95.0": 498919.8059089312,
+          "99.0": 498919.8059089312,
+          "99.9": 498919.8059089312,
+          "99.99": 498919.8059089312,
+          "99.999": 498919.8059089312,
+          "99.9999": 498919.8059089312,
+          "100.0": 498919.8059089312
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            498919.8059089312,
+            419398.8526885667,
+            320822.76873065525,
+            335439.4903983944,
+            439801.6422085715
+          ]
+        ]
+      },
+      "secondaryMetrics": {
+        "gc.alloc.rate": {
+          "score": 583.6376160488818,
+          "scoreError": 414.5048950924343,
+          "scoreConfidence": [
+            169.13272095644749,
+            998.1425111413162
+          ],
+          "scorePercentiles": {
+            "0.0": 464.99692976745615,
+            "50.0": 607.8552424810014,
+            "90.0": 723.0774891826817,
+            "95.0": 723.0774891826817,
+            "99.0": 723.0774891826817,
+            "99.9": 723.0774891826817,
+            "99.99": 723.0774891826817,
+            "99.999": 723.0774891826817,
+            "99.9999": 723.0774891826817,
+            "100.0": 723.0774891826817
+          },
+          "scoreUnit": "MB/sec",
+          "rawData": [
+            [
+              723.0774891826817,
+              607.8552424810014,
+              464.99692976745615,
+              486.1910208092541,
+              636.0673980040154
+            ]
+          ]
+        },
+        "gc.alloc.rate.norm": {
+          "score": 1520.0893001400905,
+          "scoreError": 0.62441655256214,
+          "scoreConfidence": [
+            1519.4648835875282,
+            1520.7137166926527
+          ],
+          "scorePercentiles": {
+            "0.0": 1520.0130088325652,
+            "50.0": 1520.019069412662,
+            "90.0": 1520.3793347359258,
+            "95.0": 1520.3793347359258,
+            "99.0": 1520.3793347359258,
+            "99.9": 1520.3793347359258,
+            "99.99": 1520.3793347359258,
+            "99.999": 1520.3793347359258,
+            "99.9999": 1520.3793347359258,
+            "100.0": 1520.3793347359258
+          },
+          "scoreUnit": "B/op",
+          "rawData": [
+            [
+              1520.0130088325652,
+              1520.0151515151515,
+              1520.0199362041467,
+              1520.019069412662,
+              1520.3793347359258
+            ]
+          ]
+        },
+        "gc.count": {
+          "score": 9.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            9.0,
+            9.0
+          ],
+          "scorePercentiles": {
+            "0.0": 1.0,
+            "50.0": 2.0,
+            "90.0": 2.0,
+            "95.0": 2.0,
+            "99.0": 2.0,
+            "99.9": 2.0,
+            "99.99": 2.0,
+            "99.999": 2.0,
+            "99.9999": 2.0,
+            "100.0": 2.0
+          },
+          "scoreUnit": "counts",
+          "rawData": [
+            [
+              2.0,
+              2.0,
+              2.0,
+              1.0,
+              2.0
+            ]
+          ]
+        },
+        "gc.time": {
+          "score": 23.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            23.0,
+            23.0
+          ],
+          "scorePercentiles": {
+            "0.0": 3.0,
+            "50.0": 5.0,
+            "90.0": 6.0,
+            "95.0": 6.0,
+            "99.0": 6.0,
+            "99.9": 6.0,
+            "99.99": 6.0,
+            "99.999": 6.0,
+            "99.9999": 6.0,
+            "100.0": 6.0
+          },
+          "scoreUnit": "ms",
+          "rawData": [
+            [
+              5.0,
+              6.0,
+              5.0,
+              3.0,
+              4.0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "mode": "gc",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.metadataAndSequenceFanout",
+      "parameters": {
+        "accountLanes": "1",
+        "maxInFlight": "256",
+        "waitStrategy": "BUSY_SPIN"
+      },
+      "metric": {
+        "score": 3923096.260227125,
+        "scoreError": 521664.44413491624,
+        "scoreConfidence": [
+          3401431.816092209,
+          4444760.704362041
+        ],
+        "scorePercentiles": {
+          "0.0": 3775600.8095487645,
+          "50.0": 3913170.6101230807,
+          "90.0": 4071440.728948121,
+          "95.0": 4071440.728948121,
+          "99.0": 4071440.728948121,
+          "99.9": 4071440.728948121,
+          "99.99": 4071440.728948121,
+          "99.999": 4071440.728948121,
+          "99.9999": 4071440.728948121,
+          "100.0": 4071440.728948121
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            3806158.7186963996,
+            4071440.728948121,
+            3913170.6101230807,
+            4049110.4338192577,
+            3775600.8095487645
+          ]
+        ]
+      },
+      "secondaryMetrics": {
+        "gc.alloc.rate": {
+          "score": 1376.12144577705,
+          "scoreError": 184.7589009048207,
+          "scoreConfidence": [
+            1191.3625448722294,
+            1560.8803466818706
+          ],
+          "scorePercentiles": {
+            "0.0": 1323.0438668404481,
+            "50.0": 1372.772916929229,
+            "90.0": 1428.5351039956613,
+            "95.0": 1428.5351039956613,
+            "99.0": 1428.5351039956613,
+            "99.9": 1428.5351039956613,
+            "99.99": 1428.5351039956613,
+            "99.999": 1428.5351039956613,
+            "99.9999": 1428.5351039956613,
+            "100.0": 1428.5351039956613
+          },
+          "scoreUnit": "MB/sec",
+          "rawData": [
+            [
+              1335.55339979859,
+              1428.5351039956613,
+              1372.772916929229,
+              1420.701941321321,
+              1323.0438668404481
+            ]
+          ]
+        },
+        "gc.alloc.rate.norm": {
+          "score": 368.0101229782799,
+          "scoreError": 0.073355396829224,
+          "scoreConfidence": [
+            367.9367675814507,
+            368.08347837510917
+          ],
+          "scorePercentiles": {
+            "0.0": 368.0015482043941,
+            "50.0": 368.00161435377237,
+            "90.0": 368.04420086959465,
+            "95.0": 368.04420086959465,
+            "99.0": 368.04420086959465,
+            "99.9": 368.04420086959465,
+            "99.99": 368.04420086959465,
+            "99.999": 368.04420086959465,
+            "99.9999": 368.04420086959465,
+            "100.0": 368.04420086959465
+          },
+          "scoreUnit": "B/op",
+          "rawData": [
+            [
+              368.0016605473965,
+              368.0015482043941,
+              368.00161435377237,
+              368.0015909162419,
+              368.04420086959465
+            ]
+          ]
+        },
+        "gc.count": {
+          "score": 22.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            22.0,
+            22.0
+          ],
+          "scorePercentiles": {
+            "0.0": 4.0,
+            "50.0": 4.0,
+            "90.0": 5.0,
+            "95.0": 5.0,
+            "99.0": 5.0,
+            "99.9": 5.0,
+            "99.99": 5.0,
+            "99.999": 5.0,
+            "99.9999": 5.0,
+            "100.0": 5.0
+          },
+          "scoreUnit": "counts",
+          "rawData": [
+            [
+              4.0,
+              5.0,
+              4.0,
+              5.0,
+              4.0
+            ]
+          ]
+        },
+        "gc.time": {
+          "score": 32.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            32.0,
+            32.0
+          ],
+          "scorePercentiles": {
+            "0.0": 6.0,
+            "50.0": 6.0,
+            "90.0": 8.0,
+            "95.0": 8.0,
+            "99.0": 8.0,
+            "99.9": 8.0,
+            "99.99": 8.0,
+            "99.999": 8.0,
+            "99.9999": 8.0,
+            "100.0": 8.0
+          },
+          "scoreUnit": "ms",
+          "rawData": [
+            [
+              8.0,
+              6.0,
+              6.0,
+              6.0,
+              6.0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "mode": "gc",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.metadataAndSequenceFanout",
+      "parameters": {
+        "accountLanes": "1",
+        "maxInFlight": "256",
+        "waitStrategy": "BLOCKING"
+      },
+      "metric": {
+        "score": 3039331.004228714,
+        "scoreError": 532073.3953904894,
+        "scoreConfidence": [
+          2507257.608838225,
+          3571404.399619203
+        ],
+        "scorePercentiles": {
+          "0.0": 2923788.7008881983,
+          "50.0": 2997375.443851039,
+          "90.0": 3263694.8878883915,
+          "95.0": 3263694.8878883915,
+          "99.0": 3263694.8878883915,
+          "99.9": 3263694.8878883915,
+          "99.99": 3263694.8878883915,
+          "99.999": 3263694.8878883915,
+          "99.9999": 3263694.8878883915,
+          "100.0": 3263694.8878883915
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            3263694.8878883915,
+            2939991.2108165137,
+            3071804.7776994277,
+            2923788.7008881983,
+            2997375.443851039
+          ]
+        ]
+      },
+      "secondaryMetrics": {
+        "gc.alloc.rate": {
+          "score": 1066.218259985463,
+          "scoreError": 187.21778532212997,
+          "scoreConfidence": [
+            879.000474663333,
+            1253.4360453075928
+          ],
+          "scorePercentiles": {
+            "0.0": 1025.8571534015252,
+            "50.0": 1050.4369076477615,
+            "90.0": 1145.2557855092487,
+            "95.0": 1145.2557855092487,
+            "99.0": 1145.2557855092487,
+            "99.9": 1145.2557855092487,
+            "99.99": 1145.2557855092487,
+            "99.999": 1145.2557855092487,
+            "99.9999": 1145.2557855092487,
+            "100.0": 1145.2557855092487
+          },
+          "scoreUnit": "MB/sec",
+          "rawData": [
+            [
+              1145.2557855092487,
+              1031.6571772108111,
+              1077.8842761579685,
+              1025.8571534015252,
+              1050.4369076477615
+            ]
+          ]
+        },
+        "gc.alloc.rate.norm": {
+          "score": 368.0127567931485,
+          "scoreError": 0.09182810307984275,
+          "scoreConfidence": [
+            367.9209286900687,
+            368.10458489622835
+          ],
+          "scorePercentiles": {
+            "0.0": 368.00193263926656,
+            "50.0": 368.00217561569923,
+            "90.0": 368.0554160650586,
+            "95.0": 368.0554160650586,
+            "99.0": 368.0554160650586,
+            "99.9": 368.0554160650586,
+            "99.99": 368.0554160650586,
+            "99.999": 368.0554160650586,
+            "99.9999": 368.0554160650586,
+            "100.0": 368.0554160650586
+          },
+          "scoreUnit": "B/op",
+          "rawData": [
+            [
+              368.00193263926656,
+              368.00217561569923,
+              368.00208194536975,
+              368.00217770034845,
+              368.0554160650586
+            ]
+          ]
+        },
+        "gc.count": {
+          "score": 17.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            17.0,
+            17.0
+          ],
+          "scorePercentiles": {
+            "0.0": 3.0,
+            "50.0": 3.0,
+            "90.0": 4.0,
+            "95.0": 4.0,
+            "99.0": 4.0,
+            "99.9": 4.0,
+            "99.99": 4.0,
+            "99.999": 4.0,
+            "99.9999": 4.0,
+            "100.0": 4.0
+          },
+          "scoreUnit": "counts",
+          "rawData": [
+            [
+              4.0,
+              3.0,
+              3.0,
+              4.0,
+              3.0
+            ]
+          ]
+        },
+        "gc.time": {
+          "score": 28.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            28.0,
+            28.0
+          ],
+          "scorePercentiles": {
+            "0.0": 3.0,
+            "50.0": 4.0,
+            "90.0": 12.0,
+            "95.0": 12.0,
+            "99.0": 12.0,
+            "99.9": 12.0,
+            "99.99": 12.0,
+            "99.999": 12.0,
+            "99.9999": 12.0,
+            "100.0": 12.0
+          },
+          "scoreUnit": "ms",
+          "rawData": [
+            [
+              12.0,
+              4.0,
+              4.0,
+              5.0,
+              3.0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "mode": "gc",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.metadataAndSequenceFanout",
+      "parameters": {
+        "accountLanes": "4",
+        "maxInFlight": "256",
+        "waitStrategy": "BUSY_SPIN"
+      },
+      "metric": {
+        "score": 1310244.7551440257,
+        "scoreError": 144052.20732524147,
+        "scoreConfidence": [
+          1166192.5478187841,
+          1454296.9624692672
+        ],
+        "scorePercentiles": {
+          "0.0": 1269257.526166898,
+          "50.0": 1306150.8925582601,
+          "90.0": 1360327.0484123419,
+          "95.0": 1360327.0484123419,
+          "99.0": 1360327.0484123419,
+          "99.9": 1360327.0484123419,
+          "99.99": 1360327.0484123419,
+          "99.999": 1360327.0484123419,
+          "99.9999": 1360327.0484123419,
+          "100.0": 1360327.0484123419
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            1281471.0887239892,
+            1360327.0484123419,
+            1269257.526166898,
+            1334017.2198586387,
+            1306150.8925582601
+          ]
+        ]
+      },
+      "secondaryMetrics": {
+        "gc.alloc.rate": {
+          "score": 1838.2477246196363,
+          "scoreError": 202.75096250583996,
+          "scoreConfidence": [
+            1635.4967621137964,
+            2040.9986871254762
+          ],
+          "scorePercentiles": {
+            "0.0": 1781.4362976067255,
+            "50.0": 1829.5682056905769,
+            "90.0": 1909.311110630209,
+            "95.0": 1909.311110630209,
+            "99.0": 1909.311110630209,
+            "99.9": 1909.311110630209,
+            "99.99": 1909.311110630209,
+            "99.999": 1909.311110630209,
+            "99.9999": 1909.311110630209,
+            "100.0": 1909.311110630209
+          },
+          "scoreUnit": "MB/sec",
+          "rawData": [
+            [
+              1798.5746539962472,
+              1909.311110630209,
+              1781.4362976067255,
+              1872.3483551744241,
+              1829.5682056905769
+            ]
+          ]
+        },
+        "gc.alloc.rate.norm": {
+          "score": 1472.0293228230266,
+          "scoreError": 0.21062062817519162,
+          "scoreConfidence": [
+            1471.8187021948515,
+            1472.2399434512017
+          ],
+          "scorePercentiles": {
+            "0.0": 1472.0046615700169,
+            "50.0": 1472.0049810719267,
+            "90.0": 1472.127168367347,
+            "95.0": 1472.127168367347,
+            "99.0": 1472.127168367347,
+            "99.9": 1472.127168367347,
+            "99.99": 1472.127168367347,
+            "99.999": 1472.127168367347,
+            "99.9999": 1472.127168367347,
+            "100.0": 1472.127168367347
+          },
+          "scoreUnit": "B/op",
+          "rawData": [
+            [
+              1472.0049810719267,
+              1472.0046615700169,
+              1472.0050110797745,
+              1472.0047920260686,
+              1472.127168367347
+            ]
+          ]
+        },
+        "gc.count": {
+          "score": 30.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            30.0,
+            30.0
+          ],
+          "scorePercentiles": {
+            "0.0": 6.0,
+            "50.0": 6.0,
+            "90.0": 6.0,
+            "95.0": 6.0,
+            "99.0": 6.0,
+            "99.9": 6.0,
+            "99.99": 6.0,
+            "99.999": 6.0,
+            "99.9999": 6.0,
+            "100.0": 6.0
+          },
+          "scoreUnit": "counts",
+          "rawData": [
+            [
+              6.0,
+              6.0,
+              6.0,
+              6.0,
+              6.0
+            ]
+          ]
+        },
+        "gc.time": {
+          "score": 40.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            40.0,
+            40.0
+          ],
+          "scorePercentiles": {
+            "0.0": 7.0,
+            "50.0": 8.0,
+            "90.0": 9.0,
+            "95.0": 9.0,
+            "99.0": 9.0,
+            "99.9": 9.0,
+            "99.99": 9.0,
+            "99.999": 9.0,
+            "99.9999": 9.0,
+            "100.0": 9.0
+          },
+          "scoreUnit": "ms",
+          "rawData": [
+            [
+              9.0,
+              8.0,
+              7.0,
+              8.0,
+              8.0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "mode": "gc",
+      "benchmark": "com.surprising.aeron.service.orchestration.AccountLaneCommitBenchmark.metadataAndSequenceFanout",
+      "parameters": {
+        "accountLanes": "4",
+        "maxInFlight": "256",
+        "waitStrategy": "BLOCKING"
+      },
+      "metric": {
+        "score": 233899.6989629967,
+        "scoreError": 233830.53914863206,
+        "scoreConfidence": [
+          69.15981436465518,
+          467730.2381116288
+        ],
+        "scorePercentiles": {
+          "0.0": 157726.9274599609,
+          "50.0": 221110.78513349424,
+          "90.0": 320095.94217522413,
+          "95.0": 320095.94217522413,
+          "99.0": 320095.94217522413,
+          "99.9": 320095.94217522413,
+          "99.99": 320095.94217522413,
+          "99.999": 320095.94217522413,
+          "99.9999": 320095.94217522413,
+          "100.0": 320095.94217522413
+        },
+        "scoreUnit": "ops/s",
+        "rawData": [
+          [
+            209295.2844973011,
+            261269.5555490033,
+            320095.94217522413,
+            157726.9274599609,
+            221110.78513349424
+          ]
+        ]
+      },
+      "secondaryMetrics": {
+        "gc.alloc.rate": {
+          "score": 328.23051805579905,
+          "scoreError": 328.275453696753,
+          "scoreConfidence": [
+            -0.04493564095395186,
+            656.5059717525521
+          ],
+          "scorePercentiles": {
+            "0.0": 221.37807004530416,
+            "50.0": 310.0167354449396,
+            "90.0": 449.2975799444132,
+            "95.0": 449.2975799444132,
+            "99.0": 449.2975799444132,
+            "99.9": 449.2975799444132,
+            "99.99": 449.2975799444132,
+            "99.999": 449.2975799444132,
+            "99.9999": 449.2975799444132,
+            "100.0": 449.2975799444132
+          },
+          "scoreUnit": "MB/sec",
+          "rawData": [
+            [
+              293.77972750579016,
+              366.6804773385481,
+              449.2975799444132,
+              221.37807004530416,
+              310.0167354449396
+            ]
+          ]
+        },
+        "gc.alloc.rate.norm": {
+          "score": 1472.1743709403638,
+          "scoreError": 1.253353538458482,
+          "scoreConfidence": [
+            1470.9210174019054,
+            1473.4277244788223
+          ],
+          "scorePercentiles": {
+            "0.0": 1472.0203923722045,
+            "50.0": 1472.030525030525,
+            "90.0": 1472.7564742476852,
+            "95.0": 1472.7564742476852,
+            "99.0": 1472.7564742476852,
+            "99.9": 1472.7564742476852,
+            "99.99": 1472.7564742476852,
+            "99.999": 1472.7564742476852,
+            "99.9999": 1472.7564742476852,
+            "100.0": 1472.7564742476852
+          },
+          "scoreUnit": "B/op",
+          "rawData": [
+            [
+              1472.030525030525,
+              1472.0242483026188,
+              1472.0203923722045,
+              1472.0402147487844,
+              1472.7564742476852
+            ]
+          ]
+        },
+        "gc.count": {
+          "score": 5.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            5.0,
+            5.0
+          ],
+          "scorePercentiles": {
+            "0.0": 0.0,
+            "50.0": 1.0,
+            "90.0": 2.0,
+            "95.0": 2.0,
+            "99.0": 2.0,
+            "99.9": 2.0,
+            "99.99": 2.0,
+            "99.999": 2.0,
+            "99.9999": 2.0,
+            "100.0": 2.0
+          },
+          "scoreUnit": "counts",
+          "rawData": [
+            [
+              1.0,
+              1.0,
+              2.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "gc.time": {
+          "score": 12.0,
+          "scoreError": "NaN",
+          "scoreConfidence": [
+            12.0,
+            12.0
+          ],
+          "scorePercentiles": {
+            "0.0": 0.0,
+            "50.0": 3.0,
+            "90.0": 4.0,
+            "95.0": 4.0,
+            "99.0": 4.0,
+            "99.9": 4.0,
+            "99.99": 4.0,
+            "99.999": 4.0,
+            "99.9999": 4.0,
+            "100.0": 4.0
+          },
+          "scoreUnit": "ms",
+          "rawData": [
+            [
+              2.0,
+              3.0,
+              4.0,
+              3.0
+            ]
+          ]
+        }
+      }
+    }
+  ],
+  "JMHScope": "256 in-flight技术提交任务/s；不含Matcher/Cluster，不能当业务吞吐",
+  "nativeLP": {
+    "metrics": {
+      "stage": "end_to_end",
+      "window": 256,
+      "steadyMeasurementSeconds": 60.018594,
+      "drainNanos": 4055188,
+      "drainBusinessOperations": 2688,
+      "windowBlockedNanos": 51844288956,
+      "clientPass": true,
+      "businessOpsPerSec": 425014.202,
+      "coreMessagesPerSec": 40593.603,
+      "peakInFlight": 256,
+      "p99usMaxAcrossBusinessTypes": 20135.0,
+      "pipelineHighWater": {
+        "matcher": 229,
+        "completion": 217,
+        "context": 256,
+        "lanes": [
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "laneWork": {
+        "0": {
+          "operations": {
+            "0": {
+              "completed": 379520,
+              "executionNanos": 9225913718
+            },
+            "1": {
+              "completed": 1290368,
+              "executionNanos": 15304554167
+            },
+            "2": {
+              "completed": 0,
+              "executionNanos": 0
+            },
+            "3": {
+              "completed": 0,
+              "executionNanos": 0
+            }
+          },
+          "executionWallNanos": 24530467885,
+          "measuredNanos": 60022649522,
+          "executionWallRatio": 0.4086868553846309
+        },
+        "1": {
+          "operations": {
+            "0": {
+              "completed": 379520,
+              "executionNanos": 9538878490
+            },
+            "1": {
+              "completed": 1290368,
+              "executionNanos": 16025093613
+            },
+            "2": {
+              "completed": 0,
+              "executionNanos": 0
+            },
+            "3": {
+              "completed": 0,
+              "executionNanos": 0
+            }
+          },
+          "executionWallNanos": 25563972103,
+          "measuredNanos": 60022649522,
+          "executionWallRatio": 0.4259054258114694
+        },
+        "2": {
+          "operations": {
+            "0": {
+              "completed": 379520,
+              "executionNanos": 9729403762
+            },
+            "1": {
+              "completed": 1290368,
+              "executionNanos": 16550420140
+            },
+            "2": {
+              "completed": 0,
+              "executionNanos": 0
+            },
+            "3": {
+              "completed": 0,
+              "executionNanos": 0
+            }
+          },
+          "executionWallNanos": 26279823902,
+          "measuredNanos": 60022649522,
+          "executionWallRatio": 0.4378317870217925
+        },
+        "3": {
+          "operations": {
+            "0": {
+              "completed": 379520,
+              "executionNanos": 9798087529
+            },
+            "1": {
+              "completed": 1290368,
+              "executionNanos": 16831469926
+            },
+            "2": {
+              "completed": 0,
+              "executionNanos": 0
+            },
+            "3": {
+              "completed": 0,
+              "executionNanos": 0
+            }
+          },
+          "executionWallNanos": 26629557455,
+          "measuredNanos": 60022649522,
+          "executionWallRatio": 0.44365848004159686
+        }
+      },
+      "cpu": {
+        "ownerSingleCorePercent": null,
+        "matcherSingleCorePercent": null,
+        "laneSingleCorePercentMax": null,
+        "laneSingleCorePercentByThread": []
+      },
+      "jfr": {
+        "threadCpuSamples": 0,
+        "logicalCpus": 16,
+        "coverage": {
+          "scope": "MISSING",
+          "fullMeasurementWindow": false
+        }
+      },
+      "laneExecutionWallRatioMin": 0.4086868553846309,
+      "laneExecutionWallRatioAvg": 0.4290206370648724,
+      "loadEvidence": {
+        "windowReached": true,
+        "windowBackpressureObserved": true,
+        "windowBlockedTimeRatio": 0.8638037898055393,
+        "windowBlockedTimeValid": true,
+        "queueEvidence": "HIGH_WATER_ONLY"
+      },
+      "saturationGate": {
+        "status": "UNCONFIRMED",
+        "target": "end_to_end",
+        "reasons": [
+          "sustained-queue-occupancy-not-measured",
+          "useful-processing-idle-and-dependency-wait-not-separated",
+          "throughput-plateau-under-increasing-load-not-established",
+          "thread-cpu-evidence-missing"
+        ]
+      }
+    },
+    "analysis": {
+      "at": "2026-10-11T22:51:05.277134+00:00",
+      "source": "l1-owner-routing-16-source.json",
+      "jars": "l1-owner-routing-16-jars.json",
+      "functionalAcceptance": true,
+      "observedBusinessOpsPerSec": 425014.202,
+      "observedCoreMessagesPerSec": 40593.603,
+      "measurementSeconds": 60.018594,
+      "fundsChecks": [
+        "mixedRiskDrain=PASS batchPages=75 continuationPages=74",
+        "mixedRiskDrain=PASS batchPages=0 continuationPages=0",
+        "mixedLiquidationCancellation=PASS pages=1",
+        "mixedLossLifecycle=PASS liquidation=true insurance=true adl=true",
+        "mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=4656 businessHash=ad4bb2c572b03b82",
+        "mixedCapacity=PASS elapsedSeconds=60.023 terminalBusinessOperations=25511443 offeredBusinessOperations=25511443 terminalCoreMessages=2436627 offeredCoreMessages=2436627 businessOpsPerSec=425030.271 coreMessagesPerSec=40595.126 fills=6072320 fillsPerSec=101167.144 queries=0 unfinished=0 peakInFlight=256 measuredCycles=2372 totalCycles=4656 triggerExecutions=0"
+      ],
+      "measurementSystemSamples": 12,
+      "measurementCpuSpeedLimits": [
+        70,
+        72,
+        75
+      ],
+      "formalPerformanceAcceptance": false,
+      "retainedArtifacts": [
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/aeron-surprising-linear_perpetual-0/cnc.dat",
+          "bytes": 48238592,
+          "sha256": "e81d404eb7d88378fa31dd9652212e2f9b7bd23ab6201907735c0fdb901373d1"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/aeron-surprising-linear_perpetual-0/images/77.logbuffer",
+          "bytes": 50335744,
+          "sha256": "4c69ac1e5e82cdebbe53741f78252752aa073ad3a2a0ab228e0388d88d4ca80f"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/aeron-surprising-linear_perpetual-0/images/78.logbuffer",
+          "bytes": 50335744,
+          "sha256": "a98a00c1f37f61e84adb401594e22541cb45061eed8d541b1e75f3109d859162"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/aeron-surprising-linear_perpetual-0/loss-report.dat",
+          "bytes": 1048576,
+          "sha256": "50be89ef7b74f99cb038b41b751b61b87ed3db833b36634afa7d09d74ddcaac6"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/aeron-surprising-linear_perpetual-0/publications/36.logbuffer",
+          "bytes": 397312,
+          "sha256": "d21a2b75dc7fbbc229481e85bf5e69043055ae36ba159871b34e1e9a09a4c84b"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/aeron-surprising-linear_perpetual-0/publications/45.logbuffer",
+          "bytes": 3149824,
+          "sha256": "d78439b6ca7b2ed4eec4b25da8e7b7d791a6ba9ed547a724b131a39926a752f7"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/aeron-surprising-linear_perpetual-0/publications/46.logbuffer",
+          "bytes": 397312,
+          "sha256": "f4e4989fead2ddfd559aaac1461dfd722048a664750d061cd5f3a1b76478d09a"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/aeron-surprising-linear_perpetual-0/publications/52.logbuffer",
+          "bytes": 3149824,
+          "sha256": "ad87631d728038e9014c1f4957deeb0a88a3b7257db63ca7720f2ba789c39381"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/aeron-surprising-linear_perpetual-0/publications/69.logbuffer",
+          "bytes": 201330688,
+          "sha256": "cc63cdeec7b67df3f5abb4a220a05772956098bd8b4b111a59d39a8161a0ac59"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/aeron-surprising-linear_perpetual-0/publications/80.logbuffer",
+          "bytes": 50335744,
+          "sha256": "f89c5325ed47f4c5f60354c3142bb2c80e799e5b7caff1c6f7ac1aa726de1afb"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/aeron-surprising-linear_perpetual-0/publications/82.logbuffer",
+          "bytes": 50335744,
+          "sha256": "12bbbc36105968269d0f5c00894134e2d745adfc2f5f34116f579499b75876b1"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/client.command",
+          "bytes": 1395,
+          "sha256": "7de036614ddba2c1fd039aa46bd4d92565a6d05d6849f134ca21617083ba4d1e"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/client.exit",
+          "bytes": 2,
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/client.log",
+          "bytes": 8321,
+          "sha256": "22785962b741cc4a37f89c7906066280214cc9c6f9781d5e3eabd4fb1a7bed6a"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/jmh.json",
+          "bytes": 2828,
+          "sha256": "37a08b43896ed16fc3ae65cd109f7fed6abdadc68215e79804dad94cfa06fe70"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/metrics.json",
+          "bytes": 3593,
+          "sha256": "9283b44b6fc2bfd9cd6204453322dbbae0da05342c4cdb8d77cbc7551b05242b"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/metrics.pretty.json",
+          "bytes": 3593,
+          "sha256": "9283b44b6fc2bfd9cd6204453322dbbae0da05342c4cdb8d77cbc7551b05242b"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/nmt-baseline.txt",
+          "bytes": 22,
+          "sha256": "5d8eb287cc37daca165a66674e6413f4294ab2d7a4fc43a49d6d69a7ff5cdb3d"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/nmt-summary.diff.txt",
+          "bytes": 4594,
+          "sha256": "59c19ae28dc3b05632833b3b092b17370c4e796c07524c5694873a34433c8ecf"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/nmt-summary.txt",
+          "bytes": 4807,
+          "sha256": "83adcb29eff06895dff3b9d72277ad6a04b327a8ffe8b2855de9f7f4e7682b28"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/node.command",
+          "bytes": 1676,
+          "sha256": "c9f3d148b0ad84935167b802610ad02ee40959bec171fddf1e2aaac9cb9b200e"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/node.log",
+          "bytes": 1801,
+          "sha256": "666df80aa608c9570a33e2a4333939797ac44fc5a2ca61eb466a954e6920c447"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/stage-config.txt",
+          "bytes": 197,
+          "sha256": "3d1169ae817731df0c13bc29dfe43e88d40c5a5b21906b928451a4b4736ebce2"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/threads.txt",
+          "bytes": 19325,
+          "sha256": "f1142ea2aaa2bef8eac319e97944ea60a86ea1d51ace7d1c43ce1f519e2bd6f0"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/tmp/surprising-funds-index-15067938168249087231/000004.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/tmp/surprising-funds-index-15067938168249087231/CURRENT",
+          "bytes": 16,
+          "sha256": "9c283f6e81028b9eb0760d918ee4bc0aa256ed3b926393c1734c760c4bd724fd"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/tmp/surprising-funds-index-15067938168249087231/IDENTITY",
+          "bytes": 36,
+          "sha256": "5b3a157e512098ee4ce6333b0771e1d0bc9a0dd8790a42322fbe11e59511ba4a"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/tmp/surprising-funds-index-15067938168249087231/LOCK",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/tmp/surprising-funds-index-15067938168249087231/LOG",
+          "bytes": 25608,
+          "sha256": "d4ccca6714ce12ae76186c65988071790cb4e43dd9fb831e7335fc42c9120cf4"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/tmp/surprising-funds-index-15067938168249087231/MANIFEST-000005",
+          "bytes": 116,
+          "sha256": "e31fdd4cab23d93f0b3f99c1745593e4c3a49708a4146257a37d77e90774030a"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/tmp/surprising-funds-index-15067938168249087231/OPTIONS-000007",
+          "bytes": 7598,
+          "sha256": "88686079ab0abbdffee6fe95c5c84e0a9a013d64261379cc0732dc3a1d2624a3"
+        }
+      ],
+      "processesTerminal": true,
+      "deletedOwnTemporaryData": [
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/data",
+          "bytes": 4300234816
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/aeron",
+          "bytes": 0
+        }
+      ]
+    }
+  },
+  "nativeSpot": {
+    "start": "2026-10-11T22:51:06.388701+00:00",
+    "source": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16-source.json",
+    "jars": [
+      {
+        "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+        "bytes": 135315655,
+        "sha256": "907a2601632e0e8c0c9298561cf2446056cbdd8190cc49ed53166233752c33fc"
+      },
+      {
+        "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+        "bytes": 179612756,
+        "sha256": "949907a403dfdeec315421f5a62892f8f0ff4858740d26c4460992e10d0ee194"
+      }
+    ],
+    "nodeCommand": [
+      "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+      "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+      "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+      "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+      "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+      "--enable-native-access=ALL-UNNAMED",
+      "-Xms1g",
+      "-Xmx1g",
+      "-XX:+UseG1GC",
+      "-XX:NativeMemoryTracking=summary",
+      "-XX:StartFlightRecording=settings=profile,maxsize=64m,dumponexit=true,filename=/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-spot-native-v2/node.jfr",
+      "-Dsurprising.aeron.product-line=SPOT",
+      "-Dsurprising.aeron.hostnames=127.0.0.1",
+      "-Dsurprising.aeron.egress-hostname=127.0.0.1",
+      "-Dsurprising.aeron.node-id=0",
+      "-Dsurprising.aeron.account-lanes=4",
+      "-Dsurprising.aeron.matching-engines=1",
+      "-Dsurprising.aeron.owner-command-window=256",
+      "-Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN",
+      "-Dsurprising.aeron.matcher-pipeline-wait-strategy=ADAPTIVE",
+      "-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN",
+      "-Dsurprising.aeron.owner-wait-strategy=ADAPTIVE",
+      "-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK",
+      "-Dsurprising.aeron.service.idle-strategy=YIELDING",
+      "-Dsurprising.aeron.data-dir=/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-spot-native-v2/data",
+      "-Daeron.dir=/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-spot-native-v2/aeron",
+      "-Djava.io.tmpdir=/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-spot-native-v2/tmp",
+      "-jar",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar"
+    ],
+    "clientCommand": [
+      "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+      "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+      "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+      "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+      "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+      "--enable-native-access=ALL-UNNAMED",
+      "-jar",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+      "ClusterSequentialBatchBenchmark.proceedsAndAmendOnLane",
+      "-foe",
+      "true",
+      "-f",
+      "1",
+      "-wi",
+      "0",
+      "-i",
+      "1",
+      "-t",
+      "1",
+      "-jvmArgsAppend",
+      "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -Xms512m -Xmx1g -XX:+UseG1GC -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Daeron.dir=/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-spot-native-v2/client-aeron -Djava.io.tmpdir=/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-spot-native-v2/tmp",
+      "-rf",
+      "json",
+      "-rff",
+      "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-spot-native-v2/jmh.json"
+    ],
+    "scope": "Real single-member SPOT 128 symbols lifecycle, including AMEND_ORDER_BATCH, actual Matcher/Account Lane and funds queries. Serial SingleShot functional diagnostic, not steady throughput. No snapshot/recovery/wallet.",
+    "nodePid": 49585,
+    "clientPid": 49605,
+    "nodeExitCode": 143,
+    "clientExitCode": 0,
+    "end": "2026-10-11T22:51:28.840930+00:00",
+    "sourceUnchangedDuringRun": true,
+    "fundsCasesPassed": 128
+  },
+  "nativeJFR": {
+    "metrics": {
+      "stage": "end_to_end",
+      "window": 256,
+      "steadyMeasurementSeconds": 60.025804,
+      "drainNanos": 4788192,
+      "drainBusinessOperations": 2669,
+      "windowBlockedNanos": 51841778344,
+      "clientPass": true,
+      "businessOpsPerSec": 389855.087,
+      "coreMessagesPerSec": 37245.132,
+      "peakInFlight": 256,
+      "p99usMaxAcrossBusinessTypes": 25313.0,
+      "pipelineHighWater": {
+        "matcher": 236,
+        "completion": 225,
+        "context": 256,
+        "lanes": [
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "laneWork": {
+        "0": {
+          "operations": {
+            "0": {
+              "completed": 348160,
+              "executionNanos": 8794321411
+            },
+            "1": {
+              "completed": 1183744,
+              "executionNanos": 14450526973
+            },
+            "2": {
+              "completed": 0,
+              "executionNanos": 0
+            },
+            "3": {
+              "completed": 0,
+              "executionNanos": 0
+            }
+          },
+          "executionWallNanos": 23244848384,
+          "measuredNanos": 60030592106,
+          "executionWallRatio": 0.38721671015596565
+        },
+        "1": {
+          "operations": {
+            "0": {
+              "completed": 348160,
+              "executionNanos": 9096276167
+            },
+            "1": {
+              "completed": 1183744,
+              "executionNanos": 15145189691
+            },
+            "2": {
+              "completed": 0,
+              "executionNanos": 0
+            },
+            "3": {
+              "completed": 0,
+              "executionNanos": 0
+            }
+          },
+          "executionWallNanos": 24241465858,
+          "measuredNanos": 60030592106,
+          "executionWallRatio": 0.40381853664203804
+        },
+        "2": {
+          "operations": {
+            "0": {
+              "completed": 348160,
+              "executionNanos": 9119350250
+            },
+            "1": {
+              "completed": 1183744,
+              "executionNanos": 15678321209
+            },
+            "2": {
+              "completed": 0,
+              "executionNanos": 0
+            },
+            "3": {
+              "completed": 0,
+              "executionNanos": 0
+            }
+          },
+          "executionWallNanos": 24797671459,
+          "measuredNanos": 60030592106,
+          "executionWallRatio": 0.41308390587274413
+        },
+        "3": {
+          "operations": {
+            "0": {
+              "completed": 348160,
+              "executionNanos": 9153687856
+            },
+            "1": {
+              "completed": 1183744,
+              "executionNanos": 15875895490
+            },
+            "2": {
+              "completed": 0,
+              "executionNanos": 0
+            },
+            "3": {
+              "completed": 0,
+              "executionNanos": 0
+            }
+          },
+          "executionWallNanos": 25029583346,
+          "measuredNanos": 60030592106,
+          "executionWallRatio": 0.4169471342512098
+        }
+      },
+      "cpu": {
+        "ownerSingleCorePercent": 97.67540383457622,
+        "matcherSingleCorePercent": 54.774831181016964,
+        "laneSingleCorePercentMax": 98.98080310291522,
+        "laneSingleCorePercentByThread": [
+          98.96685913301692,
+          98.97085727186438,
+          98.98080310291522,
+          98.96701535240676
+        ]
+      },
+      "jfr": {
+        "threadCpuSamples": 908,
+        "logicalCpus": 16,
+        "coverage": {
+          "scope": "MEASUREMENT",
+          "fullMeasurementWindow": true,
+          "firstCpuEvent": "2026-10-12T06:52:42.754006+08:00",
+          "lastCpuEvent": "2026-10-12T06:54:40.833466+08:00",
+          "requestedStart": "2026-10-12T06:53:25.486000+08:00",
+          "requestedEnd": "2026-10-12T06:54:25.453000+08:00",
+          "boundaryToleranceSeconds": 2
+        }
+      },
+      "laneExecutionWallRatioMin": 0.38721671015596565,
+      "laneExecutionWallRatioAvg": 0.4052665717304894,
+      "loadEvidence": {
+        "windowReached": true,
+        "windowBackpressureObserved": true,
+        "windowBlockedTimeRatio": 0.863658208459815,
+        "windowBlockedTimeValid": true,
+        "queueEvidence": "HIGH_WATER_ONLY"
+      },
+      "saturationGate": {
+        "status": "UNCONFIRMED",
+        "target": "end_to_end",
+        "reasons": [
+          "sustained-queue-occupancy-not-measured",
+          "useful-processing-idle-and-dependency-wait-not-separated",
+          "throughput-plateau-under-increasing-load-not-established"
+        ]
+      }
+    },
+    "analysis": {
+      "at": "2026-10-11T22:55:23.256275+00:00",
+      "source": "owner-final-core-jfr-source.json",
+      "jars": "owner-final-core-jfr-jars.json",
+      "functionalAcceptance": true,
+      "observedBusinessOpsPerSec": 389855.087,
+      "observedCoreMessagesPerSec": 37245.132,
+      "measurementSeconds": 60.025804,
+      "fundsChecks": [
+        "mixedRiskDrain=PASS batchPages=75 continuationPages=74",
+        "mixedRiskDrain=PASS batchPages=0 continuationPages=0",
+        "mixedLiquidationCancellation=PASS pages=1",
+        "mixedLossLifecycle=PASS liquidation=true insurance=true adl=true",
+        "mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=4318 businessHash=9b487d96bf850039",
+        "mixedCapacity=PASS elapsedSeconds=60.031 terminalBusinessOperations=23404034 offeredBusinessOperations=23404034 terminalCoreMessages=2235906 offeredCoreMessages=2235906 businessOpsPerSec=389868.452 coreMessagesPerSec=37246.109 fills=5570560 fillsPerSec=92795.353 queries=0 unfinished=0 peakInFlight=256 measuredCycles=2176 totalCycles=4318 triggerExecutions=0"
+      ],
+      "measurementSystemSamples": 12,
+      "measurementCpuSpeedLimits": [
+        70,
+        72,
+        75
+      ],
+      "formalPerformanceAcceptance": false,
+      "retainedArtifacts": [
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/aeron-surprising-linear_perpetual-0/cnc.dat",
+          "bytes": 48238592,
+          "sha256": "1a957ba27e0fbf73de81559a7abe27cca2d17b247280023b0c17553e24eb3bde"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/aeron-surprising-linear_perpetual-0/loss-report.dat",
+          "bytes": 1048576,
+          "sha256": "afc9b523c39dcfaa8fd204674111138e2c4b0beebe308adf3e8e86157cf5b607"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/allocation-by-class.txt",
+          "bytes": 6062,
+          "sha256": "2e8db6dc5ed6750d4da6b5e3dc853df296fa4358c13edb986d79c2ea536f010b"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/allocation-by-site.txt",
+          "bytes": 6062,
+          "sha256": "6e1b4d983164b4d25f56a785156b40fe75756461e2241b240f40ce3b858d0da2"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/allocation-by-thread.txt",
+          "bytes": 4083,
+          "sha256": "a0d64eddf7a6767a5ef7d3807cb84cf5c5e481cdc4ac1f7e8537569d5f8e84f8"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49778-allocation-by-class.txt",
+          "bytes": 4742,
+          "sha256": "630f06c85b4ba135a8fc6ca7dc30bdd7bb682bcee9e4975a4c3ae87839645ff3"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49778-allocation-by-site.txt",
+          "bytes": 6062,
+          "sha256": "7c3a401f0c000310d088370c55aebe47ecf5e18051c43ad98e430b6b4c10852f"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49778-allocation-by-thread.txt",
+          "bytes": 1003,
+          "sha256": "dd16daa0f68b4563584f4cce7ebf0a915e3b82e951714c87a83a937d47f68029"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49778-contention-by-thread.txt",
+          "bytes": 1003,
+          "sha256": "2b786f17543168c7bce9cafe0153b2034426687adb0875f3ff5e255364ac18cc"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49778-gc.txt",
+          "bytes": 44,
+          "sha256": "0cea1aa1c9e03e9d51b3fd699907e7324b49aa1b9b9d2b86f75fbf782f717f77"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49778-hot-methods.txt",
+          "bytes": 1670,
+          "sha256": "010112e72029588c93d6ce8041a35ff488c61bb7c116ad9e74eb3875c81bbb34"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49778-latencies-by-type.txt",
+          "bytes": 2101,
+          "sha256": "4707c3faaa11b3d5e8ac09d5293b44c18d2b987b977fdd532ba7e871026be815"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49778-safepoints.txt",
+          "bytes": 788,
+          "sha256": "bb3d762d055d47a510102c786dd646ddacc91b9bc485130fe1ea446a142ea616"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49778-summary.txt",
+          "bytes": 12341,
+          "sha256": "153b3305207daed96674d85bbdd2f7017258a860499d02ea89e17b91d5face31"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49778-thread-cpu-load.txt",
+          "bytes": 4080,
+          "sha256": "dcca5dfb10c12e1e6de48a013a0b9db1434a4b2c0794d7fc6de9e74ab1b400b8"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49778.jfr",
+          "bytes": 10539760,
+          "sha256": "f92db52644d5a9e1afa0d9bb32123a8e2b805fb9d23139fac73ab5dd192a5364"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49781-allocation-by-class.txt",
+          "bytes": 6062,
+          "sha256": "5770e89ab6ac450ce9b8af2c1e8eda2abae8628a5e72d390ea18f96b5217a6d4"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49781-allocation-by-site.txt",
+          "bytes": 6062,
+          "sha256": "991512d6b1f427d2147dc35f1761a20603e3e54a14d167cdedeefdd1f6e0bce8"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49781-allocation-by-thread.txt",
+          "bytes": 2763,
+          "sha256": "b789c521c5488f7450b431b5deadeb44e3e797bd065eb737157beb832f47b69c"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49781-contention-by-thread.txt",
+          "bytes": 1443,
+          "sha256": "aa8c477eb8fd60324fdb0f1d3e97308f5b59791f2465317ee0d94e9fd409316c"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49781-gc.txt",
+          "bytes": 206482,
+          "sha256": "5f5c44e6901562515a4f77de8f06bfa9806c677c08074495131bb3a27b9725b2"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49781-hot-methods.txt",
+          "bytes": 6070,
+          "sha256": "bc46fc0a8673dd6d2f51cf2c04c815adcd1f4999357f56e52bbf6bed17f11ec1"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49781-latencies-by-type.txt",
+          "bytes": 2321,
+          "sha256": "7716c17c4967d752c06f93c1cbe5d339dfd9daf350dfa9e15f34ab6349b89d79"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49781-safepoints.txt",
+          "bytes": 210854,
+          "sha256": "71f036e050ea4bcdff7eee7bfd6e84e65787203a55128d6de9a95429e95a1eb0"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49781-summary.txt",
+          "bytes": 12463,
+          "sha256": "3eb11c3a6ee08f7d2e8b71f554a63e61ac2d11ab0dbe440280ac7c3c6a684819"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49781-thread-cpu-load.txt",
+          "bytes": 4740,
+          "sha256": "74d7ffcbcf3e797c89c7feae4b8c13628230094bffabad5820dc06eae8cedc38"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49781.jfr",
+          "bytes": 90724722,
+          "sha256": "d1d4551206c1bb3e33c1e83b1662384fb7842411754654b8a297ef0453eaedd9"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client.command",
+          "bytes": 1744,
+          "sha256": "7676e02ba77b0f72a49f62efc5f6af918aec91696ac03c8dcfd295e0ec8180ae"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client.exit",
+          "bytes": 2,
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client.log",
+          "bytes": 9006,
+          "sha256": "3272e7569ee575019278d7ab613c83c484b49e3343053ad927bb0aff0150d453"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/contention-by-thread.txt",
+          "bytes": 1003,
+          "sha256": "031cce016f4ea8a6fa341a17df2aed98dba15dd87aee7848f5635dd57bc2d720"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/gc.txt",
+          "bytes": 35102,
+          "sha256": "020a45dba01c1bd9d90cd84e00d8e4d9bbfa0c00b80d42ac6bb3021b5a7eae7c"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/hot-methods.txt",
+          "bytes": 6070,
+          "sha256": "2d741008b78aec33adef125124db50f28962e4c561f7a264e70db6bfaf069f5d"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/jfr-dump.txt",
+          "bytes": 189,
+          "sha256": "ac256fda0fd2949073f5d59e3cce4ec9118fd7e10888b106cf1e74e4d77f4d91"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/jfr-summary.txt",
+          "bytes": 12708,
+          "sha256": "38be7f9d825d8059ce560dcd54e7a36b07ae9de94b2db223b9f54e612126033e"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/jmh.json",
+          "bytes": 3188,
+          "sha256": "1c24924ff39c86f2dd2c09c26477bf572023ccde275eff8a08ee45e3d5100fcd"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/latencies-by-type.txt",
+          "bytes": 1881,
+          "sha256": "27d636007449a8809dba77f00bbc3411c0b578607911e60b73bfeafbe186aac0"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/metrics.json",
+          "bytes": 3979,
+          "sha256": "caa547245ee6e122c044a11bc0943925f896099163957e61ad6ef92a4d5d2f55"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/metrics.pretty.json",
+          "bytes": 3979,
+          "sha256": "caa547245ee6e122c044a11bc0943925f896099163957e61ad6ef92a4d5d2f55"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/nmt-baseline.txt",
+          "bytes": 22,
+          "sha256": "e8eed6ef1a7acbd771ebc8d6d250338d92ccbb69b1ecffccd6df9358304a217f"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/nmt-summary.diff.txt",
+          "bytes": 4623,
+          "sha256": "037228c3d30c7447449bee49bb047828583986fe6e789a04f1726c954b0ba6bb"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/nmt-summary.txt",
+          "bytes": 4953,
+          "sha256": "97bc108a829655d9cc96134bc22727e34cf24ae57ad66d6ac83c456924c4de62"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/node.command",
+          "bytes": 2062,
+          "sha256": "f8728f897d57875d93650a9d94a929a2e26e62b3ba8814b17cd7a94bc1a4e2d8"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/node.jfr",
+          "bytes": 260082058,
+          "sha256": "f63d354918472e9163e6059c2c344d1a85405a721f09c2c92a99d2b55b36c3df"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/node.log",
+          "bytes": 1972,
+          "sha256": "e1aa11ffb2fa65d6b371289c4cd8cb419e83eb268f02a9632806d6531383cfbd"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/safepoints.txt",
+          "bytes": 40928,
+          "sha256": "cb62e6a8eac54426c104b0147e76d9420bda6d25628e6d772cbea556c229f5c6"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/stage-config.txt",
+          "bytes": 196,
+          "sha256": "4d8f47e568c48521331cc72d5583e69a937b32b046b3eef7beb320c9c29ee2f7"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/thread-cpu-load.txt",
+          "bytes": 6280,
+          "sha256": "6b9c48f702f9ec32d84a4123077dc2be3a8faf43034e3ad61b27b1f2a2a86f7f"
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/threads.txt",
+          "bytes": 20482,
+          "sha256": "ff4bab9a73c6b6d2cfa0d8247a0d0efa322ba8791906a8876a0a6fdb7b746832"
+        }
+      ],
+      "processesTerminal": true,
+      "deletedOwnTemporaryData": [
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/data",
+          "bytes": 4031799360
+        },
+        {
+          "path": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/aeron",
+          "bytes": 0
+        }
+      ]
+    },
+    "formalEpochMillis": [
+      1791759205486,
+      1791759265453
+    ],
+    "threadAllocationEndpoints": [
+      {
+        "thread": "clustered-service-101-0",
+        "firstEpochMillis": 1791759206234,
+        "lastEpochMillis": 1791759265001,
+        "firstBytes": 2476795216,
+        "lastBytes": 4901123872,
+        "samples": 59,
+        "bytesPerSecond": 41253231.507
+      },
+      {
+        "thread": "core-account-lane-0",
+        "firstEpochMillis": 1791759206234,
+        "lastEpochMillis": 1791759265001,
+        "firstBytes": 3789930152,
+        "lastBytes": 7505454808,
+        "samples": 59,
+        "bytesPerSecond": 63224678.068
+      },
+      {
+        "thread": "core-account-lane-1",
+        "firstEpochMillis": 1791759206234,
+        "lastEpochMillis": 1791759265001,
+        "firstBytes": 3791483184,
+        "lastBytes": 7508656680,
+        "samples": 59,
+        "bytesPerSecond": 63252735.311
+      },
+      {
+        "thread": "core-account-lane-2",
+        "firstEpochMillis": 1791759206234,
+        "lastEpochMillis": 1791759265001,
+        "firstBytes": 3791859080,
+        "lastBytes": 7506966120,
+        "samples": 59,
+        "bytesPerSecond": 63217571.766
+      },
+      {
+        "thread": "core-account-lane-3",
+        "firstEpochMillis": 1791759206234,
+        "lastEpochMillis": 1791759265001,
+        "firstBytes": 3788996464,
+        "lastBytes": 7504564984,
+        "samples": 59,
+        "bytesPerSecond": 63225424.473
+      },
+      {
+        "thread": "core-matcher-0",
+        "firstEpochMillis": 1791759206234,
+        "lastEpochMillis": 1791759265001,
+        "firstBytes": 5433046808,
+        "lastBytes": 10710030152,
+        "samples": 59,
+        "bytesPerSecond": 89795009.852
+      },
+      {
+        "thread": "trading-owner--1",
+        "firstEpochMillis": 1791759206234,
+        "lastEpochMillis": 1791759265001,
+        "firstBytes": 4330914640,
+        "lastBytes": 8466190728,
+        "samples": 59,
+        "bytesPerSecond": 70367316.487
+      }
+    ],
+    "selectedThreadBytesPerSecond": 454335967.464,
+    "approximateBytesPerBusinessOp": 1165.397047811255,
+    "allocationLimits": "TAS周期端点与正式窗口非完全对齐；仅Owner/Matcher/4 Lane/clustered-service，不含client/transport；估算值",
+    "events": {
+      "GC_PAUSE": [
+        "92",
+        "459586013",
+        "12816699"
+      ],
+      "GC_QUANTILES_NS": [
+        "4864678",
+        "5280567",
+        "12816699"
+      ],
+      "MONITOR": [
+        "0",
+        "0"
+      ],
+      "DATA_LOSS": [
+        "0"
+      ],
+      "EXEC_SAMPLES": [
+        "12290"
+      ],
+      "LARGEST_OUTSIDE_TLAB": [
+        "[J",
+        "65552"
+      ]
+    },
+    "monitorLimits": "采样阈值内记录为0，不能证明未使用synchronized"
+  },
+  "deviations": [
+    "新增连续改单测试首轮发现后项路由未包含先前项新订单，已改为引用现有批次回执并复测通过",
+    "修正原元数据JMH未进入异步作用域的问题，当前实际在常驻worker执行"
+  ],
+  "acceptance": {
+    "correctness": true,
+    "capacity": false,
+    "capacityInvalidReason": "两轮正式窗口CPU速率限制70/72/75；未宣称50万或因果吞吐提升",
+    "snapshotRecoveryWalletScenarios": false
+  },
+  "cleanup": {
+    "at": "2026-10-11T22:59:55.975334+00:00",
+    "recordings": [
+      {
+        "rawPath": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-stage.jfr",
+        "retainedPath": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-stage.jfr.gz",
+        "rawSha256": "4de0d513e9cd08ad759db9db750af84358e289ab35c5cfe930cfa8f6c80a86ab",
+        "compressedBytes": 369662
+      },
+      {
+        "rawPath": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-spot-native-v2/node.jfr",
+        "retainedPath": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-spot-native-v2/node.jfr.gz",
+        "rawSha256": "f84a028224e6a5f80a80e19f205b8106d92f9d0a2576db8ffb45c00de337b51c",
+        "compressedBytes": 373077
+      },
+      {
+        "rawPath": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49778.jfr",
+        "retainedPath": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49778.jfr.gz",
+        "rawSha256": "f92db52644d5a9e1afa0d9bb32123a8e2b805fb9d23139fac73ab5dd192a5364",
+        "compressedBytes": 1997336
+      },
+      {
+        "rawPath": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49781.jfr",
+        "retainedPath": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/client-49781.jfr.gz",
+        "rawSha256": "d1d4551206c1bb3e33c1e83b1662384fb7842411754654b8a297ef0453eaedd9",
+        "compressedBytes": 24568418
+      },
+      {
+        "rawPath": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/node.jfr",
+        "retainedPath": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/node.jfr.gz",
+        "rawSha256": "f63d354918472e9163e6059c2c344d1a85405a721f09c2c92a99d2b55b36c3df",
+        "compressedBytes": 86112528
+      }
+    ],
+    "deletedOwnTemporaryDirectories": [
+      "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/aeron-surprising-linear_perpetual-0",
+      "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-owner-routing-16/window-256/end_to_end/tmp",
+      "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/aeron-surprising-linear_perpetual-0",
+      "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-core-jfr/window-256/end_to_end/tmp",
+      "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-spot-native-v2/client-aeron",
+      "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-spot-native-v2/aeron",
+      "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-spot-native-v2/data",
+      "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-spot-native-v2/tmp",
+      "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/owner-final-spot-native-v2/aeron-surprising-spot-0"
+    ],
+    "processesTerminal": true,
+    "unrelatedArtifactsUntouched": true
+  }
+}

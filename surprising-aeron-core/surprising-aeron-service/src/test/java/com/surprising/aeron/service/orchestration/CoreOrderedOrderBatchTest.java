@@ -1174,6 +1174,61 @@ class CoreOrderedOrderBatchTest {
     }
 
     @Test
+    void finalAmendBatchResolvesChainedAndRejectedItemsWithoutOwnerOrderReads() throws Exception {
+        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 1_000);
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(13_221, "final-original", 1_000))))));
+            state.activate();
+            Object[] lanes = field(state.runtimeState, "accountLanes");
+            Object[] original = new Object[lanes.length];
+            try {
+                for (int lane = 0; lane < lanes.length; lane++) {
+                    var table = lanes[lane].getClass().getDeclaredField("orders"); table.setAccessible(true);
+                    original[lane] = table.get(lanes[lane]);
+                    table.set(lanes[lane], ownerReadGuard(original[lane], Thread.currentThread()));
+                }
+                var response = CoreTestCompletion.applyAsynchronously(state, command(
+                        CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 3,
+                        TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
+                                new AmendOrderCommand(13_221, 13_222, "final-first", 900L, 1L, CoreTimeInForce.GTC, false),
+                                new AmendOrderCommand(13_222, 13_223, "final-second", 800L, 1L, CoreTimeInForce.GTC, false),
+                                new AmendOrderCommand(13_223, 13_224, "final-rejected", 1_100L, 1L, CoreTimeInForce.GTC, false))))));
+                var items = TradingOrderBatchCodec.decodeResult(response.data()).items();
+                assertThat(items).hasSize(3);
+                assertThat(items.get(0).status()).isEqualTo(ResponseStatus.APPLIED);
+                assertThat(items.get(1).status()).isEqualTo(ResponseStatus.APPLIED);
+                assertThat(items.get(2).resultCode()).isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
+                assertThat(items.get(0).order()).isNull();
+                assertThat(items.get(1).order().orderId()).isEqualTo(13_223);
+                assertThat(items.get(2).order().orderId()).isEqualTo(13_223);
+                var rejected = CoreTestCompletion.applyAsynchronously(state, command(
+                        CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 4,
+                        TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
+                                new AmendOrderCommand(13_223, 13_225, "all-rejected", 1_100L, 1L, CoreTimeInForce.GTC, false))))));
+                var rejectedItem = TradingOrderBatchCodec.decodeResult(rejected.data()).items().getFirst();
+                assertThat(rejectedItem.resultCode()).isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
+                assertThat(rejectedItem.order().orderId()).isEqualTo(13_223);
+            } finally {
+                for (int lane = 0; lane < lanes.length; lane++) {
+                    if (original[lane] == null) continue;
+                    var table = lanes[lane].getClass().getDeclaredField("orders"); table.setAccessible(true);
+                    @SuppressWarnings("unchecked") var source =
+                            (org.agrona.collections.Long2ObjectHashMap<Object>) table.get(lanes[lane]);
+                    @SuppressWarnings("unchecked") var target =
+                            (org.agrona.collections.Long2ObjectHashMap<Object>) original[lane];
+                    target.clear(); target.putAll(source); table.set(lanes[lane], target);
+                }
+            }
+            var balance = state.tradingState().user(1001).balances().get("USDT");
+            assertThat(balance.availableUnits()).isEqualTo(200);
+            assertThat(balance.lockedUnits()).isEqualTo(800);
+        }
+    }
+
+    @Test
     @org.junit.jupiter.api.Timeout(10)
     void amendBatchAdmissionReadsOnlyItsLaneAndRetainsTheEventUntilCollected() throws Exception {
         try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {

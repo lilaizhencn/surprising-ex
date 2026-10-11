@@ -5228,3 +5228,31 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - 6份JFR经gzip并验证解压SHA，分析后删除原文件；本轮进程已停止，14个独立临时目录已清理，原始路径仅作历史定位。未删除实验worktree或其他运行产物。
 - 本轮完成批量改单准入迁出Owner、现货资金准入Lane化及批次OI读边界。生产SystemLedgerLane、Owner手续费/保险/资金费写入、批次最终响应与元数据、触发/强平/ADL和L1其余路径仍未完成；不得宣称完整最小Owner或整链路零堆分配。
 - 持久验证：[batch-amend-lane-admission-20261011.json](docs/validation/batch-amend-lane-admission-20261011.json)；artifact根目录：`/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z`，重点文件batch-amend-plan.json、batch-amend-final-report.json、batch-amend-cleanup.json及l1-owner-routing-15-source/jars.json。
+
+
+## 2026-10-12 Owner 最终账户提交/批次响应迁移：采集前计划
+
+- 当前 master `3ac2bfef` 加本轮工作树；不适用旧版本对照。
+- 问题：最终提交先由 Lane 准备订单、Owner 再写回账户表；顺序 AMEND/全拒单批次响应仍由 Owner 查订单。
+- 改动：Lane 提交任务写订单元数据并取消关闭触发单；所属账户 Lane 捕获最终批次结果与编码。完成掩码独立于实际提交掩码，全拒单读取不伪造账户提交。连续改单用现有批次回执解析路由。
+- 验证：Owner 禁止账户订单表 get/put 的并发用例；六产品相关资金、撮合及源码边界；排除快照、恢复、wallet。
+- JMH：真实 worker，元数据/最终批次编码，1/4 Lane、BUSY_SPIN/BLOCKING，固定256槽；1 fork、3×1s预热、5×1s测量，吞吐与独立gc轮；另一次4 Lane/BUSY_SPIN JFR，最大64MB。只代表提交任务，不能当业务吞吐。
+- 真实节点：固定1个Aeron成员、1 matcher、4 Lane、window256、永续MIXED/batch20/128symbols、G1，60s预热和60s正式窗口；无采样主轮及独立JFR。资金差=0、unfinished=0、accepted=terminal为正确性门槛；CPU限频或DataLoss使容量/归因无效。
+- 本轮采集以定位为目的，不宣称50万或全链路零分配。生产SystemLedger及其余Owner读取尚待接通，后续继续迁移。
+- 原始证据：`performance-artifacts/lane-parallel-20261010T144735Z/owner-final-*`、`l1-owner-routing-16-*`。
+
+
+### 2026-10-12 最终账户提交/批次响应：本模块结果
+
+- 286次相关测试执行通过（含重复轮次）；Owner 禁止订单表读写的元数据测试及完整连续AMEND/全拒单读取测试通过。20模块干净构建、1809源文件及1772 JAR class核对通过。
+- 当前无采样永续正式窗口60.018594s，终态业务增量25508755，观测425014.202business/s、40593.603Core/s；排空4.055188ms/2688业务项/256Core。最终offered=terminal=25511443业务项，unfinished=0、资金差0。正式CPU限制70/72/75，容量验收无效。
+- 真实现货单成员、1 matcher、4 Lane、window256的128个顺序批次场景通过，包含本次AMEND，资金差及残余冻结0；这是串行功能诊断，不是持续容量。
+- JMH固定256实际worker任务：4 Lane/BUSY_SPIN元数据约131万技术任务/s，最终批次编码约70.7万技术任务/s；独立gc分别约1472B/技术任务和1520B/技术任务，不能当business ops/s或全链路零分配。
+- 独立JFR正式窗口389855.087business/s，同样限频；Owner/Matcher/4 Lane/clustered-service周期端点估算约1165.4B/business（不同窗口/线程范围限制见记录）；DataLoss0，GC92次/459.586ms，最大12.817ms。记录到的Owner/Lane监视器事件0受阈值限制，不能证明无锁。
+- 修复新增连续改单用例暴露的路由遗漏；元数据JMH原内联执行已改为常驻worker。本模块完成不代表全部Owner迁移完成，继续推进生产账本及其余账户边界。
+- 证据见 `docs/validation/owner-final-account-commit-20261012.json`；清理状态后续追加。
+
+
+### 2026-10-12 最终账户提交模块：清理
+
+本轮节点/客户端/分析进程均已结束；5份录制已gzip并核对解压SHA，删除本轮临时Cluster/驱动/tmp目录。保留分析、日志、指纹与压缩录制；历史实验目录及其他压测证据未删除。详见验证记录cleanup。

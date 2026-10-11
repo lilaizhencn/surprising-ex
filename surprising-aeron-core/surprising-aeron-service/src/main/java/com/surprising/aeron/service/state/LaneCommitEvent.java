@@ -18,11 +18,17 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
     private TradingRuntimeState runtime;
     private long coreSequence;
     private long requiredLaneMask;
+    private long committedLaneMask;
+    private LaneOrderResultTarget resultTarget;
+    private RuntimeIdentityRegistry identities;
+    private int resultLaneId;
     private long dispatchedNanos;
     private long ownerObservedNanos;
 
     // Lazily allocated only for controls whose final commit also stamps account orders.
-    private LongArrayList[] metadataOrderIds;
+    // The affected Lanes resolve these identities in their own tables. The Owner never reads
+    // an account table to discover the order's Lane at this final commit boundary.
+    private LongArrayList metadataOrderIds;
     private OrderRuntime[][] stampedOrders;
     private long metadataTimestamp, metadataPosition;
 
@@ -71,25 +77,18 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         metadataPosition = position;
         for (Long orderId : orderIds) {
             if (orderId == null) continue;
-            OrderRuntime order = runtime.order(orderId);
-            if (order == null) continue;
-            int laneId = runtime.topology().accountLaneId(order.userId());
-            if ((requiredLaneMask & (1L << laneId)) == 0)
-                throw new IllegalStateException("metadata order has no account commit Lane");
             if (metadataOrderIds == null) {
-                metadataOrderIds = new LongArrayList[usersByLane.length];
+                metadataOrderIds = new LongArrayList(4);
                 stampedOrders = new OrderRuntime[usersByLane.length][];
             }
-            if (metadataOrderIds[laneId] == null) metadataOrderIds[laneId] = new LongArrayList(4);
-            metadataOrderIds[laneId].add(orderId);
+            metadataOrderIds.add(orderId);
         }
         if (metadataOrderIds == null) return;
         long lanes = requiredLaneMask;
         while (lanes != 0) {
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
-            if (metadataOrderIds[laneId] == null) continue;
-            int count = metadataOrderIds[laneId].size();
+            int count = metadataOrderIds.size();
             if (stampedOrders[laneId] == null || stampedOrders[laneId].length < count)
                 stampedOrders[laneId] = new OrderRuntime[Math.max(4, count)];
         }
@@ -97,19 +96,20 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
 
     private void stampMetadata(AccountLaneState lane) {
         int laneId = lane.laneId();
-        if (metadataOrderIds == null || metadataOrderIds[laneId] == null) return;
-        LongArrayList ids = metadataOrderIds[laneId];
+        if (metadataOrderIds == null) return;
+        LongArrayList ids = metadataOrderIds;
         runtime.enterLaneCommandScope(lane);
         try {
             for (int index = 0; index < ids.size(); index++) {
                 long id = ids.get(index);
                 OrderRuntime order = lane.orders.get(id);
-                if (order == null) throw new IllegalStateException("commit order disappeared from its Lane");
+                if (order == null) continue; // Another affected Lane owns it, or it was retired.
                 if (order.updatedAtEpochMillis() == metadataTimestamp && order.clusterPosition() == metadataPosition)
                     continue;
                 runtime.accountRollback.captureUserBefore(order.userId());
                 runtime.accountRollback.captureOrderBefore(id);
                 OrderRuntime stamped = order.withCommitMetadata(metadataTimestamp, metadataPosition);
+                lane.putOrder(stamped);
                 stampedOrders[laneId][index] = stamped;
             }
         } finally { runtime.exitLaneCommandScope(lane); }
@@ -122,7 +122,6 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
             while (lanes != 0) {
                 int laneId = Long.numberOfTrailingZeros(lanes);
                 lanes &= lanes - 1;
-                cancelClosingTriggers(runtime.accountLanes[laneId]);
                 if (canceledTriggers[laneId] == 0) continue;
                 runtime.flushPublishedChanges(laneId);
                 count = Math.addExact(count, canceledTriggers[laneId]);
@@ -134,12 +133,9 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         while (lanes != 0) {
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
-            if (metadataOrderIds[laneId] == null) continue;
-            for (int index = 0; index < metadataOrderIds[laneId].size(); index++) {
+            for (int index = 0; index < metadataOrderIds.size(); index++) {
                 OrderRuntime order = stampedOrders[laneId][index];
                 if (order == null) continue;
-                runtime.accountLanes[laneId].putOrder(order);
-                runtime.publishOrder(order.orderId(), order);
                 runtime.changedOrder(order.orderId(), order);
                 runtime.changedUsers.add(order.userId());
             }
@@ -160,6 +156,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         }
         coreSequence = sequence;
         requiredLaneMask = laneMask;
+        committedLaneMask = laneMask;
         runtime = owner;
         if (LATENCY_DIAGNOSTICS) dispatchedNanos = System.nanoTime();
         long lanes = laneMask;
@@ -173,6 +170,16 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         return this;
     }
 
+    void prepareResponse(LaneOrderResultTarget target, RuntimeIdentityRegistry registry,
+                         int laneId, long commitMask) {
+        if (target == null || registry == null || (requiredLaneMask & (1L << laneId)) == 0)
+            throw new IllegalArgumentException("batch response requires its account Lane");
+        resultTarget = target;
+        identities = registry;
+        resultLaneId = laneId;
+        committedLaneMask = commitMask;
+    }
+
     public void execute(AccountLaneState lane) {
         int laneId = lane.laneId();
         long laneBit = 1L << laneId;
@@ -180,8 +187,12 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
             throw new IllegalStateException("Account Lane commit reached an unrelated lane");
         }
         long startedNanos = System.nanoTime();
+        cancelClosingTriggers(lane);
         stampMetadata(lane);
-        runtime.applyLaneUsers(lane, usersByLane[laneId], coreSequence);
+        if ((committedLaneMask & laneBit) != 0)
+            runtime.applyLaneUsers(lane, usersByLane[laneId], coreSequence);
+        if (resultTarget != null && laneId == resultLaneId)
+            LaneOrderResultTarget.captureFinal(resultTarget, identities, lane);
         long finishedNanos = System.nanoTime();
         runtime.recordSequenceCommitLaneOperation(laneId, finishedNanos - startedNanos);
         int completionOffset = laneId * CACHE_LINE_LONGS;
@@ -205,6 +216,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
 
     public long coreSequence() { return coreSequence; }
     public long requiredLaneMask() { return requiredLaneMask; }
+    public long committedLaneMask() { return committedLaneMask; }
     public long completedLaneMask() {
         long mask = 0;
         long lanes = requiredLaneMask;
@@ -253,12 +265,11 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
             while (metadataLanes != 0) {
                 int laneId = Long.numberOfTrailingZeros(metadataLanes);
                 metadataLanes &= metadataLanes - 1;
-                if (metadataOrderIds[laneId] == null) continue;
                 if (stampedOrders[laneId] != null)
                     java.util.Arrays.fill(stampedOrders[laneId], 0,
-                            Math.min(metadataOrderIds[laneId].size(), stampedOrders[laneId].length), null);
-                metadataOrderIds[laneId].clear();
+                            Math.min(metadataOrderIds.size(), stampedOrders[laneId].length), null);
             }
+            metadataOrderIds.clear();
         }
         metadataTimestamp = metadataPosition = 0;
 
@@ -271,6 +282,10 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         runtime = null;
         coreSequence = 0;
         requiredLaneMask = 0;
+        committedLaneMask = 0;
+        resultTarget = null;
+        identities = null;
+        resultLaneId = 0;
         dispatchedNanos = 0;
         ownerObservedNanos = 0;
     }

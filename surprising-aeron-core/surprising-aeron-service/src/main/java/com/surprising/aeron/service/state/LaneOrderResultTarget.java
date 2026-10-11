@@ -75,4 +75,16 @@ public interface LaneOrderResultTarget {
             target.resultOrder(index, order, order == null ? null : identities.instrumentId(order.symbolId()));
         }
     }
+
+    /** Final sequential batch view, including earlier items changed by a later item. */
+    static void captureFinal(LaneOrderResultTarget target,
+                             RuntimeIdentityRegistry identities, AccountLaneState lane) {
+        for (int index = 0; index < target.resultCount(); index++) {
+            OrderRuntime order = lane.orders.get(target.resultOrderId(index));
+            long original = target.resultOriginalOrderId(index);
+            if (order == null && original > 0) order = lane.orders.get(original);
+            target.resultOrder(index, order, order == null ? null : identities.instrumentId(order.symbolId()));
+        }
+        target.prepareResponse();
+    }
 }

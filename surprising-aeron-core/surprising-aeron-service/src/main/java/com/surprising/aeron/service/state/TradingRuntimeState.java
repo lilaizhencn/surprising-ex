@@ -1032,6 +1032,20 @@ public final class TradingRuntimeState implements AutoCloseable {
         return dispatchLaneMutationFromScratch(coreSequence, orderIds, triggerIds, timestamp, position);
     }
 
+    /** Final batch response uses the same account commit task; rejected-only batches use a read task. */
+    public LaneCommitEvent dispatchBatchCommit(long coreSequence, Iterable<Long> userIds,
+            Iterable<Long> orderIds, long timestamp, long position, long responseUserId,
+            LaneOrderResultTarget target, RuntimeIdentityRegistry identities) {
+        assertOwner();
+        if (coreSequence <= 0 || userIds == null || orderIds == null || timestamp < 0 || position < 0
+                || responseUserId <= 0 || target == null || identities == null)
+            throw new IllegalArgumentException("invalid final batch account task");
+        clearLaneUserScratch();
+        addLaneUsers(userIds);
+        return dispatchLaneMutationFromScratch(coreSequence, orderIds, null, timestamp, position,
+                target, identities, topology.accountLaneId(responseUserId));
+    }
+
     private void addLaneUsers(Iterable<Long> userIds) {
         if (userIds instanceof ImmutableLongArrayList primitive) {
             primitive.forEachLong(userId -> { if (userId > 0) addLaneUser(userId); });
@@ -1085,6 +1099,13 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     private LaneCommitEvent dispatchLaneMutationFromScratch(long coreSequence,
             Iterable<Long> orderIds, Iterable<Long> triggerIds, long timestamp, long position) {
+        return dispatchLaneMutationFromScratch(coreSequence, orderIds, triggerIds, timestamp, position,
+                null, null, -1);
+    }
+
+    private LaneCommitEvent dispatchLaneMutationFromScratch(long coreSequence,
+            Iterable<Long> orderIds, Iterable<Long> triggerIds, long timestamp, long position,
+            LaneOrderResultTarget target, RuntimeIdentityRegistry identities, int responseLaneId) {
         long laneMask = 0;
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users = laneUserScratch[laneId];
@@ -1095,6 +1116,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             laneMask |= 1L << laneId;
         }
+        long commitMask = laneMask;
+        if (target != null) laneMask |= 1L << responseLaneId;
         if (laneMask == 0) return null;
         if (accountLanesStarted) releaseOwnerLaneAccess();
         ensureLaneWorkerCapacity(laneMask);
@@ -1102,6 +1125,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (event == null) event = new LaneCommitEvent(accountLanes.length);
         event.prepare(coreSequence, laneMask, laneUserScratch, this);
         try {
+            if (target != null) event.prepareResponse(target, identities, responseLaneId, commitMask);
             event.prepareMetadata(orderIds, timestamp, position);
             event.prepareTriggerCancellations(triggerIds);
         }
@@ -1119,7 +1143,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             } else {
                 laneWorkers[laneId].submit(event);
             }
-            dispatchedLaneCommitSequences[laneId] = coreSequence;
+            if ((commitMask & (1L << laneId)) != 0)
+                dispatchedLaneCommitSequences[laneId] = coreSequence;
         }
         return event;
     }

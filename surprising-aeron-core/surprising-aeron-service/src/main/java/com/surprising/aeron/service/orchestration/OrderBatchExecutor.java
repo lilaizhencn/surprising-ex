@@ -488,23 +488,36 @@ final class OrderBatchExecutor {
                 case AMEND -> {
                     AmendOrderCommand command = (AmendOrderCommand) item.command;
                     var route = owner.activeOrderIndex.activeOrderRoute(command.originalOrderId());
-                    if (route == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-                    if (route.userId() != userId)
+                    if (route != null && route.userId() != userId)
                         throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
+                    String instrumentId = route == null
+                            ? previousBatchOrderInstrument(batch, command.originalOrderId()) : route.instrumentId();
+                    if (instrumentId == null)
+                        throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
                     if (command.replacementOrderId() == command.originalOrderId())
                         throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "replacement order already exists");
                     var decision = CoreOrderDecisionResolver.context(owner.runtimeState, owner.identities,
-                            userId, route.instrumentId(), owner.currentClusterTimestamp);
+                            userId, instrumentId, owner.currentClusterTimestamp);
                     batch.replacementAdmissionEvent = owner.runtimeState.dispatchReplacementAdmission(
                             batch.sequence, userId, command.originalOrderId(), command, null, decision,
-                            batchOpenInterestSteps(route.instrumentId()),
-                            owner.matchingAdapter.matcherShardId(route.instrumentId()), owner.identities);
+                            batchOpenInterestSteps(instrumentId),
+                            owner.matchingAdapter.matcherShardId(instrumentId), owner.identities);
                 }
             }
         } finally {
             owner.currentClusterTimestamp = previousTimestamp;
             owner.currentClusterPosition = previousPosition;
         }
+    }
+
+    private String previousBatchOrderInstrument(OrderBatchPending batch, long orderId) {
+        for (int index = 0; index < batch.nextIndex; index++) {
+            OrderBatchItem previous = batch.items.get(index);
+            if (previous.orderId() == orderId && previous.status == ResponseStatus.APPLIED
+                    && previous.admittedOrder != null)
+                return previous.admittedOrder.instrument().instrumentId();
+        }
+        return null;
     }
 
     private boolean collectBatchAmendAdmission(OrderBatchPending batch, long userId) {
@@ -561,6 +574,7 @@ final class OrderBatchExecutor {
             direct = owner.directMatcherSettlements.prepareBatchAmend(pending,
                     java.util.Objects.requireNonNull(batch.replacementAdmission), shard);
             batch.itemSettlementEvent = direct;
+            batch.items.get(batch.nextIndex).admittedOrder = direct.admittedOrder();
             if (owner.realtimeCapture != null) batch.items.get(batch.nextIndex).realtimeTakerOrder = direct.admittedOrder();
         }
         owner.matcherPipeline.submit(shard, pending.sequence(),
@@ -866,7 +880,8 @@ final class OrderBatchExecutor {
         if (item.admittedOrder == null && batch.kind == OrderBatchKind.PLACE && batch.pipelined) {
             item.admittedOrder = batch.preparedAdmittedOrders[batch.nextIndex];
         }
-        if (item.admittedOrder == null) item.admittedOrder = owner.runtimeOrder(item.orderId());
+        if (item.admittedOrder == null && batch.kind == OrderBatchKind.PLACE)
+            item.admittedOrder = owner.runtimeOrder(item.orderId());
         if (item.realtimeTakerOrder == null && owner.realtimeCapture != null
                 && owner.realtimeCapture.active()) item.realtimeTakerOrder = item.admittedOrder;
 
@@ -978,18 +993,20 @@ final class OrderBatchExecutor {
             owner.commits.requestCommitPublication();
         }
         owner.runtimeState.completePendingReservations(batch.sequence);
-        if (!batch.laneCommitCompleted()) {
+        if (!batch.laneCommitCompleted() || batch.preparedResponse == null) {
             if (batch.laneCommitEvent == null) {
                 owner.runtimeState.releaseOwnerLaneAccess();
-                batch.laneCommitEvent = owner.runtimeState.dispatchLaneMutation(batch.sequence,
-                        batch.changedUserIds, batch.runtimeChangedOrderIds, clusterTimestamp, clusterPosition);
+                batch.laneCommitEvent = owner.runtimeState.dispatchBatchCommit(batch.sequence,
+                        batch.laneCommitCompleted() ? List.of() : batch.changedUserIds,
+                        batch.laneCommitCompleted() ? List.of() : batch.runtimeChangedOrderIds,
+                        clusterTimestamp, clusterPosition, pending.command().header().userId(), batch, owner.identities);
             }
             if (batch.laneCommitEvent != null) {
                 if (!owner.runtimeState.laneCommitComplete(batch.laneCommitEvent)) {
                     owner.suspendMatchingCommitContext(pending);
                     return null;
                 }
-                pending.completeLanes(batch.laneCommitEvent.requiredLaneMask());
+                pending.completeLanes(batch.laneCommitEvent.committedLaneMask());
                 owner.runtimeState.releaseLaneCommit(batch.laneCommitEvent);
                 batch.laneCommitEvent = null;
                 owner.commits.requestCommitPublication();
@@ -1019,17 +1036,10 @@ final class OrderBatchExecutor {
         owner.commits.completeCommitPublicationBatch();
         CoreMatchingPhaseMetrics.recordBoundary("ownerFactPublication", timingHeader, publicationStart);
         long terminalStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
-        if (batch.preparedResponse == null) for (OrderBatchItem item : batch.items) {
-            if (item.laneResultPrepared) continue;
-            OrderRuntime order = owner.runtimeOrder(item.orderId());
-            if (order == null && item.originalOrderId() > 0) order = owner.runtimeOrder(item.originalOrderId());
-            item.resultOrder = order;
-            item.resultOrderSymbol = order == null ? null : owner.runtimeOrderSymbol(order);
-        }
-        byte[] responseData = batch.preparedResponse != null
-                ? batch.preparedResponse : TradingOrderBatchCodec.encodeResultSource(batch);
-        int responseLength = batch.preparedResponse != null
-                ? batch.preparedResponseLength : responseData.length;
+        if (batch.preparedResponse == null)
+            throw failOrderBatch(batch, pending, "final account Lane did not prepare the batch response", null);
+        byte[] responseData = batch.preparedResponse;
+        int responseLength = batch.preparedResponseLength;
         CoreMatchingPhaseMetrics.recordBoundary("ownerBatchResponsePreparation", timingHeader, terminalStart);
         long ledgerStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         owner.terminalTradeCount = Math.addExact(owner.terminalTradeCount, batch.tradeCount);
@@ -1114,7 +1124,8 @@ final class OrderBatchExecutor {
             }
             case AMEND -> {
                 var route = owner.activeOrderIndex.activeOrderRoute(((AmendOrderCommand) item.command).originalOrderId());
-                yield route == null ? "" : route.instrumentId();
+                String previous = previousBatchOrderInstrument(batch, item.originalOrderId());
+                yield route == null ? previous == null ? "" : previous : route.instrumentId();
             }
         };
         return instrumentId.isBlank() ? 0 : batch.decodedCommand == null

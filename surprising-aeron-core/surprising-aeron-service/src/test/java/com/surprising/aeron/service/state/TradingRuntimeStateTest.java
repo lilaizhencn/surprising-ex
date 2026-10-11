@@ -82,7 +82,7 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void commitEventStampsOnLanesPublishesOnOwnerAndClearsReusedMetadata() {
+    void commitEventStampsOnLanesPublishesOnOwnerAndClearsReusedMetadata() throws Exception {
         var topology = new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0, 2,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
         try (var state = new TradingRuntimeState(topology)) {
@@ -96,31 +96,56 @@ class TradingRuntimeStateTest {
             CoreStateTestFixtures.reserveOrder(state, 12, second, 92, 5, 2, 3, 200);
             var original = state.order(11);
             state.clearChangedKeys();
+            var maps = new OwnerForbiddenOrderMap[topology.accountLaneCount()];
+            var ordersField = AccountLaneState.class.getDeclaredField("orders");
+            ordersField.setAccessible(true);
+            for (int id = 0; id < maps.length; id++) {
+                maps[id] = new OwnerForbiddenOrderMap(state.accountLanes[id].orders, Thread.currentThread());
+                ordersField.set(state.accountLanes[id], maps[id]);
+            }
             state.startAccountLanes();
             state.enterAsynchronousCommandScope();
             try {
                 var first = state.dispatchLaneMutation(1, java.util.List.of(7L, second),
                         java.util.List.of(11L, 12L), 100, 200);
                 awaitMetadataCommit(state, first);
-                assertThat(state.order(11)).isSameAs(original);
+                assertThat(maps[topology.accountLaneId(7)].inspect(11)).isNotSameAs(original);
                 assertThat(state.ownerLaneAccess).isFalse();
                 state.releaseLaneCommit(first);
-                assertThat(state.order(11).updatedAtEpochMillis()).isEqualTo(100);
-                assertThat(state.order(12).clusterPosition()).isEqualTo(200);
+                assertThat(maps[topology.accountLaneId(7)].inspect(11).updatedAtEpochMillis()).isEqualTo(100);
+                assertThat(maps[topology.accountLaneId(second)].inspect(12).clusterPosition()).isEqualTo(200);
                 var next = state.dispatchLaneMutation(2, java.util.List.of(7L),
                         java.util.List.of(11L), 101, 201);
                 assertThat(next).isSameAs(first);
                 awaitMetadataCommit(state, next);
                 state.releaseLaneCommit(next);
-                assertThat(state.order(11).clusterPosition()).isEqualTo(201);
-                assertThat(state.order(12).clusterPosition()).isEqualTo(200);
+                assertThat(maps[topology.accountLaneId(7)].inspect(11).clusterPosition()).isEqualTo(201);
+                assertThat(maps[topology.accountLaneId(second)].inspect(12).clusterPosition()).isEqualTo(200);
                 var plain = state.dispatchLaneMutation(3, java.util.List.of(7L, second));
                 awaitMetadataCommit(state, plain);
                 state.releaseLaneCommit(plain);
-                assertThat(state.order(11).clusterPosition()).isEqualTo(201);
-                assertThat(state.order(12).clusterPosition()).isEqualTo(200);
+                assertThat(maps[topology.accountLaneId(7)].inspect(11).clusterPosition()).isEqualTo(201);
+                assertThat(maps[topology.accountLaneId(second)].inspect(12).clusterPosition()).isEqualTo(200);
             } finally { state.exitAsynchronousCommandScope(); }
         }
+    }
+
+    private static final class OwnerForbiddenOrderMap
+            extends org.agrona.collections.Long2ObjectHashMap<OrderRuntime> {
+        private final Thread forbidden;
+        OwnerForbiddenOrderMap(org.agrona.collections.Long2ObjectHashMap<OrderRuntime> source, Thread owner) {
+            super(source);
+            forbidden = owner;
+        }
+        @Override public OrderRuntime get(long id) {
+            if (Thread.currentThread() == forbidden) throw new AssertionError("Owner read an account order table");
+            return super.get(id);
+        }
+        @Override public OrderRuntime put(long id, OrderRuntime order) {
+            if (Thread.currentThread() == forbidden) throw new AssertionError("Owner wrote an account order table");
+            return super.put(id, order);
+        }
+        OrderRuntime inspect(long id) { return super.get(id); }
     }
 
     private static void awaitMetadataCommit(TradingRuntimeState state, LaneCommitEvent event) {

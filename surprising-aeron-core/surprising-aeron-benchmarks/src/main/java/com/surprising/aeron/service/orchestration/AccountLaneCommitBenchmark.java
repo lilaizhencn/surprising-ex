@@ -54,6 +54,13 @@ public class AccountLaneCommitBenchmark {
         return state.commitBatch(true);
     }
 
+    /** Final metadata plus Lane order lookup and real batch response encoding, window fixed at 256. */
+    @Benchmark
+    @OperationsPerInvocation(256)
+    public long finalBatchResponseFanout(CommitState state) {
+        return state.commitResponses();
+    }
+
     @State(Scope.Thread)
     public static class CommitState {
         @Param("4")
@@ -71,6 +78,8 @@ public class AccountLaneCommitBenchmark {
         private java.util.List<Long> metadataUsers;
         private java.util.List<Long> metadataOrders;
         private LaneCommitEvent[] commits;
+        private OrderBatchPending[] responses;
+        private com.surprising.aeron.service.state.RuntimeIdentityRegistry identities;
         private long sequence;
         private String previousAccountLanes;
         private String previousWaitStrategy;
@@ -86,6 +95,18 @@ public class AccountLaneCommitBenchmark {
             runtime = new TradingRuntimeState(topology);
             users = new long[accountLanes];
             commits = new LaneCommitEvent[maxInFlight];
+            responses = new OrderBatchPending[maxInFlight];
+            identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+            int symbolId = identities.symbolId("1");
+            var responseArena = new ResponseArena(maxInFlight, 4096);
+            for (int index = 0; index < responses.length; index++) {
+                var response = new OrderBatchPending(1, responseArena);
+                response.kind = com.surprising.aeron.service.command.order.OrderBatchKind.AMEND;
+                response.addItem(10000, 10000, 10000, null);
+                response.items.getFirst().status = ResponseStatus.APPLIED;
+                response.items.getFirst().resultCode = CoreResultCode.NONE;
+                responses[index] = response;
+            }
             for (int laneId = 0; laneId < accountLanes; laneId++) {
                 users[laneId] = userForLane(topology, laneId);
                 runtime.putUser(new UserRuntime(users[laneId]));
@@ -99,11 +120,11 @@ public class AccountLaneCommitBenchmark {
                 long user = users[laneId];
                 runtime.putBalance(new com.surprising.aeron.service.state.account.BalanceRuntime(user, 3, 900, 100));
                 long orderId = 10000L + laneId;
-                var order = new OrderRuntime(orderId, ProductLine.LINEAR_PERPETUAL, user, 5,
+                var order = new OrderRuntime(orderId, ProductLine.LINEAR_PERPETUAL, user, symbolId,
                         instrument, CoreOrderSide.BUY, 20_000 + laneId, false, CoreMarginMode.CROSS,
                         CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                         0, 0, 1, 0, 1, false);
-                var reservation = new ReservationRuntime(orderId, user, 5,
+                var reservation = new ReservationRuntime(orderId, user, symbolId,
                         ReservationKind.DERIVATIVE_MARGIN, 3, 100, 0, 0, 1);
                 runtime.putOrder(order);
                 runtime.putReservation(reservation);
@@ -114,9 +135,28 @@ public class AccountLaneCommitBenchmark {
             metadataOrders = java.util.List.copyOf(orderList);
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
+            runtime.enterAsynchronousCommandScope();
         }
 
         long commitBatch() { return commitBatch(false); }
+
+        long commitResponses() {
+            for (int index = 0; index < commits.length; index++) {
+                long next = ++sequence;
+                commits[index] = runtime.dispatchBatchCommit(next, metadataUsers, metadataOrders,
+                        next, next, users[0], responses[index], identities);
+            }
+            for (int index = 0; index < commits.length; index++) {
+                while (!runtime.laneCommitComplete(commits[index])) Thread.onSpinWait();
+                runtime.releaseLaneCommit(commits[index]);
+                commits[index] = null;
+                var response = responses[index];
+                if (response.preparedResponse == null || response.preparedResponseLength == 0
+                        || response.items.getFirst().resultOrder == null)
+                    throw new IllegalStateException("final batch account result was not encoded");
+            }
+            return sequence;
+        }
 
         long commitBatch(boolean metadata) {
             for (int index = 0; index < commits.length; index++) {
@@ -132,7 +172,7 @@ public class AccountLaneCommitBenchmark {
                 commits[index] = null;
             }
             if (metadata) for (long id : metadataOrders)
-                if (runtime.order(id).clusterPosition() != sequence)
+                if (runtime.changedOrderValue(id).clusterPosition() != sequence)
                     throw new IllegalStateException("Lane metadata publication is not at the last sequence");
             return sequence;
         }
@@ -140,6 +180,7 @@ public class AccountLaneCommitBenchmark {
         @TearDown(Level.Trial)
         public void tearDown() {
             try {
+                runtime.exitAsynchronousCommandScope();
                 for (long user : users) {
                     var balance = runtime.balance(user, 3);
                     if (balance.availableUnits() != 900 || balance.lockedUnits() != 100)
