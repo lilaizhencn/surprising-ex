@@ -1,0 +1,40 @@
+{
+  "at": "2026-10-11T03:28:42.369400+00:00",
+  "stage": "控制命令实际交接常驻Lane；L1/L2整体尚未完成",
+  "baseCodeCommit": "c1fdbae7",
+  "behavior": [
+    "Owner按Lane位图向现有SettlementLaneWorker邮箱投递预分配任务，立即返回",
+    "各Lane串行执行业务回调并以Release完成标记发布结果，Owner以Acquire非阻塞轮询",
+    "完成之前禁止读取结果或复用任务；业务拒绝等全部目标Lane完成后再传播，下一命令可以继续执行"
+  ],
+  "tests": {
+    "baseRegression": {
+      "tests": 178,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "accountControlPipeline": {
+      "tests": 31,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "deterministicCases": [
+      "两个目标Lane同时进入回调，线程身份与Owner不同，而Owner仍可轮询",
+      "未完成时结果不可读、不可重派；完成后定向复用",
+      "一Lane拒绝、另一Lane仍运行时不提前传播或复用；下一命令成功"
+    ]
+  },
+  "provenance": {
+    "regression": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-control-lane-regression-results.json",
+    "pipeline": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-control-lane-pipeline-3-results.json",
+    "earlierFailedPipeline": "/Users/atomex/Desktop/surprising/performance-artifacts/lane-parallel-20261010T144735Z/l1-control-lane-pipeline-2-reports"
+  },
+  "qualifications": [
+    "资金、风险和生命周期控制处理器仍有Owner预检/最终Treasury写入，尚未实现Owner彻底退出资金业务",
+    "补测在已有工作区scratch修改上执行；共享杠杆探针竞态已另行改为Owner/Lane独享，尚未随本控制派发提交",
+    "本阶段无独立有效吞吐结论；路由阶段41.49万/s发生在此控制改造之前"
+  ],
+  "snapshotRecoveryWalletScenarios": false
+}
