@@ -1449,21 +1449,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         lifecycle.close();
     }
 
-    CoreResponse userStateResponse(long userId) {
-        var query = com.surprising.aeron.service.state.query.RuntimeStateQueryService.userState(
-                runtimeState, identities, userId);
-        if (query.tooLarge()) {
-            return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                    CoreResultCode.QUERY_RESPONSE_TOO_LARGE, appliedCommandCount);
-        }
-        if (!query.found()) {
-            return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                    CoreResultCode.ENTITY_NOT_FOUND, appliedCommandCount);
-        }
-        return new CoreResponse(ResponseStatus.OK, appliedCommandCount,
-                CoreStateQueryCodec.encodeUserState(query.view()));
-    }
-
     void captureRealtimeTrades(CommandSlot pending) {
         var plan = pending.settlementPlan();
         OrderRuntime taker = pending.realtimeTakerOrder;
@@ -1497,21 +1482,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
     OrderRuntime responseOrder(long orderId) {
         OrderRuntime changed = runtimeState.changedOrderValue(orderId);
         return changed == null ? runtimeOrder(orderId) : changed;
-    }
-
-    CoreResponse orderStateResponse(long orderId) {
-        return orderStateResponse(com.surprising.aeron.service.state.query.RuntimeStateQueryService.orderState(
-                runtimeState, identities, orderId));
-    }
-
-    CoreResponse orderStateResponse(
-            com.surprising.aeron.service.state.query.RuntimeStateQueryService.OrderQueryResult query) {
-        if (!query.found()) {
-            return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                    CoreResultCode.ENTITY_NOT_FOUND, appliedCommandCount);
-        }
-        return new CoreResponse(ResponseStatus.OK, appliedCommandCount,
-                CoreStateQueryCodec.encodeOrderState(query.view()));
     }
 
     long currentBusinessStateHash() {

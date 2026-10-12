@@ -592,6 +592,40 @@ public final class TradingRuntimeState implements AutoCloseable {
         return null;
     }
 
+    /** 查询只在实际Lane线程读原表；不能由Owner借用作用域执行。 */
+    public <T> T readAccountLane(AccountLaneState lane, java.util.function.Function<AccountLaneState, T> query) {
+        if (lane == null || query == null || lane.laneId() >= laneWorkers.length
+                || accountLanes[lane.laneId()] != lane || laneWorkers[lane.laneId()] == null
+                || Thread.currentThread() != laneWorkers[lane.laneId()].thread())
+            throw new IllegalStateException("account query must run on its owning Lane thread");
+        enterLaneCommandScope(lane);
+        try { return query.apply(lane); }
+        finally { exitLaneCommandScope(lane, false); }
+    }
+
+    /** 单Owner向既有Lane邮箱派发读请求；预检全部容量后才发布，满时不产生部分查询。 */
+    public boolean dispatchAccountQuery(long laneMask, SettlementLaneWorker.Command query) {
+        assertOwner();
+        if (Thread.currentThread() != owner)
+            throw new IllegalStateException("account query producer must be Owner");
+        assertAccountLanesHealthy();
+        long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1;
+        if (!accountLanesStarted || query == null || laneMask == 0 || (laneMask & ~validMask) != 0)
+            throw new IllegalArgumentException("invalid account query dispatch");
+        long lanes = laneMask;
+        while (lanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
+            if (!laneWorkers[laneId].hasCapacity()) return false;
+        }
+        releaseOwnerLaneAccess();
+        lanes = laneMask;
+        while (lanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
+            laneWorkers[laneId].submit(query);
+        }
+        return true;
+    }
+
     public MatcherSettlementChanges currentMatcherSettlementChangesScope() {
         if (Thread.currentThread() == owner) return ownerMatcherSettlementChangesScope;
         AccountLaneState lane = currentLaneCommandScope();
@@ -624,14 +658,14 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     void exitLaneCommandScope(AccountLaneState lane) {
-        exitLaneCommandScope(lane, false);
+        exitLaneCommandScope(lane, true);
     }
 
-    private void exitLaneCommandScope(AccountLaneState lane, boolean matcherScope) {
+    private void exitLaneCommandScope(AccountLaneState lane, boolean captureRetirementProof) {
         if (lane == null || currentLaneCommandScope() != lane) {
             throw new IllegalStateException("account lane command scope is not active");
         }
-        if (!matcherScope) laneDeltas[lane.laneId()].preparePositionRetirement(lane);
+        if (captureRetirementProof) laneDeltas[lane.laneId()].preparePositionRetirement(lane);
         if (Thread.currentThread() == owner) ownerLaneScope = null;
         else lane.commandScopeActive = false;
         if (Thread.currentThread() == owner) flushPublishedChanges(lane.laneId());
@@ -643,7 +677,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         if (Thread.currentThread() == owner) ownerMatcherSettlementChangesScope = null;
         else lane.matcherSettlementChanges = null;
-        exitLaneCommandScope(lane, true);
+        exitLaneCommandScope(lane, false);
     }
 
     public <T> T executeUserSettlement(long userId, java.util.function.Supplier<T> operation) {

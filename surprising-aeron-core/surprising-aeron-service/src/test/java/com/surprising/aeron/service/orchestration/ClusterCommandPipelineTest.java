@@ -54,7 +54,7 @@ class ClusterCommandPipelineTest {
                     .isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
             long child = live.service.state().runtimeState.triggerOrder(id).placedOrderId();
             assertThat(child).as("%s", live.service.state().runtimeState.triggerOrder(id)).isPositive();
-            var userState = CoreStateQueryCodec.decodeUserState(live.service.state().userStateResponse(user).data());
+            var userState = CoreTestCompletion.userState(live.service.state(), user);
             assertThat(userState.positions()).singleElement()
                     .satisfies(position -> assertThat(position.signedQuantitySteps()).isEqualTo(6));
             assertThat(userState.reservations()).isEmpty();

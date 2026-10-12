@@ -4,6 +4,32 @@ import com.surprising.aeron.protocol.CoreResponse;
 
 /** 功能测试的有界等待适配器；生产集群只使用有限轮询推进。 */
 final class CoreTestCompletion {
+    /** 测试查询也通过实际Lane读取；不借用Owner账户表。 */
+    static com.surprising.aeron.protocol.CoreUserStateView userState(TradingCoreRuntime owner, long userId) {
+        var request = new com.surprising.aeron.protocol.CoreMessage(
+                com.surprising.aeron.protocol.CoreMessageHeader.query(com.surprising.aeron.protocol.CoreMessageType.USER_STATE_QUERY,
+                        java.util.UUID.randomUUID(), owner.productLine, com.surprising.aeron.protocol.CommandSource.OPERATIONS,
+                        0, 0, userId, owner.currentClusterTimestamp, 0), new byte[0]);
+        CoreResponse response = querySynchronously(owner, request);
+        if (response.status() != com.surprising.aeron.protocol.ResponseStatus.OK)
+            throw new AssertionError("user query failed: " + response.resultCode());
+        return com.surprising.aeron.protocol.CoreStateQueryCodec.decodeUserState(response.data());
+    }
+
+    static CoreResponse querySynchronously(TradingCoreRuntime owner, com.surprising.aeron.protocol.CoreMessage request) {
+        CoreResponse response = applyAsynchronously(owner, request);
+        if (response.resultCode() == com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING) {
+            long id = owner.querySequence(request.header().commandId());
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while ((response = owner.takeQueryResult(id)) == null) {
+                owner.assertHealthy();
+                if (System.nanoTime() >= deadline) throw new AssertionError("user query timeout");
+                Thread.onSpinWait();
+            }
+        }
+        return response;
+    }
+
     static CoreResponse applyAsynchronously(TradingCoreRuntime owner,
             com.surprising.aeron.protocol.CoreMessage message) {
         return applyAsynchronously(owner, message, message.header().submittedAtEpochMillis(),

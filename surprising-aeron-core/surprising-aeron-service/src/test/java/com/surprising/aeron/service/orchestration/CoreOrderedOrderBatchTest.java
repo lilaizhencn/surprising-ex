@@ -507,7 +507,7 @@ class CoreOrderedOrderBatchTest {
             var query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.USER_STATE_HASH_QUERY,
                     UUID.randomUUID(), ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 2_000, 5),
                     new byte[0]);
-            assertThat(state.apply(query).status()).isEqualTo(ResponseStatus.OK);
+            assertThat(CoreTestCompletion.querySynchronously(state, query).status()).isEqualTo(ResponseStatus.OK);
             var balance = state.tradingState().users().get(1001L).balances().get("USDT");
             assertThat(balance.availableUnits() + balance.lockedUnits()).isEqualTo(100_007);
             try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {

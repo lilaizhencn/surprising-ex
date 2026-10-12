@@ -3,6 +3,12 @@ package com.surprising.aeron.service.orchestration;
 import static com.surprising.aeron.service.orchestration.TradingCoreRuntime.*;
 
 import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.aeron.service.lane.SettlementLaneWorker;
+import com.surprising.aeron.service.state.AccountLaneState;
+import com.surprising.aeron.service.state.query.RuntimeStateQueryService;
+import java.util.concurrent.atomic.AtomicLong;
 import com.surprising.aeron.protocol.CoreLiquidationWorkView;
 import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
 import com.surprising.aeron.service.state.InsuranceAllocationPolicy;
@@ -27,14 +33,14 @@ import java.util.NavigableMap;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** 异步查询结果路由：读取撮合器或账本，保留既有盘口分页和响应限制。 */
+/** 异步查询结果路由：由实际Lane、撮合器或账本读取并编码，不复制权威状态。 */
 final class OrderBookQueryService {
     /** 唯一交易执行 owner；共享提交上下文，不复制账户或订单状态。 */
     final TradingCoreRuntime owner;
 
     OrderBookQueryService(TradingCoreRuntime owner) { this.owner = owner; }
 
-    /** 撮合器或账本完成的查询；Owner 消费后移除。 */
+    /** 实际所有者完成的查询；Owner 消费后移除。 */
     final Map<Long, CompletedBookQuery> completedBookQueries
             = new ConcurrentHashMap<>();
 
@@ -49,6 +55,169 @@ final class OrderBookQueryService {
 
     /** 下一个盘口内部查询 ID，与交易命令序号分离。 */
     long nextAsyncQueryId = Long.MIN_VALUE;
+
+    static boolean accountQuery(CoreMessageType type) {
+        return type == CoreMessageType.USER_STATE_QUERY || type == CoreMessageType.USER_STATE_HASH_QUERY
+                || type == CoreMessageType.ORDER_STATE_QUERY || type == CoreMessageType.ORDER_STATE_HASH_QUERY
+                || type == CoreMessageType.CLIENT_ORDER_STATE_QUERY || type == CoreMessageType.USER_OPEN_ORDERS_QUERY;
+    }
+
+    /** 内部账户查询复用现有异步结果登记；Owner不进入账户读作用域。 */
+    CoreResponse beginAccountQuery(CoreMessage message) {
+        var type = message.header().messageType();
+        long userId = message.header().userId();
+        long orderId = type == CoreMessageType.ORDER_STATE_QUERY || type == CoreMessageType.ORDER_STATE_HASH_QUERY
+                ? TradingCommandCodec.decodeOrderStateQuery(message.payloadUnsafe()) : 0;
+        long clientKey = type == CoreMessageType.CLIENT_ORDER_STATE_QUERY
+                ? owner.identities.findClientKeyValue(userId, CoreStateQueryCodec.decodeClientOrderStateQuery(message.payloadUnsafe())) : 0;
+        long[] openOrderIds = null;
+        if (type == CoreMessageType.USER_OPEN_ORDERS_QUERY) {
+            var pageQuery = CoreStateQueryCodec.decodeOpenOrdersQuery(message.payloadUnsafe());
+            long before = pageQuery.beforeOrderId() == 0 ? Long.MAX_VALUE : pageQuery.beforeOrderId();
+            var page = owner.activeOrderIndex.page(userId, pageQuery.instrumentId(), before, pageQuery.limit());
+            if (page.orderIds().isEmpty()) return new CoreResponse(ResponseStatus.OK, owner.appliedCommandCount,
+                    CoreStateQueryCodec.encodeOpenOrders(new com.surprising.aeron.protocol.CoreOpenOrdersView(List.of())));
+            openOrderIds = new long[page.orderIds().size()];
+            for (int index = 0; index < openOrderIds.length; index++) openOrderIds[index] = page.orderIds().get(index);
+        }
+        boolean orderQuery = type == CoreMessageType.ORDER_STATE_QUERY || type == CoreMessageType.ORDER_STATE_HASH_QUERY;
+        if (!orderQuery && openOrderIds == null && userId <= 0) return missingAccountResponse(type, owner.appliedCommandCount);
+        long laneMask;
+        if (openOrderIds != null) {
+            laneMask = 0;
+            for (long selected : openOrderIds) {
+                var route = owner.activeOrderIndex.activeOrderRoute(selected);
+                if (route == null) throw new IllegalStateException("active order query route is missing");
+                laneMask |= owner.runtimeState.topology().accountLaneMask(route.userId());
+            }
+        } else if (orderQuery) {
+            var route = owner.activeOrderIndex.activeOrderRoute(orderId);
+            // 只有orderId的内部协议也支持保留的终态订单；无活跃路由时由各Lane原位探测。
+            int count = owner.runtimeState.topology().accountLaneCount();
+            laneMask = route != null ? owner.runtimeState.topology().accountLaneMask(route.userId())
+                    : count == Long.SIZE ? -1L : (1L << count) - 1;
+        } else laneMask = owner.runtimeState.topology().accountLaneMask(userId);
+        long id = nextAsyncQueryId++;
+        var query = new AccountQuery(id, owner.appliedCommandCount, type, userId, orderId, clientKey, laneMask, openOrderIds);
+        queryIds.put(message.header().commandId(), id);
+        try {
+            if (!owner.runtimeState.dispatchAccountQuery(laneMask, query)) {
+                queryIds.remove(message.header().commandId());
+                return owner.rejected(CoreResultCode.MATCHING_REJECTED);
+            }
+        } catch (RuntimeException failure) {
+            queryIds.remove(message.header().commandId());
+            throw failure;
+        }
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount);
+    }
+
+    private static CoreResponse missingAccountResponse(CoreMessageType type, long commandCount) {
+        if (type == CoreMessageType.USER_STATE_HASH_QUERY || type == CoreMessageType.ORDER_STATE_HASH_QUERY)
+            return new CoreResponse(ResponseStatus.OK, commandCount, CoreStateQueryCodec.encodeStateHash(0));
+        return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.ENTITY_NOT_FOUND, commandCount);
+    }
+
+    /** 每请求只保留本次响应和完成位，结果消费/关闭后整体释放，无账户镜像。 */
+    private final class AccountQuery implements SettlementLaneWorker.Command,
+            java.util.function.Function<AccountLaneState, CoreResponse> {
+        private final long id, commandCount, userId, orderId, clientKey, laneMask;
+        private final CoreMessageType type;
+        private final CoreResponse[] responses;
+        private final boolean[] found;
+        private final long[] openOrderIds;
+        private final com.surprising.aeron.protocol.CoreOrderStateView[] openOrders;
+        private final AtomicLong completedLaneMask = new AtomicLong();
+
+        private AccountQuery(long id, long commandCount, CoreMessageType type, long userId,
+                             long orderId, long clientKey, long laneMask, long[] openOrderIds) {
+            this.id = id; this.commandCount = commandCount; this.type = type;
+            this.userId = userId; this.orderId = orderId; this.clientKey = clientKey; this.laneMask = laneMask;
+            int count = owner.runtimeState.topology().accountLaneCount();
+            responses = new CoreResponse[count]; found = new boolean[count];
+            this.openOrderIds = openOrderIds;
+            openOrders = openOrderIds == null ? null : new com.surprising.aeron.protocol.CoreOrderStateView[openOrderIds.length];
+        }
+
+        @Override public void execute(AccountLaneState lane) {
+            CoreResponse response;
+            try { response = owner.runtimeState.readAccountLane(lane, this); }
+            catch (IllegalArgumentException invalid) {
+                response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
+                        CoreResultCode.INVALID_COMMAND, commandCount);
+            }
+            responses[lane.laneId()] = response;
+            long bit = 1L << lane.laneId();
+            long previous, complete;
+            do {
+                previous = completedLaneMask.get(); complete = previous | bit;
+                if ((previous & bit) != 0) throw new IllegalStateException("account query Lane completed twice");
+            } while (!completedLaneMask.compareAndSet(previous, complete));
+            if (complete != laneMask) return;
+            CoreResponse completed;
+            try { completed = completedResponse(); }
+            catch (IllegalArgumentException invalid) {
+                completed = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
+                        CoreResultCode.INVALID_COMMAND, commandCount);
+            }
+            completedBookQueries.put(id, CompletedBookQuery.encoded(completed));
+            owner.runtimeState.signalOwnerCompletion();
+        }
+
+        @Override public CoreResponse apply(AccountLaneState lane) {
+            if (openOrderIds != null) {
+                for (int index = 0; index < openOrderIds.length; index++) {
+                    var query = RuntimeStateQueryService.orderState(owner.runtimeState, owner.identities, openOrderIds[index]);
+                    if (query.found() && "OPEN".equals(query.view().status())) openOrders[index] = query.view();
+                }
+                return null;
+            }
+            if (type == CoreMessageType.USER_STATE_QUERY || type == CoreMessageType.USER_STATE_HASH_QUERY) {
+                var query = RuntimeStateQueryService.userState(owner.runtimeState, owner.identities, userId);
+                if (query.tooLarge()) return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
+                        CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
+                found[lane.laneId()] = query.found();
+                if (type == CoreMessageType.USER_STATE_HASH_QUERY)
+                    return new CoreResponse(ResponseStatus.OK, commandCount, CoreStateQueryCodec.encodeStateHash(query.stateHash()));
+                return query.found() ? new CoreResponse(ResponseStatus.OK, commandCount, CoreStateQueryCodec.encodeUserState(query.view()))
+                        : missingAccountResponse(type, commandCount);
+            }
+            Long clientOrderId = type == CoreMessageType.CLIENT_ORDER_STATE_QUERY && clientKey != 0
+                    ? owner.runtimeState.orderIdByClient(userId, clientKey) : null;
+            long selectedOrder = type == CoreMessageType.CLIENT_ORDER_STATE_QUERY ? clientOrderId == null ? 0 : clientOrderId : orderId;
+            var query = selectedOrder == 0 ? null : RuntimeStateQueryService.orderState(owner.runtimeState, owner.identities, selectedOrder);
+            found[lane.laneId()] = query != null && query.found();
+            if (!found[lane.laneId()]) return missingAccountResponse(type, commandCount);
+            byte[] encoded = type == CoreMessageType.ORDER_STATE_HASH_QUERY
+                    ? CoreStateQueryCodec.encodeStateHash(query.stateHash()) : CoreStateQueryCodec.encodeOrderState(query.view());
+            return new CoreResponse(ResponseStatus.OK, commandCount, encoded);
+        }
+
+        private CoreResponse completedResponse() {
+            long pending = laneMask;
+            while (pending != 0) {
+                int laneId = Long.numberOfTrailingZeros(pending); pending &= pending - 1;
+                var response = responses[laneId];
+                if (response != null && (response.resultCode() == CoreResultCode.INVALID_COMMAND
+                        || response.resultCode() == CoreResultCode.QUERY_RESPONSE_TOO_LARGE)) return response;
+            }
+            if (openOrders != null) {
+                var selected = new ArrayList<com.surprising.aeron.protocol.CoreOrderStateView>(openOrders.length);
+                for (var order : openOrders) if (order != null) selected.add(order);
+                return new CoreResponse(ResponseStatus.OK, commandCount,
+                        CoreStateQueryCodec.encodeOpenOrders(new com.surprising.aeron.protocol.CoreOpenOrdersView(selected)));
+            }
+            CoreResponse selected = null;
+            long lanes = laneMask;
+            while (lanes != 0) {
+                int laneId = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
+                if (!found[laneId]) continue;
+                if (selected != null) throw new IllegalStateException("order identity is present in multiple Account Lanes");
+                selected = responses[laneId];
+            }
+            return selected == null ? responses[Long.numberOfTrailingZeros(laneMask)] : selected;
+        }
+    }
 
     /** 财库查询复用已有异步查询ID及结果槽，Owner派发后立即返回。 */
     CoreResponse beginTreasuryQuery(CoreMessage message) { return beginLedgerQuery(message, null, null); }
@@ -105,7 +274,7 @@ final class OrderBookQueryService {
             } catch (IllegalArgumentException failure) {
                 response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.INVALID_COMMAND, commandCount);
             }
-            completedBookQueries.put(id, CompletedBookQuery.ledger(response));
+            completedBookQueries.put(id, CompletedBookQuery.encoded(response));
             owner.runtimeState.signalOwnerCompletion();
         }
     }
@@ -173,7 +342,7 @@ final class OrderBookQueryService {
         CompletedBookQuery completed = completedBookQueries.remove(queryId);
         if (completed == null) return null;
         queryIds.values().removeIf(value -> value == queryId);
-        if (completed.ledgerResponse() != null) return completed.ledgerResponse();
+        if (completed.encodedResponse() != null) return completed.encodedResponse();
         long exportSequence = owner.commits.publication.publishedSequence();
         if (completed.bootstrapSnapshot() == null) {
             var view = new com.surprising.aeron.protocol.CoreOrderBookView(exportSequence, completed.levels());
@@ -222,14 +391,14 @@ final class OrderBookQueryService {
             String snapshotId,
             CoreOrderBookBootstrapQuery bootstrapQuery,
             BookBootstrapSnapshot bootstrapSnapshot,
-            CoreResponse ledgerResponse) {
+            CoreResponse encodedResponse) {
 
         CompletedBookQuery(List<com.surprising.aeron.protocol.CoreBookLevelView> levels, String snapshotId,
                            CoreOrderBookBootstrapQuery bootstrapQuery, BookBootstrapSnapshot bootstrapSnapshot) {
             this(levels, snapshotId, bootstrapQuery, bootstrapSnapshot, null);
         }
 
-        static CompletedBookQuery ledger(CoreResponse response) { return new CompletedBookQuery(List.of(), "", null, null, response); }
+        static CompletedBookQuery encoded(CoreResponse response) { return new CompletedBookQuery(List.of(), "", null, null, response); }
 
         static CompletedBookQuery single(
                 List<com.surprising.aeron.protocol.CoreBookLevelView> levels) {

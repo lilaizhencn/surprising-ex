@@ -5343,3 +5343,11 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - HotSpot JDK27 两组必要执行9+22=31，失败/错误/跳过0，两组源码指纹相同，测试期间未改源码；完整命令及前期失败见 `docs/validation/owner-liquidation-admission-20261012.json`。
 - 单笔、预算1跨账户4页、过期/失效动作、阻塞Matcher跨分片、线性/反向全仓/隔离、批次和触发通过。失效动作后真实撤单成功，证明Matcher挂单仍有效。原日志目录 `../performance-artifacts/owner-liquidation-admission-20261012`。
 - 无压测/JMH/JFR/快照/恢复/wallet；测试进程退出，无集群/Archive/JFR清理项。内部账户查询与其余Owner读取仍待收口，不作性能及全部完成结论。
+
+
+## 2026-10-12：Core内部账户查询迁至Lane（必要用例）
+
+- 用户、订单、客户订单、两种hash及挂单分页共6类由实际Lane读原表并编码，Owner使用既有路由/分页ID及异步查询结果槽，无新增权威镜像。只读退出不触碰控制回执，已删除旧Owner响应读取方法。
+- HotSpot JDK27 必要回归34次通过；随后只增加实际Owner生产者线程限制并补守卫断言，最终源码的受影响账户查询8次定向通过。各轮失败/错误/跳过0、运行时源码未变，完整指纹和命令见 `docs/validation/owner-account-query-20261012.json`。
+- 覆盖精确view/hash、保留终态、全局/用户挂单页、实体不存在、坏输入、超限、阻塞Lane、一消费、关闭清理及真实Owner日志回调；回执/触发/身份回收和Ledger查询通过。初期测试构造错误0例执行日志保留。
+- 原日志目录 `../performance-artifacts/owner-account-query-20261012`；测试进程退出，无本轮集群/Archive/JFR。按用户要求无压测/JMH/JFR/快照/恢复/wallet，不作性能或全部完成结论，ADL候选及剩余Owner边界待继续收口。

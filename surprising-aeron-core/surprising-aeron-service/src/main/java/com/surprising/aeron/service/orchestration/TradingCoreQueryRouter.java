@@ -37,6 +37,11 @@ final class TradingCoreQueryRouter {
      */
     CoreResponse apply(CoreMessage message, long clusterTimestamp) {
         if (message.header().kind() == WireMessageKind.QUERY
+                && OrderBookQueryService.accountQuery(message.header().messageType())) {
+            try { return runtime.bookQueries.beginAccountQuery(message); }
+            catch (IllegalArgumentException invalid) { return runtime.rejected(CoreResultCode.INVALID_COMMAND); }
+        }
+        if (message.header().kind() == WireMessageKind.QUERY
                 && (message.header().messageType() == CoreMessageType.STATE_HASH_QUERY
                 || message.header().messageType() == CoreMessageType.BUSINESS_STATE_HASH_QUERY)) {
             // Full hashes are explicit audit queries and are calculated from authoritative state.
@@ -69,14 +74,6 @@ final class TradingCoreQueryRouter {
             }
         }
         if (message.header().kind() == WireMessageKind.QUERY
-                && message.header().messageType() == CoreMessageType.USER_STATE_HASH_QUERY) {
-            var query = com.surprising.aeron.service.state.query.RuntimeStateQueryService.userState(
-                    runtime.runtimeState, runtime.identities, message.header().userId());
-            if (query.tooLarge()) return runtime.rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
-            return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
-                    CoreStateQueryCodec.encodeStateHash(query.found() ? query.stateHash() : 0));
-        }
-        if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.COMMAND_RESULT_QUERY) {
             try {
                 UUID commandId = CoreStateQueryCodec.decodeCommandResultQuery(message.payloadUnsafe());
@@ -90,61 +87,6 @@ final class TradingCoreQueryRouter {
                 return CoreResponse.owned(ResponseStatus.OK, result.status(), result.resultCode(),
                         result.appliedCommandCount(),
                         result.responseDataUnsafe(), result.responseDataOffsetUnsafe(), result.responseDataLength());
-            } catch (IllegalArgumentException exception) {
-                return runtime.rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == WireMessageKind.QUERY
-                && message.header().messageType() == CoreMessageType.ORDER_STATE_HASH_QUERY) {
-            try {
-                var query = com.surprising.aeron.service.state.query.RuntimeStateQueryService.orderState(
-                        runtime.runtimeState, runtime.identities,
-                        TradingCommandCodec.decodeOrderStateQuery(message.payloadUnsafe()));
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
-                        CoreStateQueryCodec.encodeStateHash(query.found() ? query.stateHash() : 0));
-            } catch (IllegalArgumentException exception) {
-                return runtime.rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == WireMessageKind.QUERY
-                && message.header().messageType() == CoreMessageType.USER_STATE_QUERY) {
-            return runtime.userStateResponse(message.header().userId());
-        }
-        if (message.header().kind() == WireMessageKind.QUERY
-                && message.header().messageType() == CoreMessageType.ORDER_STATE_QUERY) {
-            try {
-                return runtime.orderStateResponse(TradingCommandCodec.decodeOrderStateQuery(message.payloadUnsafe()));
-            } catch (IllegalArgumentException exception) {
-                return runtime.rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == WireMessageKind.QUERY
-                && message.header().messageType() == CoreMessageType.CLIENT_ORDER_STATE_QUERY) {
-            try {
-                var query = com.surprising.aeron.service.state.query.RuntimeStateQueryService.clientOrderState(
-                        runtime.runtimeState, runtime.identities, message.header().userId(),
-                        CoreStateQueryCodec.decodeClientOrderStateQuery(message.payloadUnsafe()));
-                return runtime.orderStateResponse(query);
-            } catch (IllegalArgumentException exception) {
-                return runtime.rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == WireMessageKind.QUERY
-                && message.header().messageType() == CoreMessageType.USER_OPEN_ORDERS_QUERY) {
-            try {
-                var query = CoreStateQueryCodec.decodeOpenOrdersQuery(message.payloadUnsafe());
-                long beforeOrderId = query.beforeOrderId() == 0 ? Long.MAX_VALUE : query.beforeOrderId();
-                long requestedUserId = message.header().userId();
-                var page = runtime.activeOrderIndex.page(requestedUserId, query.instrumentId(), beforeOrderId, query.limit());
-                var orders = page.orderIds().stream()
-                        .map(orderId -> com.surprising.aeron.service.state.query.RuntimeStateQueryService.orderState(
-                                runtime.runtimeState, runtime.identities, orderId))
-                        .filter(com.surprising.aeron.service.state.query.RuntimeStateQueryService.OrderQueryResult::found)
-                        .map(com.surprising.aeron.service.state.query.RuntimeStateQueryService.OrderQueryResult::view)
-                        .toList();
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
-                        CoreStateQueryCodec.encodeOpenOrders(
-                                new com.surprising.aeron.protocol.CoreOpenOrdersView(orders)));
             } catch (IllegalArgumentException exception) {
                 return runtime.rejected(CoreResultCode.INVALID_COMMAND);
             }
