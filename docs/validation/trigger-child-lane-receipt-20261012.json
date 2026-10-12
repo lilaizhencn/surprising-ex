@@ -1,0 +1,101 @@
+{
+  "start": "2026-10-12T08:53:46.112128+00:00",
+  "head": "215809055d5dd688fe175edfe73b11bcd7d92287",
+  "goal": "触发子订单仅Lane检查账户、冻结和写待结算标记；Owner使用完成回执和既有路由/终态身份索引准备撮合",
+  "changeFiles": [
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/trigger/TriggerCommandContext.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/trigger/TriggerOrderCommands.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CommandSlot.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/DirectMatcherSettlementPreparation.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/MatchingCommandAdmission.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TerminalStateRetention.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreRuntime.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/PendingReservationTracker.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeOrderStateTransitions.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/ClusterCommandPipelineTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/OwnerAccountReadGuard.java"
+  ],
+  "command": [
+    "mvn",
+    "-B",
+    "-ntp",
+    "-pl",
+    "surprising-aeron-core/surprising-aeron-service",
+    "-am",
+    "-Dtest=ClusterCommandPipelineTest#triggerAdmissionAndMatchingNeverReadOwnerAccountTables+triggerNativeRejectionWithoutSnapshot+triggerAdmissionFailureWithoutSnapshot,CoreOrderedOrderBatchTest#sequentialPlaceBatchAdmitsAndRejectsFromLanesWithoutOwnerAccountReads+sequentialPlaceUsesEarlierFillProceedsOnPermanentLanes,CommandSlotTest#batchContextSurvivesCommandRewriteAndIsClearedForNextSlotGeneration+batchOrderingDetachesMiddleHeadAndTailAcrossRingReuse",
+    "-Dsurefire.failIfNoSpecifiedTests=false",
+    "test"
+  ],
+  "pressureJmhJfr": false,
+  "snapshotRecoveryWalletScenarios": false,
+  "sourceBefore": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/trigger/TriggerCommandContext.java": "a7db4f9b7e5614fcb43e869026155f39b7a029fc85c3aa2edecde07e4a7f85d1",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/trigger/TriggerOrderCommands.java": "4acb3544bf38a8a5d01f229e7de4400f828eacc12a7a4cc9c43d545ab74b4bda",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CommandSlot.java": "de0fae4da43aad149a4f06f3ff7359160e5a4f47f47206a219d5358d398a1805",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/DirectMatcherSettlementPreparation.java": "573b9c06ce9e29279ed7de2d4ddcc80b83b9589afc955bd25e534c9d2529f4cb",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/MatchingCommandAdmission.java": "cd21ea446fa4141f7e77a09e6f1dff645a5a47db1d0c341337c7e688172558bc",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TerminalStateRetention.java": "6fb23fa8b186e03bcc599e7ea52317586d4aecb5d06d4af0ccb8630fab6e3c0f",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreRuntime.java": "14e3dde69fd86515f035f2232e9209b81578b900614f5160a718d466912b9f7a",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/PendingReservationTracker.java": "73c22c0108e4743da391420149a1ac39de1761cd25bb42839e1ca7169f8970f9",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeOrderStateTransitions.java": "61db97d612d4ac42d27cbcbac233c0df4c7887797b154c0f85233075c6f0150d",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java": "ae050ac60c19fbcf547a613dc8b576a1d0fd5ed59101f0742f783127ed944941",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/ClusterCommandPipelineTest.java": "5c653eeb6b8b11729aa78b10fe5e61c5bd1a992663cf5a3784ee2862bd77ce39",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/OwnerAccountReadGuard.java": "8ae36a95b1734c0328597cf6fbba2e361a0eeef451cb8f6e564b80e1a800bf9e"
+  },
+  "exitCode": 0,
+  "end": "2026-10-12T08:59:01.209927+00:00",
+  "sourceAfter": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/trigger/TriggerCommandContext.java": "a7db4f9b7e5614fcb43e869026155f39b7a029fc85c3aa2edecde07e4a7f85d1",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/trigger/TriggerOrderCommands.java": "4acb3544bf38a8a5d01f229e7de4400f828eacc12a7a4cc9c43d545ab74b4bda",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CommandSlot.java": "de0fae4da43aad149a4f06f3ff7359160e5a4f47f47206a219d5358d398a1805",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/DirectMatcherSettlementPreparation.java": "573b9c06ce9e29279ed7de2d4ddcc80b83b9589afc955bd25e534c9d2529f4cb",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/MatchingCommandAdmission.java": "cd21ea446fa4141f7e77a09e6f1dff645a5a47db1d0c341337c7e688172558bc",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TerminalStateRetention.java": "6fb23fa8b186e03bcc599e7ea52317586d4aecb5d06d4af0ccb8630fab6e3c0f",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreRuntime.java": "14e3dde69fd86515f035f2232e9209b81578b900614f5160a718d466912b9f7a",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/PendingReservationTracker.java": "73c22c0108e4743da391420149a1ac39de1761cd25bb42839e1ca7169f8970f9",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeOrderStateTransitions.java": "61db97d612d4ac42d27cbcbac233c0df4c7887797b154c0f85233075c6f0150d",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java": "ae050ac60c19fbcf547a613dc8b576a1d0fd5ed59101f0742f783127ed944941",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/ClusterCommandPipelineTest.java": "5c653eeb6b8b11729aa78b10fe5e61c5bd1a992663cf5a3784ee2862bd77ce39",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/OwnerAccountReadGuard.java": "8ae36a95b1734c0328597cf6fbba2e361a0eeef451cb8f6e564b80e1a800bf9e"
+  },
+  "sourceUnchanged": true,
+  "executedClasses": [
+    {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.CommandSlotTest"
+    },
+    {
+      "tests": 14,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest"
+    },
+    {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest"
+    }
+  ],
+  "conclusion": "18个必要测试执行通过；触发子订单账户路径已迁移，完整Owner迁移尚未完成",
+  "fullOwnerMigrationComplete": false,
+  "businessChecks": [
+    "六产品线直接触发与内部扫描，零/部分/全部成交；Owner所有Lane的账户表get禁用",
+    "子订单跳过另一Lane的已占用终态ID，保留选定编号",
+    "OCO兄弟取消、撮合拒绝释放冻结、客户标识清除",
+    "准入不足写失败原因，算术溢出回退账户及OCO",
+    "批量准入回归及命令槽回收"
+  ],
+  "initialFailures": [
+    "Lane复用admissionIdentity访问Treasury被既有边界拒绝：改为Owner捕获只读进度标志、Lane读取客户及持仓身份",
+    "Owner账户表禁读用例发现DirectMatcherSettlementPreparation仍回查子订单：改为命令槽保留同一不可变回执"
+  ],
+  "stateOwnership": "业务表仅由Lane访问；Lane本地pending标记，Owner仅在完成后维护既有待结算路由。原有QueuedTriggerMatching及CommandSlot借用同一不可变准入订单值，不新增Map、不复制业务状态；槽初始化与回收清除引用。终态身份复用原有TerminalStateRetention，不新增字典。",
+  "cleanup": "仅Maven测试，无集群/JFR/快照临时文件；测试进程结束，保留小型复现记录"
+}

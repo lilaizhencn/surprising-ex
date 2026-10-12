@@ -66,3 +66,12 @@ Owner仍有部分权威业务读取及Treasury写入，因此 pending reservatio
 删除无权威业务职责的 `BatchAdmissionOrderIndex`。Lane 使用自己的准入索引；批次前一项完成后，后一项读取实际资金和持仓，保留成交所得再下单及部分成功语义。订单 ID 重复与命令用户归属仍用已有 Owner 路由索引校验，不做 Lane 间账户查询。
 
 HotSpot JDK 27 的12个必要用例通过，覆盖禁止 Owner 读取账户表、部分成功和资金回退、成交所得再下单、永续累计风险与撤改单回归。按用户要求未执行压测、JMH/JFR、快照/恢复或wallet；生产账本与触发/风险等剩余 Owner 边界尚未全部迁移。证据见 [批量下单验证](../../docs/validation/batch-place-lane-admission-20261012.json)。
+
+
+### 触发子订单准入与撮合回执（2026-10-12）
+
+`TriggerExecutionContinuation` 把不可变指令和资金费/结算只读进度标志交给所属Lane。客户订单号与持仓身份、余额、风险准入、资金冻结以及Lane待结算标记在Lane执行；Owner在既有ControlLaneDispatcher完成后登记路由。删除会在Lane线程修改Owner索引的旧方法，删除Owner按订单ID回读Lane预留的旧收集入口。
+
+`QueuedTriggerMatching`、`CommandSlot.triggerAdmissionOrder` 与 `DirectMatcherSettlementPreparation.prepareTrigger` 沿用同一不可变准入值，直到命令槽回收；不新增订单Map或深拷贝。子订单编号冲突使用已有活动路由、本命令变更回执及终态身份索引，覆盖其他Lane的占用ID。关闭持仓的触发取消使用已收集的持仓变更值。
+
+HotSpot JDK27的18个必要测试执行通过：六产品线直接/扫描触发，禁止Owner账户表读取、OCO、撮合与准入拒绝/回退、终态ID冲突及批量/命令槽回归。精选方法走无快照分支；未执行快照、恢复、压测、JMH/JFR或wallet。生产SystemLedgerLane、保险/强平/ADL/资金费等剩余资金边界仍需迁移。详见 [触发回执验证](../../docs/validation/trigger-child-lane-receipt-20261012.json)。

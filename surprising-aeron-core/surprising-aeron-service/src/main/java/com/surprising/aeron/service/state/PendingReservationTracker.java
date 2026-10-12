@@ -125,38 +125,6 @@ final class PendingReservationTracker {
         indexPendingReservation(userId, orderId, coreSequence, nextTotalPendingReservations);
     }
 
-    /** Control task writes its account only; Owner registers the receipt after publication. */
-    void markInCurrentLane(long userId, long orderId, long coreSequence) {
-        AccountLaneState lane = owner.currentLaneCommandScope();
-        if (lane == null || lane.laneId() != owner.topology.accountLaneId(userId))
-            throw new IllegalStateException("pending reservation requires its Account Lane");
-        ReservationRuntime reservation = lane.reservations.get(orderId);
-        if (reservation == null || reservation.userId() != userId)
-            throw new IllegalStateException("pending reservation is missing");
-        owner.accountRollback.captureReservationBefore(orderId);
-        owner.accountRollback.captureBalanceBefore(userId, reservation.assetId());
-        lane.markPendingReservation(orderId, coreSequence);
-        owner.accountRollback.captureBalanceAfter(lane, userId, reservation.assetId());
-        if (!pendingReservationUsers.containsKey(orderId)) {
-            indexPendingReservation(userId, orderId, coreSequence, Math.incrementExact(totalPendingReservations));
-        }
-    }
-
-    void collectControlReservation(long userId, long orderId, long coreSequence) {
-        owner.assertOwner();
-        if (pendingReservationUsers.containsKey(orderId)) {
-            return;
-        }
-        ReservationRuntime reservation = owner.reservation(orderId);
-        if (coreSequence <= 0 || reservation == null || reservation.userId() != userId)
-            throw new IllegalStateException("control reservation has not been published");
-        indexPendingReservation(userId, orderId, coreSequence, Math.incrementExact(totalPendingReservations));
-        owner.changedOrder(orderId);
-        owner.changedReservations.add(orderId);
-        owner.changedUsers.add(userId);
-        owner.markBalancesChanged();
-    }
-
     /** Register a completed Lane admission without reading any live Account Lane table. */
     void collectControlReservation(OrderRuntime order, long coreSequence) {
         owner.assertOwner();

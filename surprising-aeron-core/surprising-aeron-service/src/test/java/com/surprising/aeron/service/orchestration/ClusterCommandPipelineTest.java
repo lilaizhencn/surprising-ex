@@ -901,6 +901,16 @@ class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
     void triggerChildUsesOwningLaneAndPreservesOrderIdCollision(ProductLine product) throws Exception {
+        verifyTriggerChild(product, true);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void triggerAdmissionAndMatchingNeverReadOwnerAccountTables(ProductLine product) throws Exception {
+        verifyTriggerChild(product, false);
+    }
+
+    private void verifyTriggerChild(ProductLine product, boolean recovery) throws Exception {
         for (boolean internalScan : new boolean[]{false, true}) {
         if (internalScan && product == ProductLine.SPOT) continue; // Spot has no mark-price risk scan.
         for (int matchedQuantity : new int[]{0, 1, 10}) {
@@ -914,6 +924,13 @@ class ClusterCommandPipelineTest {
                 live.apply(live.place(user, "1", 102, 100, 10, CoreOrderSide.BUY));
                 // 子订单编号冲突时必须沿用准入阶段选定的编号，不能重新推导或回查 Lane。
                 live.apply(live.place(user, "1", 18003, 80, 1, CoreOrderSide.BUY));
+                if (!recovery) {
+                    // A terminal identity on another Lane also occupies the child namespace.
+                    live.apply(live.place(maker, "1", 18005, 80, 1, CoreOrderSide.BUY));
+                    live.apply(live.cancel(maker, 18005));
+                    assertThat(live.service.state().orderIdInUse(18005)).isTrue();
+                    assertThat(live.service.state().orderIdInUse(18007)).isFalse();
+                }
                 if (fill) live.apply(live.place(maker, "1", 103, 100, matchedQuantity, CoreOrderSide.BUY));
                 var trigger = new CoreTriggerOrderStateView(9001, product, user, "trigger-9001", "oco-9001", "1",
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
@@ -931,9 +948,11 @@ class ClusterCommandPipelineTest {
                 var handoff = com.surprising.aeron.service.state.TradingRuntimeState.class.getDeclaredField("laneHandoffEpoch");
                 handoff.setAccessible(true);
                 long beforeHandoff = handoff.getLong(live.service.state().runtimeState);
-                if (internalScan) scanTriggers(live, 1);
-                else live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
-                        CoreTriggerOrderCodec.encodeExecute(9001, 1, 100, TIME)));
+                try (var guard = recovery ? null : new OwnerAccountReadGuard(live.service.state().runtimeState)) {
+                    if (internalScan) scanTriggers(live, 1);
+                    else live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
+                            CoreTriggerOrderCodec.encodeExecute(9001, 1, 100, TIME)));
+                }
                 assertThat(handoff.getLong(live.service.state().runtimeState))
                         .as("trigger claim/reserve/settle stays on permanent Account Lane")
                         .isEqualTo(beforeHandoff);
@@ -941,10 +960,10 @@ class ClusterCommandPipelineTest {
                         assertThat(r.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
                 var terminal = live.service.state().runtimeState.triggerOrder(9001);
                 assertThat(terminal.status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
-                assertThat(terminal.placedOrderId()).isEqualTo(18005);
+                assertThat(terminal.placedOrderId()).isEqualTo(recovery ? 18005 : 18007);
                 assertThat(live.service.state().runtimeState.triggerOrder(9002).status())
                         .isEqualTo(CoreTriggerOrderStatus.CANCELED);
-                try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                if (recovery) try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
                 live.apply(live.cancel(user, 18003));
@@ -957,6 +976,16 @@ class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
     void nativeTriggerRejectionReleasesReservationAndCompletesOnItsLane(ProductLine product) throws Exception {
+        verifyTriggerRejection(product, true);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void triggerNativeRejectionWithoutSnapshot(ProductLine product) throws Exception {
+        verifyTriggerRejection(product, false);
+    }
+
+    private void verifyTriggerRejection(ProductLine product, boolean recovery) throws Exception {
         for (boolean internalScan : new boolean[]{false}) {
         if (internalScan && product == ProductLine.SPOT) continue; // Spot has no mark-price risk scan.
         for (int matchedQuantity : new int[]{1}) {
@@ -1003,7 +1032,7 @@ class ClusterCommandPipelineTest {
                 assertThat(terminal.placedOrderId()).isZero();
                 assertThat(live.service.state().runtimeState.triggerOrder(9002).status())
                         .isEqualTo(CoreTriggerOrderStatus.CANCELED);
-                try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                if (recovery) try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
                 live.apply(live.cancel(user, 18003));
@@ -1016,6 +1045,16 @@ class ClusterCommandPipelineTest {
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void triggerChildFailureClosesOrRollsBackOcoOnItsLane(boolean overflow) throws Exception {
+        verifyTriggerFailure(overflow, true);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void triggerAdmissionFailureWithoutSnapshot(boolean overflow) throws Exception {
+        verifyTriggerFailure(overflow, false);
+    }
+
+    private void verifyTriggerFailure(boolean overflow, boolean recovery) throws Exception {
         try (Fixture live = new Fixture(ProductLine.SPOT)) {
             live.setup();
             long user = 11;
@@ -1048,7 +1087,7 @@ class ClusterCommandPipelineTest {
             assertThat(runtime.order(18203)).isNull();
             assertThat(live.service.state().identities.findClientKey(user, "TRIGGER:9101")).isNull();
             assertThat(live.service.state().tradingState().users()).isEqualTo(accountsBefore);
-            try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, live.service.captureSnapshot(101))) {
+            if (recovery) try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, live.service.captureSnapshot(101))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }

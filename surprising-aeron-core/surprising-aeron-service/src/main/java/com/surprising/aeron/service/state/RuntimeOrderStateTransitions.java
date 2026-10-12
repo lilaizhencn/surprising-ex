@@ -3,7 +3,6 @@ import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.state.account.UserRuntime;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.admission.AdmissionIdentity;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
 import java.util.UUID;
@@ -64,28 +63,23 @@ public final class RuntimeOrderStateTransitions {
         runtime.incrementCommandRevision();
     }
 
-    public static void placeTriggerChildInLane(TradingRuntimeState runtime, long userId,
+    public static OrderRuntime placeTriggerChildInLane(TradingRuntimeState runtime, long userId,
             ResolvedPlaceOrder command, UUID commandId, long coreSequence, long openInterestSteps,
-            AdmissionIdentity identity, long clientKey, int assetId) {
+            RuntimeIdentityRegistry identities, long clientKey, int assetId,
+            boolean lifecycleSettled, boolean fundingInProgress) {
         AccountLaneState lane = runtime.currentLaneCommandScope();
-        if (lane == null) {
-            int laneId = runtime.topology().accountLaneId(userId);
-            AccountLaneState targetLane = runtime.accountLanes[laneId];
-            runtime.inLaneCommandScope(targetLane, ignored -> {
-                long required = RuntimeOrderAdmission.requiredReservationPrepared(runtime, userId, command,
-                        openInterestSteps, targetLane.admissionOrderIndex(command.symbolId()), identity);
-                placePrepared(runtime, userId, command, commandId, required, clientKey, command.symbolId(), assetId);
-                runtime.pendingReservations.markInCurrentLane(userId, command.orderId(), coreSequence);
-                return null;
-            });
-            return;
-        }
-        if (lane.laneId() != runtime.topology().accountLaneId(userId))
+        if (lane == null || lane.laneId() != runtime.topology().accountLaneId(userId))
             throw new IllegalStateException("trigger child requires its Account Lane");
+        long positionKey = identities.findPositionKeyValueInLane(lane, userId,
+                command.instrument(), command.positionSide());
         long required = RuntimeOrderAdmission.requiredReservationPrepared(runtime, userId, command,
-                openInterestSteps, lane.admissionOrderIndex(command.symbolId()), identity);
+                openInterestSteps, lane.admissionOrderIndex(command.symbolId()), clientKey,
+                command.symbolId(), positionKey, lifecycleSettled, fundingInProgress);
         placePrepared(runtime, userId, command, commandId, required, clientKey, command.symbolId(), assetId);
-        runtime.pendingReservations.markInCurrentLane(userId, command.orderId(), coreSequence);
+        lane.markPendingReservation(command.orderId(), coreSequence);
+        OrderRuntime receipt = runtime.laneDelta(lane.laneId()).orders.get(command.orderId());
+        if (receipt == null) throw new IllegalStateException("trigger admission receipt is missing");
+        return receipt;
     }
 
     public static void reserveBatchOrderInLane(TradingRuntimeState runtime, long userId,

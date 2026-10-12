@@ -1705,6 +1705,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         return changedOrders.get(orderId);
     }
 
+    public PositionRuntime changedPositionValue(long positionKey) {
+        assertOwner();
+        return changedPositions.get(positionKey);
+    }
+
     @FunctionalInterface
     public interface TerminalOrderSink {
         /** Compact Lane handoff; the Owner receives identity primitives, never a second order walk. */
@@ -4477,10 +4482,6 @@ public final class TradingRuntimeState implements AutoCloseable {
      */
 
 
-
-    public void collectControlReservation(long userId, long orderId, long coreSequence) {
-        pendingReservations.collectControlReservation(userId, orderId, coreSequence);
-    }
 
     public void collectControlReservation(OrderRuntime order, long coreSequence) {
         pendingReservations.collectControlReservation(order, coreSequence);

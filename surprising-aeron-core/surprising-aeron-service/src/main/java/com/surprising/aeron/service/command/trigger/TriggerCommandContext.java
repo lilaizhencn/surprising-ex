@@ -44,12 +44,15 @@ public interface TriggerCommandContext extends CommandResultContext {
 
     void requireOrderIdentityAvailable(long userId, PlaceOrderCommand command);
 
+    /** Owner routing/terminal identities only; never reads a Lane order table. */
+    boolean orderIdInUse(long orderId);
+
     void reservePlaceOrderRuntime(long userId, PlaceOrderCommand command, UUID commandId,
                                   long pendingCoreSequence);
 
     void queueTriggerMatching(CoreTriggerOrderState trigger, long triggerSequence,
                               long triggeredPriceTicks, long triggeredAtEpochMillis,
-                              UUID parentCommandId, long childOrderId);
+                              UUID parentCommandId, com.surprising.aeron.service.state.OrderRuntime childOrder);
 
     void seedChangeAccumulators();
 

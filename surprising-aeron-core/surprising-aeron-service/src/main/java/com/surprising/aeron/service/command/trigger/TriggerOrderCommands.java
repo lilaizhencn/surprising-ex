@@ -10,7 +10,6 @@ import com.surprising.aeron.service.state.RuntimeAlgoOrderStateTransitions;
 import com.surprising.aeron.service.state.RuntimeCancelAllAfterStateTransitions;
 import com.surprising.aeron.service.state.RuntimeOrderStateTransitions;
 import com.surprising.aeron.service.state.RuntimeRiskStateTransitions;
-import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
 import java.util.UUID;
 
@@ -422,7 +421,8 @@ public final class TriggerOrderCommands {
         }
         owner.markUserChanged(trigger.userId());
         owner.markOrderChanged(childOrderId);
-        owner.queueTriggerMatching(trigger, triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis, commandId, childOrderId);
+        owner.queueTriggerMatching(trigger, triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis, commandId,
+                owner.runtimeState().changedOrderValue(childOrderId));
     }
 
     private com.surprising.aeron.service.state.model.CoreTriggerOrderState executableTrigger(
@@ -447,7 +447,7 @@ public final class TriggerOrderCommands {
             long price, com.surprising.aeron.service.state.instrument.CoreInstrument instrument) {
         long limit = trigger.orderType() == com.surprising.aeron.protocol.CoreOrderType.LIMIT
                 ? (trigger.priceTicks() > 0 ? trigger.priceTicks() : price) : 0;
-        return new PlaceOrderCommand(triggerChildOrderId(trigger.triggerOrderId(), owner.runtimeState()),
+        return new PlaceOrderCommand(triggerChildOrderId(trigger.triggerOrderId()),
                 trigger.instrumentId(), trigger.side(), limit, trigger.quantitySteps(),
                 instrument.contractType() != com.surprising.instrument.api.model.ContractType.SPOT,
                 trigger.marginMode(), trigger.positionSide(), trigger.orderType(), trigger.timeInForce(), false,
@@ -517,12 +517,12 @@ public final class TriggerOrderCommands {
                 owner.identities(), owner.productLine(), userId, trigger);
     }
 
-    static long triggerChildOrderId(long triggerOrderId, TradingRuntimeState state) {
+    private long triggerChildOrderId(long triggerOrderId) {
         // Trigger IDs span the full positive long range (gateway IDs are UUID-derived).
         // Keep child orders in the positive odd namespace without signed multiplication overflow.
         long candidate = ((triggerOrderId << 1) | 1L) & Long.MAX_VALUE;
         long first = candidate;
-        while (state.order(candidate) != null) {
+        while (owner.orderIdInUse(candidate)) {
             candidate = candidate == Long.MAX_VALUE ? 1 : candidate + 2;
             if (candidate == first) throw new CoreStateRejectedException("INVALID_COMMAND", "trigger child order IDs exhausted");
         }
@@ -719,7 +719,8 @@ public final class TriggerOrderCommands {
         private boolean cancelOco;
         private com.surprising.aeron.service.state.ResolvedPlaceOrder order;
         private String failureReason;
-        private com.surprising.aeron.service.state.admission.AdmissionIdentity identity;
+        private long preparedClientKey;
+        private boolean lifecycleSettled, fundingInProgress;
         private int assetId, laneId;
         private long openInterest;
         private java.util.NavigableSet<Long> siblings;
@@ -738,8 +739,9 @@ public final class TriggerOrderCommands {
             this.cancelOco = cancelOco;
             this.order = order;
             this.failureReason = failureReason;
-            identity = order == null ? null : com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(
-                    owner.runtimeState(), owner.identities(), trigger.userId(), order);
+            preparedClientKey = 0;
+            lifecycleSettled = order != null && owner.runtimeState().treasury().lifecycleSettlement(order.symbolId()) != 0;
+            fundingInProgress = order != null && owner.runtimeState().treasury().fundingProgress(order.symbolId()) != null;
             assetId = order == null ? 0 : owner.identities().assetId(order.reservationAsset());
             openInterest = owner.openInterestIndex().openInterestSteps(trigger.instrumentId());
             childSequence = Math.addExact(Math.addExact(owner.appliedCommandCount(), 2), owner.queuedMatchingCount());
@@ -765,10 +767,12 @@ public final class TriggerOrderCommands {
             }
             var key = owner.identities().prepareClientKeyInCurrentLane(trigger.userId(), order.clientOrderId());
             try {
-                RuntimeOrderStateTransitions.placeTriggerChildInLane(owner.runtimeState(), trigger.userId(), order,
-                        commandId, childSequence, openInterest, identity,
-                        com.surprising.aeron.service.state.RuntimeIdentityRegistry.clientKeyValue(key), assetId);
-                return key;
+                var receipt = RuntimeOrderStateTransitions.placeTriggerChildInLane(owner.runtimeState(), trigger.userId(), order,
+                        commandId, childSequence, openInterest, owner.identities(),
+                        com.surprising.aeron.service.state.RuntimeIdentityRegistry.clientKeyValue(key), assetId,
+                        lifecycleSettled, fundingInProgress);
+                preparedClientKey = key;
+                return receipt;
             } catch (CoreStateRejectedException rejected) {
                 if (key != 0) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(),
                         order.clientOrderId(), key);
@@ -785,15 +789,16 @@ public final class TriggerOrderCommands {
         @Override public boolean getAsBoolean() {
             if (!owner.runtimeState().pollControlLanes()) return false;
             var result = owner.runtimeState().controlLaneResult(laneId);
-            long clientKey = result == null ? 0 : (Long) result;
+            long clientKey = preparedClientKey;
             if (com.surprising.aeron.service.state.RuntimeIdentityRegistry.newClientIdentity(clientKey))
                 owner.identities().recordLaneClientAllocations(1);
             owner.requestCommitPublication();
             if (result != null) {
-                owner.runtimeState().collectControlReservation(trigger.userId(), order.orderId(), childSequence);
+                var receipt = (com.surprising.aeron.service.state.OrderRuntime) result;
+                owner.runtimeState().collectControlReservation(receipt, childSequence);
                 owner.markUserChanged(trigger.userId());
                 owner.markOrderChanged(order.orderId());
-                owner.queueTriggerMatching(trigger, triggerSequence, price, triggeredAt, commandId, order.orderId());
+                owner.queueTriggerMatching(trigger, triggerSequence, price, triggeredAt, commandId, receipt);
             }
             return true;
         }
@@ -812,7 +817,7 @@ public final class TriggerOrderCommands {
             long positionKey = changedPositions.next();
             var previous = owner.runtimeState().currentPatchPositionBefore(positionKey);
             if (previous == null || previous.signedQuantitySteps() == 0) continue;
-            var current = owner.runtimeState().position(positionKey);
+            var current = owner.runtimeState().changedPositionValue(positionKey);
             if (current != null && current.signedQuantitySteps() != 0) continue;
             String instrumentId = owner.identities().instrumentId(previous.symbolId());
             var previousMarginMode = previous.marginMode();

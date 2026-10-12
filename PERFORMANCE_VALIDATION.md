@@ -5278,3 +5278,12 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - HotSpot JDK27/Maven3.9.16：CoreOrderedOrderBatchTest精选12个方法全部通过，失败/错误/跳过0，测试前后源码SHA256一致。覆盖Owner全账户表读取禁用、900/200/100部分成功、跨用户重复订单ID、成交所得再下单、永续风险限额与撤改单回归。
 - 初轮漏删旧索引引用导致编译失败，已修正；新测试初始化缺fence及固定1000价格辅助方法误用已修正，失败轮记录保留。没有据此修改撮合fence或放宽准入。
 - 结论：必要功能测试通过，非性能验收；完整Owner迁移未完成。完整命令及源码校验见docs/validation/batch-place-lane-admission-20261012.json；原始记录在../performance-artifacts/owner-batch-place-20261012/。无临时集群/JFR，Maven进程结束。
+
+
+## 2026-10-12 触发子订单账户回执迁移（仅必要测试）
+
+- 按用户要求仅必要测试，排除真实压测/JMH/JFR、快照/恢复/wallet。基于master 215809055。
+- Lane执行客户/持仓身份、余额/风险准入、冻结与本地待结算标记；Owner用不可变回执登记既有路由并准备撮合，不再回查预留/订单。命令槽保留同一值到释放，不新增业务镜像。子订单编号冲突复用活动路由与终态身份索引；平仓触发取消读取已完成持仓变更。
+- 首轮Lane错误调用带Treasury访问的身份准备被既有边界拒绝，已拆成只读进度输入与Lane身份读取；随后账户禁读用例发现直接撮合准备仍回查子订单，已改为槽内回执。失败轮原始记录保留。
+- HotSpot JDK27/Maven3.9.16精选18个测试执行全部通过，失败/错误/跳过0，源码校验一致：六产品线直接/内部扫描触发、Owner所有账户表get禁用、其他Lane终态ID占用、OCO/冻结拒绝回退及批量/命令槽复用。原有恢复用例保留，本轮只选择显式无恢复的新入口。
+- 必要功能测试通过，完整Owner迁移仍未完成，不作性能结论。复现命令/校验见docs/validation/trigger-child-lane-receipt-20261012.json；原始记录../performance-artifacts/owner-trigger-admission-20261012/。Maven进程结束，无临时集群或JFR。

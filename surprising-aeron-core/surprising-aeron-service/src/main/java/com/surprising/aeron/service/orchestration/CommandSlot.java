@@ -51,6 +51,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     /** 普通 PLACE 已在 Owner 解析，Lane 完成后直接复用该值，避免撮合命令副本。 */
     private ResolvedPlaceOrder admittedPlaceOrder;
     private CoreMatchingOrder admittedMatchingOrder;
+    /** 已完成冻结的不可变触发子订单回执，仅保留到本命令槽释放。 */
+    private OrderRuntime triggerAdmissionOrder;
     /**
      * Compact command lifecycle.  The slot is reused by the pending ring, so a byte is enough
      * to describe the owner-side admission/submission boundary without a second continuation map.
@@ -321,6 +323,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         settlementPlan = null;
         settlementApplyStartNanos = 0;
         admittedMatchingOrder = null;
+        triggerAdmissionOrder = null;
         admittedPlaceOrder = null;
         matchingLifecycle = MATCHING_ADMITTED;
         deferredClusterTimestamp = 0;
@@ -451,10 +454,14 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     ResolvedPlaceOrder admittedPlaceOrder() { return admittedPlaceOrder; }
     CoreMatchingOrder admittedMatchingOrder() { return admittedMatchingOrder; }
     /** 沿用已完成冻结的不可变订单，触发续步不得再回读 Lane 的客户端订单索引。 */
-    void triggerAdmission(CoreMatchingOrder order) {
+    OrderRuntime triggerAdmissionOrder() { return triggerAdmissionOrder; }
+    void triggerAdmission(OrderRuntime order) {
         if (operation != Operation.TRIGGER || order == null || admittedMatchingOrder != null)
             throw new IllegalStateException("invalid trigger admission");
-        admittedMatchingOrder = order;
+        triggerAdmissionOrder = order;
+        admittedMatchingOrder = new CoreMatchingOrder(order.orderId(), order.instrument().instrumentId(),
+                order.side(), order.orderType(), order.timeInForce(), order.matchingPriceTicks(),
+                order.remainingQuantitySteps(), CoreMatchingOrder.slippagePpm(order.productLine()));
     }
     boolean isMatchingSubmitted() { return matchingLifecycle >= MATCHING_SUBMITTED; }
 
@@ -525,6 +532,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         settlementPlan = null;
         admittedPlaceOrder = null;
         admittedMatchingOrder = null;
+        triggerAdmissionOrder = null;
         realtimeTakerOrder = null;
         realtimeResolvedTakerOrder = null;
         matchingLifecycle = MATCHING_ADMITTED;

@@ -1350,6 +1350,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
         }
     }
 
+    @Override public boolean orderIdInUse(long orderId) {
+        return activeOrderIndex.activeOrderRoute(orderId) != null
+                || runtimeState.changedOrderValue(orderId) != null || terminalRetention.orderIdInUse(orderId);
+    }
+
     void rollbackCommandState(
             long runtimeCheckpoint,
             long positionIdentityCheckpoint,
@@ -1361,7 +1366,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     @Override public void queueTriggerMatching(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
                                       long triggerSequence, long triggeredPriceTicks,
-                                      long triggeredAtEpochMillis, UUID parentCommandId, long childOrderId) {
+                                      long triggeredAtEpochMillis, UUID parentCommandId, OrderRuntime childOrder) {
+        if (childOrder == null || childOrder.userId() != trigger.userId())
+            throw new IllegalStateException("trigger child admission receipt is missing");
         UUID commandId = UUID.nameUUIDFromBytes((parentCommandId + ":trigger:" + trigger.triggerOrderId())
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8));
         CoreMessageHeader header = CoreMessageHeader.command(CoreMessageType.EXECUTE_TRIGGER_ORDER, commandId,
@@ -1370,7 +1377,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         admissions.queuedMatching.add(new MatchingCommandAdmission.QueuedTriggerMatching(
                 new CoreMessage(header, com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeExecute(
                         trigger.triggerOrderId(), triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis)),
-                matchingOrder(childOrderId)));
+                childOrder));
     }
 
     void setCommandFundsDelta(

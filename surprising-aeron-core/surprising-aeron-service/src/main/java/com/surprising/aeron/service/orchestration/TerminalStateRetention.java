@@ -158,6 +158,12 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
         return contains(EntityType.ORDER, orderId, userId, clientOrderId);
     }
 
+    boolean orderIdInUse(long orderId) {
+        if (orderId <= 0) throw new IllegalArgumentException("invalid terminal order key");
+        candidateLookupKey.reset(EntityType.ORDER, orderId);
+        return candidates.containsKey(candidateLookupKey) || tombstones.contains(EntityType.ORDER.code, orderId);
+    }
+
     boolean containsAlgo(long algoOrderId, long userId, String clientAlgoOrderId) {
         return contains(EntityType.ALGO, algoOrderId, userId, clientAlgoOrderId);
     }

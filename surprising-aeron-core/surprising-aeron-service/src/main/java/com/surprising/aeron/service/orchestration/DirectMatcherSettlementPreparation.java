@@ -118,7 +118,8 @@ final class DirectMatcherSettlementPreparation {
         long[] execute = pending.decodedCommand().trigger();
         var trigger = java.util.Objects.requireNonNull(owner.runtimeState.triggerOrder(execute[0]),
                 "admitted trigger is missing");
-        OrderRuntime triggerOrder = owner.runtimeOrder(pending.admittedMatchingOrder().orderId());
+        OrderRuntime triggerOrder = java.util.Objects.requireNonNull(pending.triggerAdmissionOrder(),
+                "trigger admission receipt is missing");
         MatcherSettlementEvent direct = owner.runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
                 directInitialLaneMask(triggerOrder.userId()), triggerOrder, null, 1,
                 pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,

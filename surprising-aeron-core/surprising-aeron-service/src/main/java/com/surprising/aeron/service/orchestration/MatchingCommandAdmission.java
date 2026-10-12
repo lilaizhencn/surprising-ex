@@ -46,7 +46,7 @@ final class MatchingCommandAdmission {
     private final PrimitiveLongChangeSet batchChangedOrders = new PrimitiveLongChangeSet();
 
     /** 在释放 Lane 访问权前绑定已冻结的子订单；仅存活到登记 CommandSlot，不建立第二份订单索引。 */
-    record QueuedTriggerMatching(CoreMessage command, CoreMatchingOrder order) { }
+    record QueuedTriggerMatching(CoreMessage command, OrderRuntime order) { }
 
     void appendQueuedMatching(long clusterTimestamp, long clusterPosition) {
         if (queuedMatching.isEmpty()) return;
