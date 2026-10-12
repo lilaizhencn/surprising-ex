@@ -59,7 +59,8 @@ final class OrderBookQueryService {
     static boolean accountQuery(CoreMessageType type) {
         return type == CoreMessageType.USER_STATE_QUERY || type == CoreMessageType.USER_STATE_HASH_QUERY
                 || type == CoreMessageType.ORDER_STATE_QUERY || type == CoreMessageType.ORDER_STATE_HASH_QUERY
-                || type == CoreMessageType.CLIENT_ORDER_STATE_QUERY || type == CoreMessageType.USER_OPEN_ORDERS_QUERY;
+                || type == CoreMessageType.CLIENT_ORDER_STATE_QUERY || type == CoreMessageType.USER_OPEN_ORDERS_QUERY
+                || type == CoreMessageType.ALGO_ORDER_QUERY;
     }
 
     static boolean riskAccountQuery(CoreMessageType type) {
@@ -86,6 +87,7 @@ final class OrderBookQueryService {
     /** 内部账户查询复用现有异步结果登记；Owner不进入账户读作用域。 */
     CoreResponse beginAccountQuery(CoreMessage message) {
         var type = message.header().messageType();
+        if (type == CoreMessageType.ALGO_ORDER_QUERY) return beginAlgoAccountQuery(message);
         long userId = message.header().userId();
         long orderId = type == CoreMessageType.ORDER_STATE_QUERY || type == CoreMessageType.ORDER_STATE_HASH_QUERY
                 ? TradingCommandCodec.decodeOrderStateQuery(message.payloadUnsafe()) : 0;
@@ -119,7 +121,40 @@ final class OrderBookQueryService {
                     : count == Long.SIZE ? -1L : (1L << count) - 1;
         } else laneMask = owner.runtimeState.topology().accountLaneMask(userId);
         long id = nextAsyncQueryId++;
-        var query = new AccountQuery(id, owner.appliedCommandCount, type, userId, orderId, clientKey, laneMask, openOrderIds);
+        var query = new AccountQuery(id, owner.appliedCommandCount, type, userId, orderId, clientKey, laneMask, openOrderIds, null);
+        return dispatchAccountQuery(message, id, laneMask, query);
+    }
+
+    private CoreResponse beginAlgoAccountQuery(CoreMessage message) {
+        var requested = com.surprising.aeron.protocol.CoreAlgoOrderCodec.decodeQuery(message.payloadUnsafe());
+        var ids = requested.algoOrderId() == 0
+                ? owner.algoOrderIndex.query(requested.userId(), requested.instrumentId(), requested.dueAtEpochMillis(),
+                        requested.limit(), owner.algoOrderIndex::value)
+                : owner.algoOrderIndex.value(requested.algoOrderId()) == null ? List.<Long>of() : List.of(requested.algoOrderId());
+        if (ids.isEmpty()) return new CoreResponse(ResponseStatus.OK, owner.appliedCommandCount,
+                com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeList(List.of()));
+        long[] selectedIds = new long[ids.size()], users = new long[ids.size()];
+        long laneMask = 0;
+        int children = 0;
+        for (int index = 0; index < ids.size(); index++) {
+            long selected = ids.get(index);
+            var route = owner.algoOrderIndex.value(selected);
+            if (route == null) throw new IllegalStateException("algo query route is missing");
+            children = Math.addExact(children, route.childOrderIds().size());
+            if (children > RuntimeOperationalQueryService.MAX_INDEX_SCAN)
+                return owner.rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
+            selectedIds[index] = selected; users[index] = route.userId();
+            laneMask |= owner.runtimeState.topology().accountLaneMask(route.userId());
+        }
+        long id = nextAsyncQueryId++;
+        var page = new AlgoQueryPage(selectedIds, users,
+                new com.surprising.aeron.protocol.CoreAlgoOrderView[selectedIds.length]);
+        var query = new AccountQuery(id, owner.appliedCommandCount, CoreMessageType.ALGO_ORDER_QUERY,
+                0, 0, 0, laneMask, null, page);
+        return dispatchAccountQuery(message, id, laneMask, query);
+    }
+
+    private CoreResponse dispatchAccountQuery(CoreMessage message, long id, long laneMask, AccountQuery query) {
         queryIds.put(message.header().commandId(), id);
         try {
             if (!owner.runtimeState.dispatchAccountQuery(laneMask, query)) {
@@ -132,6 +167,9 @@ final class OrderBookQueryService {
         }
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount);
     }
+
+    /** 本次算法查询的固定路由与响应槽；各Lane只写自己的下标，完成位发布后归并。 */
+    private record AlgoQueryPage(long[] ids, long[] users, com.surprising.aeron.protocol.CoreAlgoOrderView[] views) { }
 
     private static CoreResponse missingAccountResponse(CoreMessageType type, long commandCount) {
         if (type == CoreMessageType.USER_STATE_HASH_QUERY || type == CoreMessageType.ORDER_STATE_HASH_QUERY)
@@ -148,21 +186,27 @@ final class OrderBookQueryService {
         private final boolean[] found;
         private final long[] openOrderIds;
         private final com.surprising.aeron.protocol.CoreOrderStateView[] openOrders;
+        private final AlgoQueryPage algoPage;
         private final AtomicLong completedLaneMask = new AtomicLong();
 
         private AccountQuery(long id, long commandCount, CoreMessageType type, long userId,
-                             long orderId, long clientKey, long laneMask, long[] openOrderIds) {
+                             long orderId, long clientKey, long laneMask, long[] openOrderIds, AlgoQueryPage algoPage) {
             this.id = id; this.commandCount = commandCount; this.type = type;
             this.userId = userId; this.orderId = orderId; this.clientKey = clientKey; this.laneMask = laneMask;
             int count = owner.runtimeState.topology().accountLaneCount();
             responses = new CoreResponse[count]; found = new boolean[count];
             this.openOrderIds = openOrderIds;
+            this.algoPage = algoPage;
             openOrders = openOrderIds == null ? null : new com.surprising.aeron.protocol.CoreOrderStateView[openOrderIds.length];
         }
 
         @Override public void execute(AccountLaneState lane) {
             CoreResponse response;
             try { response = owner.runtimeState.readAccountLane(lane, this); }
+            catch (RuntimeOperationalQueryService.QueryTooLargeException tooLarge) {
+                response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
+                        CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
+            }
             catch (IllegalArgumentException invalid) {
                 response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                         CoreResultCode.INVALID_COMMAND, commandCount);
@@ -186,6 +230,14 @@ final class OrderBookQueryService {
         }
 
         @Override public CoreResponse apply(AccountLaneState lane) {
+            if (algoPage != null) {
+                for (int index = 0; index < algoPage.ids.length; index++) {
+                    if (owner.runtimeState.topology().accountLaneId(algoPage.users[index]) != lane.laneId()) continue;
+                    var views = RuntimeOperationalQueryService.algoOrders(owner.runtimeState, List.of(algoPage.ids[index]));
+                    if (!views.isEmpty()) algoPage.views[index] = views.getFirst();
+                }
+                return null;
+            }
             if (openOrderIds != null) {
                 for (int index = 0; index < openOrderIds.length; index++) {
                     var query = RuntimeStateQueryService.orderState(owner.runtimeState, owner.identities, openOrderIds[index]);
@@ -221,6 +273,12 @@ final class OrderBookQueryService {
                 var response = responses[laneId];
                 if (response != null && (response.resultCode() == CoreResultCode.INVALID_COMMAND
                         || response.resultCode() == CoreResultCode.QUERY_RESPONSE_TOO_LARGE)) return response;
+            }
+            if (algoPage != null) {
+                var selected = new ArrayList<com.surprising.aeron.protocol.CoreAlgoOrderView>(algoPage.views.length);
+                for (var view : algoPage.views) if (view != null) selected.add(view);
+                return new CoreResponse(ResponseStatus.OK, commandCount,
+                        com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeList(selected));
             }
             if (openOrders != null) {
                 var selected = new ArrayList<com.surprising.aeron.protocol.CoreOrderStateView>(openOrders.length);

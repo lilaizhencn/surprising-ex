@@ -37,6 +37,9 @@ public final class AlgoOrderIndex {
                 && idsByClient.containsKey(new AlgoClientKey(userId, clientAlgoOrderId));
     }
 
+    /** 已有Owner索引的不可变路由事实；账户和子订单仍由实际Lane读取。 */
+    public CoreAlgoOrderState value(long algoOrderId) { return valuesById.get(algoOrderId); }
+
     public List<Long> query(long userId, String instrumentId, long dueAtEpochMillis, int limit,
                             Map<Long, CoreAlgoOrderState> values) {
         return query(userId, instrumentId, dueAtEpochMillis, limit, values::get);

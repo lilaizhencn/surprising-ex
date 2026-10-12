@@ -1,0 +1,83 @@
+{
+  "start": "2026-10-12T12:47:19.984536+00:00",
+  "head": "cf1e2f026f57a90b7867d1ec5339ba206555ac9c",
+  "goal": "算法单查询在所属Lane读取父单及保留子订单，Owner只读已有索引选择有界路由",
+  "steps": [
+    "Owner解析查询，使用既有AlgoOrderIndex选ID、用户Lane和全局扫描上限",
+    "实际Lane读取自身父单及子订单，计算执行量/挂单量/挂单数",
+    "最后完成Lane按Owner选定分页顺序编码，仅消费既有异步结果槽",
+    "缺失及坏输入维持现有协议；超限只拒绝该查询，无新增全局业务镜像"
+  ],
+  "pressureJmhJfr": false,
+  "snapshotRecoveryWalletScenarios": false,
+  "changeFiles": [
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBookQueryService.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreQueryRouter.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/index/AlgoOrderIndex.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreAlgoLaneQueryTest.java"
+  ],
+  "command": [
+    "mvn",
+    "-B",
+    "-ntp",
+    "-pl",
+    "surprising-aeron-core/surprising-aeron-service",
+    "-am",
+    "-Dtest=CoreAlgoLaneQueryTest,CoreAccountLaneQueryTest,CoreRiskLaneQueryTest,TradingCoreOwnerTest#algoUpdatesStayOnAccountLaneAndPublishRevisions",
+    "-Dsurefire.failIfNoSpecifiedTests=false",
+    "test"
+  ],
+  "sourceBefore": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBookQueryService.java": "b21ee8ec54a675a5cf2236197ac3e17bce80915c420360ac208fd9d0c6730662",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreQueryRouter.java": "c86c81cc09f97a4334ef71fbc713f3f55272d891840ab2dc58359be03fbdeea7",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/index/AlgoOrderIndex.java": "f9b52663181f5ba3b8592a5e4e80ce6223d1903dafa1f8c3d7044544ac58d31a",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreAlgoLaneQueryTest.java": "d114f0c68c8b1191b69871747e25755d3c1584d0b2de67c733c123462560e070"
+  },
+  "exitCode": 0,
+  "end": "2026-10-12T12:50:13.826128+00:00",
+  "sourceAfter": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBookQueryService.java": "b21ee8ec54a675a5cf2236197ac3e17bce80915c420360ac208fd9d0c6730662",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreQueryRouter.java": "c86c81cc09f97a4334ef71fbc713f3f55272d891840ab2dc58359be03fbdeea7",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/index/AlgoOrderIndex.java": "f9b52663181f5ba3b8592a5e4e80ce6223d1903dafa1f8c3d7044544ac58d31a",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreAlgoLaneQueryTest.java": "d114f0c68c8b1191b69871747e25755d3c1584d0b2de67c733c123462560e070"
+  },
+  "sourceUnchanged": true,
+  "executedClasses": [
+    {
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.CoreAccountLaneQueryTest"
+    },
+    {
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.CoreAlgoLaneQueryTest"
+    },
+    {
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.CoreRiskLaneQueryTest"
+    },
+    {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.TradingCoreOwnerTest"
+    }
+  ],
+  "interpretation": {
+    "result": "20次必要测试执行通过，无失败、错误或跳过。",
+    "stateOwnership": "复用AccountQuery及原queryIds/completedBookQueries；每请求路由ID、用户Lane与DTO数组在响应消费或close/join后释放。Owner只读已有AlgoOrderIndex，不读取publishedAlgoOrders或Lane账户。",
+    "coverage": "跨Lane分页排序、用户/币对/到期/limit过滤；保留FILLED/CANCELED与部分挂单子订单精确累计；全局扫描超限；坏输入/缺失后的健康查询；阻塞Lane立即返回与一次消费；8账户、7风险ADL及1实际Owner日志算法更新回归。",
+    "notRun": "用户要求无压测/JMH/JFR/快照/恢复/wallet，不作性能结论。",
+    "remaining": "订单预检查询及运行时冷入口、严格Lane所有权与交接守卫仍需迁移收口。Owner迁移尚未全部完成。",
+    "cleanup": "Maven进程退出，无本轮集群/Archive/JFR；保留必要计划/日志。"
+  }
+}
