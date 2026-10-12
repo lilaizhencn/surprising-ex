@@ -21,7 +21,7 @@ class CoreFinancialLedgerProductionTest {
     private long sequence;
 
     @Test
-    void liquidationInsuranceAndAdlCommitOriginalLedgerInProductionOrder() {
+    void liquidationInsuranceAndAdlCommitOriginalLedgerInProductionOrder() throws Exception {
         var line = ProductLine.LINEAR_PERPETUAL;
         try (var core = new TradingCoreRuntime(line)) {
             register(core, line);
@@ -49,19 +49,19 @@ class CoreFinancialLedgerProductionTest {
 
             var topUp = new AdjustInsuranceFundCommand("USDT", 25 - expected.treasuryState().insuranceBalances().getOrDefault("USDT", 0L));
             expected = expected(expected, (runtime, identities) -> RuntimeInsuranceFundStateTransitions.adjust(runtime, identities, topUp));
-            applied(core, CoreMessageType.ADJUST_INSURANCE_FUND, 0, TradingCommandCodec.encodeAdjustInsuranceFund(topUp), TIME);
+            appliedWithGuard(core, CoreMessageType.ADJUST_INSURANCE_FUND, 0, TradingCommandCodec.encodeAdjustInsuranceFund(topUp), TIME);
             assertThat(core.tradingState()).isEqualTo(expected);
             var insurance = new ResolveLiquidationCommand(planned.liquidationId(), ResolveLiquidationCommand.Resolution.INSURANCE, 25);
             expected = expected(expected, (runtime, identities) ->
                     RuntimeLiquidationResolution.applyRuntime(insurance, runtime, identities, List.of(planned.liquidationId())));
-            applied(core, CoreMessageType.RESOLVE_LIQUIDATION, 0, TradingCommandCodec.encodeResolveLiquidation(insurance), TIME);
+            appliedWithGuard(core, CoreMessageType.RESOLVE_LIQUIDATION, 0, TradingCommandCodec.encodeResolveLiquidation(insurance), TIME);
             assertThat(core.tradingState()).isEqualTo(expected);
             var residual = expected.riskState().liquidations().get(planned.liquidationId());
             assertThat(residual.status()).isEqualTo(CoreLiquidationState.Status.ADL_REQUIRED);
             var adl = new ExecuteAdlCommand(planned.liquidationId(), 2, "1", CoreMarginMode.CROSS,
                     CorePositionSide.NET, -10, 100, 2, 10, residual.deficitUnits());
             expected = expected(expected, (runtime, identities) -> RuntimeAdlExecution.applyRuntime(adl, runtime, identities));
-            applied(core, CoreMessageType.EXECUTE_ADL, 0, TradingCommandCodec.encodeExecuteAdl(adl), TIME);
+            appliedWithGuard(core, CoreMessageType.EXECUTE_ADL, 0, TradingCommandCodec.encodeExecuteAdl(adl), TIME);
             assertThat(core.tradingState()).isEqualTo(expected);
             assertThat(core.tradingState().users().values()).allSatisfy(user -> assertThat(user.positions().values()).allSatisfy(position -> assertThat(position.signedQuantitySteps()).isZero()));
             assertThat(core.runtimeState.systemLedgerStarted()).isTrue();
@@ -71,7 +71,7 @@ class CoreFinancialLedgerProductionTest {
 
     @ParameterizedTest
     @EnumSource(value = ProductLine.class, names = {"LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
-    void expiryCommandUsesAutomaticallyStartedLedgerAndMatchesColdStateTransitions(ProductLine line) {
+    void expiryCommandUsesAutomaticallyStartedLedgerAndMatchesColdStateTransitions(ProductLine line) throws Exception {
         try (var core = new TradingCoreRuntime(line)) {
             register(core, line);
             String asset = line == ProductLine.INVERSE_DELIVERY ? "BTC" : "USDT";
@@ -85,7 +85,7 @@ class CoreFinancialLedgerProductionTest {
             var expected = expected(opening, (runtime, identities) ->
                     RuntimeLifecycleSettlement.apply(opening, settlement, null, null, null, runtime, identities));
             long handoff = core.runtimeState.laneHandoffEpoch();
-            applied(core, CoreMessageType.SETTLE_INSTRUMENT, 0, TradingCommandCodec.encodeSettleInstrument(settlement), TIME + 2_000);
+            appliedWithGuard(core, CoreMessageType.SETTLE_INSTRUMENT, 0, TradingCommandCodec.encodeSettleInstrument(settlement), TIME + 2_000);
             assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
             assertThat(core.tradingState()).isEqualTo(expected);
             assertThat(core.tradingState().users().values()).allSatisfy(user -> assertThat(user.positions().values()).allSatisfy(position -> assertThat(position.signedQuantitySteps()).isZero()));
@@ -123,6 +123,12 @@ class CoreFinancialLedgerProductionTest {
                         user == 2 ? CoreOrderSide.SELL : CoreOrderSide.BUY, price, quantity, false,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                         false, "financial-" + user)), TIME);
+    }
+
+    private CoreResponse appliedWithGuard(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload, long timestamp) throws Exception {
+        try (var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+            return applied(core, type, user, payload, timestamp);
+        }
     }
 
     private CoreResponse applied(TradingCoreRuntime core, CoreMessageType type, long user, byte[] payload, long timestamp) {

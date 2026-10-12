@@ -160,3 +160,6 @@ Matcher财务接线现由日志提交队首异步推入原Ledger；普通成交�
 财库和保险分配查询已迁到原 `SystemLedgerLane`（2026-10-12）：Owner解析和选取不可变索赔事实，账本读取预算、计算和编码；复用盘口已有异步查询ID与结果槽。财库、保险及进度查询不触发Account Lane停让；查询失败不终止账本，关闭先等待工作线程再清理结果槽。HotSpot JDK27的18个必要用例通过，生产自动启用仍待下一模块；未做压测、JMH/JFR、快照/恢复或wallet。见 [查询验证](docs/validation/owner-ledger-query-20261012.json)。
 
 生产账本自动启用（2026-10-12）：`CoreRuntimeLifecycle.activate` 绑定Owner并启动Account Lane后启动原Treasury的 `SystemLedgerLane`；无需实验开关，也不把资金状态接回Owner。实际命令入口的40个必要测试通过，覆盖批次/触发/手续费、线性和反向永续资金费、强平→保险→ADL、交割/期权结算及账本查询。Owner仍有强平执行判断与身份回收等账户读取边界，完整Shared-Nothing迁移尚未完成；未做压测、JMH/JFR、快照/恢复或wallet。见 [生产账本验证](docs/validation/production-ledger-activation-20261012.json)。
+
+
+账户控制任务的用户、订单、预留与持仓变更现只写所属 Lane 的 `LaneCommitDelta`，Owner 在完成通知后收集既有回执；关闭持仓触发取消读取已有前值。持仓身份回收使用 Lane 末尾随风险删除返回的布尔证明与身份引用计数，Owner 不回读 Lane 持仓表，不新增账户镜像。58 次必要用例执行通过，覆盖分离删除、风险单独删除、同 Lane 重开及资金费/保险/ADL/交割期权/触发边界，见 [验证记录](docs/validation/owner-position-retirement-20261012.json)。未做压测或快照恢复；强平执行前校验等 Owner 读取仍待迁移。

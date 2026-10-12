@@ -236,8 +236,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 当前提交范围内变化的标记价；与提交/回滚边界同步维护。 */
     final IntHashSet changedMarkPrices = new IntHashSet();
     /** 当前提交范围内变化的风险快照；与提交/回滚边界同步维护。 */
-    final RuntimeChangeBuffer<RiskSnapshotRuntime> changedRiskSnapshots =
-            new RuntimeChangeBuffer<>();
+    final RuntimeIndexedChangeBuffer<RiskSnapshotRuntime, Boolean> changedRiskSnapshots =
+            new RuntimeIndexedChangeBuffer<>();
     /** 当前提交范围内变化的风险扫描；与提交/回滚边界同步维护。 */
     final IntHashSet changedRiskScans = new IntHashSet();
     /** 当前提交范围内变化的杠杆；与提交/回滚边界同步维护。 */
@@ -624,9 +624,14 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     void exitLaneCommandScope(AccountLaneState lane) {
+        exitLaneCommandScope(lane, false);
+    }
+
+    private void exitLaneCommandScope(AccountLaneState lane, boolean matcherScope) {
         if (lane == null || currentLaneCommandScope() != lane) {
             throw new IllegalStateException("account lane command scope is not active");
         }
+        if (!matcherScope) laneDeltas[lane.laneId()].preparePositionRetirement(lane);
         if (Thread.currentThread() == owner) ownerLaneScope = null;
         else lane.commandScopeActive = false;
         if (Thread.currentThread() == owner) flushPublishedChanges(lane.laneId());
@@ -638,7 +643,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         if (Thread.currentThread() == owner) ownerMatcherSettlementChangesScope = null;
         else lane.matcherSettlementChanges = null;
-        exitLaneCommandScope(lane);
+        exitLaneCommandScope(lane, true);
     }
 
     public <T> T executeUserSettlement(long userId, java.util.function.Supplier<T> operation) {
@@ -935,7 +940,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                                com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
                                com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
         LaneCommitDelta changes = laneDeltas[laneId];
-        changes.recordRiskChanges(this);
+        changes.recordControlChanges(this, laneId);
+        if (accountRollback.patchBalancesBeforeByLane[laneId].size() != 0) markBalancesChanged();
         changes.publishTriggersToOwner(this);
         changes.drainTo(laneId, publishedLiquidations, publishedRiskSnapshots, changedUsers, changedOrders);
     }
@@ -1836,7 +1842,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                         ? admissionVersion : admitted);
                 if (changes == null) {
                     changedOrder(orderId, admitted);
-                    changedUsers.add(reservation.userId());
+                    markUserChanged(reservation.userId());
                 }
             }
             accountRollback.captureBalanceAfter(lane, reservation.userId(), reservation.assetId());
@@ -1875,7 +1881,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (userId <= 0 || assetId < 0 || positionKey <= 0) {
             throw new IllegalArgumentException("invalid user settlement changes");
         }
-        changedUsers.add(userId);
+        markUserChanged(userId);
         markBalancesChanged();
         changedPosition(positionKey);
     }
@@ -2371,7 +2377,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void markUserChanged(long userId) {
         assertOwner();
-        changedUsers.add(userId);
+        AccountLaneState lane = currentLaneCommandScope();
+        if (lane == null) changedUsers.add(userId);
+        else laneDelta(lane.laneId()).putUser(userId, lane.users.get(userId));
     }
 
     /** Read-only query access to the owning lane's reservation ids. */
@@ -3162,7 +3170,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             return null;
         });
         publishUser(user.userId(), user);
-        if (currentLaneCommandScope() == null) changedUsers.add(user.userId());
+        if (currentLaneCommandScope() == null) markUserChanged(user.userId());
     }
 
     public void advanceUserRevision(long userId) {
@@ -3192,7 +3200,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 Math.addExact(current.revision(), count), current.positionMode());
         onLane(userId, lane -> lane.users.put(userId, advanced));
         publishUser(userId, advanced);
-        if (currentLaneCommandScope() == null) changedUsers.add(userId);
+        if (currentLaneCommandScope() == null) markUserChanged(userId);
     }
 
     public void removeUser(long userId) {
@@ -3214,7 +3222,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             return null;
         });
         publishUser(userId, null);
-        changedUsers.add(userId);
+        markUserChanged(userId);
     }
 
     public void putBalance(BalanceRuntime balance) {
@@ -3237,7 +3245,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
         if (currentLaneCommandScope() == null) {
             markBalancesChanged();
-            changedUsers.add(userId);
+            markUserChanged(userId);
         }
     }
 
@@ -3248,7 +3256,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         onLane(order.userId(), lane -> { lane.putOrder(order); return null; });
         publishOrder(order.orderId(), order);
         changedOrder(order.orderId(), order);
-        changedUsers.add(order.userId());
+        markUserChanged(order.userId());
     }
 
     public void putReservation(ReservationRuntime reservation) {
@@ -3275,9 +3283,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         publishReservation(reservation.orderId(), reservation);
         if (previous == null) {
         }
-        changedReservations.add(reservation.orderId());
-        changedUsers.add(reservation.userId());
-        if (previous != null) changedUsers.add(previous.userId());
+        markReservationChanged(reservation.orderId());
+        markUserChanged(reservation.userId());
+        if (previous != null) markUserChanged(previous.userId());
     }
 
     public void replaceOrder(OrderRuntime order) {
@@ -3296,7 +3304,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         if (currentMatcherSettlementChangesScope() == null) {
             changedOrder(order.orderId(), order);
-            changedUsers.add(order.userId());
+            markUserChanged(order.userId());
         }
     }
 
@@ -3309,7 +3317,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             onLane(previous.userId(), lane -> { lane.removeOrder(orderId); return null; });
             publishOrder(orderId, null);
             changedOrder(orderId, null);
-            changedUsers.add(previous.userId());
+            markUserChanged(previous.userId());
         }
     }
 
@@ -3339,9 +3347,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
         publishReservation(reservation.orderId(), reservation);
         if (currentMatcherSettlementChangesScope() == null) {
-            changedReservations.add(reservation.orderId());
-            changedUsers.add(reservation.userId());
-            if (previous != null) changedUsers.add(previous.userId());
+            markReservationChanged(reservation.orderId());
+            markUserChanged(reservation.userId());
+            if (previous != null) markUserChanged(previous.userId());
         }
     }
 
@@ -3362,8 +3370,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             return null;
         });
         publishReservation(orderId, null);
-        changedReservations.add(orderId);
-        changedUsers.add(userId);
+        markReservationChanged(orderId);
+        markUserChanged(userId);
     }
 
     public void replaceBalance(BalanceRuntime balance) {
@@ -3386,7 +3394,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
         if (currentLaneCommandScope() == null) {
             markBalancesChanged();
-            changedUsers.add(userId);
+            markUserChanged(userId);
         }
     }
 
@@ -3403,7 +3411,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             return null;
         });
         markBalancesChanged();
-        changedUsers.add(userId);
+        markUserChanged(userId);
     }
 
     /** Same operation with the instrumentId identity supplied explicitly for a newly opened position. */
@@ -3507,8 +3515,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         publishPosition(positionKey, position);
         if (currentLaneCommandScope() == null) {
             changedPosition(positionKey, position);
-            changedUsers.add(position.userId());
-            if (previous != null) changedUsers.add(previous.userId());
+            markUserChanged(position.userId());
+            if (previous != null) markUserChanged(previous.userId());
         }
     }
 
@@ -3527,7 +3535,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (currentLaneCommandScope() == null) {
             changedLiquidations.put(liquidation.liquidationId(), liquidation);
         }
-        changedUsers.add(liquidation.userId());
+        markUserChanged(liquidation.userId());
     }
 
     public void putMarkPrice(MarkPriceRuntime markPrice) {
@@ -3547,7 +3555,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             return null;
         });
         if (currentLaneCommandScope() == null) changedRiskSnapshots.put(positionKey, snapshot);
-        changedUsers.add(snapshot.userId());
+        markUserChanged(snapshot.userId());
     }
 
     public void putRiskScan(RiskScanRuntime scan) {
@@ -3598,8 +3606,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (currentLaneCommandScope() == null) {
             changedLiquidations.put(liquidation.liquidationId(), liquidation);
         }
-        changedUsers.add(liquidation.userId());
-        changedUsers.add(previous.userId());
+        markUserChanged(liquidation.userId());
+        markUserChanged(previous.userId());
     }
 
     public void removePosition(long positionKey, long userId) {
@@ -3617,7 +3625,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
         publishPosition(positionKey, null);
         changedPosition(positionKey, null);
-        changedUsers.add(userId);
+        markUserChanged(userId);
     }
 
     public void removeLiquidation(long liquidationId) {
@@ -3632,7 +3640,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 return null;
             });
             if (currentLaneCommandScope() == null) changedLiquidations.put(liquidationId, null);
-            changedUsers.add(previous.userId());
+            markUserChanged(previous.userId());
         }
     }
 
@@ -3648,16 +3656,18 @@ public final class TradingRuntimeState implements AutoCloseable {
         rejectUnsupportedOrderBatchMutation("risk snapshot");
         RiskSnapshotRuntime previous = riskSnapshot(positionKey);
         if (previous != null) {
-            onLane(previous.userId(), lane -> {
+            boolean positionAbsent = onLane(previous.userId(), lane -> {
                 lane.cold.riskSnapshots.remove(positionKey);
                 publishRiskSnapshot(positionKey, null);
-                return null;
+                return lane.positions.get(positionKey) == null;
             });
+            if (currentLaneCommandScope() == null)
+                changedRiskSnapshots.putIndexed(positionKey, null, true, positionAbsent);
         } else {
             publishedRiskSnapshots.removeKey(positionKey);
         }
-        if (currentLaneCommandScope() == null) changedRiskSnapshots.put(positionKey, null);
-        if (previous != null) changedUsers.add(previous.userId());
+        if (currentLaneCommandScope() == null && previous == null) changedRiskSnapshots.put(positionKey, null);
+        if (previous != null) markUserChanged(previous.userId());
     }
 
     public void removeRiskScan(int symbolId) {
@@ -3701,8 +3711,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         publishReservation(orderId, canceled.reservation());
         if (currentMatcherSettlementChangesScope() == null) {
             changedOrder(orderId, canceled.order());
-            changedReservations.add(orderId);
-            changedUsers.add(userId);
+            markReservationChanged(orderId);
+            markUserChanged(userId);
             markBalancesChanged();
         }
         advanceUserRevision(userId);
@@ -3837,8 +3847,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
         if (release.units() == 0) return;
         if (currentLaneCommandScope() == null) {
-            changedReservations.add(orderId);
-            changedUsers.add(order.userId());
+            markReservationChanged(orderId);
+            markUserChanged(order.userId());
             markBalancesChanged();
         }
     }
@@ -3851,7 +3861,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             putClientOrderIndex(lane, userId, clientKey, orderId);
             return null;
         });
-        changedUsers.add(userId);
+        markUserChanged(userId);
     }
 
     public void removeClientOrder(long userId, long clientKey) {
@@ -3862,7 +3872,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             removeClientOrderIndex(lane, userId, clientKey);
             return null;
         });
-        changedUsers.add(userId);
+        markUserChanged(userId);
     }
 
     public void pruneTerminalOrders(RuntimeIdentityRegistry identities, List<Long> orderIds) {
@@ -3933,10 +3943,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             for (TerminalOrderPruned terminal : pruned) {
                 publishOrder(terminal.orderId(), null);
                 changedOrder(terminal.orderId(), null);
-                changedUsers.add(terminal.userId());
+                markUserChanged(terminal.userId());
                 if (terminal.reservationRemoved()) {
                     publishReservation(terminal.orderId(), null);
-                    changedReservations.add(terminal.orderId());
+                    markReservationChanged(terminal.orderId());
                     markBalancesChanged();
                 }
             }
@@ -3987,23 +3997,43 @@ public final class TradingRuntimeState implements AutoCloseable {
     void markBalanceChanged(long userId, int assetId) {
         assertOwner();
         markBalancesChanged();
-        changedUsers.add(userId);
+        markUserChanged(userId);
+    }
+
+    private void markReservationChanged(long orderId) {
+        AccountLaneState lane = currentLaneCommandScope();
+        if (lane == null) changedReservations.add(orderId);
+        else laneDelta(lane.laneId()).putReservation(orderId, lane.reservations.get(orderId));
     }
 
     void changedOrder(long orderId) {
-        changedOrders.put(orderId, order(orderId));
+        if (currentLaneCommandScope() == null && accountLanesStarted) {
+            if (!changedOrders.containsKey(orderId))
+                throw new IllegalStateException("order change requires a collected Lane receipt: " + orderId);
+            return;
+        }
+        changedOrder(orderId, order(orderId));
     }
 
     void changedOrder(long orderId, OrderRuntime order) {
-        changedOrders.put(orderId, order == null ? null : order.publicationValue());
+        AccountLaneState lane = currentLaneCommandScope();
+        if (lane == null) changedOrders.put(orderId, order == null ? null : order.publicationValue());
+        else laneDelta(lane.laneId()).putOrder(orderId, order == null ? null : order.publicationValue());
     }
 
     void changedPosition(long positionKey) {
-        changedPositions.put(positionKey, position(positionKey));
+        if (currentLaneCommandScope() == null && accountLanesStarted) {
+            if (!changedPositions.containsKey(positionKey))
+                throw new IllegalStateException("position change requires a collected Lane receipt: " + positionKey);
+            return;
+        }
+        changedPosition(positionKey, position(positionKey));
     }
 
     void changedPosition(long positionKey, PositionRuntime position) {
-        changedPositions.put(positionKey, position == null ? null : position.publicationValue());
+        AccountLaneState lane = currentLaneCommandScope();
+        if (lane == null) changedPositions.put(positionKey, position == null ? null : position.publicationValue());
+        else laneDelta(lane.laneId()).putPosition(positionKey, position == null ? null : position.publicationValue());
     }
 
     public LongHashSet changedOrders() {
@@ -4071,17 +4101,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         changedCancelAllAfterTimers.forEach(key -> consumer.timer(key, null, cancelAllAfterTimer(key)));
     }
 
-    public void releaseRetiredPositionIdentities(RuntimeIdentityRegistry identities) {
-        assertOwner();
-        if (identities == null) throw new IllegalArgumentException("runtime identities are required");
-        changedPositions.forEach((positionKey, value) -> {
-            if (value == null) releaseRetiredPositionIdentity(identities, positionKey);
-        });
-        changedRiskSnapshots.forEach((positionKey, value) -> {
-            if (value == null) releaseRetiredPositionIdentity(identities, positionKey);
-        });
-    }
-
     /**
      * Release identities only after journal publication and clear the two traversed buffers at
      * the same time. Other changed keys still follow the normal commit cleanup below.
@@ -4089,17 +4108,20 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void clearCommittedChanges(RuntimeIdentityRegistry identities) {
         assertOwner();
         if (identities == null) throw new IllegalArgumentException("runtime identities are required");
-        changedPositions.drainTo((positionKey, value) -> {
-            if (value == null) releaseRetiredPositionIdentity(identities, positionKey);
+        // 风险先清理，以已有持仓变更排除本次随后重开的持仓；不回读Lane表。
+        changedRiskSnapshots.drainIndexedTo((positionKey, value, hasProof, positionAbsent) -> {
+            if (value == null && hasProof && Boolean.TRUE.equals(positionAbsent)
+                    && changedPositions.get(positionKey) == null)
+                releaseRetiredPositionIdentity(identities, positionKey);
         });
-        changedRiskSnapshots.drainTo((positionKey, value) -> {
+        changedPositions.drainTo((positionKey, value) -> {
             if (value == null) releaseRetiredPositionIdentity(identities, positionKey);
         });
         clearChangedKeys();
     }
 
     void releaseRetiredPositionIdentity(RuntimeIdentityRegistry identities, long positionKey) {
-        if (position(positionKey) == null && publishedRiskSnapshots.get(positionKey) == null) {
+        if (publishedRiskSnapshots.get(positionKey) == null) {
             identities.releasePositionKey(positionKey);
         }
     }
@@ -4350,8 +4372,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         // after the task's completion has been observed by Owner.
         if (currentLaneCommandScope() == null) {
             changedOrder(orderId, order);
-            changedReservations.add(orderId);
-            changedUsers.add(userId);
+            markReservationChanged(orderId);
+            markUserChanged(userId);
             markBalancesChanged();
         } else {
             publishOrder(orderId, order);
@@ -4429,8 +4451,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         publishPosition(positionKey, position);
         if (currentMatcherSettlementChangesScope() == null) {
             changedPosition(positionKey, position);
-            changedUsers.add(position.userId());
-            if (previous != null) changedUsers.add(previous.userId());
+            markUserChanged(position.userId());
+            if (previous != null) markUserChanged(previous.userId());
         }
     }
 
@@ -4495,7 +4517,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     void markBalancesChanged() {
-        balancesChanged = true;
+        if (currentLaneCommandScope() == null) balancesChanged = true;
     }
 
     private static final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList EMPTY_POSITION_KEYS =

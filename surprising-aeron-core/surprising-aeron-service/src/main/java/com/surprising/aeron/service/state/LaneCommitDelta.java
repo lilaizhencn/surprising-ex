@@ -64,7 +64,8 @@ public final class LaneCommitDelta {
     /** 本次需要发布的清算变化。 */
     final RuntimeChangeBuffer<LiquidationRuntime> liquidations = new RuntimeChangeBuffer<>();
     /** 本次需要发布的风险快照变化。 */
-    final RuntimeChangeBuffer<RiskSnapshotRuntime> riskSnapshots = new RuntimeChangeBuffer<>();
+    /** 删除的预计算列只携带Lane末尾持仓不存在的证明，供提交后回收身份。 */
+    final RuntimeIndexedChangeBuffer<RiskSnapshotRuntime, Boolean> riskSnapshots = new RuntimeIndexedChangeBuffer<>();
     /** 待移除的订单路由 ID。 */
     final LongHashSet removedOrderRoutes = new LongHashSet();
     /** 待移除的预留路由 ID。 */
@@ -105,6 +106,15 @@ public final class LaneCommitDelta {
 
     void putRiskSnapshot(long key, RiskSnapshotRuntime value) {
         riskSnapshots.put(key, value);
+    }
+
+    /** 只在所属Lane结束命令时采集删除证明，不传输账户状态。 */
+    void preparePositionRetirement(AccountLaneState lane) {
+        for (int index = 0; index < riskSnapshots.size(); index++) {
+            if (riskSnapshots.valueAt(index) != null) continue;
+            long key = riskSnapshots.keyAt(index);
+            riskSnapshots.putPrepared(key, lane.positions.get(key) == null);
+        }
     }
 
     void removeOrderRoute(long orderId) { removedOrderRoutes.add(orderId); }
@@ -158,8 +168,8 @@ public final class LaneCommitDelta {
             state.changedLiquidations.put(id, value);
             TradingRuntimeState.putOrRemove(state.publishedLiquidations, id, value);
         });
-        riskSnapshots.drainTo((key, value) -> {
-            state.changedRiskSnapshots.put(key, value);
+        riskSnapshots.drainIndexedTo((key, value, hasProof, positionAbsent) -> {
+            state.changedRiskSnapshots.putIndexed(key, value, hasProof, positionAbsent);
             TradingRuntimeState.putOrRemove(state.publishedRiskSnapshots, key, value);
         });
         state.changedOrders.adopt(laneId, orders);
@@ -216,7 +226,7 @@ public final class LaneCommitDelta {
         state.changedOrders.adopt(laneId, orders);
         state.changedPositions.adopt(laneId, positions);
         liquidations.forEach(state.changedLiquidations::put);
-        riskSnapshots.forEach(state.changedRiskSnapshots::put);
+        riskSnapshots.forEachIndexed(state.changedRiskSnapshots::putIndexed);
         if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
         if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
     }
@@ -235,9 +245,13 @@ public final class LaneCommitDelta {
         triggers.clear();
     }
 
-    void recordRiskChanges(TradingRuntimeState state) {
+    void recordControlChanges(TradingRuntimeState state, int laneId) {
+        for (int index = 0; index < users.size(); index++) state.changedUsers.add(users.keyAt(index));
+        for (int index = 0; index < reservations.size(); index++) state.changedReservations.add(reservations.keyAt(index));
+        state.changedOrders.adopt(laneId, orders);
+        state.changedPositions.adopt(laneId, positions);
         liquidations.forEach(state.changedLiquidations::put);
-        riskSnapshots.forEach(state.changedRiskSnapshots::put);
+        riskSnapshots.forEachIndexed(state.changedRiskSnapshots::putIndexed);
     }
 
     void clear() {

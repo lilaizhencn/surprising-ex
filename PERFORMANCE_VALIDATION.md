@@ -5327,3 +5327,11 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - HotSpot JDK27最终40个必要测试执行通过，失败/错误/跳过0，源码指纹未变化。覆盖14批次、14无快照触发、2资金费、4真实命令财务、5查询及1手续费守恒；完整命令见 `docs/validation/production-ledger-activation-20261012.json`。
 - 初轮新财务用例4处初始化/断言错误已保留并修正；修正后4个定向及最终40执行通过。日志目录 `../performance-artifacts/production-ledger-activation-20261012`，未运行负载进程。
 - 用户要求不做压测/JMH/JFR/快照/恢复/wallet。生产资金接线完成，但Owner强平判断、身份回收等账户读取仍待迁移，不宣称完整Shared-Nothing、不作性能结论。
+
+
+## 2026-10-12：控制变更回执与持仓身份回收（必要用例）
+
+- 入口/状态：控制 Lane 只写自身已有 LaneCommitDelta，Owner 完成后收集变更；身份回收使用风险删除的 Lane 末尾证明与既有引用计数，不回读账户表、不增加全局镜像。
+- HotSpot JDK27 最终58次必要测试执行通过，失败/错误/跳过0，测试期间源码未变；完整命令、指纹与实际类见 `docs/validation/owner-position-retirement-20261012.json`。
+- 初轮34次中1处 Owner 前值回读失败已保留并修正，9次定向及最终58次通过。日志目录 `../performance-artifacts/owner-position-retirement-20261012`，测试进程退出，无本轮集群/Archive/JFR。
+- 按用户要求无压测/JMH/JFR/快照/恢复/wallet。强平执行前校验及其他Owner读取仍待迁移，不宣称全部完成，不作性能结论。

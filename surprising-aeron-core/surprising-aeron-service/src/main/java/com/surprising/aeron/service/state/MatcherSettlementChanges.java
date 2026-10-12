@@ -145,6 +145,7 @@ final class MatcherSettlementChanges {
             changes.positions.putPrepared(positionKey,
                     position == null ? null : RuntimePositionIndexValue.from(position, identities));
         });
+        changes.preparePositionRetirement(lane);
         changes.preparePublication();
         TradingRuntimeState.prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
     }

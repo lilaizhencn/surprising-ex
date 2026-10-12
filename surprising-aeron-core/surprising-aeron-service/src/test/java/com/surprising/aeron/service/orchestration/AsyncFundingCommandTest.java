@@ -121,7 +121,7 @@ class AsyncFundingCommandTest {
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
         state.runtimeState.releaseOwnerLaneAccess();
         state.runtimeState.enterAsynchronousCommandScope();
-        try {
+        try (var guard = new OwnerAccountReadGuard(state.runtimeState)) {
             assertThat(state.applyDecodedCommand(message, TIME, message.header().sourceSequence(), null, false)).isNull();
             assertThat(state.hasPendingDirectCommand()).isTrue();
             assertThatThrownBy(() -> state.apply(message)).hasMessageContaining("still active");

@@ -3,6 +3,7 @@ package com.surprising.aeron.service.orchestration;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
+import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 import java.lang.reflect.Field;
 
@@ -12,8 +13,12 @@ final class OwnerAccountReadGuard implements AutoCloseable {
     private final String[] names = {"orders", "reservations", "users", "positions", "balances"};
     private final Object[][] originals;
     private final Thread owner = Thread.currentThread();
+    private final TradingRuntimeState runtime;
+    private final String[] changeNames = {"changedUsers", "changedReservations"};
+    private final LongHashSet[] originalChanges = new LongHashSet[changeNames.length];
 
     OwnerAccountReadGuard(TradingRuntimeState runtime) throws ReflectiveOperationException {
+        this.runtime = runtime;
         Field field = runtime.getClass().getDeclaredField("accountLanes");
         field.setAccessible(true);
         lanes = (Object[]) field.get(runtime);
@@ -25,6 +30,26 @@ final class OwnerAccountReadGuard implements AutoCloseable {
                 table.set(lanes[lane], guard(originals[lane][index], names[index]));
             }
         }
+        for (int index = 0; index < changeNames.length; index++) {
+            Field changes = changeField(index);
+            var source = (LongHashSet) changes.get(runtime);
+            originalChanges[index] = source;
+            String name = changeNames[index];
+            var guard = new LongHashSet() {
+                @Override public boolean add(long key) {
+                    if (Thread.currentThread() != owner) throw new AssertionError("Lane wrote Owner " + name);
+                    return super.add(key);
+                }
+            };
+            source.forEach(guard::add);
+            changes.set(runtime, guard);
+        }
+    }
+
+    private Field changeField(int index) throws ReflectiveOperationException {
+        Field field = runtime.getClass().getDeclaredField(changeNames[index]);
+        field.setAccessible(true);
+        return field;
     }
 
     private Field table(int lane, int index) throws ReflectiveOperationException {
@@ -71,6 +96,13 @@ final class OwnerAccountReadGuard implements AutoCloseable {
                 }
                 table.set(lanes[lane], original);
             }
+        }
+        for (int index = 0; index < changeNames.length; index++) {
+            Field changes = changeField(index);
+            var source = (LongHashSet) changes.get(runtime);
+            originalChanges[index].clear();
+            originalChanges[index].addAll(source);
+            changes.set(runtime, originalChanges[index]);
         }
     }
 }

@@ -26,6 +26,15 @@ class RuntimeIdentityRegistryTest {
 
     @Test
     void lanePositionIdentitySurvivesEarlierCommitRetirementUntilItsOutputIsPublished() throws Exception {
+        verifyPositionRetention(true);
+    }
+
+    @Test
+    void lanePositionIdentityRetentionWithoutSnapshot() throws Exception {
+        verifyPositionRetention(false);
+    }
+
+    private void verifyPositionRetention(boolean snapshot) throws Exception {
         var registry = new RuntimeIdentityRegistry();
         registry.assertOwner();
         long user = 17;
@@ -39,15 +48,18 @@ class RuntimeIdentityRegistryTest {
             registry.releasePositionKey(key);
             assertThat(registry.findPositionKey(user, "1:LONG")).isEqualTo(key);
             registry.releasePublishedPosition(key);
-            var restored = RuntimeIdentityRegistry.restore(registry.snapshot());
-            assertThat(restored.positionKey(user, key)).isEqualTo("1:LONG");
+            if (snapshot) {
+                var restored = RuntimeIdentityRegistry.restore(registry.snapshot());
+                assertThat(restored.positionKey(user, key)).isEqualTo("1:LONG");
+            }
             registry.releasePositionKey(key);
             assertThat(registry.findPositionKey(user, "1:LONG")).isNull();
             long recreated = executor.submit(() -> registry.retainPositionInLane(lane, user, "1:LONG")).get();
             assertThat(recreated).isEqualTo(key);
             registry.releasePublishedPosition(key);
             registry.releasePositionKey(key);
-            assertThat(registry.snapshot().positionKeys()).isEmpty();
+            assertThat(registry.findPositionKey(user, "1:LONG")).isNull();
+            if (snapshot) assertThat(registry.snapshot().positionKeys()).isEmpty();
         }
     }
 

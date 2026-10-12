@@ -353,15 +353,11 @@ final class RuntimeAccountRollback {
 
     PositionRuntime currentPositionBefore(long positionKey) {
         state.assertOwner();
-        PositionRuntime current = state.position(positionKey);
-        if (current != null) {
-            int laneId = state.topology.accountLaneId(current.userId());
-            LaneLongCaptures<PositionRuntime> captured = patchPositionsBeforeByLane[laneId];
-            return captured.containsKey(positionKey) ? captured.get(positionKey) : current;
-        }
         for (LaneLongCaptures<PositionRuntime> captured : patchPositionsBeforeByLane)
             if (captured.containsKey(positionKey)) return captured.get(positionKey);
-        return null;
+        if (state.currentLaneCommandScope() != null || !state.accountLanesStarted)
+            return state.position(positionKey);
+        return state.changedPositionValue(positionKey);
     }
 
     OrderRuntime currentOrderBefore(long orderId) {

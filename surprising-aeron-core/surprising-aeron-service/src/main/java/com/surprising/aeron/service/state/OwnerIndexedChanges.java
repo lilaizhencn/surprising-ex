@@ -55,6 +55,17 @@ final class OwnerIndexedChanges<V, I> {
         return null;
     }
 
+    boolean containsKey(long key) {
+        if (direct.indexOf(key) >= 0) return true;
+        long remaining = laneMask;
+        while (remaining != 0) {
+            int lane = Long.numberOfTrailingZeros(remaining);
+            remaining &= remaining - 1;
+            if (lanes[lane].indexOf(key) >= 0) return true;
+        }
+        return false;
+    }
+
     boolean isEmpty() { return laneMask == 0 && direct.isEmpty(); }
     void forEachIndexed(RuntimeIndexedChangeBuffer.Consumer<V, I> consumer) {
         direct.forEachIndexed(consumer);
