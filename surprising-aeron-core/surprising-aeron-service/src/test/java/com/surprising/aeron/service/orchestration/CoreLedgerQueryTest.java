@@ -24,7 +24,7 @@ class CoreLedgerQueryTest {
     void treasuryQueryReadsOriginalLedgerWithoutAccountHandoffAndConsumesResultOnce() throws Exception {
         try (var core = new TradingCoreRuntime(LINE)) {
             core.activate();
-            core.runtimeState.startSystemLedgerLane();
+            assertThat(core.runtimeState.systemLedgerStarted()).isTrue();
             var adjustment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_INSURANCE_FUND,
                     new UUID(936, 1), LINE, CommandSource.OPERATIONS, 936, 1, 0, 1, 1),
                     TradingCommandCodec.encodeAdjustInsuranceFund(new AdjustInsuranceFundCommand("USDT", 250)));
@@ -57,7 +57,8 @@ class CoreLedgerQueryTest {
                 Map.of(), Map.of("1", instrument), new CoreRiskState(Map.of(), Map.of(), Map.of(1L, first, 2L, second), Map.of(), 3),
                 CoreTreasuryState.empty().adjustInsurance("USDT", 25));
         try (var core = coreWithInitialState(state)) {
-            core.activate(); core.runtimeState.startSystemLedgerLane();
+            core.activate();
+            assertThat(core.runtimeState.systemLedgerStarted()).isTrue();
             long handoff = core.runtimeState.laneHandoffEpoch();
             try (var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                 var pageOne = insuranceQuery(core, 0);
@@ -87,7 +88,8 @@ class CoreLedgerQueryTest {
         var state = new TradingCoreState(LINE, 0, Map.of(), Map.of(), Map.of(), CoreRiskState.empty(),
                 CoreTreasuryState.ofSubledgers(fees, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of()));
         try (var core = coreWithInitialState(state)) {
-            core.activate(); core.runtimeState.startSystemLedgerLane();
+            core.activate();
+            assertThat(core.runtimeState.systemLedgerStarted()).isTrue();
             var response = query(core, CoreMessageType.TREASURY_STATE_QUERY, new byte[0]);
             assertThat(response.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(response.resultCode()).isEqualTo(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
@@ -99,7 +101,8 @@ class CoreLedgerQueryTest {
     @Test
     void coldReadFailureDoesNotPoisonOriginalFinancialLedger() {
         try (var core = new TradingCoreRuntime(LINE)) {
-            core.activate(); core.runtimeState.startSystemLedgerLane();
+            core.activate();
+            assertThat(core.runtimeState.systemLedgerStarted()).isTrue();
             assertThatThrownBy(() -> core.runtimeState.queryLedgerAtRest(ledger -> {
                 throw new IllegalArgumentException("invalid cold query");
             })).isInstanceOf(IllegalArgumentException.class).hasMessage("invalid cold query");
@@ -113,7 +116,8 @@ class CoreLedgerQueryTest {
     void closeJoinsLedgerBeforeClearingUnconsumedQueryResults() {
         var core = new TradingCoreRuntime(LINE);
         try {
-            core.activate(); core.runtimeState.startSystemLedgerLane();
+            core.activate();
+            assertThat(core.runtimeState.systemLedgerStarted()).isTrue();
             var message = message(CoreMessageType.TREASURY_STATE_QUERY, new byte[0]);
             assertThat(CoreTestCompletion.applyAsynchronously(core, message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             assertThat(core.querySequence(message.header().commandId())).isNotZero();

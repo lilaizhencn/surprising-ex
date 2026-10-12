@@ -23,6 +23,7 @@ final class CoreRuntimeLifecycle {
             owner.matcherPipeline.start(owner.matchingAdapter::activateShard);
             bindOwner();
             owner.runtimeState.startAccountLanes();
+            owner.runtimeState.startSystemLedgerLane();
             owner.matchingAdapter.activate();
             owner.commits.publication.activate();
             owner.activated = true;

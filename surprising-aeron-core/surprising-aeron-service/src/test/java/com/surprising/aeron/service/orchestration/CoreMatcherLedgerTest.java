@@ -22,7 +22,7 @@ class CoreMatcherLedgerTest {
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
             for (long user : new long[]{1001, 1002}) applied(state, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100_000)));
-            state.activate(); state.runtimeState.startSystemLedgerLane();
+            assertThat(state.runtimeState.systemLedgerStarted()).isTrue();
             assertThatThrownBy(() -> state.runtimeState.treasury().fee(state.identities.assetId("USDT")))
                     .isInstanceOf(IllegalStateException.class);
             try (var guard = new OwnerAccountReadGuard(state.runtimeState)) {

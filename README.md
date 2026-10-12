@@ -158,3 +158,5 @@ JDK 27 的 20 模块干净构建和 167 项资金、撮合、撤单、并发顺�
 Matcher财务接线现由日志提交队首异步推入原Ledger；普通成交返回完整原语流水，顺序批次只交接财库流水并沿用既有账户端点，避免重复记账。流水批次绑定原日志fence，用户回退前值来自Lane已有不可变回执。47次必要测试执行通过，包括带费单笔/流水/撤单批次的资金及Owner账户读取守卫。**外部查询与生产activation仍待接线，完整Owner迁移未完成**；未运行压测、JMH/JFR或快照恢复。见 [Matcher账本接线验证](docs/validation/owner-matcher-ledger-20261012.json)。
 
 财库和保险分配查询已迁到原 `SystemLedgerLane`（2026-10-12）：Owner解析和选取不可变索赔事实，账本读取预算、计算和编码；复用盘口已有异步查询ID与结果槽。财库、保险及进度查询不触发Account Lane停让；查询失败不终止账本，关闭先等待工作线程再清理结果槽。HotSpot JDK27的18个必要用例通过，生产自动启用仍待下一模块；未做压测、JMH/JFR、快照/恢复或wallet。见 [查询验证](docs/validation/owner-ledger-query-20261012.json)。
+
+生产账本自动启用（2026-10-12）：`CoreRuntimeLifecycle.activate` 绑定Owner并启动Account Lane后启动原Treasury的 `SystemLedgerLane`；无需实验开关，也不把资金状态接回Owner。实际命令入口的40个必要测试通过，覆盖批次/触发/手续费、线性和反向永续资金费、强平→保险→ADL、交割/期权结算及账本查询。Owner仍有强平执行判断与身份回收等账户读取边界，完整Shared-Nothing迁移尚未完成；未做压测、JMH/JFR、快照/恢复或wallet。见 [生产账本验证](docs/validation/production-ledger-activation-20261012.json)。

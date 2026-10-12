@@ -5319,3 +5319,11 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - 复现：当前master，HotSpot JDK27；完整命令/源指纹/实际执行类见 `docs/validation/owner-ledger-query-20261012.json`，原日志目录 `../performance-artifacts/owner-ledger-query-20261012`。
 - 18个必要用例通过（5查询、1保险确定性、8账本、4进度所有权），失败/错误/跳过均0，测试期间源码未变化。禁止Owner账户表读取、无Lane停让、保险跨页预算与一次消费、失败后续查询、关闭清理通过。
 - 按用户约束未执行压测、JMH/JFR、快照/恢复或wallet。生产activate尚未启用Ledger；不宣称Owner迁移全部完成，不给出吞吐或分配结论。
+
+
+## 2026-10-12：生产自动启用原账本（必要功能验证）
+
+- 入口/状态：CoreRuntimeLifecycle.activate在Owner绑定及Account Lane启动后，自动启动原Treasury所属SystemLedgerLane。正常资金命令与Matcher队首财务使用既有异步回执；Owner不重新接回资金状态。
+- HotSpot JDK27最终40个必要测试执行通过，失败/错误/跳过0，源码指纹未变化。覆盖14批次、14无快照触发、2资金费、4真实命令财务、5查询及1手续费守恒；完整命令见 `docs/validation/production-ledger-activation-20261012.json`。
+- 初轮新财务用例4处初始化/断言错误已保留并修正；修正后4个定向及最终40执行通过。日志目录 `../performance-artifacts/production-ledger-activation-20261012`，未运行负载进程。
+- 用户要求不做压测/JMH/JFR/快照/恢复/wallet。生产资金接线完成，但Owner强平判断、身份回收等账户读取仍待迁移，不宣称完整Shared-Nothing、不作性能结论。
