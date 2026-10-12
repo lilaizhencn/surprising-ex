@@ -91,7 +91,7 @@ class AsyncFundingCommandTest {
                     var command = message(line, CoreMessageType.APPLY_FUNDING, 0,
                             TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(900, "1", 10_000, cursor, 1)));
                     CoreResponse async = page == 0 ? fundingWithPendingBoundaryChecks(state, command) : applied(state, command);
-                    CoreResponse sync = restored.apply(command);
+                    CoreResponse sync = CoreTestCompletion.applyAsynchronously(restored, command);
                     assertThat(async.commandStatus()).isEqualTo(sync.commandStatus());
                     assertThat(async.resultCode()).isEqualTo(sync.resultCode());
                     assertThat(async.data()).isEqualTo(sync.data());

@@ -5389,3 +5389,13 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - Owner指标查询仅观察既有原语计数，不再onLane、准备风险删除证明或交换控制回执；仅查询使用getOpaque，交易热路径未增加计数副本、发布或锁。队列深度来自真实邮箱游标，容量包含独立邮箱；高水位是指标采样所见值，各指标可独立滞后。
 - HotSpot JDK27 5次必要执行通过，失败/错误/跳过0，源码未变。实际控制Lane在风险删除阶段阻塞时，Owner表读取守卫、立即指标返回、未收集回执/身份保留、完成后的正常回收，以及原计数/实际Lane/日志回调回归通过。前期2轮测试编译错误均0例，日志保留。
 - 记录 `docs/validation/owner-metrics-boundary-20261012.json`，日志 `../performance-artifacts/owner-metrics-boundary-20261012`；Maven退出，无本轮集群/Archive/JFR。无压测/JMH/JFR/快照/恢复/wallet，不作性能结论。严格Lane绑定、同步借用与冷审计边界仍待收口，不宣称全部完成。
+
+
+### 2026-10-12：运行态普通入口统一派发实际Lane，删除Owner改名内联（必要功能验证）
+
+- 业务：`CoreCommandIngress.apply → TradingRuntimeState.asynchronousCommands` 现在以worker启动状态选择异步路径；普通 `TradingCoreRuntime.apply` 不再依赖调用方显式开启异步作用域。阻塞账户Lane时余额调整立即返回，原控制槽后续轮询完成；准入、撤单、批量与成交结算也派发既有实际worker。
+- 所有权：启动后 `ownerLaneAccess=false`，准入/撤单/结算派发前归还借用；运行态调用同步 `executeLaneMutations/executeRiskLane` 在执行业务前拒绝。删除Owner临时改名为 `core-account-lane-*` 的代码和无效并行参数。冷态构造仍在调用线程执行且不改线程身份；没有新增业务镜像、任务框架或逐命令快照。
+- 最终必要验证：HotSpot JDK27，19例通过，0失败/错误/跳过，源码指纹不变。六产品线普通入口（6）+真实Ledger强平/保险/ADL与三产品到期结算（4）+双永续非快照资金费（2）+批量/改单（2）+实际替换准入（1）+执行边界/真实Lane控制/指标（4）。证据 `docs/validation/owner-active-lane-ingress-20261012.json`；命令、JDK、源码指纹、过程及日志 `../performance-artifacts/owner-active-lane-ingress-20261012/`。
+- 执行偏差：首轮误选整个资金费类，执行了两个快照/恢复方法，违反本轮用户要求；两者因旧测试假定apply同步终态而失败。后续只选非快照方法，更新旧完成夹具；另一次无效参数删除遗漏调用方导致0例编译失败，修正后最终19例通过。没有压测/JMH/JFR/wallet，不作吞吐或分配结论。所有失败日志保留。
+- 未完成边界：`AccountLaneState` 线程绑定及断言仍为空实现，底层借用作用域、冷审计/物化读取以及部分触发/算法/风险事实查询仍需审查，不能认定完整Shared-Nothing已完成。按用户要求不再执行快照/恢复场景。
+- 清理：全部Maven进程退出；本轮未启动真实集群/Archive/JFR/wallet，保留必要证据。未改已有未提交的历史记录及gateway测试助手。

@@ -1951,7 +1951,7 @@ class CoreOrderedOrderBatchTest {
         RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
                 ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0);
-        assertThat(state.apply(new CoreMessage(CoreMessageHeader.command(
+        assertThat(CoreTestCompletion.applyAsynchronously(state, new CoreMessage(CoreMessageHeader.command(
                 CoreMessageType.REGISTER_INSTRUMENT, UUID.randomUUID(), ProductLine.SPOT,
                 CommandSource.OPERATIONS, 9, 1, 0, 1_000, 1),
                 TradingCommandCodec.encodeRegisterInstrument(instrument))).status())
@@ -1965,11 +1965,11 @@ class CoreOrderedOrderBatchTest {
                 10_000_000, 1_500, 0, 1_500,
                 List.of(new CoreRiskLimitBracket(1, 0, 1_500,
                         10_000_000, 100_000, 50_000)));
-        assertThat(state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
+        assertThat(CoreTestCompletion.applyAsynchronously(state, new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                 UUID.randomUUID(), ProductLine.LINEAR_PERPETUAL, CommandSource.OPERATIONS,
                 9, 1, 0, 1_000, 1), TradingCommandCodec.encodeRegisterInstrument(instrument))).status())
                 .isEqualTo(ResponseStatus.APPLIED);
-        assertThat(state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_MARK_PRICE,
+        assertThat(CoreTestCompletion.applyAsynchronously(state, new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_MARK_PRICE,
                 UUID.randomUUID(), ProductLine.LINEAR_PERPETUAL, CommandSource.KAFKA_INPUT_BRIDGE,
                 89, 1, 0, 1_000, 2), TradingCommandCodec.encodeApplyMarkPrice(
                         new ApplyMarkPriceCommand("1", 1_000, 1, 1_000)))).status())
@@ -1994,14 +1994,14 @@ class CoreOrderedOrderBatchTest {
 
     private static void applyBalance(TradingCoreRuntime state, long userId, String asset, long units,
                                      long sourceSequence) {
-        assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), sourceSequence,
+        assertThat(CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), sourceSequence,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, units)), userId))
                 .status()).isEqualTo(ResponseStatus.APPLIED);
     }
 
     private static void applyBalance(TradingCoreRuntime state, ProductLine productLine,
                                      long userId, long units, long sourceSequence) {
-        assertThat(state.apply(command(productLine, CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(),
+        assertThat(CoreTestCompletion.applyAsynchronously(state, command(productLine, CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(),
                 sourceSequence, TradingCommandCodec.encodeBalanceAdjustment(
                         new BalanceAdjustmentCommand("USDT", units)), userId)).status())
                 .isEqualTo(ResponseStatus.APPLIED);

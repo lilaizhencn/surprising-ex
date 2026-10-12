@@ -1048,8 +1048,9 @@ class TradingRuntimeStateTest {
             }
             assertThat(state.revision()).isEqualTo(revisionBeforeFailure);
             assertThat(state.changedUsers().isEmpty()).isTrue();
-            assertThat(state.executeUserSettlement(laneOneUser, () -> "apply-reclaimed"))
-                    .isEqualTo("apply-reclaimed");
+            state.dispatchControlLanes(topology.accountLaneMask(laneOneUser), id -> "apply-reclaimed");
+            awaitControlLanes(state);
+            assertThat(state.controlLaneResult(topology.accountLaneId(laneOneUser))).isEqualTo("apply-reclaimed");
         } finally {
             state.close();
         }
@@ -1195,55 +1196,64 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void lifecycleFailureReclaimsEverySubmittedOwnerTicket() {
-        TradingRuntimeState state = new TradingRuntimeState();
-        state.startAccountLanes();
-        try {
+    void activeWorkersRejectInlineSettlementWithoutRunningOrRenamingOwner() {
+        try (var state = new TradingRuntimeState()) {
+            Thread owner = Thread.currentThread();
+            String originalName = owner.getName();
+            assertThat(state.executeUserSettlement(8, Thread::currentThread)).isSameAs(owner);
+            assertThat(owner.getName()).isEqualTo(originalName);
+            state.startAccountLanes();
+            assertThat(state.asynchronousCommands()).isTrue();
+            assertThat(state.ownerLaneAccess).isFalse();
+            var executed = new java.util.concurrent.atomic.AtomicInteger();
             assertThatThrownBy(() -> state.executeLifecycleSettlements(
-                    java.util.List.of(203L, 8L), Long::longValue, laneId -> {
-                if (laneId == 0) throw new IllegalStateException("injected lifecycle lane failure");
-                return laneId;
-            })).isInstanceOf(IllegalStateException.class)
-                    .hasMessage("injected lifecycle lane failure");
-
-            assertThat(state.executeUserSettlement(8, () -> "reclaimed")).isEqualTo("reclaimed");
-        } finally {
-            state.close();
+                    java.util.List.of(203L, 8L), Long::longValue, laneId -> executed.incrementAndGet()))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("must be dispatched");
+            assertThatThrownBy(() -> state.executeUserSettlement(8, executed::incrementAndGet))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("must be dispatched");
+            assertThatThrownBy(() -> state.executeUserRisk(8, executed::incrementAndGet))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("must be dispatched");
+            assertThatThrownBy(() -> state.executeRiskLane(0, executed::incrementAndGet))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("must be dispatched");
+            assertThat(executed.get()).isZero();
+            assertThat(owner.getName()).isEqualTo(originalName);
+            state.dispatchControlLanes(state.topology().accountLaneMask(8), id -> Thread.currentThread());
+            awaitControlLanes(state);
+            assertThat(state.controlLaneResult(state.topology().accountLaneId(8))).isNotSameAs(owner);
         }
     }
 
     @Test
     void lifecycleSettlementUsesPermanentIndependentLaneOwners() {
         LaneTopology topology = LaneTopology.productionDefault();
-        TradingRuntimeState state = new TradingRuntimeState(topology);
-        java.util.List<Long> users = new java.util.ArrayList<>();
-        java.util.List<Long> revisions = new java.util.ArrayList<>();
-        for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
-            long userId = userForLane(topology, laneId);
-            users.add(userId);
-            UserRuntime user = new UserRuntime(userId);
-            revisions.add(user.revision());
-            state.putUser(user);
-            state.putBalance(new BalanceRuntime(userId, 3, 1_000 + laneId, 0));
-        }
-        state.startAccountLanes();
-        try {
-            Object[] owners = state.executeLifecycleSettlements(users, Long::longValue,
-                    laneId -> {
-                        state.advanceUserRevision(users.get(laneId));
-                        assertThat(state.balance(users.get(laneId), 3).availableUnits())
-                                .isEqualTo(1_000 + laneId);
-                        return Thread.currentThread().getName();
-                    });
-
-            for (int laneId = 0; laneId < owners.length; laneId++) {
-                assertThat(owners[laneId]).isEqualTo("core-account-lane-" + laneId);
-                assertThat(state.user(users.get(laneId)).revision()).isEqualTo(revisions.get(laneId) + 1);
+        try (TradingRuntimeState state = new TradingRuntimeState(topology)) {
+            java.util.List<Long> users = new java.util.ArrayList<>();
+            for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
+                long userId = userForLane(topology, laneId);
+                users.add(userId);
+                state.putUser(new UserRuntime(userId));
+                state.putBalance(new BalanceRuntime(userId, 3, 1_000 + laneId, 0));
             }
-            assertThat(state.executeUserSettlement(users.getFirst(), () -> "core-owner"))
-                    .isEqualTo("core-owner");
-        } finally {
-            state.close();
+            state.startAccountLanes();
+            state.dispatchControlLanes((1L << topology.accountLaneCount()) - 1, laneId -> {
+                state.advanceUserRevision(users.get(laneId));
+                assertThat(state.balance(users.get(laneId), 3).availableUnits()).isEqualTo(1_000 + laneId);
+                return Thread.currentThread();
+            });
+            awaitControlLanes(state);
+            for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
+                Thread actual = (Thread) state.controlLaneResult(laneId);
+                assertThat(actual).isSameAs(state.laneWorkers[laneId].thread()).isNotSameAs(Thread.currentThread());
+                assertThat(state.user(users.get(laneId)).revision()).isEqualTo(1);
+            }
+        }
+    }
+
+    private static void awaitControlLanes(TradingRuntimeState state) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (!state.pollControlLanes()) {
+            if (System.nanoTime() >= deadline) throw new AssertionError("control Lane timeout");
+            Thread.onSpinWait();
         }
     }
 
@@ -1284,10 +1294,11 @@ class TradingRuntimeStateTest {
                 state.putUser(new UserRuntime(userForLane(topology, lane)));
             }
             state.startAccountLanes();
-            for (int lane = 0; lane < topology.accountLaneCount(); lane++) {
-                long user = userForLane(topology, lane);
-                state.executeUserSettlement(user, () -> { state.advanceUserRevision(user); return null; });
-            }
+            state.dispatchControlLanes((1L << topology.accountLaneCount()) - 1, lane -> {
+                state.advanceUserRevision(userForLane(topology, lane));
+                return null;
+            });
+            awaitControlLanes(state);
             var encoder = new com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder(
                     1, topology.accountLaneCount(), 0, 16, 0, 0, 16, 0, 0, 16, 0, 0);
             for (int lane = 0; lane < topology.accountLaneCount(); lane++) state.writeAccountLaneMetrics(lane, encoder);

@@ -226,15 +226,13 @@ final class MatcherSettlementDispatcher {
         while (lanes != 0) {
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
-            // In asynchronous command scope the permanent Lane is the only account
-            // writer.  ownerLaneAccess may still be held by an earlier preparation
-            // step, but it must never turn this settlement into an inline write.
-            if (!owner.accountLanesStarted || !owner.asynchronousCommands() && owner.ownerLaneAccess) {
+            if (!owner.accountLanesStarted) {
                 event.execute(owner.accountLanes[laneId]);
             } else {
+                owner.releaseOwnerLaneAccess();
                 owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
                         owner.accountLaneQueueHighWaterMarks[laneId], owner.laneWorkers[laneId].depth() + 1);
-            owner.laneWorkers[laneId].submit(event);
+                owner.laneWorkers[laneId].submit(event);
             }
         }
         return event;
@@ -381,11 +379,11 @@ final class MatcherSettlementDispatcher {
             while (lanes != 0) {
                 int laneId = Long.numberOfTrailingZeros(lanes);
                 lanes &= lanes - 1;
-                if (!owner.accountLanesStarted
-                        || !owner.asynchronousCommands() && owner.ownerLaneAccess) {
+                if (!owner.accountLanesStarted) {
                     event.execute(owner.accountLanes[laneId]);
                 }
                 else {
+                    owner.releaseOwnerLaneAccess();
                     owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
                             owner.accountLaneQueueHighWaterMarks[laneId], owner.laneWorkers[laneId].depth() + 1);
                     owner.laneWorkers[laneId].submit(event);

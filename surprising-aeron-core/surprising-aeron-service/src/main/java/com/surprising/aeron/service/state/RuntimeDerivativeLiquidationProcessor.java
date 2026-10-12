@@ -400,7 +400,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
             return work;
         }
         runtime.releaseOwnerLaneAccess();
-        Object[] results = runtime.executeLaneMutations(1L << work.stage.laneId, 1, false, work);
+        Object[] results = runtime.executeLaneMutations(1L << work.stage.laneId, 1, work);
         work.finish(results[work.stage.laneId]);
         return null;
     }

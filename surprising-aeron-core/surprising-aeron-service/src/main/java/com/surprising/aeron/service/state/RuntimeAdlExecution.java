@@ -90,7 +90,7 @@ public final class RuntimeAdlExecution {
             return work;
         }
         runtime.releaseOwnerLaneAccess();
-        Object[] results = runtime.executeLaneMutations(mask, Long.bitCount(mask), false, work);
+        Object[] results = runtime.executeLaneMutations(mask, Long.bitCount(mask), work);
         work.finish(results[targetLane]);
         return null;
     }

@@ -1,0 +1,115 @@
+{
+  "start": "2026-10-12T13:41:10.533237+00:00",
+  "head": "cf443791cd7bda0f46d1ed856a3dc9f62c2f1c4b",
+  "goal": "Lane启动后普通命令入口也使用真实worker，删除Owner改名执行及运行态内联路径",
+  "steps": [
+    "入口以worker启动状态决定异步派发，显式作用域不再是唯一条件",
+    "启动后Owner不持有借用标志；所有实际派发先归还借用所有权",
+    "同步执行器仅供未启动worker的冷态状态构造，运行态调用在业务执行前拒绝",
+    "六产品线普通apply遇到阻塞Lane立即返回，后续轮询完成余额、成交、拒绝回滚"
+  ],
+  "pressureJmhJfr": false,
+  "snapshotRecoveryWalletScenarios": false,
+  "changeFiles": [
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/MatcherSettlementDispatcher.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/TradingRuntimeStateTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreActiveLaneIngressTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreOrderedOrderBatchTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/AsyncFundingCommandTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeAdlExecution.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeLiquidationResolution.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeDerivativeLiquidationProcessor.java"
+  ],
+  "command": [
+    "mvn",
+    "-B",
+    "-ntp",
+    "-pl",
+    "surprising-aeron-core/surprising-aeron-service",
+    "-am",
+    "-Dtest=CoreActiveLaneIngressTest,TradingRuntimeStateTest#activeWorkersRejectInlineSettlementWithoutRunningOrRenamingOwner+lifecycleSettlementUsesPermanentIndependentLaneOwners+stagedMutationRejectsAnOlderGlobalSequenceWithoutChangingAnyLane+directMetricsReadMatchesLaneCountersWithIndependentOwners,CoreFinancialLedgerProductionTest,CoreOrderedOrderBatchTest#sequentialPlaceLedgerKeepsOwnerOffAccountAndFinancialTables+finalAmendBatchResolvesChainedAndRejectedItemsWithoutOwnerOrderReads,ReplacementAdmissionEventTest,AsyncFundingCommandTest#fundingPagesUsePublishedProgressAndCompleteOnceWithoutOwnerLaneHandoff",
+    "-Dsurefire.failIfNoSpecifiedTests=false",
+    "test"
+  ],
+  "sourceBefore": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java": "ba6966b02f3fab0f265b95e4d7d447343b88a70a26dd2f489bc945cfcb718395",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/MatcherSettlementDispatcher.java": "8c1f075facadfa5aaf101529ffbb1dbe5c9ca79a096d6fb30ff521d216846158",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/TradingRuntimeStateTest.java": "a00f87d11bc523c784e05547bf9b1158f7c7638a3bc9afefa1883b3080d83caf",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreActiveLaneIngressTest.java": "4b729503c194b984cb50c23049d7021d376bd39e98d9ff65d5ec1698b08cf2c7",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreOrderedOrderBatchTest.java": "0052049a75057c42da1817486b0a01fa8b44221ebd2970a36ce20771eef0d6e1",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/AsyncFundingCommandTest.java": "824671abc7cecdccb49533d28a38b0e191fba89eaf2b0c8e778c1d0d153d56dc",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeAdlExecution.java": "440916ad34e225f11860edbdc550891f3f2d4b4ee749af1ca2d00a6b1faf7727",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeLiquidationResolution.java": "014bca6d3fbff3ba7f7a7d1277ab6ebe7d29c57c852caeb40fa273455c14d80c",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeDerivativeLiquidationProcessor.java": "7e4f0b85d2278986da3b5f78a2f46cd8127d24f49f26d76e4597f44ea4085684"
+  },
+  "exitCode": 0,
+  "end": "2026-10-12T13:41:33.971801+00:00",
+  "sourceAfter": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java": "ba6966b02f3fab0f265b95e4d7d447343b88a70a26dd2f489bc945cfcb718395",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/MatcherSettlementDispatcher.java": "8c1f075facadfa5aaf101529ffbb1dbe5c9ca79a096d6fb30ff521d216846158",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/TradingRuntimeStateTest.java": "a00f87d11bc523c784e05547bf9b1158f7c7638a3bc9afefa1883b3080d83caf",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreActiveLaneIngressTest.java": "4b729503c194b984cb50c23049d7021d376bd39e98d9ff65d5ec1698b08cf2c7",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreOrderedOrderBatchTest.java": "0052049a75057c42da1817486b0a01fa8b44221ebd2970a36ce20771eef0d6e1",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/AsyncFundingCommandTest.java": "824671abc7cecdccb49533d28a38b0e191fba89eaf2b0c8e778c1d0d153d56dc",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeAdlExecution.java": "440916ad34e225f11860edbdc550891f3f2d4b4ee749af1ca2d00a6b1faf7727",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeLiquidationResolution.java": "014bca6d3fbff3ba7f7a7d1277ab6ebe7d29c57c852caeb40fa273455c14d80c",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeDerivativeLiquidationProcessor.java": "7e4f0b85d2278986da3b5f78a2f46cd8127d24f49f26d76e4597f44ea4085684"
+  },
+  "sourceUnchanged": true,
+  "executedClasses": [
+    {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.state.ReplacementAdmissionEventTest"
+    },
+    {
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.state.TradingRuntimeStateTest"
+    },
+    {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.AsyncFundingCommandTest"
+    },
+    {
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.CoreActiveLaneIngressTest"
+    },
+    {
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest"
+    },
+    {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest"
+    }
+  ],
+  "interpretation": {
+    "result": "最终19个必要用例通过，0失败/错误/跳过；最终测试期间所有改动源码指纹不变，HotSpot JDK27。",
+    "businessFlow": "普通TradingCoreRuntime.apply入口启动worker后也使用真实Account Lane及原SystemLedger；Owner只准备命令/身份、异步派发及有序收集完成。Lane阻塞时Owner立即返回，释放后推进原命令槽到终态。",
+    "ownership": "启动时Owner借用标志置false；单笔/批量准入、单笔/批量撤单及非直接撮合结算派发前归还借用权。同步executeLaneMutations与executeRiskLane在worker启动后、业务执行前拒绝，删除Owner改线程名假扮Lane及无效allowParallel参数。未启动worker的冷态模型构造保持调用线程执行并保留线程身份。",
+    "allocation": "沿用原worker邮箱、任务池、控制槽、完成位及资金账本，没有引入每命令快照、业务状态镜像或新线程；未采集本轮分配/性能数据。",
+    "coverage": "普通入口六产品线阻塞Lane余额变更、跨账户maker/taker成交、余额不足拒绝，Owner五张账户表读取守卫及不借用Lane；原真实Ledger强平/保险/ADL和三产品到期结算与冷态状态转换比较；双永续资金费分页守恒/幂等；顺序批量下单和批量链式改单/拒绝，实际替换准入，真实Lane控制任务/指标回归。",
+    "previousAttempts": "首轮20个执行中16通过4错误：两个快照资金费方法及两个批量测试夹具假定apply同步返回终态；修正夹具并选择非快照资金费方法后19通过。随后删除无效参数的一次编译遗漏调用方，0用例，已修正；最终19通过。原日志均保留。",
+    "scopeDeviation": "首轮误选整个AsyncFundingCommandTest，实际执行了两个快照/恢复相关方法（均在首个资金费响应断言前失败）；违反用户本轮不测试快照/恢复的要求。后续及最终只选非快照资金费方法，不重跑快照/恢复；无压测/JMH/JFR/wallet。快照夹具仅更新异步完成调用，未再次验收该场景。",
+    "remaining": "AccountLaneState.bindOwner/assertOwner/releaseOwnerForHandoff仍为空实现，低层onLane及冷审计/物化读边界尚未全部收口；不能宣称Shared-Nothing和Owner迁移全部完成。触发/算法/风险等已有Owner路由事实和投影读取边界仍须审查。",
+    "cleanup": "Maven全部退出，磁盘剩余约408GiB；本轮未启动真实集群、Archive、JFR、wallet。保留必要功能测试日志/证据。"
+  }
+}

@@ -68,7 +68,7 @@ public final class RuntimeLiquidationResolution {
         if (asynchronous) return work;
         work.applyLedger(runtime.treasury());
         runtime.releaseOwnerLaneAccess();
-        runtime.executeLaneMutations(work.laneMask, 1, false, work);
+        runtime.executeLaneMutations(work.laneMask, 1, work);
         work.finish();
         return null;
     }

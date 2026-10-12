@@ -373,6 +373,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                     topology.matchingEngineCount());
         }
         accountLanesStarted = true;
+        ownerLaneAccess = false;
     }
 
     /** 集群命令推进作用域内禁止退回跨线程同步调用；独立恢复/快照 API 不在此作用域。 */
@@ -492,8 +493,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void signalLedgerWork() { systemLedger.signalWork(); }
 
-    /** 集群控制阶段采用非阻塞派发；独立调用沿用调用方的同步完成契约。 */
-    public boolean asynchronousCommands() { assertOwner(); return asynchronousCommandScope; }
+    /** 启动worker后的所有入口都派发真实Lane；显式作用域只用于尚未启动的命令边界。 */
+    public boolean asynchronousCommands() { assertOwner(); return accountLanesStarted || asynchronousCommandScope; }
 
     /** 控制账户任务的唯一派发/收集入口，与账户业务处理器分离。 */
     private final ControlLaneDispatcher controlLanes = new ControlLaneDispatcher(this);
@@ -697,7 +698,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalArgumentException("invalid user settlement command");
         }
         int laneId = topology.accountLaneId(userId);
-        executeLaneMutations(1L << laneId, 1, false, ignored -> operation.get());
+        executeLaneMutations(1L << laneId, 1, ignored -> operation.get());
         @SuppressWarnings("unchecked") T result = (T) laneMutationResultsScratch[laneId];
         return result;
     }
@@ -708,7 +709,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalArgumentException("invalid user risk command");
         }
         int laneId = topology.accountLaneId(userId);
-        executeLaneMutations(1L << laneId, 1, false, ignored -> operation.get());
+        executeLaneMutations(1L << laneId, 1, ignored -> operation.get());
         @SuppressWarnings("unchecked") T result = (T) laneMutationResultsScratch[laneId];
         return result;
     }
@@ -717,6 +718,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         if (laneId < 0 || laneId >= accountLanes.length || operation == null) {
             throw new IllegalArgumentException("invalid risk lane command");
+        }
+        if (accountLanesStarted) {
+            throw new IllegalStateException("active Account Lane risk must be dispatched to its worker");
         }
         long startedNanos = System.nanoTime();
         T result = onLane(laneId, ignored -> operation.get());
@@ -742,14 +746,14 @@ public final class TradingRuntimeState implements AutoCloseable {
             long userId = ownerUserId.applyAsLong(value);
             if (userId > 0) selectedLaneMask |= topology.accountLaneMask(userId);
         }
-        return executeLaneMutations(selectedLaneMask, Long.bitCount(selectedLaneMask), false, operation);
+        return executeLaneMutations(selectedLaneMask, Long.bitCount(selectedLaneMask), operation);
     }
 
     /** Execute an already-partitioned owner settlement without rescanning its values. */
     public Object[] executeOwnerSettlements(long selectedLaneMask, int workItems,
                                             java.util.function.IntFunction<Object> operation) {
         assertOwner();
-        return executeLaneMutations(selectedLaneMask, workItems, false, operation);
+        return executeLaneMutations(selectedLaneMask, workItems, operation);
     }
 
     public <E> Object[] executeLifecycleSettlements(Iterable<E> values,
@@ -768,22 +772,25 @@ public final class TradingRuntimeState implements AutoCloseable {
             workItems++;
             selectedLaneMask |= topology.accountLaneMask(userId);
         }
-        return executeLaneMutations(selectedLaneMask, workItems, true, operation);
+        return executeLaneMutations(selectedLaneMask, workItems, operation);
     }
 
     /** Execute an already-partitioned lifecycle batch without rescanning its values. */
     public Object[] executeLifecycleSettlements(long selectedLaneMask, int workItems,
                                                 java.util.function.IntFunction<Object> operation) {
         assertOwner();
-        return executeLaneMutations(selectedLaneMask, workItems, true, operation);
+        return executeLaneMutations(selectedLaneMask, workItems, operation);
     }
 
-    Object[] executeLaneMutations(long selectedLaneMask, int workItems, boolean allowParallel,
+    Object[] executeLaneMutations(long selectedLaneMask, int workItems,
                                           java.util.function.IntFunction<Object> operation) {
         assertOwner();
         long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
         if ((selectedLaneMask & ~validMask) != 0 || workItems < 0 || operation == null) {
             throw new IllegalArgumentException("invalid account lane mutation");
+        }
+        if (accountLanesStarted) {
+            throw new IllegalStateException("active Account Lane mutations must be dispatched to their workers");
         }
         Object[] results = laneMutationResultsScratch;
         long staleResults = laneMutationResultsMask;
@@ -797,21 +804,12 @@ public final class TradingRuntimeState implements AutoCloseable {
             return results;
         }
         if (workItems == 0) throw new IllegalArgumentException("account lane mutation has no work");
-        ensureLaneWorkerCapacity(selectedLaneMask);
-        int selectedCount = Long.bitCount(selectedLaneMask);
-        int laneOperations = Math.max(workItems, selectedCount);
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             if ((selectedLaneMask & 1L << laneId) == 0) continue;
             int currentLaneId = laneId;
             long startedNanos = System.nanoTime();
-            String prevName = Thread.currentThread().getName();
-            try {
-                Thread.currentThread().setName("core-account-lane-" + currentLaneId);
-                results[laneId] = inLaneCommandScope(accountLanes[currentLaneId],
-                        ignored -> operation.apply(currentLaneId));
-            } finally {
-                Thread.currentThread().setName(prevName);
-            }
+            results[laneId] = inLaneCommandScope(accountLanes[currentLaneId],
+                    ignored -> operation.apply(currentLaneId));
             recordLaneOperation(laneId, AccountLaneOperationType.SETTLEMENT,
                     System.nanoTime() - startedNanos);
         }
@@ -1299,9 +1297,10 @@ public final class TradingRuntimeState implements AutoCloseable {
                 coreSequence, userId, commandId, openInterestSteps, lifecycleSettled, fundingInProgress,
                 assetId, laneId, asynchronousCommands(), this, identities, timestamp, position);
         try {
-            if (!accountLanesStarted || !asynchronousCommands()) {
+            if (!accountLanesStarted) {
                 event.execute(accountLanes[laneId]);
             } else {
+                releaseOwnerLaneAccess();
                 laneWorkers[laneId].submitAdmission(event);
             }
         } catch (RuntimeException | Error failure) {
@@ -1365,9 +1364,10 @@ public final class TradingRuntimeState implements AutoCloseable {
                 itemCount, laneId, matcherShard, this, changes, identities, source,
                 timestamp, position);
         try {
-            if (!accountLanesStarted || !asynchronousCommands()) {
+            if (!accountLanesStarted) {
                 event.execute(accountLanes[laneId]);
             } else {
+                releaseOwnerLaneAccess();
                 laneWorkers[laneId].submitAdmission(event);
             }
         } catch (RuntimeException | Error failure) {
@@ -1725,9 +1725,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         event.prepare(coreSequence, userId, orderId, commitTimestamp, commitClusterPosition,
                 laneId, this, identities, changes);
         try {
-            if (!accountLanesStarted || !asynchronousCommands()) {
+            if (!accountLanesStarted) {
                 event.execute(accountLanes[laneId]);
             } else {
+                releaseOwnerLaneAccess();
                 laneWorkers[laneId].submit(event);
             }
         } catch (RuntimeException | Error failure) {
@@ -1772,9 +1773,10 @@ public final class TradingRuntimeState implements AutoCloseable {
                 commitTimestamp, commitClusterPosition, laneId, commitLane, this, identities, changes);
         event.resultTarget = resultTarget;
         try {
-            if (!accountLanesStarted || !asynchronousCommands()) {
+            if (!accountLanesStarted) {
                 event.execute(accountLanes[laneId]);
             } else {
+                releaseOwnerLaneAccess();
                 laneWorkers[laneId].submit(event);
             }
         } catch (RuntimeException | Error failure) {
