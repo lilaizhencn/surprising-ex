@@ -1347,7 +1347,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         int laneId = topology.accountLaneId(event.userId());
         // Only this batch's ordered commit may populate the shared rollback buffers.
         // Earlier commits must never publish or clear a future admission's before-images.
-        accountRollback.captureBatchAdmissionBefore(event.userId(), event.admittedOrders(), event.itemCount(), laneId);
+        accountRollback.captureBatchAdmissionBefore(event.userId(), event.userBefore(), event.admittedOrders(), event.itemCount(), laneId);
         event.copyBalanceBeforeTo(accountRollback.patchBalancesBeforeByLane[laneId]);
         MatcherSettlementChanges changes = event.takeChanges();
         try {
@@ -1575,6 +1575,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (order == null) throw new IllegalArgumentException("observed admission order is required");
     }
 
+    /** Owner调用此入口的事件必须属于日志提交队首，财务不按Matcher完成先后排序。 */
+    public boolean pollMatcherFinancialSettlement(MatcherSettlementEvent event, boolean sequentialBatch) {
+        assertOwner();
+        if (event == null) return true;
+        if (systemLedger == null) return event.complete();
+        if (ledgerControl != null) throw new IllegalStateException("Matcher money cannot enter an unfinished control scope");
+        if (!event.hasLedgerSettlement() && !event.submitTreasurySettlement(systemLedger, sequentialBatch)) return false;
+        return event.complete();
+    }
+
     public RuntimeTreasuryDelta collectMatcherSettlement(MatcherSettlementEvent event) {
         return collectMatcherSettlement(event, null, null);
     }
@@ -1595,6 +1605,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
         assertOwner();
         if (event == null || !event.complete()) return null;
+        if (systemLedger != null && !event.hasLedgerSettlement())
+            throw new IllegalStateException("Matcher money must be dispatched from the ordered commit head");
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta(fundsAccumulator);
         boolean ledgerFunds = event.hasLedgerSettlement();
         if (event.replacementIdentityAllocations() != 0)
@@ -4695,7 +4707,12 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
     public RuntimeTreasuryDelta collectOrderBatchMatcherSettlement(
             MatcherSettlementEvent event, TerminalOrderSink terminalOrderSink) {
-        return settlements.collectOrderBatchMatcherSettlement(event, terminalOrderSink);
+        return collectOrderBatchMatcherSettlement(event, null, terminalOrderSink);
+    }
+
+    public RuntimeTreasuryDelta collectOrderBatchMatcherSettlement(
+            MatcherSettlementEvent event, RuntimeFundsAccumulator funds, TerminalOrderSink terminalOrderSink) {
+        return settlements.collectOrderBatchMatcherSettlement(event, funds, terminalOrderSink);
     }
 
     public MatcherSettlementEvent dispatchMatcherSettlementBatch(long sequence, SettlementBatchInput batch,

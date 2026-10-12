@@ -5303,3 +5303,11 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 计划与实测见 `docs/validation/system-ledger-control-20261012.json`、`../performance-artifacts/production-system-ledger-20261012/`。HotSpot JDK27、Maven3.9.16；最终76次必要测试执行全部通过，失败/错误/跳过均0，源码指纹在测试中未变化；覆盖原账本线程守卫、预算/资金/双域进度回滚、队列满与复用、U/币本位资金费与强平保险ADL、10组交割期权结算、保险不足注资重试，以及现有触发/批次必要回归。此前21/75次通过；一次参数错误在依赖模块停止、执行0例，修正后通过。无压测、JMH/JFR、快照/恢复或wallet场景，本轮不能归因性能改善。
 
 **未完成：** `CoreRuntimeLifecycle` 尚未启用生产系统账本，Matcher提交队首财务接线及顺序批次流水去重、外部财库/保险查询仍需处理。不能据此宣称Owner已经完全退出资金写入。测试进程均退出，未启动集群，日志及计划保留供复核。
+
+## 2026-10-12 Matcher日志队首账本接线与顺序批次流水去重
+
+现有提交队首可向原 `SystemLedgerLane` 非阻塞推送Matcher财务事件，财库按日志序执行，Ledger读取各Account Lane完成位后结算并验证资金守恒。普通事件返回完整原语流水；顺序批次返回财库流水，账户流水仍使用既有批次端点日志，避免重复记账。空财库delta不再在Owner调用Treasury。修复流水PLACE批次未固定日志fence的前置路径，并用Lane准入已有的不可变用户前值替代Owner回读用户表。没有新增资金/用户/订单权威镜像。
+
+记录：`docs/validation/owner-matcher-ledger-20261012.json`、`../performance-artifacts/owner-matcher-ledger-20261012/`。HotSpot JDK27、Maven3.9.16，最终47次必要测试执行，失败/错误/跳过均0，源码指纹未变；带费单笔、流水批次及撤单批次手续费6、两用户资产199994，订单与预留清空，Owner五类账户表读取守卫覆盖全程。顺序批次成交所得再下单、部分/全部拒单、批量改单撤单及已有队列/回执/原语缓冲边界通过。前期失败轮次保留：测试构造器错误0例、注册参数错误1拒单、真实批次fence缺口与Owner用户回读已修正。
+
+按用户要求无压测、JMH/JFR、快照/恢复或wallet场景，不能说明性能改善。**生产activation尚未开启**，外部财库/保险查询与其余Owner读写边界仍待处理，不能宣称完整Owner迁移或Shared-Nothing完成。测试进程均退出，无集群/Archive/JFR清理项。

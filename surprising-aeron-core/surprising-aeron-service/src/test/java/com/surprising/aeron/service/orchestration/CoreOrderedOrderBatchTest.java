@@ -1229,7 +1229,12 @@ class CoreOrderedOrderBatchTest {
     }
 
     @Test
-    void sequentialPlaceUsesEarlierFillProceedsOnPermanentLanes() throws Exception {
+    void sequentialPlaceUsesEarlierFillProceedsOnPermanentLanes() throws Exception { sequentialPlaceProceeds(false); }
+
+    @Test
+    void sequentialPlaceLedgerReceiptDoesNotDuplicateEarlierProceeds() throws Exception { sequentialPlaceProceeds(true); }
+
+    private void sequentialPlaceProceeds(boolean ledger) throws Exception {
         try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, "BTC", 1, 1);
@@ -1238,6 +1243,7 @@ class CoreOrderedOrderBatchTest {
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             linearOrder(98_300, "proceeds-maker", CoreOrderSide.BUY, 1_000, 1)))), 1002));
             state.activate();
+            if (ledger) state.runtimeState.startSystemLedgerLane();
             long handoff = (long) field(state.runtimeState, "laneHandoffEpoch");
             var response = CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.PLACE_ORDER_BATCH,
                     UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
@@ -1258,7 +1264,12 @@ class CoreOrderedOrderBatchTest {
     }
 
     @Test
-    void sequentialPlaceBatchAdmitsAndRejectsFromLanesWithoutOwnerAccountReads() throws Exception {
+    void sequentialPlaceBatchAdmitsAndRejectsFromLanesWithoutOwnerAccountReads() throws Exception { sequentialPlaceOwnerGuard(false); }
+
+    @Test
+    void sequentialPlaceLedgerKeepsOwnerOffAccountAndFinancialTables() throws Exception { sequentialPlaceOwnerGuard(true); }
+
+    private void sequentialPlaceOwnerGuard(boolean ledger) throws Exception {
         String previous = System.getProperty("surprising.aeron.account-lanes");
         System.setProperty("surprising.aeron.account-lanes", "4");
         try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
@@ -1269,6 +1280,7 @@ class CoreOrderedOrderBatchTest {
                     UUID.randomUUID(), 3, TradingOrderBatchCodec.encodePlaceOrderBatch(
                             new PlaceOrderBatchCommand(List.of(linearOrder(98_200, "other-account", CoreOrderSide.BUY, 2_000, 1)))), 1002));
             state.activate();
+            if (ledger) state.runtimeState.startSystemLedgerLane();
             Object[] lanes = field(state.runtimeState, "accountLanes");
             String[] names = {"orders", "reservations", "users", "positions", "balances"};
             Object[][] originals = new Object[lanes.length][names.length];

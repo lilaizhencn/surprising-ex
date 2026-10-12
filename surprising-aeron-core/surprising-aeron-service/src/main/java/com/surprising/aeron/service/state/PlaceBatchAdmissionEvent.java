@@ -30,6 +30,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private MatcherSettlementChanges changes;
     private RuntimeIdentityRegistry identities;
     private long identityAllocations;
+    /** Lane准入已有的不可变用户前值，供该批次回退；不是账户镜像。 */
+    private UserRuntime userBefore;
     private RuntimeException rejection;
     /** Volatile publication is sufficient: all payload fields are written before completion. */
     private volatile boolean completed;
@@ -86,7 +88,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         if (lane.laneId() != laneId || laneId != runtime.topology().accountLaneId(userId)) {
             throw new IllegalStateException("place batch admission reached the wrong Account Lane");
         }
-        UserRuntime userBefore = lane.users.get(userId);
+        userBefore = lane.users.get(userId);
         long allocationsBefore = lane.clientIdentityAllocations;
         try {
             runtime.enterMatcherSettlementScope(lane, changes);
@@ -168,6 +170,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         symbolIds = null;
         assetIds = null;
         admittedOrders = null;
+        userBefore = null;
         runtime = null;
         identities = null;
         rejection = null;
@@ -181,6 +184,10 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     public RuntimeException rejection() {
         if (!complete()) throw new IllegalStateException("place batch admission is incomplete");
         return rejection;
+    }
+    UserRuntime userBefore() {
+        if (!complete()) throw new IllegalStateException("place batch admission is incomplete");
+        return userBefore;
     }
     public long coreSequence() { return coreSequence; }
     long userId() { return userId; }

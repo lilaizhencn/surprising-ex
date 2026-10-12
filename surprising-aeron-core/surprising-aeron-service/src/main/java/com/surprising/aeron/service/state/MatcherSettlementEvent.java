@@ -1167,12 +1167,17 @@ public final class MatcherSettlementEvent implements
         return aggregate;
     }
 
-    boolean submitTreasurySettlement(SystemLedgerLane ledger) {
+    boolean submitTreasurySettlement(SystemLedgerLane ledger) { return submitTreasurySettlement(ledger, false); }
+
+    boolean submitTreasurySettlement(SystemLedgerLane ledger, boolean sequentialBatch) {
         if (ledger == null || runtime == null || changes == null || collected)
             throw new IllegalStateException("Ledger settlement requires retained isolated account facts");
         if (treasurySettlement == null) treasurySettlement = new TreasurySettlement();
         if (treasurySettlement.queued) throw new IllegalStateException("Treasury settlement was already queued");
         treasurySettlement.ledger = ledger;
+        treasurySettlement.sequentialBatch = sequentialBatch;
+        if (sequentialBatch && treasurySettlement.treasuryFunds == null)
+            treasurySettlement.treasuryFunds = new RuntimeFundsAccumulator();
         if (!ledger.offer(treasurySettlement)) return false;
         treasurySettlement.queued = true;
         return true;
@@ -1183,11 +1188,15 @@ public final class MatcherSettlementEvent implements
     private void transferLedgerFundsTo(RuntimeFundsAccumulator target) {
         if (!hasLedgerSettlement() || !treasurySettlement.completed)
             throw new IllegalStateException("Ledger funds receipt is incomplete");
-        treasurySettlement.funds.transferTo(target);
+        RuntimeFundsAccumulator receipt = treasurySettlement.sequentialBatch
+                ? treasurySettlement.treasuryFunds : treasurySettlement.funds;
+        receipt.transferTo(target);
     }
 
     private final class TreasurySettlement implements SystemLedgerLane.Entry {
         private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
+        private RuntimeFundsAccumulator treasuryFunds;
+        private boolean sequentialBatch;
         private volatile SystemLedgerLane ledger;
         private boolean queued;
         private volatile boolean completed;
@@ -1199,7 +1208,10 @@ public final class MatcherSettlementEvent implements
                 throw new IllegalStateException("invalid Ledger financial scope");
             mergeTreasuryDeltas().apply(treasury);
             changes.appendFundsDelta(requiredLaneMask, funds);
-            treasury.appendFundsDelta(funds);
+            if (sequentialBatch) {
+                treasury.appendFundsDelta(treasuryFunds);
+                funds.add(treasuryFunds);
+            } else treasury.appendFundsDelta(funds);
             funds.requireConserved(false);
             treasury.clearChangedKeys();
             TradingRuntimeState completionRuntime = runtime;
@@ -1212,6 +1224,8 @@ public final class MatcherSettlementEvent implements
         void clear() {
             if (ledger != null && !completed) throw new IllegalStateException("Ledger still owns this settlement");
             funds.clear();
+            if (treasuryFunds != null) treasuryFunds.clear();
+            sequentialBatch = false;
             ledger = null;
             queued = completed = false;
         }

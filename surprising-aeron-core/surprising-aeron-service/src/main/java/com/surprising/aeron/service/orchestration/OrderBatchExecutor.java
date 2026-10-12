@@ -264,6 +264,7 @@ final class OrderBatchExecutor {
     }
 
     void submitPipelinedPlaceBatch(CommandSlot pending, OrderBatchPending batch) {
+        pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
         long userId = pending.command().header().userId();
         int shard = owner.matchingAdapter.matcherShardId(batch.preparedSymbols.getFirst());
         if (owner.runtimeState.asynchronousCommands()) {
@@ -647,7 +648,7 @@ final class OrderBatchExecutor {
                     && event.hasDirectNativeResult() && batch.pipelinedMatchingResultCount == 0) {
                 if (!event.complete()) throw new IllegalStateException("cancel chunk Lane is incomplete");
                 batch.mergeTreasuryDelta(owner.runtimeState.collectOrderBatchMatcherSettlement(
-                        event, owner.terminalRetention));
+                        event, owner.commandFundsAccumulator, owner.terminalRetention));
                 owner.commits.requestCommitPublication();
                 if (event.commitSequence() != 0) batch.laneCommitCompleted(true);
                 owner.runtimeState.releaseMatcherSettlement(event);
@@ -672,7 +673,7 @@ final class OrderBatchExecutor {
             }
             var event = batch.itemSettlementEvent;
             if (event == null || !event.complete()) throw new IllegalStateException("cancel chunk Lane is incomplete");
-            batch.mergeTreasuryDelta(owner.runtimeState.collectOrderBatchMatcherSettlement(event, owner.terminalRetention));
+            batch.mergeTreasuryDelta(owner.runtimeState.collectOrderBatchMatcherSettlement(event, owner.commandFundsAccumulator, owner.terminalRetention));
             owner.commits.requestCommitPublication();
             if (event.commitSequence() != 0) {
                 batch.laneCommitCompleted(true);
@@ -722,7 +723,7 @@ final class OrderBatchExecutor {
         try {
             var settledEvent = batch.itemSettlementEvent;
             batch.mergeTreasuryDelta(owner.runtimeState.collectOrderBatchMatcherSettlement(
-                    settledEvent, owner.terminalRetention));
+                    settledEvent, owner.commandFundsAccumulator, owner.terminalRetention));
             if (batch.kind == OrderBatchKind.AMEND && batch.lastMatchingResult.accepted()) {
                 // Preserve the existing reservation revision; SPOT also counted its original cancellation.
                 owner.runtimeState.setMetadata(owner.productLine, Math.addExact(owner.runtimeState.revision(),
@@ -992,7 +993,7 @@ final class OrderBatchExecutor {
             throw failOrderBatch(batch, pending, "order batch account lane mask mismatch", null);
         }
         try {
-            if (batch.treasuryDelta != null) batch.treasuryDelta.apply(owner.runtimeState.treasury());
+            if (batch.treasuryDelta != null && batch.treasuryDelta.size() != 0) batch.treasuryDelta.apply(owner.runtimeState.treasury());
             owner.runtimeState.setMetadata(owner.productLine,
                     Math.incrementExact(owner.runtimeState.revision()));
             if (pending.completedLaneMask() != pending.expectedLaneMask()) {

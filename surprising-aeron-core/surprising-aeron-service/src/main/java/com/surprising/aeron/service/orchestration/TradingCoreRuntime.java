@@ -1298,7 +1298,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             pending.settlement(event, settlementPlan, applyStartNanos);
         }
         if (pending.isDispatchOnly()) return null;
-        if (!event.complete()) return null;
+        if (!runtimeState.pollMatcherFinancialSettlement(event, false)) return null;
         captureRealtimeTrades(pending);
         com.surprising.aeron.service.state.RuntimeTreasuryDelta delta =
                 runtimeState.collectMatcherSettlement(

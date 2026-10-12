@@ -280,7 +280,8 @@ final class MatcherSettlementDispatcher {
     }
 
     public RuntimeTreasuryDelta collectOrderBatchMatcherSettlement(
-            MatcherSettlementEvent event, TradingRuntimeState.TerminalOrderSink terminalOrderSink) {
+            MatcherSettlementEvent event, RuntimeFundsAccumulator funds,
+            TradingRuntimeState.TerminalOrderSink terminalOrderSink) {
         owner.assertOwner();
         if (!owner.orderBatchMutationScope || !event.complete())
             throw new IllegalStateException("batch item settlement is not ready to collect");
@@ -292,7 +293,7 @@ final class MatcherSettlementDispatcher {
             lanes &= lanes - 1;
             owner.accountRollback.patchBalancesBeforeByLane[laneId].mergeSequential(event.changes().balancePatches[laneId]);
         }
-        return owner.collectMatcherSettlement(event, null, terminalOrderSink);
+        return owner.collectMatcherSettlement(event, event.hasLedgerSettlement() ? funds : null, terminalOrderSink);
     }
 
     public MatcherSettlementEvent dispatchMatcherSettlementBatch(

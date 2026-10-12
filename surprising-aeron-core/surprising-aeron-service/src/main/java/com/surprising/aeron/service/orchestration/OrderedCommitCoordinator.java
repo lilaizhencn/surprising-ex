@@ -124,6 +124,7 @@ final class OrderedCommitCoordinator {
         owner.assertOwner();
         CommandSlot pending = owner.pendingMatching.get(sequence);
         if (pending == null || matchingResult == null) return null;
+        if (!financialHeadReady(pending)) return null;
         pending.establishCommitFence(clusterTimestamp, clusterPosition);
         clusterTimestamp = pending.commitFenceTimestamp();
         clusterPosition = pending.commitFenceClusterPosition();
@@ -477,7 +478,7 @@ final class OrderedCommitCoordinator {
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
         RuntimeTreasuryDelta settledTreasuryDelta = settlementTreasuryDelta;
             if (settledTreasuryDelta != null) {
-                settledTreasuryDelta.apply(owner.runtimeState.treasury());
+                if (settledTreasuryDelta.size() != 0) settledTreasuryDelta.apply(owner.runtimeState.treasury());
                 owner.runtimeState.setMetadata(owner.productLine,
                         Math.addExact(owner.runtimeState.revision(),
                                 pending.operation() == CommandSlot.Operation.TRIGGER && !matchingResult.accepted() ? 2 : 1));
@@ -573,7 +574,7 @@ final class OrderedCommitCoordinator {
                     || pending.operation() == CommandSlot.Operation.TRIGGER) {
                 requestCommitPublication();
             }
-            settlementTreasuryDelta.apply(owner.runtimeState.treasury());
+            if (settlementTreasuryDelta.size() != 0) settlementTreasuryDelta.apply(owner.runtimeState.treasury());
             long revisionDelta = switch (pending.operation()) {
                 case CANCEL -> matchingResult.accepted() ? 1 : 0;
                 case REPLACE, AMEND -> matchingResult.accepted() ? 2 : 0;
@@ -1039,8 +1040,18 @@ final class OrderedCommitCoordinator {
         dispatchReadyPlaceSettlements(clusterTimestamp, clusterPosition, throughSequence);
     }
 
+    private boolean financialHeadReady(CommandSlot pending) {
+        if (!owner.runtimeState.systemLedgerStarted()) return true;
+        if (pending.sequence() != owner.pendingMatching.firstSequence()) return false;
+        OrderBatchPending batch = pending.orderBatch;
+        if (batch == null) return owner.runtimeState.pollMatcherFinancialSettlement(pending.settlementEvent(), false);
+        if (batch.itemSettlementEvent != null
+                && !owner.runtimeState.pollMatcherFinancialSettlement(batch.itemSettlementEvent, true)) return false;
+        return owner.runtimeState.pollMatcherFinancialSettlement(batch.settlementEvent, !batch.pipelined);
+    }
+
     boolean matchingCommitReady(CommandSlot pending) {
-        if (pending == null) return false;
+        if (pending == null || !financialHeadReady(pending)) return false;
         OrderBatchPending batch = pending.orderBatch;
         // A matcher result alone does not make a batch ready while its Lane work is outstanding.
         if (batch != null && (!batch.activated() || !batch.laneWorkComplete())) return false;

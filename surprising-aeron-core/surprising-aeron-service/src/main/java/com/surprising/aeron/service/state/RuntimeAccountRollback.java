@@ -48,19 +48,20 @@ final class RuntimeAccountRollback {
     }
 
     /**
-     * Capture a pipelined batch's before-image in one owner-side pass.  Admission has already
+     * Consume a pipelined batch's Lane-captured before-image at its ordered commit.  Admission has already
      * created the new order and reservation on the Lane, so every order/reservation identity is
      * known to be absent from the owner view.  Avoiding one global lookup plus a cross-Lane capture
      * scan per item removes a quadratic hot path for batch20 while preserving the same contains-key
      * markers used by rollback.
      */
-    void captureBatchAdmissionBefore(long userId, OrderRuntime[] admittedOrders,
+    void captureBatchAdmissionBefore(long userId, UserRuntime userBefore, OrderRuntime[] admittedOrders,
                                              int itemCount, int laneId) {
         if (userId <= 0 || admittedOrders == null || itemCount <= 0 || itemCount > admittedOrders.length
                 || laneId < 0 || laneId >= patchOrdersBeforeByLane.length) {
             throw new IllegalArgumentException("invalid batch admission before-image");
         }
-        captureUserBefore(userId);
+        LaneLongCaptures<UserRuntime> userCaptures = patchUsersBeforeByLane[laneId];
+        if (!userCaptures.containsKey(userId)) userCaptures.put(userId, userBefore);
         LaneLongCaptures<PatchOrderBefore> orderCaptures = patchOrdersBeforeByLane[laneId];
         LaneLongCaptures<PatchReservationBefore> reservationCaptures = patchReservationsBeforeByLane[laneId];
         for (int index = 0; index < itemCount; index++) {
