@@ -357,30 +357,6 @@ final class CoreMatchingFlow {
                 order.positionSide(), order.orderType(), timeInForce, postOnly, clientOrderId);
     }
 
-    PlaceOrderCommand triggerPlacement(
-            com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
-            long triggeredPriceTicks) {
-        Long clientKey = owner.identities.findClientKey(trigger.userId(), "TRIGGER:" + trigger.triggerOrderId());
-        Long orderId = clientKey == null ? null : owner.runtimeState.orderIdByClient(trigger.userId(), clientKey);
-        OrderRuntime order = orderId == null ? null : owner.runtimeState.order(orderId);
-        return triggerPlacement(trigger, triggeredPriceTicks, order);
-    }
-
-    PlaceOrderCommand triggerPlacement(
-            com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
-            long triggeredPriceTicks, OrderRuntime order) {
-        if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "trigger child order not found");
-        if (owner.runtimeState.instrument(trigger.instrumentId()) == null) {
-            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
-        }
-        long limitPriceTicks = trigger.orderType() == com.surprising.aeron.protocol.CoreOrderType.LIMIT
-                ? (order.priceTicks() > 0 ? order.priceTicks() : triggeredPriceTicks) : 0;
-        return new PlaceOrderCommand(order.orderId(), trigger.instrumentId(),
-                trigger.side(), limitPriceTicks, order.quantitySteps(), order.reduceOnly(),
-                trigger.marginMode(), trigger.positionSide(), trigger.orderType(), trigger.timeInForce(),
-                false, order.clientOrderId());
-    }
-
     long currentMarkPriceTicks(String instrumentId, long referencePriceTicks) {
         Integer symbolId = owner.identities.findSymbolId(instrumentId);
         var markPrice = symbolId == null ? null : owner.runtimeState.markPrice(symbolId);

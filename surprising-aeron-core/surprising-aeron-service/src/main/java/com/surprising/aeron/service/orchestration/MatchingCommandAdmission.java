@@ -14,7 +14,6 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.PositionCloseCapacity;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
@@ -185,14 +184,14 @@ final class MatchingCommandAdmission {
                 case CANCEL -> validatePendingCancel(message, decodedCommand);
                 case REPLACE -> replacementAdmission = dispatchReplacementAdmission(message, decodedCommand, false, sequence);
                 case AMEND -> replacementAdmission = dispatchReplacementAdmission(message, decodedCommand, true, sequence);
-                case TRIGGER -> validatePendingTrigger(decodedCommand);
+                case TRIGGER -> throw new IllegalStateException("trigger matching requires its Lane admission");
                 case LIQUIDATION -> validatePendingLiquidation(decodedCommand);
                 case LIQUIDATION_BATCH -> validatePendingLiquidationBatch(decodedCommand);
                 case SETTLEMENT -> validatePendingSettlement(decodedCommand);
             }
             if (replacementAdmission == null)
                 preMatchingCancellations = preMatchingCloseCapacityCancellations(
-                        operation, message, decodedCommand, admission, placeAdmission);
+                        operation, message, decodedCommand, placeAdmission);
         } catch (CoreStateRejectedException exception) {
             if (owner.commits.commitPublicationDirty()) {
                 if (!owner.pendingMatching.isEmpty()) {
@@ -352,66 +351,18 @@ final class MatchingCommandAdmission {
         return ImmutableLongArrayList.takeOwnership(sorted);
     }
 
-    void validatePendingTrigger(DecodedMatchingCommand decodedCommand) {
-        long[] execute = decodedCommand.trigger();
-        var trigger = owner.runtimeState.triggerOrder(execute[0]);
-        if (trigger == null) {
-            throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order does not exist");
-        }
-        PlaceOrderCommand child = owner.matchingFlow.triggerPlacement(trigger, execute[2]);
-        var instrument = owner.runtimeState.instrument(child.instrumentId());
-        if (instrument != null) instrument.requireOrderEnabled(child);
-        var order = owner.runtimeState.order(child.orderId());
-        if (order == null || order.userId() != trigger.userId()) {
-            throw new CoreStateRejectedException("ORDER_NOT_FOUND", "trigger child reservation is missing");
-        }
-        owner.resultBuilder.setSingleChangedUser(trigger.userId());
-        owner.resultBuilder.setSingleChangedOrder(child.orderId());
-    }
-
     List<Long> preMatchingCloseCapacityCancellations(
             CommandSlot.Operation operation,
             CoreMessage message,
             DecodedMatchingCommand decodedCommand,
-            ResolvedMatchingAdmission admission,
             com.surprising.aeron.service.state.PlaceAdmissionEvent placeAdmission) {
-        PlaceOrderCommand placement;
-        ResolvedPlaceOrder resolved = null;
-        long excludedOrderId = 0;
-        switch (operation) {
-            case PLACE -> {
-                placement = decodedCommand.placeOrder();
-                resolved = placeAdmission;
-                excludedOrderId = placement.orderId();
-            }
-            case TRIGGER -> {
-                long[] execute = decodedCommand.trigger();
-                var trigger = owner.runtimeState.triggerOrder(execute[0]);
-                if (trigger == null) return List.of();
-                placement = owner.matchingFlow.triggerPlacement(trigger, execute[2]);
-                excludedOrderId = placement.orderId();
-            }
-            case REPLACE, AMEND -> {
-                if (admission == null) throw new IllegalStateException("replace admission is missing");
-                excludedOrderId = admission.originalOrderId();
-                placement = admission.command();
-                resolved = admission.resolved();
-            }
-            default -> {
-                return List.of();
-            }
-        }
-        List<Long> closeCapacity;
-        if (operation == CommandSlot.Operation.PLACE && placeAdmission != null) {
-            // An incomplete Lane receipt is consumed by the Matcher continuation, never waited on here.
-            closeCapacity = placeAdmission.complete() ? placeAdmission.closeCapacityCancellations() : List.of();
-        } else {
-            closeCapacity = preMatchingCloseCapacityCancellations(message.header().userId(), placement, excludedOrderId);
-        }
-        long matchingPrice = resolved == null
-                ? CoreOrderDecisionResolver.resolve(owner.runtimeState, owner.identities,
-                        message.header().userId(), placement, owner.currentClusterTimestamp).matchingPriceTicks()
-                : resolved.matchingPriceTicks();
+        if (operation != CommandSlot.Operation.PLACE) return List.of();
+        if (placeAdmission == null) throw new IllegalStateException("place matching requires its Lane admission");
+        PlaceOrderCommand placement = decodedCommand.placeOrder();
+        long excludedOrderId = placement.orderId();
+        // 未完成的Lane回执由Matcher准入续接消费，Owner不等待或读取账户准入状态。
+        List<Long> closeCapacity = placeAdmission.complete() ? placeAdmission.closeCapacityCancellations() : List.of();
+        long matchingPrice = placeAdmission.matchingPriceTicks();
         long[] selfTrade = preMatchingSelfTradeCancellations(
                 message.header().userId(), placement, excludedOrderId, matchingPrice);
         // Self-trade IDs are already unique and sorted. Usually both sources are empty;
@@ -456,28 +407,6 @@ final class MatchingCommandAdmission {
         long[] result = cancellations.toArray();
         java.util.Arrays.sort(result);
         return result;
-    }
-
-    List<Long> preMatchingCloseCapacityCancellations(
-            long userId,
-            PlaceOrderCommand placement,
-            long excludedOrderId) {
-        if (!owner.productLine.isDerivative() || placement.reduceOnly()) return List.of();
-        var user = owner.runtimeState.user(userId);
-        if (user == null) return List.of();
-        String instrumentId = placement.instrumentId();
-        var instrument = owner.runtimeState.instrument(instrumentId);
-        long runtimePositionKey = owner.identities.findPositionKeyValue(
-                userId, instrument, placement.positionSide());
-        var position = runtimePositionKey == 0 ? null : owner.runtimeState.position(runtimePositionKey);
-        if (position == null || position.signedQuantitySteps() == 0
-                || (position.signedQuantitySteps() > 0)
-                == (placement.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
-            return List.of();
-        }
-        return PositionCloseCapacity.inspectRuntime(owner.runtimeState, owner.identities, userId,
-                instrumentId, placement.positionSide(), placement.side(), owner.activeOrderIndex, excludedOrderId)
-                .conflictsFor(placement.quantitySteps());
     }
 
     void validatePendingLiquidation(DecodedMatchingCommand decodedCommand) {

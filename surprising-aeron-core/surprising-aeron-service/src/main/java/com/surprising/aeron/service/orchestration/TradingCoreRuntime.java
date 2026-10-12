@@ -728,21 +728,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     CoreResponse pollDirectCommand() { return directCommand.poll(this); }
 
-    long runtimePositionQuantity(long userId, String instrumentId) {
-        long quantity = 0;
-        var instrument = runtimeState.instrument(instrumentId);
-        if (instrument == null) return 0;
-        for (com.surprising.aeron.protocol.CorePositionSide side
-                : com.surprising.aeron.protocol.CorePositionSide.values()) {
-            long positionKey = identities.findPositionKeyValue(userId, instrument, side);
-            if (positionKey == 0) continue;
-            com.surprising.aeron.service.state.PositionRuntime position =
-                    runtimeState.position(positionKey);
-            if (position != null) quantity = Math.addExact(quantity, position.signedQuantitySteps());
-        }
-        return quantity;
-    }
-
     /** Dispatch once from either preparation or ordered commit; collection stays at commit. */
 
     void recordSourceSequence(SourceKey sourceKey, long sourceSequence) {
@@ -1097,10 +1082,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return symbolId == null ? 0 : runtimeState.treasury().fundingSettlement(symbolId);
     }
     LiquidationRuntime runtimeLiquidation(long liquidationId) { return runtimeState.liquidation(liquidationId); }
-    PositionRuntime runtimePosition(long userId, String positionKey) {
-        Long key = identities.findPositionKey(userId, positionKey);
-        return key == null ? null : runtimeState.position(key);
-    }
     boolean snapshotHasPendingCommands() {
         return factContextActive || directCommand.active() || pendingMatching.inFlight() != 0;
     }
@@ -1241,8 +1222,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     OrderRuntime runtimeOrder(long orderId) {
-        OrderRuntime order = runtimeState.order(orderId);
-        return order == null ? runtimeState.provisionalOrder(orderId) : order;
+        return runtimeState.hasChangedOrder(orderId) ? runtimeState.changedOrderValue(orderId)
+                : activeOrderIndex.activeOrderRuntime(orderId);
     }
 
     String runtimeOrderSymbol(OrderRuntime order) {
@@ -1480,8 +1461,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     OrderRuntime responseOrder(long orderId) {
-        OrderRuntime changed = runtimeState.changedOrderValue(orderId);
-        return changed == null ? runtimeOrder(orderId) : changed;
+        return runtimeOrder(orderId);
     }
 
     long currentBusinessStateHash() {

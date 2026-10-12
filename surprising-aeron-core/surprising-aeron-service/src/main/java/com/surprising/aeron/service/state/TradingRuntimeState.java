@@ -1812,6 +1812,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         laneCancelEventPool.addFirst(event);
     }
 
+    /** Owner已收集的本次回执，null删除标记也是有效回执，不得退回旧路由引用。 */
+    public boolean hasChangedOrder(long orderId) {
+        assertOwner();
+        return changedOrders.containsKey(orderId);
+    }
+
     public OrderRuntime changedOrderValue(long orderId) {
         assertOwner();
         return changedOrders.get(orderId);
@@ -2579,20 +2585,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     /** 全局配置屏障之后读取已提交索引；不复制账户快照或请求账户所有权。 */
-    boolean hasPublishedInstrumentExposure(int symbolId) {
-        assertOwner();
-        if (currentLaneCommandScope() != null) throw new IllegalStateException("instrument check belongs to Core owner");
-        for (int i = 0; i < accountLanes.length; i++) {
-            for (OrderRuntime order : accountLanes[i].orders.values()) {
-                if (order.symbolId() == symbolId && order.status() == CoreOrderStatus.OPEN) return true;
-            }
-            for (PositionRuntime position : accountLanes[i].positions.values()) {
-                if (position.symbolId() == symbolId && position.signedQuantitySteps() != 0) return true;
-            }
-        }
-        return false;
-    }
-
     public boolean hasUnresolvedLiquidation(int symbolId) {
         assertOwner();
         if (currentLaneCommandScope() != null) throw new IllegalStateException("instrument check belongs to Core owner");

@@ -5351,3 +5351,11 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - HotSpot JDK27 必要回归34次通过；随后只增加实际Owner生产者线程限制并补守卫断言，最终源码的受影响账户查询8次定向通过。各轮失败/错误/跳过0、运行时源码未变，完整指纹和命令见 `docs/validation/owner-account-query-20261012.json`。
 - 覆盖精确view/hash、保留终态、全局/用户挂单页、实体不存在、坏输入、超限、阻塞Lane、一消费、关闭清理及真实Owner日志回调；回执/触发/身份回收和Ledger查询通过。初期测试构造错误0例执行日志保留。
 - 原日志目录 `../performance-artifacts/owner-account-query-20261012`；测试进程退出，无本轮集群/Archive/JFR。按用户要求无压测/JMH/JFR/快照/恢复/wallet，不作性能或全部完成结论，ADL候选及剩余Owner边界待继续收口。
+
+
+## 2026-10-12：Owner订单读取收口（必要用例）
+
+- 本次回执（含删除标记）优先于既有活跃索引；取消Owner订单/预留跨Lane探测，删除无调用的Owner持仓/触发准备及暴露扫描。未增加账户镜像或逐命令拷贝。
+- HotSpot JDK27 25次必要执行通过，失败/错误/跳过0，测试时源码未变；完整命令及指纹见 `docs/validation/owner-order-receipt-only-20261012.json`，日志目录 `../performance-artifacts/owner-order-receipt-only-20261012`。
+- 覆盖删除回执优先、Owner表读守卫、手续费守恒、顺序PLACE/AMEND批次、14无快照触发及强平保险ADL/交割期权。测试进程退出，无本轮集群/Archive/JFR。
+- 无压测/JMH/JFR/快照/恢复/wallet；风险状态/ADL候选和冷入口仍需检查，不作性能或完整迁移结论。
