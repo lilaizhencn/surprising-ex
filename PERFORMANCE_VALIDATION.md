@@ -5399,3 +5399,25 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - 执行偏差：首轮误选整个资金费类，执行了两个快照/恢复方法，违反本轮用户要求；两者因旧测试假定apply同步终态而失败。后续只选非快照方法，更新旧完成夹具；另一次无效参数删除遗漏调用方导致0例编译失败，修正后最终19例通过。没有压测/JMH/JFR/wallet，不作吞吐或分配结论。所有失败日志保留。
 - 未完成边界：`AccountLaneState` 线程绑定及断言仍为空实现，底层借用作用域、冷审计/物化读取以及部分触发/算法/风险事实查询仍需审查，不能认定完整Shared-Nothing已完成。按用户要求不再执行快照/恢复场景。
 - 清理：全部Maven进程退出；本轮未启动真实集群/Archive/JFR/wallet，保留必要证据。未改已有未提交的历史记录及gateway测试助手。
+
+
+### 2026-10-12：当前master c6d60296c 单节点永续混合压测（采集前锁定计划）
+
+- 用户要求执行一次压测，沿用原混合口径：LINEAR_PERPETUAL，真实Aeron单成员，1 Matcher/4 Lane，global/session in-flight256，MIXED/batch20/symbols128，异步连续发压，60s预热+60s正式窗口，1次，无profiler；保留网络和Archive，不执行快照/恢复/wallet。
+- 只运行当前master；先clean package并核对源码/制品指纹，未提交项为原文档及gateway测试助手，不修改生产源。观察目标500000business ops/s；正确性要求accepted=terminal、unfinished=0、资金差0并核对订单/冻结/持仓，尾延迟无指定验收线。若正式窗口限频/新增swap则容量结果无效；单次也不宣称长期稳定或完整性能验收。
+- 当前macOS26.7.2/x86_64，8物理/16逻辑核、16GiB，电池82%，预检CPU_Speed_Limit及Scheduler_Limit100、swap0、磁盘408GiB。每5s采集系统限制/CPU/内存/磁盘，磁盘小于20GiB停止；不重跑旧版本。
+- 计划/完整配置/构建与运行命令、源码指纹及后续原始结果：`/Users/atomex/Desktop/surprising/performance-artifacts/single-lp-20261012T134855Z`。结果待追加。
+
+- 采集前构建修正：基准模块 `LinearPerpetualMixedWorkload` 的两处旧 getter 随迁移删除，首次 clean package 编译失败；改为现有只读核对视图，重新锁定源码指纹。生产源及本轮真实外部集群负载不变；首轮未启动压测。
+
+
+### 2026-10-12：单节点压测失败及 Ledger 完成推进修复
+
+- 实测源码：master `c6d60296c6402041f30e3ee3c387d3ce3771a044` + 仅基准模块两处旧 getter 编译适配。成功 clean package 后核对1826份源码和服务/压测包中的568/1240个class，指纹见 `docs/validation/single-lp-20261012T134855Z.json`。节点PID5604，JMH入口5612、fork5619；时间2026-10-12 21:57:47–21:58:23（Asia/Shanghai）。只启动一轮，配置与锁定计划一致。
+- **业务失败，未产生有效吞吐。** 在初始化建仓阶段发生 `CompletionException -> ResultUnknownException: Aeron request was admitted but its result is unknown`，未输出 `mixedSetup=PASS`，也未进入预热或正式窗口。吞吐、p99、accepted/terminal、unfinished、资金差均缺失，不能填0或宣布资金核对通过。JMH入口退出0但fork失败、结果为[]；资格脚本退出1，clientPass=false。
+- 只读扫描本轮Archive：记录2042条命令（128注册、128标记价、1385余额、1保险、400下单）；出口日志缓冲中发现1786个成功响应，最高提交序号1786，后续256个响应缺失。首条未发现响应的日志命令1787：user100050、symbol10006、IOC BUY、价格100、数量3。出口缓冲不等于客户端实际收到，更不等于完成资金终态审计。
+- 21:58:22线程转储：Owner在 `OwnerIdleStrategy.idle:56`，Matcher在 `MatcherCommandPipeline.run:343`，4账户Lane在 `SettlementLaneWorker.run:349`空闲自旋，SystemLedger在 `SystemLedgerLane.run:97`等待；节点没有异常日志。7个启动至失败的5秒系统样本：Speed/Scheduler Limit均100，swap0，磁盘最少约407GiB；无观测到限频/换页证据。未采JFR/GC分配/长稳，不能声明0分配或容量上限。
+- 用户随后要求修复。确定性测试复现：暂停真实Ledger、提交跨Lane IOC和随后同账户订单、耗尽Matcher/Lane完成通知、再放行Ledger。SPOT和LINEAR_PERPETUAL修复前均在Owner完成门禁断言失败。原因是Ledger只发布事件完成位和唤醒，外层门禁漏查结算完成事件，内层通知缓存门禁也可能继续跳过推进。
+- 修复：`TradingCoreRuntime.hasCompletedLaneCommit`检查队首现有 `MatcherSettlementEvent.complete()`；`TradingCoreOwner.pollCommandCommit`在同一权威完成态可见时不跳过提交。保留异步Ledger与Lane资金单写者、原完成事件和0额外容器，不新增全局镜像或Owner资金写入。首次修复后的测试末尾误读已退休IOC订单，调整为订单删除、响应/成交数量及真实持仓核对后通过。
+- 必要测试：JDK27，`mvn -B -ntp -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=TradingCoreOwnerTest#ledgerCompletionResumesOrderedHeadWithoutAnotherMatcherNotification,CoreActiveLaneIngressTest,CoreMatcherLedgerTest,OwnerCommandPipelineStateTest,OwnerIdleStrategyTest -Dsurefire.failIfNoSpecifiedTests=false test`。18例通过、0失败/错误/跳过；覆盖两条产品线Ledger延迟唤醒、六产品线普通入口、批量手续费/资金守恒、等待与提交状态。未运行快照/恢复、wallet、全量测试或第二轮压测，修复后吞吐仍待实测。
+- 已归档原完整命令、日志、线程/NMT文本、系统序列、制品指纹、失败与修复测试证据到上述JSON；所有本轮进程已停止，删除本轮native临时集群、Archive、日志缓冲、tmp及已入档原始日志/报告，保留计划/源码指纹和构建JAR。历史运行数据和原有未提交项未动。

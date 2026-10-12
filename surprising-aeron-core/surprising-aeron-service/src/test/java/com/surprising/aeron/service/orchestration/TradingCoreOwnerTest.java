@@ -49,6 +49,113 @@ import org.junit.jupiter.api.Test;
 
 class TradingCoreOwnerTest {
     @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = ProductLine.class,
+            names = {"SPOT", "LINEAR_PERPETUAL"})
+    void ledgerCompletionResumesOrderedHeadWithoutAnotherMatcherNotification(ProductLine line) throws Exception {
+        var service = new TradingOwnerTestSupport(line);
+        var responses = new CopyOnWriteArrayList<byte[]>();
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        service.onStart(cluster(), null);
+        try {
+            var register = new RegisterInstrumentCommand("1", ContractType.valueOf(line.contractTypeCode()).ordinal(),
+                    "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
+            onSessionMessage(service, responses, command(line, CoreMessageType.REGISTER_INSTRUMENT, 1, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(register)));
+            onSessionMessage(service, responses, command(line, CoreMessageType.APPLY_MARK_PRICE, 2, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(
+                            new com.surprising.aeron.protocol.ApplyMarkPriceCommand("1", 100, 1, 1_000))));
+            for (int user = 1; user <= 2; user++) {
+                onSessionMessage(service, responses, command(line, CoreMessageType.ADJUST_BALANCE, 2 + user, user,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));
+            }
+            if (line == ProductLine.SPOT) {
+                onSessionMessage(service, responses, command(line, CoreMessageType.ADJUST_BALANCE, 5, 2,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 10))));
+            }
+            onSessionMessage(service, responses, command(line, CoreMessageType.PLACE_ORDER, 6, 2,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(9000, "1", CoreOrderSide.SELL,
+                            100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                            CoreTimeInForce.GTC, false, "ledger-maker"))));
+            var core = service.state();
+            var runtime = core.runtimeState;
+            assertThat(core.laneTopology().accountLaneId(1))
+                    .isNotEqualTo(core.laneTopology().accountLaneId(2));
+            assertThat(runtime.systemLedgerStarted()).isTrue();
+            assertThat(runtime.dispatchLedgerQuery(ledger -> {
+                entered.countDown();
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Ledger release timeout");
+                } catch (InterruptedException interrupted) { throw new AssertionError(interrupted); }
+            })).isTrue();
+            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+            var first = command(line, CoreMessageType.PLACE_ORDER, 7, 1,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(9001, "1", CoreOrderSide.BUY,
+                            100, 3, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                            CoreTimeInForce.IOC, false, "ledger-taker-1")));
+            var following = command(line, CoreMessageType.PLACE_ORDER, 8, 1,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(9002, "1", CoreOrderSide.BUY,
+                            100, 3, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                            CoreTimeInForce.IOC, false, "ledger-taker-2")));
+            int before = responses.size();
+            service.acceptCommittedCommand(clientSession(responses), first, 2_000, 2_000);
+            service.acceptCommittedCommand(clientSession(responses), following, 2_001, 2_001);
+            com.surprising.aeron.service.state.MatcherSettlementEvent event = null;
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            do {
+                service.pollCommands();
+                var head = core.pendingMatching.head();
+                event = head == null ? null : head.settlementEvent();
+                if (event != null && event.completedLaneMask() == event.requiredLaneMask()
+                        && !core.hasMatchingNotifications() && !service.ownerWorkAvailable()) break;
+                if (System.nanoTime() > deadline) throw new AssertionError("Owner did not await Ledger completion");
+                java.util.concurrent.locks.LockSupport.parkNanos(100_000);
+            } while (true);
+            assertThat(event.complete()).isFalse();
+            assertThat(responses).hasSize(before);
+            release.countDown();
+            deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (!event.complete()) {
+                if (System.nanoTime() > deadline) throw new AssertionError("Ledger did not finish settlement");
+                java.util.concurrent.locks.LockSupport.parkNanos(100_000);
+            }
+            // Ledger publishes only a release completion and a wake-up; all Matcher/Lane queues are empty.
+            assertThat(core.hasMatchingNotifications()).isFalse();
+            assertThat(service.ownerCompletionAvailable()).isTrue();
+            assertThat(service.ownerWorkAvailable()).isTrue();
+            service.pollCommands();
+            assertThat(responses.size()).isGreaterThan(before);
+            finishCommands(service);
+            assertThat(responses).hasSize(before + 2);
+            for (int index = before; index < responses.size(); index++) {
+                assertThat(CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.get(index)).payload())
+                        .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            }
+            assertThat(service.pendingCommandCount()).isZero();
+            var state = core.tradingState();
+            assertThat(state.order(9000).remainingQuantitySteps()).isEqualTo(4);
+            assertThat(state.order(9001)).isNull();
+            assertThat(state.order(9002)).isNull();
+            assertThat(core.terminalTradeCount).isEqualTo(2);
+            long funds = state.users().values().stream().mapToLong(user -> user.totalUnits("USDT")).sum();
+            assertThat(funds + state.treasuryState().feeBalances().getOrDefault("USDT", 0L)).isEqualTo(20_000);
+            if (line == ProductLine.SPOT) {
+                assertThat(state.user(1).totalUnits("BTC")).isEqualTo(6);
+                assertThat(state.user(2).totalUnits("BTC")).isEqualTo(4);
+            } else {
+                assertThat(state.user(1).positions().get("1").signedQuantitySteps()).isEqualTo(6);
+                assertThat(state.user(2).positions().get("1").signedQuantitySteps()).isEqualTo(-6);
+            }
+        } finally { release.countDown(); service.onTerminate(null); }
+    }
+
+    private static CoreMessage command(ProductLine line, CoreMessageType type, long sequence,
+                                       long user, byte[] payload) {
+        return new CoreMessage(CoreMessageHeader.command(type, new UUID(995, sequence), line,
+                CommandSource.OPERATIONS, 995, sequence, user, 1_000, sequence), payload);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void terminalPreparationFailureRollsBackOnLaneAndRetainsRejection(boolean capacityFailure) throws Exception {
         var service = service();

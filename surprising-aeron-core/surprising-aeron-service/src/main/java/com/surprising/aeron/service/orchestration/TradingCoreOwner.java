@@ -266,7 +266,7 @@ public final class TradingCoreOwner {
         long progressBefore = state.matchingProgressSequence();
         if (commandPipeline.waitingForMatchingNotification()
                 && commandPipeline.canSkipMatchingPoll(dispatchThrough, progressBefore,
-                state.hasMatchingNotifications())) {
+                state.hasMatchingNotifications() || state.hasCompletedLaneCommit())) {
             checkProgressDeadline();
             CoreMatchingPhaseMetrics.finishHeadAttempt(headTiming, headAttemptStarted, "NOTIFICATION_GATE");
             return false;

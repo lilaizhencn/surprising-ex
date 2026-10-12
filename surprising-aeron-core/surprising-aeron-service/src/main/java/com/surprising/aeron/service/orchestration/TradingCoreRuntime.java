@@ -829,9 +829,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
     boolean hasMatchingDrainWork() { return matchingProgress.hasDrainWork(); }
 
     /**
-     * Reads the existing Lane commit event held by the active Owner command.  The event's
-     * completion bits remain the single source of truth; this method only makes that state
-     * visible to the Owner wake-up gate and does not maintain a second ready flag.
+     * Reads the existing Lane/financial completion held by the ordered Owner head. Completion
+     * bits remain authoritative: the Ledger's release completion has no Matcher queue cursor,
+     * so both wake-up and polling gates must also observe the settlement event itself.
      */
     boolean hasCompletedLaneCommit() {
         var directCommit = directCommand.commitEvent();
@@ -839,6 +839,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
         CommandSlot pending = pendingMatching.head();
         if (pending == null) return false;
+        var settlement = pending.settlementEvent();
+        if (settlement != null && settlement.complete()) return true;
         if (pending.commitEvent != null && pending.commitEvent.complete()) return true;
         OrderBatchPending batch = pending.orderBatch;
         return batch != null && batch.laneCommitEvent != null && batch.laneCommitEvent.complete();

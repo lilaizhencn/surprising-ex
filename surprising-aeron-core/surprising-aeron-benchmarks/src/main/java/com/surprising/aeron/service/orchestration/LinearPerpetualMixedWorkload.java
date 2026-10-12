@@ -417,7 +417,8 @@ final class LinearPerpetualMixedWorkload {
                         TradingCommandCodec.encodeExecuteLiquidationBatch(batch)));
 
                 LiquidationRuntime liquidated = liquidation(target, liquidationId);
-                long insurance = target.state().runtimeInsurance(SETTLE_ASSET);
+                long insurance = target.state().tradingState().treasuryState()
+                        .insuranceBalances().getOrDefault(SETTLE_ASSET, 0L);
                 long coverage = Math.min(insurance, Math.subtractExact(liquidated.deficitUnits(), 1));
                 if (liquidated.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED || coverage <= 0) {
                     throw new IllegalStateException("mixed workload did not create an insurable deficit");
@@ -428,9 +429,9 @@ final class LinearPerpetualMixedWorkload {
 
                 LiquidationRuntime adlRequired = liquidation(target, liquidationId);
                 int liquidationSymbolIndex = source.liquidationSymbolIndex();
-                var makerPosition = target.state().runtimePosition(
-                        source.positionMakers().get(liquidationSymbolIndex),
-                        source.symbols().get(liquidationSymbolIndex));
+                var makerPosition = target.state().tradingState()
+                        .user(source.positionMakers().get(liquidationSymbolIndex)).positions()
+                        .get(source.symbols().get(liquidationSymbolIndex));
                 if (makerPosition == null) throw new IllegalStateException("ADL maker position is missing");
                 long profitPerStep = Math.subtractExact(makerPosition.entryPriceTicks(), LIQUIDATION_MARK);
                 long closeQuantity = Math.floorDiv(
