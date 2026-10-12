@@ -172,30 +172,11 @@ final class TradingCoreQueryRouter {
             }
         }
         if (message.header().kind() == WireMessageKind.QUERY
-                && message.header().messageType() == CoreMessageType.ADL_CANDIDATE_QUERY) {
-            try {
-                var query = com.surprising.aeron.protocol.CoreAdlQueryCodec.decodeQuery(message.payloadUnsafe());
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
-                        com.surprising.aeron.protocol.CoreAdlQueryCodec.encodeCandidates(
-                                com.surprising.aeron.service.state.query.RuntimeRiskQueryService.adlCandidates(
-                                        runtime.runtimeState, runtime.identities, query.asset(),
-                                        runtime.adlPositionIndex.positions(query.asset()), query.limit())));
-            } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
+                && OrderBookQueryService.riskAccountQuery(message.header().messageType())) {
+            try { return runtime.bookQueries.beginRiskAccountQuery(message); }
+            catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException failure) {
                 return runtime.rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
-            } catch (IllegalArgumentException exception) {
-                return runtime.rejected(CoreResultCode.INVALID_COMMAND);
-            }
-        }
-        if (message.header().kind() == WireMessageKind.QUERY
-                && message.header().messageType() == CoreMessageType.RISK_STATE_QUERY) {
-            try {
-                var views = com.surprising.aeron.service.state.query.RuntimeRiskQueryService.snapshots(
-                        runtime.runtimeState, runtime.identities, message.header().userId());
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
-                        com.surprising.aeron.protocol.CoreRiskQueryCodec.encode(views));
-            } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
-                return runtime.rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
-            }
+            } catch (IllegalArgumentException failure) { return runtime.rejected(CoreResultCode.INVALID_COMMAND); }
         }
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.RISK_SCAN_CONTROL_QUERY) {

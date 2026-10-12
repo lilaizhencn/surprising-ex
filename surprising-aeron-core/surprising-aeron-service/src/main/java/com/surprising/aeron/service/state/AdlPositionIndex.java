@@ -20,8 +20,15 @@ public final class AdlPositionIndex {
     }
 
     public Set<PositionKey> positions(String asset) {
+        return positions(asset, Integer.MAX_VALUE);
+    }
+
+    /** 在物化查询路由之前检查扫描边界，不为超限请求复制整个候选集合。 */
+    public Set<PositionKey> positions(String asset, int maximumPositions) {
         LongHashSet values = keysByAsset.get(AssetBalance.normalizeAsset(asset));
         if (values == null || values.isEmpty()) return Set.of();
+        if (values.size() > maximumPositions)
+            throw new com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException();
         PositionKey[] captured = new PositionKey[values.size()];
         int[] cursor = {0};
         values.forEach(positionKey -> {

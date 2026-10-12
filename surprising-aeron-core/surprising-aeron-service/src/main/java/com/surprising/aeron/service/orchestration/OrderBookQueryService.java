@@ -62,6 +62,27 @@ final class OrderBookQueryService {
                 || type == CoreMessageType.CLIENT_ORDER_STATE_QUERY || type == CoreMessageType.USER_OPEN_ORDERS_QUERY;
     }
 
+    static boolean riskAccountQuery(CoreMessageType type) {
+        return type == CoreMessageType.RISK_STATE_QUERY || type == CoreMessageType.ADL_CANDIDATE_QUERY;
+    }
+
+    CoreResponse beginRiskAccountQuery(CoreMessage message) {
+        long id = nextAsyncQueryId++;
+        var query = RiskAccountQuery.prepare(owner, message, id);
+        if (query.laneMask == 0) return query.completedResponse();
+        queryIds.put(message.header().commandId(), id);
+        try {
+            if (!owner.runtimeState.dispatchAccountQuery(query.laneMask, query)) {
+                queryIds.remove(message.header().commandId());
+                return owner.rejected(CoreResultCode.MATCHING_REJECTED);
+            }
+        } catch (RuntimeException failure) {
+            queryIds.remove(message.header().commandId());
+            throw failure;
+        }
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount);
+    }
+
     /** 内部账户查询复用现有异步结果登记；Owner不进入账户读作用域。 */
     CoreResponse beginAccountQuery(CoreMessage message) {
         var type = message.header().messageType();

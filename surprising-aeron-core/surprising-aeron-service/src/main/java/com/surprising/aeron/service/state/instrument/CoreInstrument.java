@@ -108,6 +108,18 @@ public final class CoreInstrument {
 
     public String instrumentId() { return instrumentId; }
     public Configuration configuration() { return configuration; }
+
+    /** 查询边界固定已校验的不可变配置；该视图仅由本次查询读取，没有配置写入者。 */
+    public CoreInstrument captureForQuery() {
+        return new CoreInstrument(instrumentId, configuration, maintenance);
+    }
+
+    private CoreInstrument(String instrumentId, Configuration configuration, CoreInstrumentMaintenance maintenance) {
+        this.instrumentId = instrumentId;
+        this.configuration = configuration;
+        this.maintenance = maintenance;
+    }
+
     public void updateConfiguration(CoreInstrument updated) {
         if (updated == null || !instrumentId.equals(updated.instrumentId)) throw new IllegalArgumentException("instrument instrumentId mismatch");
         this.configuration = updated.configuration;

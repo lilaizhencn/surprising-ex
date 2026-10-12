@@ -5359,3 +5359,11 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - HotSpot JDK27 25次必要执行通过，失败/错误/跳过0，测试时源码未变；完整命令及指纹见 `docs/validation/owner-order-receipt-only-20261012.json`，日志目录 `../performance-artifacts/owner-order-receipt-only-20261012`。
 - 覆盖删除回执优先、Owner表读守卫、手续费守恒、顺序PLACE/AMEND批次、14无快照触发及强平保险ADL/交割期权。测试进程退出，无本轮集群/Archive/JFR。
 - 无压测/JMH/JFR/快照/恢复/wallet；风险状态/ADL候选和冷入口仍需检查，不作性能或完整迁移结论。
+
+
+## 2026-10-12：风险状态及ADL候选查询迁至Lane（必要用例）
+
+- Owner从现有持仓索引选路由与有界身份键，固定配置/标记价/资产ID；实际Lane计算当前风险及ADL，最后完成Lane按原顺序和优先级编码，通过既有异步结果槽返回。没有资金或持仓镜像，交易热路径不调用查询配置捕获。
+- HotSpot JDK27最终41次必要测试执行通过，失败/错误/跳过0，源码指纹未变；此前7次定向通过。首轮测试导入错误0例、下一轮6处实际Lane调用Owner资产字典已修正并保留日志。
+- 覆盖线性/反向永续与期权、全仓/隔离/隔离挂单预留，精确结果/排名/限额，阻塞Lane期间价格及配置变更，一次消费和全局响应超限后续查询；旧计算、索引、账户/Ledger查询必要回归通过。记录 `docs/validation/owner-risk-query-20261012.json`；日志 `../performance-artifacts/owner-risk-query-20261012`。
+- 无压测/JMH/JFR/快照/恢复/wallet；测试进程退出，无本轮集群/Archive/JFR。算法单子订单查询与冷入口/严格所有权边界仍待收口，不给出性能或全部迁移结论。

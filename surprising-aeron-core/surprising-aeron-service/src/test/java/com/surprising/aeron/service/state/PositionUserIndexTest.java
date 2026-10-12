@@ -5,6 +5,7 @@ import com.surprising.aeron.service.state.model.CorePositionState;
 import com.surprising.aeron.service.state.model.CoreRiskState;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
@@ -86,6 +87,27 @@ class PositionUserIndexTest {
                     .mapToLong(Long::longValue).min().orElse(0);
             assertThat(index.higherUserId("1", laneId, 0)).isEqualTo(expected);
         }
+    }
+
+    @Test
+    void riskQueryRoutesUseMembershipAndEnforceGlobalAndUserScanBounds() {
+        var position = new CorePositionState("1", "USDT", 1, 100, 100, 0, 10);
+        var flat = new CorePositionState("2", "USDT", 0, 0, 0, 0, 0);
+        var first = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 1, 0,
+                Map.of("USDT", new AssetBalance("USDT", 0, 10)), Map.of(), Map.of("1", position, "2", flat));
+        var state = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 0,
+                Map.of(1L, first, 7L, positionedUser(7, position)), Map.of(), Map.of(),
+                CoreRiskState.empty(), CoreTreasuryState.empty());
+        var index = new PositionUserIndex(state);
+        var global = index.riskQueryRoutes(0, 3);
+        assertThat(global.userIds()).containsExactly(1L, 7L);
+        assertThat(global.instrumentIds()).containsExactly("1", "2");
+        assertThat(index.riskQueryRoutes(7, 1).instrumentIds()).containsExactly("1");
+        assertThat(index.riskQueryRoutes(99, 1).userIds()).containsExactly(99L);
+        assertThatThrownBy(() -> index.riskQueryRoutes(0, 2))
+                .isInstanceOf(com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException.class);
+        assertThatThrownBy(() -> index.riskQueryRoutes(1, 1))
+                .isInstanceOf(com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException.class);
     }
 
     private static CoreUserState positionedUser(long userId, CorePositionState position) {

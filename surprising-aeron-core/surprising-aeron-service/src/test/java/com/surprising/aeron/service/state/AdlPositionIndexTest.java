@@ -64,6 +64,17 @@ class AdlPositionIndexTest {
         assertThat(index.positions("USDT")).hasSize(1);
     }
 
+    @Test
+    void checksQueryScanLimitBeforeMaterializingCandidateRoutes() {
+        var index = emptyIndex();
+        index.apply(1, null, position("USDT", 1));
+        index.apply(2, null, new RuntimePositionIndexValue(1, "1", "USDT", CorePositionSide.NET, 2));
+        assertThatThrownBy(() -> index.positions("USDT", 1))
+                .isInstanceOf(com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException.class);
+        assertThat(index.positions("USDT", 2)).extracting(AdlPositionIndex.PositionKey::userId).containsExactly(1L, 7L);
+        assertThat(index.positions("BTC", 1)).isEmpty();
+    }
+
     private static AdlPositionIndex emptyIndex() {
         return new AdlPositionIndex(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 new RuntimeIdentityRegistry());

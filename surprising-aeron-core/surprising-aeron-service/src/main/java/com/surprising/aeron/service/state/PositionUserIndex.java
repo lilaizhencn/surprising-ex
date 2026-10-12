@@ -41,6 +41,32 @@ public final class PositionUserIndex {
         return Collections.unmodifiableNavigableSet(sorted);
     }
 
+    /** Owner查询路由：只遍历既有索引，数量门槛包含零数量持仓，不读取Lane账户表。 */
+    public RiskQueryRoutes riskQueryRoutes(long userId, int maximumPositions) {
+        if (userId < 0 || maximumPositions < 1) throw new IllegalArgumentException("invalid risk query route");
+        TreeSet<Long> users = new TreeSet<>();
+        TreeSet<String> instruments = new TreeSet<>();
+        long total = 0;
+        for (var entry : positionCountsBySymbol.entrySet()) {
+            LongIntHashMap counts = entry.getValue();
+            long count = userId == 0 ? counts.sum() : counts.get(userId);
+            total = Math.addExact(total, count);
+            if (total > maximumPositions)
+                throw new com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException();
+            if (count == 0) continue;
+            instruments.add(entry.getKey());
+            if (userId == 0) counts.forEachKey(users::add);
+        }
+        if (userId != 0) users.add(userId);
+        long[] selected = new long[users.size()];
+        int index = 0;
+        for (long user : users) selected[index++] = user;
+        return new RiskQueryRoutes(selected, java.util.List.copyOf(instruments));
+    }
+
+    /** 仅本次查询的路由IDs和市场输入名称；无持仓、资金或数量副本。 */
+    public record RiskQueryRoutes(long[] userIds, java.util.List<String> instrumentIds) { }
+
     public Long higherUser(String instrumentId, long cursorUserId) {
         long higher = higherUserId(instrumentId, cursorUserId);
         return higher == 0 ? null : higher;
