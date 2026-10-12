@@ -5295,3 +5295,11 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - 完成资金缓冲交接支持非空批次前缀，空目标仍交换数组。同键溢出先检查所有postings，失败保留目标与未消费回执；null目标不允许静默丢弃Ledger流水。
 - HotSpot JDK27/Maven3.9.16精选12次执行全通过（MatcherTreasurySettlement1/SystemLedgerLane8/RuntimeFundsAccumulator3），失败/错误/跳过0，源码校验一致。跨Lane手续费2加已有前缀5得到7且守恒；溢出失败后可重试，覆盖抵消/资产隔离/复用。
 - 这是生产账本接线所需正确性边界修复；完整Owner迁移仍未完成，无性能结论。命令及校验docs/validation/ledger-batch-funds-receipt-20261012.json，原始记录../performance-artifacts/ledger-batch-funds-receipt-20261012/；Maven进程已结束，无临时集群/JFR。
+
+## 2026-10-12 控制资金作用域迁入原系统账本（生产启用待接线）
+
+资金费、保险调整、强平（含批次）收付、保险分配、ADL 与交割/行权的异步续步支持由唯一 `SystemLedgerLane` 修改原 `TreasuryRuntime`。Owner只消费完成回执和更新命令元数据；未新增资金余额镜像。`SystemLedgerCommand` 保留原财库前值直到 Owner 的提交/拒绝决定，队首 `ScopeClose` 在账本线程清理或恢复，跨账户阶段的保险预留也能回退。账本资金导出在其线程执行，未提交作用域禁止查询。修正保险不足分支：尚未执行的用户游标保持原位，processedUsers=0，注资后可正确重试。
+
+计划与实测见 `docs/validation/system-ledger-control-20261012.json`、`../performance-artifacts/production-system-ledger-20261012/`。HotSpot JDK27、Maven3.9.16；最终76次必要测试执行全部通过，失败/错误/跳过均0，源码指纹在测试中未变化；覆盖原账本线程守卫、预算/资金/双域进度回滚、队列满与复用、U/币本位资金费与强平保险ADL、10组交割期权结算、保险不足注资重试，以及现有触发/批次必要回归。此前21/75次通过；一次参数错误在依赖模块停止、执行0例，修正后通过。无压测、JMH/JFR、快照/恢复或wallet场景，本轮不能归因性能改善。
+
+**未完成：** `CoreRuntimeLifecycle` 尚未启用生产系统账本，Matcher提交队首财务接线及顺序批次流水去重、外部财库/保险查询仍需处理。不能据此宣称Owner已经完全退出资金写入。测试进程均退出，未启动集群，日志及计划保留供复核。

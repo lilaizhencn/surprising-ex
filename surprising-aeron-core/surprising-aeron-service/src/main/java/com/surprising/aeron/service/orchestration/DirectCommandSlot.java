@@ -65,6 +65,7 @@ final class DirectCommandSlot {
     private RuntimeAdlExecution.AdlWork reusableAdlWork;
     private RuntimeLiquidationResolution.ResolutionWork reusableResolutionWork;
     private RiskScanCoordinator reusableRiskCoordinator;
+    private com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment;
     private AccountBalanceAdjustment reusableBalanceAdjustment;
     private AccountTransferOut reusableTransferOut;
     private AccountLeverageChange reusableLeverageChange;
@@ -163,6 +164,14 @@ final class DirectCommandSlot {
             reusableRiskCoordinator.resetForCommand(maxUsers);
         }
         return reusableRiskCoordinator;
+    }
+
+    com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment() {
+        return reusableInsuranceAdjustment;
+    }
+
+    void rememberInsuranceAdjustment(com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork work) {
+        reusableInsuranceAdjustment = work;
     }
 
     AccountBalanceAdjustment reusableBalanceAdjustment() { return reusableBalanceAdjustment; }

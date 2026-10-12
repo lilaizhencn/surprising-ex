@@ -133,42 +133,7 @@ public final class RuntimeStateMaterializer {
         CoreRiskState risk = new CoreRiskState(marks, riskSnapshots, liquidations, scans,
                 runtime.nextLiquidationId(), runtime.riskScanControl(), runtime.marketRevision());
 
-        Map<String, Long> fees = new TreeMap<>();
-        runtime.treasury().feeBalances().forEachKeyValue((id, units) -> fees.put(identities.asset(id), units));
-        Map<String, Long> insurance = new TreeMap<>();
-        runtime.treasury().insuranceBalances().forEachKeyValue((id, units) -> insurance.put(identities.asset(id), units));
-        Map<String, Long> deficits = new TreeMap<>();
-        runtime.treasury().insuranceDeficits().forEachKeyValue((id, units) -> deficits.put(identities.asset(id), units));
-        Map<String, Long> liquidationFees = new TreeMap<>();
-        runtime.treasury().liquidationFeeBalances().forEachKeyValue((id, units) ->
-                liquidationFees.put(identities.asset(id), units));
-        Map<String, Long> fundingResiduals = new TreeMap<>();
-        runtime.treasury().fundingResidualBalances().forEachKeyValue((id, units) ->
-                fundingResiduals.put(identities.asset(id), units));
-        Map<String, Long> roundingResiduals = new TreeMap<>();
-        runtime.treasury().roundingResidualBalances().forEachKeyValue((id, units) ->
-                roundingResiduals.put(identities.asset(id), units));
-        Map<String, Long> clearingPnl = new TreeMap<>();
-        runtime.treasury().clearingPnlBalances().forEachKeyValue((id, units) ->
-                clearingPnl.put(identities.asset(id), units));
-        Map<String, Long> funding = new TreeMap<>();
-        runtime.treasury().fundingSettlements().forEachKeyValue((id, value) -> funding.put(identities.instrumentId(id), value));
-        Map<String, Long> lifecycle = new TreeMap<>();
-        runtime.treasury().lifecycleSettlements().forEachKeyValue((id, value) -> lifecycle.put(identities.instrumentId(id), value));
-        Map<String, CoreTreasuryState.FundingProgress> fundingProgress = new TreeMap<>();
-        runtime.treasury().fundingProgresses().forEachKeyValue((id, value) -> fundingProgress.put(
-                identities.instrumentId(id), new CoreTreasuryState.FundingProgress(value.settlementId(),
-                        value.fundingRatePpm(), value.accountLaneId(),
-                        value.nextCursorUserId(), value.commandId(), value.markPriceTicks(), value.priceSequence())));
-        Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = new TreeMap<>();
-        runtime.treasury().lifecycleProgresses().forEachKeyValue((id, value) -> lifecycleProgress.put(
-                identities.instrumentId(id), new CoreTreasuryState.LifecycleProgress(value.settlementId(),
-                        value.settlementPriceTicks(), value.optionCashUnitsPerContract(),
-                        value.ordersComplete(), value.accountLaneId(), value.nextCursorOrderId(),
-                        value.nextCursorUserId(), value.commandId(), value.requiredInsuranceUnits())));
-        CoreTreasuryState treasury = new CoreTreasuryState(fees, insurance, deficits, liquidationFees,
-                fundingResiduals, roundingResiduals, clearingPnl, funding, lifecycle,
-                fundingProgress, lifecycleProgress);
+        CoreTreasuryState treasury = runtime.treasuryForQuery(identities);
 
         Map<TradingCoreState.ClientOrderKey, Long> clientIndex = new TreeMap<>();
         runtime.clientOrderIndexForSnapshot().forEachKeyValue((userId, entries) ->
@@ -184,6 +149,46 @@ public final class RuntimeStateMaterializer {
                 new TreeMap<>(runtime.leveragesForRuntime()), new TreeMap<>(runtime.algoOrdersForRuntime()),
                 new TreeMap<>(runtime.cancelAllAfterTimersForRuntime()), clientIndex,
                 new TreeMap<>(runtime.triggerOrdersForRuntime()));
+    }
+
+    /** 查询/导出边界；所有财库表遍历在其唯一所有者线程执行。 */
+    static CoreTreasuryState materializeTreasury(TreasuryRuntime ledger, RuntimeIdentityRegistry identities) {
+        Map<String, Long> fees = new TreeMap<>();
+        ledger.feeBalances().forEachKeyValue((id, units) -> fees.put(identities.asset(id), units));
+        Map<String, Long> insurance = new TreeMap<>();
+        ledger.insuranceBalances().forEachKeyValue((id, units) -> insurance.put(identities.asset(id), units));
+        Map<String, Long> deficits = new TreeMap<>();
+        ledger.insuranceDeficits().forEachKeyValue((id, units) -> deficits.put(identities.asset(id), units));
+        Map<String, Long> liquidationFees = new TreeMap<>();
+        ledger.liquidationFeeBalances().forEachKeyValue((id, units) ->
+                liquidationFees.put(identities.asset(id), units));
+        Map<String, Long> fundingResiduals = new TreeMap<>();
+        ledger.fundingResidualBalances().forEachKeyValue((id, units) ->
+                fundingResiduals.put(identities.asset(id), units));
+        Map<String, Long> roundingResiduals = new TreeMap<>();
+        ledger.roundingResidualBalances().forEachKeyValue((id, units) ->
+                roundingResiduals.put(identities.asset(id), units));
+        Map<String, Long> clearingPnl = new TreeMap<>();
+        ledger.clearingPnlBalances().forEachKeyValue((id, units) ->
+                clearingPnl.put(identities.asset(id), units));
+        Map<String, Long> funding = new TreeMap<>();
+        ledger.fundingSettlements().forEachKeyValue((id, value) -> funding.put(identities.instrumentId(id), value));
+        Map<String, Long> lifecycle = new TreeMap<>();
+        ledger.lifecycleSettlements().forEachKeyValue((id, value) -> lifecycle.put(identities.instrumentId(id), value));
+        Map<String, CoreTreasuryState.FundingProgress> fundingProgress = new TreeMap<>();
+        ledger.fundingProgresses().forEachKeyValue((id, value) -> fundingProgress.put(
+                identities.instrumentId(id), new CoreTreasuryState.FundingProgress(value.settlementId(),
+                        value.fundingRatePpm(), value.accountLaneId(),
+                        value.nextCursorUserId(), value.commandId(), value.markPriceTicks(), value.priceSequence())));
+        Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = new TreeMap<>();
+        ledger.lifecycleProgresses().forEachKeyValue((id, value) -> lifecycleProgress.put(
+                identities.instrumentId(id), new CoreTreasuryState.LifecycleProgress(value.settlementId(),
+                        value.settlementPriceTicks(), value.optionCashUnitsPerContract(),
+                        value.ordersComplete(), value.accountLaneId(), value.nextCursorOrderId(),
+                        value.nextCursorUserId(), value.commandId(), value.requiredInsuranceUnits())));
+        return new CoreTreasuryState(fees, insurance, deficits, liquidationFees,
+                fundingResiduals, roundingResiduals, clearingPnl, funding, lifecycle,
+                fundingProgress, lifecycleProgress);
     }
 
     static CoreTreasuryState.FundingProgress fundingProgress(

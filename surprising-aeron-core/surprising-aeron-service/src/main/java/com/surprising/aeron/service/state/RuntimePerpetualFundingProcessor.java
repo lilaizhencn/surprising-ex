@@ -39,6 +39,7 @@ public final class RuntimePerpetualFundingProcessor {
     public static FundingResult applyRuntime(ApplyFundingCommand command, Iterable<Long> indexedUserIds,
                                              UUID chunkCommandId, TradingRuntimeState runtime,
                                              RuntimeIdentityRegistry identities) {
+        if (runtime.systemLedgerStarted()) throw new IllegalStateException("active funding requires its asynchronous continuation");
         FundingWork work = prepare(command, indexedUserIds, chunkCommandId, runtime, identities);
         Object[] results = runtime.executeLifecycleSettlements(work.laneMask, work.selectedUserIds.size(),
                 work::applyLane);
@@ -99,18 +100,18 @@ public final class RuntimePerpetualFundingProcessor {
 
         UserPage userPage = selectUsers(indexedUserIds, command.cursorUserId(),
                 chunked ? command.maxUsers() : Integer.MAX_VALUE);
-        if (reuse == null) return new FundingWork(command, chunkCommandId, runtime, instrument, symbolId,
+        if (reuse == null || !reuse.reusable()) return new FundingWork(command, chunkCommandId, runtime, instrument, symbolId,
                 settleAssetId, fundingMark, fundingPriceSequence, userPage);
         return reuse.reset(command, chunkCommandId, runtime, instrument, symbolId, settleAssetId,
                 fundingMark, fundingPriceSequence, userPage);
     }
 
-    /** 一页资金费的账户计算与 owner 财库提交；各 Lane 只处理自己持有的账户。 */
-    public static final class FundingWork {
+    /** 一页资金费：账户由各Lane计算，原Treasury收付与进度由账本线程提交。 */
+    public static final class FundingWork extends SystemLedgerCommand {
         /** 原始资金费参数及幂等分页标识，跨回调保持不变。 */
         private ApplyFundingCommand command;
         private UUID chunkCommandId;
-        /** owner 负责财库和进度；Lane 通过作用域访问自己的账户。 */
+        /** Owner负责元数据提交；各Lane通过作用域访问自己的账户。 */
         private TradingRuntimeState runtime;
         /** 本页固定币对、结算资产和标记价，禁止中途切换价格。 */
         private CoreInstrument instrument;
@@ -125,6 +126,10 @@ public final class RuntimePerpetualFundingProcessor {
         /** 一次派发一次终态，重复轮询不重复收付资金费。 */
         private boolean started;
         private FundingResult result;
+        private LaneFundingResult[] laneResults;
+        private final ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
+        private final RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        private boolean accountsCollected, ledgerDispatched;
 
         private FundingWork(ApplyFundingCommand command, UUID chunkCommandId, TradingRuntimeState runtime,
                 CoreInstrument instrument, int symbolId, int settleAssetId, long fundingMark,
@@ -136,6 +141,7 @@ public final class RuntimePerpetualFundingProcessor {
         private FundingWork reset(ApplyFundingCommand command, UUID chunkCommandId,
                 TradingRuntimeState runtime, CoreInstrument instrument, int symbolId,
                 int settleAssetId, long fundingMark, long fundingPriceSequence, UserPage userPage) {
+            initializeLedgerCommand(runtime);
             this.command = command; this.chunkCommandId = chunkCommandId; this.runtime = runtime;
             this.instrument = instrument; this.symbolId = symbolId; this.settleAssetId = settleAssetId;
             this.fundingMark = fundingMark; this.fundingPriceSequence = fundingPriceSequence;
@@ -143,6 +149,7 @@ public final class RuntimePerpetualFundingProcessor {
             this.chunked = chunkCommandId != null;
             if (usersByLane == null || usersByLane.length != runtime.topology().accountLaneCount()) {
                 usersByLane = new LongArrayList[runtime.topology().accountLaneCount()];
+                laneResults = new LaneFundingResult[usersByLane.length];
                 for (int lane = 0; lane < usersByLane.length; lane++) usersByLane[lane] = new LongArrayList();
             } else {
                 for (LongArrayList users : usersByLane) users.clear();
@@ -155,7 +162,9 @@ public final class RuntimePerpetualFundingProcessor {
             for (int lane = 0; lane < usersByLane.length; lane++) {
                 if (!usersByLane[lane].isEmpty()) mask |= 1L << lane;
             }
-            laneMask = mask; started = false; result = null;
+            laneMask = mask; started = accountsCollected = ledgerDispatched = false; result = null;
+            java.util.Arrays.fill(laneResults, null);
+            payments.clear(); treasuryDelta.clear();
             return this;
         }
 
@@ -171,8 +180,21 @@ public final class RuntimePerpetualFundingProcessor {
                 started = true;
                 if (laneMask != 0) runtime.dispatchControlLanes(laneMask, this::applyLane);
             }
-            if (laneMask != 0 && !runtime.pollControlLanes()) return false;
-            result = finish();
+            if (!accountsCollected) {
+                if (laneMask != 0 && !runtime.pollControlLanes()) return false;
+                for (int lane = 0; lane < usersByLane.length; lane++) {
+                    if ((laneMask & (1L << lane)) == 0) continue;
+                    collectAccountReceipt(lane, runtime.controlLaneResult(lane));
+                }
+                runtime.requireRevisionCapacity();
+                accountsCollected = true;
+            }
+            if (!ledgerDispatched) {
+                if (!runtime.dispatchLedgerCommand(this)) return false;
+                ledgerDispatched = true;
+            }
+            if (!ledgerCommandCompleted()) return false;
+            result = finishOwnerResult();
             return true;
         }
 
@@ -181,56 +203,37 @@ public final class RuntimePerpetualFundingProcessor {
             return result;
         }
 
-        private FundingResult finish(Object[] laneResults) {
-            ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
-            RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
-            for (Object value : laneResults) {
-                if (!(value instanceof LaneFundingResult laneResult)) continue;
-                payments.addAll(laneResult.payments());
-                treasuryDelta.merge(laneResult.treasuryDelta());
-                for (long userId : laneResult.changedUserIds()) {
-                    runtime.markBalanceChanged(userId, settleAssetId);
-                }
-            }
-            treasuryDelta.apply(runtime.treasury());
-
-            boolean complete = !chunked || userPage.complete();
-            long nextCursorUserId = complete ? 0 : userPage.nextCursorUserId();
-            if (complete) {
-                runtime.treasury().setFundingSettlement(symbolId, command.settlementId());
-            } else {
-                runtime.treasury().setFundingProgress(symbolId, new TreasuryRuntime.FundingProgressRuntime(
-                        command.settlementId(), instrument, command.fundingRatePpm(),
-                        userPage.accountLaneId(), nextCursorUserId, chunkCommandId, fundingMark, fundingPriceSequence));
-            }
-            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-            payments.sort(java.util.Comparator.comparingLong(CoreFundingPaymentView::userId));
-            return new FundingResult(runtime, payments, new CoreFundingProgressView(command.settlementId(), complete,
-                    nextCursorUserId, selectedUserIds.size()));
+        private void collectAccountReceipt(int lane, Object value) {
+            if (!(value instanceof LaneFundingResult receipt)) return;
+            laneResults[lane] = receipt;
+            for (long userId : receipt.changedUserIds()) runtime.markBalanceChanged(userId, settleAssetId);
         }
 
-        private FundingResult finish() {
-            ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
-            RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
-            for (int lane = 0; lane < usersByLane.length; lane++) {
-                if ((laneMask & (1L << lane)) == 0) continue;
-                Object value = runtime.controlLaneResult(lane);
-                if (!(value instanceof LaneFundingResult laneResult)) continue;
-                payments.addAll(laneResult.payments());
-                treasuryDelta.merge(laneResult.treasuryDelta());
-                for (long userId : laneResult.changedUserIds()) runtime.markBalanceChanged(userId, settleAssetId);
+        private FundingResult finish(Object[] results) {
+            for (int lane = 0; lane < results.length; lane++) collectAccountReceipt(lane, results[lane]);
+            applyLedger(runtime.treasury());
+            return finishOwnerResult();
+        }
+
+        @Override protected void applyLedger(TreasuryRuntime ledger) {
+            for (LaneFundingResult receipt : laneResults) {
+                if (receipt == null) continue;
+                payments.addAll(receipt.payments());
+                treasuryDelta.merge(receipt.treasuryDelta());
             }
-            treasuryDelta.apply(runtime.treasury());
-            boolean complete = !chunked || userPage.complete();
-            long nextCursorUserId = complete ? 0 : userPage.nextCursorUserId();
-            if (complete) runtime.treasury().setFundingSettlement(symbolId, command.settlementId());
-            else runtime.treasury().setFundingProgress(symbolId, new TreasuryRuntime.FundingProgressRuntime(
+            treasuryDelta.apply(ledger);
+            if (!chunked || userPage.complete()) ledger.setFundingSettlement(symbolId, command.settlementId());
+            else ledger.setFundingProgress(symbolId, new TreasuryRuntime.FundingProgressRuntime(
                     command.settlementId(), instrument, command.fundingRatePpm(),
-                    userPage.accountLaneId(), nextCursorUserId, chunkCommandId, fundingMark, fundingPriceSequence));
-            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+                    userPage.accountLaneId(), userPage.nextCursorUserId(), chunkCommandId, fundingMark, fundingPriceSequence));
             payments.sort(java.util.Comparator.comparingLong(CoreFundingPaymentView::userId));
+        }
+
+        private FundingResult finishOwnerResult() {
+            boolean complete = !chunked || userPage.complete();
+            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
             return new FundingResult(runtime, payments, new CoreFundingProgressView(command.settlementId(), complete,
-                    nextCursorUserId, selectedUserIds.size()));
+                    complete ? 0 : userPage.nextCursorUserId(), selectedUserIds.size()));
         }
     }
 

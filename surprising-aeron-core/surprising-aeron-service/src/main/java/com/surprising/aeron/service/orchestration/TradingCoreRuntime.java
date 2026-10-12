@@ -604,7 +604,13 @@ public final class TradingCoreRuntime implements AutoCloseable,
     /** 唯一直接控制命令的续步槽；与订单撮合序号槽分离。 */
     final DirectCommandSlot directCommand = new DirectCommandSlot();
 
+    @Override public com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment() {
+        return directCommand.reusableInsuranceAdjustment();
+    }
+
     @Override public void deferControl(java.util.function.BooleanSupplier continuation) {
+        if (continuation instanceof com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork work)
+            directCommand.rememberInsuranceAdjustment(work);
         directCommand.deferControl(continuation);
     }
 

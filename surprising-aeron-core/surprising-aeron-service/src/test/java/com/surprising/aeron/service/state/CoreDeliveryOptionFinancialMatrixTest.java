@@ -114,6 +114,68 @@ class CoreDeliveryOptionFinancialMatrixTest {
         }
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("ledgerExpiryVariants")
+    void expiryMoneyBudgetAndProgressUseOriginalSystemLedger(Variant variant) {
+        TradingCoreState opening = fundedState(variant, USER_ID, WALLET);
+        opening = fundedState(opening, SECOND_MAKER_ID, WALLET);
+        opening = addPosition(opening, USER_ID, QUANTITY, variant);
+        opening = addPosition(opening, SECOND_MAKER_ID, -QUANTITY, variant);
+        var command = new SettleInstrumentCommand(701, variant.instrumentId(), variant.settlementPriceTicks(), 9_999);
+        TradingCoreState expected = reducer.settleInstrument(opening, command);
+        var identities = new RuntimeIdentityRegistry();
+        try (var runtime = RuntimeStateProjector.project(opening, identities)) {
+            runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
+            try {
+                var work = RuntimeLifecycleSettlementContinuation.prepare(command, List.of(USER_ID, SECOND_MAKER_ID),
+                        new UUID(1, 701), new ActiveOrderIndex(opening), runtime, identities);
+                LedgerControlTestSupport.await(runtime, work::poll);
+                assertThat(work.result().complete()).isTrue();
+                assertThat(work.poll()).isTrue();
+                assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
+                assertThatThrownBy(() -> runtime.treasury().insurance(identities.assetId(variant.settleAsset())))
+                        .isInstanceOf(IllegalStateException.class);
+            } finally { runtime.exitAsynchronousCommandScope(); }
+        }
+    }
+
+    @Test
+    void insuranceShortfallKeepsUnsettledUserCursorAndRetriesOnLedgerAfterFunding() {
+        Variant variant = VARIANTS.get(1);
+        TradingCoreState opening = fundedState(variant, USER_ID, 200);
+        opening = addPosition(opening, USER_ID, variant.instrumentId(), 1, 160, 20, variant);
+        var command = new SettleInstrumentCommand(702, variant.instrumentId(), 120, 9_999);
+        var identities = new RuntimeIdentityRegistry();
+        var coldIdentities = new RuntimeIdentityRegistry();
+        try (var runtime = RuntimeStateProjector.project(opening, identities);
+             var cold = RuntimeStateProjector.project(opening, coldIdentities)) {
+            var index = new ActiveOrderIndex(opening);
+            runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
+            try {
+                var work = RuntimeLifecycleSettlementContinuation.prepare(command, List.of(USER_ID), new UUID(1, 702), index, runtime, identities);
+                LedgerControlTestSupport.await(runtime, work::poll);
+                assertThat(work.result().requiredInsuranceUnits()).isEqualTo(20);
+                assertThat(work.result().nextCursorUserId()).isZero();
+                assertThat(work.result().processedUsers()).isZero();
+                RuntimeLifecycleSettlement.applyRuntime(command, List.of(USER_ID), new UUID(1, 702), index, cold, coldIdentities);
+                assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(RuntimeStateMaterializer.materialize(cold, coldIdentities));
+                cold.clearChangedKeys();
+                var topUp = new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), 20);
+                LedgerControlTestSupport.await(runtime, RuntimeInsuranceFundStateTransitions.prepare(null, runtime, identities, topUp));
+                RuntimeInsuranceFundStateTransitions.adjust(cold, coldIdentities, topUp);
+                LedgerControlTestSupport.commit(runtime, identities, true); cold.clearChangedKeys();
+                work = RuntimeLifecycleSettlementContinuation.prepare(work, command, List.of(USER_ID), new UUID(1, 703), index, runtime, identities);
+                LedgerControlTestSupport.await(runtime, work::poll);
+                assertThat(work.result().complete()).isTrue();
+                RuntimeLifecycleSettlement.applyRuntime(command, List.of(USER_ID), new UUID(1, 703), index, cold, coldIdentities);
+                assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(RuntimeStateMaterializer.materialize(cold, coldIdentities));
+                assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).isEmpty();
+            } finally { runtime.exitAsynchronousCommandScope(); }
+        }
+    }
+
+    static java.util.stream.Stream<Variant> ledgerExpiryVariants() { return VARIANTS.stream(); }
+
     private static final Map<String, DeliveryExpectation> DELIVERY_EXPECTATIONS = Map.of(
             "LINEAR_DELIVERY:CROSS", new DeliveryExpectation(40, -40, 2_040, 1_960),
             "LINEAR_DELIVERY:ISOLATED", new DeliveryExpectation(40, -40, 2_040, 1_960),

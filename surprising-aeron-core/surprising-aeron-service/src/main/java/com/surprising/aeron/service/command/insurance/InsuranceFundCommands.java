@@ -14,8 +14,13 @@ public final class InsuranceFundCommands {
     }
 
     public void executeAdjustInsuranceFund(CoreMessage message, long clusterTimestamp) {
-        RuntimeInsuranceFundStateTransitions.adjust(owner.runtimeState(), owner.identities(),
-                TradingCommandCodec.decodeAdjustInsuranceFund(message.payloadUnsafe()));
+        var command = TradingCommandCodec.decodeAdjustInsuranceFund(message.payloadUnsafe());
+        if (owner.asynchronousCommands()) {
+            owner.deferControl(RuntimeInsuranceFundStateTransitions.prepare(owner.reusableInsuranceAdjustment(),
+                    owner.runtimeState(), owner.identities(), command));
+        } else {
+            RuntimeInsuranceFundStateTransitions.adjust(owner.runtimeState(), owner.identities(), command);
+        }
         owner.requestCommitPublication();
     }
 }

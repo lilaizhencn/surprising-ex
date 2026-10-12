@@ -46,6 +46,7 @@ public final class RuntimeLifecycleSettlement {
                 || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid runtime settlement");
         }
+        if (runtime.systemLedgerStarted()) throw new IllegalStateException("active lifecycle settlement requires its asynchronous continuation");
         CoreInstrument instrument = requireInstrument(runtime, command);
         int symbolId = identities.symbolId(instrument.instrumentId());
         long previousSettlement = runtime.treasury().lifecycleSettlement(symbolId);

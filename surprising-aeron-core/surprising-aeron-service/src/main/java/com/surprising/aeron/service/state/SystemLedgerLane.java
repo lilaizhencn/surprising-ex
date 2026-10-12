@@ -8,9 +8,9 @@ import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
 
 /** The original Treasury ledger has one writer; the Owner only publishes financial work. */
-final class SystemLedgerLane implements AutoCloseable {
+public final class SystemLedgerLane implements AutoCloseable {
     /** Input and completion belong to the existing command slot throughout this handoff. */
-    interface Entry {
+    public interface Entry {
         void apply(TreasuryRuntime ledger);
         default boolean ready() { return true; }
     }

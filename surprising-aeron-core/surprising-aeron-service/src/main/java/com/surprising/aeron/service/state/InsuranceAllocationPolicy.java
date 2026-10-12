@@ -92,6 +92,29 @@ public final class InsuranceAllocationPolicy {
                 claims.add(new Claim(claim, identities.instrumentId(claim.symbolId())));
             }
         }
+        return resolve(new ResolutionInputs(liquidationId, assetId, target.deficitUnits(), claims), runtime.treasury());
+    }
+
+    /** Owner仅选取已发布的不可变索赔事实；预算由账本读取。 */
+    static ResolutionInputs prepareResolution(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                               Iterable<Long> candidateIds, LiquidationRuntime target, int assetId) {
+        ArrayList<Claim> claims = new ArrayList<>();
+        for (Long id : candidateIds) {
+            if (id == null) continue;
+            LiquidationRuntime claim = runtime.liquidation(id);
+            if (claim == null || claim.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) continue;
+            CoreInstrument instrument = runtime.instrument(identities.instrumentId(claim.symbolId()));
+            if (instrument != null && instrument == claim.instrument()
+                    && identities.assetId(instrument.settleAsset()) == assetId)
+                claims.add(new Claim(claim, identities.instrumentId(claim.symbolId())));
+        }
+        return new ResolutionInputs(target.liquidationId(), assetId, target.deficitUnits(), claims);
+    }
+
+    record ResolutionInputs(long liquidationId, int assetId, long deficitUnits, ArrayList<Claim> claims) { }
+
+    static Resolution resolve(ResolutionInputs inputs, TreasuryRuntime ledger) {
+        ArrayList<Claim> claims = inputs.claims();
         if (claims.isEmpty()) return new Resolution(false, 0);
         claims.sort(CLAIM_ORDER);
         int targetIndex = -1;
@@ -99,19 +122,19 @@ public final class InsuranceAllocationPolicy {
         for (int index = 0; index < claims.size(); index++) {
             Claim claim = claims.get(index);
             total = total.add(BigInteger.valueOf(claim.liquidation().deficitUnits()));
-            if (claim.liquidation().liquidationId() == liquidationId) targetIndex = index;
+            if (claim.liquidation().liquidationId() == inputs.liquidationId()) targetIndex = index;
         }
         if (targetIndex < 0 || total.signum() == 0) return new Resolution(false, 0);
-        BigInteger available = BigInteger.valueOf(Math.max(0, runtime.treasury().insurance(assetId))).min(total);
+        BigInteger available = BigInteger.valueOf(Math.max(0, ledger.insurance(inputs.assetId()))).min(total);
         if (available.signum() == 0) return new Resolution(targetIndex == 0, 0);
-        if (available.equals(total)) return new Resolution(targetIndex == 0, target.deficitUnits());
+        if (available.equals(total)) return new Resolution(targetIndex == 0, inputs.deficitUnits());
         BigInteger allocated = BigInteger.ZERO;
         long targetBase = 0;
         for (Claim claim : claims) {
             BigInteger share = available.multiply(BigInteger.valueOf(claim.liquidation().deficitUnits()))
                     .divide(total);
             allocated = allocated.add(share);
-            if (claim.liquidation().liquidationId() == liquidationId) targetBase = share.longValueExact();
+            if (claim.liquidation().liquidationId() == inputs.liquidationId()) targetBase = share.longValueExact();
         }
         int remainder = available.subtract(allocated).intValueExact();
         return new Resolution(targetIndex == 0, targetBase + (targetIndex < remainder ? 1 : 0));

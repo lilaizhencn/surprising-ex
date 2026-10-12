@@ -45,6 +45,8 @@ public interface CommandResultContext extends CommandOwnerContext {
 
     RuntimeLiquidationResolution.ResolutionWork reusableLiquidationResolutionWork();
 
+    com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment();
+
     AccountBalanceAdjustment reusableBalanceAdjustment();
 
     AccountTransferOut reusableTransferOut();

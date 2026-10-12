@@ -18,7 +18,7 @@ import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import java.util.Collection;
 import java.util.List;
 
-/** Liquidation account mutations run on their Lane; Owner applies treasury deltas after completion. */
+/** 强平账户由自己的Lane修改；收付、保险缺口与强平费交给唯一账本线程。 */
 public final class RuntimeDerivativeLiquidationProcessor {
 
     private RuntimeDerivativeLiquidationProcessor() {
@@ -42,6 +42,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
                                                             Collection<CoreOrderState> canceledOrders,
                                                             TradingRuntimeState runtime,
                                                             RuntimeIdentityRegistry identities) {
+        if (runtime.systemLedgerStarted()) throw new IllegalStateException("active liquidation requires its asynchronous continuation");
         execute(null, command, canceledOrders, 0, runtime, identities, false);
         return runtime;
     }
@@ -88,15 +89,50 @@ public final class RuntimeDerivativeLiquidationProcessor {
             }
             return results;
         });
-        return () -> {
-            if (!runtime.pollControlLanes()) return false;
-            for (int index = 0; index < stages.length; index++) {
-                BatchExecutionStage stage = stages[index];
-                finishExecution(runtime, stage.userId, stage.assetId, stage.positionKey,
-                        results[index], stage.canceledCount);
+        return new BatchFinancialWork(runtime, stages, results);
+    }
+
+    /** 已有强平批次的资金交接；账户结果只由对应Lane写一次、账本读一次。 */
+    private static final class BatchFinancialWork extends SystemLedgerCommand
+            implements java.util.function.BooleanSupplier {
+        private final TradingRuntimeState runtime;
+        private final BatchExecutionStage[] stages;
+        private final RuntimeTreasuryDelta[] results;
+        private boolean accountsCollected, ledgerDispatched, done;
+        private long revisionDelta;
+
+        private BatchFinancialWork(TradingRuntimeState runtime, BatchExecutionStage[] stages,
+                                   RuntimeTreasuryDelta[] results) {
+            initializeLedgerCommand(runtime);
+            this.runtime = runtime; this.stages = stages; this.results = results;
+        }
+
+        @Override public boolean getAsBoolean() {
+            if (done) return true;
+            if (!accountsCollected) {
+                if (!runtime.pollControlLanes()) return false;
+                for (int index = 0; index < stages.length; index++) {
+                    BatchExecutionStage stage = stages[index];
+                    if (results[index] != null)
+                        runtime.recordUserSettlementChanges(stage.userId, stage.assetId, stage.positionKey);
+                    revisionDelta = Math.addExact(revisionDelta, stage.canceledCount == 0 ? 1 : 2);
+                }
+                Math.addExact(runtime.revision(), revisionDelta);
+                accountsCollected = true;
             }
+            if (!ledgerDispatched) {
+                if (!runtime.dispatchLedgerCommand(this)) return false;
+                ledgerDispatched = true;
+            }
+            if (!ledgerCommandCompleted()) return false;
+            runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), revisionDelta));
+            done = true;
             return true;
-        };
+        }
+
+        @Override protected void applyLedger(TreasuryRuntime ledger) {
+            for (RuntimeTreasuryDelta delta : results) if (delta != null) delta.apply(ledger);
+        }
     }
 
     private static final class BatchExecutionStage {
@@ -240,7 +276,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
             throw new IllegalArgumentException("invalid liquidation account stage");
         }
         runtime.assertOwner();
-        ExecutionWork work = reuse == null ? new ExecutionWork() : reuse;
+        ExecutionWork work = reuse == null || !reuse.reusable() ? new ExecutionWork() : reuse;
         work.prepare(command, canceledOrders, nextCursorOrderId, runtime, identities);
         if (asynchronous) {
             runtime.dispatchControlLanes(1L << work.stage.laneId, work);
@@ -253,18 +289,21 @@ public final class RuntimeDerivativeLiquidationProcessor {
     }
 
     /** One liquidation account stage with a reusable owner polling continuation. */
-    public static final class ExecutionWork
+    public static final class ExecutionWork extends SystemLedgerCommand
             implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
         private BatchExecutionStage stage;
         private TradingRuntimeState runtime;
-        private boolean done;
+        private boolean done, accountsCollected, ledgerDispatched;
+        private RuntimeTreasuryDelta treasuryDelta;
 
         private void prepare(ExecuteLiquidationCommand command, Collection<CoreOrderState> canceledOrders,
                 long nextCursorOrderId, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            initializeLedgerCommand(runtime);
             this.stage = BatchExecutionStage.prepare(stage, command, canceledOrders, nextCursorOrderId,
                     runtime, identities);
             this.runtime = runtime;
-            this.done = false;
+            this.done = accountsCollected = ledgerDispatched = false;
+            treasuryDelta = null;
         }
 
         @Override
@@ -273,9 +312,26 @@ public final class RuntimeDerivativeLiquidationProcessor {
         @Override
         public boolean getAsBoolean() {
             if (done) return true;
-            if (!runtime.pollControlLanes()) return false;
-            finish(runtime.controlLaneResult(stage.laneId));
+            if (!accountsCollected) {
+                if (!runtime.pollControlLanes()) return false;
+                treasuryDelta = (RuntimeTreasuryDelta) runtime.controlLaneResult(stage.laneId);
+                if (treasuryDelta != null)
+                    runtime.recordUserSettlementChanges(stage.userId, stage.assetId, stage.positionKey);
+                Math.addExact(runtime.revision(), stage.canceledCount == 0 ? 1 : 2);
+                accountsCollected = true;
+            }
+            if (!ledgerDispatched) {
+                if (!runtime.dispatchLedgerCommand(this)) return false;
+                ledgerDispatched = true;
+            }
+            if (!ledgerCommandCompleted()) return false;
+            runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), stage.canceledCount == 0 ? 1 : 2));
+            done = true;
             return true;
+        }
+
+        @Override protected void applyLedger(TreasuryRuntime ledger) {
+            if (treasuryDelta != null) treasuryDelta.apply(ledger);
         }
 
         private void finish(Object result) {

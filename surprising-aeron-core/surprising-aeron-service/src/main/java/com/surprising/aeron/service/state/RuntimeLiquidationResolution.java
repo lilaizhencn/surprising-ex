@@ -32,6 +32,7 @@ public final class RuntimeLiquidationResolution {
                                                    TradingRuntimeState runtime,
                                                    RuntimeIdentityRegistry identities,
                                                    Iterable<Long> candidateIds) {
+        if (runtime.systemLedgerStarted()) throw new IllegalStateException("active resolution requires its asynchronous continuation");
         resolve(null, command, runtime, identities, candidateIds, false);
         return runtime;
     }
@@ -59,102 +60,96 @@ public final class RuntimeLiquidationResolution {
             throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
         }
         CoreInstrument instrument = requireInstrument(runtime, identities.instrumentId(liquidation.symbolId()));
-        LiquidationRuntime current = liquidation;
-        ResolutionWork work = reuse == null ? new ResolutionWork() : reuse;
-        CoreLiquidationState.Status nextStatus;
-        long nextDeficit = liquidation.deficitUnits();
-        RuntimeTreasuryDelta treasuryDelta = work.delta();
-        treasuryDelta.clear();
-        switch (command.resolution()) {
-            case INSURANCE -> {
-                if (liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) {
-                    throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT",
-                            "insurance resolution requires insurance state");
-                }
-                if (command.coveredUnits() > liquidation.deficitUnits()) {
-                    throw new CoreStateRejectedException("INSURANCE_COVER_EXCEEDS_DEFICIT",
-                            "insurance coverage must be within liquidation deficit");
-                }
-                int assetId = identities.assetId(instrument.settleAsset());
-                InsuranceAllocationPolicy.Resolution allocation = InsuranceAllocationPolicy.resolve(
-                        runtime, identities, candidateIds, liquidation.liquidationId());
-                if (!allocation.next()) {
-                    throw new CoreStateRejectedException("INSURANCE_RESOLUTION_ORDER_MISMATCH",
-                            "insurance claims must resolve in deterministic priority order");
-                }
-                long expectedCoverage = allocation.expectedCoverage();
-                if (command.coveredUnits() != expectedCoverage) {
-                    throw new CoreStateRejectedException("INSURANCE_ALLOCATION_MISMATCH",
-                            "insurance coverage does not match deterministic allocation");
-                }
-                if (command.coveredUnits() > runtime.treasury().insurance(assetId)) {
-                    throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
-                            "insurance fund balance is insufficient");
-                }
-                if (command.coveredUnits() != 0) {
-                    treasuryDelta.addInsurance(assetId, Math.negateExact(command.coveredUnits()));
-                    treasuryDelta.addDeficit(assetId, Math.negateExact(command.coveredUnits()));
-                }
-                nextDeficit = Math.subtractExact(nextDeficit, command.coveredUnits());
-                nextStatus = nextDeficit == 0 ? CoreLiquidationState.Status.COMPLETED
-                        : CoreLiquidationState.Status.ADL_REQUIRED;
-            }
-            case ADL -> throw new CoreStateRejectedException("INVALID_COMMAND",
-                    "ADL resolution requires atomic target deleveraging");
-            case COMPLETED -> {
-                if (command.coveredUnits() != 0) {
-                    throw new CoreStateRejectedException("INVALID_COMMAND", "completed resolution covers no units");
-                }
-                if (liquidation.deficitUnits() != 0) {
-                    throw new CoreStateRejectedException("LIQUIDATION_DEFICIT_REMAINS",
-                            "liquidation deficit must be fully covered before completion");
-                }
-                nextStatus = CoreLiquidationState.Status.COMPLETED;
-            }
-            default -> throw new IllegalStateException("unknown liquidation resolution");
-        }
-        LiquidationRuntime nextLiquidation = new LiquidationRuntime(current.liquidationId(), current.userId(),
-                current.symbolId(), current.marginMode(), current.positionSide(), current.instrument(),
-                current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
-                nextDeficit, current.executionPriceTicks(), current.liquidationFeeRatePpm(),
-                current.liquidationFeeUnits(), nextStatus, 0);
-        long laneMask = runtime.topology().accountLaneMask(current.userId());
-        work.prepare(runtime, nextLiquidation, laneMask);
-        if (asynchronous) {
-            runtime.dispatchControlLanes(laneMask, work);
-            return work;
-        }
+        int assetId = identities.assetId(instrument.settleAsset());
+        InsuranceAllocationPolicy.ResolutionInputs allocation = command.resolution() == ResolveLiquidationCommand.Resolution.INSURANCE
+                ? InsuranceAllocationPolicy.prepareResolution(runtime, identities, candidateIds, liquidation, assetId) : null;
+        ResolutionWork work = reuse == null || !reuse.reusable() ? new ResolutionWork() : reuse;
+        work.prepare(runtime, command, liquidation, assetId, allocation);
+        if (asynchronous) return work;
+        work.applyLedger(runtime.treasury());
         runtime.releaseOwnerLaneAccess();
-        runtime.executeLaneMutations(laneMask, 1, false, work);
+        runtime.executeLaneMutations(work.laneMask, 1, false, work);
         work.finish();
         return null;
     }
 
-    /** One account-lane mutation plus the owner-side insurance delta for a resolution. */
-    public static final class ResolutionWork
+    /** 账本先判定预算并记账；账户Lane随后发布自己的强平终态。 */
+    public static final class ResolutionWork extends SystemLedgerCommand
             implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
         private final RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         private TradingRuntimeState runtime;
-        private LiquidationRuntime nextLiquidation;
-        private boolean done;
+        private ResolveLiquidationCommand command;
+        private LiquidationRuntime liquidation, nextLiquidation;
+        private InsuranceAllocationPolicy.ResolutionInputs allocation;
+        private int assetId;
+        private long laneMask;
+        private boolean done, ledgerDispatched, accountsDispatched;
 
-        private RuntimeTreasuryDelta delta() { return treasuryDelta; }
-
-        private void prepare(TradingRuntimeState runtime, LiquidationRuntime nextLiquidation, long laneMask) {
-            this.runtime = runtime;
-            this.nextLiquidation = nextLiquidation;
-            this.done = false;
+        private void prepare(TradingRuntimeState runtime, ResolveLiquidationCommand command,
+                LiquidationRuntime liquidation, int assetId, InsuranceAllocationPolicy.ResolutionInputs allocation) {
+            initializeLedgerCommand(runtime);
+            runtime.requireRevisionCapacity();
+            this.runtime = runtime; this.command = command; this.liquidation = liquidation;
+            this.assetId = assetId; this.allocation = allocation;
+            laneMask = runtime.topology().accountLaneMask(liquidation.userId());
+            nextLiquidation = null;
+            treasuryDelta.clear();
+            done = ledgerDispatched = accountsDispatched = false;
         }
 
-        @Override
-        public Object apply(int ignored) {
-            runtime.replaceLiquidation(nextLiquidation);
-            return null;
+        @Override protected void applyLedger(TreasuryRuntime ledger) {
+            long nextDeficit = liquidation.deficitUnits();
+            CoreLiquidationState.Status nextStatus;
+            switch (command.resolution()) {
+                case INSURANCE -> {
+                    if (liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED)
+                        throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "insurance resolution requires insurance state");
+                    if (command.coveredUnits() > liquidation.deficitUnits())
+                        throw new CoreStateRejectedException("INSURANCE_COVER_EXCEEDS_DEFICIT", "insurance coverage must be within liquidation deficit");
+                    InsuranceAllocationPolicy.Resolution result = InsuranceAllocationPolicy.resolve(allocation, ledger);
+                    if (!result.next()) throw new CoreStateRejectedException("INSURANCE_RESOLUTION_ORDER_MISMATCH",
+                            "insurance claims must resolve in deterministic priority order");
+                    if (command.coveredUnits() != result.expectedCoverage())
+                        throw new CoreStateRejectedException("INSURANCE_ALLOCATION_MISMATCH", "insurance coverage does not match deterministic allocation");
+                    if (command.coveredUnits() > ledger.insurance(assetId))
+                        throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE", "insurance fund balance is insufficient");
+                    if (command.coveredUnits() != 0) {
+                        treasuryDelta.addInsurance(assetId, Math.negateExact(command.coveredUnits()));
+                        treasuryDelta.addDeficit(assetId, Math.negateExact(command.coveredUnits()));
+                    }
+                    nextDeficit = Math.subtractExact(nextDeficit, command.coveredUnits());
+                    nextStatus = nextDeficit == 0 ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.ADL_REQUIRED;
+                }
+                case ADL -> throw new CoreStateRejectedException("INVALID_COMMAND", "ADL resolution requires atomic target deleveraging");
+                case COMPLETED -> {
+                    if (command.coveredUnits() != 0) throw new CoreStateRejectedException("INVALID_COMMAND", "completed resolution covers no units");
+                    if (liquidation.deficitUnits() != 0) throw new CoreStateRejectedException("LIQUIDATION_DEFICIT_REMAINS",
+                            "liquidation deficit must be fully covered before completion");
+                    nextStatus = CoreLiquidationState.Status.COMPLETED;
+                }
+                default -> throw new IllegalStateException("unknown liquidation resolution");
+            }
+            treasuryDelta.apply(ledger);
+            LiquidationRuntime current = liquidation;
+            nextLiquidation = new LiquidationRuntime(current.liquidationId(), current.userId(), current.symbolId(),
+                    current.marginMode(), current.positionSide(), current.instrument(), current.triggerPriceSequence(),
+                    current.signedQuantitySteps(), current.closeQuantitySteps(), nextDeficit, current.executionPriceTicks(),
+                    current.liquidationFeeRatePpm(), current.liquidationFeeUnits(), nextStatus, 0);
         }
 
-        @Override
-        public boolean getAsBoolean() {
+        @Override public Object apply(int ignored) { runtime.replaceLiquidation(nextLiquidation); return null; }
+
+        @Override public boolean getAsBoolean() {
             if (done) return true;
+            if (!ledgerDispatched) {
+                if (!runtime.dispatchLedgerCommand(this)) return false;
+                ledgerDispatched = true;
+            }
+            if (!ledgerCommandCompleted()) return false;
+            if (!accountsDispatched) {
+                runtime.dispatchControlLanes(laneMask, this);
+                accountsDispatched = true;
+            }
             if (!runtime.pollControlLanes()) return false;
             finish();
             return true;
@@ -162,7 +157,6 @@ public final class RuntimeLiquidationResolution {
 
         private void finish() {
             if (done) return;
-            treasuryDelta.apply(runtime.treasury());
             runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
             done = true;
         }

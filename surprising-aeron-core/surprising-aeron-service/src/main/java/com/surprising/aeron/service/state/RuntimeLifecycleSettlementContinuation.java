@@ -52,7 +52,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         if (command.settlementId() == previousSettlement) {
             CoreSettlementProgressView completed = new CoreSettlementProgressView(
                     command.settlementId(), true, true, 0, 0, 0, 0);
-            return reuse == null ? SettlementWork.completed(runtime, completed)
+            return reuse == null || !reuse.reusable() ? SettlementWork.completed(runtime, completed)
                     : reuse.resetCompleted(runtime, completed);
         }
         ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
@@ -73,7 +73,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         RuntimeLifecycleSettlement.UserPage userPage = ordersComplete || !moreOrders
                 ? RuntimeLifecycleSettlement.selectUsers(indexedUserIds, runtime, accountLaneId, command.cursorUserId(), command.maxUsers())
                 : new RuntimeLifecycleSettlement.UserPage(List.of(), accountLaneId, 0, true);
-        if (reuse == null) {
+        if (reuse == null || !reuse.reusable()) {
             return new SettlementWork(command, chunkCommandId, runtime,
                     instrument, kernel, symbolId, assetId, previousProgress, selectedOrders,
                     moreOrders, userPage);
@@ -83,8 +83,9 @@ public final class RuntimeLifecycleSettlementContinuation {
     }
 
     /** Bounded asynchronous settlement continuation. Instances are owner-confined. */
-    public static final class SettlementWork implements java.util.function.IntFunction<Object> {
-        private enum Phase { CANCEL, PREPARE, APPLY, APPLY_WAIT, DONE }
+    public static final class SettlementWork extends SystemLedgerCommand implements java.util.function.IntFunction<Object> {
+        private enum Phase { CANCEL, PREPARE, APPLY, BUDGET_WAIT, APPLY_WAIT, FINAL_WAIT, DONE }
+        private enum FinancialPhase { ORDER_PROGRESS, INSURANCE, FINAL }
 
         private SettleInstrumentCommand command;
         private UUID chunkCommandId;
@@ -106,6 +107,10 @@ public final class RuntimeLifecycleSettlementContinuation {
         private Object[] prepared;
         private RuntimeTreasuryDelta treasuryDelta;
         private CoreSettlementProgressView result;
+        private FinancialPhase financialPhase;
+        private boolean ledgerDispatched, budgetSufficient;
+        private long requiredInsurance, nextOrderCursor;
+        private RuntimeTreasuryDelta[] financialResults;
 
         private SettlementWork(SettleInstrumentCommand command, UUID chunkCommandId,
                 TradingRuntimeState runtime, CoreInstrument instrument,
@@ -122,6 +127,7 @@ public final class RuntimeLifecycleSettlementContinuation {
 
         @SuppressWarnings("unchecked")
         private SettlementWork(TradingRuntimeState runtime, CoreSettlementProgressView result) {
+            initializeLedgerCommand(runtime);
             this.command = null; this.chunkCommandId = null;
             this.runtime = runtime; this.instrument = null; this.kernel = null;
             this.symbolId = this.assetId = 0; this.previousProgress = null; this.selectedOrders = List.of();
@@ -144,6 +150,7 @@ public final class RuntimeLifecycleSettlementContinuation {
                 ProductTradingRules kernel, int symbolId, int assetId,
                 TreasuryRuntime.LifecycleProgressRuntime previousProgress,
                 List<CoreOrderState> selectedOrders, boolean moreOrders, RuntimeLifecycleSettlement.UserPage userPage) {
+            initializeLedgerCommand(runtime);
             if (usersByLane.length != runtime.topology().accountLaneCount()) {
                 throw new IllegalStateException("settlement continuation lane topology changed");
             }
@@ -171,6 +178,11 @@ public final class RuntimeLifecycleSettlementContinuation {
             else Arrays.fill(prepared, null);
             if (treasuryDelta == null) treasuryDelta = new RuntimeTreasuryDelta();
             else treasuryDelta.clear();
+            if (financialResults == null) financialResults = new RuntimeTreasuryDelta[usersByLane.length];
+            else Arrays.fill(financialResults, null);
+            ledgerDispatched = budgetSufficient = false;
+            requiredInsurance = nextOrderCursor = 0;
+            financialPhase = null;
             this.result = null;
             this.dispatchedPhase = null;
             this.phase = selectedOrders.isEmpty() ? Phase.PREPARE : Phase.CANCEL;
@@ -178,6 +190,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         }
 
         private SettlementWork resetCompleted(TradingRuntimeState runtime, CoreSettlementProgressView result) {
+            initializeLedgerCommand(runtime);
             this.command = null; this.chunkCommandId = null; this.runtime = runtime;
             this.instrument = null; this.kernel = null; this.symbolId = this.assetId = 0;
             this.previousProgress = null; this.selectedOrders = List.of(); this.selectedUserIds = List.of();
@@ -220,24 +233,15 @@ public final class RuntimeLifecycleSettlementContinuation {
                 case PREPARE -> {
                     if (orderLaneMask != 0 && !runtime.pollControlLanes()) return false;
                     if (moreOrders) {
-                        long nextCursor = selectedOrders.isEmpty() ? command.cursorOrderId()
-                                : selectedOrders.getLast().orderId();
-                        runtime.treasury().setLifecycleProgress(symbolId,
-                                new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                                        instrument, command.settlementPriceTicks(),
-                                        command.optionCashUnitsPerContract(), false,
-                                        previousProgress == null ? 0 : previousProgress.accountLaneId(),
-                                        nextCursor, 0, chunkCommandId));
-                        runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
-                                selectedOrders.isEmpty() ? 1 : 2));
-                        result = new CoreSettlementProgressView(command.settlementId(), false, false,
-                                nextCursor, 0, selectedOrders.size(), 0);
-                        phase = Phase.DONE;
-                        return true;
+                        nextOrderCursor = selectedOrders.isEmpty() ? command.cursorOrderId() : selectedOrders.getLast().orderId();
+                        financialPhase = FinancialPhase.ORDER_PROGRESS;
+                        phase = Phase.FINAL_WAIT;
+                        return false;
                     }
                     if (userLaneMask == 0) {
-                        finishWithoutUsers();
-                        return true;
+                        financialPhase = FinancialPhase.FINAL;
+                        phase = Phase.FINAL_WAIT;
+                        return false;
                     }
                     dispatchedPhase = Phase.PREPARE;
                     runtime.dispatchControlLanes(userLaneMask, this);
@@ -246,32 +250,24 @@ public final class RuntimeLifecycleSettlementContinuation {
                 }
                 case APPLY -> {
                     if (!runtime.pollControlLanes()) return false;
-                    int laneCount = runtime.topology().accountLaneCount();
                     Arrays.fill(prepared, null);
-                    long requiredInsurance = 0;
-                    for (int lane = 0; lane < laneCount; lane++) {
-                        if ((userLaneMask & (1L << lane)) == 0) continue;
-                        prepared[lane] = runtime.controlLaneResult(lane);
-                        @SuppressWarnings("unchecked") List<RuntimeLifecycleSettlement.UserSettlement> plans = (List<RuntimeLifecycleSettlement.UserSettlement>) prepared[lane];
-                        for (RuntimeLifecycleSettlement.UserSettlement plan : plans) requiredInsurance = Math.addExact(requiredInsurance, plan.insurance());
-                    }
-                    if (requiredInsurance > runtime.treasury().insurance(assetId)) {
-                        long cursor = selectedUserIds.isEmpty() ? command.cursorUserId() : selectedUserIds.getLast();
-                        UUID progressId = chunkCommandId;
-                        runtime.treasury().setLifecycleProgress(symbolId,
-                                new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                                        instrument, command.settlementPriceTicks(),
-                                        command.optionCashUnitsPerContract(), true, 0, 0, cursor,
-                                        progressId, requiredInsurance));
+                    for (int lane = 0; lane < usersByLane.length; lane++)
+                        if ((userLaneMask & (1L << lane)) != 0) prepared[lane] = runtime.controlLaneResult(lane);
+                    financialPhase = FinancialPhase.INSURANCE;
+                    ledgerDispatched = false;
+                    phase = Phase.BUDGET_WAIT;
+                    return false;
+                }
+                case BUDGET_WAIT -> {
+                    if (!pollLedger()) return false;
+                    if (!budgetSufficient) {
                         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+                        long cursor = command.cursorUserId();
                         result = new CoreSettlementProgressView(command.settlementId(), false, true,
-                                0, cursor, selectedOrders.size(), selectedUserIds.size(), requiredInsurance);
+                                0, cursor, selectedOrders.size(), 0, requiredInsurance);
                         phase = Phase.DONE;
                         return true;
                     }
-                    if (requiredInsurance != 0) runtime.treasury().setInsurance(assetId,
-                            Math.subtractExact(runtime.treasury().insurance(assetId), requiredInsurance),
-                            runtime.treasury().insuranceDeficit(assetId));
                     dispatchedPhase = Phase.APPLY;
                     runtime.dispatchControlLanes(userLaneMask, this);
                     phase = Phase.APPLY_WAIT;
@@ -279,26 +275,25 @@ public final class RuntimeLifecycleSettlementContinuation {
                 }
                 case APPLY_WAIT -> {
                     if (!runtime.pollControlLanes()) return false;
-                    treasuryDelta.clear();
-                    int laneCount = runtime.topology().accountLaneCount();
-                    for (int lane = 0; lane < laneCount; lane++) {
-                        if ((userLaneMask & (1L << lane)) == 0) continue;
-                        treasuryDelta.merge((RuntimeTreasuryDelta) runtime.controlLaneResult(lane));
+                    for (int lane = 0; lane < usersByLane.length; lane++)
+                        if ((userLaneMask & (1L << lane)) != 0)
+                            financialResults[lane] = (RuntimeTreasuryDelta) runtime.controlLaneResult(lane);
+                    financialPhase = FinancialPhase.FINAL;
+                    ledgerDispatched = false;
+                    phase = Phase.FINAL_WAIT;
+                    return false;
+                }
+                case FINAL_WAIT -> {
+                    if (!pollLedger()) return false;
+                    runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), selectedOrders.isEmpty() ? 1 : 2));
+                    if (financialPhase == FinancialPhase.ORDER_PROGRESS)
+                        result = new CoreSettlementProgressView(command.settlementId(), false, false,
+                                nextOrderCursor, 0, selectedOrders.size(), 0);
+                    else {
+                        boolean complete = usersComplete || selectedUserIds.isEmpty();
+                        result = new CoreSettlementProgressView(command.settlementId(), complete, true,
+                                0, complete ? 0 : selectedUserIds.getLast(), selectedOrders.size(), selectedUserIds.size());
                     }
-                    treasuryDelta.apply(runtime.treasury());
-                    boolean complete = usersComplete || selectedUserIds.isEmpty();
-                    long nextCursor = complete ? 0 : selectedUserIds.getLast();
-                    if (complete) runtime.treasury().setLifecycleSettlement(symbolId, command.settlementId());
-                    else runtime.treasury().setLifecycleProgress(symbolId,
-                            new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                                    instrument, command.settlementPriceTicks(),
-                                    command.optionCashUnitsPerContract(), true,
-                                    previousProgress == null ? 0 : previousProgress.accountLaneId(),
-                                    0, nextCursor, chunkCommandId));
-                    runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
-                            selectedOrders.isEmpty() ? 1 : 2));
-                    result = new CoreSettlementProgressView(command.settlementId(), complete, true,
-                            0, nextCursor, selectedOrders.size(), selectedUserIds.size());
                     phase = Phase.DONE;
                     return true;
                 }
@@ -325,13 +320,55 @@ public final class RuntimeLifecycleSettlementContinuation {
             };
         }
 
-        private void finishWithoutUsers() {
-            runtime.treasury().setLifecycleSettlement(symbolId, command.settlementId());
-            runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
-                    selectedOrders.isEmpty() ? 1 : 2));
-            result = new CoreSettlementProgressView(command.settlementId(), true, true, 0, 0,
-                    selectedOrders.size(), 0);
-            phase = Phase.DONE;
+        private boolean pollLedger() {
+            if (!ledgerDispatched) {
+                Math.addExact(runtime.revision(), financialPhase == FinancialPhase.INSURANCE ? 1 : selectedOrders.isEmpty() ? 1 : 2);
+                if (!runtime.dispatchLedgerCommand(this)) return false;
+                ledgerDispatched = true;
+            }
+            return ledgerCommandCompleted();
+        }
+
+        @Override protected boolean financialScopeComplete() {
+            return financialPhase != FinancialPhase.INSURANCE || !budgetSufficient;
+        }
+
+        @Override protected void applyLedger(TreasuryRuntime ledger) {
+            if (financialPhase == FinancialPhase.ORDER_PROGRESS) {
+                ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(
+                        command.settlementId(), instrument, command.settlementPriceTicks(), command.optionCashUnitsPerContract(),
+                        false, previousProgress == null ? 0 : previousProgress.accountLaneId(), nextOrderCursor, 0, chunkCommandId));
+                return;
+            }
+            if (financialPhase == FinancialPhase.INSURANCE) {
+                requiredInsurance = 0;
+                for (Object receipt : prepared) {
+                    if (receipt == null) continue;
+                    @SuppressWarnings("unchecked") List<RuntimeLifecycleSettlement.UserSettlement> plans =
+                            (List<RuntimeLifecycleSettlement.UserSettlement>) receipt;
+                    for (RuntimeLifecycleSettlement.UserSettlement plan : plans)
+                        requiredInsurance = Math.addExact(requiredInsurance, plan.insurance());
+                }
+                budgetSufficient = requiredInsurance <= ledger.insurance(assetId);
+                if (!budgetSufficient) {
+                    long cursor = command.cursorUserId();
+                    ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(
+                            command.settlementId(), instrument, command.settlementPriceTicks(), command.optionCashUnitsPerContract(),
+                            true, 0, 0, cursor, chunkCommandId, requiredInsurance));
+                } else if (requiredInsurance != 0) {
+                    ledger.setInsurance(assetId, Math.subtractExact(ledger.insurance(assetId), requiredInsurance),
+                            ledger.insuranceDeficit(assetId));
+                }
+                return;
+            }
+            treasuryDelta.clear();
+            for (RuntimeTreasuryDelta delta : financialResults) if (delta != null) treasuryDelta.merge(delta);
+            treasuryDelta.apply(ledger);
+            boolean complete = usersComplete || selectedUserIds.isEmpty();
+            if (complete) ledger.setLifecycleSettlement(symbolId, command.settlementId());
+            else ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(
+                    command.settlementId(), instrument, command.settlementPriceTicks(), command.optionCashUnitsPerContract(), true,
+                    previousProgress == null ? 0 : previousProgress.accountLaneId(), 0, selectedUserIds.getLast(), chunkCommandId));
         }
 
         public CoreSettlementProgressView result() {

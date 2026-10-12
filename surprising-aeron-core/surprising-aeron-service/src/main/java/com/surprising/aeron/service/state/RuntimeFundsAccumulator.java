@@ -105,6 +105,8 @@ public final class RuntimeFundsAccumulator {
         size = 0;
     }
 
+    boolean isEmpty() { return size == 0; }
+
     /**
      * 将已汇总的资金缓冲交给空目标，源接回空缓冲；转移时两者必须由当前线程独占。
      * 跨线程转移须先以完成标记交接所有权，原生产者发布完成后不再访问源缓冲。

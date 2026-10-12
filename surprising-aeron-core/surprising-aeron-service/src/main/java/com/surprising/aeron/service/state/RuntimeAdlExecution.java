@@ -14,7 +14,7 @@ import com.surprising.aeron.service.state.model.CoreLiquidationState;
  *
  * <p>The liquidation account is completed on its owning lane, while the target
  * account supplies the position and balance mutation. The owner only merges the
- * target lane treasury delta after both lanes have completed.</p>
+ * target lane receipt after both lanes have completed; SystemLedgerLane applies the money.</p>
  */
 public final class RuntimeAdlExecution {
 
@@ -34,6 +34,7 @@ public final class RuntimeAdlExecution {
     public static TradingRuntimeState applyRuntime(ExecuteAdlCommand command,
                                                    TradingRuntimeState runtime,
                                                    RuntimeIdentityRegistry identities) {
+        if (runtime.systemLedgerStarted()) throw new IllegalStateException("active ADL requires its asynchronous continuation");
         adl(null, command, runtime, identities, false);
         return runtime;
     }
@@ -81,7 +82,7 @@ public final class RuntimeAdlExecution {
         int settleAssetId = identities.assetId(instrument.settleAsset());
         int targetLane = runtime.topology().accountLaneId(command.targetUserId());
         long mask = (1L << targetLane) | runtime.topology().accountLaneMask(liquidation.userId());
-        AdlWork work = reuse == null ? new AdlWork() : reuse;
+        AdlWork work = reuse == null || !reuse.reusable() ? new AdlWork() : reuse;
         work.prepare(command, runtime, liquidation, instrument, mark, positionKey,
                 settleAssetId, targetLane);
         if (asynchronous) {
@@ -94,8 +95,8 @@ public final class RuntimeAdlExecution {
         return null;
     }
 
-    /** Two-account-lane ADL mutation plus its single owner-side treasury delta. */
-    public static final class AdlWork
+    /** 两个账户Lane独立修改；账本消费目标账户的资金回执。 */
+    public static final class AdlWork extends SystemLedgerCommand
             implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
         private ExecuteAdlCommand command;
         private TradingRuntimeState runtime;
@@ -106,11 +107,12 @@ public final class RuntimeAdlExecution {
         private int settleAssetId;
         private int targetLane;
         private final RuntimeTreasuryDelta targetDelta = new RuntimeTreasuryDelta();
-        private boolean done;
+        private boolean done, accountsCollected, ledgerDispatched;
 
         private void prepare(ExecuteAdlCommand command, TradingRuntimeState runtime,
                 LiquidationRuntime liquidation, CoreInstrument instrument, MarkPriceRuntime mark,
                 long positionKey, int settleAssetId, int targetLane) {
+            initializeLedgerCommand(runtime);
             this.command = command;
             this.runtime = runtime;
             this.liquidation = liquidation;
@@ -120,7 +122,7 @@ public final class RuntimeAdlExecution {
             this.settleAssetId = settleAssetId;
             this.targetLane = targetLane;
             this.targetDelta.clear();
-            this.done = false;
+            this.done = accountsCollected = ledgerDispatched = false;
         }
 
         @Override
@@ -139,10 +141,23 @@ public final class RuntimeAdlExecution {
         @Override
         public boolean getAsBoolean() {
             if (done) return true;
-            if (!runtime.pollControlLanes()) return false;
-            finish(runtime.controlLaneResult(targetLane));
+            if (!accountsCollected) {
+                if (!runtime.pollControlLanes()) return false;
+                runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
+                runtime.requireRevisionCapacity();
+                accountsCollected = true;
+            }
+            if (!ledgerDispatched) {
+                if (!runtime.dispatchLedgerCommand(this)) return false;
+                ledgerDispatched = true;
+            }
+            if (!ledgerCommandCompleted()) return false;
+            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+            done = true;
             return true;
         }
+
+        @Override protected void applyLedger(TreasuryRuntime ledger) { targetDelta.apply(ledger); }
 
         private void finish(Object result) {
             if (done) return;

@@ -225,6 +225,62 @@ class CorePerpetualFinancialMatrixTest {
         }
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("adlVariants")
+    void fundingRunsOnOriginalSystemLedgerWithoutOwnerMoneyAccess(Variant variant) {
+        TradingCoreState opening = withPosition(variant, USER_ID, QUANTITY, ENTRY_PRICE, DEFAULT_WALLET, POSITION_MARGIN);
+        opening = withPosition(opening, variant, SECOND_MAKER_ID, -QUANTITY, ENTRY_PRICE, DEFAULT_WALLET, POSITION_MARGIN);
+        TradingCoreState marked = mark(opening, variant, ENTRY_PRICE, 1);
+        var command = new ApplyFundingCommand(701, SYMBOL, 100_000);
+        var expected = reducer.applyFundingWithFacts(marked, command);
+        var identities = new RuntimeIdentityRegistry();
+        try (var runtime = RuntimeStateProjector.project(marked, identities)) {
+            runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
+            try {
+                var work = RuntimePerpetualFundingProcessor.prepare(command, List.of(USER_ID, SECOND_MAKER_ID), null, runtime, identities);
+                LedgerControlTestSupport.await(runtime, work::poll);
+                assertThat(work.poll()).isTrue();
+                assertThat(work.result().payments()).isEqualTo(expected.payments());
+                assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected.state());
+                assertThatThrownBy(() -> runtime.treasury().fundingResidual(identities.assetId(variant.settleAsset())))
+                        .isInstanceOf(IllegalStateException.class);
+            } finally { runtime.exitAsynchronousCommandScope(); }
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("adlVariants")
+    void liquidationInsuranceAndAdlUseOriginalSystemLedgerAcrossAccountLanes(Variant variant) {
+        TradingCoreState marked = mark(adlSetup(variant), variant, 1, 1);
+        var execute = new ExecuteLiquidationCommand(1, liquidationSequence(marked), 1, 0);
+        TradingCoreState expected = reducer.executeLiquidation(marked, execute);
+        var identities = new RuntimeIdentityRegistry();
+        try (var runtime = RuntimeStateProjector.project(marked, identities)) {
+            runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
+            try {
+                var execution = RuntimeDerivativeLiquidationProcessor.beginExecution(null, execute, List.of(), 0, runtime, identities);
+                LedgerControlTestSupport.await(runtime, execution);
+                assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
+                long coverage = variant.type() == ContractType.LINEAR_PERPETUAL ? 25 : 50_000;
+                var adjustment = new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), coverage);
+                expected = reducer.adjustInsuranceFund(expected, adjustment);
+                LedgerControlTestSupport.await(runtime, RuntimeInsuranceFundStateTransitions.prepare(null, runtime, identities, adjustment));
+                assertThat(LedgerControlTestSupport.commit(runtime, identities, true)).isEqualTo(expected);
+                coverage = InsuranceAllocationPolicy.expectedCoverage(expected, 1);
+                var resolve = new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage);
+                expected = reducer.resolveLiquidation(expected, resolve);
+                LedgerControlTestSupport.await(runtime, RuntimeLiquidationResolution.begin(resolve, runtime, identities, List.of(1L)));
+                assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
+                var adl = new ExecuteAdlCommand(1, SECOND_MAKER_ID, SYMBOL, variant.marginMode(), CorePositionSide.NET,
+                        -QUANTITY, 150, expected.riskState().markPrices().get(SYMBOL).priceSequence(), 5, linearOrInverse(variant, 700, 40_000));
+                expected = reducer.executeAdl(expected, adl);
+                LedgerControlTestSupport.await(runtime, RuntimeAdlExecution.begin(adl, runtime, identities));
+                assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
+                runtime.assertAccountLanesHealthy();
+            } finally { runtime.exitAsynchronousCommandScope(); }
+        }
+    }
+
     static java.util.stream.Stream<Variant> adlVariants() { return VARIANTS.stream(); }
 
     @Test

@@ -181,8 +181,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     final IntObjectHashMap<MarkPriceRuntime> markPrices = new IntObjectHashMap<>();
     /** 各币对的风险扫描续作状态。 */
     final IntObjectHashMap<RiskScanRuntime> riskScans = new IntObjectHashMap<>();
-    /** 手续费、保险、清算等全局资金状态，按提交边界合并。 */
+    /** 唯一系统财库；启动后只允许SystemLedgerLane写入，不建立Owner资金镜像。 */
     final TreasuryRuntime treasury = new TreasuryRuntime();
+    private SystemLedgerLane systemLedger;
+    /** 当前唯一控制命令的财务交接槽；匹配事件各用自身已有财务槽。 */
+    private SystemLedgerCommand ledgerControl;
     /** 配置命令在控制栅栏内热注册；同一 instrumentId 的对象身份保持稳定。 */
     final Map<String, CoreInstrument> instruments = new HashMap<>();
     /** 用户自动撤单定时器状态。 */
@@ -429,6 +432,54 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (failure instanceof Error error) throw error;
         if (failure != null) throw new IllegalStateException("account lane failed", failure);
     }
+
+    public void startSystemLedgerLane() {
+        assertOwner();
+        if (systemLedger != null) return;
+        if (treasury.hasChangedValues()) throw new IllegalStateException("Ledger activation requires committed Treasury");
+        systemLedger = new SystemLedgerLane(treasury,
+                Math.max(4_096, Math.multiplyExact(matcherSettlementChangesRing.length, 2)), failure -> {
+                    accountLaneFailure.compareAndSet(null, failure);
+                    signalOwnerCompletion();
+                });
+    }
+
+    public boolean systemLedgerStarted() { return systemLedger != null; }
+
+    public boolean dispatchLedgerCommand(SystemLedgerCommand command) {
+        assertOwner();
+        if (command == null) throw new IllegalArgumentException("Ledger command is required");
+        if (systemLedger == null) {
+            command.applyBeforeActivation(treasury);
+            return true;
+        }
+        if (ledgerControl != null && ledgerControl != command)
+            throw new IllegalStateException("another control command owns the Ledger financial scope");
+        command.submitted();
+        if (!systemLedger.offer(command)) {
+            command.notAdmitted();
+            return false;
+        }
+        ledgerControl = command;
+        return true;
+    }
+
+    private boolean rollbackLedgerControl() {
+        if (systemLedger == null) {
+            treasury.rollbackChangedValues();
+            return true;
+        }
+        if (ledgerControl == null) return true;
+        // Queue the inverse scope only after the previously dispatched phase released it.
+        return ledgerControl.requestRollback();
+    }
+
+    boolean enqueueLedgerScopeClose(SystemLedgerLane.Entry close) {
+        assertOwner();
+        return systemLedger.offer(close);
+    }
+
+    void signalLedgerWork() { systemLedger.signalWork(); }
 
     /** 集群控制阶段采用非阻塞派发；独立调用沿用调用方的同步完成契约。 */
     public boolean asynchronousCommands() { assertOwner(); return asynchronousCommandScope; }
@@ -922,9 +973,18 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void close() {
         releaseOwnerLaneAccess();
         accountLanesStarted = false;
+        RuntimeException failure = null;
         for (SettlementLaneWorker worker : laneWorkers) {
-            if (worker != null) worker.close();
+            try { if (worker != null) worker.close(); }
+            catch (RuntimeException problem) {
+                if (failure == null) failure = problem; else failure.addSuppressed(problem);
+            }
         }
+        try { if (systemLedger != null) systemLedger.close(); }
+        catch (RuntimeException problem) {
+            if (failure == null) failure = problem; else failure.addSuppressed(problem);
+        } finally { systemLedger = null; }
+        if (failure != null) throw failure;
     }
 
     static long[][] laneMetricValues(int laneCount) {
@@ -1867,7 +1927,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 包含尚未提升 revision 的 Lane 修改，失败时也必须回滚。 */
     public boolean hasUncommittedCommandChanges() {
         assertOwner();
-        return snapshotProjectionStateDirty() || treasury.hasChangedValues();
+        return snapshotProjectionStateDirty() || (systemLedger == null ? treasury.hasChangedValues() : ledgerControl != null);
     }
 
     boolean snapshotProjectionStateDirty() {
@@ -1981,7 +2041,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public void releaseOwnerForHandoff() {
-        if (accountLanesStarted) throw new IllegalStateException("account lanes must be closed before handoff");
+        if (accountLanesStarted || systemLedger != null) throw new IllegalStateException("all lanes must be closed before handoff");
         for (AccountLaneState lane : accountLanes) lane.releaseOwnerForHandoff();
         treasury.releaseOwnerForHandoff();
         owner = null;
@@ -2005,17 +2065,17 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void beginOrderBatchMutationScope() {
         assertOwner();
         if (orderBatchMutationScope) throw new IllegalStateException("order batch mutation scope is already active");
-        if (snapshotProjectionStateDirty() || treasury.hasChangedValues()) {
+        if (snapshotProjectionStateDirty() || (systemLedger == null ? treasury.hasChangedValues() : ledgerControl != null)) {
             throw new IllegalStateException("order batch requires a clean command mutation set");
         }
         orderBatchMutationScope = true;
-        treasury.beginOrderBatchMutationScope();
+        if (systemLedger == null) treasury.beginOrderBatchMutationScope();
     }
 
     public void endOrderBatchMutationScope() {
         assertOwner();
         if (!orderBatchMutationScope) return;
-        treasury.endOrderBatchMutationScope();
+        if (systemLedger == null) treasury.endOrderBatchMutationScope();
         orderBatchMutationScope = false;
     }
 
@@ -2056,23 +2116,30 @@ public final class TradingRuntimeState implements AutoCloseable {
             accountRollback.restoreLane(lane);
             return completed;
         });
-        return () -> {
-            if (!pollControlLanes()) return false;
-            int completed = 0;
-            for (int id = 0; id < accountLanes.length; id++)
-                completed = Math.addExact(completed, (Integer) controlLaneResult(id));
-            if (completed != expectedPending) throw new IllegalStateException("rollback reservation count mismatch");
-            for (long orderId : pendingOrders) {
-                long userId = pendingReservations.pendingReservationUsers.get(orderId);
-                pendingReservations.unindexPendingReservation(orderId, coreSequence, userId,
-                        Math.subtractExact(pendingReservations.totalPendingReservations, 1));
+        return new java.util.function.BooleanSupplier() {
+            private boolean ownerRestored;
+            @Override public boolean getAsBoolean() {
+                if (!ownerRestored) {
+                    if (!pollControlLanes()) return false;
+                    int completed = 0;
+                    for (int id = 0; id < accountLanes.length; id++)
+                        completed = Math.addExact(completed, (Integer) controlLaneResult(id));
+                    if (completed != expectedPending) throw new IllegalStateException("rollback reservation count mismatch");
+                    for (long orderId : pendingOrders) {
+                        long userId = pendingReservations.pendingReservationUsers.get(orderId);
+                        pendingReservations.unindexPendingReservation(orderId, coreSequence, userId,
+                                Math.subtractExact(pendingReservations.totalPendingReservations, 1));
+                    }
+                    if (batch != null) pendingReservations.completedBatchItems(coreSequence, batch.remaining);
+                    accountRollback.restoreOwner();
+                    ownerRestored = true;
+                }
+                if (!rollbackLedgerControl()) return false;
+                ledgerControl = null;
+                revision = revisionCheckpoint;
+                clearChangedKeys();
+                return true;
             }
-            if (batch != null) pendingReservations.completedBatchItems(coreSequence, batch.remaining);
-            accountRollback.restoreOwner();
-            treasury.rollbackChangedValues();
-            revision = revisionCheckpoint;
-            clearChangedKeys();
-            return true;
         };
     }
 
@@ -2095,7 +2162,9 @@ public final class TradingRuntimeState implements AutoCloseable {
             });
         }
         accountRollback.restoreOwner();
-        treasury.rollbackChangedValues();
+        if (systemLedger != null && ledgerControl != null)
+            throw new IllegalStateException("active Ledger rollback requires its asynchronous continuation");
+        if (systemLedger == null) treasury.rollbackChangedValues();
         revision = revisionCheckpoint;
         clearChangedKeys();
     }
@@ -2590,10 +2659,37 @@ public final class TradingRuntimeState implements AutoCloseable {
         return nextLiquidationId;
     }
 
+    /** 冷查询只取得不可变导出值，不向Owner交接Treasury所有权。 */
+    public CoreTreasuryState treasuryForQuery(RuntimeIdentityRegistry identities) {
+        assertOwner();
+        if (ledgerControl != null) throw new IllegalStateException("Treasury query requires committed control work");
+        if (systemLedger == null) return RuntimeStateMaterializer.materializeTreasury(treasury, identities);
+        final class Query implements SystemLedgerLane.Entry {
+            private CoreTreasuryState value;
+            private volatile boolean complete;
+            @Override public void apply(TreasuryRuntime ledger) {
+                value = RuntimeStateMaterializer.materializeTreasury(ledger, identities);
+                complete = true;
+            }
+        }
+        Query query = new Query();
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (!systemLedger.offer(query)) {
+            if (System.nanoTime() >= deadline) throw new IllegalStateException("Treasury query mailbox timeout");
+            java.util.concurrent.locks.LockSupport.parkNanos(this, 100_000L);
+        }
+        while (!query.complete) {
+            systemLedger.assertHealthy();
+            if (System.nanoTime() >= deadline) throw new IllegalStateException("Treasury query completion timeout");
+            java.util.concurrent.locks.LockSupport.parkNanos(this, 100_000L);
+        }
+        return query.value;
+    }
+
     public TreasuryRuntime treasury() {
         assertOwner();
         if (currentLaneCommandScope() != null) {
-            throw new IllegalStateException("Account Lane cannot mutate Sequencer-owned Treasury");
+            throw new IllegalStateException("Account Lane cannot access SystemLedger-owned Treasury");
         }
         return treasury;
     }
@@ -4004,7 +4100,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (LaneBalancePatches balances : accountRollback.patchBalancesBeforeByLane) {
             appendBalanceFundsDelta(balances, accumulator);
         }
-        treasury.appendFundsDelta(accumulator);
+        if (systemLedger == null) treasury.appendFundsDelta(accumulator);
+        else if (ledgerControl != null) ledgerControl.transferFundsTo(accumulator);
     }
 
     static void prepareBalanceFundsDelta(LaneBalancePatches patches,
@@ -4067,7 +4164,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         changedCancelAllAfterTimers.clear();
         changedTriggerOrders.clear();
         clearChanged(changedFeePolicies);
-        treasury.clearChangedKeys();
+        if (systemLedger == null) treasury.clearChangedKeys();
+        else if (ledgerControl != null) {
+            ledgerControl.commitScope();
+            ledgerControl = null;
+        }
         accountRollback.publishAndClearBalances();
     }
 
