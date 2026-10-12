@@ -1204,7 +1204,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         while (lanes != 0) {
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
-            if (!accountLanesStarted || !asynchronousCommands()) {
+            if (!accountLanesStarted) {
                 event.execute(accountLanes[laneId]);
             } else {
                 laneWorkers[laneId].submit(event);

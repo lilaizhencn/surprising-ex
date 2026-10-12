@@ -43,7 +43,7 @@ class CoreFinancialLedgerProductionTest {
             var expected = expected(core.tradingState(), (runtime, identities) ->
                     RuntimeDerivativeLiquidationProcessor.applyExecutionRuntime(execute, List.of(), runtime, identities));
             long handoff = core.runtimeState.laneHandoffEpoch();
-            applied(core, CoreMessageType.EXECUTE_LIQUIDATION, 0, TradingCommandCodec.encodeExecuteLiquidation(execute), TIME);
+            appliedWithGuard(core, CoreMessageType.EXECUTE_LIQUIDATION, 0, TradingCommandCodec.encodeExecuteLiquidation(execute), TIME);
             assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
             assertThat(core.tradingState()).isEqualTo(expected);
 

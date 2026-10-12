@@ -163,3 +163,6 @@ Matcher财务接线现由日志提交队首异步推入原Ledger；普通成交�
 
 
 账户控制任务的用户、订单、预留与持仓变更现只写所属 Lane 的 `LaneCommitDelta`，Owner 在完成通知后收集既有回执；关闭持仓触发取消读取已有前值。持仓身份回收使用 Lane 末尾随风险删除返回的布尔证明与身份引用计数，Owner 不回读 Lane 持仓表，不新增账户镜像。58 次必要用例执行通过，覆盖分离删除、风险单独删除、同 Lane 重开及资金费/保险/ADL/交割期权/触发边界，见 [验证记录](docs/validation/owner-position-retirement-20261012.json)。未做压测或快照恢复；强平执行前校验等 Owner 读取仍待迁移。
+
+
+强平单笔与批次先由所属 Lane 校验持仓和风险，Owner 消费命令槽中的动作结果后才向 Matcher 撤单；订单页及取消 Lane 掩码使用现有 `ActiveOrderIndex` 的不可变引用。过期动作与失效风险不会撤掉有效挂单，已启动账本的同步入口也走原账本回执，订单提交元数据由 Lane 写入。31 次必要用例执行通过，见 [强平迁移记录](docs/validation/owner-liquidation-admission-20261012.json)。本轮没有压测或快照恢复，内部账户查询等 Owner 读取仍待迁移。

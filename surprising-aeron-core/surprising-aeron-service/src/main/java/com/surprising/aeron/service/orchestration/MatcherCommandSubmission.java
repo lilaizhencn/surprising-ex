@@ -130,8 +130,7 @@ final class MatcherCommandSubmission {
                 case LIQUIDATION -> {
                     var command = pending.decodedCommand().liquidation();
                     var liquidation = owner.runtimeState.liquidation(command.liquidationId());
-                    if (liquidation == null || !com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService
-                            .isExecutable(owner.runtimeState, owner.identities, command)) {
+                    if (liquidation == null || !pending.liquidationCheck().executable(0)) {
                         yield new MatchingSubmission(command.liquidationId(), () ->
                                 new com.surprising.aeron.service.matching.CoreMatchingResult(true, "SUCCESS"));
                     }

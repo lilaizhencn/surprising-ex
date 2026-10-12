@@ -14,6 +14,7 @@ import com.surprising.aeron.service.state.model.CoreRiskStatus;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
+import com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand;
 
 import java.util.Collection;
 import java.util.List;
@@ -52,6 +53,123 @@ public final class RuntimeDerivativeLiquidationProcessor {
             Collection<CoreOrderState> canceledOrders, long nextCursorOrderId,
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         return execute(reuse, command, canceledOrders, nextCursorOrderId, runtime, identities, true);
+    }
+
+    /**
+     * 强平前置校验随命令槽复用，只保存本次不可变输入和每个动作的结果字节。
+     * Owner准备身份键；所属Lane读取自身持仓/风险。结果由既有控制完成位发布，
+     * 校验完成前不得向Matcher撤单，槽位回收时释放输入，不维护第二份账户状态。
+     */
+    public static final class ExecutionCheck implements java.util.function.IntFunction<Object> {
+        private static final byte CHECK_LANE = 0, EXECUTABLE = 1, OBSOLETE = 2, STALE_PRICE = 3;
+        private LiquidationRuntime[] liquidations = new LiquidationRuntime[4];
+        private CoreInstrument[] instruments = new CoreInstrument[4];
+        private long[] positionKeys = new long[4];
+        private int[] laneIds = new int[4];
+        private byte[] results = new byte[4];
+        private TradingRuntimeState runtime;
+        private int count;
+        private long laneMask;
+        private boolean dispatched, done;
+
+        public void prepare(ExecuteLiquidationCommand command, TradingRuntimeState runtime,
+                            RuntimeIdentityRegistry identities) {
+            initialize(runtime, 1);
+            prepareAction(0, command.liquidationId(), command.triggerPriceSequence(),
+                    command.executionPriceTicks(), identities);
+        }
+
+        public void prepare(ExecuteLiquidationBatchCommand command, TradingRuntimeState runtime,
+                            RuntimeIdentityRegistry identities) {
+            initialize(runtime, command.actions().size());
+            for (int index = 0; index < count; index++) {
+                var action = command.actions().get(index);
+                prepareAction(index, action.liquidationId(), action.triggerPriceSequence(),
+                        action.executionPriceTicks(), identities);
+            }
+        }
+
+        private void initialize(TradingRuntimeState runtime, int count) {
+            runtime.assertOwner();
+            if (this.runtime != null) throw new IllegalStateException("liquidation checks already prepared");
+            if (count > results.length) {
+                int capacity = Math.max(count, Math.multiplyExact(results.length, 2));
+                liquidations = new LiquidationRuntime[capacity]; instruments = new CoreInstrument[capacity];
+                positionKeys = new long[capacity]; laneIds = new int[capacity]; results = new byte[capacity];
+            }
+            this.runtime = runtime; this.count = count; laneMask = 0; dispatched = done = false;
+        }
+
+        private void prepareAction(int index, long liquidationId, long priceSequence,
+                                   long executionPriceTicks, RuntimeIdentityRegistry identities) {
+            LiquidationRuntime liquidation = runtime.liquidation(liquidationId);
+            results[index] = OBSOLETE;
+            laneIds[index] = -1;
+            if (liquidation == null || (liquidation.status() != CoreLiquidationState.Status.PLANNED
+                    && liquidation.status() != CoreLiquidationState.Status.ORDERED)) return;
+            MarkPriceRuntime mark = runtime.markPrice(liquidation.symbolId());
+            if (mark == null || mark.priceSequence() != liquidation.triggerPriceSequence()
+                    || priceSequence > 0 && priceSequence != liquidation.triggerPriceSequence()
+                    || executionPriceTicks != mark.markPriceTicks()) {
+                results[index] = STALE_PRICE;
+                return;
+            }
+            CoreInstrument instrument = runtime.instrument(identities.instrumentId(liquidation.symbolId()));
+            if (instrument == null || !CoreRiskPolicy.canLiquidate(
+                    instrument.contractType(), liquidation.signedQuantitySteps())) return;
+            long positionKey = identities.findPositionKeyValue(
+                    liquidation.userId(), instrument, liquidation.positionSide());
+            if (positionKey == 0) return;
+            liquidations[index] = liquidation; instruments[index] = instrument; positionKeys[index] = positionKey;
+            laneIds[index] = runtime.topology().accountLaneId(liquidation.userId());
+            results[index] = CHECK_LANE;
+            laneMask |= 1L << laneIds[index];
+        }
+
+        public boolean prepared() { return runtime != null; }
+
+        public boolean poll() {
+            if (done) return true;
+            runtime.assertOwner();
+            if (laneMask == 0) { done = true; return true; }
+            if (!dispatched) {
+                runtime.dispatchControlLanes(laneMask, this);
+                dispatched = true;
+            }
+            if (!runtime.pollControlLanes()) return false;
+            done = true;
+            return true;
+        }
+
+        @Override public Object apply(int laneId) {
+            for (int index = 0; index < count; index++) {
+                if (laneIds[index] == laneId && results[index] == CHECK_LANE)
+                    results[index] = RuntimeDerivativeLiquidationProcessor.executable(runtime, liquidations[index], instruments[index], positionKeys[index])
+                            ? EXECUTABLE : OBSOLETE;
+            }
+            return null;
+        }
+
+        /** 批次筛选撤单时过期动作直接跳过，不影响同批次其他账户。 */
+        public boolean cancelsOrders(int index) { requireResult(index); return results[index] == EXECUTABLE; }
+
+        public boolean executable(int index) {
+            requireResult(index);
+            if (results[index] == STALE_PRICE)
+                throw new CoreStateRejectedException("STALE_MARK_PRICE", "liquidation mark price changed");
+            return results[index] == EXECUTABLE;
+        }
+
+        private void requireResult(int index) {
+            if (!done || index < 0 || index >= count)
+                throw new IllegalStateException("liquidation Lane check is not complete");
+        }
+
+        public void clearReferences() {
+            java.util.Arrays.fill(liquidations, 0, count, null);
+            java.util.Arrays.fill(instruments, 0, count, null);
+            runtime = null; count = 0; laneMask = 0; dispatched = done = false;
+        }
     }
 
     /** A validated account stage that can be coalesced with other liquidation stages. */
@@ -141,7 +259,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private long nextCursorOrderId;
         private int canceledCount;
         private boolean advance;
-        private boolean obsolete;
         private TradingRuntimeState runtime;
         private LiquidationRuntime liquidation;
         private CoreInstrument instrument;
@@ -151,20 +268,20 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private long userId;
 
         private BatchExecutionStage(ExecuteLiquidationCommand command, long[] orderIds,
-                                    long nextCursorOrderId, boolean advance, boolean obsolete,
+                                    long nextCursorOrderId, boolean advance,
                                     TradingRuntimeState runtime, LiquidationRuntime liquidation,
                                     CoreInstrument instrument, int assetId, long positionKey) {
-            reset(command, orderIds, nextCursorOrderId, advance, obsolete, runtime, liquidation,
+            reset(command, orderIds, nextCursorOrderId, advance, runtime, liquidation,
                     instrument, assetId, positionKey);
         }
 
         private void reset(ExecuteLiquidationCommand command, long[] orderIds,
-                           long nextCursorOrderId, boolean advance, boolean obsolete,
+                           long nextCursorOrderId, boolean advance,
                            TradingRuntimeState runtime, LiquidationRuntime liquidation,
                            CoreInstrument instrument, int assetId, long positionKey) {
             this.command = command; this.orderIds = orderIds; this.nextCursorOrderId = nextCursorOrderId;
             this.canceledCount = orderIds == null ? 0 : orderIds.length;
-            this.advance = advance; this.obsolete = obsolete; this.runtime = runtime;
+            this.advance = advance; this.runtime = runtime;
             this.liquidation = liquidation; this.instrument = instrument; this.assetId = assetId;
             this.positionKey = positionKey; this.userId = liquidation.userId();
             this.laneId = runtime.topology().accountLaneId(userId);
@@ -204,8 +321,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 }
                 validatePrice(runtime, liquidation, command);
             }
-            boolean obsolete = !advance && !executable(runtime, liquidation, identities);
-            int count = obsolete || canceledOrders == null ? 0 : canceledOrders.size();
+            int count = canceledOrders == null ? 0 : canceledOrders.size();
             long[] orderIds = count == 0 ? null : new long[count];
             if (count != 0) {
                 int index = 0;
@@ -216,19 +332,20 @@ public final class RuntimeDerivativeLiquidationProcessor {
                     orderIds[index++] = order.orderId();
                 }
             }
-            CoreInstrument instrument = advance || obsolete ? null : requireInstrument(runtime,
-                    identities.instrumentId(liquidation.symbolId()));
+            CoreInstrument instrument = advance ? null : runtime.instrument(identities.instrumentId(liquidation.symbolId()));
             int assetId = instrument == null ? 0 : identities.assetId(instrument.settleAsset());
-            long positionKey = instrument == null ? 0 : identities.positionKey(
+            long positionKey = instrument == null ? 0 : identities.findPositionKeyValue(
                     liquidation.userId(), instrument, liquidation.positionSide());
             if (reuse == null) return new BatchExecutionStage(command, orderIds, nextCursorOrderId, advance,
-                    obsolete, runtime, liquidation, instrument, assetId, positionKey);
-            reuse.reset(command, orderIds, nextCursorOrderId, advance, obsolete, runtime, liquidation,
+                    runtime, liquidation, instrument, assetId, positionKey);
+            reuse.reset(command, orderIds, nextCursorOrderId, advance, runtime, liquidation,
                     instrument, assetId, positionKey);
             return reuse;
         }
 
         private RuntimeTreasuryDelta apply() {
+            boolean obsolete = !advance && !executable(runtime, liquidation, instrument, positionKey);
+            if (obsolete) canceledCount = 0;
             for (int index = 0; index < canceledCount; index++) {
                 long orderId = orderIds[index];
                 OrderRuntime order = runtime.order(orderId);
@@ -473,13 +590,10 @@ public final class RuntimeDerivativeLiquidationProcessor {
     }
 
     private static boolean executable(TradingRuntimeState runtime, LiquidationRuntime liquidation,
-                                      RuntimeIdentityRegistry identities) {
-        String instrumentId = identities.instrumentId(liquidation.symbolId());
-        CoreInstrument instrument = runtime.instrument(instrumentId);
+                                      CoreInstrument instrument, long positionKey) {
         if (instrument == null || !CoreRiskPolicy.canLiquidate(
                 instrument.contractType(), liquidation.signedQuantitySteps())) return false;
-        long positionKey = identities.positionKey(
-                liquidation.userId(), instrument, liquidation.positionSide());
+        if (positionKey == 0) return false;
         PositionRuntime position = runtime.position(positionKey);
         RiskSnapshotRuntime risk = runtime.riskSnapshot(positionKey);
         return position != null && position.instrument() == liquidation.instrument()
@@ -498,14 +612,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 || command.executionPriceTicks() != mark.markPriceTicks()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "liquidation mark price changed");
         }
-    }
-
-    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String instrumentId) {
-        CoreInstrument instrument = runtime.instrument(instrumentId);
-        if (instrument == null) {
-            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        return instrument;
     }
 
     private static LiquidationRuntime copy(LiquidationRuntime current, long deficit, long priceTicks,

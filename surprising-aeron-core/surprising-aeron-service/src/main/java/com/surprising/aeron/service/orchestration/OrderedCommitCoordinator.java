@@ -360,7 +360,8 @@ final class OrderedCommitCoordinator {
                 case LIQUIDATION -> {
                     var command = pending.decodedCommand().liquidation();
                     var liquidation = owner.runtimeState.liquidation(command.liquidationId());
-                    TradingCoreRuntime.LifecycleOrderChunk chunk = liquidation == null ? new TradingCoreRuntime.LifecycleOrderChunk(List.of(), 0)
+                    boolean executable = matchingResult.accepted() && liquidation != null && pending.liquidationCheck().executable(0);
+                    TradingCoreRuntime.LifecycleOrderChunk chunk = !executable ? new TradingCoreRuntime.LifecycleOrderChunk(List.of(), 0)
                             : owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
                             command.cursorOrderId(),
                             command.maxOrders());
@@ -368,13 +369,11 @@ final class OrderedCommitCoordinator {
                     if (liquidation == null) owner.resultBuilder.commandChangedUserIds = List.of();
                     else owner.resultBuilder.setSingleChangedUser(liquidation.userId());
                     if (matchingResult.accepted() && liquidation != null) {
-                        boolean executable = com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService
-                                .isExecutable(owner.runtimeState, owner.identities, command);
                         long nextCursor = executable && chunk.more() ? chunk.nextCursorOrderId() : 0;
                         var orders = executable ? chunk.orders() : List.<CoreOrderState>of();
                         var progress = new CoreLiquidationProgressView(nextCursor == 0, nextCursor,
                                 chunk.orders().size());
-                        if (owner.runtimeState.asynchronousCommands()) {
+                        if (owner.runtimeState.systemLedgerStarted() || owner.runtimeState.asynchronousCommands()) {
                             var work = com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor
                                      .beginExecution(pending.liquidationWork(), command, orders, nextCursor,
                                             owner.runtimeState, owner.identities);
@@ -396,7 +395,7 @@ final class OrderedCommitCoordinator {
                     var command = pending.decodedCommand().settlement();
                     if (matchingResult.accepted()) {
                         owner.instrumentSettlement.applySettlementChangedIds(command);
-                        if (owner.runtimeState.asynchronousCommands()) {
+                        if (owner.runtimeState.systemLedgerStarted() || owner.runtimeState.asynchronousCommands()) {
                             var work = owner.instrumentSettlement.beginAsyncSettlement(
                                     pending.settlementWork(), command, pending.command().header().commandId());
                             pending.settlementWork(work);
@@ -696,12 +695,11 @@ final class OrderedCommitCoordinator {
         var cancellations = result.cancellations();
         for (int index = 0; index < cancellations.size(); index++) {
             CoreCancellationResult cancellation = cancellations.get(index);
-            OrderRuntime order = owner.runtimeOrder(cancellation.orderId());
+            OrderRuntime order = owner.activeOrderIndex.activeOrderRuntime(cancellation.orderId());
             if (order != null) mask |= owner.matchingAdapter.topology().accountLaneMask(order.userId());
         }
         if (pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH) {
-            for (var action : TradingCommandCodec.decodeExecuteLiquidationBatch(
-                    pending.command().payloadUnsafe()).actions()) {
+            for (var action : pending.decodedCommand().liquidationBatch().actions()) {
                 mask |= owner.matchingAdapter.topology().accountLaneMask(action.userId());
             }
         } else if (pending.operation() == CommandSlot.Operation.LIQUIDATION) {
@@ -854,8 +852,7 @@ final class OrderedCommitCoordinator {
                     owner.resultBuilder.markUserChanged(liquidation.userId());
                     boolean executable;
                     try {
-                        executable = com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService
-                                .isExecutable(owner.runtimeState, owner.identities, single);
+                        executable = pending.liquidationCheck().executable(index - 1);
                     } catch (CoreStateRejectedException rejection) {
                         if (!"STALE_MARK_PRICE".equals(rejection.code())) throw rejection;
                         // A queried liquidation action can expire before this batch reaches its commit fence.
@@ -863,8 +860,8 @@ final class OrderedCommitCoordinator {
                         obsolete++;
                         continue;
                     }
-                    var chunk = owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
-                            action.cursorOrderId(), remaining);
+                    var chunk = executable ? owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
+                            action.cursorOrderId(), remaining) : new TradingCoreRuntime.LifecycleOrderChunk(List.of(), 0);
                     for (CoreOrderState order : chunk.orders()) owner.resultBuilder.markOrderChanged(order.orderId());
                     owner.resultBuilder.markUserChanged(liquidation.userId());
                     long nextCursor = executable && chunk.more() ? chunk.nextCursorOrderId() : 0;
@@ -874,7 +871,7 @@ final class OrderedCommitCoordinator {
                         remaining -= orders.size();
                     }
                     if (nextCursor == 0) applied++; else pendingCount++;
-                    if (owner.runtimeState.asynchronousCommands()) {
+                    if (owner.runtimeState.systemLedgerStarted() || owner.runtimeState.asynchronousCommands()) {
                         executionRequests.add(new com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor
                                 .ExecutionRequest(single, orders, nextCursor));
                         continue;
@@ -883,7 +880,7 @@ final class OrderedCommitCoordinator {
                     else owner.liquidations.executeLiquidationRuntime(single, orders);
                 }
                 if (!executionRequests.isEmpty()) {
-                    if (owner.runtimeState.asynchronousCommands()) {
+                    if (owner.runtimeState.systemLedgerStarted() || owner.runtimeState.asynchronousCommands()) {
                         accountWork = com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor
                                 .beginExecutionBatch(executionRequests, owner.runtimeState, owner.identities);
                         executionRequests = new ArrayList<>();
@@ -901,7 +898,7 @@ final class OrderedCommitCoordinator {
                             && scan.priceSequence() == continuation.priceSequence()
                             && scan.lastUserId() == continuation.lastUserId()) {
                         beforeRiskRevision = owner.runtimeState.revision();
-                        if (owner.runtimeState.asynchronousCommands()) {
+                        if (owner.runtimeState.systemLedgerStarted() || owner.runtimeState.asynchronousCommands()) {
                             riskWork = new RiskScanCoordinator(batch.maxRiskScanUsers(), owner.positionUserIndex,
                                     owner.runtimeState, owner.identities);
                         } else {
@@ -925,7 +922,7 @@ final class OrderedCommitCoordinator {
                 return true;
             }
         };
-        if (owner.runtimeState.asynchronousCommands()) pending.deferControl(work);
+        if (owner.runtimeState.systemLedgerStarted() || owner.runtimeState.asynchronousCommands()) pending.deferControl(work);
         else if (!work.getAsBoolean()) throw new IllegalStateException("synchronous liquidation batch suspended");
     }
 

@@ -166,7 +166,7 @@ final class CoreMatchingFlow {
             long userId, String instrumentId, long cursorOrderId, int maxOrders) {
         var page = owner.activeOrderIndex.page(userId, instrumentId, cursorOrderId, maxOrders);
         List<CoreOrderState> selected = page.orderIds().stream()
-                .map(owner.runtimeState::order)
+                .map(owner.activeOrderIndex::activeOrderRuntime)
                 .filter(order -> order != null && order.status() == CoreOrderStatus.OPEN)
                 .map(order -> RuntimeStateMaterializer.orderSnapshot(order, owner.identities))
                 .toList();
@@ -177,8 +177,10 @@ final class CoreMatchingFlow {
         var command = pending.decodedCommand().liquidationBatch();
         List<CoreOrderState> orders = new ArrayList<>();
         int remaining = command.maxCancelOrders();
-        for (var action : command.actions()) {
+        for (int index = 0; index < command.actions().size(); index++) {
             if (remaining == 0) break;
+            if (!pending.liquidationCheck().cancelsOrders(index)) continue;
+            var action = command.actions().get(index);
             var liquidation = owner.runtimeState.liquidation(action.liquidationId());
             if (liquidation == null || (liquidation.status() != CoreLiquidationState.Status.PLANNED
                     && liquidation.status() != CoreLiquidationState.Status.ORDERED)) continue;
@@ -214,6 +216,7 @@ final class CoreMatchingFlow {
         if (pending.crossShardCancellationStarted
                 || !batchContinuation && owner.matchingProgress.submissionDeferred(pending.sequence())) return;
         if (!collectReplacementAdmissionIfReady(pending) || hasPendingMatchingRejection(pending.sequence())) return;
+        if (!collectLiquidationChecksIfReady(pending) || pending.hasMatchingRejection()) return;
         pending.prepareLaneResultTarget(owner.responseArena);
         if (pending.placeAdmission() != null && !owner.runtimeState.asynchronousCommands()) {
             if (!collectPlaceAdmissionIfReady(pending)
@@ -429,6 +432,27 @@ final class CoreMatchingFlow {
                     ? CoreResultCode.fromRejectionCode(rejected.code())
                     : failure instanceof ArithmeticException ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND);
             owner.matchingProgress.submissionCompleted(pending);
+        }
+        return true;
+    }
+
+    /** 账户校验完成后才撤Matcher订单；Owner只读本槽的动作结果。 */
+    private boolean collectLiquidationChecksIfReady(CommandSlot pending) {
+        if (pending.operation() != CommandSlot.Operation.LIQUIDATION
+                && pending.operation() != CommandSlot.Operation.LIQUIDATION_BATCH) return true;
+        var check = pending.liquidationCheck();
+        if (!check.prepared()) {
+            if (pending.operation() == CommandSlot.Operation.LIQUIDATION)
+                check.prepare(pending.decodedCommand().liquidation(), owner.runtimeState, owner.identities);
+            else check.prepare(pending.decodedCommand().liquidationBatch(), owner.runtimeState, owner.identities);
+        }
+        if (!check.poll()) return false;
+        if (pending.operation() == CommandSlot.Operation.LIQUIDATION) {
+            try { check.executable(0); }
+            catch (CoreStateRejectedException rejection) {
+                pending.rejectMatching(CoreResultCode.fromRejectionCode(rejection.code()));
+                owner.matchingProgress.submissionCompleted(pending);
+            }
         }
         return true;
     }

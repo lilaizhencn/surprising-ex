@@ -5335,3 +5335,11 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - HotSpot JDK27 最终58次必要测试执行通过，失败/错误/跳过0，测试期间源码未变；完整命令、指纹与实际类见 `docs/validation/owner-position-retirement-20261012.json`。
 - 初轮34次中1处 Owner 前值回读失败已保留并修正，9次定向及最终58次通过。日志目录 `../performance-artifacts/owner-position-retirement-20261012`，测试进程退出，无本轮集群/Archive/JFR。
 - 按用户要求无压测/JMH/JFR/快照/恢复/wallet。强平执行前校验及其他Owner读取仍待迁移，不宣称全部完成，不作性能结论。
+
+
+## 2026-10-12：强平前置校验迁至Lane（必要用例）
+
+- Owner读取既有不可变计划/价格/合约事实；Lane按持仓身份键校验持仓与风险，完成后Owner筛选Matcher撤单。订单页、取消Lane掩码不再回读Lane订单表；同步入口也使用原Ledger与Lane元数据提交。
+- HotSpot JDK27 两组必要执行9+22=31，失败/错误/跳过0，两组源码指纹相同，测试期间未改源码；完整命令及前期失败见 `docs/validation/owner-liquidation-admission-20261012.json`。
+- 单笔、预算1跨账户4页、过期/失效动作、阻塞Matcher跨分片、线性/反向全仓/隔离、批次和触发通过。失效动作后真实撤单成功，证明Matcher挂单仍有效。原日志目录 `../performance-artifacts/owner-liquidation-admission-20261012`。
+- 无压测/JMH/JFR/快照/恢复/wallet；测试进程退出，无集群/Archive/JFR清理项。内部账户查询与其余Owner读取仍待收口，不作性能及全部完成结论。

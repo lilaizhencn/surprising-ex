@@ -88,6 +88,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private com.surprising.aeron.service.state.RuntimeLifecycleSettlementContinuation.SettlementWork reusableSettlementWork;
     private final SettlementControlContinuation settlementControl = new SettlementControlContinuation();
     private com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableLiquidationWork;
+    /** 仅强平命令首次使用时创建，随槽位复用的Lane前置校验。 */
+    private com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionCheck liquidationCheck;
     private final LiquidationExecutionContinuation liquidationExecutionControl =
             new LiquidationExecutionContinuation();
     /** Fixed wrapper for the only admission-gated Matcher submission. */
@@ -216,6 +218,12 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         settlementControl.prepare(coordinator, work);
         controlWork = settlementControl;
+    }
+
+    com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionCheck liquidationCheck() {
+        if (liquidationCheck == null)
+            liquidationCheck = new com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionCheck();
+        return liquidationCheck;
     }
 
     com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork liquidationWork() {
@@ -830,6 +838,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         clearMatchingControlContinuations();
         if (reusableSettlementWork != null) reusableSettlementWork.clearReferences();
         if (reusableLiquidationWork != null) reusableLiquidationWork.clearReferences();
+        if (liquidationCheck != null) liquidationCheck.clearReferences();
         controlWork = null;
         controlPending = false;
         controlStartedNanos = 0;

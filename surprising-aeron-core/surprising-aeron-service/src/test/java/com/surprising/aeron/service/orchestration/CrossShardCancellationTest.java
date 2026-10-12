@@ -18,6 +18,16 @@ class CrossShardCancellationTest {
     @Test
     @ResourceLock(Resources.SYSTEM_PROPERTIES)
     void liquidationCancellationPollsBlockedShardAndRecoversTheSameFunds() throws Exception {
+        verifyLiquidationCancellation(true);
+    }
+
+    @Test
+    @ResourceLock(Resources.SYSTEM_PROPERTIES)
+    void liquidationCancellationPollsBlockedShardWithoutSnapshotOrOwnerAccountReads() throws Exception {
+        verifyLiquidationCancellation(false);
+    }
+
+    private void verifyLiquidationCancellation(boolean recovery) throws Exception {
         String property = "surprising.aeron.matching-engines";
         String previous = System.getProperty(property);
         System.setProperty(property, "2");
@@ -43,7 +53,7 @@ class CrossShardCancellationTest {
             assertThat(work.actions()).hasSize(2);
             var batch = command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, 0,
                     TradingCommandCodec.encodeExecuteLiquidationBatch(ExecuteLiquidationBatchCommand.fromWork(work, 0, 0)));
-            byte[] snapshot = state.snapshot(500);
+            byte[] snapshot = recovery ? state.snapshot(500) : null;
             var entered = new CountDownLatch(1);
             int shard = state.matchingAdapter.matcherShardId(first);
             long token = state.matcherPipeline.submitControl(shard, () -> {
@@ -53,23 +63,31 @@ class CrossShardCancellationTest {
                 return Boolean.TRUE;
             });
             assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-            var pending = state.apply(batch);
-            assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-            assertThat(release.getCount()).isOne();
-            assertThat(state.pendingMatching(state.matchingSequence(batch.header().commandId()))
-                    .crossShardCancellationStarted).isTrue();
-            release.countDown();
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            Object complete;
-            do { complete = state.matcherPipeline.pollControl(shard, token); Thread.onSpinWait(); }
-            while (complete == null && System.nanoTime() < deadline);
-            assertThat(complete).isEqualTo(Boolean.TRUE);
-            var terminal = CoreTestCompletion.completeMatchingSynchronously(state,
-                    state.matchingSequence(batch.header().commandId()), TIME, batch.header().sourceSequence());
-            assertThat(terminal.status()).isEqualTo(ResponseStatus.APPLIED);
+            try (var guard = new OwnerAccountReadGuard(state.runtimeState)) {
+                var pending = state.apply(batch);
+                assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+                assertThat(release.getCount()).isOne();
+                long checkDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while (!state.pendingMatching(state.matchingSequence(batch.header().commandId())).crossShardCancellationStarted) {
+                    if (System.nanoTime() >= checkDeadline) throw new AssertionError("liquidation Lane check timeout");
+                    state.matchingProgress.progressPlaceBatchAdmissions();
+                    Thread.onSpinWait();
+                }
+                assertThat(state.pendingMatching(state.matchingSequence(batch.header().commandId()))
+                        .crossShardCancellationStarted).isTrue();
+                release.countDown();
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                Object complete;
+                do { complete = state.matcherPipeline.pollControl(shard, token); Thread.onSpinWait(); }
+                while (complete == null && System.nanoTime() < deadline);
+                assertThat(complete).isEqualTo(Boolean.TRUE);
+                var terminal = CoreTestCompletion.completeMatchingSynchronously(state,
+                        state.matchingSequence(batch.header().commandId()), TIME, batch.header().sourceSequence());
+                assertThat(terminal.status()).isEqualTo(ResponseStatus.APPLIED);
+            }
             assertThat(state.tradingState().order(1003).status()).isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.CANCELED);
             assertThat(state.tradingState().order(2003).status()).isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.CANCELED);
-            try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
+            if (recovery) try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
                 applied(restored, batch);
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
                 assertThat(restored.tradingState().users()).isEqualTo(state.tradingState().users());
