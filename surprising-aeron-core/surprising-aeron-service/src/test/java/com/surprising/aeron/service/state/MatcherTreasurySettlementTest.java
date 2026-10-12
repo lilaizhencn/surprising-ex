@@ -112,14 +112,29 @@ class MatcherTreasurySettlementTest {
                     Thread.onSpinWait();
                 }
                 var funds = new RuntimeFundsAccumulator();
+                assertThatThrownBy(() -> runtime.collectMatcherSettlement(event, null, null))
+                        .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("distinct target");
+                funds.add(identities.assetId("USDT"),
+                        com.surprising.aeron.service.state.settlement.FundsPosting.OwnerKind.TREASURY,
+                        0, com.surprising.aeron.service.state.settlement.FundsPosting.Subledger.FEE, Long.MAX_VALUE);
+                var overflowBefore = funds.toDelta().postings();
+                assertThatThrownBy(() -> runtime.collectMatcherSettlement(event, funds, null))
+                        .isInstanceOf(ArithmeticException.class);
+                assertThat(funds.toDelta().postings()).containsExactlyElementsOf(overflowBefore);
+                funds.clear();
+                funds.add(identities.assetId("USDT"),
+                        com.surprising.aeron.service.state.settlement.FundsPosting.OwnerKind.TREASURY,
+                        0, com.surprising.aeron.service.state.settlement.FundsPosting.Subledger.FEE, 5);
                 funds.add(identities.assetId("USDT"),
                         com.surprising.aeron.service.state.settlement.FundsPosting.OwnerKind.USER,
-                        takerUser, com.surprising.aeron.service.state.settlement.FundsPosting.Subledger.AVAILABLE, 1);
-                assertThatThrownBy(() -> runtime.collectMatcherSettlement(event, funds, null))
-                        .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("empty target");
-                funds.clear();
+                        takerUser, com.surprising.aeron.service.state.settlement.FundsPosting.Subledger.AVAILABLE, -5);
                 assertThat(runtime.collectMatcherSettlement(event, funds, null).size()).isZero();
                 funds.requireConserved(false);
+                assertThat(funds.toDelta().postings()).anySatisfy(posting -> {
+                    assertThat(posting.subledger()).isEqualTo(
+                            com.surprising.aeron.service.state.settlement.FundsPosting.Subledger.FEE);
+                    assertThat(posting.units()).isEqualTo(7);
+                });
                 assertThatThrownBy(() -> runtime.collectMatcherSettlement(event, funds, null))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("already collected");
                 runtime.releaseMatcherSettlement(event);

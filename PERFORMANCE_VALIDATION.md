@@ -5287,3 +5287,11 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - 首轮Lane错误调用带Treasury访问的身份准备被既有边界拒绝，已拆成只读进度输入与Lane身份读取；随后账户禁读用例发现直接撮合准备仍回查子订单，已改为槽内回执。失败轮原始记录保留。
 - HotSpot JDK27/Maven3.9.16精选18个测试执行全部通过，失败/错误/跳过0，源码校验一致：六产品线直接/内部扫描触发、Owner所有账户表get禁用、其他Lane终态ID占用、OCO/冻结拒绝回退及批量/命令槽复用。原有恢复用例保留，本轮只选择显式无恢复的新入口。
 - 必要功能测试通过，完整Owner迁移仍未完成，不作性能结论。复现命令/校验见docs/validation/trigger-child-lane-receipt-20261012.json；原始记录../performance-artifacts/owner-trigger-admission-20261012/。Maven进程结束，无临时集群或JFR。
+
+
+## 2026-10-12 账本回执保留批次已有资金流水（仅必要测试）
+
+- 基于master fabf8fc13；按用户要求仅必要测试，不跑真实压力/JMH/JFR、快照/恢复/wallet。
+- 完成资金缓冲交接支持非空批次前缀，空目标仍交换数组。同键溢出先检查所有postings，失败保留目标与未消费回执；null目标不允许静默丢弃Ledger流水。
+- HotSpot JDK27/Maven3.9.16精选12次执行全通过（MatcherTreasurySettlement1/SystemLedgerLane8/RuntimeFundsAccumulator3），失败/错误/跳过0，源码校验一致。跨Lane手续费2加已有前缀5得到7且守恒；溢出失败后可重试，覆盖抵消/资产隔离/复用。
+- 这是生产账本接线所需正确性边界修复；完整Owner迁移仍未完成，无性能结论。命令及校验docs/validation/ledger-batch-funds-receipt-20261012.json，原始记录../performance-artifacts/ledger-batch-funds-receipt-20261012/；Maven进程已结束，无临时集群/JFR。

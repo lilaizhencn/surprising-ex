@@ -1150,7 +1150,7 @@ public final class MatcherSettlementEvent implements
     RuntimeTreasuryDelta collectTreasuryDelta(RuntimeFundsAccumulator target) {
         if (!complete()) return null;
         if (collected) throw new IllegalStateException("matcher settlement event was already collected");
-        if (hasLedgerSettlement() && target != null) transferLedgerFundsTo(target);
+        if (hasLedgerSettlement()) transferLedgerFundsTo(target);
         collected = true;
         if (treasurySettlement != null && treasurySettlement.queued) return EMPTY_TREASURY_DELTA;
         return mergeTreasuryDeltas();
@@ -1183,7 +1183,7 @@ public final class MatcherSettlementEvent implements
     private void transferLedgerFundsTo(RuntimeFundsAccumulator target) {
         if (!hasLedgerSettlement() || !treasurySettlement.completed)
             throw new IllegalStateException("Ledger funds receipt is incomplete");
-        treasurySettlement.funds.transferToEmpty(target);
+        treasurySettlement.funds.transferTo(target);
     }
 
     private final class TreasurySettlement implements SystemLedgerLane.Entry {

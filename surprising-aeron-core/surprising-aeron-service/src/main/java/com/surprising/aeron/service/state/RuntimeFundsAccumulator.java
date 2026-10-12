@@ -124,6 +124,33 @@ public final class RuntimeFundsAccumulator {
         size = 0;
     }
 
+    /**
+     * 交接一项完成的结算流水。空命令缓冲仍只交换数组；批次已含前缀时合并原语流水。
+     * 所有同键加法先检查溢出，失败不修改目标，也不消费源回执。
+     */
+    public void transferTo(RuntimeFundsAccumulator target) {
+        if (target == null || target == this)
+            throw new IllegalArgumentException("funds transfer requires a distinct target");
+        if (target.size == 0) {
+            transferToEmpty(target);
+            return;
+        }
+        for (int source = 0; source < size; source++) {
+            for (int existing = 0; existing < target.size; existing++) {
+                if (assetIds[source] == target.assetIds[existing]
+                        && ownerKinds[source] == target.ownerKinds[existing]
+                        && ownerIds[source] == target.ownerIds[existing]
+                        && subledgers[source] == target.subledgers[existing]) {
+                    Math.addExact(units[source], target.units[existing]);
+                    break;
+                }
+            }
+        }
+        target.ensureCapacity(Math.addExact(target.size, size));
+        target.add(this);
+        clear();
+    }
+
     private void removeAt(int index) {
         int last = --size;
         if (index == last) return;

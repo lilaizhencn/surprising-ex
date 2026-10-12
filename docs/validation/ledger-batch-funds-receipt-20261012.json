@@ -1,0 +1,72 @@
+{
+  "start": "2026-10-12T09:03:49.939556+00:00",
+  "head": "fabf8fc13975ca28d0ab68946385a85fe6822718",
+  "goal": "Ledger完成回执保留既有批次流水；空目标交换原语数组，非空目标溢出先检查且失败不消费回执",
+  "changeFiles": [
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/MatcherSettlementEvent.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeFundsAccumulator.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/MatcherTreasurySettlementTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/RuntimeFundsAccumulatorTest.java"
+  ],
+  "command": [
+    "mvn",
+    "-B",
+    "-ntp",
+    "-pl",
+    "surprising-aeron-core/surprising-aeron-service",
+    "-am",
+    "-Dtest=RuntimeFundsAccumulatorTest,MatcherTreasurySettlementTest,SystemLedgerLaneTest",
+    "-Dsurefire.failIfNoSpecifiedTests=false",
+    "test"
+  ],
+  "pressureJmhJfr": false,
+  "snapshotRecoveryWalletScenarios": false,
+  "sourceBefore": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/MatcherSettlementEvent.java": "41afb3fc45a2149add1e056303ea0c6398aa78f2ca08eb9e3bff0e2030634e06",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeFundsAccumulator.java": "ef647a3872bfb758f1b484287c50ed8a8d2f48656c260dd5f3ac65064061141e",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/MatcherTreasurySettlementTest.java": "7f1b3551ab03cd30f38b7e4465cd1e6c5db55ddfadc993cfce7d063ce4c680f3",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/RuntimeFundsAccumulatorTest.java": "a9a97de91837bc752c88c14254678be746c5246681588beba135683f51a46bd0"
+  },
+  "exitCode": 0,
+  "end": "2026-10-12T09:04:06.764199+00:00",
+  "sourceAfter": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/MatcherSettlementEvent.java": "41afb3fc45a2149add1e056303ea0c6398aa78f2ca08eb9e3bff0e2030634e06",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeFundsAccumulator.java": "ef647a3872bfb758f1b484287c50ed8a8d2f48656c260dd5f3ac65064061141e",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/MatcherTreasurySettlementTest.java": "7f1b3551ab03cd30f38b7e4465cd1e6c5db55ddfadc993cfce7d063ce4c680f3",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/RuntimeFundsAccumulatorTest.java": "a9a97de91837bc752c88c14254678be746c5246681588beba135683f51a46bd0"
+  },
+  "sourceUnchanged": true,
+  "executedClasses": [
+    {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.state.MatcherTreasurySettlementTest"
+    },
+    {
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.state.SystemLedgerLaneTest"
+    },
+    {
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.state.RuntimeFundsAccumulatorTest"
+    }
+  ],
+  "conclusion": "12个必要测试执行通过；修复账本批次流水交接边界，生产账本尚未全部接线",
+  "fullOwnerMigrationComplete": false,
+  "businessChecks": [
+    "实际跨Lane成交手续费2与已有批次手续费5合成7，流水守恒",
+    "非空目标流水不丢失，同键抵消及跨资产隔离",
+    "晚出现的手续费溢出不修改已有流水、不消费回执，可重试",
+    "财务回执必须被实际目标接收，拒绝null后仍可收集",
+    "原语数组空目标交换、后续命令隔离、满队列/唤醒/单写者及复用"
+  ],
+  "cleanup": "仅Maven测试；进程结束，无压力/快照/集群/JFR临时文件"
+}

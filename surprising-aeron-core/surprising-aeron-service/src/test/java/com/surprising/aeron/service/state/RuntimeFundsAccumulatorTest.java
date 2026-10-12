@@ -21,7 +21,7 @@ class RuntimeFundsAccumulatorTest {
         var storage = RuntimeFundsAccumulator.class.getDeclaredField("units");
         storage.setAccessible(true);
         Object originalStorage = storage.get(source);
-        source.transferToEmpty(target);
+        source.transferTo(target);
         assertThat(storage.get(target)).isSameAs(originalStorage);
         assertThat(source.toDelta()).isSameAs(RuntimeFundsDelta.empty());
         source.add(9, FundsPosting.OwnerKind.USER, 900, FundsPosting.Subledger.AVAILABLE, 17);
@@ -34,6 +34,35 @@ class RuntimeFundsAccumulatorTest {
         target.clear();
         assertThat(source.toDelta().postings()).containsExactlyElementsOf(expected);
         assertThat(storage.get(source)).isSameAs(originalStorage);
+    }
+
+    @Test
+    void transfersCompletedItemsIntoAnExistingBatchPrefixWithoutSharingStorage() {
+        var source = new RuntimeFundsAccumulator(1);
+        var target = new RuntimeFundsAccumulator(1);
+        target.add(7, FundsPosting.OwnerKind.USER, 11, FundsPosting.Subledger.AVAILABLE, -50);
+        target.add(7, FundsPosting.OwnerKind.USER, 11, FundsPosting.Subledger.LOCKED, 50);
+        source.add(7, FundsPosting.OwnerKind.USER, 11, FundsPosting.Subledger.AVAILABLE, 50);
+        source.add(7, FundsPosting.OwnerKind.USER, 11, FundsPosting.Subledger.LOCKED, -50);
+        source.add(9, FundsPosting.OwnerKind.USER, 12, FundsPosting.Subledger.AVAILABLE, -3);
+        source.add(9, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 3);
+        source.transferTo(target);
+        assertThat(source.toDelta()).isSameAs(RuntimeFundsDelta.empty());
+        assertThat(target.toDelta().postings()).hasSize(2).allSatisfy(posting ->
+                assertThat(posting.assetId()).isEqualTo(9));
+        target.requireConserved(false);
+
+        source.add(9, FundsPosting.OwnerKind.USER, 12, FundsPosting.Subledger.AVAILABLE, -2);
+        source.add(9, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 2);
+        source.transferTo(target);
+        var expected = target.toDelta().postings();
+        assertThat(expected).anySatisfy(posting -> assertThat(posting.units()).isEqualTo(5));
+        target.requireConserved(false);
+        source.add(7, FundsPosting.OwnerKind.USER, 11, FundsPosting.Subledger.AVAILABLE, 1);
+        assertThat(target.toDelta().postings()).containsExactlyElementsOf(expected);
+        assertThatThrownBy(() -> source.transferTo(source)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> source.transferTo(null)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(source.toDelta().postings()).hasSize(1);
     }
 
     @Test
