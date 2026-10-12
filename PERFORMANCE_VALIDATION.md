@@ -5421,3 +5421,21 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - 修复：`TradingCoreRuntime.hasCompletedLaneCommit`检查队首现有 `MatcherSettlementEvent.complete()`；`TradingCoreOwner.pollCommandCommit`在同一权威完成态可见时不跳过提交。保留异步Ledger与Lane资金单写者、原完成事件和0额外容器，不新增全局镜像或Owner资金写入。首次修复后的测试末尾误读已退休IOC订单，调整为订单删除、响应/成交数量及真实持仓核对后通过。
 - 必要测试：JDK27，`mvn -B -ntp -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=TradingCoreOwnerTest#ledgerCompletionResumesOrderedHeadWithoutAnotherMatcherNotification,CoreActiveLaneIngressTest,CoreMatcherLedgerTest,OwnerCommandPipelineStateTest,OwnerIdleStrategyTest -Dsurefire.failIfNoSpecifiedTests=false test`。18例通过、0失败/错误/跳过；覆盖两条产品线Ledger延迟唤醒、六产品线普通入口、批量手续费/资金守恒、等待与提交状态。未运行快照/恢复、wallet、全量测试或第二轮压测，修复后吞吐仍待实测。
 - 已归档原完整命令、日志、线程/NMT文本、系统序列、制品指纹、失败与修复测试证据到上述JSON；所有本轮进程已停止，删除本轮native临时集群、Archive、日志缓冲、tmp及已入档原始日志/报告，保留计划/源码指纹和构建JAR。历史运行数据和原有未提交项未动。
+
+
+### 2026-10-12：Ledger唤醒修复后 master bda471753 单节点压测（采集前锁定计划）
+
+- 用户明确要求再次压测。当前master `bda471753906716be5b86f0cdacf728116e96ee5`，原有未提交项仍仅文档及gateway测试助手；不改生产源。LINEAR_PERPETUAL、真实Aeron单成员、1 Matcher/4 Lane、global/session in-flight256、MIXED/batch20/symbols128；1命令会话+1查询会话，持续异步发压，60s预热+60s正式窗口，1次，G1，无profiler/快照/恢复/wallet。Owner和Matcher pipeline为ADAPTIVE，账户结算和Matcher为BUSY_SPIN，clustered-service为YIELDING。
+- 观察目标500000business ops/s；正确性要求accepted=terminal、unfinished=0、资金差0，核对订单/冻结/持仓。若正式窗口CPU限频/新增swap则容量结果无效；未指定尾延迟验收线，不宣称完整验收或长期容量。先clean package核对源码和制品指纹，系统5秒采样，磁盘小于20GiB停止；只测当前master，不重跑旧版本。
+- 机器仍为8物理/16逻辑核、16GiB、macOS26.7.2、电池供电75%；预检Speed/Scheduler Limit100，swap0，磁盘408GiB，无其他Java负载进程。初始普通1384账户各1000000000、专用强平账户100、保险25，种子25620；混合流的控制生命周期在初始化完成，稳定窗口只统计连续混合交易。
+- 完整计划、命令、参数、源码/制品指纹和采样路径：`/Users/atomex/Desktop/surprising/performance-artifacts/single-lp-20261012T141952Z`。稳定窗口与排空分开；受256窗口背压的负载不宣称open-loop，延迟不做coordinated omission补偿。结果待追加。
+
+
+### 2026-10-12：master bda471753 单节点永续压测结果（预热失败）
+
+- 只运行当前master `bda471753906716be5b86f0cdacf728116e96ee5` 一轮，生产源码未修改；clean package成功，1826份源码及服务/基准包568/1240个class一致。完整计划、指纹、命令、原日志、线程/NMT和系统采样归档至 `docs/validation/single-lp-20261012T141952Z.json`。节点PID9257，JMH入口9269、fork9273；2026-10-12 22:21:49–22:22:36（Asia/Shanghai）。配置与预锁定计划一致。
+- **预热业务失败，尚无有效吞吐。** 初始化 `mixedSetup=PASS`，风险扫描、强平撤单及强平/保险/ADL检查均通过；连续MIXED交易预热阶段发生 `CompletionException -> ResultUnknownException: Aeron request was admitted but its result is unknown`，正式测量未开始。吞吐、p99、accepted/terminal、unfinished及期末资金差均缺失；不填0，不声明完整资金核对、0分配或容量上限。资格脚本退出1，clientPass=false；JMH入口退出0但fork失败、结果[]。
+- 只读扫描本轮Archive记录12956个协议请求，其中查询2160、命令10796；出口publication发现10540个成功COMMAND_RESULT。最高响应的source request sequence为12700，对应committedCoreSequence/appliedCommandCount10540，查询不计入Core提交序号，两种序号不可混用。首条未发现响应的是source request sequence12701，user104950、20项 `CANCEL_ORDER_BATCH`；日志末尾source request sequence12956，与最后响应相差256。此扫描不证明客户端实际接收或完整业务终态；分片下单批量仅扫描首片段协议头，未回放/恢复。
+- 22:22:35线程转储：Owner在 `OwnerIdleStrategy.idle` 等待，Matcher在 `MatcherCommandPipeline.run` 等待，4账户Lane在 `SettlementLaneWorker.run` 空闲自旋。10个启动至失败的系统样本，Speed/Scheduler Limit均100、swap0、磁盘最少约407GiB；未观测到限频或新增swap。BUSY_SPIN CPU不可作为有用计算饱和证据。未采JFR/GC分配、正式窗口队列或长稳数据。
+- **待定向复现的疑点：批量完成唤醒遗漏。** `TradingCoreRuntime.hasCompletedLaneCommit` 已覆盖普通队首settlementEvent，但批量只检查laneCommitEvent，未覆盖batch.settlementEvent/itemSettlementEvent；`OrderedCommitCoordinator.financialHeadReady` 正在使用批量结算事件等待Ledger。线程栈无法证明内部事件已完成，因此本轮仅记录假设，不宣布根因已确认或问题已修复。下一项最小验证：暂停真实Ledger，构造20项批量撤单，耗尽Matcher/Lane通知后放行Ledger，检查Owner能否无需新Matcher通知继续提交。
+- 本轮没有生产代码修改、追加压测、快照/恢复或wallet场景。完整证据入档并核对所有本轮PID停止后，仅清理本轮native集群/Archive/缓冲/tmp和已归档日志；保留构建JAR及计划/源码指纹/运行配方，原有未提交文件未动。文档验证为JSON解析与 `git diff --check`。
