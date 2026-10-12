@@ -5269,3 +5269,12 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 边界：生产 SystemLedgerLane 尚未接线，手续费/保险/资金费/强平/ADL/生命周期资金执行及 Owner 其余账户访问继续迁移。本轮是账本永久归属的前置正确性改动，不是完整 Owner 迁移验收；未采集吞吐/分配数据。标量准入返回已有引用，不新增逐订单对象；低频进度写入会创建不可变状态记录，不声称全链路零分配。
 
 清理：两轮 Maven 已退出；本轮未生成集群、Archive、JFR、堆转储或压力进程。小体积必要测试日志和源码校验保留于 /Users/atomex/Desktop/surprising/performance-artifacts/owner-system-ledger-20261012。历史数据及原有未提交改动保持原样。
+
+
+## 2026-10-12 顺序批量下单账户准入（仅必要测试）
+
+- 本轮按用户“只验证必要用例，先不要压测”执行；不跑JMH/JFR、真实压测、快照/恢复/wallet。基于 master 782853356。
+- 顺序PLACE批次的客户标识、余额、持仓、风险限额及平仓冲突判断与冻结改由所属Lane完成；Owner消费已有不可变回执后登记待结算路由并提交Matcher。删除重复BatchAdmissionOrderIndex，不新增业务镜像。
+- HotSpot JDK27/Maven3.9.16：CoreOrderedOrderBatchTest精选12个方法全部通过，失败/错误/跳过0，测试前后源码SHA256一致。覆盖Owner全账户表读取禁用、900/200/100部分成功、跨用户重复订单ID、成交所得再下单、永续风险限额与撤改单回归。
+- 初轮漏删旧索引引用导致编译失败，已修正；新测试初始化缺fence及固定1000价格辅助方法误用已修正，失败轮记录保留。没有据此修改撮合fence或放宽准入。
+- 结论：必要功能测试通过，非性能验收；完整Owner迁移未完成。完整命令及源码校验见docs/validation/batch-place-lane-admission-20261012.json；原始记录在../performance-artifacts/owner-batch-place-20261012/。无临时集群/JFR，Maven进程结束。

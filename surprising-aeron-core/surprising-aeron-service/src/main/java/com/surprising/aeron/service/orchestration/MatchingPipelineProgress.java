@@ -144,8 +144,6 @@ final class MatchingPipelineProgress {
                                     ResponseStatus.REJECTED, code);
                             orderBatch.nextIndex = 1;
                         }
-                        if (orderBatch.admissionOrderIndex != null)
-                            orderBatch.admissionOrderIndex.reset(pending.command().header().userId());
                         readyShardMask &= ~shardBit;
                         if (orderBatch.commitStarted()) {
                             owner.restoreMatchingCommitContext(pending);

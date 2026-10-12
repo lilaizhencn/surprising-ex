@@ -157,6 +157,22 @@ final class PendingReservationTracker {
         owner.markBalancesChanged();
     }
 
+    /** Register a completed Lane admission without reading any live Account Lane table. */
+    void collectControlReservation(OrderRuntime order, long coreSequence) {
+        owner.assertOwner();
+        if (coreSequence <= 0 || order == null || order.userId() <= 0)
+            throw new IllegalStateException("control reservation receipt is missing");
+        long orderId = order.orderId();
+        long userId = order.userId();
+        if (pendingReservationUsers.containsKey(orderId))
+            throw new IllegalStateException("control reservation receipt was collected twice");
+        indexPendingReservation(userId, orderId, coreSequence, Math.incrementExact(totalPendingReservations));
+        owner.changedOrder(orderId, order);
+        owner.changedReservations.add(orderId);
+        owner.changedUsers.add(userId);
+        owner.markBalancesChanged();
+    }
+
     void indexPendingReservation(long userId, long orderId, long coreSequence,
                                          int nextTotalPendingReservations) {
         pendingReservationsBySequence.add(coreSequence, orderId);

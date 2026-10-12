@@ -1,0 +1,80 @@
+{
+  "start": "2026-10-12T07:35:31.034278+00:00",
+  "head": "782853356c76ae1ae135040c0d86067bec9c3fea",
+  "goal": "顺序批量下单准入/冻结/持仓和关闭冲突检查由已有 Control Lane 执行；Owner消费不可变回执；删除重复批次准入索引",
+  "changeFiles": [
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeOrderStateTransitions.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/PendingReservationTracker.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/BatchPlaceReservation.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBatchExecutor.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBatchPending.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreOrderedOrderBatchTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/MatchingPipelineProgress.java"
+  ],
+  "deletedFiles": [
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/BatchAdmissionOrderIndex.java"
+  ],
+  "command": [
+    "mvn",
+    "-B",
+    "-ntp",
+    "-pl",
+    "surprising-aeron-core/surprising-aeron-service",
+    "-am",
+    "-Dtest=CoreOrderedOrderBatchTest#sequentialPlaceBatchAdmitsAndRejectsFromLanesWithoutOwnerAccountReads+sequentialPlaceUsesEarlierFillProceedsOnPermanentLanes+amendBatchRejectsReplacementIdOnAnotherLaneBeforeCancelingOriginal+alternatingSingleOrdersAndBatchesReleaseContextsBeforeTheNextBatchResumes+amendBatchAdmissionReadsOnlyItsLaneAndRetainsTheEventUntilCollected+amendPartialMatcherFailureMustFailStickyBeforeRecordingBusinessRejection+asynchronousCancelBatchSubmitsLaterChunkAfterMissingOrder+cancelIdentityAndPreparationNeverReadLaneOrderTables+executesCancelAndAmendBatchesWithOrderedPerItemOutcomes+perpetualBatchAdmissionIncludesEarlierItemsAndConservesReservedFunds+rejectsMixedUserCancelBatchBeforeAnyMutation+finalAmendBatchResolvesChainedAndRejectedItemsWithoutOwnerOrderReads",
+    "-Dsurefire.failIfNoSpecifiedTests=false",
+    "test"
+  ],
+  "pressureJmhJfr": false,
+  "snapshotRecoveryWalletScenarios": false,
+  "sourceBefore": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeOrderStateTransitions.java": "fe4c22a615c842b1f825106a978ee969529e4bd38c13345108bc76c8e601f5c1",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java": "ef2fd7db3e2e5e24045b9731b2ff0757d212912619698d4847f42b8fa77097bd",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/PendingReservationTracker.java": "c9b8b3ac15b161d1b2f588c2dc7826151c6f89701de9af478848bad35ad1dfa4",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/BatchPlaceReservation.java": "b3d410da3ccc87c170ed395681edfa151a6b538cf47c5523d7f66f9bbd817b02",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBatchExecutor.java": "12a4aaed1422f226c363dd86a9cebfbefc35d99582c53a0cc21753bd6529b771",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBatchPending.java": "6d2a755000f8308b57ae43d96e0a233153769d1f53a573cad0a716c624c7dbfd",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreOrderedOrderBatchTest.java": "10d9c9b5fec1e83c0a33802c40114a2be5efc5ccd002114cfeb1b8a71ed061c9",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/MatchingPipelineProgress.java": "cc9d8f5859575d73ce9c031ebc6506912102f3d12f7b0d66d97025412fa701da"
+  },
+  "exitCode": 0,
+  "end": "2026-10-12T08:34:35.969267+00:00",
+  "sourceAfter": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeOrderStateTransitions.java": "fe4c22a615c842b1f825106a978ee969529e4bd38c13345108bc76c8e601f5c1",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java": "ef2fd7db3e2e5e24045b9731b2ff0757d212912619698d4847f42b8fa77097bd",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/PendingReservationTracker.java": "c9b8b3ac15b161d1b2f588c2dc7826151c6f89701de9af478848bad35ad1dfa4",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/BatchPlaceReservation.java": "b3d410da3ccc87c170ed395681edfa151a6b538cf47c5523d7f66f9bbd817b02",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBatchExecutor.java": "12a4aaed1422f226c363dd86a9cebfbefc35d99582c53a0cc21753bd6529b771",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBatchPending.java": "6d2a755000f8308b57ae43d96e0a233153769d1f53a573cad0a716c624c7dbfd",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreOrderedOrderBatchTest.java": "10d9c9b5fec1e83c0a33802c40114a2be5efc5ccd002114cfeb1b8a71ed061c9",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/MatchingPipelineProgress.java": "cc9d8f5859575d73ce9c031ebc6506912102f3d12f7b0d66d97025412fa701da"
+  },
+  "sourceUnchanged": true,
+  "executedClasses": [
+    {
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest"
+    }
+  ],
+  "conclusion": "必要功能测试通过；未作性能验收；完整 Owner 迁移仍未完成",
+  "fullOwnerMigrationComplete": false,
+  "businessChecks": [
+    "Owner读取所有Lane账户表即失败的完整异步准入用例通过",
+    "900成功、200余额不足拒单、100成功，冻结总额1000，失败客户标识释放",
+    "其他账户已有订单ID重复拒绝，无跨Lane账户互查",
+    "批次第一笔成交所得可冻结第二笔下单",
+    "永续同批次累计风险限额及资金守恒",
+    "撤改单及完成槽复用回归"
+  ],
+  "initialFailures": [
+    "删除旧索引漏改MatchingPipelineProgress引用，已修正编译",
+    "新测试初始化方式缺少撮合提交fence，改用既有drainBatch初始化",
+    "新测试place辅助方法固定价格1000，改为明确900/200/100价格"
+  ],
+  "stateOwnership": "每批次槽复用BatchPlaceReservation承担既有ControlLaneDispatcher线程交接；输入直到Lane释放前不可复用；完成回执复用已有不可变准入值，业务表仍仅在Lane",
+  "cleanup": "仅Maven测试，无集群/JFR/快照临时文件；测试进程结束，保留小型复现记录"
+}

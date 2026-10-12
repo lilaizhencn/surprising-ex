@@ -1229,6 +1229,113 @@ class CoreOrderedOrderBatchTest {
     }
 
     @Test
+    void sequentialPlaceUsesEarlierFillProceedsOnPermanentLanes() throws Exception {
+        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, "BTC", 1, 1);
+            applyBalance(state, 1002, 2_000, 2);
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            linearOrder(98_300, "proceeds-maker", CoreOrderSide.BUY, 1_000, 1)))), 1002));
+            state.activate();
+            long handoff = (long) field(state.runtimeState, "laneHandoffEpoch");
+            var response = CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.PLACE_ORDER_BATCH,
+                    UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            linearOrder(98_301, "sell-for-proceeds", CoreOrderSide.SELL, 1_000, 1),
+                            linearOrder(98_302, "buy-with-proceeds", CoreOrderSide.BUY, 1_000, 1))))));
+            assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 2)).isEqualTo(-1);
+            assertThat((long) field(state.runtimeState, "laneHandoffEpoch")).isEqualTo(handoff);
+            var trading = state.tradingState();
+            assertThat(trading.order(98_300)).isNull();
+            assertThat(trading.order(98_301)).isNull();
+            assertThat(trading.order(98_302).remainingQuantitySteps()).isOne();
+            assertThat(trading.user(1001).balances().get("USDT").availableUnits()).isZero();
+            assertThat(trading.user(1001).balances().get("USDT").lockedUnits()).isEqualTo(1_000);
+            assertThat(trading.user(1001).reservations()).containsOnlyKeys(98_302L);
+            assertThat(trading.user(1002).balances().get("USDT").availableUnits()).isEqualTo(1_000);
+            assertThat(trading.user(1002).balances().get("BTC").availableUnits()).isOne();
+        }
+    }
+
+    @Test
+    void sequentialPlaceBatchAdmitsAndRejectsFromLanesWithoutOwnerAccountReads() throws Exception {
+        String previous = System.getProperty("surprising.aeron.account-lanes");
+        System.setProperty("surprising.aeron.account-lanes", "4");
+        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 1_000, 1);
+            applyBalance(state, 1002, 2_000, 2);
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH,
+                    UUID.randomUUID(), 3, TradingOrderBatchCodec.encodePlaceOrderBatch(
+                            new PlaceOrderBatchCommand(List.of(linearOrder(98_200, "other-account", CoreOrderSide.BUY, 2_000, 1)))), 1002));
+            state.activate();
+            Object[] lanes = field(state.runtimeState, "accountLanes");
+            String[] names = {"orders", "reservations", "users", "positions", "balances"};
+            Object[][] originals = new Object[lanes.length][names.length];
+            try {
+                for (int lane = 0; lane < lanes.length; lane++) {
+                    for (int index = 0; index < names.length; index++) {
+                        var table = lanes[lane].getClass().getDeclaredField(names[index]);
+                        table.setAccessible(true);
+                        originals[lane][index] = table.get(lanes[lane]);
+                        table.set(lanes[lane], ownerReadGuard(originals[lane][index], Thread.currentThread()));
+                    }
+                }
+                long handoff = (long) field(state.runtimeState, "laneHandoffEpoch");
+                var response = CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.PLACE_ORDER_BATCH,
+                        UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                                linearOrder(98_201, "lane-first", CoreOrderSide.BUY, 900, 1),
+                                linearOrder(98_202, "lane-unaffordable", CoreOrderSide.BUY, 200, 1),
+                                linearOrder(98_203, "lane-last", CoreOrderSide.BUY, 100, 1))))));
+                var items = TradingOrderBatchCodec.decodeResult(response.data()).items();
+                assertThat(items).as("sequential Lane outcomes: %s", items).extracting(CoreOrderBatchResult.Item::status)
+                        .containsExactly(ResponseStatus.APPLIED, ResponseStatus.REJECTED, ResponseStatus.APPLIED);
+                assertThat(items.get(1).resultCode()).isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
+                assertThat(items.get(0).order().orderId()).isEqualTo(98_201);
+                assertThat(items.get(2).order().orderId()).isEqualTo(98_203);
+                var rejected = CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.PLACE_ORDER_BATCH,
+                        UUID.randomUUID(), 5, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                                linearOrder(98_200, "duplicate-other-account", CoreOrderSide.BUY, 1, 1),
+                                linearOrder(98_204, "all-rejected", CoreOrderSide.BUY, 1, 1))))));
+                assertThat(TradingOrderBatchCodec.decodeResult(rejected.data()).items())
+                        .extracting(CoreOrderBatchResult.Item::resultCode)
+                        .containsExactly(CoreResultCode.DUPLICATE_ORDER_ID, CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
+                assertThat((long) field(state.runtimeState, "laneHandoffEpoch")).isEqualTo(handoff);
+            } finally {
+                for (int lane = 0; lane < lanes.length; lane++) {
+                    for (int index = 0; index < names.length; index++) {
+                        Object original = originals[lane][index];
+                        if (original == null) continue;
+                        var table = lanes[lane].getClass().getDeclaredField(names[index]);
+                        table.setAccessible(true);
+                        Object current = table.get(lanes[lane]);
+                        if (original instanceof org.agrona.collections.Long2ObjectHashMap<?>) {
+                            @SuppressWarnings("unchecked") var target = (org.agrona.collections.Long2ObjectHashMap<Object>) original;
+                            @SuppressWarnings("unchecked") var source = (org.agrona.collections.Long2ObjectHashMap<Object>) current;
+                            target.clear(); target.putAll(source);
+                        } else {
+                            @SuppressWarnings("unchecked") var target = (org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<Object>) original;
+                            @SuppressWarnings("unchecked") var source = (org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<Object>) current;
+                            target.clear(); target.putAll(source);
+                        }
+                        table.set(lanes[lane], original);
+                    }
+                }
+            }
+            var trading = state.tradingState();
+            assertThat(trading.user(1001).balances().get("USDT").availableUnits()).isZero();
+            assertThat(trading.user(1001).balances().get("USDT").lockedUnits()).isEqualTo(1_000);
+            assertThat(trading.user(1001).reservations()).containsOnlyKeys(98_201L, 98_203L);
+            assertThat(trading.order(98_200).userId()).isEqualTo(1002);
+            assertThat(state.identities.findClientKeyValue(1001, "lane-unaffordable")).isZero();
+            assertThat(state.identities.findClientKeyValue(1001, "all-rejected")).isZero();
+        } finally {
+            if (previous == null) System.clearProperty("surprising.aeron.account-lanes");
+            else System.setProperty("surprising.aeron.account-lanes", previous);
+        }
+    }
+
+    @Test
     @org.junit.jupiter.api.Timeout(10)
     void amendBatchAdmissionReadsOnlyItsLaneAndRetainsTheEventUntilCollected() throws Exception {
         try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
@@ -1271,7 +1378,6 @@ class CoreOrderedOrderBatchTest {
                 var event = batch.replacementAdmissionEvent;
                 assertThat(event).isNotNull();
                 assertThat(event.complete()).isFalse();
-                assertThat(batch.admissionOrderIndex).isNull();
                 assertThatThrownBy(() -> state.runtimeState.releaseReplacementAdmission(event))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("incomplete");
                 var independent = new java.util.concurrent.CountDownLatch(1);

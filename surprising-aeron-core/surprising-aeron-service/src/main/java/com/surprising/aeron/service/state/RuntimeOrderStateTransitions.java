@@ -98,7 +98,7 @@ public final class RuntimeOrderStateTransitions {
             runtime.inLaneCommandScope(targetLane, ignored -> {
                 placePrepared(runtime, userId, command, commandId, requiredReservation,
                         clientKey, command.symbolId(), assetId);
-                runtime.pendingReservations.markInCurrentLane(userId, command.orderId(), coreSequence);
+                targetLane.markPendingReservation(command.orderId(), coreSequence);
                 return null;
             });
             return;
@@ -107,7 +107,9 @@ public final class RuntimeOrderStateTransitions {
             throw new IllegalStateException("batch reservation requires its Account Lane");
         placePrepared(runtime, userId, command, commandId, requiredReservation,
                 clientKey, command.symbolId(), assetId);
-        runtime.pendingReservations.markInCurrentLane(userId, command.orderId(), coreSequence);
+        // Lane keeps the pending marker. The Owner registers routing only after the
+        // existing control completion releases the immutable admission receipt.
+        lane.markPendingReservation(command.orderId(), coreSequence);
     }
 
     static boolean cancel(TradingRuntimeState runtime, long userId, long orderId) {

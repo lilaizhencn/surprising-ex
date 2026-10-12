@@ -4482,6 +4482,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         pendingReservations.collectControlReservation(userId, orderId, coreSequence);
     }
 
+    public void collectControlReservation(OrderRuntime order, long coreSequence) {
+        pendingReservations.collectControlReservation(order, coreSequence);
+    }
+
     public void markPendingReservation(long userId, long orderId, long coreSequence) { pendingReservations.markPendingReservation(userId, orderId, coreSequence); }
     public void completePendingReservation(long userId, long orderId, long coreSequence) { pendingReservations.completePendingReservation(userId, orderId, coreSequence); }
     public void completePendingReservations(long coreSequence) { pendingReservations.completePendingReservations(coreSequence); }

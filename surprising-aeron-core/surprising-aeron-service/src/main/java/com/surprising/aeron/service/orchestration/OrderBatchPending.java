@@ -270,8 +270,9 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     long itemAdmissionRevision;
     com.surprising.aeron.service.state.LaneCommitEvent laneCommitEvent;
     MatchingResult lastMatchingResult;
-    /** 本批准入订单增量索引，供后续批量项检查前面项目产生的订单依赖。 */
-    BatchAdmissionOrderIndex admissionOrderIndex;
+    /** 顺序批量下单复用一个 Lane 预留任务；下项只能在上项完成后准备。 */
+    final com.surprising.aeron.service.state.BatchPlaceReservation placeReservation =
+            new com.surprising.aeron.service.state.BatchPlaceReservation();
 
     private static final byte COMMIT_WAITING = 0;
     private static final byte COMMIT_PREDISPATCHED = 1;
@@ -422,7 +423,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         itemAdmission = null;
         itemAdmissionRevision = 0;
         laneCommitEvent = null;
-        if (admissionOrderIndex != null) admissionOrderIndex.clear();
+        placeReservation.clear();
         kind = null;
         clusterTimestamp = 0;
         clusterPosition = 0;

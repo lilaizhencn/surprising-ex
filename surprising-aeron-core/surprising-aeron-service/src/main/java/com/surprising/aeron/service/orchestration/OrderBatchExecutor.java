@@ -17,7 +17,6 @@ import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.RuntimeOrderStateTransitions;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
@@ -143,7 +142,6 @@ final class OrderBatchExecutor {
         else if (pending.hasCommitContext())
             owner.restoreMatchingCommitContext(pending);
         else owner.activateFactContext(pending.command(), pending.fingerprint());
-        if (firstActivation && batch.admissionOrderIndex != null) batch.admissionOrderIndex.reset(pending.command().header().userId());
         batch.activated(true);
         if (preparePipelinedPlaceBatch(batch, pending)) {
             registerPipelinedBatchSymbols(batch, pending);
@@ -160,9 +158,6 @@ final class OrderBatchExecutor {
 
     boolean tryActivatePipelinedOrderBatch(OrderBatchPending batch, CommandSlot pending) {
         if (pending.clusterIndependent && batch.kind == OrderBatchKind.CANCEL && !batch.sequentialAdmission) {
-            if (batch.admissionOrderIndex == null)
-                batch.admissionOrderIndex = new BatchAdmissionOrderIndex(owner.activeOrderIndex, owner.identities, batch.items.size());
-            batch.admissionOrderIndex.reset(pending.command().header().userId());
             batch.activated(true);
             owner.matchingFlow.submitMatching(pending);
             return true;
@@ -172,7 +167,6 @@ final class OrderBatchExecutor {
                 || !pending.clusterIndependent && conflictsWithEarlierPipelinedBatch(batch)) {
             return false;
         }
-        if (batch.admissionOrderIndex != null) batch.admissionOrderIndex.reset(pending.command().header().userId());
         batch.activated(true);
         if (!preparePipelinedPlaceBatch(batch, pending)) {
             batch.activated(false);
@@ -248,7 +242,6 @@ final class OrderBatchExecutor {
         } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException
                  | TradingCoreRuntime.PipelinedBatchNotApplicable exception) {
             batch.rollbackPreparedClientKeys(owner.identities);
-            if (batch.admissionOrderIndex != null) batch.admissionOrderIndex.reset(pending.command().header().userId());
             batch.currentPreMatchingCancellationOrderIds = List.of();
             batch.preparedSymbols.clear();
             return false;
@@ -421,34 +414,23 @@ final class OrderBatchExecutor {
 
     private java.util.function.BooleanSupplier beginBatchReservation(OrderBatchPending batch, long userId,
                                                                     PlaceOrderCommand command, UUID commandId) {
-        ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(owner.runtimeState,
-                owner.identities, userId, command, owner.currentClusterTimestamp);
-        long required = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
-                owner.runtimeState, owner.identities, userId, resolved,
-                batchOpenInterestSteps(command.instrumentId()), batch.admissionOrderIndex, 0);
-        int assetId = owner.identities.assetId(resolved.reservationAsset());
-        long sequence = batch.sequence;
+        var decision = CoreOrderDecisionResolver.context(owner.runtimeState, owner.identities,
+                userId, command.instrumentId(), owner.currentClusterTimestamp);
+        var work = batch.placeReservation;
+        work.prepare(owner.runtimeState, owner.identities, batch.sequence, userId, commandId,
+                command, decision, batchOpenInterestSteps(command.instrumentId()));
         int laneId = owner.runtimeState.topology().accountLaneId(userId);
-        owner.runtimeState.dispatchControlLanes(1L << laneId, ignored -> {
-            var key = owner.identities.prepareClientKeyInCurrentLane(userId, resolved.clientOrderId());
-            try {
-                RuntimeOrderStateTransitions.reserveBatchOrderInLane(owner.runtimeState, userId, resolved,
-                        commandId, required,
-                        com.surprising.aeron.service.state.RuntimeIdentityRegistry.clientKeyValue(key),
-                        assetId, sequence);
-                return key;
-            } catch (RuntimeException | Error failure) {
-                if (key != 0) owner.identities.rollbackClientKeyInCurrentLane(userId, resolved.clientOrderId(), key);
-                throw failure;
-            }
-        });
+        owner.runtimeState.dispatchControlLanes(1L << laneId, work);
         return () -> {
             if (!owner.runtimeState.pollControlLanes()) return false;
-            long key = (Long) owner.runtimeState.controlLaneResult(laneId);
+            long key = work.preparedClientKey();
             if (com.surprising.aeron.service.state.RuntimeIdentityRegistry.newClientIdentity(key))
                 owner.identities.recordLaneClientAllocations(1);
-            owner.runtimeState.collectControlReservation(userId, resolved.orderId(), sequence);
-            batch.retainPreparedClientKey(userId, resolved.clientOrderId(),
+            OrderRuntime admitted = work.admittedOrder();
+            owner.runtimeState.collectControlReservation(admitted, batch.sequence);
+            batch.items.get(batch.nextIndex).admittedOrder = admitted;
+            batch.currentPreMatchingCancellationOrderIds = work.closeCapacityCancellations();
+            batch.retainPreparedClientKey(userId, work.clientOrderId(),
                     com.surprising.aeron.service.state.RuntimeIdentityRegistry.clientKeyValue(key));
             owner.commits.requestCommitPublication();
             return true;
@@ -457,10 +439,6 @@ final class OrderBatchExecutor {
 
     void prepareOrderBatchItem(OrderBatchPending batch, OrderBatchItem item, long userId,
                                        UUID commandId) {
-        if (batch.kind == OrderBatchKind.PLACE && batch.admissionOrderIndex == null) {
-            batch.admissionOrderIndex = new BatchAdmissionOrderIndex(owner.activeOrderIndex, owner.identities, batch.items.size());
-            batch.admissionOrderIndex.reset(userId);
-        }
         long previousTimestamp = owner.currentClusterTimestamp;
         long previousPosition = owner.currentClusterPosition;
         owner.currentClusterTimestamp = batch.clusterTimestamp;
@@ -470,8 +448,9 @@ final class OrderBatchExecutor {
                 case PLACE -> {
                     PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                     owner.requireOrderIdentityAvailable(userId, command);
-                    batch.currentPreMatchingCancellationOrderIds = owner.admissions.preMatchingCloseCapacityCancellations(
-                            userId, command, command.orderId());
+                    if (owner.activeOrderIndex.activeOrderRoute(command.orderId()) != null)
+                        throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "order already exists");
+                    batch.currentPreMatchingCancellationOrderIds = List.of();
                     batch.itemAdmission = beginBatchReservation(batch, userId, command, commandId);
                 }
                 case CANCEL -> {
@@ -562,7 +541,7 @@ final class OrderBatchExecutor {
         // it no longer constructs a settlement event after the Matcher result arrives.
         if (batch.kind == OrderBatchKind.PLACE && owner.runtimeState.asynchronousCommands()) {
             OrderBatchItem item = batch.items.get(batch.nextIndex);
-            OrderRuntime admitted = owner.runtimeOrder(item.orderId());
+            OrderRuntime admitted = item.admittedOrder;
             if (admitted == null) throw new IllegalStateException("batch item admission order is missing");
             item.admittedOrder = admitted;
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
@@ -779,13 +758,6 @@ final class OrderBatchExecutor {
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
         try {
             batch.collectChangedOrderIds(item, pending.command().header().userId(), matchingResult);
-            if (batch.admissionOrderIndex != null) {
-                for (int index = 0; index < batch.itemChangedOrderIds.size(); index++) {
-                    long orderId = batch.itemChangedOrderIds.valueAt(index);
-                    batch.admissionOrderIndex.update(owner.runtimeState.currentPatchOrderBefore(orderId),
-                            owner.runtimeOrder(orderId));
-                }
-            }
             if (batch.kind != OrderBatchKind.CANCEL) appendOrderBatchResult(batch, item, status, resultCode);
             releaseBatchAmendAdmission(batch);
             item.cancelSymbol = null;
@@ -881,7 +853,7 @@ final class OrderBatchExecutor {
             item.admittedOrder = batch.preparedAdmittedOrders[batch.nextIndex];
         }
         if (item.admittedOrder == null && batch.kind == OrderBatchKind.PLACE)
-            item.admittedOrder = owner.runtimeOrder(item.orderId());
+            throw new IllegalStateException("batch place admission receipt is missing");
         if (item.realtimeTakerOrder == null && owner.realtimeCapture != null
                 && owner.realtimeCapture.active()) item.realtimeTakerOrder = item.admittedOrder;
 
@@ -1168,7 +1140,11 @@ final class OrderBatchExecutor {
         for (int index = 0; index < cancellations.size(); index++) {
             CoreCancellationResult cancellation = cancellations.get(index);
             if (!cancellation.accepted() || !expected.contains(cancellation.orderId())) continue;
-            OrderRuntime order = owner.runtimeOrder(cancellation.orderId());
+            OrderRuntime order = owner.runtimeState.changedOrderValue(cancellation.orderId());
+            if (order == null) {
+                var route = owner.activeOrderIndex.activeOrderRoute(cancellation.orderId());
+                order = route == null ? null : route.runtime();
+            }
             if (order != null && order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN) {
                 batch.deferredCancellationOrderIds.add(order.orderId());
             }
@@ -1295,11 +1271,17 @@ final class OrderBatchExecutor {
         java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> submission;
         List<DeterministicExchangeCoreAdapter.CancellationOrder> preMatchingCancellations =
                 owner.matcherCommands.preMatchingCancellationOrders(pending);
+        var admitted = batch.kind == OrderBatchKind.PLACE ? item.admittedOrder : null;
+        var placeMatchingOrder = admitted == null ? null
+                : new com.surprising.aeron.service.matching.CoreMatchingOrder(admitted.orderId(),
+                        admitted.instrument().instrumentId(), admitted.side(), admitted.orderType(),
+                        admitted.timeInForce(), admitted.matchingPriceTicks(), admitted.remainingQuantitySteps(),
+                        com.surprising.aeron.service.matching.CoreMatchingOrder.slippagePpm(owner.productLine));
         switch (batch.kind) {
             case PLACE -> {
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                 orderId = command.orderId();
-                var matchingOrder = owner.matchingOrder(item.orderId());
+                var matchingOrder = java.util.Objects.requireNonNull(placeMatchingOrder, "batch admission receipt");
                 submission = () -> owner.matchingAdapter.place(
                         pending.command().header().userId(), matchingOrder);
             }
@@ -1316,7 +1298,7 @@ final class OrderBatchExecutor {
         if (direct != null) {
             java.util.function.Supplier<?> directSubmission;
             if (batch.kind == OrderBatchKind.PLACE) {
-                var matchingOrder = owner.matchingOrder(item.orderId());
+                var matchingOrder = java.util.Objects.requireNonNull(placeMatchingOrder, "batch admission receipt");
                 directSubmission = () -> owner.matchingAdapter.placeDirect(
                         shard, pending.sequence(), pending.command().header().commandId(),
                         pending.command().header().submittedAtEpochMillis(),
