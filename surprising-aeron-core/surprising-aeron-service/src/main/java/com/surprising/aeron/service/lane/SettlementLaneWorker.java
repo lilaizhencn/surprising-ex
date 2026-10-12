@@ -205,6 +205,13 @@ public final class SettlementLaneWorker implements AutoCloseable {
                 + (admissionProducerSequence.value - admissionConsumerSequence.value) + direct);
     }
 
+    /** 观测容量包含控制、准入及各Matcher邮箱；不改变任一邮箱准入上限。 */
+    public int metricsQueueCapacity() {
+        int capacity = Math.addExact(commands.length, admissionCommands.length);
+        for (MatcherSettlementRing ring : matcherSettlementRings) capacity = Math.addExact(capacity, ring.events.length);
+        return capacity;
+    }
+
     public boolean hasCapacity() {
         return running && failure == null && depth() < commands.length;
     }

@@ -1327,10 +1327,12 @@ class TradingRuntimeStateTest {
     void metricsIncludeEarlierQueuedAdmissionAfterItsCompletionFence() throws Exception {
         try (TradingRuntimeState state = new TradingRuntimeState()) {
             state.startAccountLanes();
-            state.onLane(0, lane -> {
+            var complete = new java.util.concurrent.CountDownLatch(1);
+            assertThat(state.dispatchAccountQuery(1, lane -> {
                 state.recordAdmissionLaneOperation(lane, 123);
-                return null;
-            });
+                complete.countDown();
+            })).isTrue();
+            assertThat(complete.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
             var encoder = new com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder(
                     1, 1, 0, 16, 0, 0, 16, 0, 0, 16, 0, 0);
             state.writeAccountLaneMetrics(0, encoder);

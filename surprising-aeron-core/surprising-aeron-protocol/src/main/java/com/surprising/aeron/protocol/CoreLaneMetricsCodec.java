@@ -49,8 +49,8 @@ public final class CoreLaneMetricsCodec {
     }
 
     /**
-     * Query-scoped encoder. The Core owner hands it to one Lane at a time to write its counters
-     * behind the Lane task's publication/completion fences. finish() transfers the byte array and
+     * Query-scoped encoder. The Core owner samples atomic primitive observation counters;
+     * these fields may reflect different instants. finish() transfers the byte array and
      * seals this writer; no runtime array or mutable Lane state escapes into the response.
      */
     public static final class Encoder {

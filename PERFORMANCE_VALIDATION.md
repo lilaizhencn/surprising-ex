@@ -5382,3 +5382,10 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - HotSpot JDK27必要回归31次通过；仅新增算术拒绝断言后定向4次通过，共35次执行，失败/错误/跳过0。前期测试构造错误执行0例已保留并修正。记录 `docs/validation/owner-preflight-query-20261012.json`，日志 `../performance-artifacts/owner-preflight-query-20261012`。
 - 六产品线、重复身份、减仓容量、算术拒绝、阻塞Lane时固定市场配置及实际Owner日志回调通过；正常/替换准入和顺序PLACE/AMEND守卫回归通过。源码运行时未变；测试进程退出，无本轮集群/Archive/JFR。
 - 无压测/JMH/JFR/快照/恢复/wallet，不作性能结论。严格Lane所有权及同步冷入口、指标/审计读取仍待收口，不宣称完整Shared-Nothing完成。
+
+
+## 2026-10-12：指标查询移除账户作用域副作用（必要用例）
+
+- Owner指标查询仅观察既有原语计数，不再onLane、准备风险删除证明或交换控制回执；仅查询使用getOpaque，交易热路径未增加计数副本、发布或锁。队列深度来自真实邮箱游标，容量包含独立邮箱；高水位是指标采样所见值，各指标可独立滞后。
+- HotSpot JDK27 5次必要执行通过，失败/错误/跳过0，源码未变。实际控制Lane在风险删除阶段阻塞时，Owner表读取守卫、立即指标返回、未收集回执/身份保留、完成后的正常回收，以及原计数/实际Lane/日志回调回归通过。前期2轮测试编译错误均0例，日志保留。
+- 记录 `docs/validation/owner-metrics-boundary-20261012.json`，日志 `../performance-artifacts/owner-metrics-boundary-20261012`；Maven退出，无本轮集群/Archive/JFR。无压测/JMH/JFR/快照/恢复/wallet，不作性能结论。严格Lane绑定、同步借用与冷审计边界仍待收口，不宣称全部完成。

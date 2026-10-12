@@ -330,24 +330,35 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public int laneWorkerDepth(int laneId) {
-        return 0;
+        assertOwner();
+        if (laneId < 0 || laneId >= laneWorkers.length) throw new IllegalArgumentException("invalid Lane id");
+        SettlementLaneWorker worker = laneWorkers[laneId];
+        // 非fence观测可能跨过Matcher发布/消费；只约束瞬时负差，不影响业务队列。
+        return worker == null ? 0 : Math.max(0, worker.depth());
     }
 
-    /** Writes a single Lane snapshot; the encoder is exclusively handed off until onLane completes. */
+    private static final java.lang.invoke.VarHandle METRIC_LONGS = java.lang.invoke.MethodHandles.arrayElementVarHandle(long[].class);
+    private static final long[] EMPTY_METRIC_OPERATIONS = new long[com.surprising.aeron.protocol.CoreLaneMetricsView.OPERATION_TYPE_COUNT];
+
+    /** 指标是非fence观测；Owner只读原子计数，不进入账户作用域或收集业务回执。 */
     public void writeAccountLaneMetrics(int laneId, com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder encoder) {
         assertOwner();
         if (laneId < 0 || laneId >= accountLanes.length || encoder == null) {
             throw new IllegalArgumentException("invalid Lane metrics request");
         }
-        int depth = 0;
-        int highWater = accountLaneQueueHighWaterMarks[laneId];
-        onLane(laneId, lane -> {
-            encoder.writeOperations(laneId, accountLaneCompletedOperations[laneId],
-                    accountLaneLatencySamples[laneId], accountLaneTotalLatencyNanos[laneId],
-                    accountLaneMaxLatencyNanos[laneId]);
-            lane.writeMetrics(encoder, depth, highWater);
-            return null;
-        });
+        int depth = laneWorkerDepth(laneId);
+        int capacity = laneWorkers[laneId] == null ? accountLanes[laneId].queueCapacity() : laneWorkers[laneId].metricsQueueCapacity();
+        int highWater = Math.max(accountLaneQueueHighWaterMarks[laneId], depth);
+        accountLaneQueueHighWaterMarks[laneId] = highWater; // 指标采样所见的高水位，不声称捕获每次入队。
+        encoder.writeOperations(laneId, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS);
+        for (int operation = 0; operation < EMPTY_METRIC_OPERATIONS.length; operation++) {
+            encoder.addOperation(laneId, operation,
+                    (long) METRIC_LONGS.getOpaque(accountLaneCompletedOperations[laneId], operation),
+                    (long) METRIC_LONGS.getOpaque(accountLaneLatencySamples[laneId], operation),
+                    (long) METRIC_LONGS.getOpaque(accountLaneTotalLatencyNanos[laneId], operation),
+                    (long) METRIC_LONGS.getOpaque(accountLaneMaxLatencyNanos[laneId], operation));
+        }
+        accountLanes[laneId].writeMetrics(encoder, depth, capacity, highWater);
     }
 
     public void startAccountLanes() {

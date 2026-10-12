@@ -22,6 +22,19 @@ import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 import java.util.Map;
 
 public final class AccountLaneState {
+    // 仅指标查询使用原子不透明读；不增加Lane热路径发布、锁或账户副本。
+    private static final java.lang.invoke.VarHandle METRIC_REVISION = metricField("revision");
+    private static final java.lang.invoke.VarHandle METRIC_APPLIED = metricField("appliedSequence");
+    private static final java.lang.invoke.VarHandle METRIC_COMMITTED = metricField("committedSequence");
+    private static final java.lang.invoke.VarHandle METRIC_SETTLEMENTS = metricField("matcherSettlementOperations");
+    private static final java.lang.invoke.VarHandle METRIC_LATENCY = metricField("matcherSettlementLatencyNanos");
+    private static final java.lang.invoke.VarHandle METRIC_MAX_LATENCY = metricField("matcherSettlementMaxLatencyNanos");
+
+    private static java.lang.invoke.VarHandle metricField(String name) {
+        try { return java.lang.invoke.MethodHandles.lookup().findVarHandle(AccountLaneState.class, name, long.class); }
+        catch (ReflectiveOperationException failure) { throw new ExceptionInInitializerError(failure); }
+    }
+
     private static final int INITIAL_ENTITY_CAPACITY = Math.max(16,
             Integer.getInteger("surprising.aeron.lane-initial-entities", 1_024));
     private final int laneId;
@@ -128,14 +141,16 @@ public final class AccountLaneState {
 
     void assertOwner() {}
 
+    /** Owner可观察原子原语计数，各字段允许独立滞后；没有账户读取或Lane作用域。 */
     void writeMetrics(com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder encoder,
-                      int depth, int highWater) {
-        assertOwner();
-        encoder.writeLane(laneId, revision, appliedSequence, committedSequence,
-                depth, queueCapacity, highWater, 0, 0);
+                      int depth, int capacity, int highWater) {
+        long committed = (long) METRIC_COMMITTED.getOpaque(this);
+        long applied = Math.max(committed, (long) METRIC_APPLIED.getOpaque(this));
+        encoder.writeLane(laneId, (long) METRIC_REVISION.getOpaque(this), applied, committed,
+                depth, capacity, highWater, 0, 0);
+        long settlements = (long) METRIC_SETTLEMENTS.getOpaque(this);
         encoder.addOperation(laneId, AccountLaneOperationType.SETTLEMENT.ordinal(),
-                matcherSettlementOperations, matcherSettlementOperations,
-                matcherSettlementLatencyNanos, matcherSettlementMaxLatencyNanos);
+                settlements, settlements, (long) METRIC_LATENCY.getOpaque(this), (long) METRIC_MAX_LATENCY.getOpaque(this));
     }
 
     public int laneId() { return laneId; }
