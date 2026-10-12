@@ -14,6 +14,57 @@ class AsyncFundingCommandTest {
 
     @ParameterizedTest
     @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL"})
+    void fundingPagesUsePublishedProgressAndCompleteOnceWithoutOwnerLaneHandoff(ProductLine line) throws Exception {
+        try (var state = new TradingCoreRuntime(line)) {
+            var type = ContractType.valueOf(line.contractTypeCode());
+            String asset = type.isInverse() ? "BTC" : "USDT";
+            applied(state, message(line, CoreMessageType.REGISTER_INSTRUMENT, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
+                            type.ordinal(), "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1000 : 1,
+                            100_000, 50_000, 0, 0, 0, -1, 0))));
+            applied(state, message(line, CoreMessageType.APPLY_MARK_PRICE, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME))));
+            for (long user = 1; user <= 8; user++) {
+                applied(state, message(line, CoreMessageType.ADJUST_BALANCE, user,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 100_000))));
+                applied(state, message(line, CoreMessageType.PLACE_ORDER, user,
+                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100 + user, "1",
+                                user % 2 == 1 ? CoreOrderSide.SELL : CoreOrderSide.BUY, 100, 10, false,
+                                CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                                CoreTimeInForce.GTC, false, "funding-" + user))));
+            }
+            long funds = economicUnits(state, asset);
+            long cursor = 0;
+            int symbolId = state.identities.symbolId("1");
+            int pages = 0;
+            for (; pages < 8; pages++) {
+                var command = message(line, CoreMessageType.APPLY_FUNDING, 0,
+                        TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(900, "1", 10_000, cursor, 1)));
+                fundingWithPendingBoundaryChecks(state, command);
+                assertThat(economicUnits(state, asset)).isEqualTo(funds);
+                long revision = state.runtimeState.revision();
+                assertThat(CoreTestCompletion.applyAsynchronously(state, command).status()).isEqualTo(ResponseStatus.DUPLICATE);
+                assertThat(state.runtimeState.revision()).isEqualTo(revision);
+                var progress = state.runtimeState.treasury().fundingProgress(symbolId);
+                if (progress == null) break;
+                assertThat(progress.nextCursorUserId()).isGreaterThan(cursor);
+                assertThat(progress.settlementId()).isEqualTo(900);
+                assertThat(state.runtimeState.treasury().incompleteFundingCount()).isEqualTo(1);
+                cursor = progress.nextCursorUserId();
+            }
+            assertThat(pages).isEqualTo(7);
+            assertThat(state.runtimeState.treasury().fundingSettlement(symbolId)).isEqualTo(900);
+            assertThat(state.runtimeState.treasury().incompleteFundingCount()).isZero();
+            var next = message(line, CoreMessageType.APPLY_FUNDING, 0,
+                    TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(901, "1", -10_000)));
+            fundingWithPendingBoundaryChecks(state, next);
+            assertThat(state.runtimeState.treasury().fundingSettlement(symbolId)).isEqualTo(901);
+            assertThat(economicUnits(state, asset)).isEqualTo(funds);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL"})
     void fundingPagesMatchSynchronousLedgerAndContinueAfterSnapshot(ProductLine line) throws Exception {
         try (var state = new TradingCoreRuntime(line)) {
             var type = ContractType.valueOf(line.contractTypeCode());

@@ -18,10 +18,14 @@ public final class TreasuryRuntime {
     private final IntLongHashMap fundingResidualBalances = new IntLongHashMap();
     private final IntLongHashMap roundingResidualBalances = new IntLongHashMap();
     private final IntLongHashMap clearingPnlBalances = new IntLongHashMap();
-    private final IntLongHashMap fundingSettlements = new IntLongHashMap();
-    private final IntLongHashMap lifecycleSettlements = new IntLongHashMap();
-    private final IntObjectHashMap<FundingProgressRuntime> fundingProgress = new IntObjectHashMap<>();
-    private final IntObjectHashMap<LifecycleProgressRuntime> lifecycleProgress = new IntObjectHashMap<>();
+    /**
+     * 币对 ID 由 RuntimeIdentityRegistry 连续分配。每个币对只有一份权威结算进度，
+     * 账本所有者发布不可变记录；准入线程只读取记录，不访问或复制账本的可变 Map。
+     * 扩容只复制 cell 引用，旧数组上的读者仍读取同一个 cell。
+     */
+    private volatile SettlementStatusCell[] settlementStates = new SettlementStatusCell[8];
+    /** 全局准入栅栏所需的数量索引，由账本所有者随进度变更维护。 */
+    private volatile int incompleteFundingCount;
     /** Treasury 线程独占的事务前值；首次写入捕获，提交或回滚后清空并保留容量。 */
     private final RuntimeChangeBuffer<Void> assetChanges = new RuntimeChangeBuffer<>();
     private long[] feeBefore = new long[8];
@@ -69,10 +73,10 @@ public final class TreasuryRuntime {
     public long fundingResidual(int assetId) { assertOwner(); return fundingResidualBalances.get(assetId); }
     public long roundingResidual(int assetId) { assertOwner(); return roundingResidualBalances.get(assetId); }
     public long clearingPnl(int assetId) { assertOwner(); return clearingPnlBalances.get(assetId); }
-    public long fundingSettlement(int symbolId) { assertOwner(); return fundingSettlements.get(symbolId); }
-    public FundingProgressRuntime fundingProgress(int symbolId) { assertOwner(); return fundingProgress.get(symbolId); }
-    public long lifecycleSettlement(int symbolId) { assertOwner(); return lifecycleSettlements.get(symbolId); }
-    public LifecycleProgressRuntime lifecycleProgress(int symbolId) { assertOwner(); return lifecycleProgress.get(symbolId); }
+    public long fundingSettlement(int symbolId) { return settlementStatus(symbolId).fundingSettlementId(); }
+    public FundingProgressRuntime fundingProgress(int symbolId) { return settlementStatus(symbolId).fundingProgress(); }
+    public long lifecycleSettlement(int symbolId) { return settlementStatus(symbolId).lifecycleSettlementId(); }
+    public LifecycleProgressRuntime lifecycleProgress(int symbolId) { return settlementStatus(symbolId).lifecycleProgress(); }
 
     void beginOrderBatchMutationScope() {
         assertOwner();
@@ -154,8 +158,9 @@ public final class TreasuryRuntime {
             throw new IllegalArgumentException("invalid runtime funding settlement");
         }
         captureFundingBefore(symbolId);
-        fundingSettlements.put(symbolId, settlementId);
-        fundingProgress.remove(symbolId);
+        SettlementStatus previous = settlementStatus(symbolId);
+        publishSettlementStatus(symbolId, new SettlementStatus(settlementId, null,
+                previous.lifecycleSettlementId(), previous.lifecycleProgress()));
         changedFundingSymbols.add(symbolId);
     }
 
@@ -166,7 +171,9 @@ public final class TreasuryRuntime {
             throw new IllegalArgumentException("invalid runtime funding progress");
         }
         captureFundingBefore(symbolId);
-        fundingProgress.put(symbolId, progress);
+        SettlementStatus previous = settlementStatus(symbolId);
+        publishSettlementStatus(symbolId, new SettlementStatus(previous.fundingSettlementId(), progress,
+                previous.lifecycleSettlementId(), previous.lifecycleProgress()));
         changedFundingSymbols.add(symbolId);
     }
 
@@ -175,8 +182,9 @@ public final class TreasuryRuntime {
         rejectNonAssetOrderBatchMutation("Treasury lifecycle state");
         if (symbolId < 0 || settlementId <= 0) throw new IllegalArgumentException("invalid lifecycle settlement");
         captureLifecycleBefore(symbolId);
-        lifecycleSettlements.put(symbolId, settlementId);
-        lifecycleProgress.remove(symbolId);
+        SettlementStatus previous = settlementStatus(symbolId);
+        publishSettlementStatus(symbolId, new SettlementStatus(previous.fundingSettlementId(),
+                previous.fundingProgress(), settlementId, null));
         changedLifecycleSymbols.add(symbolId);
     }
 
@@ -185,7 +193,9 @@ public final class TreasuryRuntime {
         rejectNonAssetOrderBatchMutation("Treasury lifecycle state");
         if (symbolId < 0 || progress == null) throw new IllegalArgumentException("invalid lifecycle progress");
         captureLifecycleBefore(symbolId);
-        lifecycleProgress.put(symbolId, progress);
+        SettlementStatus previous = settlementStatus(symbolId);
+        publishSettlementStatus(symbolId, new SettlementStatus(previous.fundingSettlementId(),
+                previous.fundingProgress(), previous.lifecycleSettlementId(), progress));
         changedLifecycleSymbols.add(symbolId);
     }
 
@@ -280,15 +290,17 @@ public final class TreasuryRuntime {
         }
         for (int symbolId : changedFundingSymbols.toArray()) {
             FundingState before = patchFundingBefore.get(symbolId);
-            restoreSigned(fundingSettlements, symbolId, before == null ? 0 : before.settlementId());
-            if (before == null || before.progress() == null) fundingProgress.remove(symbolId);
-            else fundingProgress.put(symbolId, before.progress());
+            SettlementStatus current = settlementStatus(symbolId);
+            publishSettlementStatus(symbolId, new SettlementStatus(before == null ? 0 : before.settlementId(),
+                    before == null ? null : before.progress(), current.lifecycleSettlementId(),
+                    current.lifecycleProgress()));
         }
         for (int symbolId : changedLifecycleSymbols.toArray()) {
             LifecycleState before = patchLifecycleBefore.get(symbolId);
-            restoreSigned(lifecycleSettlements, symbolId, before == null ? 0 : before.settlementId());
-            if (before == null || before.progress() == null) lifecycleProgress.remove(symbolId);
-            else lifecycleProgress.put(symbolId, before.progress());
+            SettlementStatus current = settlementStatus(symbolId);
+            publishSettlementStatus(symbolId, new SettlementStatus(current.fundingSettlementId(),
+                    current.fundingProgress(), before == null ? 0 : before.settlementId(),
+                    before == null ? null : before.progress()));
         }
         clearChangedKeys();
     }
@@ -302,10 +314,10 @@ public final class TreasuryRuntime {
         fundingResidualBalances.clear();
         roundingResidualBalances.clear();
         clearingPnlBalances.clear();
-        fundingSettlements.clear();
-        lifecycleSettlements.clear();
-        fundingProgress.clear();
-        lifecycleProgress.clear();
+        for (SettlementStatusCell cell : settlementStates) {
+            if (cell != null) cell.value = SettlementStatus.EMPTY;
+        }
+        incompleteFundingCount = 0;
     }
 
     public IntLongHashMap feeBalances() { assertOwner(); return new IntLongHashMap(feeBalances); }
@@ -316,20 +328,88 @@ public final class TreasuryRuntime {
     public IntLongHashMap fundingResidualBalances() { assertOwner(); return new IntLongHashMap(fundingResidualBalances); }
     public IntLongHashMap roundingResidualBalances() { assertOwner(); return new IntLongHashMap(roundingResidualBalances); }
     public IntLongHashMap clearingPnlBalances() { assertOwner(); return new IntLongHashMap(clearingPnlBalances); }
-    public IntLongHashMap fundingSettlements() { assertOwner(); return new IntLongHashMap(fundingSettlements); }
+    public IntLongHashMap fundingSettlements() {
+        assertOwner();
+        IntLongHashMap result = new IntLongHashMap();
+        SettlementStatusCell[] states = settlementStates;
+        for (int symbolId = 0; symbolId < states.length; symbolId++) {
+            SettlementStatusCell cell = states[symbolId];
+            if (cell != null && cell.value.fundingSettlementId() != 0)
+                result.put(symbolId, cell.value.fundingSettlementId());
+        }
+        return result;
+    }
     public IntObjectHashMap<FundingProgressRuntime> fundingProgresses() {
         assertOwner();
-        return new IntObjectHashMap<>(fundingProgress);
+        IntObjectHashMap<FundingProgressRuntime> result = new IntObjectHashMap<>();
+        SettlementStatusCell[] states = settlementStates;
+        for (int symbolId = 0; symbolId < states.length; symbolId++) {
+            SettlementStatusCell cell = states[symbolId];
+            if (cell != null && cell.value.fundingProgress() != null)
+                result.put(symbolId, cell.value.fundingProgress());
+        }
+        return result;
     }
 
     public int incompleteFundingCount() {
-        assertOwner();
-        return fundingProgress.size();
+        return incompleteFundingCount;
     }
-    public IntLongHashMap lifecycleSettlements() { assertOwner(); return new IntLongHashMap(lifecycleSettlements); }
+    public IntLongHashMap lifecycleSettlements() {
+        assertOwner();
+        IntLongHashMap result = new IntLongHashMap();
+        SettlementStatusCell[] states = settlementStates;
+        for (int symbolId = 0; symbolId < states.length; symbolId++) {
+            SettlementStatusCell cell = states[symbolId];
+            if (cell != null && cell.value.lifecycleSettlementId() != 0)
+                result.put(symbolId, cell.value.lifecycleSettlementId());
+        }
+        return result;
+    }
     public IntObjectHashMap<LifecycleProgressRuntime> lifecycleProgresses() {
         assertOwner();
-        return new IntObjectHashMap<>(lifecycleProgress);
+        IntObjectHashMap<LifecycleProgressRuntime> result = new IntObjectHashMap<>();
+        SettlementStatusCell[] states = settlementStates;
+        for (int symbolId = 0; symbolId < states.length; symbolId++) {
+            SettlementStatusCell cell = states[symbolId];
+            if (cell != null && cell.value.lifecycleProgress() != null)
+                result.put(symbolId, cell.value.lifecycleProgress());
+        }
+        return result;
+    }
+
+    private SettlementStatus settlementStatus(int symbolId) {
+        SettlementStatusCell[] states = settlementStates;
+        if (symbolId < 0 || symbolId >= states.length) return SettlementStatus.EMPTY;
+        SettlementStatusCell cell = states[symbolId];
+        return cell == null ? SettlementStatus.EMPTY : cell.value;
+    }
+
+    private void publishSettlementStatus(int symbolId, SettlementStatus value) {
+        SettlementStatusCell[] states = settlementStates;
+        if (symbolId >= states.length) {
+            int capacity = Math.max(Math.addExact(symbolId, 1), Math.multiplyExact(states.length, 2));
+            states = Arrays.copyOf(states, capacity);
+        }
+        SettlementStatusCell cell = states[symbolId];
+        if (cell == null) {
+            cell = new SettlementStatusCell();
+            states[symbolId] = cell;
+            // Release the new cell, including when capacity did not change.
+            settlementStates = states;
+        }
+        boolean wasIncomplete = cell.value.fundingProgress() != null;
+        boolean isIncomplete = value.fundingProgress() != null;
+        cell.value = value;
+        if (wasIncomplete != isIncomplete) incompleteFundingCount += isIncomplete ? 1 : -1;
+    }
+
+    private static final class SettlementStatusCell {
+        private volatile SettlementStatus value = SettlementStatus.EMPTY;
+    }
+
+    private record SettlementStatus(long fundingSettlementId, FundingProgressRuntime fundingProgress,
+                                    long lifecycleSettlementId, LifecycleProgressRuntime lifecycleProgress) {
+        private static final SettlementStatus EMPTY = new SettlementStatus(0, null, 0, null);
     }
 
     private static void setSigned(IntLongHashMap balances, int assetId, long units) {
@@ -366,8 +446,9 @@ public final class TreasuryRuntime {
 
     private void captureFundingBefore(int symbolId) {
         if (changedFundingSymbols.contains(symbolId)) return;
-        long settlementId = fundingSettlements.get(symbolId);
-        FundingProgressRuntime progress = fundingProgress.get(symbolId);
+        SettlementStatus current = settlementStatus(symbolId);
+        long settlementId = current.fundingSettlementId();
+        FundingProgressRuntime progress = current.fundingProgress();
         if (settlementId != 0 || progress != null) {
             patchFundingBefore.put(symbolId,
                     new FundingState(settlementId, progress));
@@ -376,8 +457,9 @@ public final class TreasuryRuntime {
 
     private void captureLifecycleBefore(int symbolId) {
         if (changedLifecycleSymbols.contains(symbolId)) return;
-        long settlementId = lifecycleSettlements.get(symbolId);
-        LifecycleProgressRuntime progress = lifecycleProgress.get(symbolId);
+        SettlementStatus current = settlementStatus(symbolId);
+        long settlementId = current.lifecycleSettlementId();
+        LifecycleProgressRuntime progress = current.lifecycleProgress();
         if (settlementId != 0 || progress != null) {
             patchLifecycleBefore.put(symbolId,
                     new LifecycleState(settlementId, progress));

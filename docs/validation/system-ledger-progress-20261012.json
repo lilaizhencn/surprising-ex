@@ -1,0 +1,115 @@
+{
+  "time": "2026-10-12T07:16:16.139980+00:00",
+  "module": "系统账本结算进度单写者边界",
+  "headBefore": "a4451bb8dd445987f5563bac3d613728caaf09d9",
+  "fullOwnerMigrationComplete": false,
+  "productionSystemLedgerConnected": false,
+  "scope": [
+    "移除 Treasury 的四张资金费/生命周期进度 Map，仅保留账本写入的每币对不可变权威记录",
+    "Owner/Lane 准入读取原始权威进度，不维护 Owner 副本，不读取资金余额",
+    "保留资金余额和进度写入的账本线程归属检查；保留首次前值、双域回滚、分页和幂等语义"
+  ],
+  "necessaryNewState": [
+    {
+      "state": "SettlementStatusCell[] / SettlementStatus",
+      "owner": "Treasury 唯一账本写者；准入 acquire 只读",
+      "lifecycle": "每币对一格；低频进度更新发布不可变记录，数组扩容共享原始 cell",
+      "reason": "账本永久交接后准入不能跨线程读普通可变 Map，替代原四张权威 Map，未维护镜像"
+    },
+    {
+      "state": "incompleteFundingCount",
+      "owner": "Treasury 唯一写者",
+      "reason": "保留全局准入栅栏的常数时间数量查询；必要计数索引，不存业务对象"
+    }
+  ],
+  "sourceFiles": [
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TreasuryRuntime.java",
+      "sha256": "fd3eeb42e7e26ac17a15977735cc93164d20d657ad504740079762058e15cc3d"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/TreasuryProgressOwnershipTest.java",
+      "sha256": "a3a2886571e5eec98270dbe885ac7557fafcd0ace9ce17540ce40e5fbd6e9909"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/AsyncFundingCommandTest.java",
+      "sha256": "736389c27c1a6c0acf7e15815103978f36e2a7324b91e8a1373ef37ba412ef3d"
+    }
+  ],
+  "tests": {
+    "command": [
+      "mvn",
+      "-B",
+      "-ntp",
+      "-pl",
+      "surprising-aeron-core/surprising-aeron-service",
+      "-am",
+      "-Dtest=TreasuryProgressOwnershipTest,SystemLedgerLaneTest,RuntimeTreasuryDeltaTest,MatcherTreasurySettlementTest,CoreLifecycleStateTest#runtimeFundingRejectsMissingMarkStaleSettlementAndInvalidCursor+settlementUsesTheRegisteredCanonicalInstrument+duplicateSettlementIsIdempotentAfterPositionsAndOrdersAreClosed,AsyncFundingCommandTest#fundingPagesUsePublishedProgressAndCompleteOnceWithoutOwnerLaneHandoff",
+      "-Dsurefire.failIfNoSpecifiedTests=false",
+      "test"
+    ],
+    "exitCode": 0,
+    "sourceUnchanged": true,
+    "executions": 33,
+    "classes": [
+      {
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "class": "com.surprising.aeron.service.state.CoreLifecycleStateTest"
+      },
+      {
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "class": "com.surprising.aeron.service.state.TreasuryProgressOwnershipTest"
+      },
+      {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "class": "com.surprising.aeron.service.state.MatcherTreasurySettlementTest"
+      },
+      {
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "class": "com.surprising.aeron.service.state.SystemLedgerLaneTest"
+      },
+      {
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "class": "com.surprising.aeron.service.state.RuntimeTreasuryDeltaTest"
+      },
+      {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "class": "com.surprising.aeron.service.orchestration.AsyncFundingCommandTest"
+      }
+    ],
+    "jdk": "HotSpot Corretto 27.0.0.33.1",
+    "evidence": "/Users/atomex/Desktop/surprising/performance-artifacts/owner-system-ledger-20261012/progress-tests.json",
+    "log": "/Users/atomex/Desktop/surprising/performance-artifacts/owner-system-ledger-20261012/progress-tests.log"
+  },
+  "userDirective": "2026-10-12：后续仅验证必要测试用例，先不做压测；不测试快照/恢复，不启动 wallet",
+  "pressureJmhJfr": false,
+  "snapshotRecoveryWalletScenarios": false,
+  "performanceConclusion": "未测量；准入标量读取直接返回已有记录，不新增逐订单分配。低频进度写入新增不可变状态记录，不能声称全链路零分配或吞吐改善。",
+  "remaining": [
+    "生产 SystemLedgerLane 接线及手续费/保险/资金费/强平/ADL/交割行权资金执行",
+    "Owner 剩余账户准入与直接访问",
+    "资金守恒/失败回滚/账本查询线程交接"
+  ],
+  "cleanup": {
+    "processes": "本轮 Maven 均退出；未启动集群、压测、JMH、JFR、wallet",
+    "artifacts": "保留小体积测试日志和校验；没有本轮临时集群/Archive/JFR待删除"
+  }
+}
