@@ -1,0 +1,98 @@
+{
+  "start": "2026-10-12T10:50:38.005888+00:00",
+  "head": "203683a0be210ed2bf13fdcf972c0403053c0602",
+  "goal": "财库查询及保险分页在原Ledger读取和计算，无账户停让；失败及关闭边界",
+  "changeFiles": [
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CoreCommandIngress.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CoreRuntimeLifecycle.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBookQueryService.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreQueryRouter.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreRuntime.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/InsuranceAllocationPolicy.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/query/RuntimeLiquidationQueryService.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/query/RuntimeOperationalQueryService.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreLedgerQueryTest.java"
+  ],
+  "command": [
+    "mvn",
+    "-B",
+    "-ntp",
+    "-pl",
+    "surprising-aeron-core/surprising-aeron-service",
+    "-am",
+    "-Dtest=CoreLedgerQueryTest,CoreLifecycleStateTest#insuranceShortfallIsProRataAndIndependentOfLaneLiquidationOrder,SystemLedgerLaneTest,TreasuryProgressOwnershipTest",
+    "-Dsurefire.failIfNoSpecifiedTests=false",
+    "test"
+  ],
+  "pressureJmhJfr": false,
+  "snapshotRecoveryWalletScenarios": false,
+  "sourceBefore": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CoreCommandIngress.java": "2e5271c21720a1dfe9e67c50be3e51dd023380aa8e8165dd30d3e547ae4e6748",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CoreRuntimeLifecycle.java": "e86841f06387ba3f5bc3d376c7fb76fc26b7c0a9eac46e03993ea501001d8d50",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBookQueryService.java": "588c0bc4d6827b2ab682cec4ffcab6f7897c6c6567db0adff019fc93a1b7cd40",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreQueryRouter.java": "8acccab4633aa7c15e62e05b0ec4d1d647a3966cafe4b7b83e85b792661b975a",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreRuntime.java": "5a322c07813501b564b77349e0c10d460f66742d8d55c676cb07299d0ef61bf5",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/InsuranceAllocationPolicy.java": "8fc5f1d62caf3d31a9944cf386bc15e231a867c92906c4c55da9d5d8ee8af122",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java": "b57cf339748f7ed42a837af6624c94c2b80e9948050ea072a8ecae896eae23ac",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/query/RuntimeLiquidationQueryService.java": "cad02a293b53f1d3522678a3fcc94d5f5977bdc08eb10c43a5a8f2da52e0f804",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/query/RuntimeOperationalQueryService.java": "9fff5f94be5e256f28395cb5104c9e968af1d001a1230b96eac80ffee27c1ff5",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreLedgerQueryTest.java": "30bb25f57b465fd99e03eb94a8b7ea131d4fb49a4b2641370cb6c735ad6abd7a"
+  },
+  "exitCode": 0,
+  "end": "2026-10-12T10:50:56.199708+00:00",
+  "sourceAfter": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CoreCommandIngress.java": "2e5271c21720a1dfe9e67c50be3e51dd023380aa8e8165dd30d3e547ae4e6748",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CoreRuntimeLifecycle.java": "e86841f06387ba3f5bc3d376c7fb76fc26b7c0a9eac46e03993ea501001d8d50",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBookQueryService.java": "588c0bc4d6827b2ab682cec4ffcab6f7897c6c6567db0adff019fc93a1b7cd40",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreQueryRouter.java": "8acccab4633aa7c15e62e05b0ec4d1d647a3966cafe4b7b83e85b792661b975a",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreRuntime.java": "5a322c07813501b564b77349e0c10d460f66742d8d55c676cb07299d0ef61bf5",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/InsuranceAllocationPolicy.java": "8fc5f1d62caf3d31a9944cf386bc15e231a867c92906c4c55da9d5d8ee8af122",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java": "b57cf339748f7ed42a837af6624c94c2b80e9948050ea072a8ecae896eae23ac",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/query/RuntimeLiquidationQueryService.java": "cad02a293b53f1d3522678a3fcc94d5f5977bdc08eb10c43a5a8f2da52e0f804",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/query/RuntimeOperationalQueryService.java": "9fff5f94be5e256f28395cb5104c9e968af1d001a1230b96eac80ffee27c1ff5",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreLedgerQueryTest.java": "30bb25f57b465fd99e03eb94a8b7ea131d4fb49a4b2641370cb6c735ad6abd7a"
+  },
+  "sourceUnchanged": true,
+  "executedClasses": [
+    {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.state.CoreLifecycleStateTest"
+    },
+    {
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.state.TreasuryProgressOwnershipTest"
+    },
+    {
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.state.SystemLedgerLaneTest"
+    },
+    {
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.CoreLedgerQueryTest"
+    }
+  ],
+  "result": "通过必要功能验证，未进行性能验收",
+  "proven": [
+    "财库查询在原Treasury所属Ledger线程读取及编码，Root直接资金读取拒绝",
+    "保险分页按全体索赔预算按确定性顺序分配，跨页不重分配预算",
+    "财库/保险/结算进度查询不借用Account Lane，不新增结果Map",
+    "超大查询及冷查询失败不毒化Ledger；关闭先join再清空结果槽"
+  ],
+  "remaining": [
+    "生产activate尚未启动Ledger，下一模块启用",
+    "剩余Owner账户读取及身份回收边界继续迁移"
+  ]
+}

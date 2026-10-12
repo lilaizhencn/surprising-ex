@@ -34,6 +34,21 @@ public final class InsuranceAllocationPolicy {
         if (runtime == null || identities == null || candidateIds == null) {
             throw new IllegalArgumentException("insurance allocation inputs are required");
         }
+        AllocationInputs inputs = prepareAllocations(runtime, identities, candidateIds);
+        return runtime.queryLedgerAtRest(ledger -> allocations(ledger, inputs));
+    }
+
+    /** 查询页所需的不可变索赔引用；仅活到本次查询完成，不保存账户或资金权威。 */
+    public static final class AllocationInputs {
+        private final Map<Integer, ArrayList<Claim>> byAsset;
+        private AllocationInputs(Map<Integer, ArrayList<Claim>> byAsset) { this.byAsset = byAsset; }
+    }
+
+    public static AllocationInputs prepareAllocations(TradingRuntimeState runtime,
+            RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
+        if (runtime == null || identities == null || candidateIds == null)
+            throw new IllegalArgumentException("insurance allocation inputs are required");
+        runtime.assertOwner();
         Map<Integer, ArrayList<Claim>> byAsset = new HashMap<>();
         for (Long candidateId : candidateIds) {
             if (candidateId == null) continue;
@@ -47,8 +62,12 @@ public final class InsuranceAllocationPolicy {
             byAsset.computeIfAbsent(assetId, ignored -> new ArrayList<>())
                     .add(new Claim(liquidation, identities.instrumentId(liquidation.symbolId())));
         }
+        return new AllocationInputs(byAsset);
+    }
+
+    public static Map<Long, Long> allocations(TreasuryRuntime ledger, AllocationInputs inputs) {
         Map<Long, Long> result = new HashMap<>();
-        byAsset.forEach((assetId, claims) -> allocateAsset(runtime.treasury().insurance(assetId), claims, result));
+        inputs.byAsset.forEach((assetId, claims) -> allocateAsset(ledger.insurance(assetId), claims, result));
         return result;
     }
 
@@ -92,7 +111,8 @@ public final class InsuranceAllocationPolicy {
                 claims.add(new Claim(claim, identities.instrumentId(claim.symbolId())));
             }
         }
-        return resolve(new ResolutionInputs(liquidationId, assetId, target.deficitUnits(), claims), runtime.treasury());
+        ResolutionInputs inputs = new ResolutionInputs(liquidationId, assetId, target.deficitUnits(), claims);
+        return runtime.queryLedgerAtRest(ledger -> resolve(inputs, ledger));
     }
 
     /** Owner仅选取已发布的不可变索赔事实；预算由账本读取。 */

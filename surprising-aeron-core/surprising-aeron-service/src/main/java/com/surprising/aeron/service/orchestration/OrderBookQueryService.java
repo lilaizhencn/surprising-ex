@@ -3,6 +3,13 @@ package com.surprising.aeron.service.orchestration;
 import static com.surprising.aeron.service.orchestration.TradingCoreRuntime.*;
 
 import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CoreLiquidationWorkView;
+import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
+import com.surprising.aeron.service.state.InsuranceAllocationPolicy;
+import com.surprising.aeron.service.state.SystemLedgerLane;
+import com.surprising.aeron.service.state.TreasuryRuntime;
+import com.surprising.aeron.service.state.query.RuntimeOperationalQueryService;
+import com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreOrderBookBootstrapPage;
 import com.surprising.aeron.protocol.CoreOrderBookBootstrapQuery;
@@ -20,14 +27,14 @@ import java.util.NavigableMap;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** 盘口查询服务：异步读取撮合器、缓存分页会话并限制响应大小。 */
+/** 异步查询结果路由：读取撮合器或账本，保留既有盘口分页和响应限制。 */
 final class OrderBookQueryService {
     /** 唯一交易执行 owner；共享提交上下文，不复制账户或订单状态。 */
     final TradingCoreRuntime owner;
 
     OrderBookQueryService(TradingCoreRuntime owner) { this.owner = owner; }
 
-    /** 撮合线程完成的盘口查询；owner 消费后移除。 */
+    /** 撮合器或账本完成的查询；Owner 消费后移除。 */
     final Map<Long, CompletedBookQuery> completedBookQueries
             = new ConcurrentHashMap<>();
 
@@ -42,6 +49,66 @@ final class OrderBookQueryService {
 
     /** 下一个盘口内部查询 ID，与交易命令序号分离。 */
     long nextAsyncQueryId = Long.MIN_VALUE;
+
+    /** 财库查询复用已有异步查询ID及结果槽，Owner派发后立即返回。 */
+    CoreResponse beginTreasuryQuery(CoreMessage message) { return beginLedgerQuery(message, null, null); }
+
+    CoreResponse beginInsuranceQuery(CoreMessage message, CoreLiquidationWorkView work,
+            InsuranceAllocationPolicy.AllocationInputs claims) {
+        return beginLedgerQuery(message, work, claims);
+    }
+
+    private CoreResponse beginLedgerQuery(CoreMessage message, CoreLiquidationWorkView work,
+            InsuranceAllocationPolicy.AllocationInputs claims) {
+        long id = nextAsyncQueryId++;
+        queryIds.put(message.header().commandId(), id);
+        LedgerQuery query = new LedgerQuery(id, owner.appliedCommandCount, work, claims);
+        try {
+            if (!owner.runtimeState.dispatchLedgerQuery(query)) {
+                queryIds.remove(message.header().commandId());
+                return owner.rejected(CoreResultCode.MATCHING_REJECTED);
+            }
+        } catch (RuntimeException failure) {
+            queryIds.remove(message.header().commandId());
+            throw failure;
+        }
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount);
+    }
+
+    private final class LedgerQuery implements SystemLedgerLane.Entry {
+        private final long id;
+        private final long commandCount;
+        private final CoreLiquidationWorkView insuranceWork;
+        private final InsuranceAllocationPolicy.AllocationInputs claims;
+        private LedgerQuery(long id, long commandCount, CoreLiquidationWorkView work,
+                InsuranceAllocationPolicy.AllocationInputs claims) {
+            this.id = id;
+            this.commandCount = commandCount;
+            this.insuranceWork = work;
+            this.claims = claims;
+        }
+        @Override public void apply(TreasuryRuntime ledger) {
+            CoreResponse response;
+            try {
+                byte[] encoded;
+                if (insuranceWork == null) {
+                    var assets = RuntimeOperationalQueryService.treasuryAssets(ledger, owner.identities);
+                    encoded = CoreStateQueryCodec.encodeTreasuryState(assets);
+                } else {
+                    var allocations = InsuranceAllocationPolicy.allocations(ledger, claims);
+                    var work = RuntimeLiquidationQueryService.insuranceRecommendations(insuranceWork, allocations);
+                    encoded = CoreLiquidationWorkCodec.encodeWork(work);
+                }
+                response = new CoreResponse(ResponseStatus.OK, commandCount, encoded);
+            } catch (RuntimeOperationalQueryService.QueryTooLargeException failure) {
+                response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
+            } catch (IllegalArgumentException failure) {
+                response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.INVALID_COMMAND, commandCount);
+            }
+            completedBookQueries.put(id, CompletedBookQuery.ledger(response));
+            owner.runtimeState.signalOwnerCompletion();
+        }
+    }
 
     CoreResponse beginBookQuery(CoreMessage message) {
         if (message.payloadUnsafe().length == 0) {
@@ -106,6 +173,7 @@ final class OrderBookQueryService {
         CompletedBookQuery completed = completedBookQueries.remove(queryId);
         if (completed == null) return null;
         queryIds.values().removeIf(value -> value == queryId);
+        if (completed.ledgerResponse() != null) return completed.ledgerResponse();
         long exportSequence = owner.commits.publication.publishedSequence();
         if (completed.bootstrapSnapshot() == null) {
             var view = new com.surprising.aeron.protocol.CoreOrderBookView(exportSequence, completed.levels());
@@ -153,7 +221,15 @@ final class OrderBookQueryService {
             List<com.surprising.aeron.protocol.CoreBookLevelView> levels,
             String snapshotId,
             CoreOrderBookBootstrapQuery bootstrapQuery,
-            BookBootstrapSnapshot bootstrapSnapshot) {
+            BookBootstrapSnapshot bootstrapSnapshot,
+            CoreResponse ledgerResponse) {
+
+        CompletedBookQuery(List<com.surprising.aeron.protocol.CoreBookLevelView> levels, String snapshotId,
+                           CoreOrderBookBootstrapQuery bootstrapQuery, BookBootstrapSnapshot bootstrapSnapshot) {
+            this(levels, snapshotId, bootstrapQuery, bootstrapSnapshot, null);
+        }
+
+        static CompletedBookQuery ledger(CoreResponse response) { return new CompletedBookQuery(List.of(), "", null, null, response); }
 
         static CompletedBookQuery single(
                 List<com.surprising.aeron.protocol.CoreBookLevelView> levels) {

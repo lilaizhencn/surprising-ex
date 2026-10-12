@@ -97,18 +97,21 @@ final class CoreRuntimeLifecycle {
         owner.snapshots.releaseSnapshotFence();
         owner.snapshots.inFlightMatcherSnapshot.set(null);
         owner.matcherPipeline.closeShards(owner.matchingAdapter::closeShard);
-        owner.bookQueries.completedBookQueries.clear();
-        owner.bookQueries.failedQueries.clear();
-        owner.bookQueries.queryIds.clear();
         owner.runtimeState.endOrderBatchMutationScope();
-        owner.clearFactContext();
-        owner.directCommand.clear();
-        owner.batches.clearPendingBatches();
-        owner.pendingMatching.clear();
-        owner.crossShardCancellations.clear();
-        owner.admissions.pendingLifecycleScopes.clear();
         owner.commits.publication.close();
         try { owner.runtimeState.close(); }
-        finally { owner.terminalRetention.close(); }
+        finally {
+            // Account/Ledger workers must finish before their result slots or command references are cleared.
+            owner.bookQueries.completedBookQueries.clear();
+            owner.bookQueries.failedQueries.clear();
+            owner.bookQueries.queryIds.clear();
+            owner.clearFactContext();
+            owner.directCommand.clear();
+            owner.batches.clearPendingBatches();
+            owner.pendingMatching.clear();
+            owner.crossShardCancellations.clear();
+            owner.admissions.pendingLifecycleScopes.clear();
+            owner.terminalRetention.close();
+        }
     }
 }

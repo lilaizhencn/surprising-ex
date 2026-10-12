@@ -5311,3 +5311,11 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 记录：`docs/validation/owner-matcher-ledger-20261012.json`、`../performance-artifacts/owner-matcher-ledger-20261012/`。HotSpot JDK27、Maven3.9.16，最终47次必要测试执行，失败/错误/跳过均0，源码指纹未变；带费单笔、流水批次及撤单批次手续费6、两用户资产199994，订单与预留清空，Owner五类账户表读取守卫覆盖全程。顺序批次成交所得再下单、部分/全部拒单、批量改单撤单及已有队列/回执/原语缓冲边界通过。前期失败轮次保留：测试构造器错误0例、注册参数错误1拒单、真实批次fence缺口与Owner用户回读已修正。
 
 按用户要求无压测、JMH/JFR、快照/恢复或wallet场景，不能说明性能改善。**生产activation尚未开启**，外部财库/保险查询与其余Owner读写边界仍待处理，不能宣称完整Owner迁移或Shared-Nothing完成。测试进程均退出，无集群/Archive/JFR清理项。
+
+
+## 2026-10-12：Owner财库及保险查询迁移（必要用例）
+
+- 入口/校验：Owner解析查询及选取既有不可变索赔事实；Ledger读取原Treasury预算并计算/编码，通过既有异步结果槽返回。超大响应只拒绝查询，关闭先join再清理查询与命令引用。
+- 复现：当前master，HotSpot JDK27；完整命令/源指纹/实际执行类见 `docs/validation/owner-ledger-query-20261012.json`，原日志目录 `../performance-artifacts/owner-ledger-query-20261012`。
+- 18个必要用例通过（5查询、1保险确定性、8账本、4进度所有权），失败/错误/跳过均0，测试期间源码未变化。禁止Owner账户表读取、无Lane停让、保险跨页预算与一次消费、失败后续查询、关闭清理通过。
+- 按用户约束未执行压测、JMH/JFR、快照/恢复或wallet。生产activate尚未启用Ledger；不宣称Owner迁移全部完成，不给出吞吐或分配结论。

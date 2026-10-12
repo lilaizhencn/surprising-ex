@@ -28,7 +28,10 @@ public final class RuntimeOperationalQueryService {
 
     public static List<CoreTreasuryAssetView> treasuryAssets(
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
-        TreasuryRuntime treasury = runtime.treasury();
+        return runtime.queryLedgerAtRest(ledger -> treasuryAssets(ledger, identities));
+    }
+
+    public static List<CoreTreasuryAssetView> treasuryAssets(TreasuryRuntime treasury, RuntimeIdentityRegistry identities) {
         if (treasury.assetLedgerEntryCount() > MAX_QUERY_ENTITIES) throw new QueryTooLargeException();
         var ids = new org.eclipse.collections.impl.set.mutable.primitive.IntHashSet();
         ids.addAll(treasury.feeBalances().keySet());

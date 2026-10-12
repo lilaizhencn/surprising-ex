@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 查询协议路由：只读取交易 Owner 的权威状态和索引，生成同步响应或启动盘口异步查询。
+ * 查询协议路由：读取已有路由索引并向实际账户、撮合器或账本所有者派发查询。
  *
  * <p>该类不保存交易状态，也不参与命令准入、撮合提交或资金变更。</p>
  */
@@ -196,6 +196,7 @@ final class TradingCoreQueryRouter {
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.TREASURY_STATE_QUERY) {
             try {
+                if (runtime.runtimeState.systemLedgerStarted()) return runtime.bookQueries.beginTreasuryQuery(message);
                 var views = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.treasuryAssets(
                         runtime.runtimeState, runtime.identities);
                 return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
@@ -316,6 +317,14 @@ final class TradingCoreQueryRouter {
                 }
                 java.util.NavigableSet<Long> candidates = runtime.liquidationIndex.activeIds()
                         .tailSet(query.afterLiquidationId(), false);
+                if (query.purpose() == com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.INSURANCE
+                        && runtime.runtimeState.systemLedgerStarted()) {
+                    var claims = com.surprising.aeron.service.state.InsuranceAllocationPolicy.prepareAllocations(
+                            runtime.runtimeState, runtime.identities, runtime.liquidationIndex.activeIds());
+                    var selected = com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService.work(
+                            runtime.runtimeState, runtime.identities, runtime.productLine, query, candidates, java.util.Map.of());
+                    return runtime.bookQueries.beginInsuranceQuery(message, selected, claims);
+                }
                 var work = com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService.work(
                         runtime.runtimeState, runtime.identities, runtime.productLine, query, candidates,
                         runtime.liquidationIndex.activeIds());

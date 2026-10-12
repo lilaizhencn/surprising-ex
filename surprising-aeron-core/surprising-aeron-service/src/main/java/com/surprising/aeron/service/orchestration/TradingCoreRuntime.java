@@ -1096,10 +1096,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         Integer symbolId = identities.findSymbolId(instrumentId);
         return symbolId == null ? 0 : runtimeState.treasury().fundingSettlement(symbolId);
     }
-    long runtimeInsurance(String asset) {
-        Integer assetId = identities.findAssetId(asset);
-        return assetId == null ? 0 : runtimeState.treasury().insurance(assetId);
-    }
     LiquidationRuntime runtimeLiquidation(long liquidationId) { return runtimeState.liquidation(liquidationId); }
     PositionRuntime runtimePosition(long userId, String positionKey) {
         Long key = identities.findPositionKey(userId, positionKey);

@@ -54,6 +54,14 @@ public final class RuntimeLiquidationQueryService {
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities, ProductLine productLine,
             CoreLiquidationWorkView.Query query, Iterable<Long> candidateIds,
             Iterable<Long> allCandidateIds) {
+        java.util.Map<Long, Long> allocations = query.purpose() == CoreLiquidationWorkView.Purpose.INSURANCE
+                ? InsuranceAllocationPolicy.allocations(runtime, identities, allCandidateIds) : java.util.Map.of();
+        return work(runtime, identities, productLine, query, candidateIds, allocations);
+    }
+
+    public static CoreLiquidationWorkView work(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+            ProductLine productLine, CoreLiquidationWorkView.Query query, Iterable<Long> candidateIds,
+            java.util.Map<Long, Long> insuranceAllocations) {
         ArrayList<CoreLiquidationActionView> actions = new ArrayList<>();
         ArrayList<CoreLiquidationWorkView.Resolution> resolutions = new ArrayList<>();
         CoreRiskScanContinuation continuation = continuation(runtime, identities, query.purpose());
@@ -62,8 +70,6 @@ public final class RuntimeLiquidationQueryService {
                 productLine, nextCursor, false, continuation, actions, resolutions)).length;
         int scanned = 0;
         boolean complete = true;
-        java.util.Map<Long, Long> insuranceAllocations = query.purpose() == CoreLiquidationWorkView.Purpose.INSURANCE
-                ? InsuranceAllocationPolicy.allocations(runtime, identities, allCandidateIds) : java.util.Map.of();
         for (Long liquidationId : candidateIds) {
             if (liquidationId == null || liquidationId <= query.afterLiquidationId()) continue;
             if (++scanned > RuntimeOperationalQueryService.MAX_INDEX_SCAN) {
@@ -116,6 +122,18 @@ public final class RuntimeLiquidationQueryService {
             nextCursor = candidateCursor;
         }
         return new CoreLiquidationWorkView(productLine, nextCursor, complete, continuation, actions, resolutions);
+    }
+
+    /** 查询编码边界补齐账本推荐额，不改变索赔权威或分页选取。 */
+    public static CoreLiquidationWorkView insuranceRecommendations(CoreLiquidationWorkView work,
+                                                                  java.util.Map<Long, Long> allocations) {
+        ArrayList<CoreLiquidationWorkView.Resolution> resolutions = new ArrayList<>(work.resolutions().size());
+        for (var value : work.resolutions()) resolutions.add(new CoreLiquidationWorkView.Resolution(
+                value.liquidationId(), value.userId(), value.instrumentId(), value.asset(), value.marginMode(), value.positionSide(),
+                value.triggerPriceSequence(), value.signedQuantitySteps(), value.deficitUnits(),
+                allocations.getOrDefault(value.liquidationId(), 0L), value.purpose()));
+        return new CoreLiquidationWorkView(work.productLine(), work.nextCursorLiquidationId(), work.complete(),
+                work.riskScanContinuation(), work.actions(), resolutions);
     }
 
     private static boolean eligible(

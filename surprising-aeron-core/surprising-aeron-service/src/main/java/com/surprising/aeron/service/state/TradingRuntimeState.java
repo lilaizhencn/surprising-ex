@@ -1478,7 +1478,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 仅唤醒已经声明休眠的 Owner；在发布队列/就绪位后调用，不替代完成队列。 */
     private volatile Runnable ownerCompletionSignal;
     public void ownerCompletionSignal(Runnable signal) { assertOwner(); ownerCompletionSignal = signal; }
-    void signalOwnerCompletion() {
+    public void signalOwnerCompletion() {
         Runnable signal = ownerCompletionSignal;
         if (signal != null) signal.run();
     }
@@ -2673,20 +2673,29 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** 冷查询只取得不可变导出值，不向Owner交接Treasury所有权。 */
     public CoreTreasuryState treasuryForQuery(RuntimeIdentityRegistry identities) {
+        return queryLedgerAtRest(ledger -> RuntimeStateMaterializer.materializeTreasury(ledger, identities));
+    }
+
+    /** 冷导出边界的同步契约；生产查询使用非阻塞dispatchLedgerQuery。 */
+    public <T> T queryLedgerAtRest(java.util.function.Function<TreasuryRuntime, T> read) {
         assertOwner();
+        java.util.Objects.requireNonNull(read, "Ledger read is required");
         if (ledgerControl != null) throw new IllegalStateException("Treasury query requires committed control work");
-        if (systemLedger == null) return RuntimeStateMaterializer.materializeTreasury(treasury, identities);
+        if (systemLedger == null) return read.apply(treasury);
         final class Query implements SystemLedgerLane.Entry {
-            private CoreTreasuryState value;
+            private T value;
+            private RuntimeException failure;
             private volatile boolean complete;
             @Override public void apply(TreasuryRuntime ledger) {
-                value = RuntimeStateMaterializer.materializeTreasury(ledger, identities);
-                complete = true;
+                try { value = read.apply(ledger); }
+                catch (RuntimeException invalidQuery) { failure = invalidQuery; }
+                finally { complete = true; }
             }
         }
         Query query = new Query();
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
         while (!systemLedger.offer(query)) {
+            systemLedger.assertHealthy();
             if (System.nanoTime() >= deadline) throw new IllegalStateException("Treasury query mailbox timeout");
             java.util.concurrent.locks.LockSupport.parkNanos(this, 100_000L);
         }
@@ -2695,7 +2704,16 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (System.nanoTime() >= deadline) throw new IllegalStateException("Treasury query completion timeout");
             java.util.concurrent.locks.LockSupport.parkNanos(this, 100_000L);
         }
+        if (query.failure != null) throw query.failure;
         return query.value;
+    }
+
+    public boolean dispatchLedgerQuery(SystemLedgerLane.Entry query) {
+        assertOwner();
+        if (query == null) throw new IllegalArgumentException("Ledger query is required");
+        if (ledgerControl != null) throw new IllegalStateException("Ledger query requires committed control work");
+        if (systemLedger == null) { query.apply(treasury); return true; }
+        return systemLedger.offer(query);
     }
 
     public TreasuryRuntime treasury() {

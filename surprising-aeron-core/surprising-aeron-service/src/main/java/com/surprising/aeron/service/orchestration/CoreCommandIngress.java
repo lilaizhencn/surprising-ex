@@ -2,6 +2,8 @@ package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
+import com.surprising.aeron.protocol.CoreLiquidationWorkView;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -59,6 +61,7 @@ final class CoreCommandIngress {
             return runtime.rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
         }
         if (message.header().kind() == WireMessageKind.QUERY
+                && requiresOwnerLaneAccessForPreparation(message)
                 && TradingCoreRuntime.accountLaneReadQuery(message.header().messageType())) {
             if (TradingCoreRuntime.singleUserLaneQuery(message.header().messageType())
                     && message.header().userId() > 0) {
@@ -77,7 +80,17 @@ final class CoreCommandIngress {
 
     /** Queries can borrow Lane state for a read fence; commands hand mutations to their Lane. */
     boolean requiresOwnerLaneAccessForPreparation(CoreMessage message) {
-        return message.header().kind() == WireMessageKind.QUERY;
+        if (message.header().kind() != WireMessageKind.QUERY) return false;
+        var type = message.header().messageType();
+        if (type == CoreMessageType.TREASURY_STATE_QUERY || type == CoreMessageType.FUNDING_PROGRESS_QUERY
+                || type == CoreMessageType.SETTLEMENT_PROGRESS_QUERY) return false;
+        if (type == CoreMessageType.LIQUIDATION_WORK_QUERY) {
+            try {
+                return CoreLiquidationWorkCodec.decodeQuery(message.payloadUnsafe()).purpose()
+                        != CoreLiquidationWorkView.Purpose.INSURANCE;
+            } catch (IllegalArgumentException invalid) { return false; }
+        }
+        return true;
     }
 
     CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position) {

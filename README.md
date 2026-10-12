@@ -156,3 +156,5 @@ JDK 27 的 20 模块干净构建和 167 项资金、撮合、撤单、并发顺�
 控制资金续步支持原系统账本：资金费、保险调整、强平收付、保险分配、ADL和交割/行权由 `SystemLedgerLane` 读写原Treasury，Owner消费完成回执；账本前值保留到提交/拒绝，账户阶段失败仍可回退保险预留。保险不足保留未执行用户游标，注资后原位重试。76次必要测试执行通过。**生产activation及Matcher/外部查询接线尚未完成，Owner资金退出仍未全部完成**；按要求未运行压测、JMH/JFR或快照恢复。见 [控制账本验证](docs/validation/system-ledger-control-20261012.json)。
 
 Matcher财务接线现由日志提交队首异步推入原Ledger；普通成交返回完整原语流水，顺序批次只交接财库流水并沿用既有账户端点，避免重复记账。流水批次绑定原日志fence，用户回退前值来自Lane已有不可变回执。47次必要测试执行通过，包括带费单笔/流水/撤单批次的资金及Owner账户读取守卫。**外部查询与生产activation仍待接线，完整Owner迁移未完成**；未运行压测、JMH/JFR或快照恢复。见 [Matcher账本接线验证](docs/validation/owner-matcher-ledger-20261012.json)。
+
+财库和保险分配查询已迁到原 `SystemLedgerLane`（2026-10-12）：Owner解析和选取不可变索赔事实，账本读取预算、计算和编码；复用盘口已有异步查询ID与结果槽。财库、保险及进度查询不触发Account Lane停让；查询失败不终止账本，关闭先等待工作线程再清理结果槽。HotSpot JDK27的18个必要用例通过，生产自动启用仍待下一模块；未做压测、JMH/JFR、快照/恢复或wallet。见 [查询验证](docs/validation/owner-ledger-query-20261012.json)。
