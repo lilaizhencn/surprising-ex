@@ -89,6 +89,20 @@ public final class CoreOrderDecisionResolver {
                 context.clusterTimestamp(), context.lifecycleSettled(), intent);
     }
 
+    /** 预检查询固定规范配置；重新绑定同一价格事实，保持正常决策的合约身份检查。 */
+    public static Context queryContext(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+            long userId, String instrumentId, long clusterTimestamp) {
+        Context source = context(runtime, identities, userId, instrumentId, clusterTimestamp);
+        CoreInstrument instrument = source.instrument().captureForQuery();
+        MarkPriceRuntime mark = source.mark();
+        MarkPriceRuntime captured = mark == null || mark.instrument() != source.instrument() ? mark
+                : new MarkPriceRuntime(mark.symbolId(), instrument,
+                mark.markPriceTicks(), mark.indexPriceTicks(), mark.forwardPriceTicks(), mark.priceSequence(),
+                mark.generatedAtEpochMillis(), mark.lastPriceTicks());
+        return new Context(instrument, source.symbolId(), captured, source.fee(), source.clusterTimestamp(),
+                source.lifecycleSettled(), source.fundingInProgress());
+    }
+
     private static ResolvedPlaceOrder resolveValues(ResolvedPlaceOrder target,
                                                     CoreInstrument instrument, int symbolId,
                                                     MarkPriceRuntime mark, CoreFeeRate fee,

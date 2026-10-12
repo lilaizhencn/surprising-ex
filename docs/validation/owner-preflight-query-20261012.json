@@ -1,0 +1,185 @@
+{
+  "start": "2026-10-12T12:54:38.684364+00:00",
+  "head": "59ba9b60da52c720086c91ed9cef4865ca19e42a",
+  "goal": "下单预检由实际所属Lane读取用户/持仓/杠杆/待成交订单，Owner只准备身份路由及固定市场输入",
+  "steps": [
+    "Owner解析请求、使用原订单索引与终态身份检查，固定配置、价格、费率和账本进度标记",
+    "Lane按现有订单决策与资金预留规则计算；使用自身准入索引，不读Owner活跃订单表",
+    "查询只编码预留资产/金额，无冻结、订单或身份分配，无Owner等待",
+    "拒绝码维持原语义并允许后续查询正常完成；结果复用原异步查询登记"
+  ],
+  "pressureJmhJfr": false,
+  "snapshotRecoveryWalletScenarios": false,
+  "changeFiles": [
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBookQueryService.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreQueryRouter.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CoreCommandIngress.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/admission/CoreOrderDecisionResolver.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeOrderAdmission.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CorePreflightLaneQueryTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/TradingCoreOwnerTest.java"
+  ],
+  "command": [
+    "mvn",
+    "-B",
+    "-ntp",
+    "-pl",
+    "surprising-aeron-core/surprising-aeron-service",
+    "-am",
+    "-Dtest=CorePreflightLaneQueryTest#duplicateIdUsesOwnerIndexAndDuplicateClientUsesLaneWithoutCrossAccountReads,ReplacementAdmissionEventTest,CoreOrderedOrderBatchTest#sequentialPlaceLedgerKeepsOwnerOffAccountAndFinancialTables+finalAmendBatchResolvesChainedAndRejectedItemsWithoutOwnerOrderReads",
+    "-Dsurefire.failIfNoSpecifiedTests=false",
+    "test"
+  ],
+  "sourceBefore": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBookQueryService.java": "cabc9e85074a9477a23a696b7459e8047c88fb3dbaef43d64c210f46e4578304",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreQueryRouter.java": "e80763c481f9c76b7c0c6290aed336aec5be4f5c48f23b1203348270f4308c78",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CoreCommandIngress.java": "7d4a4f04c6dbd5301d869d0e88d9d45410975fb0b63014345191481cf8230b45",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/admission/CoreOrderDecisionResolver.java": "c0d04474c79c01f058eb49b4486730d2a8266912b7fa7b1b4b9d7fe2921f9a33",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeOrderAdmission.java": "fa9fbe701602f7db2e48c486d7948fcf5594b81d8e79c27c337de8b7664be1a8",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CorePreflightLaneQueryTest.java": "649ded6bf67f2f0feaae206195925b2d072facf8831e632dbf49175b7193d598",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/TradingCoreOwnerTest.java": "a2a8e3434c82c7f6fd4d0b055c1bea1c811ccfa040824241b7e911ef1fe913cf"
+  },
+  "exitCode": 0,
+  "end": "2026-10-12T13:02:44.275771+00:00",
+  "sourceAfter": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBookQueryService.java": "cabc9e85074a9477a23a696b7459e8047c88fb3dbaef43d64c210f46e4578304",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreQueryRouter.java": "e80763c481f9c76b7c0c6290aed336aec5be4f5c48f23b1203348270f4308c78",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CoreCommandIngress.java": "7d4a4f04c6dbd5301d869d0e88d9d45410975fb0b63014345191481cf8230b45",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/admission/CoreOrderDecisionResolver.java": "c0d04474c79c01f058eb49b4486730d2a8266912b7fa7b1b4b9d7fe2921f9a33",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeOrderAdmission.java": "fa9fbe701602f7db2e48c486d7948fcf5594b81d8e79c27c337de8b7664be1a8",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CorePreflightLaneQueryTest.java": "649ded6bf67f2f0feaae206195925b2d072facf8831e632dbf49175b7193d598",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/TradingCoreOwnerTest.java": "a2a8e3434c82c7f6fd4d0b055c1bea1c811ccfa040824241b7e911ef1fe913cf"
+  },
+  "sourceUnchanged": true,
+  "executedClasses": [
+    {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.state.ReplacementAdmissionEventTest"
+    },
+    {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest"
+    },
+    {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class": "com.surprising.aeron.service.orchestration.CorePreflightLaneQueryTest"
+    }
+  ],
+  "regression": {
+    "start": "2026-10-12T12:54:38.684364+00:00",
+    "head": "59ba9b60da52c720086c91ed9cef4865ca19e42a",
+    "goal": "下单预检由实际所属Lane读取用户/持仓/杠杆/待成交订单，Owner只准备身份路由及固定市场输入",
+    "steps": [
+      "Owner解析请求、使用原订单索引与终态身份检查，固定配置、价格、费率和账本进度标记",
+      "Lane按现有订单决策与资金预留规则计算；使用自身准入索引，不读Owner活跃订单表",
+      "查询只编码预留资产/金额，无冻结、订单或身份分配，无Owner等待",
+      "拒绝码维持原语义并允许后续查询正常完成；结果复用原异步查询登记"
+    ],
+    "pressureJmhJfr": false,
+    "snapshotRecoveryWalletScenarios": false,
+    "changeFiles": [
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBookQueryService.java",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreQueryRouter.java",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CoreCommandIngress.java",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/admission/CoreOrderDecisionResolver.java",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeOrderAdmission.java",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CorePreflightLaneQueryTest.java",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/TradingCoreOwnerTest.java"
+    ],
+    "command": [
+      "mvn",
+      "-B",
+      "-ntp",
+      "-pl",
+      "surprising-aeron-core/surprising-aeron-service",
+      "-am",
+      "-Dtest=CorePreflightLaneQueryTest,TradingCoreOwnerTest#preflightQueryWaitsForLaneOnLoggedCallbacksWithoutOwnerAccountReads,CoreOrderDecisionResolverTest#batchContextKeepsItsMarkAndUsesTheCanonicalInstrumentForEveryOrder+resolvesProtectionReservationAndFeeInsideCore+rejectsAStaleCoreMarkWithoutReadingProviderState+spotLimitUsesItsLimitAndInstrumentDefaultWithoutAMark+scalesPricesWithoutOverflowingTheIntermediateProduct,LaneAdmissionAggregateTest,CoreAccountLaneQueryTest,CoreAlgoLaneQueryTest",
+      "-Dsurefire.failIfNoSpecifiedTests=false",
+      "test"
+    ],
+    "sourceBefore": {
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBookQueryService.java": "cabc9e85074a9477a23a696b7459e8047c88fb3dbaef43d64c210f46e4578304",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreQueryRouter.java": "e80763c481f9c76b7c0c6290aed336aec5be4f5c48f23b1203348270f4308c78",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CoreCommandIngress.java": "7d4a4f04c6dbd5301d869d0e88d9d45410975fb0b63014345191481cf8230b45",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/admission/CoreOrderDecisionResolver.java": "c0d04474c79c01f058eb49b4486730d2a8266912b7fa7b1b4b9d7fe2921f9a33",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeOrderAdmission.java": "fa9fbe701602f7db2e48c486d7948fcf5594b81d8e79c27c337de8b7664be1a8",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CorePreflightLaneQueryTest.java": "d21dba4d10eb18e0699dcae2e67ae992ae827c740b6e1de01f6784e8948dbddc",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/TradingCoreOwnerTest.java": "a2a8e3434c82c7f6fd4d0b055c1bea1c811ccfa040824241b7e911ef1fe913cf"
+    },
+    "exitCode": 0,
+    "end": "2026-10-12T13:00:24.427644+00:00",
+    "sourceAfter": {
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBookQueryService.java": "cabc9e85074a9477a23a696b7459e8047c88fb3dbaef43d64c210f46e4578304",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreQueryRouter.java": "e80763c481f9c76b7c0c6290aed336aec5be4f5c48f23b1203348270f4308c78",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CoreCommandIngress.java": "7d4a4f04c6dbd5301d869d0e88d9d45410975fb0b63014345191481cf8230b45",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/admission/CoreOrderDecisionResolver.java": "c0d04474c79c01f058eb49b4486730d2a8266912b7fa7b1b4b9d7fe2921f9a33",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeOrderAdmission.java": "fa9fbe701602f7db2e48c486d7948fcf5594b81d8e79c27c337de8b7664be1a8",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CorePreflightLaneQueryTest.java": "d21dba4d10eb18e0699dcae2e67ae992ae827c740b6e1de01f6784e8948dbddc",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/TradingCoreOwnerTest.java": "a2a8e3434c82c7f6fd4d0b055c1bea1c811ccfa040824241b7e911ef1fe913cf"
+    },
+    "sourceUnchanged": true,
+    "executedClasses": [
+      {
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "class": "com.surprising.aeron.service.state.CoreOrderDecisionResolverTest"
+      },
+      {
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "class": "com.surprising.aeron.service.state.LaneAdmissionAggregateTest"
+      },
+      {
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "class": "com.surprising.aeron.service.orchestration.CoreAccountLaneQueryTest"
+      },
+      {
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "class": "com.surprising.aeron.service.orchestration.CoreAlgoLaneQueryTest"
+      },
+      {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "class": "com.surprising.aeron.service.orchestration.TradingCoreOwnerTest"
+      },
+      {
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "class": "com.surprising.aeron.service.orchestration.CorePreflightLaneQueryTest"
+      }
+    ]
+  },
+  "interpretation": {
+    "result": "31次必要回归通过；仅新增算术拒绝断言后4次定向通过，共35次执行，不是35个独立用例。",
+    "stateOwnership": "Owner从原索引检查全局ID，固定配置/价格/费率及财务进度原语，所属Lane读取用户、持仓、杠杆与准入聚合计算预留。单Lane查询使用原异步结果登记，不新增权威Map。",
+    "newBoundary": "queryContext只在查询边界固定配置并重新关联已验证的价格身份；requiredReservationForQuery只接收准备好的身份与市场输入，在实际Lane使用原规则。正常PLACE/AMEND仍校验规范instrument引用。",
+    "coverage": "六产品线买卖预检、资金/身份无变更、全局跨用户重复ID及用户客户ID、减仓容量、算术异常后的健康查询、阻塞Lane期间市场配置变更及实际Owner日志回调；旧决策/准入、账户/算法查询、普通及替换准入、顺序PLACE和AMEND必要回归。",
+    "previousFailures": "首轮新增测试使用不存在的PlaceOrderCommand简短构造器，执行0例；修正后31及4次通过，原记录保留。",
+    "notRun": "按用户要求无压测/JMH/JFR/快照/恢复/wallet；不作性能结论。",
+    "remaining": "严格Lane所有权、同步冷入口及审计/指标读取边界尚需收口，完整Owner迁移未完成。",
+    "cleanup": "Maven退出，无本轮集群/Archive/JFR；必要日志保留。"
+  }
+}

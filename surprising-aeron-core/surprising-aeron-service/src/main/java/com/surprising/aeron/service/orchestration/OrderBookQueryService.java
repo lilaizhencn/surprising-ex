@@ -67,6 +67,74 @@ final class OrderBookQueryService {
         return type == CoreMessageType.RISK_STATE_QUERY || type == CoreMessageType.ADL_CANDIDATE_QUERY;
     }
 
+    CoreResponse beginPreflightQuery(CoreMessage message, long timestamp) {
+        var command = TradingCommandCodec.decodePlaceOrder(message.payloadUnsafe());
+        long userId = message.header().userId();
+        if (userId <= 0) throw new IllegalArgumentException("preflight user is required");
+        owner.requireOrderIdentityAvailable(userId, command);
+        if (owner.orderIdInUse(command.orderId())) throw new com.surprising.aeron.service.exception.CoreStateRejectedException(
+                "DUPLICATE_ORDER_ID", "orderId already exists");
+        var context = com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.queryContext(
+                owner.runtimeState, owner.identities, userId, command.instrumentId(), timestamp);
+        var identity = new com.surprising.aeron.service.state.admission.AdmissionIdentity(
+                owner.identities.findClientKeyValue(userId, command.clientOrderId()), context.symbolId(),
+                owner.identities.findPositionKeyValue(userId, context.instrument(), command.positionSide()),
+                context.lifecycleSettled(), context.fundingInProgress());
+        long id = nextAsyncQueryId++;
+        var query = new PreflightQuery(id, owner.appliedCommandCount, userId, command, context, identity,
+                owner.openInterestIndex.openInterestSteps(command.instrumentId()));
+        queryIds.put(message.header().commandId(), id);
+        try {
+            if (!owner.runtimeState.dispatchAccountQuery(owner.runtimeState.topology().accountLaneMask(userId), query)) {
+                queryIds.remove(message.header().commandId());
+                return owner.rejected(CoreResultCode.MATCHING_REJECTED);
+            }
+        } catch (RuntimeException failure) {
+            queryIds.remove(message.header().commandId());
+            throw failure;
+        }
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount);
+    }
+
+    /** 单Lane预检仅保留本次已准备输入；完成Lane编码，Owner消费后引用释放。 */
+    private final class PreflightQuery implements SettlementLaneWorker.Command,
+            java.util.function.Function<AccountLaneState, CoreResponse> {
+        private final long id, commandCount, userId, openInterest;
+        private final com.surprising.aeron.protocol.PlaceOrderCommand command;
+        private final com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context context;
+        private final com.surprising.aeron.service.state.admission.AdmissionIdentity identity;
+
+        private PreflightQuery(long id, long commandCount, long userId, com.surprising.aeron.protocol.PlaceOrderCommand command,
+                com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context context,
+                com.surprising.aeron.service.state.admission.AdmissionIdentity identity, long openInterest) {
+            this.id = id; this.commandCount = commandCount; this.userId = userId;
+            this.command = command; this.context = context; this.identity = identity; this.openInterest = openInterest;
+        }
+
+        @Override public void execute(AccountLaneState lane) {
+            CoreResponse response;
+            try { response = owner.runtimeState.readAccountLane(lane, this); }
+            catch (com.surprising.aeron.service.exception.CoreStateRejectedException failure) {
+                response = rejected(CoreResultCode.fromRejectionCode(failure.code()));
+            } catch (ArithmeticException failure) { response = rejected(CoreResultCode.ARITHMETIC_OVERFLOW); }
+            catch (IllegalArgumentException failure) { response = rejected(CoreResultCode.INVALID_COMMAND); }
+            completedBookQueries.put(id, CompletedBookQuery.encoded(response));
+            owner.runtimeState.signalOwnerCompletion();
+        }
+
+        @Override public CoreResponse apply(AccountLaneState lane) {
+            var order = com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.resolve(context, command);
+            long reserved = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationForQuery(
+                    owner.runtimeState, userId, order, openInterest, identity);
+            return new CoreResponse(ResponseStatus.OK, commandCount, com.surprising.aeron.protocol.CoreOrderPreflightCodec.encode(
+                    new com.surprising.aeron.protocol.CoreOrderPreflightView(order.reservationAsset(), reserved)));
+        }
+
+        private CoreResponse rejected(CoreResultCode code) {
+            return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, code, commandCount);
+        }
+    }
+
     CoreResponse beginRiskAccountQuery(CoreMessage message) {
         long id = nextAsyncQueryId++;
         var query = RiskAccountQuery.prepare(owner, message, id);

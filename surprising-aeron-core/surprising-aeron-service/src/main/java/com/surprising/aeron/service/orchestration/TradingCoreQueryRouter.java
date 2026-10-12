@@ -246,17 +246,7 @@ final class TradingCoreQueryRouter {
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.ORDER_PREFLIGHT_QUERY) {
             try {
-                var command = TradingCommandCodec.decodePlaceOrder(message.payloadUnsafe());
-                runtime.requireOrderIdentityAvailable(message.header().userId(), command);
-                ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtime.runtimeState,
-                        runtime.identities, message.header().userId(), command, clusterTimestamp);
-                long reservedUnits = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
-                        runtime.runtimeState, runtime.identities, message.header().userId(), resolved,
-                        runtime.openInterestIndex.openInterestSteps(command.instrumentId()), runtime.activeOrderIndex);
-                var view = new com.surprising.aeron.protocol.CoreOrderPreflightView(
-                        resolved.reservationAsset(), reservedUnits);
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
-                        com.surprising.aeron.protocol.CoreOrderPreflightCodec.encode(view));
+                return runtime.bookQueries.beginPreflightQuery(message, clusterTimestamp);
             } catch (CoreStateRejectedException exception) {
                 return runtime.rejected(CoreResultCode.fromRejectionCode(exception.code()));
             } catch (ArithmeticException exception) {

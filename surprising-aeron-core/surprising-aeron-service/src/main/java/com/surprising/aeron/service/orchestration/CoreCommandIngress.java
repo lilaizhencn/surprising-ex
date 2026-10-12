@@ -83,6 +83,7 @@ final class CoreCommandIngress {
         if (message.header().kind() != WireMessageKind.QUERY) return false;
         var type = message.header().messageType();
         if (OrderBookQueryService.accountQuery(type) || OrderBookQueryService.riskAccountQuery(type)) return false;
+        if (type == CoreMessageType.ORDER_PREFLIGHT_QUERY) return false;
         if (type == CoreMessageType.TREASURY_STATE_QUERY || type == CoreMessageType.FUNDING_PROGRESS_QUERY
                 || type == CoreMessageType.SETTLEMENT_PROGRESS_QUERY) return false;
         if (type == CoreMessageType.LIQUIDATION_WORK_QUERY) {

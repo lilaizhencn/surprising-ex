@@ -5374,3 +5374,11 @@ HotSpot Corretto27/G1：`replacement-lane-financial-verified` 297项、`replacem
 - Owner从原AlgoOrderIndex选择有界ID/用户路由；实际Lane读取父单及保留的成交、撤销、挂单子订单，计算执行/活跃数量并按原分页顺序编码。复用AccountQuery和原异步结果槽，无新的账户或算法单权威副本。
 - HotSpot JDK27 20次必要执行通过，失败/错误/跳过0，源码未变；包含4算法查询、8账户、7风险ADL及1实际Owner日志算法更新用例。Owner五类账户表和publishedAlgoOrders读取守卫覆盖查询，全局扫描超限、阻塞Lane与一次消费通过。
 - 记录 `docs/validation/owner-algo-query-20261012.json`，日志 `../performance-artifacts/owner-algo-query-20261012`；Maven退出，无本轮集群/Archive/JFR。无压测/JMH/JFR/快照/恢复/wallet，不作性能结论。订单预检及严格Lane运行时边界仍待收口，不宣称全部完成。
+
+
+## 2026-10-12：下单预检查询迁至Lane（必要用例）
+
+- Owner只从现有索引检查身份并固定市场/费率/财务进度输入；所属Lane读取用户、持仓、杠杆和自身准入聚合，按原规则编码预留资产/金额。预检不冻结资金、不创建订单、不分配身份，响应使用原异步结果槽。
+- HotSpot JDK27必要回归31次通过；仅新增算术拒绝断言后定向4次通过，共35次执行，失败/错误/跳过0。前期测试构造错误执行0例已保留并修正。记录 `docs/validation/owner-preflight-query-20261012.json`，日志 `../performance-artifacts/owner-preflight-query-20261012`。
+- 六产品线、重复身份、减仓容量、算术拒绝、阻塞Lane时固定市场配置及实际Owner日志回调通过；正常/替换准入和顺序PLACE/AMEND守卫回归通过。源码运行时未变；测试进程退出，无本轮集群/Archive/JFR。
+- 无压测/JMH/JFR/快照/恢复/wallet，不作性能结论。严格Lane所有权及同步冷入口、指标/审计读取仍待收口，不宣称完整Shared-Nothing完成。

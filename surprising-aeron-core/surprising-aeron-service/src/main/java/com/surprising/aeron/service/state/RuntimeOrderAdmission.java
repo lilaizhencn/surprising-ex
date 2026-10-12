@@ -106,6 +106,27 @@ public final class RuntimeOrderAdmission {
             long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
             long clientKey, int symbolId, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol) {
+        return requiredReservation(runtime, userId, order, openInterestSteps, activeOrders, excludedOrderId,
+                clientKey, symbolId, positionKey, lifecycleSettled, fundingInProgress, excludedSymbol, null);
+    }
+
+    /** 预检只读所属Lane及Owner已固定的市场输入，不分配身份、创建订单或冻结资金。 */
+    public static long requiredReservationForQuery(TradingRuntimeState runtime, long userId,
+            ResolvedPlaceOrder order, long openInterestSteps, AdmissionIdentity identity) {
+        AccountLaneState lane = runtime.currentLaneCommandScope();
+        if (lane == null || runtime.topology().accountLaneId(userId) != lane.laneId()
+                || order == null || identity == null)
+            throw new IllegalStateException("preflight query requires its owning Lane scope");
+        return requiredReservation(runtime, userId, order, openInterestSteps,
+                lane.admissionOrderIndex(identity.symbolId()), 0, identity.clientKey(), identity.symbolId(),
+                identity.positionKey(), identity.lifecycleSettled(), identity.fundingInProgress(), null, order.instrument());
+    }
+
+    private static long requiredReservation(
+            TradingRuntimeState runtime, long userId, ResolvedPlaceOrder order,
+            long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
+            long clientKey, int symbolId, long positionKey,
+            boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol, CoreInstrument queryInstrument) {
         if (runtime.order(order.orderId()) != null && order.orderId() != excludedOrderId) {
             throw rejected("DUPLICATE_ORDER_ID", "orderId already exists");
         }
@@ -113,7 +134,7 @@ public final class RuntimeOrderAdmission {
         if (clientOrderId != 0 && clientOrderId != excludedOrderId) {
             throw rejected("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
         }
-        CoreInstrument instrument = runtime.instrument(order.instrumentId());
+        CoreInstrument instrument = queryInstrument == null ? runtime.instrument(order.instrumentId()) : queryInstrument;
         if (instrument == null || instrument != order.instrument()) {
             throw rejected("INSTRUMENT_ORDER_MISMATCH", "order instrument differs from Runtime");
         }

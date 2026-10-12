@@ -188,6 +188,52 @@ class TradingCoreOwnerTest {
     }
 
     @Test
+    void preflightQueryWaitsForLaneOnLoggedCallbacksWithoutOwnerAccountReads() throws Exception {
+        var service = service();
+        var responses = new CopyOnWriteArrayList<byte[]>();
+        var release = new java.util.concurrent.CountDownLatch(1);
+        service.onStart(cluster(), null);
+        try {
+            service.state().apply(timerInstrument());
+            var runtime = service.state().runtimeState;
+            var entered = new java.util.concurrent.CountDownLatch(1);
+            long mask = runtime.topology().accountLaneMask(1001);
+            assertThat(runtime.dispatchAccountQuery(mask, lane -> {
+                entered.countDown();
+                try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane release timeout"); }
+                catch (InterruptedException failure) { throw new AssertionError(failure); }
+            })).isTrue();
+            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+            long handoff = runtime.laneHandoffEpoch();
+            var intent = new PlaceOrderCommand(910, "1", CoreOrderSide.BUY, 100, 3, false,
+                    CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "preflight-910");
+            var request = new CoreMessage(CoreMessageHeader.query(CoreMessageType.ORDER_PREFLIGHT_QUERY,
+                    UUID.randomUUID(), ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 1000, 9),
+                    TradingCommandCodec.encodePlaceOrder(intent));
+            try (var guard = new OwnerAccountReadGuard(runtime)) {
+                byte[] encoded = CoreMessageCodec.encode(request);
+                service.onSessionMessage(clientSession(responses), 1000, new UnsafeBuffer(encoded), 0,
+                        encoded.length, aeronHeader());
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while (service.state().querySequence(request.header().commandId()) == 0 && System.nanoTime() < deadline)
+                    service.pollCommands();
+                assertThat(service.state().querySequence(request.header().commandId())).isNotZero();
+                assertThat(responses).isEmpty();
+                assertThat(release.getCount()).isOne();
+                release.countDown();
+                finishCommands(service);
+                assertThat(responses).hasSize(1);
+                var response = CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.getFirst()).payloadUnsafe());
+                assertThat(response.status()).isEqualTo(ResponseStatus.OK);
+                assertThat(response.data()).isEqualTo(com.surprising.aeron.protocol.CoreOrderPreflightCodec.encode(
+                        new com.surprising.aeron.protocol.CoreOrderPreflightView("USDT", 300)));
+                assertThat(runtime.laneHandoffEpoch()).isEqualTo(handoff);
+                service.state().assertClusterCallbackComplete();
+            }
+        } finally { release.countDown(); service.onTerminate(null); }
+    }
+
+    @Test
     void bookQueryDoesNotWaitForBlockedMatcherAndCompletesOnLaterLoggedCallback() throws Exception {
         var service = service();
         var responses = new CopyOnWriteArrayList<byte[]>();
