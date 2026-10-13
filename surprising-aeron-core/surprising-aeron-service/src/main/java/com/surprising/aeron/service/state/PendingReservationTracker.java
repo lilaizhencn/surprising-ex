@@ -348,6 +348,14 @@ final class PendingReservationTracker {
     }
 
     void assertPendingReservationCounts() {
+        if (owner.accountLanesStarted && !owner.ownerLaneAccess) {
+            int tracked = pendingReservationUsers.size();
+            for (PendingBatch batch : batches.values()) tracked = Math.addExact(tracked, batch.remaining);
+            if (tracked != totalPendingReservations
+                    || pendingReservationCountsByUser.sum() != totalPendingReservations)
+                throw new IllegalStateException("Owner pending reservation routing counts differ");
+            return;
+        }
         int lanePendingReservations = 0;
         for (int laneId = 0; laneId < owner.accountLanes.length; laneId++) {
             int currentLaneId = laneId;

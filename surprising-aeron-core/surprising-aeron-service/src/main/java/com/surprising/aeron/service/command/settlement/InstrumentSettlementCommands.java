@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.command.settlement;
 
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
+
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.service.state.RuntimeLifecycleSettlement;
 import com.surprising.aeron.service.state.RuntimeLifecycleSettlementContinuation;
@@ -77,7 +79,7 @@ public final class InstrumentSettlementCommands {
                 owner.activeOrderIndex(), owner.runtimeState(), owner.identities());
     }
 
-    private static List<Long> boxedOrderIds(List<? extends CoreOrderState> orders) {
+    private static List<Long> boxedOrderIds(List<CancellationOrder> orders) {
         if (orders == null || orders.isEmpty()) return List.of();
         long[] values = new long[orders.size()];
         for (int index = 0; index < values.length; index++) values[index] = orders.get(index).orderId();

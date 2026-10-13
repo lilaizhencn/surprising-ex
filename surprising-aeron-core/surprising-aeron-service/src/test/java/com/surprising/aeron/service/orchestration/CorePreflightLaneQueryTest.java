@@ -33,7 +33,7 @@ class CorePreflightLaneQueryTest {
                     var command = place(900, side, 95, 3, false, "preflight-900");
                     var resolved = CoreOrderDecisionResolver.resolve(cold, identities, 1, command, TIME);
                     long reserved = RuntimeOrderAdmission.requiredReservation(cold, identities, 1, resolved,
-                            0, new ActiveOrderIndex(before));
+                            0, cold.admissionOrders(1, resolved.symbolId()));
                     try (var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                         var response = query(core, 1, command);
                         assertThat(response.status()).isEqualTo(ResponseStatus.OK);
@@ -42,9 +42,9 @@ class CorePreflightLaneQueryTest {
                     }
                 }
             }
-            assertThat(core.tradingState()).isEqualTo(before);
             assertThat(core.identities.positionCheckpoint()).isEqualTo(positionCheckpoint);
             assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+            assertThat(core.tradingState()).isEqualTo(before);
             core.assertClusterCallbackComplete();
         }
     }
@@ -91,7 +91,7 @@ class CorePreflightLaneQueryTest {
                 var valid = place(305, CoreOrderSide.SELL, 110, 2, true, "close-valid");
                 var resolved = CoreOrderDecisionResolver.resolve(cold, identities, 1, valid, TIME);
                 long expected = RuntimeOrderAdmission.requiredReservation(cold, identities, 1, resolved,
-                        core.openInterestIndex.openInterestSteps("1"), new ActiveOrderIndex(before));
+                        core.openInterestIndex.openInterestSteps("1"), cold.admissionOrders(1, resolved.symbolId()));
                 try (var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                     assertThat(query(core, 1, place(304, CoreOrderSide.SELL, 110, 3, true, "close-oversized")).resultCode())
                             .isEqualTo(CoreResultCode.REDUCE_ONLY_CAPACITY_EXCEEDED);
@@ -114,7 +114,7 @@ class CorePreflightLaneQueryTest {
             try (var cold = RuntimeStateProjector.project(core.tradingState(), ids)) {
                 var order = CoreOrderDecisionResolver.resolve(cold, ids, 1, intent, TIME);
                 expected = CoreOrderPreflightCodec.encode(new CoreOrderPreflightView(order.reservationAsset(),
-                        RuntimeOrderAdmission.requiredReservation(cold, ids, 1, order, 0, new ActiveOrderIndex(core.tradingState()))));
+                        RuntimeOrderAdmission.requiredReservation(cold, ids, 1, order, 0, cold.admissionOrders(1, order.symbolId()))));
             }
             var entered = new CountDownLatch(1);
             long mask = core.runtimeState.topology().accountLaneMask(1);

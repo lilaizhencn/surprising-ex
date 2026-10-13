@@ -55,9 +55,9 @@ final class MatcherCommandSubmission {
             }
             if (pending.operation() == CommandSlot.Operation.CANCEL && direct != null) {
                 var command = pending.decodedCommand().cancelOrder();
-                var order = owner.activeOrderIndex.activeOrderRuntime(command.orderId());
+                var order = owner.activeOrderIndex.activeOrderRoute(command.orderId());
                 if (order != null) {
-                    String instrumentId = owner.identities.instrumentId(order.symbolId());
+                    String instrumentId = order.instrumentId();
                     int shard = owner.matchingFlow.matcherShard(pending);
                     return directWithCancellations(pending, direct, preMatchingCancellations,
                             command.orderId(), pending.prepareCancelMatching(owner, shard, command.orderId(),
@@ -102,8 +102,8 @@ final class MatcherCommandSubmission {
                 }
                 case CANCEL -> {
                     var command = pending.decodedCommand().cancelOrder();
-                    var order = owner.activeOrderIndex.activeOrderRuntime(command.orderId());
-                    String instrumentId = order == null ? "" : owner.identities.instrumentId(order.symbolId());
+                    var order = owner.activeOrderIndex.activeOrderRoute(command.orderId());
+                    String instrumentId = order == null ? "" : order.instrumentId();
                     yield new MatchingSubmission(command.orderId(),
                             () -> owner.matchingAdapter.cancelForContinuation(userId, command.orderId(), instrumentId));
                 }
@@ -116,7 +116,7 @@ final class MatcherCommandSubmission {
                 }
                 case TRIGGER -> {
                     long[] execute = pending.decodedCommand().trigger();
-                    var trigger = owner.runtimeState.triggerOrder(execute[0]);
+                    var trigger = pending.sourceTrigger();
                     if (trigger == null) {
                         yield new MatchingSubmission(0, () ->
                                 new com.surprising.aeron.service.matching.CoreMatchingResult(
@@ -129,7 +129,7 @@ final class MatcherCommandSubmission {
                 }
                 case LIQUIDATION -> {
                     var command = pending.decodedCommand().liquidation();
-                    var liquidation = owner.runtimeState.liquidation(command.liquidationId());
+                    var liquidation = pending.liquidationCheck().liquidation(0);
                     if (liquidation == null || !pending.liquidationCheck().executable(0)) {
                         yield new MatchingSubmission(command.liquidationId(), () ->
                                 new com.surprising.aeron.service.matching.CoreMatchingResult(true, "SUCCESS"));
@@ -138,11 +138,11 @@ final class MatcherCommandSubmission {
                             owner.runtimeLiquidationSymbol(liquidation), command.cursorOrderId(),
                             command.maxOrders()).orders();
                     yield new MatchingSubmission(command.liquidationId(),
-                            () -> owner.matchingAdapter.cancelBatch(orders));
+                            () -> owner.matchingAdapter.cancelRoutedBatch(orders));
                 }
                 case LIQUIDATION_BATCH -> {
                     var orders = owner.matchingFlow.batchCancellationOrders(pending);
-                    yield new MatchingSubmission(0, () -> owner.matchingAdapter.cancelBatch(orders));
+                    yield new MatchingSubmission(0, () -> owner.matchingAdapter.cancelRoutedBatch(orders));
                 }
                 case SETTLEMENT -> {
                     var command = pending.decodedCommand().settlement();
@@ -154,7 +154,7 @@ final class MatcherCommandSubmission {
                     var orders = owner.matchingFlow.lifecycleOrders(0, command.instrumentId(), command.cursorOrderId(),
                             command.maxOrders()).orders();
                     yield new MatchingSubmission(0,
-                            () -> owner.matchingAdapter.cancelBatch(orders));
+                            () -> owner.matchingAdapter.cancelRoutedBatch(orders));
                 }
             };
             Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> guarded =
@@ -222,10 +222,10 @@ final class MatcherCommandSubmission {
         ArrayList<DeterministicExchangeCoreAdapter.CancellationOrder> orders =
                 new ArrayList<>(orderIds.size());
         for (long orderId : orderIds) {
-            OrderRuntime order = owner.activeOrderIndex.activeOrderRuntime(orderId);
-            if (order != null && order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN) {
+            var order = owner.activeOrderIndex.activeOrderRoute(orderId);
+            if (order != null) {
                 orders.add(new DeterministicExchangeCoreAdapter.CancellationOrder(
-                        order.orderId(), order.userId(), owner.runtimeOrderSymbol(order)));
+                        order.orderId(), order.userId(), order.instrumentId()));
             }
         }
         return orders.isEmpty() ? List.of() : orders;

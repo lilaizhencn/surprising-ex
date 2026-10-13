@@ -254,6 +254,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     final int[] preparedAssetIds;
     /** 本批预备的 AdmittedOrders 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final OrderRuntime[] preparedAdmittedOrders;
+    long[] preparedCancellationOrderIds;
     /** 本批预备的 Symbols 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final ArrayList<String> preparedSymbols;
     /** 与 preparedSymbols 对齐的批内准入上下文；批次最多几十项，线性查找避免 Map 节点。 */
@@ -342,6 +343,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         preparedSymbolIds = new int[capacity];
         preparedAssetIds = new int[capacity];
         preparedAdmittedOrders = new OrderRuntime[capacity];
+        preparedCancellationOrderIds = new long[preparedAdmittedOrders.length];
         preparedSymbols = new ArrayList<>(capacity);
         preparedContextDecisions =
                 new com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision[capacity];

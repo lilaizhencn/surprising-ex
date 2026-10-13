@@ -153,7 +153,7 @@ final class CoreSnapshotLifecycle {
                 fence.coreSequence = owner.appliedCommandCount;
                 CompletableFuture<MatcherSnapshot> matcherSnapshot = matcherSnapshotCapture.capture(
                         fence.snapshotId, fence.coreSequence, fence.businessStateHash,
-                        fence.snapshotState, owner.activeOrderIndex.orders());
+                        fence.snapshotState, fence.snapshotState.orders().values().stream().filter(order -> order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN).toList());
                 if (!inFlightMatcherSnapshot.compareAndSet(null, matcherSnapshot)) {
                     throw new TradingCoreRuntime.SnapshotNotReadyException();
                 }

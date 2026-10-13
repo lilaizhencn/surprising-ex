@@ -103,9 +103,7 @@ final class CoreRuntimeLifecycle {
         try { owner.runtimeState.close(); }
         finally {
             // Account/Ledger workers must finish before their result slots or command references are cleared.
-            owner.bookQueries.completedBookQueries.clear();
-            owner.bookQueries.failedQueries.clear();
-            owner.bookQueries.queryIds.clear();
+            owner.bookQueries.clearPendingQueries();
             owner.clearFactContext();
             owner.directCommand.clear();
             owner.batches.clearPendingBatches();

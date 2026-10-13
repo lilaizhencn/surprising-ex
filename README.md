@@ -34,6 +34,14 @@ Gateway sends trading commands to the single-member Aeron Cluster. Core owns tra
 
 The Maven modules follow these boundaries: [`surprising-aeron-core`](surprising-aeron-core/) contains the cluster and client; [`surprising-gateway`](surprising-gateway/) contains the consolidated identity, instrument, trading, and account application; [`surprising-price`](surprising-price/), [`surprising-realtime`](surprising-realtime/), [`surprising-derivatives-lifecycle`](surprising-derivatives-lifecycle/), and [`surprising-maker`](surprising-maker/) contain the other four processes. Shared API modules define product-line and business contracts.
 
+### 当前 Core 线程职责（2026-10-13）
+
+用户余额、预留、仓位、订单、算法单、触发单、清算及风险记录由所属 `AccountLaneState` 的实际 worker 读写。`SettlementLaneWorker` 在启动前绑定线程；运行中的 Owner 不能直接读取账户表、进入 Lane 写作用域或执行账户闭包。已删除四张 `published*` 业务镜像，`ActiveOrderIndex` 仅保存订单 ID、用户 ID、币对；触发、算法及清算索引只保存路由与候选筛选键。Owner 定序、检查路由身份、派发任务并按日志顺序发布完成结果；命令内的不可变回执在提交后清理，不留第二份业务状态。
+
+手续费、保险基金和 Treasury 仍只由原 `SystemLedgerLane` 写入。生产命令不再在 Owner 汇总资金流水或重复计算守恒：成交由 Ledger 消费 Lane 原语回执校验，控制命令由 Ledger 合并已完成的账户变更和 Treasury 变更，校验成功后才允许发布；失败保留原有回滚边界。强平检查、保险索赔读取、ADL 和触发子订单准备在实际 Lane 执行；自成交防护所需取消集合也在 Lane 准入时生成。
+
+Core 内部账户、触发、算法及强平执行/保险/ADL 分页查询读取实际 Lane，通过已有异步查询槽响应；保险预算由 Ledger 计算。外部 Redis/Valkey 投影链路沿用现有机制。完整状态物化仅在显式冷态检查屏障借用所有权，生产运行不缓存完整业务视图。符号缓存、DirectBuffer 读取和事件缓冲复用继续保留。本轮仅做必要功能回归及直接受影响基准模块的编译，不执行压测、JMH/JFR、快照恢复或 wallet；功能通过不表示吞吐或零分配已重新验收。见 [Owner 状态边界验证](docs/validation/owner-shared-state-20261013.json)。下文的日期记录描述各阶段当时的状态。
+
 ## 风险查询口径
 
 `RuntimeRiskQueryService.snapshots` 在查询边界使用当前仓位、钱包和标记价，统一计算名义价值、未实现盈亏、维持保证金、权益、保证金率和风险状态；返回的价格序号对应本次估值价格。全仓按用户及结算资产汇总，扣除逐仓占用；逐仓仅使用本仓保证金，期权权益使用期权市值。

@@ -33,6 +33,7 @@ class RuntimeChangedIndexCommitTest {
         runtime.putOrder(CoreStateTestFixtures.order(11, 7, symbolId, 2));
 
         IndexSet indexes = indexes(initial, identities);
+        if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(indexes.activeOrders.ids()).containsExactly(11L);
@@ -44,16 +45,17 @@ class RuntimeChangedIndexCommitTest {
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(),
                 3, 100, 300, 0, 60));
         runtime.putOrder(CoreStateTestFixtures.order(11, 7, symbolId, 5));
+        if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
 
-        assertThat(indexes.activeOrders.pendingQuantity(
-                7, "1", CorePositionSide.NET,
-                com.surprising.aeron.protocol.CoreOrderSide.BUY)).isEqualTo(5);
+        assertThat(runtime.admissionOrders(7, symbolId).inspect(7, "1", CorePositionSide.NET,
+                com.surprising.aeron.protocol.CoreOrderSide.BUY, CoreMarginMode.ISOLATED).pendingQuantity()).isEqualTo(5);
         assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(3);
 
         runtime.clearChangedKeys();
         runtime.removeOrder(11);
         runtime.removePosition(positionKey, 7);
+        if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(indexes.activeOrders.ids()).isEmpty();
@@ -80,24 +82,26 @@ class RuntimeChangedIndexCommitTest {
         IndexSet indexes = indexes(initial, identities);
         RiskSnapshotRuntime risk = new RiskSnapshotRuntime(userId, symbolId, CorePositionSide.NET,
                 9, 1_000, 20, 100, 100_000, CoreRiskStatus.NORMAL);
-        runtime.executeUserRisk(userId, () -> {
+        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), ignored -> {
             runtime.putRiskSnapshot(positionKey, risk);
             return null;
         });
+        if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
 
-        assertThat(runtime.riskSnapshot(positionKey)).isEqualTo(risk);
+        assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.riskSnapshot(positionKey))).isEqualTo(risk);
 
         runtime.clearChangedKeys();
-        runtime.executeUserRisk(userId, () -> {
+        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), ignored -> {
             runtime.removeRiskSnapshot(positionKey);
+            runtime.removePosition(positionKey, userId);
             return null;
         });
-        runtime.removePosition(positionKey, userId);
+        if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
         runtime.clearCommittedChanges(identities);
 
-        assertThat(runtime.riskSnapshot(positionKey)).isNull();
+        assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.riskSnapshot(positionKey))).isNull();
         assertThat(identities.findPositionKey(userId, "1:NET")).isNull();
         assertThat(runtime.snapshotProjectionStateDirty()).isFalse();
         runtime.close();
@@ -116,23 +120,25 @@ class RuntimeChangedIndexCommitTest {
         runtime.startAccountLanes();
         IndexSet indexes = indexes(initial, identities);
 
-        runtime.executeUserRisk(userId, () -> {
+        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), ignored -> {
             runtime.putLiquidation(planned);
             return null;
         });
+        if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
 
-        assertThat(runtime.liquidation(1)).isEqualTo(planned);
+        assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.liquidation(1))).isEqualTo(planned);
         assertThat(indexes.liquidations.activeIds()).containsExactly(1L);
 
         runtime.clearChangedKeys();
-        runtime.executeUserRisk(userId, () -> {
+        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), ignored -> {
             runtime.removeLiquidation(1);
             return null;
         });
+        if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
 
-        assertThat(runtime.liquidation(1)).isNull();
+        assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.liquidation(1))).isNull();
         assertThat(indexes.liquidations.activeIds()).isEmpty();
         runtime.close();
     }

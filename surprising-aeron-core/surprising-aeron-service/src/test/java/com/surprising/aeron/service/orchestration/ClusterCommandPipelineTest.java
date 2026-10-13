@@ -67,6 +67,16 @@ class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
     void atomicOcoPairPublishesTogetherAndEitherLegCancelsItsSibling(ProductLine product) throws Exception {
+        verifyAtomicOcoPair(product, true);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void atomicOcoPairWithoutSnapshot(ProductLine product) throws Exception {
+        verifyAtomicOcoPair(product, false);
+    }
+
+    private void verifyAtomicOcoPair(ProductLine product, boolean recovery) throws Exception {
         for (boolean takeProfitWins : new boolean[]{true, false}) {
             try (Fixture live = new Fixture(product)) {
                 live.setup();
@@ -84,8 +94,8 @@ class ClusterCommandPipelineTest {
                         CoreTriggerOrderCodec.encodeList(List.of(tp,
                                 pairLeg(product, user, 9014874673242113703L, " ", CoreTriggerOrderType.STOP_LOSS, sl.triggerPriceTicks())))));
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-                assertThat(live.service.state().runtimeState.triggerOrder(6174311206148487272L)).isNull();
-                assertThat(live.service.state().runtimeState.triggerOrder(9014874673242113703L)).isNull();
+                assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 6174311206148487272L)).isNull();
+                assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9014874673242113703L)).isNull();
                 var pair = live.message(CoreMessageType.PLACE_TRIGGER_OCO_PAIR, user,
                         CoreTriggerOrderCodec.encodeList(List.of(tp, sl)));
                 live.apply(pair);
@@ -98,11 +108,11 @@ class ClusterCommandPipelineTest {
                 long canceled = takeProfitWins ? 9014874673242113703L : 6174311206148487272L;
                 live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
                         CoreTriggerOrderCodec.encodeExecute(winner, 1, 100, TIME)));
-                assertThat(live.service.state().runtimeState.triggerOrder(winner).status())
+                assertThat(CoreTestCompletion.triggerState(live.service.state(), user, winner).status())
                         .isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
-                assertThat(live.service.state().runtimeState.triggerOrder(canceled).status())
+                assertThat(CoreTestCompletion.triggerState(live.service.state(), user, canceled).status())
                         .isEqualTo(CoreTriggerOrderStatus.CANCELED);
-                try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                if (recovery) try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
             }
@@ -958,10 +968,10 @@ class ClusterCommandPipelineTest {
                         .isEqualTo(beforeHandoff);
                 assertThat(live.responses).isNotEmpty().allSatisfy(r ->
                         assertThat(r.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
-                var terminal = live.service.state().runtimeState.triggerOrder(9001);
+                var terminal = CoreTestCompletion.triggerState(live.service.state(), user, 9001);
                 assertThat(terminal.status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
                 assertThat(terminal.placedOrderId()).isEqualTo(recovery ? 18005 : 18007);
-                assertThat(live.service.state().runtimeState.triggerOrder(9002).status())
+                assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9002).status())
                         .isEqualTo(CoreTriggerOrderStatus.CANCELED);
                 if (recovery) try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
@@ -1024,13 +1034,13 @@ class ClusterCommandPipelineTest {
                         .isEqualTo(beforeHandoff);
                 assertThat(live.responses).isNotEmpty().allSatisfy(r ->
                         assertThat(r.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
-                assertThat(live.service.state().runtimeState.reservation(18005)).isNull();
-                assertThat(live.service.state().runtimeState.order(18005).status())
-                        .isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.REJECTED);
-                var terminal = live.service.state().runtimeState.triggerOrder(9001);
+                assertThat(CoreTestCompletion.userState(live.service.state(), user).reservations()).noneMatch(r -> r.orderId() == 18005);
+                assertThat(CoreTestCompletion.orderState(live.service.state(), user, 18005).status())
+                        .isEqualTo("REJECTED");
+                var terminal = CoreTestCompletion.triggerState(live.service.state(), user, 9001);
                 assertThat(terminal.status()).isEqualTo(CoreTriggerOrderStatus.TRIGGER_FAILED);
                 assertThat(terminal.placedOrderId()).isZero();
-                assertThat(live.service.state().runtimeState.triggerOrder(9002).status())
+                assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9002).status())
                         .isEqualTo(CoreTriggerOrderStatus.CANCELED);
                 if (recovery) try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
@@ -1072,19 +1082,19 @@ class ClusterCommandPipelineTest {
             var runtime = live.service.state().runtimeState;
             var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
             epoch.setAccessible(true);
-            long before = epoch.getLong(runtime);
             var accountsBefore = live.service.state().tradingState().users();
+            long before = epoch.getLong(runtime);
             live.responses.clear();
             live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, user,
                     CoreTriggerOrderCodec.encodeExecute(9101, 1, 100, TIME)));
             assertThat(epoch.getLong(runtime)).isEqualTo(before);
             assertThat(live.responses.getLast().commandStatus())
                     .isEqualTo(overflow ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
-            assertThat(runtime.triggerOrder(9101).status())
+            assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9101).status())
                     .isEqualTo(overflow ? CoreTriggerOrderStatus.PENDING : CoreTriggerOrderStatus.TRIGGER_FAILED);
-            assertThat(runtime.triggerOrder(9102).status())
+            assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9102).status())
                     .isEqualTo(overflow ? CoreTriggerOrderStatus.PENDING : CoreTriggerOrderStatus.CANCELED);
-            assertThat(runtime.order(18203)).isNull();
+            assertThat(CoreTestCompletion.orderState(live.service.state(), user, 18203)).isNull();
             assertThat(live.service.state().identities.findClientKey(user, "TRIGGER:9101")).isNull();
             assertThat(live.service.state().tradingState().users()).isEqualTo(accountsBefore);
             if (recovery) try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, live.service.captureSnapshot(101))) {
@@ -2098,6 +2108,17 @@ class ClusterCommandPipelineTest {
     @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL",
             "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
     void internalTriggerPagesExpireTrailAndRecoverWithoutAccountHandoff(ProductLine product) throws Exception {
+        verifyTriggerPages(product, true);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL",
+            "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
+    void internalTriggerPagesWithoutSnapshot(ProductLine product) throws Exception {
+        verifyTriggerPages(product, false);
+    }
+
+    private void verifyTriggerPages(ProductLine product, boolean recovery) throws Exception {
         try (Fixture live = new Fixture(product)) {
             live.setup();
             long maker = 11, user = disjointUser(maker);
@@ -2119,8 +2140,8 @@ class ClusterCommandPipelineTest {
             var runtime = live.service.state().runtimeState;
             var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
             epoch.setAccessible(true);
-            long before = epoch.getLong(runtime);
             long funds = com.surprising.aeron.service.state.FundsStateHash.compute(live.service.state().tradingState());
+            long before = epoch.getLong(runtime);
             live.sequence += 1000; // Commands occur after the expired order and the new mark timestamp.
             live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(product == ProductLine.OPTION
@@ -2132,26 +2153,29 @@ class ClusterCommandPipelineTest {
                         TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(1)));
                 // The same snapshot must resume an incomplete OCO page in standalone replay as in live Lane execution.
                 var scan = runtime.riskScan(live.service.state().identities.findSymbolId("1"));
-                if (!resumed && scan.triggerOcoOrderId() != 0) {
+                if (recovery && !resumed && scan.triggerOcoOrderId() != 0) {
                     try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(501))) {
                         live.apply(command);
                         assertThat(restored.apply(command).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                         assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                     }
                     resumed = true;
-                } else live.apply(command);
+                } else {
+                    resumed |= scan.triggerOcoOrderId() != 0;
+                    live.apply(command);
+                }
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(epoch.getLong(runtime)).isEqualTo(before);
             }
             assertThat(resumed).as("cross-command OCO continuation exercised").isTrue();
             assertThat(runtime.firstIncompleteRiskScan()).isNull();
-            assertThat(runtime.triggerOrder(8990).status()).isEqualTo(CoreTriggerOrderStatus.EXPIRED);
-            assertThat(runtime.triggerOrder(9001).status()).as("%s", runtime.triggerOrder(9001)).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+            assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 8990).status()).isEqualTo(CoreTriggerOrderStatus.EXPIRED);
+            assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9001).status()).as("%s", CoreTestCompletion.triggerState(live.service.state(), user, 9001)).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
             for (long id = 9002; id <= 9005; id++)
-                assertThat(runtime.triggerOrder(id).status()).isEqualTo(CoreTriggerOrderStatus.CANCELED);
-            assertThat(runtime.triggerOrder(9010).status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
-            assertThat(runtime.triggerOrder(9010).highestPriceTicks()).isEqualTo(120);
-            assertThat(runtime.triggerOrder(9010).activatedAtEpochMillis()).isEqualTo(TIME + 1000);
+                assertThat(CoreTestCompletion.triggerState(live.service.state(), user, id).status()).isEqualTo(CoreTriggerOrderStatus.CANCELED);
+            assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9010).status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+            assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9010).highestPriceTicks()).isEqualTo(120);
+            assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9010).activatedAtEpochMillis()).isEqualTo(TIME + 1000);
             assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(live.service.state().tradingState()))
                     .isEqualTo(funds);
         }
@@ -2175,6 +2199,17 @@ class ClusterCommandPipelineTest {
     @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL",
             "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
     void evaluatesEachTriggerOnlyAgainstItsSelectedPriceStream(ProductLine product) {
+        verifyTriggerPriceStreams(product, true);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL",
+            "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
+    void selectedTriggerPriceStreamsWithoutSnapshot(ProductLine product) {
+        verifyTriggerPriceStreams(product, false);
+    }
+
+    private void verifyTriggerPriceStreams(ProductLine product, boolean recovery) {
         try (Fixture live = new Fixture(product)) {
             live.setup();
             long maker = 11, user = disjointUser(maker);
@@ -2198,16 +2233,16 @@ class ClusterCommandPipelineTest {
                     product == ProductLine.OPTION ? 80 : 0,
                     2, TIME, 120));
             var runtime = live.service.state().runtimeState;
-            assertThat(runtime.triggerOrder(8100).status()).isEqualTo(CoreTriggerOrderStatus.PENDING);
-            assertThat(runtime.triggerOrder(8101).status())
-                    .as("%s", runtime.triggerOrder(8101).rejectReason()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
-            assertThat(runtime.triggerOrder(8102).status()).isEqualTo(CoreTriggerOrderStatus.PENDING);
+            assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 8100).status()).isEqualTo(CoreTriggerOrderStatus.PENDING);
+            assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 8101).status())
+                    .as("%s", CoreTestCompletion.triggerState(live.service.state(), user, 8101).rejectReason()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+            assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 8102).status()).isEqualTo(CoreTriggerOrderStatus.PENDING);
             applyPriceAndFinishTriggerScan(live, new ApplyMarkPriceCommand("1", 120, 120,
                     product == ProductLine.OPTION ? 120 : 0,
                     3, TIME, 0));
-            assertThat(runtime.triggerOrder(8100).status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
-            assertThat(runtime.triggerOrder(8102).status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
-            try (var recovered = TradingCoreRuntime.fromSnapshot(product,
+            assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 8100).status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+            assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 8102).status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+            if (recovery) try (var recovered = TradingCoreRuntime.fromSnapshot(product,
                     live.service.captureSnapshot(999))) {
                 assertThat(recovered.tradingState().businessStateHash()).isEqualTo(live.hash());
                 assertThat(recovered.tradingState().triggerOrders().get(8101L).priceSource())

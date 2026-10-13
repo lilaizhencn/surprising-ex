@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.command;
 
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
+
 import com.surprising.aeron.protocol.CoreFundingPaymentView;
 import com.surprising.aeron.protocol.CoreFundingProgressView;
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
@@ -77,7 +79,7 @@ public interface CommandResultContext extends CommandOwnerContext {
 
     void addChangedUser(long userId);
 
-    void addChangedUsersFromOrders(Iterable<? extends CoreOrderState> orders);
+    void addChangedUsersFromOrders(Iterable<CancellationOrder> orders);
 
     void addChangedUsersFromFundingPayments(
             Iterable<? extends CoreFundingPaymentView> payments);

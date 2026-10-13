@@ -1,4 +1,7 @@
 package com.surprising.aeron.service.state;
+
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import com.surprising.aeron.service.command.AccountLaneOperationType;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.state.account.UserRuntime;
@@ -135,11 +138,35 @@ public final class AccountLaneState {
         this.localFundsHash = computeFundsHash();
     }
 
-    public void bindOwner() {}
+    private volatile Thread owner;
+    private static final VarHandle OWNER;
+    static {
+        try { OWNER = MethodHandles.lookup().findVarHandle(AccountLaneState.class, "owner", Thread.class); }
+        catch (ReflectiveOperationException failure) { throw new ExceptionInInitializerError(failure); }
+    }
 
-    public void releaseOwnerForHandoff() {}
+    public void bindOwner() { assertOwner(); }
 
-    void assertOwner() {}
+    /** Bind the actual worker before it starts; no unowned startup window is exposed. */
+    public void bindWorker(Thread worker) {
+        assertOwner();
+        if (worker == null || worker.getState() != Thread.State.NEW)
+            throw new IllegalArgumentException("Account Lane worker must not have started");
+        owner = worker;
+    }
+
+    public void releaseOwnerForHandoff() {
+        assertOwner();
+        owner = null;
+    }
+
+    void assertOwner() {
+        Thread current = Thread.currentThread();
+        Thread bound = owner;
+        if (bound == null && OWNER.compareAndSet(this, null, current)) return;
+        if (owner != current)
+            throw new IllegalStateException("account lane " + laneId + " is bound to another thread");
+    }
 
     /** Owner可观察原子原语计数，各字段允许独立滞后；没有账户读取或Lane作用域。 */
     void writeMetrics(com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder encoder,
@@ -179,21 +206,19 @@ public final class AccountLaneState {
         if (orderId <= 0 || coreSequence <= committedSequence) {
             throw new IllegalArgumentException("invalid pending reservation identity");
         }
-        synchronized (pendingReservationSequences) {
-            if (pendingReservationSequences.containsKey(orderId)) {
-                throw new IllegalStateException("reservation is already pending");
-            }
-            ReservationRuntime reservation = reservations.get(orderId);
-            if (reservation == null) throw new IllegalStateException("pending reservation is missing");
-            int nextUserCount = Math.addExact(pendingReservationCountsByUser.get(reservation.userId()), 1);
-            int nextTotal = Math.addExact(totalPendingReservations, 1);
-            long previousUnits = pendingReservedUnits(reservation.userId(), reservation.assetId());
-            long nextUnits = Math.addExact(previousUnits, reservation.reservedUnits());
-            pendingReservationSequences.put(orderId, coreSequence);
-            pendingReservationCountsByUser.put(reservation.userId(), nextUserCount);
-            setPendingReservedUnits(reservation.userId(), reservation.assetId(), nextUnits);
-            totalPendingReservations = nextTotal;
+        if (pendingReservationSequences.containsKey(orderId)) {
+            throw new IllegalStateException("reservation is already pending");
         }
+        ReservationRuntime reservation = reservations.get(orderId);
+        if (reservation == null) throw new IllegalStateException("pending reservation is missing");
+        int nextUserCount = Math.addExact(pendingReservationCountsByUser.get(reservation.userId()), 1);
+        int nextTotal = Math.addExact(totalPendingReservations, 1);
+        long previousUnits = pendingReservedUnits(reservation.userId(), reservation.assetId());
+        long nextUnits = Math.addExact(previousUnits, reservation.reservedUnits());
+        pendingReservationSequences.put(orderId, coreSequence);
+        pendingReservationCountsByUser.put(reservation.userId(), nextUserCount);
+        setPendingReservedUnits(reservation.userId(), reservation.assetId(), nextUnits);
+        totalPendingReservations = nextTotal;
     }
 
     void completePendingReservation(long orderId, long coreSequence) {
@@ -207,74 +232,64 @@ public final class AccountLaneState {
     /** Validate all counters before writing; validation and application share no temporary state object. */
     private void pendingReservationCompletion(long orderId, long coreSequence, boolean apply) {
         assertOwner();
-        synchronized (pendingReservationSequences) {
-            long pendingSequence = pendingReservationSequences.getIfAbsent(orderId, 0);
-            if (pendingSequence != coreSequence) {
-                throw new IllegalStateException("pending reservation sequence mismatch");
-            }
-            ReservationRuntime reservation = reservations.get(orderId);
-            if (reservation == null) throw new IllegalStateException("pending reservation is missing");
-            int userCount = pendingReservationCountsByUser.get(reservation.userId());
-            int nextUserCount = Math.max(0, userCount - 1);
-            int nextTotal = Math.max(0, totalPendingReservations - 1);
-            long previousUnits = pendingReservedUnits(reservation.userId(), reservation.assetId());
-            long nextUnits = Math.max(0L, previousUnits - reservation.reservedUnits());
-            if (!apply) return;
-            pendingReservationSequences.removeKey(orderId);
-            if (nextUserCount == 0) pendingReservationCountsByUser.removeKey(reservation.userId());
-            else pendingReservationCountsByUser.put(reservation.userId(), nextUserCount);
-            setPendingReservedUnits(reservation.userId(), reservation.assetId(), nextUnits);
-            totalPendingReservations = nextTotal;
+        long pendingSequence = pendingReservationSequences.getIfAbsent(orderId, 0);
+        if (pendingSequence != coreSequence) {
+            throw new IllegalStateException("pending reservation sequence mismatch");
         }
+        ReservationRuntime reservation = reservations.get(orderId);
+        if (reservation == null) throw new IllegalStateException("pending reservation is missing");
+        int userCount = pendingReservationCountsByUser.get(reservation.userId());
+        int nextUserCount = Math.max(0, userCount - 1);
+        int nextTotal = Math.max(0, totalPendingReservations - 1);
+        long previousUnits = pendingReservedUnits(reservation.userId(), reservation.assetId());
+        long nextUnits = Math.max(0L, previousUnits - reservation.reservedUnits());
+        if (!apply) return;
+        pendingReservationSequences.removeKey(orderId);
+        if (nextUserCount == 0) pendingReservationCountsByUser.removeKey(reservation.userId());
+        else pendingReservationCountsByUser.put(reservation.userId(), nextUserCount);
+        setPendingReservedUnits(reservation.userId(), reservation.assetId(), nextUnits);
+        totalPendingReservations = nextTotal;
     }
 
     void replacePendingReservation(ReservationRuntime previous, ReservationRuntime replacement) {
         assertOwner();
-        synchronized (pendingReservationSequences) {
-            if (!pendingReservationSequences.containsKey(previous.orderId())) return;
-            if (previous.orderId() != replacement.orderId() || previous.userId() != replacement.userId()) {
-                throw new IllegalStateException("pending reservation owner cannot change");
-            }
-            long currentUnits = pendingReservedUnits(previous.userId(), previous.assetId());
-            long remainingUnits = Math.subtractExact(currentUnits, previous.reservedUnits());
-            if (remainingUnits < 0) throw new IllegalStateException("pending reservation counters are inconsistent");
-            if (previous.assetId() == replacement.assetId()) {
-                long nextUnits = Math.addExact(remainingUnits, replacement.reservedUnits());
-                setPendingReservedUnits(previous.userId(), previous.assetId(), nextUnits);
-            } else {
-                long replacementUnits = Math.addExact(
-                        pendingReservedUnits(previous.userId(), replacement.assetId()), replacement.reservedUnits());
-                // Validate both assets before changing either side, including rollback replacements.
-                setPendingReservedUnits(previous.userId(), previous.assetId(), remainingUnits);
-                setPendingReservedUnits(previous.userId(), replacement.assetId(), replacementUnits);
-            }
+        if (!pendingReservationSequences.containsKey(previous.orderId())) return;
+        if (previous.orderId() != replacement.orderId() || previous.userId() != replacement.userId()) {
+            throw new IllegalStateException("pending reservation owner cannot change");
+        }
+        long currentUnits = pendingReservedUnits(previous.userId(), previous.assetId());
+        long remainingUnits = Math.subtractExact(currentUnits, previous.reservedUnits());
+        if (remainingUnits < 0) throw new IllegalStateException("pending reservation counters are inconsistent");
+        if (previous.assetId() == replacement.assetId()) {
+            long nextUnits = Math.addExact(remainingUnits, replacement.reservedUnits());
+            setPendingReservedUnits(previous.userId(), previous.assetId(), nextUnits);
+        } else {
+            long replacementUnits = Math.addExact(
+                    pendingReservedUnits(previous.userId(), replacement.assetId()), replacement.reservedUnits());
+            // Validate both assets before changing either side, including rollback replacements.
+            setPendingReservedUnits(previous.userId(), previous.assetId(), remainingUnits);
+            setPendingReservedUnits(previous.userId(), replacement.assetId(), replacementUnits);
         }
     }
 
     boolean pendingReservation(long orderId) {
         assertOwner();
-        synchronized (pendingReservationSequences) {
-            return pendingReservationSequences.containsKey(orderId);
-        }
+        return pendingReservationSequences.containsKey(orderId);
     }
 
     long pendingReservationSequence(long orderId) {
         assertOwner();
-        synchronized (pendingReservationSequences) {
-            return pendingReservationSequences.getIfAbsent(orderId, 0);
-        }
+        return pendingReservationSequences.getIfAbsent(orderId, 0);
     }
 
     void updatePendingReservationInPlace(ReservationRuntime reservation, long previousReservedUnits) {
         assertOwner();
         if (reservation == null || previousReservedUnits < 0) throw new IllegalArgumentException("invalid reservation update");
-        synchronized (pendingReservationSequences) {
-            if (!pendingReservationSequences.containsKey(reservation.orderId())) return;
-            long current = pendingReservedUnits(reservation.userId(), reservation.assetId());
-            long next = Math.addExact(Math.subtractExact(current, previousReservedUnits), reservation.reservedUnits());
-            if (next < 0) throw new IllegalStateException("pending reservation counters are inconsistent");
-            setPendingReservedUnits(reservation.userId(), reservation.assetId(), next);
-        }
+        if (!pendingReservationSequences.containsKey(reservation.orderId())) return;
+        long current = pendingReservedUnits(reservation.userId(), reservation.assetId());
+        long next = Math.addExact(Math.subtractExact(current, previousReservedUnits), reservation.reservedUnits());
+        if (next < 0) throw new IllegalStateException("pending reservation counters are inconsistent");
+        setPendingReservedUnits(reservation.userId(), reservation.assetId(), next);
     }
 
     long pendingReservedUnits(long userId, int assetId) {
@@ -323,6 +338,36 @@ public final class AccountLaneState {
     boolean hasPendingReservations() {
         assertOwner();
         return totalPendingReservations != 0;
+    }
+
+    /** The account owner selects self-trade cancellations from its own live orders. */
+    java.util.List<Long> preMatchingCancellations(long userId, int symbolId,
+            com.surprising.aeron.protocol.CoreOrderSide side, long matchingPrice,
+            long excludedOrderId, long newOrderId, java.util.List<Long> closeCapacity) {
+        assertOwner();
+        LongHashSet active = activeOrderIdsByUser.get(userId);
+        if (active == null || active.isEmpty()) return closeCapacity;
+        LongHashSet cancellations = null;
+        var iterator = active.longIterator();
+        while (iterator.hasNext()) {
+            long id = iterator.next();
+            if (id == excludedOrderId || id == newOrderId || pendingReservation(id)) continue;
+            OrderRuntime order = orders.get(id);
+            if (order == null || order.symbolId() != symbolId || order.side() == side) continue;
+            boolean crosses = side == com.surprising.aeron.protocol.CoreOrderSide.BUY
+                    ? matchingPrice >= order.priceTicks() : matchingPrice <= order.priceTicks();
+            if (crosses) {
+                if (cancellations == null) {
+                    cancellations = new LongHashSet();
+                    for (long closeId : closeCapacity) cancellations.add(closeId);
+                }
+                cancellations.add(id);
+            }
+        }
+        if (cancellations == null) return closeCapacity;
+        long[] ids = cancellations.toArray();
+        java.util.Arrays.sort(ids);
+        return com.surprising.aeron.service.command.ImmutableLongArrayList.takeOwnership(ids);
     }
 
     AdmissionOrderIndex admissionOrderIndex(int symbolId) {
@@ -664,12 +709,10 @@ public final class AccountLaneState {
         this.localFundsHash = localFundsHash;
         userIds.clear();
         userIds.addAll(restoredUsers);
-        synchronized (pendingReservationSequences) {
-            pendingReservationSequences.clear();
-            pendingReservationCountsByUser.clear();
-            pendingReservedUnitsByAsset.clear();
-            totalPendingReservations = 0;
-        }
+        pendingReservationSequences.clear();
+        pendingReservationCountsByUser.clear();
+        pendingReservedUnitsByAsset.clear();
+        totalPendingReservations = 0;
     }
 
     LongHashSet userIdsSnapshot() {
@@ -691,10 +734,8 @@ public final class AccountLaneState {
 
     void requireSnapshot(long fenceSequence) {
         assertOwner();
-        synchronized (pendingReservationSequences) {
-            if (!pendingReservationSequences.isEmpty()) {
-                throw new IllegalStateException("pending reservation cannot cross snapshot fence");
-            }
+        if (!pendingReservationSequences.isEmpty()) {
+            throw new IllegalStateException("pending reservation cannot cross snapshot fence");
         }
         if (fenceSequence < committedSequence || appliedSequence != committedSequence) {
             throw new IllegalStateException("account lane snapshot crossed an incomplete commit");

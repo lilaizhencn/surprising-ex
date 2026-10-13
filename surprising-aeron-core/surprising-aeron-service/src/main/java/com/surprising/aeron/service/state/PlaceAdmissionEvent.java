@@ -135,6 +135,8 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
                             lane, userId, symbolId, positionKey, positionSide(), side(), orderId())
                             .conflictsFor(quantitySteps());
                 }
+                closeCapacityCancellations = lane.preMatchingCancellations(userId, symbolId,
+                        side(), matchingPriceTicks(), orderId(), orderId(), closeCapacityCancellations);
                 runtime.placeOrderInLane(lane, userId, this, commandId,
                         requiredReservation, preparedClientKey, symbolId, assetId, coreSequence, null, timestamp, position);
                 admittedAccountVersion = lane.users.get(userId).revision();

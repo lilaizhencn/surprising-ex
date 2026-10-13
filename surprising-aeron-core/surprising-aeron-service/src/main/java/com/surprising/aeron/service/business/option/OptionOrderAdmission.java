@@ -86,15 +86,12 @@ public final class OptionOrderAdmission {
                     Math.subtractExact(Math.addExact(premium, feeDebit), releasedMargin)));
         }
         if (openSteps == 0) return Math.max(1, feeDebit);
-        long pendingSell = activeOrderIndex == null
-                ? userOrders(state, user).stream()
+        long pendingSell = userOrders(state, user).stream()
                 .filter(order -> order.status() == CoreOrderStatus.OPEN && !order.reduceOnly()
                         && order.instrumentId().equals(instrument.instrumentId())
                         && order.positionSide() == command.positionSide()
                         && order.side() == CoreOrderSide.SELL)
-                .mapToLong(CoreOrderState::remainingQuantitySteps).reduce(0L, Math::addExact)
-                : activeOrderIndex.pendingQuantity(user.userId(), instrument.instrumentId(),
-                command.positionSide(), CoreOrderSide.SELL);
+                .mapToLong(CoreOrderState::remainingQuantitySteps).reduce(0L, Math::addExact);
         long totalSellOrders = Math.addExact(pendingSell, command.quantitySteps());
         long projectedSigned = Math.subtractExact(currentQuantity, totalSellOrders);
         long projectedRisk = Math.max(0, Math.negateExact(projectedSigned));

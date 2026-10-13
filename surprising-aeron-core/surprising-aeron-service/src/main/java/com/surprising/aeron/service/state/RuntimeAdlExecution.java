@@ -56,6 +56,23 @@ public final class RuntimeAdlExecution {
             throw new IllegalArgumentException("invalid ADL apply");
         }
         runtime.assertOwner();
+        if (asynchronous) {
+            var route = runtime.liquidationRoute(command.liquidationId());
+            if (route == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation route is missing");
+            CoreInstrument instrument = requireInstrument(runtime, route.instrumentId());
+            int symbolId = identities.symbolId(route.instrumentId());
+            MarkPriceRuntime mark = runtime.markPrice(symbolId);
+            if (mark == null || mark.priceSequence() != command.markPriceSequence())
+                throw new CoreStateRejectedException("STALE_MARK_PRICE", "ADL mark price changed");
+            long positionKey = identities.positionKey(command.targetUserId(), instrument, command.positionSide());
+            AdlWork work = reuse == null || !reuse.reusable() ? new AdlWork() : reuse;
+            work.prepare(command, runtime, null, instrument, mark, positionKey,
+                    identities.assetId(instrument.settleAsset()), runtime.topology().accountLaneId(command.targetUserId()));
+            work.fundingInProgress = runtime.treasury().fundingProgress(symbolId) != null;
+            work.sourceUserId = route.userId(); work.capturingLiquidation = true;
+            runtime.dispatchControlLanes(runtime.topology().accountLaneMask(route.userId()), work);
+            return work;
+        }
         LiquidationRuntime liquidation = runtime.liquidation(command.liquidationId());
         if (liquidation == null) {
             throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
@@ -85,10 +102,6 @@ public final class RuntimeAdlExecution {
         AdlWork work = reuse == null || !reuse.reusable() ? new AdlWork() : reuse;
         work.prepare(command, runtime, liquidation, instrument, mark, positionKey,
                 settleAssetId, targetLane);
-        if (asynchronous) {
-            runtime.dispatchControlLanes(mask, work);
-            return work;
-        }
         runtime.releaseOwnerLaneAccess();
         Object[] results = runtime.executeLaneMutations(mask, Long.bitCount(mask), work);
         work.finish(results[targetLane]);
@@ -108,6 +121,9 @@ public final class RuntimeAdlExecution {
         private int targetLane;
         private final RuntimeTreasuryDelta targetDelta = new RuntimeTreasuryDelta();
         private boolean done, accountsCollected, ledgerDispatched;
+        private long sourceUserId;
+        private boolean capturingLiquidation;
+        private boolean fundingInProgress;
 
         private void prepare(ExecuteAdlCommand command, TradingRuntimeState runtime,
                 LiquidationRuntime liquidation, CoreInstrument instrument, MarkPriceRuntime mark,
@@ -122,11 +138,23 @@ public final class RuntimeAdlExecution {
             this.settleAssetId = settleAssetId;
             this.targetLane = targetLane;
             this.targetDelta.clear();
-            this.done = accountsCollected = ledgerDispatched = false;
+            this.done = accountsCollected = ledgerDispatched = capturingLiquidation = false;
         }
 
         @Override
         public Object apply(int ignored) {
+            if (capturingLiquidation) {
+                liquidation = runtime.liquidation(command.liquidationId());
+                if (liquidation == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
+                if (liquidation.status() != CoreLiquidationState.Status.ADL_REQUIRED)
+                    throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "ADL requires ADL state");
+                if (fundingInProgress)
+                    throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "funding position cut is in progress");
+                if (!instrument.instrumentId().equals(command.instrumentId()) || command.targetUserId() == liquidation.userId()
+                        || command.coveredUnits() > liquidation.deficitUnits())
+                    throw new CoreStateRejectedException("INVALID_COMMAND", "ADL command does not match liquidation");
+                return null;
+            }
             RuntimeTreasuryDelta delta = null;
             if (runtime.currentLaneOwns(command.targetUserId())) {
                 delta = applyAdlTarget(command, runtime, liquidation, instrument, mark,
@@ -141,6 +169,12 @@ public final class RuntimeAdlExecution {
         @Override
         public boolean getAsBoolean() {
             if (done) return true;
+            if (capturingLiquidation) {
+                if (!runtime.pollControlLanes()) return false;
+                capturingLiquidation = false;
+                runtime.dispatchControlLanes((1L << targetLane) | runtime.topology().accountLaneMask(sourceUserId), this);
+                return false;
+            }
             if (!accountsCollected) {
                 if (!runtime.pollControlLanes()) return false;
                 runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
@@ -154,6 +188,10 @@ public final class RuntimeAdlExecution {
             if (!ledgerCommandCompleted()) return false;
             runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
             done = true;
+            liquidation = null;
+            command = null;
+            instrument = null;
+            mark = null;
             return true;
         }
 

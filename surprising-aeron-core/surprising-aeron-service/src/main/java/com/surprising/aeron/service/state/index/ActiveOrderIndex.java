@@ -3,18 +3,13 @@ package com.surprising.aeron.service.state.index;
 import com.surprising.aeron.service.state.OrderReservation;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.state.RuntimeStateMaterializer;
-import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.TradingCoreState;
-import com.surprising.aeron.service.state.admission.AdmissionOrderIndex;
-import com.surprising.aeron.service.state.admission.AdmissionSummary;
 
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.ArrayDeque;
 import java.util.HashMap;
@@ -26,7 +21,7 @@ import org.eclipse.collections.api.iterator.LongIterator;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.collections.LongHashSet;
 
-public final class ActiveOrderIndex implements AdmissionOrderIndex {
+public final class ActiveOrderIndex {
 
     public static final int MAX_PAGE_SIZE = 1_024;
     /**
@@ -54,57 +49,33 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
             new Long2ObjectHashMap<>(INITIAL_INDEX_CAPACITY, 0.65f, false);
     /** Owner-only wrapper pool; its lifetime follows this index and retains no terminal values. */
     private final ArrayDeque<IndexedOrder> recycledOrders = new ArrayDeque<>(INITIAL_INDEX_CAPACITY);
-    private RuntimeIdentityRegistry recoveryIdentities;
 
-    /** One Owner-owned index entry per active order; updates reuse the Lane's immutable value. */
-    /**
-     * Compact Owner routing view backed by the existing active-order entry.
-     * Returning this holder avoids allocating a route record for every cancel.
-     */
+    /** Owner routing metadata only; authoritative orders remain in Account Lane. */
     public static final class IndexedOrder {
-        OrderRuntime order;
-        String instrumentId;
-        IndexedOrder(OrderRuntime order, String instrumentId) { reset(order, instrumentId); }
-        void reset(OrderRuntime order, String instrumentId) { this.order = order; this.instrumentId = instrumentId; }
-        void clear() { order = null; instrumentId = null; }
-        public long orderId() { return order.orderId(); }
-        public long userId() { return order.userId(); }
+        private long orderId, userId;
+        private String instrumentId;
+        IndexedOrder(long orderId, long userId, String instrumentId) { reset(orderId, userId, instrumentId); }
+        void reset(long orderId, long userId, String instrumentId) {
+            this.orderId = orderId; this.userId = userId; this.instrumentId = instrumentId;
+        }
+        void clear() { orderId = userId = 0; instrumentId = null; }
+        public long orderId() { return orderId; }
+        public long userId() { return userId; }
         public String instrumentId() { return instrumentId; }
-        /** Existing runtime value for the Owner's cancel handoff; no second map lookup. */
-        public OrderRuntime runtime() { return order; }
-        com.surprising.aeron.protocol.CoreOrderSide side() { return order.side(); }
-        long matchingPriceTicks() { return order.matchingPriceTicks(); }
-        long remainingQuantitySteps() { return order.remainingQuantitySteps(); }
-        boolean reduceOnly() { return order.reduceOnly(); }
-        com.surprising.aeron.protocol.CorePositionSide positionSide() { return order.positionSide(); }
-        com.surprising.aeron.protocol.CoreMarginMode marginMode() { return order.marginMode(); }
-        CoreOrderState snapshot() { return RuntimeStateMaterializer.orderSnapshot(order, instrumentId); }
     }
     // Owner-only bounded query scratch; never sized to total book depth.
     private long[] pageScratch;
-    private final AdmissionSummary admissionSummary = new AdmissionSummary();
 
     public ActiveOrderIndex(TradingCoreState state) {
         this(state, null);
     }
 
     public ActiveOrderIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
-        recoveryIdentities = identities == null ? new RuntimeIdentityRegistry() : identities;
         rebuild(state);
     }
 
     public NavigableSet<Long> ids() {
         return descending(orderIds());
-    }
-
-    public Collection<CoreOrderState> orders() {
-        ArrayList<CoreOrderState> result = new ArrayList<>(ordersById.size());
-        long[] orderIds = orderIds();
-        java.util.Arrays.sort(orderIds);
-        for (long orderId : orderIds) {
-            result.add(ordersById.get(orderId).snapshot());
-        }
-        return Collections.unmodifiableCollection(result);
     }
 
     public NavigableSet<Long> ids(long userId) {
@@ -125,17 +96,6 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
 
     public int count() {
         return ordersById.size();
-    }
-
-    /** Full immutable query view; admission/routing uses the existing runtime reference below. */
-    public CoreOrderState activeOrder(long orderId) {
-        IndexedOrder entry = ordersById.get(orderId);
-        return entry == null ? null : entry.snapshot();
-    }
-
-    public OrderRuntime activeOrderRuntime(long orderId) {
-        IndexedOrder entry = ordersById.get(orderId);
-        return entry == null ? null : entry.order;
     }
 
     /**
@@ -229,111 +189,6 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         return sortedDescending(idsByUser.get(userId));
     }
 
-    public long pendingQuantity(long userId, String instrumentId,
-                                com.surprising.aeron.protocol.CorePositionSide positionSide,
-                                com.surprising.aeron.protocol.CoreOrderSide side) {
-        String normalized = OrderReservation.requireInstrumentId(instrumentId);
-        LongHashSet ids = idsByUser.get(userId);
-        if (ids == null) return 0;
-        long total = 0;
-        var iterator = ids.iterator();
-        while (iterator.hasNext()) {
-            long orderId = iterator.nextValue();
-            IndexedOrder order = ordersById.get(orderId);
-            if (order != null && !order.reduceOnly() && order.instrumentId().equals(normalized)
-                    && order.positionSide() == positionSide && order.side() == side) {
-                total = Math.addExact(total, order.remainingQuantitySteps());
-            }
-        }
-        return total;
-    }
-
-    @Override
-    public AdmissionSummary inspect(
-            long userId, String instrumentId,
-            com.surprising.aeron.protocol.CorePositionSide positionSide,
-            com.surprising.aeron.protocol.CoreOrderSide side,
-            com.surprising.aeron.protocol.CoreMarginMode conflictingMarginMode) {
-        String normalized = OrderReservation.requireInstrumentId(instrumentId);
-        LongHashSet ids = idsByUser.get(userId);
-        if (ids == null) return admissionSummary.set(0, 0, 0);
-        long pendingQuantity = 0;
-        long reduceOnlyQuantity = 0;
-        int marginModeCount = 0;
-        var iterator = ids.iterator();
-        while (iterator.hasNext()) {
-            IndexedOrder order = ordersById.get(iterator.nextValue());
-            if (order == null || !order.instrumentId().equals(normalized)) continue;
-            if (order.reduceOnly() && order.side() == side) {
-                reduceOnlyQuantity = Math.addExact(
-                        reduceOnlyQuantity, order.remainingQuantitySteps());
-            } else if (!order.reduceOnly() && order.positionSide() == positionSide
-                    && order.side() == side) {
-                pendingQuantity = Math.addExact(pendingQuantity, order.remainingQuantitySteps());
-            }
-            if (order.positionSide() == positionSide
-                    && order.marginMode() == conflictingMarginMode) {
-                marginModeCount = Math.incrementExact(marginModeCount);
-            }
-        }
-        return admissionSummary.set(pendingQuantity, reduceOnlyQuantity, marginModeCount);
-    }
-
-    public long reduceOnlyQuantity(long userId, String instrumentId,
-                                   com.surprising.aeron.protocol.CoreOrderSide side) {
-        String normalized = OrderReservation.requireInstrumentId(instrumentId);
-        LongHashSet ids = idsByUser.get(userId);
-        if (ids == null) return 0;
-        long total = 0;
-        var iterator = ids.iterator();
-        while (iterator.hasNext()) {
-            long orderId = iterator.nextValue();
-            IndexedOrder order = ordersById.get(orderId);
-            if (order != null && order.reduceOnly() && order.instrumentId().equals(normalized)
-                    && order.side() == side) {
-                total = Math.addExact(total, order.remainingQuantitySteps());
-            }
-        }
-        return total;
-    }
-
-    public boolean hasDifferentMarginMode(long userId, String instrumentId,
-                                          com.surprising.aeron.protocol.CorePositionSide positionSide,
-                                          com.surprising.aeron.protocol.CoreMarginMode marginMode) {
-        String normalized = OrderReservation.requireInstrumentId(instrumentId);
-        LongHashSet ids = idsByUser.get(userId);
-        if (ids == null) return false;
-        var iterator = ids.iterator();
-        while (iterator.hasNext()) {
-            long orderId = iterator.nextValue();
-            IndexedOrder order = ordersById.get(orderId);
-            if (order != null && order.instrumentId().equals(normalized)
-                    && order.positionSide() == positionSide && order.marginMode() != marginMode) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    public int marginModeCount(long userId, String instrumentId,
-                               com.surprising.aeron.protocol.CorePositionSide positionSide,
-                               com.surprising.aeron.protocol.CoreMarginMode marginMode) {
-        String normalized = OrderReservation.requireInstrumentId(instrumentId);
-        LongHashSet ids = idsByUser.get(userId);
-        if (ids == null) return 0;
-        int count = 0;
-        var iterator = ids.iterator();
-        while (iterator.hasNext()) {
-            long orderId = iterator.nextValue();
-            IndexedOrder order = ordersById.get(orderId);
-            if (order != null && order.instrumentId().equals(normalized)
-                    && order.positionSide() == positionSide && order.marginMode() == marginMode) {
-                count = Math.incrementExact(count);
-            }
-        }
-        return count;
-    }
-
     public Page page(long userId, String instrumentId, long beforeOrderId, int limit) {
         if (beforeOrderId < 0 || limit < 1 || limit > MAX_PAGE_SIZE) {
             throw new IllegalArgumentException("invalid active-order page");
@@ -411,11 +266,12 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
 
     public void apply(long orderId, OrderRuntime after, RuntimeIdentityRegistry identities) {
         OrderRuntime current = after != null && after.status() == CoreOrderStatus.OPEN ? after : null;
-        applyRuntime(orderId, current, current == null ? null : identities.instrumentId(current.symbolId()));
+        applyRoute(orderId, current == null ? 0 : current.userId(),
+                current == null ? null : identities.instrumentId(current.symbolId()));
     }
 
-    private void applyRuntime(long orderId, OrderRuntime current, String instrumentId) {
-        if (current == null) {
+    private void applyRoute(long orderId, long userId, String instrumentId) {
+        if (instrumentId == null) {
             // Removal already returns the old entry; do not probe the same order twice.
             IndexedOrder previous = ordersById.remove(orderId);
             if (previous != null) {
@@ -429,21 +285,20 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
         IndexedOrder previous = ordersById.get(orderId);
         if (previous == null) {
             IndexedOrder entry = recycledOrders.pollFirst();
-            if (entry == null) entry = new IndexedOrder(current, instrumentId);
-            else entry.reset(current, instrumentId);
+            if (entry == null) entry = new IndexedOrder(orderId, userId, instrumentId);
+            else entry.reset(orderId, userId, instrumentId);
             add(entry);
             return;
         }
-        if (previous.userId() != current.userId()) {
+        if (previous.userId() != userId) {
             remove(idsByUser, previous.userId(), orderId);
-            add(idsByUser, current.userId(), orderId);
+            add(idsByUser, userId, orderId);
         }
         if (!previous.instrumentId.equals(instrumentId)) {
             remove(idsBySymbol, previous.instrumentId, orderId);
             add(idsBySymbol, instrumentId, orderId);
         }
-        previous.order = current;
-        previous.instrumentId = instrumentId;
+        previous.reset(orderId, userId, instrumentId);
     }
 
     public void rebuild(TradingCoreState state) {
@@ -457,13 +312,12 @@ public final class ActiveOrderIndex implements AdmissionOrderIndex {
                     if (instrument == null) {
                         throw new IllegalStateException("instrument is not registered: " + order.instrumentId());
                     }
-                    applyRuntime(order.orderId(), RuntimeStateProjector.toRuntimeOrder(
-                            order, recoveryIdentities, instrument), order.instrumentId());
+                    applyRoute(order.orderId(), order.userId(), order.instrumentId());
                 });
     }
 
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
-        recoveryIdentities = java.util.Objects.requireNonNull(identities, "runtime identities");
+        java.util.Objects.requireNonNull(identities, "runtime identities");
         rebuild(state);
     }
 

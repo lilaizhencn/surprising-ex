@@ -24,6 +24,7 @@ public record RealtimeUserSnapshot(
     public record LeverageValue(CoreLeverageKey key, long value) {}
 
     static RealtimeUserSnapshot capture(AccountLaneState lane, long userId) {
+        lane.assertOwner();
         var balances = lane.balances.get(userId);
         var orderIds = lane.activeOrderIdsByUser.get(userId);
         var reservationIds = lane.reservationIdsByUser.get(userId);
@@ -48,21 +49,21 @@ public record RealtimeUserSnapshot(
             orderIds.forEach(
                     id -> {
                         var v = lane.orders.get(id);
-                        if (v != null && !v.status().terminal()) o.add(v);
+                        if (v != null && !v.status().terminal()) o.add(v.publicationValue());
                     });
         var re = new ArrayList<ReservationRuntime>();
         if (reservationIds != null)
             reservationIds.forEach(
                     id -> {
                         var v = lane.reservations.get(id);
-                        if (v != null) re.add(v);
+                        if (v != null) re.add(v.publicationValue());
                     });
         var p = new ArrayList<PositionRuntime>();
         if (positionKeys != null)
             positionKeys.forEach(
                     id -> {
                         var v = lane.positions.get(id);
-                        if (v != null) p.add(v);
+                        if (v != null) p.add(v.publicationValue());
                     });
         var risk = new ArrayList<RiskSnapshotRuntime>();
         if (positionKeys != null)

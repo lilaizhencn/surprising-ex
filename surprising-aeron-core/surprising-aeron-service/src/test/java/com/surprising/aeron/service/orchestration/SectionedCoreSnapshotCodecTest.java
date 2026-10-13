@@ -229,7 +229,7 @@ class SectionedCoreSnapshotCodecTest {
             assertThat(adapter.placeAsync(7, bid()).join().accepted()).isTrue();
             matcherSnapshot = adapter.snapshotAsync(
                     43, 1, tradingState.businessStateHash(), tradingState,
-                    new ActiveOrderIndex(tradingState).orders()).join();
+                    tradingState.orders().values()).join();
         }
         TradingCoreRuntime source = new TradingCoreRuntime(ProductLine.SPOT);
         CoreMessage increment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,

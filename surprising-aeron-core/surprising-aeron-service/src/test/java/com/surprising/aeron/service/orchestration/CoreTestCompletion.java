@@ -4,6 +4,50 @@ import com.surprising.aeron.protocol.CoreResponse;
 
 /** 功能测试的有界等待适配器；生产集群只使用有限轮询推进。 */
 final class CoreTestCompletion {
+    static com.surprising.aeron.protocol.CoreOrderStateView orderState(
+            TradingCoreRuntime owner, long userId, long id) {
+        var response = querySynchronously(owner, query(owner,
+                com.surprising.aeron.protocol.CoreMessageType.ORDER_STATE_QUERY, userId,
+                com.surprising.aeron.protocol.TradingCommandCodec.encodeOrderStateQuery(id)));
+        if (response.resultCode() == com.surprising.aeron.protocol.CoreResultCode.ENTITY_NOT_FOUND) return null;
+        requireQuerySuccess(response);
+        return com.surprising.aeron.protocol.CoreStateQueryCodec.decodeOrderState(response.data());
+    }
+
+    static com.surprising.aeron.protocol.CoreTriggerOrderStateView triggerState(
+            TradingCoreRuntime owner, long userId, long id) {
+        var response = querySynchronously(owner, query(owner,
+                com.surprising.aeron.protocol.CoreMessageType.TRIGGER_ORDER_QUERY, userId,
+                com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeQuery(
+                        new com.surprising.aeron.protocol.CoreTriggerOrderQuery(id, "", 0, 1))));
+        requireQuerySuccess(response);
+        var values = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeList(response.data());
+        return values.isEmpty() ? null : values.getFirst();
+    }
+
+    static com.surprising.aeron.protocol.CoreAlgoOrderView algoState(
+            TradingCoreRuntime owner, long userId, long id) {
+        var response = querySynchronously(owner, query(owner,
+                com.surprising.aeron.protocol.CoreMessageType.ALGO_ORDER_QUERY, userId,
+                com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeQuery(userId, id, "", 0, 1)));
+        requireQuerySuccess(response);
+        var values = com.surprising.aeron.protocol.CoreAlgoOrderCodec.decodeList(response.data());
+        return values.isEmpty() ? null : values.getFirst();
+    }
+
+    private static com.surprising.aeron.protocol.CoreMessage query(TradingCoreRuntime owner,
+            com.surprising.aeron.protocol.CoreMessageType type, long userId, byte[] payload) {
+        return new com.surprising.aeron.protocol.CoreMessage(
+                com.surprising.aeron.protocol.CoreMessageHeader.query(type, java.util.UUID.randomUUID(),
+                        owner.productLine, com.surprising.aeron.protocol.CommandSource.OPERATIONS,
+                        0, 0, userId, owner.currentClusterTimestamp, 0), payload);
+    }
+
+    private static void requireQuerySuccess(CoreResponse response) {
+        if (response.status() != com.surprising.aeron.protocol.ResponseStatus.OK)
+            throw new AssertionError("state query failed: " + response.resultCode());
+    }
+
     /** 测试查询也通过实际Lane读取；不借用Owner账户表。 */
     static com.surprising.aeron.protocol.CoreUserStateView userState(TradingCoreRuntime owner, long userId) {
         var request = new com.surprising.aeron.protocol.CoreMessage(

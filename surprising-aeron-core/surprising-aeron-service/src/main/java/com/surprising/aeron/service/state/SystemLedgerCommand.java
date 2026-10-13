@@ -26,7 +26,7 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
         submitted = closeQueued = false;
         rejection = null;
         completed = scopeCompleted = true;
-        close.requested = close.rollback = false;
+        close.requested = close.rollback = close.validationRequested = close.validated = false;
     }
 
     final void notAdmitted() {
@@ -73,7 +73,6 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
 
     protected final boolean ledgerCommandCompleted() {
         if (!completed) return false;
-        if (submitted && scopeCompleted && !queueClose()) return false;
         if (rejection != null) throw rejection;
         return true;
     }
@@ -103,10 +102,13 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
         runtime.signalLedgerWork();
     }
 
-    final void transferFundsTo(RuntimeFundsAccumulator target) {
-        if (!ledgerCommandCompleted() || !scopeCompleted)
-            throw new IllegalStateException("Ledger financial scope is incomplete");
-        funds.transferTo(target);
+    final boolean validateFunds(boolean externalAdjustment) {
+        if (!ledgerCommandCompleted() || !scopeCompleted) return false;
+        if (!queueClose()) return false;
+        close.externalAdjustment = externalAdjustment;
+        close.validationRequested = true;
+        runtime.signalLedgerWork();
+        return close.validated;
     }
 
     /** Queue head holds the original before-images until the Owner's commit/rollback decision. */
@@ -114,7 +116,19 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
         private volatile boolean requested;
         private volatile boolean completed = true;
         private boolean rollback;
-        @Override public boolean ready() { return requested; }
+        private volatile boolean validationRequested;
+        private volatile boolean validated;
+        private boolean externalAdjustment;
+        @Override public boolean ready() {
+            if (validationRequested && !validated) {
+                runtime.appendControlAccountFunds(funds);
+                funds.requireConserved(externalAdjustment);
+                funds.clear();
+                validated = true;
+                runtime.signalOwnerCompletion();
+            }
+            return requested;
+        }
         @Override public void apply(TreasuryRuntime ledger) {
             if (rollback) { ledger.rollbackChangedValues(); funds.clear(); }
             ledger.clearChangedKeys();

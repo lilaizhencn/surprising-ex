@@ -1,4 +1,6 @@
 package com.surprising.aeron.service.orchestration;
+
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
 import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.command.support.PrimitiveLongView;
 import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
@@ -149,11 +151,11 @@ final class CommandResultBuilder {
         changedUserIds.add(userId);
     }
 
-    void addChangedUsersFromOrders(Iterable<? extends CoreOrderState> orders) {
+    void addChangedUsersFromOrders(Iterable<CancellationOrder> orders) {
         owner.seedChangeAccumulators();
         commandChangedUserIds = List.of();
         if (orders == null) return;
-        for (CoreOrderState order : orders) if (order != null) changedUserIds.add(order.userId());
+        for (var order : orders) if (order != null) changedUserIds.add(order.userId());
     }
 
     void addChangedUsersFromFundingPayments(
@@ -165,7 +167,7 @@ final class CommandResultBuilder {
     }
 
     void resetChangeAccumulators() {
-        owner.commandFundsAccumulator.clear();
+        if (!owner.runtimeState.systemLedgerStarted()) owner.runtimeState.coldCommandFunds().clear();
         changedUserIds.clear();
         changedOrderIds.clear();
         laneCommitIdsSeeded = false;

@@ -40,10 +40,10 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         int count = 0;
         for (Long id : ids) {
             if (id == null) continue;
-            var trigger = runtime.triggerOrder(id);
+            var trigger = runtime.triggerRoute(id);
             if (trigger == null || trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
                 continue;
-            Math.incrementExact(trigger.revision());
+            if (!trigger.cancelRevisionAvailable()) throw new ArithmeticException("trigger revision overflow");
             int laneId = runtime.topology().accountLaneId(trigger.userId());
             if ((requiredLaneMask & (1L << laneId)) == 0)
                 throw new IllegalStateException("closing trigger has no account commit Lane");

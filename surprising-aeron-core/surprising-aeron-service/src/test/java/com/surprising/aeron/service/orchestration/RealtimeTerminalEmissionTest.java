@@ -62,9 +62,7 @@ class RealtimeTerminalEmissionTest {
         var message=new CoreMessage(CoreMessageHeader.command(type,new UUID(55,seq),line,
                 CommandSource.OPERATIONS,991,seq,user,TIME+seq,seq),payload);
         if(capture!=null)capture.begin(seq,TIME+seq,0,state.realtimeExportSequence());
-        var response=state.apply(message);
-        if(response.resultCode()==CoreResultCode.MATCHING_PENDING)
-            response=CoreTestCompletion.completeMatchingSynchronously(state, state.matchingSequence(message.header().commandId()),TIME+seq,seq);
+        var response=CoreTestCompletion.applyAsynchronously(state, message, TIME+seq, seq);
         if(response.commandStatus()!=ResponseStatus.APPLIED)throw new IllegalStateException(label+" "+response.resultCode());
         if(capture==null)return;
         capture.commit(state.realtimeExportSequence());

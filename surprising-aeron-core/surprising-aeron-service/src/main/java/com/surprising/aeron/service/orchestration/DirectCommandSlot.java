@@ -549,7 +549,9 @@ final class DirectCommandSlot {
                             positionKey, instrumentSettled);
                     else RuntimeTriggerOrderStateTransitions.placeOcoPair(runtime, userId, trigger, secondTrigger,
                             symbolId, positionKey, instrumentSettled);
-                    yield null;
+                    yield secondTrigger == null ? runtime.triggerOrder(trigger.triggerOrderId()).view()
+                            : java.util.List.of(runtime.triggerOrder(trigger.triggerOrderId()).view(),
+                                    runtime.triggerOrder(secondTrigger.triggerOrderId()).view());
                 }
                 case ALGO_UPSERT -> {
                     RuntimeAlgoOrderStateTransitions.upsert(runtime, userId, algo, symbolId);
@@ -567,13 +569,12 @@ final class DirectCommandSlot {
                 if (Boolean.TRUE.equals(result)) owner.requestCommitPublication();
             } else if (kind == TRIGGER_UPSERT) {
                 owner.requestCommitPublication();
-                if (secondTrigger == null) owner.setCommandTriggerOrderView(owner.runtimeState().triggerOrder(trigger.triggerOrderId()).view());
-                else owner.setCommandTriggerOrderViews(java.util.List.of(
-                        owner.runtimeState().triggerOrder(trigger.triggerOrderId()).view(),
-                        owner.runtimeState().triggerOrder(secondTrigger.triggerOrderId()).view()));
+                if (secondTrigger == null) owner.setCommandTriggerOrderView((CoreTriggerOrderStateView) result);
+                else {
+                    @SuppressWarnings("unchecked") var views = (java.util.List<CoreTriggerOrderStateView>) result;
+                    owner.setCommandTriggerOrderViews(views);
+                }
             } else {
-                owner.runtimeState().publishAlgoOrder(
-                        (com.surprising.aeron.service.state.model.CoreAlgoOrderState) result);
                 owner.requestCommitPublication();
             }
             return true;

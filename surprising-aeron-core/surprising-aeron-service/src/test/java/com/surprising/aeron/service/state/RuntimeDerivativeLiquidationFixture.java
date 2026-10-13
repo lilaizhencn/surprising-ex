@@ -24,7 +24,7 @@ final class RuntimeDerivativeLiquidationFixture {
             throw new IllegalArgumentException("invalid perpetual liquidation simulation");
         }
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        return applyExecutionRuntime(command, canceledOrders, runtime, identities);
+        return applyExecutionRuntime(command, RuntimeTestStateTransitions.cancellationRoutes(canceledOrders), runtime, identities);
     }
 
     public static TradingRuntimeState simulateCancellationAdvance(TradingCoreState before,
@@ -37,7 +37,7 @@ final class RuntimeDerivativeLiquidationFixture {
             throw new IllegalArgumentException("invalid liquidation cancellation simulation");
         }
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        return applyCancellationAdvanceRuntime(command, canceledOrders, nextCursorOrderId, runtime, identities);
+        return applyCancellationAdvanceRuntime(command, RuntimeTestStateTransitions.cancellationRoutes(canceledOrders), nextCursorOrderId, runtime, identities);
     }
 
     public static TradingRuntimeState simulateResolution(TradingCoreState before,

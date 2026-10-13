@@ -130,6 +130,7 @@ public final class MatcherSettlementEvent implements
         final MatcherSettlementPlan[] plans;
         final CoreInstrument[] instruments;
         final OrderRuntime[] admittedOrders;
+        final long[] cancellationOrderIds;
         final int[] baseAssetIds, quoteAssetIds, settleAssetIds;
         /** Number of slots populated by the current preparation, not backing capacity. */
         private int activeSize;
@@ -138,6 +139,7 @@ public final class MatcherSettlementEvent implements
             for (int i = 0; i < size; i++) plans[i] = new MatcherSettlementPlan();
             instruments = new CoreInstrument[size];
             admittedOrders = new OrderRuntime[size];
+            cancellationOrderIds = new long[size];
             baseAssetIds = new int[size]; quoteAssetIds = new int[size]; settleAssetIds = new int[size];
         }
         void activate(int size) {
@@ -150,6 +152,7 @@ public final class MatcherSettlementEvent implements
                 plans[index].clearReferences();
                 instruments[index] = null;
                 admittedOrders[index] = null;
+                cancellationOrderIds[index] = 0;
             }
             activeSize = 0;
         }
@@ -361,10 +364,10 @@ public final class MatcherSettlementEvent implements
         try {
             OrderRuntime admitted = batchStorage.admittedOrders[0];
             if (cancellation) {
-                if (admitted == null || admitted.orderId() != orderId)
+                if (batchStorage.cancellationOrderIds[0] != orderId)
                     throw new IllegalStateException("direct cancellation order is inconsistent");
                 batchPlans[0].buildDirectNativeCancellation(directCoreSequence, cancellationUserId,
-                        admitted, result, runtime);
+                        orderId, result, runtime);
             } else if (admissionRequired && admissionAccepted) {
                 if (admissionOrder == null || admissionOrder.orderId() != orderId)
                     throw new IllegalStateException("direct admission order is inconsistent");
@@ -413,11 +416,12 @@ public final class MatcherSettlementEvent implements
         }
         try {
             OrderRuntime admitted = batchStorage.admittedOrders[index];
-            if (admitted == null || admitted.orderId() != orderId)
+            if (cancellation ? batchStorage.cancellationOrderIds[index] != orderId
+                    : admitted == null || admitted.orderId() != orderId)
                 throw new IllegalStateException("direct matcher batch order is inconsistent");
             if (cancellation) {
                 batchPlans[index].buildDirectNativeCancellation(directCoreSequence, cancellationUserId,
-                        admitted, result, runtime);
+                        orderId, result, runtime);
             } else {
                 batchPlans[index].buildDirectNative(directCoreSequence, admitted,
                         batchInstruments[index], result, runtime);
@@ -1190,7 +1194,8 @@ public final class MatcherSettlementEvent implements
             throw new IllegalStateException("Ledger funds receipt is incomplete");
         RuntimeFundsAccumulator receipt = treasurySettlement.sequentialBatch
                 ? treasurySettlement.treasuryFunds : treasurySettlement.funds;
-        receipt.transferTo(target);
+        if (target == null) receipt.clear();
+        else receipt.transferTo(target);
     }
 
     private final class TreasurySettlement implements SystemLedgerLane.Entry {

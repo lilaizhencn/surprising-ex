@@ -962,6 +962,16 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                         order -> cancel(order.userId(), order.orderId(), order.instrumentId())));
     }
 
+    /** Cancel routing identities; full account orders are read only by their settlement Lane. */
+    public CoreMatchingResult cancelRoutedBatch(List<CancellationOrder> orders) {
+        List<CancellationOrder> requested = orders == null ? List.of() : List.copyOf(orders);
+        if (requested.size() > 1_024)
+            return aggregateRuntimeCancellationResult(requested, CancelBatchOutcome.rejected(requested.size(),
+                    new CoreMatchingResult(false, "LIFECYCLE_BATCH_TOO_LARGE")));
+        return aggregateRuntimeCancellationResult(requested, cancelBatchOrdered(requested,
+                order -> cancel(order.userId(), order.orderId(), order.instrumentId())));
+    }
+
     public CompletableFuture<CoreMatchingResult> executeAfterCancellations(
             List<CancellationOrder> orders,
             Supplier<CompletableFuture<CoreMatchingResult>> submission) {
@@ -1046,6 +1056,24 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             else if (failed == null) failed = result;
         }
         return aggregateCancellationResult(requested,
+                new CancelBatchOutcome(completed, successfulPrefix, failed, null));
+    }
+
+    public CoreMatchingResult aggregateRoutedCancellationResults(
+            List<CancellationOrder> requested, List<CoreMatchingResult> results) {
+        if (requested == null || results == null || requested.size() != results.size()) {
+            throw new IllegalArgumentException("cancellation aggregation size mismatch");
+        }
+        ArrayList<CoreMatchingResult> completed = new ArrayList<>(results.size());
+        ArrayList<CoreMatchingResult> successfulPrefix = new ArrayList<>(results.size());
+        CoreMatchingResult failed = null;
+        for (CoreMatchingResult result : results) {
+            if (result == null) throw new IllegalArgumentException("cancellation result is missing");
+            completed.add(result);
+            if (failed == null && result.accepted()) successfulPrefix.add(result);
+            else if (failed == null) failed = result;
+        }
+        return aggregateRuntimeCancellationResult(requested,
                 new CancelBatchOutcome(completed, successfulPrefix, failed, null));
     }
 

@@ -1,7 +1,9 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
+
 import com.surprising.aeron.service.matching.CoreMatchingResult;
-import com.surprising.aeron.service.state.model.CoreOrderState;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,7 +17,7 @@ final class CrossShardCancellationCoordinator {
 
     CrossShardCancellationCoordinator(TradingCoreRuntime owner) { this.owner = owner; }
 
-    void start(CommandSlot command, List<CoreOrderState> orders) {
+    void start(CommandSlot command, List<CancellationOrder> orders) {
         if (command.crossShardCancellationStarted) return;
         command.crossShardCancellationStarted = true;
         pending.addLast(new Progress(command, orders));
@@ -39,14 +41,14 @@ final class CrossShardCancellationCoordinator {
                     progress.index++;
                     continue;
                 }
-                CoreOrderState order = progress.orders.get(progress.index);
+                CancellationOrder order = progress.orders.get(progress.index);
                 progress.shard = owner.matchingAdapter.matcherShardId(order.instrumentId());
                 progress.token = owner.matcherPipeline.submitControl(progress.shard,
                         () -> owner.matchingAdapter.cancelForContinuation(order.userId(), order.orderId(), order.instrumentId()));
                 continue;
             }
             var command = progress.command;
-            var aggregate = owner.matchingAdapter.aggregateCancellationResults(progress.orders, progress.results);
+            var aggregate = owner.matchingAdapter.aggregateRoutedCancellationResults(progress.orders, progress.results);
             var evidenced = owner.matchingAdapter.executeControlWithEvidenceSync(
                     command.sequence(), command.command().header().commandId(), 0,
                     command.command().header().submittedAtEpochMillis(), () -> aggregate);
@@ -66,7 +68,7 @@ final class CrossShardCancellationCoordinator {
     private static final class Progress {
         /** 原始待提交命令及确定性撤单次序。 */
         final CommandSlot command;
-        final List<CoreOrderState> orders;
+        final List<CancellationOrder> orders;
         /** 与订单次序一一对应的原生结果，最终交由现有聚合器生成提交证据。 */
         final ArrayList<CoreMatchingResult> results;
         /** 当前订单下标、分片及尚未收集的控制 token。 */
@@ -74,7 +76,7 @@ final class CrossShardCancellationCoordinator {
         long token;
         /** 第一个失败后只补未提交标记，不再执行后续原生撤单。 */
         boolean failed;
-        Progress(CommandSlot command, List<CoreOrderState> orders) {
+        Progress(CommandSlot command, List<CancellationOrder> orders) {
             this.command = command; this.orders = orders;
             results = new ArrayList<>(orders.size());
         }

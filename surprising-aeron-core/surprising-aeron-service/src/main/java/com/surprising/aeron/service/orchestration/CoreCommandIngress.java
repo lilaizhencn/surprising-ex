@@ -84,14 +84,10 @@ final class CoreCommandIngress {
         var type = message.header().messageType();
         if (OrderBookQueryService.accountQuery(type) || OrderBookQueryService.riskAccountQuery(type)) return false;
         if (type == CoreMessageType.ORDER_PREFLIGHT_QUERY || type == CoreMessageType.LANE_METRICS_QUERY) return false;
+        if (type == CoreMessageType.TRIGGER_ORDER_QUERY || type == CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY) return false;
         if (type == CoreMessageType.TREASURY_STATE_QUERY || type == CoreMessageType.FUNDING_PROGRESS_QUERY
                 || type == CoreMessageType.SETTLEMENT_PROGRESS_QUERY) return false;
-        if (type == CoreMessageType.LIQUIDATION_WORK_QUERY) {
-            try {
-                return CoreLiquidationWorkCodec.decodeQuery(message.payloadUnsafe()).purpose()
-                        != CoreLiquidationWorkView.Purpose.INSURANCE;
-            } catch (IllegalArgumentException invalid) { return false; }
-        }
+        if (type == CoreMessageType.LIQUIDATION_WORK_QUERY) return false;
         return true;
     }
 

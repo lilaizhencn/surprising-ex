@@ -1,4 +1,6 @@
 package com.surprising.aeron.service.state;
+
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
@@ -29,7 +31,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
 
     public static TradingRuntimeState applyExecution(TradingCoreState before,
                                                      ExecuteLiquidationCommand command,
-                                                     Collection<CoreOrderState> canceledOrders,
+                                                     Collection<CancellationOrder> canceledOrders,
                                                      TradingRuntimeState runtime,
                                                      RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
@@ -40,7 +42,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
     }
 
     public static TradingRuntimeState applyExecutionRuntime(ExecuteLiquidationCommand command,
-                                                            Collection<CoreOrderState> canceledOrders,
+                                                            Collection<CancellationOrder> canceledOrders,
                                                             TradingRuntimeState runtime,
                                                             RuntimeIdentityRegistry identities) {
         if (runtime.systemLedgerStarted()) throw new IllegalStateException("active liquidation requires its asynchronous continuation");
@@ -50,7 +52,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
 
     /** Re-arm a command-slot execution continuation while retaining its validation buffers. */
     public static ExecutionWork beginExecution(ExecutionWork reuse, ExecuteLiquidationCommand command,
-            Collection<CoreOrderState> canceledOrders, long nextCursorOrderId,
+            Collection<CancellationOrder> canceledOrders, long nextCursorOrderId,
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         return execute(reuse, command, canceledOrders, nextCursorOrderId, runtime, identities, true);
     }
@@ -66,6 +68,8 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private CoreInstrument[] instruments = new CoreInstrument[4];
         private long[] positionKeys = new long[4];
         private int[] laneIds = new int[4];
+        private long[] liquidationIds = new long[4], priceSequences = new long[4], prices = new long[4], cursors = new long[4];
+        private RuntimeIdentityRegistry identities;
         private byte[] results = new byte[4];
         private TradingRuntimeState runtime;
         private int count;
@@ -76,7 +80,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
                             RuntimeIdentityRegistry identities) {
             initialize(runtime, 1);
             prepareAction(0, command.liquidationId(), command.triggerPriceSequence(),
-                    command.executionPriceTicks(), identities);
+                    command.executionPriceTicks(), command.cursorOrderId(), identities);
         }
 
         public void prepare(ExecuteLiquidationBatchCommand command, TradingRuntimeState runtime,
@@ -85,7 +89,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
             for (int index = 0; index < count; index++) {
                 var action = command.actions().get(index);
                 prepareAction(index, action.liquidationId(), action.triggerPriceSequence(),
-                        action.executionPriceTicks(), identities);
+                        action.executionPriceTicks(), action.cursorOrderId(), identities);
             }
         }
 
@@ -96,34 +100,26 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 int capacity = Math.max(count, Math.multiplyExact(results.length, 2));
                 liquidations = new LiquidationRuntime[capacity]; instruments = new CoreInstrument[capacity];
                 positionKeys = new long[capacity]; laneIds = new int[capacity]; results = new byte[capacity];
+                liquidationIds = new long[capacity]; priceSequences = new long[capacity]; prices = new long[capacity]; cursors = new long[capacity];
             }
             this.runtime = runtime; this.count = count; laneMask = 0; dispatched = done = false;
         }
 
         private void prepareAction(int index, long liquidationId, long priceSequence,
-                                   long executionPriceTicks, RuntimeIdentityRegistry identities) {
-            LiquidationRuntime liquidation = runtime.liquidation(liquidationId);
-            results[index] = OBSOLETE;
-            laneIds[index] = -1;
-            if (liquidation == null || (liquidation.status() != CoreLiquidationState.Status.PLANNED
-                    && liquidation.status() != CoreLiquidationState.Status.ORDERED)) return;
-            MarkPriceRuntime mark = runtime.markPrice(liquidation.symbolId());
-            if (mark == null || mark.priceSequence() != liquidation.triggerPriceSequence()
-                    || priceSequence > 0 && priceSequence != liquidation.triggerPriceSequence()
-                    || executionPriceTicks != mark.markPriceTicks()) {
-                results[index] = STALE_PRICE;
-                return;
+                                   long executionPriceTicks, long cursor, RuntimeIdentityRegistry identities) {
+            this.identities = identities;
+            liquidationIds[index] = liquidationId; priceSequences[index] = priceSequence;
+            prices[index] = executionPriceTicks; cursors[index] = cursor;
+            results[index] = OBSOLETE; laneIds[index] = -1;
+            var route = runtime.liquidationRoute(liquidationId);
+            long userId = route == null ? 0 : route.userId();
+            if (route == null && !runtime.asynchronousCommands()) {
+                var value = runtime.liquidation(liquidationId);
+                if (value != null) userId = value.userId();
             }
-            CoreInstrument instrument = runtime.instrument(identities.instrumentId(liquidation.symbolId()));
-            if (instrument == null || !CoreRiskPolicy.canLiquidate(
-                    instrument.contractType(), liquidation.signedQuantitySteps())) return;
-            long positionKey = identities.findPositionKeyValue(
-                    liquidation.userId(), instrument, liquidation.positionSide());
-            if (positionKey == 0) return;
-            liquidations[index] = liquidation; instruments[index] = instrument; positionKeys[index] = positionKey;
-            laneIds[index] = runtime.topology().accountLaneId(liquidation.userId());
-            results[index] = CHECK_LANE;
-            laneMask |= 1L << laneIds[index];
+            if (userId == 0) return;
+            laneIds[index] = runtime.topology().accountLaneId(userId);
+            results[index] = CHECK_LANE; laneMask |= 1L << laneIds[index];
         }
 
         public boolean prepared() { return runtime != null; }
@@ -143,12 +139,35 @@ public final class RuntimeDerivativeLiquidationProcessor {
 
         @Override public Object apply(int laneId) {
             for (int index = 0; index < count; index++) {
-                if (laneIds[index] == laneId && results[index] == CHECK_LANE)
-                    results[index] = RuntimeDerivativeLiquidationProcessor.executable(runtime, liquidations[index], instruments[index], positionKeys[index])
-                            ? EXECUTABLE : OBSOLETE;
+                if (laneIds[index] != laneId || results[index] != CHECK_LANE) continue;
+                LiquidationRuntime value = runtime.liquidation(liquidationIds[index]);
+                liquidations[index] = value;
+                if (value == null || (value.status() != CoreLiquidationState.Status.PLANNED
+                        && value.status() != CoreLiquidationState.Status.ORDERED)) {
+                    results[index] = OBSOLETE; continue;
+                }
+                if (value.status() == CoreLiquidationState.Status.PLANNED && cursors[index] != 0
+                        || value.status() == CoreLiquidationState.Status.ORDERED && cursors[index] != value.nextCancelOrderId())
+                    throw new CoreStateRejectedException("LIQUIDATION_CURSOR_CONFLICT", "liquidation cursor does not match state");
+                MarkPriceRuntime mark = runtime.markPrice(value.symbolId());
+                if (mark == null || mark.priceSequence() != value.triggerPriceSequence()
+                        || priceSequences[index] > 0 && priceSequences[index] != value.triggerPriceSequence()
+                        || prices[index] != mark.markPriceTicks()) {
+                    results[index] = STALE_PRICE; continue;
+                }
+                CoreInstrument instrument = runtime.instrument(identities.instrumentId(value.symbolId()));
+                instruments[index] = instrument;
+                if (instrument == null || !CoreRiskPolicy.canLiquidate(instrument.contractType(), value.signedQuantitySteps())) {
+                    results[index] = OBSOLETE; continue;
+                }
+                positionKeys[index] = identities.findPositionKeyValueInLane(runtime.currentLaneCommandScope(), value.userId(), instrument, value.positionSide());
+                results[index] = positionKeys[index] != 0 && RuntimeDerivativeLiquidationProcessor.executable(
+                        runtime, value, instrument, positionKeys[index]) ? EXECUTABLE : OBSOLETE;
             }
             return null;
         }
+
+        public LiquidationRuntime liquidation(int index) { requireResult(index); return liquidations[index]; }
 
         /** 批次筛选撤单时过期动作直接跳过，不影响同批次其他账户。 */
         public boolean cancelsOrders(int index) { requireResult(index); return results[index] == EXECUTABLE; }
@@ -168,13 +187,13 @@ public final class RuntimeDerivativeLiquidationProcessor {
         public void clearReferences() {
             java.util.Arrays.fill(liquidations, 0, count, null);
             java.util.Arrays.fill(instruments, 0, count, null);
-            runtime = null; count = 0; laneMask = 0; dispatched = done = false;
+            runtime = null; identities = null; count = 0; laneMask = 0; dispatched = done = false;
         }
     }
 
     /** A validated account stage that can be coalesced with other liquidation stages. */
     public record ExecutionRequest(ExecuteLiquidationCommand command,
-                                   Collection<CoreOrderState> canceledOrders,
+                                   Collection<CancellationOrder> canceledOrders,
                                    long nextCursorOrderId) {
         public ExecutionRequest {
             if (command == null || nextCursorOrderId < 0) {
@@ -195,15 +214,19 @@ public final class RuntimeDerivativeLiquidationProcessor {
         runtime.assertOwner();
         BatchExecutionStage[] stages = new BatchExecutionStage[requests.size()];
         long laneMask = 0;
+        int[] laneIds = new int[requests.size()];
         for (int index = 0; index < requests.size(); index++) {
-            stages[index] = BatchExecutionStage.prepare(requests.get(index), runtime, identities);
-            laneMask |= 1L << stages[index].laneId;
+            var route = runtime.liquidationRoute(requests.get(index).command().liquidationId());
+            if (route == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation route is missing");
+            laneIds[index] = runtime.topology().accountLaneId(route.userId());
+            laneMask |= 1L << laneIds[index];
         }
         RuntimeTreasuryDelta[] results = new RuntimeTreasuryDelta[stages.length];
         runtime.dispatchControlLanes(laneMask, lane -> {
             for (int index = 0; index < stages.length; index++) {
-                BatchExecutionStage stage = stages[index];
-                if (stage.laneId == lane) results[index] = stage.apply();
+                if (laneIds[index] != lane) continue;
+                stages[index] = BatchExecutionStage.prepare(requests.get(index), runtime, identities);
+                results[index] = stages[index].apply();
             }
             return results;
         });
@@ -296,7 +319,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
 
         private static BatchExecutionStage prepare(BatchExecutionStage reuse,
                                                     ExecuteLiquidationCommand command,
-                                                    Collection<CoreOrderState> canceledOrders,
+                                                    Collection<CancellationOrder> canceledOrders,
                                                     long nextCursorOrderId,
                                                     TradingRuntimeState runtime,
                                                     RuntimeIdentityRegistry identities) {
@@ -325,7 +348,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
             long[] orderIds = count == 0 ? null : new long[count];
             if (count != 0) {
                 int index = 0;
-                for (CoreOrderState order : canceledOrders) {
+                for (var order : canceledOrders) {
                     if (order == null || order.userId() != liquidation.userId()) {
                         throw new IllegalArgumentException("liquidation cancellation must belong to its account");
                     }
@@ -333,9 +356,15 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 }
             }
             CoreInstrument instrument = advance ? null : runtime.instrument(identities.instrumentId(liquidation.symbolId()));
-            int assetId = instrument == null ? 0 : identities.assetId(instrument.settleAsset());
-            long positionKey = instrument == null ? 0 : identities.findPositionKeyValue(
-                    liquidation.userId(), instrument, liquidation.positionSide());
+            AccountLaneState scoped = runtime.currentLaneCommandScope();
+            long positionKey = instrument == null ? 0 : scoped == null
+                    ? identities.findPositionKeyValue(liquidation.userId(), instrument, liquidation.positionSide())
+                    : identities.findPositionKeyValueInLane(scoped, liquidation.userId(), instrument, liquidation.positionSide());
+            PositionRuntime position = scoped == null || positionKey == 0 ? null : scoped.positions.get(positionKey);
+            int assetId = instrument == null ? 0 : scoped == null ? identities.assetId(instrument.settleAsset())
+                    : position == null ? 0 : position.assetId();
+            if (position != null && !identities.asset(assetId).equals(instrument.settleAsset()))
+                throw new IllegalStateException("liquidation position settlement asset differs from instrument");
             if (reuse == null) return new BatchExecutionStage(command, orderIds, nextCursorOrderId, advance,
                     runtime, liquidation, instrument, assetId, positionKey);
             reuse.reset(command, orderIds, nextCursorOrderId, advance, runtime, liquidation,
@@ -386,7 +415,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
     }
 
     private static ExecutionWork execute(ExecutionWork reuse, ExecuteLiquidationCommand command,
-            Collection<CoreOrderState> canceledOrders, long nextCursorOrderId,
+            Collection<CancellationOrder> canceledOrders, long nextCursorOrderId,
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities, boolean asynchronous) {
         if (command == null || runtime == null || identities == null || nextCursorOrderId < 0
                 || !runtime.productLine().isDerivative()) {
@@ -396,12 +425,12 @@ public final class RuntimeDerivativeLiquidationProcessor {
         ExecutionWork work = reuse == null || !reuse.reusable() ? new ExecutionWork() : reuse;
         work.prepare(command, canceledOrders, nextCursorOrderId, runtime, identities);
         if (asynchronous) {
-            runtime.dispatchControlLanes(1L << work.stage.laneId, work);
+            runtime.dispatchControlLanes(1L << work.laneId, work);
             return work;
         }
         runtime.releaseOwnerLaneAccess();
-        Object[] results = runtime.executeLaneMutations(1L << work.stage.laneId, 1, work);
-        work.finish(results[work.stage.laneId]);
+        Object[] results = runtime.executeLaneMutations(1L << work.laneId, 1, work);
+        work.finish(results[work.laneId]);
         return null;
     }
 
@@ -410,21 +439,32 @@ public final class RuntimeDerivativeLiquidationProcessor {
             implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
         private BatchExecutionStage stage;
         private TradingRuntimeState runtime;
+        private ExecuteLiquidationCommand command;
+        private Collection<CancellationOrder> canceledOrders;
+        private long nextCursorOrderId;
+        private RuntimeIdentityRegistry identities;
+        private int laneId;
         private boolean done, accountsCollected, ledgerDispatched;
         private RuntimeTreasuryDelta treasuryDelta;
 
-        private void prepare(ExecuteLiquidationCommand command, Collection<CoreOrderState> canceledOrders,
+        private void prepare(ExecuteLiquidationCommand command, Collection<CancellationOrder> canceledOrders,
                 long nextCursorOrderId, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
             initializeLedgerCommand(runtime);
-            this.stage = BatchExecutionStage.prepare(stage, command, canceledOrders, nextCursorOrderId,
-                    runtime, identities);
+            this.command = command; this.canceledOrders = canceledOrders;
+            this.nextCursorOrderId = nextCursorOrderId; this.identities = identities;
+            var route = runtime.liquidationRoute(command.liquidationId());
+            long userId = route == null ? runtime.liquidation(command.liquidationId()).userId() : route.userId();
+            laneId = runtime.topology().accountLaneId(userId);
             this.runtime = runtime;
             this.done = accountsCollected = ledgerDispatched = false;
             treasuryDelta = null;
         }
 
         @Override
-        public Object apply(int ignored) { return stage.apply(); }
+        public Object apply(int ignored) {
+            stage = BatchExecutionStage.prepare(stage, command, canceledOrders, nextCursorOrderId, runtime, identities);
+            return stage.apply();
+        }
 
         @Override
         public boolean getAsBoolean() {
@@ -462,6 +502,10 @@ public final class RuntimeDerivativeLiquidationProcessor {
         public void clearReferences() {
             if (stage != null) stage.clearReferences();
             runtime = null;
+            command = null;
+            canceledOrders = null;
+            identities = null;
+            nextCursorOrderId = 0;
             done = false;
         }
     }
@@ -529,7 +573,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
 
     public static TradingRuntimeState applyCancellationAdvance(TradingCoreState before,
                                                                ExecuteLiquidationCommand command,
-                                                               Collection<CoreOrderState> canceledOrders,
+                                                               Collection<CancellationOrder> canceledOrders,
                                                                long nextCursorOrderId,
                                                                TradingRuntimeState runtime,
                                                                RuntimeIdentityRegistry identities) {
@@ -541,7 +585,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
     }
 
     public static TradingRuntimeState applyCancellationAdvanceRuntime(ExecuteLiquidationCommand command,
-                                                                      Collection<CoreOrderState> canceledOrders,
+                                                                      Collection<CancellationOrder> canceledOrders,
                                                                       long nextCursorOrderId,
                                                                       TradingRuntimeState runtime,
                                                                       RuntimeIdentityRegistry identities) {

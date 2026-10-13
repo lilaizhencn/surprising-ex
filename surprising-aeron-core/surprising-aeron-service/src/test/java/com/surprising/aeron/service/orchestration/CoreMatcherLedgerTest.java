@@ -24,8 +24,9 @@ class CoreMatcherLedgerTest {
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100_000)));
             applied(state, CoreMessageType.PLACE_ORDER, 1001, TradingCommandCodec.encodePlaceOrder(order(1, CoreOrderSide.BUY, 99, 1)));
             try (var guard = new OwnerAccountReadGuard(state.runtimeState)) {
-                assertThat(state.runtimeOrder(1)).isSameAs(state.activeOrderIndex.activeOrderRuntime(1));
-                assertThat(state.runtimeOrder(999)).isNull();
+                assertThat(state.activeOrderIndex.activeOrderRoute(1).userId()).isEqualTo(1001);
+                assertThatThrownBy(() -> state.runtimeOrder(1)).isInstanceOf(IllegalStateException.class);
+                assertThatThrownBy(() -> state.runtimeOrder(999)).isInstanceOf(IllegalStateException.class);
                 // 模拟Lane删除回执已收集、Owner活跃路由尚未发布的提交窗口。
                 var field = com.surprising.aeron.service.state.TradingRuntimeState.class.getDeclaredField("changedOrders");
                 field.setAccessible(true);
@@ -33,7 +34,7 @@ class CoreMatcherLedgerTest {
                 var put = changes.getClass().getDeclaredMethod("put", long.class, Object.class);
                 put.setAccessible(true);
                 put.invoke(changes, 1L, (Object) null);
-                assertThat(state.activeOrderIndex.activeOrderRuntime(1)).isNotNull();
+                assertThat(state.activeOrderIndex.activeOrderRoute(1)).isNotNull();
                 assertThat(state.runtimeState.hasChangedOrder(1)).isTrue();
                 assertThat(state.runtimeOrder(1)).isNull();
                 assertThat(state.responseOrder(1)).isNull();
@@ -69,6 +70,29 @@ class CoreMatcherLedgerTest {
             assertThat(trading.users().values().stream().mapToLong(u -> u.totalUnits("USDT")).sum()).isEqualTo(199_994);
             assertThat(trading.orders()).isEmpty();
             assertThat(trading.users().values()).allSatisfy(user -> assertThat(user.reservations()).isEmpty());
+            state.assertClusterCallbackComplete();
+        }
+    }
+
+    @Test
+    void laneAdmissionCancelsOwnCrossingOrderWithoutOwnerBusinessReads() throws Exception {
+        try (var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+            applied(state, CoreMessageType.REGISTER_INSTRUMENT, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                            "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
+            applied(state, CoreMessageType.APPLY_MARK_PRICE, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
+            applied(state, CoreMessageType.ADJUST_BALANCE, 1001,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100_000)));
+            try (var guard = new OwnerAccountReadGuard(state.runtimeState)) {
+                applied(state, CoreMessageType.PLACE_ORDER, 1001, TradingCommandCodec.encodePlaceOrder(order(1, CoreOrderSide.BUY, 100, 1)));
+                applied(state, CoreMessageType.PLACE_ORDER, 1001, TradingCommandCodec.encodePlaceOrder(order(2, CoreOrderSide.SELL, 100, 1)));
+            }
+            var trading = state.tradingState();
+            assertThat(trading.orders()).containsOnlyKeys(2L);
+            assertThat(trading.users().get(1001L).totalUnits("USDT")).isEqualTo(100_000);
+            assertThat(trading.users().get(1001L).positions()).isEmpty();
+            assertThat(trading.treasuryState().feeBalances().getOrDefault("USDT", 0L)).isZero();
             state.assertClusterCallbackComplete();
         }
     }

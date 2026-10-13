@@ -68,7 +68,7 @@ final class DirectMatcherSettlementPreparation {
             CommandSlot pending, OrderBatchPending batch, int shard, boolean finalChunk, int count) {
         MatcherSettlementEvent direct = owner.runtimeState.prepareDirectCancelBatch(
                 pending.sequence(), finalChunk, pending.command().header().userId(),
-                batch.preparedAdmittedOrders, count, pending.command().header().commandId(), shard,
+                batch.preparedCancellationOrderIds, count, pending.command().header().commandId(), shard,
                 owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), batch);
         reserveMatcherPublication(direct);
         return direct;
@@ -116,7 +116,7 @@ final class DirectMatcherSettlementPreparation {
 
     private MatcherSettlementEvent prepareTrigger(CommandSlot pending) {
         long[] execute = pending.decodedCommand().trigger();
-        var trigger = java.util.Objects.requireNonNull(owner.runtimeState.triggerOrder(execute[0]),
+        var trigger = java.util.Objects.requireNonNull(pending.sourceTrigger(),
                 "admitted trigger is missing");
         OrderRuntime triggerOrder = java.util.Objects.requireNonNull(pending.triggerAdmissionOrder(),
                 "trigger admission receipt is missing");
@@ -132,9 +132,8 @@ final class DirectMatcherSettlementPreparation {
     }
 
     private MatcherSettlementEvent prepareCancellation(CommandSlot pending) {
-        OrderRuntime canceledOrder = owner.activeOrderIndex.activeOrderRuntime(
-                pending.decodedCommand().cancelOrder().orderId());
-        MatcherSettlementEvent direct = owner.runtimeState.prepareDirectCancellation(pending.sequence(), canceledOrder,
+        MatcherSettlementEvent direct = owner.runtimeState.prepareDirectCancellation(pending.sequence(),
+                pending.command().header().userId(), pending.decodedCommand().cancelOrder().orderId(),
                 pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,
                 pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), pending.laneResultTarget());
         reserveMatcherPublication(pending, direct);

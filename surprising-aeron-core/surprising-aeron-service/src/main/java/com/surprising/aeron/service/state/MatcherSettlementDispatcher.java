@@ -92,24 +92,24 @@ final class MatcherSettlementDispatcher {
         return event;
     }
 
-    MatcherSettlementEvent prepareDirectCancellation(long sequence, OrderRuntime order,
+    MatcherSettlementEvent prepareDirectCancellation(long sequence, long userId, long orderId,
             java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
             long timestamp, long position, LaneOrderResultTarget resultTarget) {
         owner.assertOwner();
-        if (order == null) throw new IllegalArgumentException("cancel order is missing");
-        long laneMask = owner.topology.accountLaneMask(order.userId());
+        if (userId <= 0 || orderId <= 0) throw new IllegalArgumentException("cancel order is missing");
+        long laneMask = owner.topology.accountLaneMask(userId);
         owner.ensureMatcherSettlementDispatchCapacity(laneMask);
         MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
         if (event == null) event = new MatcherSettlementEvent();
-        event.batchStorage(1).admittedOrders[0] = order;
+        event.batchStorage(1).cancellationOrderIds[0] = orderId;
         // 撤单不依赖当前合约配置，也不需要为成交解析资产或构建持仓身份。
         event.prepareDirect(sequence, laneMask, timestamp, position, commandId, shard,
                 owner, identities, 1, List.of(), resultTarget);
-        event.cancellation(order.userId());
+        event.cancellation(userId);
         return event;
     }
 
-    MatcherSettlementEvent prepareDirectCancelBatch(long sequence, boolean finalChunk, long userId, OrderRuntime[] orders, int count,
+    MatcherSettlementEvent prepareDirectCancelBatch(long sequence, boolean finalChunk, long userId, long[] orders, int count,
             java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities, long timestamp, long position,
             LaneOrderResultTarget resultTarget) {
         owner.assertOwner();
@@ -118,7 +118,7 @@ final class MatcherSettlementDispatcher {
         owner.ensureMatcherSettlementDispatchCapacity(mask);
         MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
         if (event == null) event = new MatcherSettlementEvent();
-        System.arraycopy(orders, 0, event.batchStorage(count).admittedOrders, 0, count);
+        System.arraycopy(orders, 0, event.batchStorage(count).cancellationOrderIds, 0, count);
         event.prepareDirect(sequence, finalChunk ? sequence : 0, mask, timestamp, position, commandId, shard,
                 owner, identities, count, List.of(), resultTarget);
         event.cancellation(userId);

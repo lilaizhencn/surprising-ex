@@ -110,7 +110,7 @@ final class CommitPublication {
                 if (!owner.factContextActive) {
                     throw new IllegalStateException("runtime commit requires an active command scope");
                 }
-                owner.runtimeState.appendFundsDelta(owner.commandFundsAccumulator);
+                owner.runtimeState.appendFundsDelta(owner.runtimeState.coldCommandFunds());
                 if (timing != null) { timing.fundsNanos = System.nanoTime() - stepStart; stepStart = System.nanoTime(); }
                 if (owner.realtimeCapture != null) owner.runtimeState.captureRealtimeChanges(owner.realtimeCapture);
                 if (timing != null) { timing.realtimeCaptureNanos = System.nanoTime() - stepStart; stepStart = System.nanoTime(); }

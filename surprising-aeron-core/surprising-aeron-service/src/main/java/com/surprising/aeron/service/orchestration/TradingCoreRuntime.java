@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
+
 import com.surprising.aeron.service.command.instrument.InstrumentConfigurationCommands;
 import lombok.extern.slf4j.Slf4j;
 import com.surprising.aeron.service.state.account.TransferRuntime;
@@ -342,10 +344,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
     /** 收集各 Lane 国库变化的复用缓冲；提交完清空。 */
     final RuntimeTreasuryDelta mergedLaneTreasuryDelta =
             new RuntimeTreasuryDelta(RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
-    /** 当前命令资金变化累加器；挂起/恢复时保持命令隔离。 */
-    final com.surprising.aeron.service.state.RuntimeFundsAccumulator commandFundsAccumulator =
-            new com.surprising.aeron.service.state.RuntimeFundsAccumulator(64);
-
     /** 当前激活命令在复制日志中的位置。 */
     long currentClusterPosition;
     /** 当前激活命令的集群时间，保证确定性业务时间。 */
@@ -368,7 +366,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     @Override public void markOrderChanged(long orderId) { resultBuilder.markOrderChanged(orderId); }
     @Override public void beginChangedUsers() { resultBuilder.beginChangedUsers(); }
     @Override public void addChangedUser(long userId) { resultBuilder.addChangedUser(userId); }
-    @Override public void addChangedUsersFromOrders(Iterable<? extends CoreOrderState> orders) {
+    @Override public void addChangedUsersFromOrders(Iterable<CancellationOrder> orders) {
         resultBuilder.addChangedUsersFromOrders(orders);
     }
     @Override public void addChangedUsersFromFundingPayments(
@@ -489,7 +487,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         this.activeOrderIndex = new ActiveOrderIndex(snapshotState, identities);
         this.matchingAdapter = matcherSnapshot == null
                 ? new DeterministicExchangeCoreAdapter(false)
-                : new DeterministicExchangeCoreAdapter(snapshotState, activeOrderIndex.orders(),
+                : new DeterministicExchangeCoreAdapter(snapshotState, snapshotState.orders().values().stream().filter(order -> order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN).toList(),
                         appliedCommandCount, matcherSnapshot, false, restoredBusinessStateHash);
         this.pendingMatching = new PendingMatchingRing(
                 Math.min(MAX_PENDING_MATCHING, matchingAdapter.topology().matcherWindowSize()),
@@ -519,6 +517,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         this.factIndexes = new com.surprising.aeron.service.state.RuntimeFactIndexes(
                 positionUserIndex, openInterestIndex, triggerOrderIndex, algoOrderIndex,
                 liquidationIndex, cancelAllAfterIndex, activeOrderIndex, adlPositionIndex);
+        runtimeState.bindFactIndexes(factIndexes);
         this.runtimeState.restoreFeePolicies(restoredFeePolicies);
         this.runtimeState.restorePendingTransfers(restoredPendingTransfers);
         commits.initializeCommitPublication(snapshotState.revision(), projectionSequence);
@@ -776,7 +775,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return rejected(resultCode);
     }
 
-    record LifecycleOrderChunk(List<CoreOrderState> orders, long nextCursorOrderId) {
+    record LifecycleOrderChunk(List<CancellationOrder> orders, long nextCursorOrderId) {
         boolean more() { return nextCursorOrderId != 0; }
     }
 
@@ -1065,7 +1064,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     int incompleteRiskScanCount() { return runtimeState.incompleteRiskScanCount(); }
     int incompleteFundingCount() { return runtimeState.treasury().incompleteFundingCount(); }
     int activeOrderCount() { return activeOrderIndex.count(); }
-    int positionCount() { return runtimeState.publishedPositionCount(); }
+    int positionCount() { return adlPositionIndex.count(); }
     int triggerOrderCount() { return triggerOrderIndex.ids().size(); }
 
     TradingCoreState snapshotTradingState() { return materializedState.snapshot(); }
@@ -1195,7 +1194,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     userId, resolved.clientOrderId());
             try {
                 long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationPrepared(
-                        runtimeState, userId, resolved, openInterestSteps, activeOrderIndex, admissionIdentity);
+                        runtimeState, userId, resolved, openInterestSteps, runtimeState.admissionOrders(userId, resolved.symbolId()), admissionIdentity);
                 RuntimeOrderStateTransitions.placePrepared(runtimeState, userId, resolved,
                         commandId, requiredReservation,
                         com.surprising.aeron.service.state.RuntimeIdentityRegistry.clientKeyValue(preparedClientKey),
@@ -1230,7 +1229,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     OrderRuntime runtimeOrder(long orderId) {
         return runtimeState.hasChangedOrder(orderId) ? runtimeState.changedOrderValue(orderId)
-                : activeOrderIndex.activeOrderRuntime(orderId);
+                : runtimeState.order(orderId);
     }
 
     String runtimeOrderSymbol(OrderRuntime order) {
@@ -1286,7 +1285,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         captureRealtimeTrades(pending);
         com.surprising.aeron.service.state.RuntimeTreasuryDelta delta =
                 runtimeState.collectMatcherSettlement(
-                        event, commandFundsAccumulator, terminalRetention,
+                        event, runtimeState.coldCommandFunds(), terminalRetention,
                         resultBuilder.changedUserIds, resultBuilder.changedOrderIds);
         resultBuilder.markLaneCommitIdsSeeded();
         pending.completeLanes(event.requiredLaneMask());
@@ -1307,7 +1306,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         runtimeState.acceptChangedUserIds(resultBuilder.changedUserIds::add);
         CommandSlot context = pending;
         context.suspendCommitContext(
-                resultBuilder, commandFundsAccumulator,
+                resultBuilder, runtimeState.coldCommandFunds(),
                 commits.commitPublicationDirty(), commits.commitPublicationProvisionalOnly());
         commits.suspendCommitPublication();
         resultBuilder.commandChangedUserIds = List.of();
@@ -1326,7 +1325,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         context.restoreCommitContext(resultBuilder);
         resultBuilder.commandChangedUserIds = List.of();
         resultBuilder.commandChangedOrderIds = List.of();
-        context.takeCommitFundsTo(commandFundsAccumulator);
+        context.takeCommitFundsTo(runtimeState.coldCommandFunds());
         context.clearCommitContext();
         resultBuilder.commandTradeCount = 0;
         resultBuilder.commandLiquidationProgress = null;
@@ -1367,27 +1366,30 @@ public final class TradingCoreRuntime implements AutoCloseable,
         admissions.queuedMatching.add(new MatchingCommandAdmission.QueuedTriggerMatching(
                 new CoreMessage(header, com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeExecute(
                         trigger.triggerOrderId(), triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis)),
-                childOrder));
+                childOrder, trigger));
     }
 
     void setCommandFundsDelta(
             com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta) {
-        commandFundsAccumulator.clear();
-        commandFundsAccumulator.add(fundsDelta);
+        if (runtimeState.systemLedgerStarted()) return;
+        runtimeState.coldCommandFunds().clear();
+        runtimeState.coldCommandFunds().add(fundsDelta);
     }
 
     void setCommandFunds(
             com.surprising.aeron.service.state.RuntimeFundsAccumulator fundsAccumulator) {
-        commandFundsAccumulator.clear();
-        commandFundsAccumulator.add(fundsAccumulator);
+        if (runtimeState.systemLedgerStarted()) return;
+        runtimeState.coldCommandFunds().clear();
+        runtimeState.coldCommandFunds().add(fundsAccumulator);
     }
 
     void validateFundsConservation(CoreMessage command) {
+        if (runtimeState.systemLedgerStarted()) return;
         boolean externalAdjustment = command.header().messageType() == CoreMessageType.ADJUST_BALANCE
                 || command.header().messageType() == CoreMessageType.TRANSFER_OUT
                 || command.header().messageType() == CoreMessageType.TRANSFER_IN
                 || command.header().messageType() == CoreMessageType.ADJUST_INSURANCE_FUND;
-        commandFundsAccumulator.requireConserved(externalAdjustment);
+        runtimeState.coldCommandFunds().requireConserved(externalAdjustment);
     }
 
     @Override public void seedChangeAccumulators() {
@@ -1412,7 +1414,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     /** Collect lifecycle order identities without creating boxed Long elements. */
-    static List<Long> boxedOrderIds(List<? extends CoreOrderState> orders) {
+    static List<Long> boxedOrderIds(List<CancellationOrder> orders) {
         if (orders == null || orders.isEmpty()) return List.of();
         long[] values = new long[orders.size()];
         for (int index = 0; index < values.length; index++) values[index] = orders.get(index).orderId();

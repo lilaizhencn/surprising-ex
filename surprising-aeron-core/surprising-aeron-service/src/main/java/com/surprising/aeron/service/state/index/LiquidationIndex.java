@@ -19,7 +19,7 @@ public final class LiquidationIndex {
 
     private final Map<LiquidationKey, NavigableSet<Long>> activeIds = new TreeMap<>();
     private final NavigableSet<Long> allActiveIds = new TreeSet<>();
-    private final LongObjectHashMap<LiquidationKey> keysById = new LongObjectHashMap<>();
+    private final LongObjectHashMap<LiquidationRoute> keysById = new LongObjectHashMap<>();
 
     public LiquidationIndex(TradingCoreState state) {
         rebuild(state);
@@ -34,19 +34,27 @@ public final class LiquidationIndex {
         return allActiveIds;
     }
 
+    public record LiquidationRoute(long userId, String instrumentId, CorePositionSide positionSide,
+                                   boolean unresolved, boolean executable) {
+        LiquidationKey key() { return new LiquidationKey(userId, instrumentId, positionSide); }
+    }
+    public LiquidationRoute route(long id) { return keysById.get(id); }
+
+    public boolean hasUnresolved(String instrumentId) {
+        for (LiquidationRoute route : keysById.values())
+            if (route.unresolved() && (instrumentId == null || route.instrumentId().equals(instrumentId))) return true;
+        return false;
+    }
+
     public void apply(long liquidationId, LiquidationRuntime after, RuntimeIdentityRegistry identities) {
-        LiquidationKey previous = keysById.get(liquidationId);
-        LiquidationKey current = isActive(after)
-                ? new LiquidationKey(after.userId(), identities.instrumentId(after.symbolId()), after.positionSide())
-                : null;
-        if (java.util.Objects.equals(previous, current)) return;
-        if (previous != null) {
-            keysById.remove(liquidationId);
-            remove(liquidationId, previous);
-        }
-        if (current != null) {
+        LiquidationRoute previous = keysById.remove(liquidationId);
+        if (previous != null && previous.unresolved()) remove(liquidationId, previous.key());
+        if (after != null) {
+            LiquidationRoute current = new LiquidationRoute(after.userId(), identities.instrumentId(after.symbolId()),
+                    after.positionSide(), isActive(after), after.status() == CoreLiquidationState.Status.PLANNED
+                    || after.status() == CoreLiquidationState.Status.ORDERED);
             keysById.put(liquidationId, current);
-            add(liquidationId, current);
+            if (current.unresolved()) add(liquidationId, current.key());
         }
     }
 
@@ -54,9 +62,7 @@ public final class LiquidationIndex {
         activeIds.clear();
         allActiveIds.clear();
         keysById.clear();
-        state.riskState().liquidations().values().stream()
-                .filter(LiquidationIndex::isActive)
-                .forEach(this::add);
+        state.riskState().liquidations().values().forEach(this::add);
     }
 
     private static boolean isActive(CoreLiquidationState value) {
@@ -71,8 +77,10 @@ public final class LiquidationIndex {
 
     private void add(CoreLiquidationState value) {
         LiquidationKey key = new LiquidationKey(value.userId(), value.instrumentId(), value.positionSide());
-        keysById.put(value.liquidationId(), key);
-        add(value.liquidationId(), key);
+        keysById.put(value.liquidationId(), new LiquidationRoute(value.userId(), value.instrumentId(),
+                value.positionSide(), isActive(value), value.status() == CoreLiquidationState.Status.PLANNED
+                || value.status() == CoreLiquidationState.Status.ORDERED));
+        if (isActive(value)) add(value.liquidationId(), key);
     }
 
     private void add(long liquidationId, LiquidationKey key) {

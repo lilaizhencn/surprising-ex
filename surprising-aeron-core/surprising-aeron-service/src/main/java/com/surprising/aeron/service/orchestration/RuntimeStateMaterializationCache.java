@@ -15,19 +15,27 @@ final class RuntimeStateMaterializationCache {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 
+    /** Full state exists only at an explicit cold read fence, outside the trading mutation path. */
     TradingCoreState current() {
         owner.runtimeState.requireSnapshotFenceReady();
-        long currentRevision = owner.runtimeState.revision();
-        long currentMarketRevision = owner.runtimeState.marketRevision();
-        long currentSequence = owner.commits.publication.publishedSequence();
-        if (state == null || revision != currentRevision || marketRevision != currentMarketRevision
-                || sequence != currentSequence) {
-            state = RuntimeStateMaterializer.materialize(owner.runtimeState, owner.identities);
-            revision = currentRevision;
-            marketRevision = currentMarketRevision;
-            sequence = currentSequence;
-        }
-        return state;
+        boolean acquired = owner.runtimeState.systemLedgerStarted() && !owner.runtimeState.ownerLaneAccess;
+        try {
+            if (acquired) {
+                while (!owner.runtimeState.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
+            }
+            if (owner.runtimeState.systemLedgerStarted()) {
+                state = null;
+                return RuntimeStateMaterializer.materialize(owner.runtimeState, owner.identities);
+            }
+            long currentRevision = owner.runtimeState.revision();
+            long currentMarketRevision = owner.runtimeState.marketRevision();
+            long currentSequence = owner.commits.publication.publishedSequence();
+            if (state == null || revision != currentRevision || marketRevision != currentMarketRevision || sequence != currentSequence) {
+                state = RuntimeStateMaterializer.materialize(owner.runtimeState, owner.identities);
+                revision = currentRevision; marketRevision = currentMarketRevision; sequence = currentSequence;
+            }
+            return state;
+        } finally { if (acquired) owner.runtimeState.releaseOwnerLaneAccess(); }
     }
 
     TradingCoreState snapshot() {

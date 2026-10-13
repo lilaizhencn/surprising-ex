@@ -36,6 +36,15 @@ public final class RuntimeFactIndexes implements TradingRuntimeState.ChangedInde
         this.adlPositions = require(adlPositions, "ADL-position");
     }
 
+    public com.surprising.aeron.service.state.index.LiquidationIndex.LiquidationRoute liquidationRoute(long id) {
+        return liquidations.route(id);
+    }
+    public boolean hasUnresolvedLiquidation(String instrumentId) { return liquidations.hasUnresolved(instrumentId); }
+
+    public com.surprising.aeron.service.state.index.AlgoOrderIndex.AlgoRoute algoRoute(long id) { return algos.value(id); }
+
+    public TriggerOrderIndex.TriggerRoute triggerRoute(long id) { return triggers.route(id); }
+
     public void applyCurrent(TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         if (runtime == null || identities == null || activeIdentities != null) {
             throw new IllegalArgumentException("runtime changed indexes are invalid");

@@ -57,7 +57,7 @@ public class MatcherTreasuryReceiptBenchmark {
 
     @Benchmark public long completeFinancialReceipt() {
         long currentSequence = ++sequence;
-        var event = runtime.prepareDirectCancellation(currentSequence, original, commandId, 0, identities, 10, 20);
+        var event = runtime.prepareDirectCancellation(currentSequence, original.userId(), original.orderId(), commandId, 0, identities, 10, 20);
         if (!event.submitTreasurySettlement(ledger)) throw new IllegalStateException("financial slot not admitted");
         event.beginMatcherPublication();
         // Matcher payload is a retained no-trade fixture; the Core proof/commit sequence

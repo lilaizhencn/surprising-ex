@@ -141,6 +141,9 @@ class SettlementLaneWorkerTest {
     void parkedAndActiveHandoffsKeepOrderAndDrainBeforeClose(int spins) throws Exception {
         String key = "surprising.aeron.settlement-spin-limit";
         String previous = System.getProperty(key);
+        String strategyKey = "surprising.aeron.settlement-wait-strategy";
+        String previousStrategy = System.getProperty(strategyKey);
+        System.setProperty(strategyKey, "BLOCKING");
         System.setProperty(key, Integer.toString(spins));
         try (var worker = new SettlementLaneWorker("test", new AccountLaneState(0, 8), 8)) {
             var field = SettlementLaneWorker.class.getDeclaredField("thread");
@@ -185,6 +188,7 @@ class SettlementLaneWorkerTest {
             assertThat(executed.get()).isEqualTo(32 * 9 + 1);
             assertThat(thread.isAlive()).isFalse();
         } finally {
+            if (previousStrategy == null) System.clearProperty(strategyKey); else System.setProperty(strategyKey, previousStrategy);
             if (previous == null) System.clearProperty(key); else System.setProperty(key, previous);
         }
     }

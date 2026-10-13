@@ -100,7 +100,9 @@ public final class SettlementLaneWorker implements AutoCloseable {
         this.lane = lane;
         thread = Thread.ofPlatform().daemon(true)
                 .name("core-" + role + "-lane-" + lane.laneId())
-                .start(this::run);
+                .unstarted(this::run);
+        lane.bindWorker(thread);
+        thread.start();
         while (!started && failure == null) Thread.onSpinWait();
         rethrowFailure();
     }
@@ -248,19 +250,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     || admissionNext < admissionProducerSequence.value
                     || hasMatcherSettlementWork()) {
                 diagnosticSample();
-                // Admissions are independent producer mail and must be drained even when the
-                // main queue head is a Matcher result that has not been published yet.
-                if (admissionNext < admissionProducerSequence.value) {
-                    int admissionIndex = (int) admissionNext & admissionIndexMask;
-                    Command admission = admissionCommands[admissionIndex];
-                    if (admission == null) throw new IllegalStateException("admission publication gap");
-                    admissionCommands[admissionIndex] = null;
-                    admissionNext++;
-                    admissionConsumerSequence.value = admissionNext;
-                    execute(admission);
-                    idleSpins = 0;
-                    continue;
-                }
                 if (completedHandoff > reboundHandoff) {
                     if (resumedHandoff < completedHandoff) {
                         if (!running) break;
@@ -276,6 +265,19 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     }
                     lane.bindOwner();
                     reboundHandoff = completedHandoff;
+                }
+                // Admissions are independent producer mail and must be drained even when the
+                // main queue head is a Matcher result that has not been published yet.
+                if (admissionNext < admissionProducerSequence.value) {
+                    int admissionIndex = (int) admissionNext & admissionIndexMask;
+                    Command admission = admissionCommands[admissionIndex];
+                    if (admission == null) throw new IllegalStateException("admission publication gap");
+                    admissionCommands[admissionIndex] = null;
+                    admissionNext++;
+                    admissionConsumerSequence.value = admissionNext;
+                    execute(admission);
+                    idleSpins = 0;
+                    continue;
                 }
                 // Handoff is an ownership barrier.  Do not consume a Matcher ring after the
                 // worker has released its Lane to the Owner and before the Owner resumes it.

@@ -193,24 +193,57 @@ final class OrderBookQueryService {
         return dispatchAccountQuery(message, id, laneMask, query);
     }
 
+    CoreResponse beginTriggerQuery(CoreMessage message) {
+        var requested = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeQuery(message.payloadUnsafe());
+        long before = requested.beforeTriggerOrderId() == 0 ? Long.MAX_VALUE : requested.beforeTriggerOrderId();
+        Iterable<Long> source = requested.expiresBeforeEpochMillis() > 0
+                ? owner.triggerOrderIndex.expired(requested.expiresBeforeEpochMillis(), requested.limit())
+                : requested.instrumentId().isEmpty()
+                ? requested.status() != null ? owner.triggerOrderIndex.ids(requested.status())
+                : message.header().userId() == 0 ? owner.triggerOrderIndex.ids() : owner.triggerOrderIndex.ids(message.header().userId())
+                : requested.status() == null ? owner.triggerOrderIndex.ids(requested.instrumentId())
+                : owner.triggerOrderIndex.ids(requested.instrumentId(), requested.status());
+        var selected = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
+        var users = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
+        long laneMask = 0;
+        int scanned = 0;
+        for (long id : source) {
+            if (++scanned > RuntimeOperationalQueryService.MAX_INDEX_SCAN)
+                throw new RuntimeOperationalQueryService.QueryTooLargeException();
+            var route = owner.triggerOrderIndex.route(id);
+            if (route == null || id >= before || requested.triggerOrderId() != 0 && requested.triggerOrderId() != id
+                    || message.header().userId() != 0 && message.header().userId() != route.userId()
+                    || !requested.instrumentId().isEmpty() && !requested.instrumentId().equals(route.instrumentId())
+                    || requested.status() != null && requested.status() != route.status()
+                    || message.header().messageType() == CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY && !route.status().open()) continue;
+            selected.add(id); users.add(route.userId());
+            laneMask |= owner.runtimeState.topology().accountLaneMask(route.userId());
+            if (selected.size() == Math.min(requested.limit(), RuntimeOperationalQueryService.MAX_QUERY_ENTITIES)) break;
+        }
+        if (selected.isEmpty()) return new CoreResponse(ResponseStatus.OK, owner.appliedCommandCount,
+                com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeList(List.of()));
+        long queryId = nextAsyncQueryId++;
+        var query = new AccountQuery(queryId, owner.appliedCommandCount, message.header().messageType(),
+                0, 0, 0, laneMask, null, null);
+        query.triggerPage = new TriggerQueryPage(selected.toArray(), users.toArray(),
+                new com.surprising.aeron.protocol.CoreTriggerOrderStateView[selected.size()]);
+        return dispatchAccountQuery(message, queryId, laneMask, query);
+    }
+
     private CoreResponse beginAlgoAccountQuery(CoreMessage message) {
         var requested = com.surprising.aeron.protocol.CoreAlgoOrderCodec.decodeQuery(message.payloadUnsafe());
         var ids = requested.algoOrderId() == 0
                 ? owner.algoOrderIndex.query(requested.userId(), requested.instrumentId(), requested.dueAtEpochMillis(),
-                        requested.limit(), owner.algoOrderIndex::value)
+                        requested.limit())
                 : owner.algoOrderIndex.value(requested.algoOrderId()) == null ? List.<Long>of() : List.of(requested.algoOrderId());
         if (ids.isEmpty()) return new CoreResponse(ResponseStatus.OK, owner.appliedCommandCount,
                 com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeList(List.of()));
         long[] selectedIds = new long[ids.size()], users = new long[ids.size()];
         long laneMask = 0;
-        int children = 0;
         for (int index = 0; index < ids.size(); index++) {
             long selected = ids.get(index);
             var route = owner.algoOrderIndex.value(selected);
             if (route == null) throw new IllegalStateException("algo query route is missing");
-            children = Math.addExact(children, route.childOrderIds().size());
-            if (children > RuntimeOperationalQueryService.MAX_INDEX_SCAN)
-                return owner.rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             selectedIds[index] = selected; users[index] = route.userId();
             laneMask |= owner.runtimeState.topology().accountLaneMask(route.userId());
         }
@@ -237,6 +270,8 @@ final class OrderBookQueryService {
     }
 
     /** 本次算法查询的固定路由与响应槽；各Lane只写自己的下标，完成位发布后归并。 */
+    private record TriggerQueryPage(long[] ids, long[] users, com.surprising.aeron.protocol.CoreTriggerOrderStateView[] views) { }
+
     private record AlgoQueryPage(long[] ids, long[] users, com.surprising.aeron.protocol.CoreAlgoOrderView[] views) { }
 
     private static CoreResponse missingAccountResponse(CoreMessageType type, long commandCount) {
@@ -255,6 +290,7 @@ final class OrderBookQueryService {
         private final long[] openOrderIds;
         private final com.surprising.aeron.protocol.CoreOrderStateView[] openOrders;
         private final AlgoQueryPage algoPage;
+        private TriggerQueryPage triggerPage;
         private final AtomicLong completedLaneMask = new AtomicLong();
 
         private AccountQuery(long id, long commandCount, CoreMessageType type, long userId,
@@ -298,6 +334,14 @@ final class OrderBookQueryService {
         }
 
         @Override public CoreResponse apply(AccountLaneState lane) {
+            if (triggerPage != null) {
+                for (int index = 0; index < triggerPage.ids.length; index++) {
+                    if (owner.runtimeState.topology().accountLaneId(triggerPage.users[index]) != lane.laneId()) continue;
+                    var value = owner.runtimeState.triggerOrder(triggerPage.ids[index]);
+                    if (value != null) triggerPage.views[index] = value.view();
+                }
+                return null;
+            }
             if (algoPage != null) {
                 for (int index = 0; index < algoPage.ids.length; index++) {
                     if (owner.runtimeState.topology().accountLaneId(algoPage.users[index]) != lane.laneId()) continue;
@@ -342,9 +386,22 @@ final class OrderBookQueryService {
                 if (response != null && (response.resultCode() == CoreResultCode.INVALID_COMMAND
                         || response.resultCode() == CoreResultCode.QUERY_RESPONSE_TOO_LARGE)) return response;
             }
+            if (triggerPage != null) {
+                var selected = new ArrayList<com.surprising.aeron.protocol.CoreTriggerOrderStateView>(triggerPage.views.length);
+                for (var view : triggerPage.views) if (view != null) selected.add(view);
+                return new CoreResponse(ResponseStatus.OK, commandCount,
+                        com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeList(selected));
+            }
             if (algoPage != null) {
                 var selected = new ArrayList<com.surprising.aeron.protocol.CoreAlgoOrderView>(algoPage.views.length);
-                for (var view : algoPage.views) if (view != null) selected.add(view);
+                int children = 0;
+                for (var view : algoPage.views) if (view != null) {
+                    children = Math.addExact(children, view.childOrderIds().size());
+                    if (children > RuntimeOperationalQueryService.MAX_INDEX_SCAN)
+                        return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
+                                CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
+                    selected.add(view);
+                }
                 return new CoreResponse(ResponseStatus.OK, commandCount,
                         com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeList(selected));
             }
@@ -367,18 +424,146 @@ final class OrderBookQueryService {
     }
 
     /** 财库查询复用已有异步查询ID及结果槽，Owner派发后立即返回。 */
-    CoreResponse beginTreasuryQuery(CoreMessage message) { return beginLedgerQuery(message, null, null); }
+    CoreResponse beginTreasuryQuery(CoreMessage message) { return beginLedgerQuery(message); }
 
-    CoreResponse beginInsuranceQuery(CoreMessage message, CoreLiquidationWorkView work,
-            InsuranceAllocationPolicy.AllocationInputs claims) {
-        return beginLedgerQuery(message, work, claims);
+    private LiquidationWorkQuery deferredLiquidationWorkQuery;
+
+    CoreResponse beginLiquidationWorkQuery(CoreMessage message, CoreLiquidationWorkView.Query requested) {
+        if (deferredLiquidationWorkQuery != null) return owner.rejected(CoreResultCode.MATCHING_REJECTED);
+        var candidates = requested.purpose() == CoreLiquidationWorkView.Purpose.INSURANCE
+                ? owner.liquidationIndex.activeIds()
+                : owner.liquidationIndex.activeIds().tailSet(requested.afterLiquidationId(), false);
+        if (requested.purpose() == CoreLiquidationWorkView.Purpose.INSURANCE
+                && candidates.size() > RuntimeOperationalQueryService.MAX_INDEX_SCAN)
+            throw new RuntimeOperationalQueryService.QueryTooLargeException();
+        long queryId = nextAsyncQueryId++;
+        var query = new LiquidationWorkQuery(queryId, owner.appliedCommandCount, requested, candidates);
+        queryIds.put(message.header().commandId(), queryId);
+        if (query.laneMask != 0 && !owner.runtimeState.dispatchAccountQuery(query.laneMask, query)) {
+            queryIds.remove(message.header().commandId());
+            return owner.rejected(CoreResultCode.MATCHING_REJECTED);
+        }
+        if (!owner.runtimeState.dispatchLedgerQuery(query)) deferredLiquidationWorkQuery = query;
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount);
     }
 
-    private CoreResponse beginLedgerQuery(CoreMessage message, CoreLiquidationWorkView work,
-            InsuranceAllocationPolicy.AllocationInputs claims) {
+    /** Lane reads execution/ADL facts; Ledger values insurance claims and encodes the bounded page. */
+    private final class LiquidationWorkQuery implements SettlementLaneWorker.Command, SystemLedgerLane.Entry {
+        private final long id, commandCount, laneMask;
+        private final CoreLiquidationWorkView.Query requested;
+        private final long[] ids;
+        private final int[] lanes, assetIds;
+        private final com.surprising.aeron.service.state.instrument.CoreInstrument[] instruments;
+        private final CoreLiquidationWorkView.Resolution[] receipts;
+        private final com.surprising.aeron.protocol.CoreLiquidationActionView[] actions;
+        private final com.surprising.aeron.service.state.market.MarkPriceRuntime[] marks;
+        private final com.surprising.aeron.protocol.CoreRiskScanContinuation continuation;
+        private final boolean sourceComplete;
+        private final CoreResultCode[] failures;
+        private final InsuranceAllocationPolicy.AllocationInputs[] claims;
+        private final java.util.concurrent.atomic.AtomicLong completed = new java.util.concurrent.atomic.AtomicLong();
+        LiquidationWorkQuery(long id, long commandCount, CoreLiquidationWorkView.Query requested, java.util.NavigableSet<Long> candidates) {
+            this.id = id; this.commandCount = commandCount; this.requested = requested;
+            int count = Math.min(candidates.size(), RuntimeOperationalQueryService.MAX_INDEX_SCAN);
+            sourceComplete = count == candidates.size();
+            continuation = RuntimeLiquidationQueryService.continuation(owner.runtimeState, owner.identities, requested.purpose());
+            ids = new long[count]; lanes = new int[ids.length]; assetIds = new int[ids.length];
+            instruments = new com.surprising.aeron.service.state.instrument.CoreInstrument[ids.length];
+            receipts = new CoreLiquidationWorkView.Resolution[ids.length];
+            actions = new com.surprising.aeron.protocol.CoreLiquidationActionView[ids.length];
+            marks = new com.surprising.aeron.service.state.market.MarkPriceRuntime[ids.length];
+            failures = new CoreResultCode[owner.runtimeState.topology().accountLaneCount()];
+            claims = new InsuranceAllocationPolicy.AllocationInputs[owner.runtimeState.topology().accountLaneCount()];
+            long mask = 0; int index = 0;
+            for (long liquidationId : candidates) {
+                if (index == count) break;
+                var route = owner.liquidationIndex.route(liquidationId);
+                if (route == null) throw new IllegalStateException("liquidation query route is missing");
+                instruments[index] = owner.runtimeState.instrument(route.instrumentId());
+                assetIds[index] = owner.identities.assetId(instruments[index].settleAsset());
+                marks[index] = owner.runtimeState.markPrice(owner.identities.findSymbolId(route.instrumentId()));
+                ids[index] = liquidationId; lanes[index] = owner.runtimeState.topology().accountLaneId(route.userId());
+                mask |= 1L << lanes[index++];
+            }
+            laneMask = mask;
+        }
+        @Override public void execute(AccountLaneState lane) {
+            try { owner.runtimeState.readAccountLane(lane, owned -> {
+                for (int index = 0; index < ids.length; index++) {
+                    if (lanes[index] != owned.laneId()) continue;
+                    var value = owner.runtimeState.liquidation(ids[index]);
+                    if (value == null) continue;
+                    var purpose = requested.purpose();
+                    if (purpose == CoreLiquidationWorkView.Purpose.EXECUTION) {
+                        var mark = marks[index];
+                        if ((value.status() != com.surprising.aeron.service.state.model.CoreLiquidationState.Status.PLANNED
+                                && value.status() != com.surprising.aeron.service.state.model.CoreLiquidationState.Status.ORDERED)
+                                || mark == null || mark.priceSequence() != value.triggerPriceSequence()) continue;
+                        actions[index] = new com.surprising.aeron.protocol.CoreLiquidationActionView(value.liquidationId(),
+                                value.userId(), instruments[index].instrumentId(), value.marginMode(), value.positionSide(),
+                                value.triggerPriceSequence(), value.signedQuantitySteps(), value.closeQuantitySteps(),
+                                mark.markPriceTicks(), value.status().name(),
+                                value.status() == com.surprising.aeron.service.state.model.CoreLiquidationState.Status.ORDERED
+                                        ? value.nextCancelOrderId() : 0);
+                        continue;
+                    }
+                    var required = purpose == CoreLiquidationWorkView.Purpose.INSURANCE
+                            ? com.surprising.aeron.service.state.model.CoreLiquidationState.Status.INSURANCE_REQUIRED
+                            : com.surprising.aeron.service.state.model.CoreLiquidationState.Status.ADL_REQUIRED;
+                    if (value.status() != required) continue;
+                    var instrument = instruments[index];
+                    if (instrument == null || instrument != value.instrument() || instrument.contractType().productLine() != owner.productLine) continue;
+                    receipts[index] = new CoreLiquidationWorkView.Resolution(value.liquidationId(), value.userId(),
+                            instrument.instrumentId(), instrument.settleAsset(), value.marginMode(), value.positionSide(),
+                            value.triggerPriceSequence(), value.signedQuantitySteps(), value.deficitUnits(), 0, purpose);
+                }
+                if (requested.purpose() == CoreLiquidationWorkView.Purpose.INSURANCE)
+                    claims[owned.laneId()] = InsuranceAllocationPolicy.prepareLaneAllocations(owner.runtimeState, ids, assetIds, instruments);
+                return null;
+            }); }
+            catch (RuntimeOperationalQueryService.QueryTooLargeException tooLarge) {
+                failures[lane.laneId()] = CoreResultCode.QUERY_RESPONSE_TOO_LARGE;
+            } catch (IllegalArgumentException | ArithmeticException invalid) {
+                failures[lane.laneId()] = CoreResultCode.INVALID_COMMAND;
+            }
+            completed.getAndUpdate(mask -> mask | (1L << lane.laneId()));
+            owner.runtimeState.signalLedgerWork();
+            owner.runtimeState.signalOwnerCompletion();
+        }
+        @Override public boolean ready() { return completed.get() == laneMask; }
+        @Override public void apply(TreasuryRuntime ledger) {
+            CoreResponse response;
+            try {
+                for (CoreResultCode failure : failures) {
+                    if (failure == null) continue;
+                    completedBookQueries.put(id, CompletedBookQuery.encoded(new CoreResponse(
+                            ResponseStatus.REJECTED, ResponseStatus.REJECTED, failure, commandCount)));
+                    owner.runtimeState.signalOwnerCompletion();
+                    return;
+                }
+                var result = RuntimeLiquidationQueryService.workPage(owner.productLine, requested, ids, actions,
+                        receipts, continuation, sourceComplete);
+                if (requested.purpose() == CoreLiquidationWorkView.Purpose.INSURANCE) {
+                    var allocations = InsuranceAllocationPolicy.allocations(ledger, InsuranceAllocationPolicy.mergeLaneClaims(claims));
+                    result = RuntimeLiquidationQueryService.insuranceRecommendations(result, allocations);
+                }
+                response = new CoreResponse(ResponseStatus.OK, commandCount, CoreLiquidationWorkCodec.encodeWork(result));
+            } catch (RuntimeOperationalQueryService.QueryTooLargeException tooLarge) {
+                response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
+                        CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
+            } catch (IllegalArgumentException | ArithmeticException invalid) {
+                response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
+                        CoreResultCode.INVALID_COMMAND, commandCount);
+            }
+            completedBookQueries.put(id, CompletedBookQuery.encoded(response));
+            owner.runtimeState.signalOwnerCompletion();
+        }
+    }
+
+    private CoreResponse beginLedgerQuery(CoreMessage message) {
         long id = nextAsyncQueryId++;
         queryIds.put(message.header().commandId(), id);
-        LedgerQuery query = new LedgerQuery(id, owner.appliedCommandCount, work, claims);
+        LedgerQuery query = new LedgerQuery(id, owner.appliedCommandCount);
         try {
             if (!owner.runtimeState.dispatchLedgerQuery(query)) {
                 queryIds.remove(message.header().commandId());
@@ -394,27 +579,15 @@ final class OrderBookQueryService {
     private final class LedgerQuery implements SystemLedgerLane.Entry {
         private final long id;
         private final long commandCount;
-        private final CoreLiquidationWorkView insuranceWork;
-        private final InsuranceAllocationPolicy.AllocationInputs claims;
-        private LedgerQuery(long id, long commandCount, CoreLiquidationWorkView work,
-                InsuranceAllocationPolicy.AllocationInputs claims) {
+        private LedgerQuery(long id, long commandCount) {
             this.id = id;
             this.commandCount = commandCount;
-            this.insuranceWork = work;
-            this.claims = claims;
         }
         @Override public void apply(TreasuryRuntime ledger) {
             CoreResponse response;
             try {
-                byte[] encoded;
-                if (insuranceWork == null) {
-                    var assets = RuntimeOperationalQueryService.treasuryAssets(ledger, owner.identities);
-                    encoded = CoreStateQueryCodec.encodeTreasuryState(assets);
-                } else {
-                    var allocations = InsuranceAllocationPolicy.allocations(ledger, claims);
-                    var work = RuntimeLiquidationQueryService.insuranceRecommendations(insuranceWork, allocations);
-                    encoded = CoreLiquidationWorkCodec.encodeWork(work);
-                }
+                var assets = RuntimeOperationalQueryService.treasuryAssets(ledger, owner.identities);
+                byte[] encoded = CoreStateQueryCodec.encodeTreasuryState(assets);
                 response = new CoreResponse(ResponseStatus.OK, commandCount, encoded);
             } catch (RuntimeOperationalQueryService.QueryTooLargeException failure) {
                 response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
@@ -481,7 +654,17 @@ final class OrderBookQueryService {
         return queryIds.getOrDefault(queryId, 0L);
     }
 
+    /** Called after the account and financial readers have stopped. */
+    void clearPendingQueries() {
+        completedBookQueries.clear();
+        failedQueries.clear();
+        queryIds.clear();
+        deferredLiquidationWorkQuery = null;
+    }
+
     public CoreResponse takeQueryResult(long queryId) {
+        if (deferredLiquidationWorkQuery != null && deferredLiquidationWorkQuery.id == queryId
+                && owner.runtimeState.dispatchLedgerQuery(deferredLiquidationWorkQuery)) deferredLiquidationWorkQuery = null;
         if (failedQueries.remove(queryId) != null) {
             queryIds.values().removeIf(value -> value == queryId);
             return owner.rejected(CoreResultCode.MATCHING_REJECTED);

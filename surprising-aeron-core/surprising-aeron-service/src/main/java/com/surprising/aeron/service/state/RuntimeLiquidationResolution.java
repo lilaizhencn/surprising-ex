@@ -55,6 +55,17 @@ public final class RuntimeLiquidationResolution {
             throw new IllegalArgumentException("invalid liquidation resolution apply");
         }
         runtime.assertOwner();
+        if (asynchronous) {
+            var route = runtime.liquidationRoute(command.liquidationId());
+            if (route == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation route is missing");
+            CoreInstrument instrument = requireInstrument(runtime, route.instrumentId());
+            int assetId = identities.assetId(instrument.settleAsset());
+            ResolutionWork work = reuse == null || !reuse.reusable() ? new ResolutionWork() : reuse;
+            work.sourceUserId = route.userId();
+            work.prepare(runtime, command, null, assetId, null);
+            work.prepareClaimReads(candidateIds, identities);
+            return work;
+        }
         LiquidationRuntime liquidation = runtime.liquidation(command.liquidationId());
         if (liquidation == null) {
             throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
@@ -84,6 +95,12 @@ public final class RuntimeLiquidationResolution {
         private int assetId;
         private long laneMask;
         private boolean done, ledgerDispatched, accountsDispatched;
+        private long sourceUserId;
+        private boolean capturingClaims;
+        private long[] claimIds = new long[4];
+        private int[] claimLanes = new int[4];
+        private LiquidationRuntime[] claimReceipts = new LiquidationRuntime[4];
+        private int claimCount;
 
         private void prepare(TradingRuntimeState runtime, ResolveLiquidationCommand command,
                 LiquidationRuntime liquidation, int assetId, InsuranceAllocationPolicy.ResolutionInputs allocation) {
@@ -91,13 +108,39 @@ public final class RuntimeLiquidationResolution {
             runtime.requireRevisionCapacity();
             this.runtime = runtime; this.command = command; this.liquidation = liquidation;
             this.assetId = assetId; this.allocation = allocation;
-            laneMask = runtime.topology().accountLaneMask(liquidation.userId());
+            laneMask = runtime.topology().accountLaneMask(liquidation == null ? sourceUserId : liquidation.userId());
             nextLiquidation = null;
             treasuryDelta.clear();
-            done = ledgerDispatched = accountsDispatched = false;
+            done = ledgerDispatched = accountsDispatched = capturingClaims = false;
+        }
+
+        private void prepareClaimReads(Iterable<Long> candidateIds, RuntimeIdentityRegistry identities) {
+            claimCount = 0;
+            long readMask = laneMask;
+            if (command.resolution() == ResolveLiquidationCommand.Resolution.INSURANCE) {
+                for (long id : candidateIds) {
+                    var route = runtime.liquidationRoute(id);
+                    if (route == null) continue;
+                    var instrument = runtime.instrument(route.instrumentId());
+                    if (instrument == null || identities.assetId(instrument.settleAsset()) != assetId) continue;
+                    if (claimCount == claimIds.length) {
+                        int capacity = Math.multiplyExact(claimCount, 2);
+                        claimIds = java.util.Arrays.copyOf(claimIds, capacity);
+                        claimLanes = java.util.Arrays.copyOf(claimLanes, capacity);
+                        claimReceipts = java.util.Arrays.copyOf(claimReceipts, capacity);
+                    }
+                    int laneId = runtime.topology().accountLaneId(route.userId());
+                    claimIds[claimCount] = id; claimLanes[claimCount] = laneId; claimReceipts[claimCount++] = null;
+                    readMask |= 1L << laneId;
+                }
+            }
+            capturingClaims = true;
+            runtime.dispatchControlLanes(readMask, this);
         }
 
         @Override protected void applyLedger(TreasuryRuntime ledger) {
+            if (command.resolution() == ResolveLiquidationCommand.Resolution.INSURANCE && allocation == null)
+                allocation = InsuranceAllocationPolicy.prepareResolution(claimReceipts, claimCount, liquidation, assetId);
             long nextDeficit = liquidation.deficitUnits();
             CoreLiquidationState.Status nextStatus;
             switch (command.resolution()) {
@@ -137,10 +180,30 @@ public final class RuntimeLiquidationResolution {
                     current.liquidationFeeRatePpm(), current.liquidationFeeUnits(), nextStatus, 0);
         }
 
-        @Override public Object apply(int ignored) { runtime.replaceLiquidation(nextLiquidation); return null; }
+        @Override public Object apply(int laneId) {
+            if (capturingClaims) {
+                if (runtime.currentLaneOwns(sourceUserId)) {
+                    liquidation = runtime.liquidation(command.liquidationId());
+                    if (liquidation == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
+                }
+                for (int index = 0; index < claimCount; index++) {
+                    if (claimLanes[index] != laneId) continue;
+                    var value = runtime.liquidation(claimIds[index]);
+                    if (value != null && value.status() == CoreLiquidationState.Status.INSURANCE_REQUIRED)
+                        claimReceipts[index] = value;
+                }
+                return null;
+            }
+            runtime.replaceLiquidation(nextLiquidation);
+            return null;
+        }
 
         @Override public boolean getAsBoolean() {
             if (done) return true;
+            if (capturingClaims) {
+                if (!runtime.pollControlLanes()) return false;
+                capturingClaims = false;
+            }
             if (!ledgerDispatched) {
                 if (!runtime.dispatchLedgerCommand(this)) return false;
                 ledgerDispatched = true;
@@ -158,6 +221,10 @@ public final class RuntimeLiquidationResolution {
         private void finish() {
             if (done) return;
             runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+            java.util.Arrays.fill(claimReceipts, 0, claimCount, null);
+            allocation = null;
+            liquidation = nextLiquidation = null;
+            command = null;
             done = true;
         }
     }

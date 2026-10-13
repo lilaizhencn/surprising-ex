@@ -79,7 +79,7 @@ final class RuntimeTestStateTransitions {
         return mutate(before, (runtime, identities) -> {
             ActiveOrderIndex activeOrders = new ActiveOrderIndex(before);
             long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
-                    command, 0, activeOrders);
+                    command, 0, runtime.admissionOrders(userId, command.symbolId()));
             RuntimeOrderStateTransitions.place(runtime, identities, userId, command, UUID.randomUUID(), required);
         });
     }
@@ -89,7 +89,7 @@ final class RuntimeTestStateTransitions {
         return mutate(before, (runtime, identities) -> {
             ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(before, command);
             long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
-                    resolved, openInterestSteps, activeOrders);
+                    resolved, openInterestSteps, runtime.admissionOrders(userId, resolved.symbolId()));
             RuntimeOrderStateTransitions.place(runtime, identities, userId, resolved, commandId, required);
         });
     }
@@ -163,9 +163,15 @@ final class RuntimeTestStateTransitions {
         return settleInstrumentWithProgress(before, command, null, null, null).state();
     }
 
+    static java.util.List<com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder> cancellationRoutes(
+            Collection<CoreOrderState> orders) {
+        return orders.stream().map(order -> new com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder(
+                order.orderId(), order.userId(), order.instrumentId())).toList();
+    }
+
     TradingCoreState executeLiquidation(TradingCoreState before, ExecuteLiquidationCommand command) {
         return mutate(before, (runtime, identities) -> RuntimeDerivativeLiquidationProcessor.applyExecution(
-                before, command, openOrders(before), runtime, identities));
+                before, command, cancellationRoutes(openOrders(before)), runtime, identities));
     }
 
     TradingCoreState executeLiquidationAfterCancellation(TradingCoreState before,
@@ -180,7 +186,7 @@ final class RuntimeTestStateTransitions {
                                                      long nextCursorOrderId) {
         return mutate(before, (runtime, identities) ->
                 RuntimeDerivativeLiquidationProcessor.applyCancellationAdvance(before, command,
-                        canceledOrders, nextCursorOrderId, runtime, identities));
+                        cancellationRoutes(canceledOrders), nextCursorOrderId, runtime, identities));
     }
 
     TradingCoreState cancelLifecycleOrders(TradingCoreState before,

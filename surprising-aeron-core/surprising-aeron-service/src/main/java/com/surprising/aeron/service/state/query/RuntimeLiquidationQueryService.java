@@ -16,6 +16,7 @@ import com.surprising.aeron.protocol.CoreRiskScanContinuation;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
+import java.util.List;
 
 public final class RuntimeLiquidationQueryService {
 
@@ -124,6 +125,38 @@ public final class RuntimeLiquidationQueryService {
         return new CoreLiquidationWorkView(productLine, nextCursor, complete, continuation, actions, resolutions);
     }
 
+    /** Immutable Lane receipts retain global cursor and byte-budget semantics at the query boundary. */
+    public static CoreLiquidationWorkView workPage(ProductLine productLine,
+            CoreLiquidationWorkView.Query query, long[] ids, CoreLiquidationActionView[] actionReceipts,
+            CoreLiquidationWorkView.Resolution[] resolutionReceipts, CoreRiskScanContinuation continuation,
+            boolean sourceComplete) {
+        ArrayList<CoreLiquidationActionView> actions = new ArrayList<>();
+        ArrayList<CoreLiquidationWorkView.Resolution> resolutions = new ArrayList<>();
+        long cursor = query.afterLiquidationId();
+        boolean complete = sourceComplete;
+        int encoded = CoreLiquidationWorkCodec.encodeWork(new CoreLiquidationWorkView(
+                productLine, cursor, false, continuation, List.of(), List.of())).length;
+        for (int index = 0; index < ids.length; index++) {
+            if (ids[index] <= query.afterLiquidationId()) continue;
+            var action = actionReceipts[index];
+            var resolution = resolutionReceipts[index];
+            if (action == null && resolution == null) { cursor = ids[index]; continue; }
+            if (actions.size() + resolutions.size() == query.maxItems()) { complete = false; break; }
+            int itemBytes = CoreLiquidationWorkCodec.encodeWork(new CoreLiquidationWorkView(
+                    productLine, ids[index], false, continuation,
+                    action == null ? List.of() : List.of(action),
+                    resolution == null ? List.of() : List.of(resolution))).length
+                    - CoreLiquidationWorkCodec.encodeWork(new CoreLiquidationWorkView(
+                    productLine, ids[index], false, continuation, List.of(), List.of())).length;
+            if (Math.addExact(encoded, itemBytes) > query.maxBytes()) { complete = false; break; }
+            encoded = Math.addExact(encoded, itemBytes);
+            if (action != null) actions.add(action);
+            if (resolution != null) resolutions.add(resolution);
+            cursor = ids[index];
+        }
+        return new CoreLiquidationWorkView(productLine, cursor, complete, continuation, actions, resolutions);
+    }
+
     /** 查询编码边界补齐账本推荐额，不改变索赔权威或分页选取。 */
     public static CoreLiquidationWorkView insuranceRecommendations(CoreLiquidationWorkView work,
                                                                   java.util.Map<Long, Long> allocations) {
@@ -156,7 +189,7 @@ public final class RuntimeLiquidationQueryService {
                 && instrument.contractType().productLine() == productLine;
     }
 
-    private static CoreRiskScanContinuation continuation(
+    public static CoreRiskScanContinuation continuation(
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
             CoreLiquidationWorkView.Purpose purpose) {
         if (purpose != CoreLiquidationWorkView.Purpose.EXECUTION) return null;

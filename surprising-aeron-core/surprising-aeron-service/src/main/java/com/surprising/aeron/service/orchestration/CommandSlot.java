@@ -53,6 +53,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private CoreMatchingOrder admittedMatchingOrder;
     /** 已完成冻结的不可变触发子订单回执，仅保留到本命令槽释放。 */
     private OrderRuntime triggerAdmissionOrder;
+    private com.surprising.aeron.service.state.model.CoreTriggerOrderState sourceTrigger;
     /**
      * Compact command lifecycle.  The slot is reused by the pending ring, so a byte is enough
      * to describe the owner-side admission/submission boundary without a second continuation map.
@@ -109,6 +110,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     com.surprising.aeron.service.state.LaneCommitEvent commitEvent;
 
     boolean controlPending;
+    /** The Ledger validation poll must not submit the already committed account task again. */
+    boolean controlAccountsCommitted;
     long controlStartedNanos;
     byte[] resultData;
 
@@ -332,6 +335,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         settlementApplyStartNanos = 0;
         admittedMatchingOrder = null;
         triggerAdmissionOrder = null;
+        sourceTrigger = null;
         admittedPlaceOrder = null;
         matchingLifecycle = MATCHING_ADMITTED;
         deferredClusterTimestamp = 0;
@@ -357,10 +361,9 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                            CommandFingerprint fingerprint, List<Long> preMatchingCancellationOrderIds,
                            RuntimeFundsAccumulator sourceFunds,
                            DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
-        if (sourceFunds == null) throw new IllegalArgumentException("pending command funds are required");
         initialize(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds,
                 RuntimeFundsDelta.empty(), decodedCommand, admission);
-        sourceFunds.transferToEmpty(fundsAccumulator);
+        if (sourceFunds != null) sourceFunds.transferToEmpty(fundsAccumulator);
         return this;
     }
 
@@ -462,6 +465,11 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     ResolvedPlaceOrder admittedPlaceOrder() { return admittedPlaceOrder; }
     CoreMatchingOrder admittedMatchingOrder() { return admittedMatchingOrder; }
     /** 沿用已完成冻结的不可变订单，触发续步不得再回读 Lane 的客户端订单索引。 */
+    com.surprising.aeron.service.state.model.CoreTriggerOrderState sourceTrigger() { return sourceTrigger; }
+    void sourceTrigger(com.surprising.aeron.service.state.model.CoreTriggerOrderState value) {
+        if (value == null || sourceTrigger != null) throw new IllegalStateException("trigger receipt already bound");
+        sourceTrigger = value;
+    }
     OrderRuntime triggerAdmissionOrder() { return triggerAdmissionOrder; }
     void triggerAdmission(OrderRuntime order) {
         if (operation != Operation.TRIGGER || order == null || admittedMatchingOrder != null)
@@ -541,6 +549,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         admittedPlaceOrder = null;
         admittedMatchingOrder = null;
         triggerAdmissionOrder = null;
+        sourceTrigger = null;
         realtimeTakerOrder = null;
         realtimeResolvedTakerOrder = null;
         matchingLifecycle = MATCHING_ADMITTED;
@@ -713,7 +722,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     void suspendCommitContext(CommandResultBuilder resultBuilder,
                               com.surprising.aeron.service.state.RuntimeFundsAccumulator fundsAccumulator,
                               boolean snapshotDirty, boolean snapshotProvisionalOnly) {
-        if (resultBuilder == null || fundsAccumulator == null || commitContextActive) {
+        if (resultBuilder == null || commitContextActive) {
             throw new IllegalStateException("invalid suspended sequence commit context");
         }
         PrimitiveLongChangeSet reusableUserIds = commitChangedUserIds;
@@ -723,7 +732,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         resultBuilder.changedUserIds = reusableUserIds;
         resultBuilder.changedOrderIds = reusableOrderIds;
         commitFundsAccumulator.clear();
-        fundsAccumulator.transferToEmpty(commitFundsAccumulator);
+        if (fundsAccumulator != null) fundsAccumulator.transferToEmpty(commitFundsAccumulator);
         commitSnapshotDirty = snapshotDirty;
         commitSnapshotProvisionalOnly = snapshotProvisionalOnly;
         commitContextActive = true;
@@ -746,8 +755,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     /** 恢复本序号时交还原资金缓冲，不把已汇总的逐账户 posting 再合并一次。 */
     void takeCommitFundsTo(com.surprising.aeron.service.state.RuntimeFundsAccumulator target) {
         requireCommit();
-        target.clear();
-        commitFundsAccumulator.transferToEmpty(target);
+        if (target != null) { target.clear(); commitFundsAccumulator.transferToEmpty(target); }
     }
     boolean commitSnapshotDirty() { requireCommit(); return commitSnapshotDirty; }
     boolean commitSnapshotProvisionalOnly() { requireCommit(); return commitSnapshotProvisionalOnly; }
@@ -841,6 +849,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         if (liquidationCheck != null) liquidationCheck.clearReferences();
         controlWork = null;
         controlPending = false;
+        controlAccountsCommitted = false;
         controlStartedNanos = 0;
         commitEvent = null;
         resultData = null;

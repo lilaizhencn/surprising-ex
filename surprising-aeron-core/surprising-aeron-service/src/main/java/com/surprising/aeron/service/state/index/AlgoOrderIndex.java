@@ -14,7 +14,6 @@ import java.util.NavigableSet;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.function.LongFunction;
 
 public final class AlgoOrderIndex {
 
@@ -26,7 +25,11 @@ public final class AlgoOrderIndex {
     private final Map<String, NavigableSet<AlgoDueKey>> idsBySymbol = new TreeMap<>();
     private final NavigableSet<AlgoDueKey> allDue = new TreeSet<>(DUE_ORDER);
     private final Map<AlgoClientKey, Long> idsByClient = new java.util.HashMap<>();
-    private final Map<Long, CoreAlgoOrderState> valuesById = new TreeMap<>();
+    private final Map<Long, AlgoRoute> valuesById = new TreeMap<>();
+
+    /** Scheduling and identity keys only; quantities, status and child orders stay in Lane. */
+    public record AlgoRoute(long algoOrderId, long userId, String instrumentId,
+                            long nextSliceAtEpochMillis, String clientAlgoOrderId) { }
 
     public AlgoOrderIndex(TradingCoreState state) {
         rebuild(state);
@@ -38,16 +41,9 @@ public final class AlgoOrderIndex {
     }
 
     /** 已有Owner索引的不可变路由事实；账户和子订单仍由实际Lane读取。 */
-    public CoreAlgoOrderState value(long algoOrderId) { return valuesById.get(algoOrderId); }
+    public AlgoRoute value(long algoOrderId) { return valuesById.get(algoOrderId); }
 
-    public List<Long> query(long userId, String instrumentId, long dueAtEpochMillis, int limit,
-                            Map<Long, CoreAlgoOrderState> values) {
-        return query(userId, instrumentId, dueAtEpochMillis, limit, values::get);
-    }
-
-    public List<Long> query(long userId, String instrumentId, long dueAtEpochMillis, int limit,
-                            LongFunction<CoreAlgoOrderState> lookup) {
-        if (lookup == null) throw new IllegalArgumentException("algo order lookup is required");
+    public List<Long> query(long userId, String instrumentId, long dueAtEpochMillis, int limit) {
         int boundedLimit = Math.max(1, Math.min(limit, 10_000));
         String normalizedSymbol = instrumentId == null || instrumentId.isEmpty()
                 ? "" : OrderReservation.requireInstrumentId(instrumentId);
@@ -58,7 +54,7 @@ public final class AlgoOrderIndex {
                 : candidates.headSet(new AlgoDueKey(dueAtEpochMillis, Long.MAX_VALUE), true);
         List<Long> result = new ArrayList<>(Math.min(boundedLimit, dueCandidates.size()));
         for (AlgoDueKey key : dueCandidates) {
-            CoreAlgoOrderState value = lookup.apply(key.algoOrderId());
+            AlgoRoute value = valuesById.get(key.algoOrderId());
             if (value == null || (userId != 0 && value.userId() != userId)
                     || (!normalizedSymbol.isEmpty() && !value.instrumentId().equals(normalizedSymbol))
                     || (dueAtEpochMillis != 0 && (value.nextSliceAtEpochMillis() == 0
@@ -72,7 +68,7 @@ public final class AlgoOrderIndex {
     }
 
     public void apply(long algoOrderId, CoreAlgoOrderState after) {
-        CoreAlgoOrderState previous = valuesById.remove(algoOrderId);
+        AlgoRoute previous = valuesById.remove(algoOrderId);
         if (previous != null) remove(previous);
         if (after != null) add(after);
     }
@@ -101,7 +97,9 @@ public final class AlgoOrderIndex {
     }
 
     private void add(CoreAlgoOrderState value) {
-        valuesById.put(value.algoOrderId(), value);
+        AlgoRoute route = new AlgoRoute(value.algoOrderId(), value.userId(), value.instrumentId(),
+                value.nextSliceAtEpochMillis(), value.clientAlgoOrderId());
+        valuesById.put(value.algoOrderId(), route);
         AlgoDueKey key = new AlgoDueKey(value.nextSliceAtEpochMillis(), value.algoOrderId());
         allDue.add(key);
         idsByUser.computeIfAbsent(value.userId(), ignored -> new TreeSet<>(DUE_ORDER)).add(key);
@@ -111,7 +109,7 @@ public final class AlgoOrderIndex {
         }
     }
 
-    private void remove(CoreAlgoOrderState value) {
+    private void remove(AlgoRoute value) {
         valuesById.remove(value.algoOrderId());
         AlgoDueKey key = new AlgoDueKey(value.nextSliceAtEpochMillis(), value.algoOrderId());
         allDue.remove(key);

@@ -137,6 +137,14 @@ final class CoreDirectCommandFlow {
             runtime.runtimeState.releaseLaneCommit(runtime.directCommand.commitEvent());
             runtime.directCommand.clearCommitEvent();
         }
+        if (status == ResponseStatus.APPLIED && !runtime.runtimeState.pollControlFundsValidation(
+                message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ADJUST_BALANCE
+                || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TRANSFER_OUT
+                || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TRANSFER_IN
+                || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ADJUST_INSURANCE_FUND)) {
+            runtime.directCommand.result(status, resultCode);
+            return null;
+        }
         runtime.directCommand.clearFinalizationPrepared();
         runtime.commits.completeCommitPublicationBatch();
         if (status == ResponseStatus.APPLIED) runtime.validateFundsConservation(message);

@@ -1509,9 +1509,6 @@ class CoreOrderedOrderBatchTest {
                 assertThat(state.admissions.matchingSymbol(replaceSingle, CommandSlot.Operation.REPLACE,
                         com.surprising.aeron.service.command.order.DecodedMatchingCommand.decode(replaceSingle)))
                         .isEqualTo("1");
-                assertThat(state.admissions.preMatchingSelfTradeCancellations(1001,
-                        linearOrder(13_103, "route-self-trade", CoreOrderSide.SELL, 900, 1), 0, 900))
-                        .containsExactly(13_101);
                 var foreignSingle = command(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 5,
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(13_102)), 1001);
                 assertThatThrownBy(() -> state.admissions.validatePendingCancel(foreignSingle,

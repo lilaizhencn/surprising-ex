@@ -79,6 +79,8 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
                         lane, userId, symbolId(), positionKey, positionSide(), side(), originalOrderId)
                         .conflictsFor(quantitySteps());
             }
+            closeCapacityCancellations = lane.preMatchingCancellations(userId, symbolId(),
+                    side(), matchingPriceTicks(), originalOrderId, orderId(), closeCapacityCancellations);
             var user = lane.users.get(userId);
             admission = new ResolvedMatchingAdmission(userId, originalOrderId, original.revision(),
                     user == null ? 0 : user.revision(), command, this, required);

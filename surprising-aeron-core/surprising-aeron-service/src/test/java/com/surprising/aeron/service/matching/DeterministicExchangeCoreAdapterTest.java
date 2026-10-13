@@ -578,7 +578,7 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     private static Iterable<CoreOrderState> activeOrders(TradingCoreState state) {
-        return new ActiveOrderIndex(state).orders();
+        return state.orders().values().stream().filter(order -> order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN).toList();
     }
 
     private static CoreMatchingResult result(boolean accepted, String resultCode) {

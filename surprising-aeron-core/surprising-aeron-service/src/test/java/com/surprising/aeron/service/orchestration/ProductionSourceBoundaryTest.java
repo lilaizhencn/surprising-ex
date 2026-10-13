@@ -14,6 +14,25 @@ import org.junit.jupiter.api.Test;
 
 class ProductionSourceBoundaryTest {
     @Test
+    void ownerRetainsNoPersistentLaneBusinessViews() {
+        var fields = java.util.Arrays.stream(com.surprising.aeron.service.state.TradingRuntimeState.class.getDeclaredFields());
+        assertThat(fields.map(java.lang.reflect.Field::getName)).doesNotContain(
+                "publishedOrders", "publishedUsers", "publishedAlgoOrders", "publishedTriggerOrders",
+                "publishedLiquidations", "publishedRiskSnapshots");
+        var businessTypes = java.util.Set.of("CoreAlgoOrderState", "CoreTriggerOrderState", "LiquidationRuntime", "RiskSnapshotRuntime");
+        for (var field : com.surprising.aeron.service.state.TradingRuntimeState.class.getDeclaredFields()) {
+            if (!java.util.Map.class.isAssignableFrom(field.getType())
+                    && !field.getType().getName().endsWith("LongObjectHashMap")) continue;
+            assertThat(businessTypes.stream().anyMatch(type -> field.getGenericType().getTypeName().contains(type)))
+                    .as("persistent Owner business view %s", field.getName()).isFalse();
+        }
+        assertThat(java.util.Arrays.stream(com.surprising.aeron.service.state.index.ActiveOrderIndex.IndexedOrder.class.getDeclaredFields())
+                .map(java.lang.reflect.Field::getName)).containsExactlyInAnyOrder("orderId", "userId", "instrumentId");
+        assertThat(java.util.Arrays.stream(TradingCoreRuntime.class.getDeclaredFields()).map(java.lang.reflect.Field::getName))
+                .doesNotContain("commandFundsAccumulator");
+    }
+
+    @Test
     void productionSourcesDoNotContainTestHooksOrBenchmarkBypasses() throws IOException {
         Path root = Path.of("").toAbsolutePath();
         while (!Files.isDirectory(root.resolve("surprising-aeron-core"))) {

@@ -1,0 +1,170 @@
+{
+  "runId": "owner-boundary-20261013T094209Z",
+  "recordType": "必要功能验证，不是压测记录",
+  "status": "通过本次功能范围；性能未验收",
+  "completedAtUtc": "2026-10-13T11:45:56.083420+00:00",
+  "branch": "master",
+  "baseCommit": "90d16d5dfe5bb6367306f062fbacba7233785c84",
+  "toolchain": {
+    "jdk": "HotSpot Corretto 27+33-FR",
+    "jdkHome": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn",
+    "maven": "3.9.16",
+    "os": "macOS 26.7.2 x86_64"
+  },
+  "requirements": [
+    "Owner 不保留完整账户、算法单、触发单、清算及风险业务镜像；活跃订单索引仅保留路由字段",
+    "账户权威只由真实 Account Lane worker 访问，冷态检查必须显式交接所有权",
+    "Owner 不汇总生产资金流水；Ledger 在结果发布前执行包含账户和 Treasury 的守恒校验",
+    "保留拒绝、回滚、序号、队列背压和六产品线业务语义",
+    "查询读取实际 Lane，保险预算由 Ledger 计算；查询背压不能终止 Ledger",
+    "触发、自成交防护、强平、保险、ADL 和到期结算使用实际 Lane 命令及短期不可变回执"
+  ],
+  "changes": [
+    "移除 publishedAlgoOrders、publishedTriggerOrders、publishedLiquidations、publishedRiskSnapshots；风险身份只保留 primitive 键集合",
+    "删除 ActiveOrderIndex 的完整 OrderRuntime 值；取消准备使用 orderId/userId/instrumentId 路由",
+    "算法/触发/清算索引仅保留路由与候选筛选字段，响应由实际 Lane 提供",
+    "移除 live Owner commandFundsAccumulator 及重复守恒计算；控制命令合并校验在原 Ledger 执行",
+    "AccountLaneState 绑定真实线程，启动前直接移交给 worker；移除 pendingReservationSequences 的 synchronized",
+    "交接期间先等待恢复所有权，再处理 admission 队列，防止 Owner 冷态检查与 Lane 准入并发访问",
+    "强平、保险索赔、ADL、触发子单准备和自成交取消集合迁到实际 Lane",
+    "内部触发/算法/强平执行/保险/ADL 工作分页走已有异步查询槽，保留游标、字节预算和风险续扫元数据",
+    "实时用户及预留输出消费完成回执，冷态完整物化不保留生产全量缓存",
+    "控制账户已提交时等待 Ledger 校验不重复派发账户提交；完成后清理续步引用和查询槽"
+  ],
+  "scope": {
+    "productLines": [
+      "SPOT",
+      "LINEAR_PERPETUAL",
+      "INVERSE_PERPETUAL",
+      "LINEAR_DELIVERY",
+      "INVERSE_DELIVERY",
+      "OPTION"
+    ],
+    "covered": [
+      "Lane 所有权、启动和交接",
+      "队列满、延迟通知和槽位复用",
+      "下单、成交、手续费、撤单、改单和批量顺序",
+      "自成交取消",
+      "资金费",
+      "强平→保险→ADL",
+      "交割/期权到期结算",
+      "触发、OCO、追踪止损、过期和价格源",
+      "账户、风险、算法、保险及强平工作分页查询",
+      "身份回收及六产品线实时订单/成交输出"
+    ],
+    "notRun": [
+      "单节点压测",
+      "JMH",
+      "JFR",
+      "Aeron 快照及恢复",
+      "wallet",
+      "全量 Maven 测试"
+    ],
+    "basis": "改动涉及 Lane 状态所有权、系统账本及跨产品线命令，因此选择对应功能/并发/资金用例；按用户要求不做性能与快照恢复验证。"
+  },
+  "results": {
+    "uniqueFinalCases": 169,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "classCounts": {
+      "ActiveOrderIndexTest": 9,
+      "CoreLedgerQueryTest": 8,
+      "RuntimeChangedIndexCommitTest": 3,
+      "AccountLanePendingReservationTest": 2,
+      "CoreAccountLaneQueryTest": 8,
+      "CoreMatcherLedgerTest": 3,
+      "MatcherSettlementPlanTest": 6,
+      "ProductionSourceBoundaryTest": 2,
+      "CorePreflightLaneQueryTest": 9,
+      "TriggerOrderIndexTest": 2,
+      "CoreFinancialLedgerProductionTest": 4,
+      "AccountLaneOwnershipTest": 4,
+      "CoreRiskLaneQueryTest": 7,
+      "SettlementLaneWorkerTest": 9,
+      "CoreActiveLaneIngressTest": 6,
+      "MatcherTreasurySettlementTest": 1,
+      "CoreAlgoLaneQueryTest": 4,
+      "SystemLedgerLaneTest": 8,
+      "SystemLedgerControlTest": 5,
+      "SystemLedgerFundsValidationTest": 1,
+      "CoreLiquidationLaneCheckTest": 4,
+      "ControlLaneDispatcherTest": 4,
+      "ClusterCommandPipelineTest": 30,
+      "CoreOrderedOrderBatchTest": 6,
+      "AsyncFundingCommandTest": 2,
+      "RealtimeTerminalEmissionTest": 6,
+      "TradingCoreOwnerTest": 16
+    },
+    "note": "按类和 testcase 名称合并最终受影响重跑；失败历史保留在证据包，不以反复执行次数充当用例数。",
+    "benchmarkCompile": "通过；仅编译直接受影响基准模块，未运行基准",
+    "diffCheck": "通过",
+    "diskFreeDuringTests": "约402 GiB",
+    "throughput": "不适用，未压测",
+    "allocation": "不适用，未重新采样"
+  },
+  "commands": [
+    {
+      "name": "final-a",
+      "command": "JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn PATH=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin:$PATH MAVEN_OPTS=\"-Xms256m -Xmx1536m\" mvn -q -pl surprising-aeron-core/surprising-aeron-service -am -Dsurefire.failIfNoSpecifiedTests=false -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN -Dtest=AccountLaneOwnershipTest#*,AccountLanePendingReservationTest#*,ActiveOrderIndexTest#*,ProductionSourceBoundaryTest#*,SystemLedgerFundsValidationTest#*,SystemLedgerControlTest#*,SystemLedgerLaneTest#*,ControlLaneDispatcherTest#*,SettlementLaneWorkerTest#*,CoreMatcherLedgerTest#*,CoreActiveLaneIngressTest#*,CoreFinancialLedgerProductionTest#*,CoreLiquidationLaneCheckTest#*,CoreLedgerQueryTest#*,CoreAlgoLaneQueryTest#*,CorePreflightLaneQueryTest#*,CoreAccountLaneQueryTest#*,CoreRiskLaneQueryTest#*,RuntimeChangedIndexCommitTest#*,MatcherTreasurySettlementTest#*,TriggerOrderIndexTest#closeTriggerCommitPublishesOnlyAfterLanesAndDoesNotRepeatOnReuse+accountThreadMutatesTriggerWhileOwnerUsesOnlyCommitReceipts,MatcherSettlementPlanTest#rejectedDirectCancelLeavesOrderUnchangedWithoutInstrumentMetadata+expectedCancellationsAreWrittenInAdmissionOrderIntoReusablePlanStorage+sharedMakerQuantityIsValidatedAcrossItemsBeforeAnyLaneApplies+reusedPlanAndScratchDoNotRetainPriorMakerOrTriggerState+pooledPlanSwitchesFromDeepMakerLaneIndexBackToOneFillWithoutStaleLinks+singleCommandSlotReusesPlanWithoutLeakingPriorOrdersOrCancellations test",
+      "result": "108 次，104 通过、4 个旧查询等待适配失败；已在 final-b 重跑修复"
+    },
+    {
+      "name": "final-b",
+      "command": "JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn PATH=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin:$PATH MAVEN_OPTS=\"-Xms256m -Xmx1536m\" mvn -q -pl surprising-aeron-core/surprising-aeron-service -am -Dsurefire.failIfNoSpecifiedTests=false -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN -Dtest=CoreLiquidationLaneCheckTest#*,TradingCoreOwnerTest#ledgerCompletionResumesOrderedHeadWithoutAnotherMatcherNotification+batchLedgerCompletionResumesOrderedHeadWithoutAnotherMatcherNotification+ledgerSettlesIndependentCommandsBeforeOwnerRetiresTheFirstResponse+controlCommandFencesLedgerPrefillAndTheFollowingTrade+fullLedgerMailboxKeepsItsDispatchCursorAndRetriesWithoutNewMatcherNotifications+algoUpdatesStayOnAccountLaneAndPublishRevisions,CoreOrderedOrderBatchTest#alternatingSingleOrdersAndBatchesReleaseContextsBeforeTheNextBatchResumes+sequentialPlaceLedgerReceiptDoesNotDuplicateEarlierProceeds+sequentialPlaceLedgerKeepsOwnerOffAccountAndFinancialTables+asynchronousCancelBatchSubmitsLaterChunkAfterMissingOrder+finalAmendBatchResolvesChainedAndRejectedItemsWithoutOwnerOrderReads+cancelIdentityAndPreparationNeverReadLaneOrderTables,AsyncFundingCommandTest#fundingPagesUsePublishedProgressAndCompleteOnceWithoutOwnerLaneHandoff,ClusterCommandPipelineTest#triggerAdmissionAndMatchingNeverReadOwnerAccountTables+triggerNativeRejectionWithoutSnapshot+triggerAdmissionFailureWithoutSnapshot+atomicOcoPairWithoutSnapshot+internalTriggerPagesWithoutSnapshot+selectedTriggerPriceStreamsWithoutSnapshot,RealtimeTerminalEmissionTest#* test",
+      "result": "64 次全部通过"
+    },
+    {
+      "name": "startup-backpressure-final",
+      "command": "JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn PATH=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin:$PATH MAVEN_OPTS=\"-Xms256m -Xmx1536m\" mvn -q -pl surprising-aeron-core/surprising-aeron-service -am -Dsurefire.failIfNoSpecifiedTests=false -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN -Dtest=AccountLaneOwnershipTest#*,SettlementLaneWorkerTest#*,ControlLaneDispatcherTest#*,CoreActiveLaneIngressTest#*,CoreLedgerQueryTest#* test",
+      "result": "31 次全部通过"
+    },
+    {
+      "name": "receipt-lifetime-final",
+      "command": "JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn PATH=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin:$PATH MAVEN_OPTS=\"-Xms256m -Xmx1536m\" mvn -q -pl surprising-aeron-core/surprising-aeron-service -am -Dsurefire.failIfNoSpecifiedTests=false -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN -Dtest=CoreFinancialLedgerProductionTest#*,CoreLiquidationLaneCheckTest#*,CoreLedgerQueryTest#*,ClusterCommandPipelineTest#triggerAdmissionAndMatchingNeverReadOwnerAccountTables+triggerNativeRejectionWithoutSnapshot+triggerAdmissionFailureWithoutSnapshot+atomicOcoPairWithoutSnapshot+internalTriggerPagesWithoutSnapshot+selectedTriggerPriceStreamsWithoutSnapshot test",
+      "result": "46 次全部通过"
+    },
+    {
+      "name": "benchmark-final-compile",
+      "command": "JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn PATH=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin:$PATH MAVEN_OPTS=\"-Xms256m -Xmx1536m\" mvn -q -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dmaven.test.skip=true compile",
+      "result": "退出0"
+    }
+  ],
+  "failuresAndRepairs": [
+    "初轮83用例失败：旧冷态前置检查读 Lane、保险在 Lane 查 Owner 字典、旧测试直接 Owner 读取，以及测试全局 BUSY_SPIN 与专用 park 检查设置冲突。现均已修复并重跑。",
+    "控制守恒等待最初未保留账户提交阶段，导致续步无法挂起或重复派发；命令槽记录账户已提交，Ledger 校验后再发布。",
+    "ADL/触发准备误在 Lane 读取 Ledger 进度；改为 Owner 捕获不可变进度元数据，再由实际 Lane 校验业务状态。",
+    "内部强平工作查询改为异步后，旧测试提前解码 MATCHING_PENDING 的空载荷；测试改为消费最终查询结果。",
+    "初轮误选 TriggerOrderIndexTest.replacingAuxiliarySnapshotClearsPublishedTriggerIdentities，在首次 Owner 读取时即失败，尚未调用辅助状态替换。后续明确排除该用例及所有快照/恢复分支；未执行快照序列化/恢复。"
+  ],
+  "artifacts": {
+    "archivePath": "/Users/atomex/Desktop/surprising/surprising-ex/performance-artifacts/owner-boundary-20261013T094209Z.tar.gz",
+    "archiveBytes": 138707,
+    "archiveSha256": "30d8a7c694ba7bb8986be4973fe5d92fbb7dfd3254d29d399ad675963eddf85a",
+    "contains": [
+      "所有失败与最终测试原始日志",
+      "相应 Surefire XML",
+      "初始计划与源码指纹",
+      "最终源码指纹",
+      "最终用例列表与结果",
+      "artifact-manifest.json"
+    ],
+    "rawRunDirectoryHistoricalPath": "/Users/atomex/Desktop/surprising/surprising-ex/performance-artifacts/owner-boundary-20261013T094209Z"
+  },
+  "cleanup": {
+    "ownedProcesses": "本轮 Maven 与 Surefire 已退出；未启动真实 Aeron 节点、Archive、wallet 或 profiler",
+    "rawRunDirectory": "压缩证据归档后清理本轮原始工作目录，保留 tar.gz",
+    "surefireReports": "仅清理确认本轮生成且已经归档的 XML/txt；其他历史报告保留",
+    "preExistingChangesPreserved": [
+      "PERFORMANCE_VALIDATION.md",
+      "PERFORMANCE_LIMITS_ANALYSIS.md",
+      "PERFORMANCE_OPTIMIZATION_PLAN.md",
+      "surprising-gateway/src/test/java/com/surprising/aeron/service/orchestration/CoreTestCompletion.java"
+    ]
+  },
+  "limitations": [
+    "仅为必要功能验证；不能据此宣称达到50万/s、恢复历史吞吐或全链路零分配",
+    "完整状态冷态检查仍使用显式屏障；未验证快照及恢复兼容性",
+    "压力测试与全部旧测试不在本轮范围；修改过的旧快照测试只做源码编译兼容调整"
+  ]
+}

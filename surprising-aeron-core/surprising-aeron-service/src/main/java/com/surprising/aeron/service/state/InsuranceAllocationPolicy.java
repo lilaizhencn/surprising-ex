@@ -65,6 +65,27 @@ public final class InsuranceAllocationPolicy {
         return new AllocationInputs(byAsset);
     }
 
+    public static AllocationInputs prepareLaneAllocations(TradingRuntimeState runtime, long[] ids,
+            int[] assetIds, CoreInstrument[] instruments) {
+        if (runtime.currentLaneCommandScope() == null) throw new IllegalStateException("insurance claim read requires Lane ownership");
+        Map<Integer, ArrayList<Claim>> byAsset = new HashMap<>();
+        for (int index = 0; index < ids.length; index++) {
+            LiquidationRuntime value = runtime.liquidation(ids[index]);
+            CoreInstrument instrument = instruments[index];
+            if (value == null || value.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED
+                    || instrument == null || instrument != value.instrument()) continue;
+            byAsset.computeIfAbsent(assetIds[index], ignored -> new ArrayList<>()).add(new Claim(value, instrument.instrumentId()));
+        }
+        return new AllocationInputs(byAsset);
+    }
+
+    public static AllocationInputs mergeLaneClaims(AllocationInputs[] laneClaims) {
+        Map<Integer, ArrayList<Claim>> merged = new HashMap<>();
+        for (AllocationInputs inputs : laneClaims) if (inputs != null)
+            inputs.byAsset.forEach((assetId, claims) -> merged.computeIfAbsent(assetId, ignored -> new ArrayList<>()).addAll(claims));
+        return new AllocationInputs(merged);
+    }
+
     public static Map<Long, Long> allocations(TreasuryRuntime ledger, AllocationInputs inputs) {
         Map<Long, Long> result = new HashMap<>();
         inputs.byAsset.forEach((assetId, claims) -> allocateAsset(ledger.insurance(assetId), claims, result));
@@ -127,6 +148,17 @@ public final class InsuranceAllocationPolicy {
             if (instrument != null && instrument == claim.instrument()
                     && identities.assetId(instrument.settleAsset()) == assetId)
                 claims.add(new Claim(claim, identities.instrumentId(claim.symbolId())));
+        }
+        return new ResolutionInputs(target.liquidationId(), assetId, target.deficitUnits(), claims);
+    }
+
+    /** Ledger consumes command-local Lane receipts, then determines allocation against its own budget. */
+    static ResolutionInputs prepareResolution(LiquidationRuntime[] receipts, int count,
+                                               LiquidationRuntime target, int assetId) {
+        ArrayList<Claim> claims = new ArrayList<>();
+        for (int index = 0; index < count; index++) {
+            LiquidationRuntime value = receipts[index];
+            if (value != null) claims.add(new Claim(value, value.instrument().instrumentId()));
         }
         return new ResolutionInputs(target.liquidationId(), assetId, target.deficitUnits(), claims);
     }

@@ -206,6 +206,9 @@ class CoreLiquidationLaneCheckTest {
         var header = type == CoreMessageType.LIQUIDATION_WORK_QUERY
                 ? CoreMessageHeader.query(type, id, core.productLine, CommandSource.OPERATIONS, 951, next, user, TIME, next)
                 : CoreMessageHeader.command(type, id, core.productLine, CommandSource.OPERATIONS, 951, next, user, TIME, next);
-        return CoreTestCompletion.applyAsynchronously(core, new CoreMessage(header, payload));
+        var message = new CoreMessage(header, payload);
+        return type == CoreMessageType.LIQUIDATION_WORK_QUERY
+                ? CoreTestCompletion.querySynchronously(core, message)
+                : CoreTestCompletion.applyAsynchronously(core, message);
     }
 }

@@ -458,8 +458,8 @@ final class OrderBatchExecutor {
                     batch.currentPreMatchingCancellationOrderIds = List.of();
                     CancelOrderCommand command = (CancelOrderCommand) item.command;
                     var route = owner.activeOrderIndex.activeOrderRoute(command.orderId());
-                    OrderRuntime order = route == null ? null : route.runtime();
-                    if (order == null || order.status().terminal())
+                    var order = route;
+                    if (order == null)
                         throw new CoreStateRejectedException("ORDER_NOT_FOUND", "active order does not exist");
                     if (order.userId() != userId) {
                         throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
@@ -511,8 +511,7 @@ final class OrderBatchExecutor {
             throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "replacement order already exists");
         owner.requireOrderIdentityAvailable(userId, admission.command());
         batch.replacementAdmission = admission;
-        batch.currentPreMatchingCancellationOrderIds = owner.admissions.replacementPreMatchingCancellations(
-                admission, event.closeCapacityCancellations());
+        batch.currentPreMatchingCancellationOrderIds = event.closeCapacityCancellations();
         return true;
     }
 
@@ -575,11 +574,10 @@ final class OrderBatchExecutor {
             // route holder's runtime value instead of probing the active-order map
             // a second time while building the fixed same-shard chunk.
             var route = owner.activeOrderIndex.activeOrderRoute(item.orderId);
-            if (route == null || route.runtime() == null) break;
-            OrderRuntime order = route.runtime();
+            if (route == null) break;
             String instrumentId = route.instrumentId();
             if (owner.matchingAdapter.matcherShardId(instrumentId) != shard) break;
-            batch.preparedAdmittedOrders[end - start] = order;
+            batch.preparedCancellationOrderIds[end - start] = item.orderId;
             item.cancelSymbol = instrumentId;
             end++;
         }
@@ -648,7 +646,7 @@ final class OrderBatchExecutor {
                     && event.hasDirectNativeResult() && batch.pipelinedMatchingResultCount == 0) {
                 if (!event.complete()) throw new IllegalStateException("cancel chunk Lane is incomplete");
                 batch.mergeTreasuryDelta(owner.runtimeState.collectOrderBatchMatcherSettlement(
-                        event, owner.commandFundsAccumulator, owner.terminalRetention));
+                        event, owner.runtimeState.coldCommandFunds(), owner.terminalRetention));
                 owner.commits.requestCommitPublication();
                 if (event.commitSequence() != 0) batch.laneCommitCompleted(true);
                 owner.runtimeState.releaseMatcherSettlement(event);
@@ -673,7 +671,7 @@ final class OrderBatchExecutor {
             }
             var event = batch.itemSettlementEvent;
             if (event == null || !event.complete()) throw new IllegalStateException("cancel chunk Lane is incomplete");
-            batch.mergeTreasuryDelta(owner.runtimeState.collectOrderBatchMatcherSettlement(event, owner.commandFundsAccumulator, owner.terminalRetention));
+            batch.mergeTreasuryDelta(owner.runtimeState.collectOrderBatchMatcherSettlement(event, owner.runtimeState.coldCommandFunds(), owner.terminalRetention));
             owner.commits.requestCommitPublication();
             if (event.commitSequence() != 0) {
                 batch.laneCommitCompleted(true);
@@ -723,7 +721,7 @@ final class OrderBatchExecutor {
         try {
             var settledEvent = batch.itemSettlementEvent;
             batch.mergeTreasuryDelta(owner.runtimeState.collectOrderBatchMatcherSettlement(
-                    settledEvent, owner.commandFundsAccumulator, owner.terminalRetention));
+                    settledEvent, owner.runtimeState.coldCommandFunds(), owner.terminalRetention));
             if (batch.kind == OrderBatchKind.AMEND && batch.lastMatchingResult.accepted()) {
                 // Preserve the existing reservation revision; SPOT also counted its original cancellation.
                 owner.runtimeState.setMetadata(owner.productLine, Math.addExact(owner.runtimeState.revision(),
@@ -937,7 +935,7 @@ final class OrderBatchExecutor {
                 return null;
             }
             owner.runtimeState.collectCancel(
-                    batch.cancelEvent, owner.commandFundsAccumulator, owner.terminalRetention);
+                    batch.cancelEvent, owner.runtimeState.coldCommandFunds(), owner.terminalRetention);
             if (batch.cancelEvent.commitsLane()) {
                 pending.completeLanes(batch.cancelEvent.requiredLaneMask());
                 batch.laneCommitCompleted(true);
@@ -950,7 +948,7 @@ final class OrderBatchExecutor {
             long settlementLaneMask = batch.settlementEvent.requiredLaneMask();
             boolean finalLaneCommit = batch.settlementEvent.commitSequence() != 0;
             RuntimeTreasuryDelta delta = owner.runtimeState.collectMatcherSettlement(
-                    batch.settlementEvent, owner.commandFundsAccumulator, owner.terminalRetention);
+                    batch.settlementEvent, owner.runtimeState.coldCommandFunds(), owner.terminalRetention);
             if (delta == null) {
                 owner.suspendMatchingCommitContext(pending);
                 return null;
@@ -1127,7 +1125,7 @@ final class OrderBatchExecutor {
         }
         beginOrderBatchCommitContext(batch, pending);
         if (!preparedCancel) {
-            owner.runtimeState.collectPlaceBatchAdmission(admission, owner.commandFundsAccumulator);
+            owner.runtimeState.collectPlaceBatchAdmission(admission, owner.runtimeState.coldCommandFunds());
             owner.runtimeState.releasePlaceBatchAdmission(admission);
             batch.placeBatchAdmissionEvent = null;
             owner.commits.requestCommitPublication();
@@ -1146,7 +1144,7 @@ final class OrderBatchExecutor {
             OrderRuntime order = owner.runtimeState.changedOrderValue(cancellation.orderId());
             if (order == null) {
                 var route = owner.activeOrderIndex.activeOrderRoute(cancellation.orderId());
-                order = route == null ? null : route.runtime();
+                if (route != null) batch.deferredCancellationOrderIds.add(cancellation.orderId());
             }
             if (order != null && order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN) {
                 batch.deferredCancellationOrderIds.add(order.orderId());

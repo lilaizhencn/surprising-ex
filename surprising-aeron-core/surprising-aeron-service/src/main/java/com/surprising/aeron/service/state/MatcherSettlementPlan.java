@@ -231,10 +231,10 @@ public final class MatcherSettlementPlan {
         } finally { keys.clear(); }
     }
 
-    void buildDirectNativeCancellation(long sequence, long userId, OrderRuntime order,
+    void buildDirectNativeCancellation(long sequence, long userId, long orderId,
                                        exchange.core2.core.common.MatcherResult result,
                                        TradingRuntimeState runtime) {
-        if (order == null || result == null) throw new IllegalArgumentException("invalid direct cancellation fact");
+        if (orderId <= 0 || result == null) throw new IllegalArgumentException("invalid direct cancellation fact");
         for (int index = 0; index < result.events().size(); index++) {
             MatcherEvent event = result.events().get(index);
             if (event == null || event.eventType() == MatcherEventType.TRADE)
@@ -242,14 +242,12 @@ public final class MatcherSettlementPlan {
         }
         clearReferences();
         boolean accepted = nativeAccepted(result);
-        if (accepted && order.userId() != userId)
-            throw new IllegalStateException("matcher canceled another account order");
-        coreSequence = sequence; takerOrderId = order.orderId(); activeUserId = userId;
+        coreSequence = sequence; takerOrderId = orderId; activeUserId = userId;
         takerLaneId = runtime.topology().accountLaneId(activeUserId);
         rejectedTaker = !accepted;
         requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
         orderCount = accepted ? 1 : 0;
-        if (orderCount != 0) orderIds[0] = order.orderId();
+        if (orderCount != 0) orderIds[0] = orderId;
     }
 
     private static boolean nativeAccepted(exchange.core2.core.common.MatcherResult result) {

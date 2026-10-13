@@ -52,6 +52,7 @@ public final class LaneCommitDelta {
 
     /** 本次需要发布的触发单变化。 */
     RuntimeChangeBuffer<CoreTriggerOrderState> triggers;
+    RuntimeChangeBuffer<com.surprising.aeron.service.state.model.CoreAlgoOrderState> algos;
     int closedTriggerCount;
     /** 本次需要发布的用户变化。 */
     final RuntimeChangeBuffer<UserRuntime> users = new RuntimeChangeBuffer<>();
@@ -121,8 +122,7 @@ public final class LaneCommitDelta {
     void removeReservationRoute(long orderId) { removedReservationRoutes.add(orderId); }
 
     void drainTo(int laneId,
-                 LongObjectHashMap<LiquidationRuntime> targetLiquidations,
-                 LongObjectHashMap<RiskSnapshotRuntime> targetRiskSnapshots,
+                 TradingRuntimeState state,
                  com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
                  com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
         if (changedUsers != null || changedOrders != null) {
@@ -145,8 +145,11 @@ public final class LaneCommitDelta {
         orders.clear();
         reservations.clear();
         positions.clear();
-        liquidations.drainToEclipseMap(targetLiquidations);
-        riskSnapshots.drainToEclipseMap(targetRiskSnapshots);
+        liquidations.clear();
+        riskSnapshots.drainTo((key, value) -> {
+            if (value == null) state.riskPositionIdentities.remove(key);
+            else state.riskPositionIdentities.add(key);
+        });
         if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
         if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
     }
@@ -166,11 +169,11 @@ public final class LaneCommitDelta {
             terminalOrderSink.acceptBatch(this, coreSequence);
         liquidations.drainTo((id, value) -> {
             state.changedLiquidations.put(id, value);
-            TradingRuntimeState.putOrRemove(state.publishedLiquidations, id, value);
         });
         riskSnapshots.drainIndexedTo((key, value, hasProof, positionAbsent) -> {
             state.changedRiskSnapshots.putIndexed(key, value, hasProof, positionAbsent);
-            TradingRuntimeState.putOrRemove(state.publishedRiskSnapshots, key, value);
+            if (value == null) state.riskPositionIdentities.remove(key);
+            else state.riskPositionIdentities.add(key);
         });
         state.changedOrders.adopt(laneId, orders);
         state.changedPositions.adopt(laneId, positions);
@@ -184,6 +187,7 @@ public final class LaneCommitDelta {
         users.drainTo((id, value) -> {
             if (changedUsers != null) changedUsers.add(id);
             state.changedUsers.add(id);
+            state.captureUserMetadata(value);
         });
         for (int index = 0; index < orders.size(); index++) {
             long id = orders.keyAt(index);
@@ -195,6 +199,7 @@ public final class LaneCommitDelta {
             if (changedOrders != null) changedOrders.add(id);
             if (changedUsers != null && value != null) changedUsers.add(value.userId());
             state.changedReservations.add(id);
+            state.captureReservation(value);
         }
         reservations.clear();
         for (int index = 0; index < positions.size(); index++) {
@@ -231,23 +236,34 @@ public final class LaneCommitDelta {
         if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
     }
 
+    void putAlgo(long id, com.surprising.aeron.service.state.model.CoreAlgoOrderState value) {
+        if (algos == null) algos = new RuntimeChangeBuffer<>();
+        algos.put(id, value);
+    }
+
     void putTrigger(long id, CoreTriggerOrderState value) {
         if (triggers == null) triggers = new RuntimeChangeBuffer<>();
         triggers.put(id, value);
     }
 
     void publishTriggersToOwner(TradingRuntimeState state) {
+        if (algos != null) algos.drainTo(state.changedAlgoOrders::put);
         if (triggers == null || triggers.isEmpty()) return;
         triggers.forEach((id, value) -> {
-            TradingRuntimeState.putOrRemove(state.publishedTriggerOrders, id, value);
             state.changedTriggerOrders.put(id, value);
         });
         triggers.clear();
     }
 
     void recordControlChanges(TradingRuntimeState state, int laneId) {
-        for (int index = 0; index < users.size(); index++) state.changedUsers.add(users.keyAt(index));
-        for (int index = 0; index < reservations.size(); index++) state.changedReservations.add(reservations.keyAt(index));
+        for (int index = 0; index < users.size(); index++) {
+            state.changedUsers.add(users.keyAt(index));
+            state.captureUserMetadata(users.valueAt(index));
+        }
+        for (int index = 0; index < reservations.size(); index++) {
+            state.changedReservations.add(reservations.keyAt(index));
+            state.captureReservation(reservations.valueAt(index));
+        }
         state.changedOrders.adopt(laneId, orders);
         state.changedPositions.adopt(laneId, positions);
         liquidations.forEach(state.changedLiquidations::put);
@@ -257,6 +273,7 @@ public final class LaneCommitDelta {
     void clear() {
         closedTriggerCount = 0;
         if (triggers != null) triggers.clear();
+        if (algos != null) algos.clear();
         publicationPrepared = false;
         java.util.Arrays.fill(terminalOrderClients, 0, terminalOrderCount, null);
         // 原语列不持有引用；count 是唯一有效边界，recordTerminalOrder 先完整覆盖再递增。

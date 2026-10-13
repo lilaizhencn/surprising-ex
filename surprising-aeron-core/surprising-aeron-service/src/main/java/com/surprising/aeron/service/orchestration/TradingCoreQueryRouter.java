@@ -96,25 +96,7 @@ final class TradingCoreQueryRouter {
         if (message.header().kind() == WireMessageKind.QUERY
                 && (message.header().messageType() == CoreMessageType.TRIGGER_ORDER_QUERY
                 || message.header().messageType() == CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY)) {
-            try {
-                var query = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeQuery(message.payloadUnsafe());
-                long before = query.beforeTriggerOrderId() == 0 ? Long.MAX_VALUE : query.beforeTriggerOrderId();
-                Iterable<Long> source = query.expiresBeforeEpochMillis() > 0
-                        ? runtime.triggerOrderIndex.expired(query.expiresBeforeEpochMillis(), query.limit())
-                        : query.instrumentId().isEmpty()
-                        ? (query.status() != null
-                        ? runtime.triggerOrderIndex.ids(query.status())
-                        : message.header().userId() == 0 ? runtime.triggerOrderIndex.ids()
-                        : runtime.triggerOrderIndex.ids(message.header().userId()))
-                        : (query.status() == null ? runtime.triggerOrderIndex.ids(query.instrumentId())
-                        : runtime.triggerOrderIndex.ids(query.instrumentId(), query.status()));
-                var values = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.triggerOrders(
-                        runtime.runtimeState, source, message.header().userId(), query.instrumentId(), query.status(),
-                        query.triggerOrderId(), before,
-                        message.header().messageType() == CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY,
-                        query.limit());
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
-                        com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeList(values));
+            try { return runtime.bookQueries.beginTriggerQuery(message);
             } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return runtime.rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             } catch (IllegalArgumentException exception) {
@@ -224,13 +206,8 @@ final class TradingCoreQueryRouter {
                 }
                 java.util.NavigableSet<Long> candidates = runtime.liquidationIndex.activeIds()
                         .tailSet(query.afterLiquidationId(), false);
-                if (query.purpose() == com.surprising.aeron.protocol.CoreLiquidationWorkView.Purpose.INSURANCE
-                        && runtime.runtimeState.systemLedgerStarted()) {
-                    var claims = com.surprising.aeron.service.state.InsuranceAllocationPolicy.prepareAllocations(
-                            runtime.runtimeState, runtime.identities, runtime.liquidationIndex.activeIds());
-                    var selected = com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService.work(
-                            runtime.runtimeState, runtime.identities, runtime.productLine, query, candidates, java.util.Map.of());
-                    return runtime.bookQueries.beginInsuranceQuery(message, selected, claims);
+                if (runtime.runtimeState.systemLedgerStarted()) {
+                    return runtime.bookQueries.beginLiquidationWorkQuery(message, query);
                 }
                 var work = com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService.work(
                         runtime.runtimeState, runtime.identities, runtime.productLine, query, candidates,

@@ -1,4 +1,6 @@
 package com.surprising.aeron.service.state;
+
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
@@ -8,7 +10,7 @@ import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.index.ActiveOrderIndex;
 
-import com.surprising.aeron.service.state.model.CoreOrderState;
+
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -62,7 +64,7 @@ public final class RuntimeLifecycleSettlement {
         boolean chunked = indexedUserIds != null && chunkCommandId != null;
         validateProgress(previousProgress, command, chunked);
         boolean ordersComplete = !chunked || previousProgress != null && previousProgress.ordersComplete();
-        List<CoreOrderState> selectedOrders = List.of();
+        List<CancellationOrder> selectedOrders = List.of();
         boolean moreOrders = false;
         if (!chunked) {
             selectedOrders = openOrders(runtime, identities, activeOrderIndex, instrument.instrumentId());
@@ -148,7 +150,7 @@ public final class RuntimeLifecycleSettlement {
     }
 
     public static void advanceCancellation(TradingCoreState before, SettleInstrumentCommand command,
-                                           Collection<CoreOrderState> orders, long nextCursorOrderId,
+                                           Collection<CancellationOrder> orders, long nextCursorOrderId,
                                            UUID chunkCommandId, TradingRuntimeState runtime,
                                            RuntimeIdentityRegistry identities) {
         if (nextCursorOrderId <= 0 || chunkCommandId == null) {
@@ -162,7 +164,7 @@ public final class RuntimeLifecycleSettlement {
     }
 
     public static void advanceCancellationRuntime(SettleInstrumentCommand command,
-                                                  Collection<CoreOrderState> orders, long nextCursorOrderId,
+                                                  Collection<CancellationOrder> orders, long nextCursorOrderId,
                                                   UUID chunkCommandId, TradingRuntimeState runtime,
                                                   RuntimeIdentityRegistry identities) {
         if (nextCursorOrderId <= 0 || chunkCommandId == null || runtime == null || identities == null) {
@@ -265,43 +267,43 @@ public final class RuntimeLifecycleSettlement {
                                   ActiveOrderIndex index, String instrumentId, int startLaneId,
                                   long startCursorOrderId, int limit) {
         var page = index.page(0, instrumentId, startCursorOrderId, limit);
-        ArrayList<CoreOrderState> selected = new ArrayList<>(page.orderIds().size());
+        ArrayList<CancellationOrder> selected = new ArrayList<>(page.orderIds().size());
         for (long orderId : page.orderIds()) {
-            OrderRuntime order = runtime.order(orderId);
-            if (order == null || order.status() != CoreOrderStatus.OPEN) {
+            var order = index.activeOrderRoute(orderId);
+            if (order == null) {
                 throw new IllegalStateException("settlement active order index differs from runtime");
             }
-            selected.add(RuntimeStateMaterializer.orderSnapshot(order, identities));
+            selected.add(new CancellationOrder(orderId, order.userId(), order.instrumentId()));
         }
         return new OrderPage(selected, 0, page.nextCursorOrderId(), page.nextCursorOrderId() == 0);
     }
 
-    private static List<CoreOrderState> openOrders(TradingRuntimeState runtime,
+    private static List<CancellationOrder> openOrders(TradingRuntimeState runtime,
                                                    RuntimeIdentityRegistry identities,
                                                    ActiveOrderIndex index, String instrumentId) {
         long[] orderIds = index.sortedIdsDescending(instrumentId);
-        ArrayList<CoreOrderState> result = new ArrayList<>(orderIds.length);
+        ArrayList<CancellationOrder> result = new ArrayList<>(orderIds.length);
         for (long orderId : orderIds) {
-            OrderRuntime order = runtime.order(orderId);
-            if (order != null && !order.canceled()) {
-                result.add(RuntimeStateMaterializer.orderSnapshot(order, identities));
+            var order = index.activeOrderRoute(orderId);
+            if (order != null) {
+                result.add(new CancellationOrder(orderId, order.userId(), order.instrumentId()));
             }
         }
         return result.isEmpty() ? List.of() : List.copyOf(result);
     }
 
-    private static void cancelOrders(TradingRuntimeState runtime, Collection<CoreOrderState> orders) {
+    private static void cancelOrders(TradingRuntimeState runtime, Collection<CancellationOrder> orders) {
         if (orders == null || orders.isEmpty()) return;
-        @SuppressWarnings("unchecked") ArrayList<CoreOrderState>[] ordersByLane =
+        @SuppressWarnings("unchecked") ArrayList<CancellationOrder>[] ordersByLane =
                 groupOrders(orders, runtime);
         long laneMask = laneMask(ordersByLane);
         runtime.executeOwnerSettlements(laneMask, orders.size(),
                 lane -> { cancelOrdersOnLane(runtime, ordersByLane[lane]); return null; });
     }
 
-    static void cancelOrdersOnLane(TradingRuntimeState runtime, Collection<CoreOrderState> orders) {
+    static void cancelOrdersOnLane(TradingRuntimeState runtime, Collection<CancellationOrder> orders) {
         if (orders == null || orders.isEmpty()) return;
-        for (CoreOrderState order : orders) {
+        for (var order : orders) {
             if (!runtime.currentLaneOwns(order.userId())) continue;
             ReservationRuntime reservation = runtime.reservation(order.orderId());
             if (reservation == null) throw new IllegalStateException("settlement reservation is missing");
@@ -322,7 +324,7 @@ public final class RuntimeLifecycleSettlement {
         return mask;
     }
 
-    static long laneMask(ArrayList<CoreOrderState>[] groups) {
+    static long laneMask(ArrayList<CancellationOrder>[] groups) {
         long mask = 0;
         for (int lane = 0; lane < groups.length; lane++) {
             if (groups[lane] != null && !groups[lane].isEmpty()) mask |= 1L << lane;
@@ -330,14 +332,14 @@ public final class RuntimeLifecycleSettlement {
         return mask;
     }
 
-    private static ArrayList<CoreOrderState>[] groupOrders(Collection<CoreOrderState> orders,
+    private static ArrayList<CancellationOrder>[] groupOrders(Collection<CancellationOrder> orders,
                                                             TradingRuntimeState runtime) {
-        @SuppressWarnings("unchecked") ArrayList<CoreOrderState>[] groups =
-                (ArrayList<CoreOrderState>[]) new ArrayList<?>[runtime.topology().accountLaneCount()];
-        for (CoreOrderState order : orders) {
+        @SuppressWarnings("unchecked") ArrayList<CancellationOrder>[] groups =
+                (ArrayList<CancellationOrder>[]) new ArrayList<?>[runtime.topology().accountLaneCount()];
+        for (var order : orders) {
             if (order == null) continue;
             int lane = runtime.topology().accountLaneId(order.userId());
-            ArrayList<CoreOrderState> group = groups[lane];
+            ArrayList<CancellationOrder> group = groups[lane];
             if (group == null) groups[lane] = group = new ArrayList<>();
             group.add(order);
         }
@@ -372,7 +374,7 @@ public final class RuntimeLifecycleSettlement {
                     long nextCursorUserId, boolean complete) {
     }
 
-    record OrderPage(List<CoreOrderState> orders, int accountLaneId,
+    record OrderPage(List<CancellationOrder> orders, int accountLaneId,
                      long nextCursorOrderId, boolean complete) {
     }
 }

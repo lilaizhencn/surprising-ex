@@ -44,7 +44,7 @@ class ActiveOrderIndexTest {
             index.apply(1, terminal, identities);
             index.apply(1, null, identities);
             index.apply(999, null, identities);
-            assertThat(index.activeOrderRuntime(1)).isNull();
+            assertThat(index.activeOrderRoute(1)).isNull();
             assertThat(index.ids(7)).containsExactly(2L);
             assertThat(index.ids(8)).containsExactly(3L);
             assertThat(index.ids("1")).containsExactly(3L, 2L);
@@ -87,7 +87,7 @@ class ActiveOrderIndexTest {
             assertThat(index.page(0, null, 0, 16).orderIds()).hasSize(16);
         }
         assertThat(actual).hasSize(32).allMatch(id -> id > 4064 && id <= 4096);
-        assertThat(index.pendingQuantity(7, "1", CorePositionSide.NET, CoreOrderSide.BUY)).isEqualTo(320);
+        assertThat(index.count()).isEqualTo(32);
         for (long id = 4065; id <= 4096; id++) index.apply(id, null, identities);
         assertThat(index.count()).isZero();
         assertThat(index.ids(7)).isEmpty();
@@ -95,32 +95,22 @@ class ActiveOrderIndexTest {
     }
 
     @Test
-    void runtimeUpdatesShareThePublishedOrderAndKeepQuerySnapshotsImmutable() throws Exception {
+    void runtimeUpdatesRetainRoutingOnlyAndRetireTerminalMembership() {
         var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
         var initial = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
-        var order = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
-                initial, identities, instrument(initial.instrumentId()));
+        var order = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(initial, identities, instrument("1"));
         index.apply(1, order, identities);
-        assertThat(index.activeOrderRuntime(1)).isSameAs(order);
-        var oldQuery = index.activeOrder(1);
-        assertThat(oldQuery).isEqualTo(initial);
-        var field = ActiveOrderIndex.class.getDeclaredField("ordersById");
-        field.setAccessible(true);
-        var entries = (org.agrona.collections.Long2ObjectHashMap<?>) field.get(index);
-        Object entry = entries.get(1);
-        var partiallyFilled = order.withFill(4, 6, 3, CoreOrderStatus.OPEN, 2);
-        index.apply(1, partiallyFilled, identities);
-        assertThat(entries.get(1)).isSameAs(entry);
-        assertThat(index.activeOrderRuntime(1)).isSameAs(partiallyFilled);
-        assertThat(index.pendingQuantity(7, "1", CorePositionSide.NET, CoreOrderSide.BUY)).isEqualTo(6);
-        assertThat(index.activeOrder(1).cumulativeFeeUnits()).isEqualTo(3);
-        assertThat(oldQuery.remainingQuantitySteps()).isEqualTo(10);
-        assertThat(oldQuery.cumulativeFeeUnits()).isZero();
-        assertThat(index.orders()).containsExactly(index.activeOrder(1));
-        index.apply(1, partiallyFilled.withStatus(CoreOrderStatus.CANCELED, 3), identities);
-        assertThat(index.activeOrderRuntime(1)).isNull();
-        assertThat(index.activeOrderSymbol(1)).isNull();
+        var route = index.activeOrderRoute(1);
+        assertThat(route.userId()).isEqualTo(7);
+        assertThat(route.instrumentId()).isEqualTo("1");
+        assertThat(java.util.Arrays.stream(route.getClass().getDeclaredFields()).map(field -> field.getType().getName()))
+                .doesNotContain(com.surprising.aeron.service.state.OrderRuntime.class.getName());
+        index.apply(1, order.withFill(4, 6, 3, CoreOrderStatus.OPEN, 2), identities);
+        assertThat(index.activeOrderRoute(1)).isSameAs(route);
+        assertThat(index.page(7, "1", 0, 10).orderIds()).containsExactly(1L);
+        index.apply(1, order.withStatus(CoreOrderStatus.CANCELED, 3), identities);
+        assertThat(index.activeOrderRoute(1)).isNull();
         assertThat(index.ids(7)).isEmpty();
     }
 
@@ -135,12 +125,12 @@ class ActiveOrderIndexTest {
         var replacement = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
                 second, identities, instrument(second.instrumentId()));
         index.apply(1, replacement, identities);
-        assertThat(index.activeOrderRuntime(1)).isSameAs(replacement);
+        assertThat(index.activeOrderRoute(1).userId()).isEqualTo(8);
         assertThat(index.activeOrderSymbol(1)).isEqualTo("2");
         assertThat(index.ids(7)).isEmpty();
         assertThat(index.ids("1")).isEmpty();
         assertThat(index.ids(8)).containsExactly(1L);
-        assertThat(index.activeOrder(1)).isEqualTo(second);
+        assertThat(index.activeOrderRoute(1).instrumentId()).isEqualTo("2");
     }
 
     @Test
@@ -185,30 +175,25 @@ class ActiveOrderIndexTest {
                 Map.of(11L, CoreUserState.empty(ProductLine.LINEAR_PERPETUAL, 11)),
                 Map.of(7L, opening, 8L, reducing), instruments(ProductLine.LINEAR_PERPETUAL, "1"),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
-        ActiveOrderIndex index = new ActiveOrderIndex(before);
-
-        assertThat(index.pendingQuantity(11, "1", CorePositionSide.NET, CoreOrderSide.BUY)).isEqualTo(5);
-        assertThat(index.reduceOnlyQuantity(11, "1", CoreOrderSide.SELL)).isEqualTo(3);
-        assertThat(index.hasDifferentMarginMode(11, "1", CorePositionSide.NET,
-                CoreMarginMode.CROSS)).isTrue();
-        AdmissionSummary summary = index.inspect(
-                11, "1", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.ISOLATED);
-        assertThat(summary.pendingQuantity()).isEqualTo(5);
-        assertThat(summary.reduceOnlyQuantity()).isZero();
-        assertThat(summary.marginModeCount()).isEqualTo(1);
-
-        Map<Long, CoreOrderState> orders = StateMapSupport.delta(before.orders());
-        orders.put(7L, opening.fill(3));
-        orders.put(8L, reducing.cancel());
-        TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2, before.users(), orders,
-                before.instruments(), before.riskState(), before.treasuryState(), before.leverages(),
-                before.algoOrders(), before.cancelAllAfterTimers(), before.clientOrderIndex(), before.triggerOrders());
-        index.rebuild(after);
-
-        assertThat(index.pendingQuantity(11, "1", CorePositionSide.NET, CoreOrderSide.BUY)).isEqualTo(2);
-        assertThat(index.reduceOnlyQuantity(11, "1", CoreOrderSide.SELL)).isZero();
-        assertThat(index.hasDifferentMarginMode(11, "1", CorePositionSide.NET,
-                CoreMarginMode.CROSS)).isFalse();
+        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        try (var runtime = com.surprising.aeron.service.state.RuntimeStateProjector.project(before, identities)) {
+            var laneOrders = runtime.admissionOrders(11, identities.symbolId("1"));
+            var summary = laneOrders.inspect(11, "1", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.ISOLATED);
+            assertThat(summary.pendingQuantity()).isEqualTo(5);
+            assertThat(summary.reduceOnlyQuantity()).isZero();
+            assertThat(summary.marginModeCount()).isEqualTo(1);
+            runtime.executeUserSettlement(11, () -> {
+                runtime.replaceOrder(com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+                        opening.fill(3), identities, runtime.instrument("1")));
+                runtime.replaceOrder(com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+                        reducing.cancel(), identities, runtime.instrument("1")));
+                return null;
+            });
+            summary = laneOrders.inspect(11, "1", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.ISOLATED);
+            assertThat(summary.pendingQuantity()).isEqualTo(2);
+            assertThat(summary.reduceOnlyQuantity()).isZero();
+            assertThat(summary.marginModeCount()).isZero();
+        }
     }
 
     @Test
@@ -220,7 +205,7 @@ class ActiveOrderIndexTest {
 
         ActiveOrderIndex index = new ActiveOrderIndex(state);
         assertThat(index.ids()).containsExactly(7L);
-        assertThat(index.orders()).containsExactly(order);
+        assertThat(index.activeOrderRoute(7).userId()).isEqualTo(11);
     }
 
     @Test

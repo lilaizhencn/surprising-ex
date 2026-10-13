@@ -25,21 +25,11 @@ class CoreAlgoLaneQueryTest {
         try (var cold = RuntimeStateProjector.project(state, identities); var core = initial(state)) {
             var expected = RuntimeOperationalQueryService.algoOrders(cold, List.of(502L, 501L, 503L));
             core.activate();
-            assertThat(core.activeOrderIndex.activeOrderRuntime(102)).isNull();
-            assertThat(core.activeOrderIndex.activeOrderRuntime(104)).isNull();
+            assertThat(core.activeOrderIndex.activeOrderRoute(102)).isNull();
+            assertThat(core.activeOrderIndex.activeOrderRoute(104)).isNull();
             long handoff = core.runtimeState.laneHandoffEpoch();
-            var publishedField = TradingRuntimeState.class.getDeclaredField("publishedAlgoOrders");
-            publishedField.setAccessible(true);
-            @SuppressWarnings("unchecked")
-            var original = (org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<CoreAlgoOrderState>) publishedField.get(core.runtimeState);
-            Thread owner = Thread.currentThread();
-            var forbidden = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<CoreAlgoOrderState>(original) {
-                @Override public CoreAlgoOrderState get(long id) {
-                    if (Thread.currentThread() == owner) throw new AssertionError("Owner read published algo map");
-                    return super.get(id);
-                }
-            };
-            publishedField.set(core.runtimeState, forbidden);
+            assertThat(java.util.Arrays.stream(TradingRuntimeState.class.getDeclaredFields()).map(java.lang.reflect.Field::getName))
+                    .doesNotContain("publishedAlgoOrders");
             try (var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                 assertThat(query(core, 0, 0, "", 0, 10).data()).isEqualTo(CoreAlgoOrderCodec.encodeList(expected));
                 assertThat(CoreAlgoOrderCodec.decodeList(query(core, 1, 0, "", 0, 10).data()))
@@ -58,7 +48,7 @@ class CoreAlgoLaneQueryTest {
                 assertThat(partial.executedQuantitySteps()).isEqualTo(4);
                 assertThat(partial.activeQuantitySteps()).isEqualTo(6);
                 assertThat(partial.activeChildOrderCount()).isOne();
-            } finally { publishedField.set(core.runtimeState, original); }
+            }
             assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
             assertThat(core.tradingState()).isEqualTo(state);
             core.assertClusterCallbackComplete();
@@ -88,7 +78,7 @@ class CoreAlgoLaneQueryTest {
             try (var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                 var request = message(CoreAlgoOrderCodec.encodeQuery(0, 0, "", 0, 10));
                 assertThat(core.requiresOwnerLaneAccessForPreparation(request)).isFalse();
-                assertThat(core.apply(request).resultCode()).isEqualTo(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
+                assertThat(CoreTestCompletion.querySynchronously(core, request).resultCode()).isEqualTo(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
                 assertThat(core.querySequence(request.header().commandId())).isZero();
                 var response = query(core, 0, 503, "", 0, 10);
                 assertThat(response.status()).isEqualTo(ResponseStatus.OK);

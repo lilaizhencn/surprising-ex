@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
+
 import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -165,23 +167,22 @@ final class CoreMatchingFlow {
     TradingCoreRuntime.LifecycleOrderChunk lifecycleOrders(
             long userId, String instrumentId, long cursorOrderId, int maxOrders) {
         var page = owner.activeOrderIndex.page(userId, instrumentId, cursorOrderId, maxOrders);
-        List<CoreOrderState> selected = page.orderIds().stream()
-                .map(owner.activeOrderIndex::activeOrderRuntime)
-                .filter(order -> order != null && order.status() == CoreOrderStatus.OPEN)
-                .map(order -> RuntimeStateMaterializer.orderSnapshot(order, owner.identities))
-                .toList();
+        var selected = page.orderIds().stream().map(owner.activeOrderIndex::activeOrderRoute)
+                .filter(java.util.Objects::nonNull)
+                .map(route -> new CancellationOrder(
+                        route.orderId(), route.userId(), route.instrumentId())).toList();
         return new TradingCoreRuntime.LifecycleOrderChunk(selected, page.nextCursorOrderId());
     }
 
-    List<CoreOrderState> batchCancellationOrders(CommandSlot pending) {
+    List<CancellationOrder> batchCancellationOrders(CommandSlot pending) {
         var command = pending.decodedCommand().liquidationBatch();
-        List<CoreOrderState> orders = new ArrayList<>();
+        List<CancellationOrder> orders = new ArrayList<>();
         int remaining = command.maxCancelOrders();
         for (int index = 0; index < command.actions().size(); index++) {
             if (remaining == 0) break;
             if (!pending.liquidationCheck().cancelsOrders(index)) continue;
             var action = command.actions().get(index);
-            var liquidation = owner.runtimeState.liquidation(action.liquidationId());
+            var liquidation = pending.liquidationCheck().liquidation(index);
             if (liquidation == null || (liquidation.status() != CoreLiquidationState.Status.PLANNED
                     && liquidation.status() != CoreLiquidationState.Status.ORDERED)) continue;
             TradingCoreRuntime.LifecycleOrderChunk chunk = lifecycleOrders(
@@ -233,7 +234,7 @@ final class CoreMatchingFlow {
         }
         if (pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
                 && owner.matchingAdapter.topology().matchingEngineCount() > 1) {
-            List<CoreOrderState> orders = batchCancellationOrders(pending);
+            List<CancellationOrder> orders = batchCancellationOrders(pending);
             int shardId = singleMatcherShard(orders);
             if (shardId == -2) {
                 owner.crossShardCancellations.start(pending, orders);
@@ -283,9 +284,9 @@ final class CoreMatchingFlow {
         return true;
     }
 
-    int singleMatcherShard(List<CoreOrderState> orders) {
+    int singleMatcherShard(List<CancellationOrder> orders) {
         int shardId = -1;
-        for (CoreOrderState order : orders) {
+        for (var order : orders) {
             int orderShard = owner.matchingAdapter.matcherShardId(order.instrumentId());
             if (shardId == -1) shardId = orderShard;
             else if (shardId != orderShard) return -2;
@@ -402,7 +403,7 @@ final class CoreMatchingFlow {
             if (admission.resolved().orderId() != admission.originalOrderId())
                 owner.requireOrderIdentityAvailable(admission.userId(), admission.command());
             pending.withAdmission(admission);
-            pending.withPreMatchingCancellations(owner.admissions.replacementPreMatchingCancellations(pending));
+            pending.withPreMatchingCancellations(pending.replacementAdmission().closeCapacityCancellations());
         } catch (com.surprising.aeron.service.exception.CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
             pending.rejectMatching(failure instanceof com.surprising.aeron.service.exception.CoreStateRejectedException rejected
                     ? CoreResultCode.fromRejectionCode(rejected.code())
@@ -422,7 +423,12 @@ final class CoreMatchingFlow {
                 check.prepare(pending.decodedCommand().liquidation(), owner.runtimeState, owner.identities);
             else check.prepare(pending.decodedCommand().liquidationBatch(), owner.runtimeState, owner.identities);
         }
-        if (!check.poll()) return false;
+        try { if (!check.poll()) return false; }
+        catch (CoreStateRejectedException rejection) {
+            pending.rejectMatching(CoreResultCode.fromRejectionCode(rejection.code()));
+            owner.matchingProgress.submissionCompleted(pending);
+            return true;
+        }
         if (pending.operation() == CommandSlot.Operation.LIQUIDATION) {
             try { check.executable(0); }
             catch (CoreStateRejectedException rejection) {

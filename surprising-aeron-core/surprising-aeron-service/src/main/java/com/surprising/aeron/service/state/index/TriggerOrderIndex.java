@@ -36,7 +36,28 @@ public final class TriggerOrderIndex {
         return symbol == 0 ? left.source().compareTo(right.source()) : symbol;
     });
     private final NavigableMap<Long, NavigableSet<Long>> idsByExpiry = new TreeMap<>();
-    private final Map<Long, CoreTriggerOrderState> valuesById = new TreeMap<>();
+    private final Map<Long, TriggerRoute> valuesById = new TreeMap<>();
+
+    /** Identity and candidate-index keys; order size, fees and execution state remain in Lane. */
+    public record TriggerRoute(long triggerOrderId, long userId, String instrumentId,
+            String clientTriggerOrderId, String ocoGroupId, CoreMarginMode marginMode,
+            CorePositionSide positionSide, CoreTriggerOrderStatus status, long expiresAtEpochMillis,
+            CoreTriggerPriceSource priceSource, CoreTriggerOrderType triggerType,
+            com.surprising.aeron.protocol.CoreTriggerCondition triggerCondition, long triggerPriceTicks,
+            com.surprising.aeron.protocol.CoreOrderSide side, long activationPriceTicks,
+            long callbackRatePpm, long highestPriceTicks, long lowestPriceTicks, long activatedAtEpochMillis,
+            boolean cancelRevisionAvailable) {
+        public static TriggerRoute from(CoreTriggerOrderState value) {
+            return new TriggerRoute(value.triggerOrderId(), value.userId(), value.instrumentId(),
+                    value.clientTriggerOrderId(), value.ocoGroupId(), value.marginMode(), value.positionSide(),
+                    value.status(), value.expiresAtEpochMillis(), value.priceSource(), value.triggerType(),
+                    value.triggerCondition(), value.triggerPriceTicks(), value.side(), value.activationPriceTicks(),
+                    value.callbackRatePpm(), value.highestPriceTicks(), value.lowestPriceTicks(), value.activatedAtEpochMillis(),
+                    value.revision() < Long.MAX_VALUE);
+        }
+    }
+
+    public TriggerRoute route(long id) { return valuesById.get(id); }
 
     public TriggerOrderIndex(TradingCoreState state) {
         rebuild(state);
@@ -295,13 +316,21 @@ public final class TriggerOrderIndex {
         return ids == null ? Collections.emptyNavigableSet() : Collections.unmodifiableNavigableSet(ids);
     }
 
+    public NavigableSet<Long> ocoSiblings(TriggerRoute order) {
+        if (order.ocoGroupId().isEmpty()) return Collections.emptyNavigableSet();
+        NavigableSet<Long> ids = idsByOco.get(new TriggerOcoKey(order.userId(),
+                OrderReservation.requireInstrumentId(order.instrumentId()), order.marginMode(), order.positionSide(),
+                order.ocoGroupId()));
+        return ids == null ? Collections.emptyNavigableSet() : Collections.unmodifiableNavigableSet(ids);
+    }
+
     public boolean containsClient(long userId, String clientTriggerOrderId) {
         return clientTriggerOrderId != null && !clientTriggerOrderId.isEmpty()
                 && idsByClient.containsKey(new ClientTriggerKey(userId, clientTriggerOrderId));
     }
 
     public void apply(long id, CoreTriggerOrderState current) {
-        CoreTriggerOrderState previous = valuesById.remove(id);
+        TriggerRoute previous = valuesById.remove(id);
         if (previous != null) {
             remove(previous, id);
             if (!previous.clientTriggerOrderId().isEmpty()) {
@@ -336,7 +365,9 @@ public final class TriggerOrderIndex {
         });
     }
 
-    private void add(CoreTriggerOrderState order) {
+    private void add(CoreTriggerOrderState order) { add(TriggerRoute.from(order)); }
+
+    private void add(TriggerRoute order) {
         long userId = order.userId();
         String instrumentId = order.instrumentId();
         long id = order.triggerOrderId();
@@ -372,7 +403,7 @@ public final class TriggerOrderIndex {
         }
     }
 
-    private void remove(CoreTriggerOrderState order, long id) {
+    private void remove(TriggerRoute order, long id) {
         valuesById.remove(id);
         long userId = order.userId();
         String instrumentId = order.instrumentId();
@@ -456,7 +487,7 @@ public final class TriggerOrderIndex {
         private final NavigableSet<Long> trailingAlways = new TreeSet<>();
     }
 
-    private static void indexTrailing(NavigableMapByPrice price, CoreTriggerOrderState order) {
+    private static void indexTrailing(NavigableMapByPrice price, TriggerRoute order) {
         boolean sell = order.side() == com.surprising.aeron.protocol.CoreOrderSide.SELL;
         if (order.activatedAtEpochMillis() > 0) {
             long base = sell ? order.highestPriceTicks() : order.lowestPriceTicks();
@@ -476,7 +507,7 @@ public final class TriggerOrderIndex {
         price.trailingAlways.add(order.triggerOrderId());
     }
 
-    private static void removeTrailing(NavigableMapByPrice price, CoreTriggerOrderState order, long id) {
+    private static void removeTrailing(NavigableMapByPrice price, TriggerRoute order, long id) {
         boolean sell = order.side() == com.surprising.aeron.protocol.CoreOrderSide.SELL;
         if (order.activatedAtEpochMillis() > 0) {
             long base = sell ? order.highestPriceTicks() : order.lowestPriceTicks();

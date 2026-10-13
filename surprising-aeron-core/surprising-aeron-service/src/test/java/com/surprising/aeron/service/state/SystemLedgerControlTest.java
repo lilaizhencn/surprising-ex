@@ -28,14 +28,14 @@ class SystemLedgerControlTest {
             assertThatThrownBy(() -> runtime.treasuryForQuery(identities)).hasMessageContaining("committed control");
             var funds = new RuntimeFundsAccumulator();
             runtime.appendFundsDelta(funds);
-            assertThat(funds.toDelta().postings()).hasSize(1);
-            runtime.clearChangedKeys();
+            assertThat(funds.toDelta().postings()).as("Owner consumes completion without money receipts").isEmpty();
+            LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
             assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 75L);
             assertThat(work.reusable()).isTrue();
             var next = RuntimeInsuranceFundStateTransitions.prepare(work, runtime, identities, new AdjustInsuranceFundCommand("USDT", -20));
             assertThat(next).isSameAs(work);
             LedgerControlTestSupport.await(runtime, next);
-            runtime.appendFundsDelta(new RuntimeFundsAccumulator()); runtime.clearChangedKeys();
+            LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
             assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 55L);
             assertThat(runtime.revision()).isEqualTo(2);
         }
@@ -60,7 +60,7 @@ class SystemLedgerControlTest {
                 assertThat(work.reusable()).isTrue();
             } finally { ready.set(true); ledger.signalWork(); }
             LedgerControlTestSupport.await(runtime, work);
-            runtime.appendFundsDelta(new RuntimeFundsAccumulator()); runtime.clearChangedKeys();
+            LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
             assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 7L);
             assertThat(runtime.revision()).isEqualTo(1);
         }
@@ -80,7 +80,7 @@ class SystemLedgerControlTest {
                 assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", Long.MAX_VALUE);
                 var spend = RuntimeInsuranceFundStateTransitions.prepare(overflow, runtime, identities, new AdjustInsuranceFundCommand("USDT", -Long.MAX_VALUE));
                 LedgerControlTestSupport.await(runtime, spend);
-                runtime.appendFundsDelta(new RuntimeFundsAccumulator()); runtime.clearChangedKeys();
+                LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
                 assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).isEmpty();
                 var rejected = RuntimeInsuranceFundStateTransitions.prepare(spend, runtime, identities, new AdjustInsuranceFundCommand("USDT", -1));
                 assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, rejected)).isInstanceOf(CoreStateRejectedException.class);
@@ -88,7 +88,7 @@ class SystemLedgerControlTest {
                 assertThat(runtime.revision()).isEqualTo(1);
                 var credit = RuntimeInsuranceFundStateTransitions.prepare(rejected, runtime, identities, new AdjustInsuranceFundCommand("USDT", 7));
                 LedgerControlTestSupport.await(runtime, credit);
-                runtime.appendFundsDelta(new RuntimeFundsAccumulator()); runtime.clearChangedKeys();
+                LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
                 assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 7L);
                 runtime.assertAccountLanesHealthy();
             } finally { runtime.exitAsynchronousCommandScope(); }

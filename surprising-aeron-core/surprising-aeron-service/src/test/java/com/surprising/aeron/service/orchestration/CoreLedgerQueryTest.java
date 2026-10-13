@@ -1,6 +1,8 @@
 package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.service.state.model.CoreMarkPriceState;
+import java.util.TreeSet;
 import com.surprising.aeron.service.state.*;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
@@ -40,6 +42,45 @@ class CoreLedgerQueryTest {
                             assertThat(asset.asset()).isEqualTo("USDT");
                             assertThat(asset.insuranceBalanceUnits()).isEqualTo(250);
                         });
+            }
+            assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+            core.assertClusterCallbackComplete();
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = CoreLiquidationWorkView.Purpose.class,
+            names = {"EXECUTION", "ADL"})
+    void executionAndAdlPagesReadLanesAndKeepExistingBudgets(CoreLiquidationWorkView.Purpose purpose) throws Exception {
+        var instrument = CoreInstrument.from(LINE, new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+        var liquidations = Map.of(
+                1L, new CoreLiquidationState(1, 1001, "1", 1, 1, 0, CoreLiquidationState.Status.PLANNED),
+                2L, new CoreLiquidationState(2, 1002, "1", 2, 1, 0, CoreLiquidationState.Status.PLANNED),
+                3L, new CoreLiquidationState(3, 1003, "1", 1, 1, 70, CoreLiquidationState.Status.ADL_REQUIRED),
+                4L, new CoreLiquidationState(4, 1004, "1", 1, 1, 30, CoreLiquidationState.Status.ADL_REQUIRED),
+                5L, new CoreLiquidationState(5, 1005, "1", 1, 1, 0, CoreLiquidationState.Status.PLANNED));
+        var state = new TradingCoreState(LINE, 0,
+                Map.of(1001L, CoreUserState.empty(LINE, 1001), 1002L, CoreUserState.empty(LINE, 1002),
+                        1003L, CoreUserState.empty(LINE, 1003), 1004L, CoreUserState.empty(LINE, 1004),
+                        1005L, CoreUserState.empty(LINE, 1005)),
+                Map.of(), Map.of("1", instrument), new CoreRiskState(
+                Map.of("1", new CoreMarkPriceState("1", 100, 1, 1)), Map.of(), liquidations, Map.of("1", new CoreRiskState.RiskScan("1", 1, 999, false)), 6),
+                CoreTreasuryState.empty());
+        var identities = new RuntimeIdentityRegistry();
+        try (var cold = RuntimeStateProjector.project(state, identities); var core = coreWithInitialState(state)) {
+            core.activate();
+            long handoff = core.runtimeState.laneHandoffEpoch();
+            try (var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+                for (long cursor : new long[]{0, 1, 3, 5}) {
+                    for (int maxBytes : new int[]{256, 1_024}) {
+                        var request = new CoreLiquidationWorkView.Query(LINE, purpose, cursor, 1, maxBytes);
+                        var expected = com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService.work(
+                                cold, identities, LINE, request, new TreeSet<>(liquidations.keySet()), liquidations.keySet());
+                        var response = query(core, CoreMessageType.LIQUIDATION_WORK_QUERY, CoreLiquidationWorkCodec.encodeQuery(request));
+                        assertThat(response.data()).isEqualTo(CoreLiquidationWorkCodec.encodeWork(expected));
+                    }
+                }
             }
             assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
             core.assertClusterCallbackComplete();
@@ -109,6 +150,44 @@ class CoreLedgerQueryTest {
             assertThat(CoreStateQueryCodec.decodeTreasuryState(query(core, CoreMessageType.TREASURY_STATE_QUERY, new byte[0]).data()))
                     .isEmpty();
             core.assertClusterCallbackComplete();
+        }
+    }
+
+    @Test
+    void fullLedgerMailboxKeepsOneDeferredQueryAndRejectsTheNextWithoutPoisoningLedger() {
+        var release = new java.util.concurrent.atomic.AtomicBoolean();
+        try (var core = new TradingCoreRuntime(LINE)) {
+            core.activate();
+            var blocked = new SystemLedgerLane.Entry() {
+                @Override public boolean ready() { return release.get(); }
+                @Override public void apply(TreasuryRuntime ledger) { }
+            };
+            try {
+                int queued = 0;
+                while (core.runtimeState.dispatchLedgerQuery(blocked)) {
+                    if (++queued > 65_536) throw new AssertionError("Ledger mailbox did not fill");
+                }
+                var payload = CoreLiquidationWorkCodec.encodeQuery(new CoreLiquidationWorkView.Query(
+                        LINE, CoreLiquidationWorkView.Purpose.EXECUTION, 0, 1, 1_024));
+                var first = message(CoreMessageType.LIQUIDATION_WORK_QUERY, payload);
+                assertThat(CoreTestCompletion.applyAsynchronously(core, first).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+                long id = core.querySequence(first.header().commandId());
+                var second = message(CoreMessageType.LIQUIDATION_WORK_QUERY, payload);
+                assertThat(CoreTestCompletion.applyAsynchronously(core, second).resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
+                assertThat(core.querySequence(second.header().commandId())).isZero();
+                release.set(true);
+                CoreResponse response;
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+                while ((response = core.takeQueryResult(id)) == null) {
+                    core.assertHealthy();
+                    if (System.nanoTime() >= deadline) throw new AssertionError("deferred query timed out");
+                    Thread.onSpinWait();
+                }
+                assertThat(CoreLiquidationWorkCodec.decodeWork(response.data()).complete()).isTrue();
+                assertThat(core.takeQueryResult(id)).isNull();
+                assertThat(core.querySequence(first.header().commandId())).isZero();
+                core.assertHealthy();
+            } finally { release.set(true); }
         }
     }
 

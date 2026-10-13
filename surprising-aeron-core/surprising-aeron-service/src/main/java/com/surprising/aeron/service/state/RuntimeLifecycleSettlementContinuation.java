@@ -1,11 +1,13 @@
 package com.surprising.aeron.service.state;
+
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.business.ProductTradingRules;
 import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.index.ActiveOrderIndex;
-import com.surprising.aeron.service.state.model.CoreOrderState;
+
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import java.util.ArrayList;
@@ -61,7 +63,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         RuntimeLifecycleSettlement.validateProgress(previousProgress, command, true);
         boolean ordersComplete = previousProgress != null && previousProgress.ordersComplete();
         int accountLaneId = previousProgress == null ? 0 : previousProgress.accountLaneId();
-        List<CoreOrderState> selectedOrders = List.of();
+        List<CancellationOrder> selectedOrders = List.of();
         boolean moreOrders = false;
         if (!ordersComplete) {
             RuntimeLifecycleSettlement.OrderPage page = RuntimeLifecycleSettlement.selectOrders(runtime, identities, activeOrderIndex, instrument.instrumentId(),
@@ -94,11 +96,11 @@ public final class RuntimeLifecycleSettlementContinuation {
         private ProductTradingRules kernel;
         private int symbolId, assetId;
         private TreasuryRuntime.LifecycleProgressRuntime previousProgress;
-        private List<CoreOrderState> selectedOrders;
+        private List<CancellationOrder> selectedOrders;
         private boolean moreOrders;
         private List<Long> selectedUserIds;
         private final LongArrayList[] usersByLane;
-        private final ArrayList<CoreOrderState>[] ordersByLane;
+        private final ArrayList<CancellationOrder>[] ordersByLane;
         private boolean usersComplete;
         private long orderLaneMask;
         private long userLaneMask;
@@ -116,7 +118,7 @@ public final class RuntimeLifecycleSettlementContinuation {
                 TradingRuntimeState runtime, CoreInstrument instrument,
                 ProductTradingRules kernel, int symbolId, int assetId,
                 TreasuryRuntime.LifecycleProgressRuntime previousProgress,
-                List<CoreOrderState> selectedOrders, boolean moreOrders, RuntimeLifecycleSettlement.UserPage userPage) {
+                List<CancellationOrder> selectedOrders, boolean moreOrders, RuntimeLifecycleSettlement.UserPage userPage) {
             int laneCount = runtime.topology().accountLaneCount();
             this.usersByLane = new LongArrayList[laneCount];
             for (int lane = 0; lane < laneCount; lane++) usersByLane[lane] = new LongArrayList();
@@ -134,22 +136,22 @@ public final class RuntimeLifecycleSettlementContinuation {
             this.moreOrders = false; this.selectedUserIds = List.of();
             this.usersByLane = new LongArrayList[runtime.topology().accountLaneCount()];
             for (int lane = 0; lane < usersByLane.length; lane++) usersByLane[lane] = new LongArrayList();
-            this.ordersByLane = (ArrayList<CoreOrderState>[]) new ArrayList<?>[runtime.topology().accountLaneCount()];
+            this.ordersByLane = (ArrayList<CancellationOrder>[]) new ArrayList<?>[runtime.topology().accountLaneCount()];
             this.usersComplete = true;
             this.orderLaneMask = this.userLaneMask = 0; this.phase = Phase.DONE; this.result = result;
             this.dispatchedPhase = null;
         }
 
         @SuppressWarnings("unchecked")
-        private static ArrayList<CoreOrderState>[] newLaneOrderGroups(int laneCount) {
-            return (ArrayList<CoreOrderState>[]) new ArrayList<?>[laneCount];
+        private static ArrayList<CancellationOrder>[] newLaneOrderGroups(int laneCount) {
+            return (ArrayList<CancellationOrder>[]) new ArrayList<?>[laneCount];
         }
 
         private SettlementWork reset(SettleInstrumentCommand command, UUID chunkCommandId,
                 TradingRuntimeState runtime, CoreInstrument instrument,
                 ProductTradingRules kernel, int symbolId, int assetId,
                 TreasuryRuntime.LifecycleProgressRuntime previousProgress,
-                List<CoreOrderState> selectedOrders, boolean moreOrders, RuntimeLifecycleSettlement.UserPage userPage) {
+                List<CancellationOrder> selectedOrders, boolean moreOrders, RuntimeLifecycleSettlement.UserPage userPage) {
             initializeLedgerCommand(runtime);
             if (usersByLane.length != runtime.topology().accountLaneCount()) {
                 throw new IllegalStateException("settlement continuation lane topology changed");
@@ -160,15 +162,15 @@ public final class RuntimeLifecycleSettlementContinuation {
             this.moreOrders = moreOrders; this.selectedUserIds = userPage.userIds();
             this.usersComplete = userPage.complete();
             for (LongArrayList users : usersByLane) users.clear();
-            for (ArrayList<CoreOrderState> orders : ordersByLane) if (orders != null) orders.clear();
+            for (ArrayList<CancellationOrder> orders : ordersByLane) if (orders != null) orders.clear();
             for (int index = 0; index < selectedUserIds.size(); index++) {
                 long userId = selectedUserIds.get(index);
                 usersByLane[runtime.topology().accountLaneId(userId)].add(userId);
             }
-            for (CoreOrderState order : selectedOrders) {
+            for (CancellationOrder order : selectedOrders) {
                 if (order == null) continue;
                 int lane = runtime.topology().accountLaneId(order.userId());
-                ArrayList<CoreOrderState> group = ordersByLane[lane];
+                ArrayList<CancellationOrder> group = ordersByLane[lane];
                 if (group == null) ordersByLane[lane] = group = new ArrayList<>();
                 group.add(order);
             }
@@ -196,7 +198,7 @@ public final class RuntimeLifecycleSettlementContinuation {
             this.previousProgress = null; this.selectedOrders = List.of(); this.selectedUserIds = List.of();
             this.moreOrders = false; this.usersComplete = true; this.orderLaneMask = this.userLaneMask = 0;
             for (LongArrayList users : usersByLane) users.clear();
-            for (ArrayList<CoreOrderState> orders : ordersByLane) if (orders != null) orders.clear();
+            for (ArrayList<CancellationOrder> orders : ordersByLane) if (orders != null) orders.clear();
             if (prepared != null) Arrays.fill(prepared, null);
             if (treasuryDelta != null) treasuryDelta.clear();
             this.result = result; this.phase = Phase.DONE;
@@ -211,7 +213,7 @@ public final class RuntimeLifecycleSettlementContinuation {
             result = null; phase = Phase.DONE;
             dispatchedPhase = null;
             for (LongArrayList users : usersByLane) users.clear();
-            for (ArrayList<CoreOrderState> orders : ordersByLane) if (orders != null) orders.clear();
+            for (ArrayList<CancellationOrder> orders : ordersByLane) if (orders != null) orders.clear();
             if (prepared != null) Arrays.fill(prepared, null);
             if (treasuryDelta != null) treasuryDelta.clear();
         }

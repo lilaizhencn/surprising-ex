@@ -658,8 +658,8 @@ class TradingCoreOwnerTest {
                 onSessionMessage(service, responses, command(CoreMessageType.UPSERT_ALGO_ORDER,
                         revision, 1001, com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(algo)));
                 finishCommands(service);
-                assertThat(runtime.algoOrder(501).revision()).isEqualTo(revision);
-                assertThat(runtime.algoOrder(501).userId()).isEqualTo(1001);
+                assertThat(CoreTestCompletion.algoState(service.state(), 1001, 501).revision()).isEqualTo(revision);
+                assertThat(CoreTestCompletion.algoState(service.state(), 1001, 501).userId()).isEqualTo(1001);
             }
             assertThat(epoch.getLong(runtime)).isEqualTo(before);
             long revisionBeforeFailure = runtime.revision();
@@ -673,14 +673,14 @@ class TradingCoreOwnerTest {
             finishCommands(service);
             assertThat(CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.getLast()).payloadUnsafe()).status())
                     .isEqualTo(ResponseStatus.REJECTED);
-            assertThat(runtime.algoOrder(501).revision()).isEqualTo(3);
+            assertThat(CoreTestCompletion.algoState(service.state(), 1001, 501).revision()).isEqualTo(3);
             assertThat(runtime.revision()).isEqualTo(Long.MAX_VALUE);
             runtime.setMetadata(ProductLine.SPOT, revisionBeforeFailure);
             onSessionMessage(service, responses, command(CoreMessageType.UPSERT_ALGO_ORDER, 5, 1001, payload));
             finishCommands(service);
             assertThat(CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.getLast()).payloadUnsafe()).status())
                     .isEqualTo(ResponseStatus.APPLIED);
-            assertThat(runtime.algoOrder(501).revision()).isEqualTo(4);
+            assertThat(CoreTestCompletion.algoState(service.state(), 1001, 501).revision()).isEqualTo(4);
             assertThat(epoch.getLong(runtime)).isEqualTo(before);
 
         } finally { service.onTerminate(null); }

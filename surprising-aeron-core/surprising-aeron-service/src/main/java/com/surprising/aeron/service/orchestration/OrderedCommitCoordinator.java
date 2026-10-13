@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
+
 import lombok.extern.slf4j.Slf4j;
 
 
@@ -144,7 +146,7 @@ final class OrderedCommitCoordinator {
                 }
                 // Account work is consumed once; commit publication may require later polls.
                 pending.controlWork = null;
-                if (pending.commitEvent == null) {
+                if (!pending.controlAccountsCommitted && pending.commitEvent == null) {
                     owner.runtimeState.completePendingReservations(sequence);
                     owner.resultBuilder.materializeChangeAccumulators();
                     // A suspended control may accumulate users across several risk pages/Lanes.
@@ -348,7 +350,7 @@ final class OrderedCommitCoordinator {
                 case REPLACE, AMEND -> throw new IllegalStateException("replacement requires a direct Lane event");
                 case TRIGGER -> {
                     long[] execute = pending.decodedCommand().trigger();
-                    var trigger = owner.runtimeState.triggerOrder(execute[0]);
+                    var trigger = pending.sourceTrigger();
                     if (trigger == null) throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND",
                             "trigger order not found");
                     settlementTreasuryDelta = owner.applyMatchesOnAccountLanes(
@@ -360,7 +362,7 @@ final class OrderedCommitCoordinator {
                 }
                 case LIQUIDATION -> {
                     var command = pending.decodedCommand().liquidation();
-                    var liquidation = owner.runtimeState.liquidation(command.liquidationId());
+                    var liquidation = pending.liquidationCheck().liquidation(0);
                     boolean executable = matchingResult.accepted() && liquidation != null && pending.liquidationCheck().executable(0);
                     TradingCoreRuntime.LifecycleOrderChunk chunk = !executable ? new TradingCoreRuntime.LifecycleOrderChunk(List.of(), 0)
                             : owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
@@ -371,7 +373,7 @@ final class OrderedCommitCoordinator {
                     else owner.resultBuilder.setSingleChangedUser(liquidation.userId());
                     if (matchingResult.accepted() && liquidation != null) {
                         long nextCursor = executable && chunk.more() ? chunk.nextCursorOrderId() : 0;
-                        var orders = executable ? chunk.orders() : List.<CoreOrderState>of();
+                        var orders = executable ? chunk.orders() : List.<CancellationOrder>of();
                         var progress = new CoreLiquidationProgressView(nextCursor == 0, nextCursor,
                                 chunk.orders().size());
                         if (owner.runtimeState.systemLedgerStarted() || owner.runtimeState.asynchronousCommands()) {
@@ -514,6 +516,18 @@ final class OrderedCommitCoordinator {
             if (!owner.resultBuilder.commandChangedOrderIds.isEmpty()) {
                 owner.resultBuilder.materializeCommandOrderViews(pending);
             }
+        if ((pending.operation() == CommandSlot.Operation.LIQUIDATION
+                || pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
+                || pending.operation() == CommandSlot.Operation.SETTLEMENT)) {
+            pending.controlAccountsCommitted = true;
+            if (!owner.runtimeState.pollControlFundsValidation(false)) {
+                pending.controlPending = true;
+                pending.controlStartedNanos = applyStartNanos;
+                retainControlResponse(pending, matchingResult);
+                owner.suspendMatchingCommitContext(pending);
+                return null;
+            }
+        }
         var timingHeader = pending.command().header();
         long publicationStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         completeCommitPublicationBatch();
@@ -542,7 +556,7 @@ final class OrderedCommitCoordinator {
         com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta;
         try {
             settlementTreasuryDelta = owner.runtimeState.collectMatcherSettlement(
-                    event, owner.commandFundsAccumulator, owner.terminalRetention,
+                    event, owner.runtimeState.coldCommandFunds(), owner.terminalRetention,
                     owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
             owner.resultBuilder.markLaneCommitIdsSeeded();
             pending.completeLanes(event.requiredLaneMask());
@@ -558,7 +572,7 @@ final class OrderedCommitCoordinator {
                 }
                 case TRIGGER -> {
                     long[] execute = pending.decodedCommand().trigger();
-                    var trigger = owner.runtimeState.triggerOrder(execute[0]);
+                    var trigger = pending.sourceTrigger();
                     if (trigger == null) {
                         throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
                     }
@@ -631,7 +645,7 @@ final class OrderedCommitCoordinator {
         com.surprising.aeron.service.state.LaneCancelEvent event = pending.cancelEvent();
         if (event == null || !event.complete()) return null;
         try {
-            owner.runtimeState.collectCancel(event, owner.commandFundsAccumulator, owner.terminalRetention,
+            owner.runtimeState.collectCancel(event, owner.runtimeState.coldCommandFunds(), owner.terminalRetention,
                     owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
             owner.resultBuilder.markLaneCommitIdsSeeded();
             pending.completeLanes(event.requiredLaneMask());
@@ -696,7 +710,7 @@ final class OrderedCommitCoordinator {
         var cancellations = result.cancellations();
         for (int index = 0; index < cancellations.size(); index++) {
             CoreCancellationResult cancellation = cancellations.get(index);
-            OrderRuntime order = owner.activeOrderIndex.activeOrderRuntime(cancellation.orderId());
+            var order = owner.activeOrderIndex.activeOrderRoute(cancellation.orderId());
             if (order != null) mask |= owner.matchingAdapter.topology().accountLaneMask(order.userId());
         }
         if (pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH) {
@@ -705,7 +719,7 @@ final class OrderedCommitCoordinator {
             }
         } else if (pending.operation() == CommandSlot.Operation.LIQUIDATION) {
             var command = pending.decodedCommand().liquidation();
-            var liquidation = owner.runtimeState.liquidation(command.liquidationId());
+            var liquidation = pending.liquidationCheck().liquidation(0);
             if (liquidation != null) mask |= owner.matchingAdapter.topology().accountLaneMask(liquidation.userId());
         } else if (pending.operation() == CommandSlot.Operation.SETTLEMENT) {
             var command = pending.decodedCommand().settlement();
@@ -758,7 +772,7 @@ final class OrderedCommitCoordinator {
             }
             case TRIGGER -> {
                 long[] execute = pending.decodedCommand().trigger();
-                var trigger = owner.runtimeState.triggerOrder(execute[0]);
+                var trigger = pending.sourceTrigger();
                 if (trigger == null) yield null;
                 long orderId = java.util.Objects.requireNonNull(pending.admittedMatchingOrder(),
                         "trigger admission is missing").orderId();
@@ -793,7 +807,7 @@ final class OrderedCommitCoordinator {
     boolean controlPending(long sequence) {
         if (!owner.pendingMatching.claimed(sequence)) return false;
         CommandSlot slot = owner.pendingMatching.required(sequence);
-        return slot.controlPending && (slot.controlWork != null || slot.commitEvent != null);
+        return slot.controlPending;
     }
 
     void applyLiquidationBatch(
@@ -806,11 +820,8 @@ final class OrderedCommitCoordinator {
         for (var action : batch.actions()) owner.resultBuilder.markUserChanged(action.userId());
         if (!matchingResult.accepted()) {
             int obsolete = batch.actions().stream()
-                    .map(action -> owner.runtimeState.liquidation(action.liquidationId()))
-                    .mapToInt(liquidation -> liquidation == null || liquidation.status() == CoreLiquidationState.Status.COMPLETED
-                            || liquidation.status() == CoreLiquidationState.Status.INSURANCE_REQUIRED
-                            || liquidation.status() == CoreLiquidationState.Status.ADL_REQUIRED
-                            || liquidation.status() == CoreLiquidationState.Status.CANCELED ? 1 : 0)
+                    .map(action -> owner.liquidationIndex.route(action.liquidationId()))
+                    .mapToInt(liquidation -> liquidation == null || !liquidation.executable() ? 1 : 0)
                     .sum();
             owner.resultBuilder.commandLiquidationBatchResult = new CoreLiquidationBatchResultView(batch.actions().size(), 0,
                     batch.actions().size() - obsolete, obsolete, 0, 0);
@@ -835,7 +846,7 @@ final class OrderedCommitCoordinator {
                 if (executionRequests == null) executionRequests = new ArrayList<>();
                 while (index < batch.actions().size()) {
                     var action = batch.actions().get(index++);
-                    var liquidation = owner.runtimeState.liquidation(action.liquidationId());
+                    var liquidation = pending.liquidationCheck().liquidation(index - 1);
                     if (liquidation == null || liquidation.status() == CoreLiquidationState.Status.COMPLETED
                             || liquidation.status() == CoreLiquidationState.Status.INSURANCE_REQUIRED
                             || liquidation.status() == CoreLiquidationState.Status.ADL_REQUIRED
@@ -863,10 +874,10 @@ final class OrderedCommitCoordinator {
                     }
                     var chunk = executable ? owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
                             action.cursorOrderId(), remaining) : new TradingCoreRuntime.LifecycleOrderChunk(List.of(), 0);
-                    for (CoreOrderState order : chunk.orders()) owner.resultBuilder.markOrderChanged(order.orderId());
+                    for (var order : chunk.orders()) owner.resultBuilder.markOrderChanged(order.orderId());
                     owner.resultBuilder.markUserChanged(liquidation.userId());
                     long nextCursor = executable && chunk.more() ? chunk.nextCursorOrderId() : 0;
-                    var orders = executable ? chunk.orders() : List.<CoreOrderState>of();
+                    var orders = executable ? chunk.orders() : List.<CancellationOrder>of();
                     if (executable) {
                         processedOrders += orders.size();
                         remaining -= orders.size();

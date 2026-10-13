@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.command.liquidation;
 
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
+
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
@@ -31,14 +33,14 @@ public final class LiquidationCommands {
     }
 
     public void executeLiquidationRuntime(ExecuteLiquidationCommand command,
-                                          Collection<CoreOrderState> canceledOrders) {
+                                          Collection<CancellationOrder> canceledOrders) {
         RuntimeDerivativeLiquidationProcessor.applyExecutionRuntime(command, canceledOrders,
                 owner.runtimeState(), owner.identities());
         owner.requestCommitPublication();
     }
 
     public void advanceLiquidationCancellationRuntime(ExecuteLiquidationCommand command,
-                                                       Collection<CoreOrderState> canceledOrders,
+                                                       Collection<CancellationOrder> canceledOrders,
                                                        long nextCursorOrderId) {
         RuntimeDerivativeLiquidationProcessor.applyCancellationAdvanceRuntime(command, canceledOrders,
                 nextCursorOrderId, owner.runtimeState(), owner.identities());

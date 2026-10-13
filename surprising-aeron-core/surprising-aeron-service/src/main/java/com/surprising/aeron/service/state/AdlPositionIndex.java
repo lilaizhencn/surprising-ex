@@ -19,6 +19,8 @@ public final class AdlPositionIndex {
         rebuild(state, identities);
     }
 
+    public int count() { return positions.size(); }
+
     public Set<PositionKey> positions(String asset) {
         return positions(asset, Integer.MAX_VALUE);
     }

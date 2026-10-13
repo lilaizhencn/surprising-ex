@@ -30,7 +30,7 @@ class MatcherSettlementPlanTest {
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
             runtime.putOrder(original);
-            var event = runtime.prepareDirectCancellation(1, original, new java.util.UUID(1, 2),
+            var event = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
             event.beginMatcherPublication();
             runtime.dispatchOwnerControlledSettlement(event);
@@ -55,11 +55,11 @@ class MatcherSettlementPlanTest {
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
             runtime.putOrder(original);
-            var first = runtime.prepareDirectCancellation(1, original, new java.util.UUID(1, 2),
+            var first = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
             first.beginMatcherPublication();
             runtime.dispatchOwnerControlledSettlement(first);
-            var suffix = runtime.prepareDirectCancellation(2, original, new java.util.UUID(3, 4),
+            var suffix = runtime.prepareDirectCancellation(2, original.userId(), original.orderId(), new java.util.UUID(3, 4),
                     0, identities, 30, 40);
             suffix.beginMatcherPublication();
             suffix.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
@@ -91,7 +91,7 @@ class MatcherSettlementPlanTest {
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
             runtime.putOrder(original);
-            var event = runtime.prepareDirectCancellation(1, original, new java.util.UUID(1, 2),
+            var event = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
             event.markMatcherOwnedPublication();
             // The transport release must observe all event metadata already prepared, while
@@ -118,7 +118,7 @@ class MatcherSettlementPlanTest {
             assertThat(event.ready()).isTrue();
             assertThat(runtime.collectMatcherSettlement(event)).isNotNull();
             runtime.releaseMatcherSettlement(event);
-            var reused = runtime.prepareDirectCancellation(2, original, new java.util.UUID(3, 4),
+            var reused = runtime.prepareDirectCancellation(2, original.userId(), original.orderId(), new java.util.UUID(3, 4),
                     0, identities, 30, 40);
             assertThat(reused).isSameAs(event);
             finishSignal.countDown();
@@ -187,7 +187,7 @@ class MatcherSettlementPlanTest {
             var original = order(11, 21, instrumentId, CoreOrderSide.BUY, 3);
             runtime.putOrder(original);
             var id = new java.util.UUID(1, 2);
-            var event = runtime.prepareDirectCancellation(1, original, id, 0, identities, 10, 20);
+            var event = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), id, 0, identities, 10, 20);
             event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     instrumentId, 1, List.of()), 1, 1, 2, 11, 1, 0);
             event.execute(runtime.accountLanes[runtime.topology().accountLaneId(21)]);

@@ -8,6 +8,7 @@ import com.surprising.aeron.service.state.model.CoreRiskState;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -29,10 +30,23 @@ class TriggerOrderIndexTest {
         try (var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
             long second = 8;
             while (runtime.topology().accountLaneId(second) == runtime.topology().accountLaneId(7)) second++;
+            final long secondUser = second;
             runtime.putUser(new UserRuntime(7));
             runtime.putUser(new UserRuntime(second));
             runtime.putTriggerOrder(trigger(901, 7, 100));
             runtime.putTriggerOrder(trigger(902, second, 100));
+            var initial = TradingCoreState.empty(ProductLine.SPOT);
+            var identities = new RuntimeIdentityRegistry();
+            var triggers = new TriggerOrderIndex(initial);
+            triggers.apply(901, trigger(901, 7, 100));
+            triggers.apply(902, trigger(902, second, 100));
+            runtime.bindFactIndexes(new RuntimeFactIndexes(new PositionUserIndex(initial, identities),
+                    new OpenInterestIndex(initial, identities), triggers,
+                    new com.surprising.aeron.service.state.index.AlgoOrderIndex(initial),
+                    new com.surprising.aeron.service.state.index.LiquidationIndex(initial),
+                    new com.surprising.aeron.service.state.index.CancelAllAfterIndex(initial),
+                    new com.surprising.aeron.service.state.index.ActiveOrderIndex(initial, identities),
+                    new AdlPositionIndex(initial, identities)));
             runtime.setMetadata(ProductLine.SPOT, 10);
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
@@ -42,19 +56,19 @@ class TriggerOrderIndexTest {
                         java.util.List.of(), java.util.List.of(901L, 902L), 100, 200);
                 awaitCommit(runtime, event);
                 assertThat(runtime.revision()).isEqualTo(10);
-                assertThat(runtime.triggerOrder(901).status()).isEqualTo(CoreTriggerOrderStatus.PENDING);
-                assertThat(runtime.triggerOrder(902).status()).isEqualTo(CoreTriggerOrderStatus.PENDING);
+                assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
+                assertThat(AccountLaneQueryTestSupport.read(runtime, secondUser, () -> runtime.triggerOrder(902).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
                 assertThat(runtime.ownerLaneAccess).isFalse();
                 runtime.releaseLaneCommit(event);
                 assertThat(runtime.revision()).isEqualTo(12);
-                assertThat(runtime.triggerOrder(901).status()).isEqualTo(CoreTriggerOrderStatus.CANCELED);
-                assertThat(runtime.triggerOrder(902).revision()).isEqualTo(2);
+                assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
+                assertThat(AccountLaneQueryTestSupport.read(runtime, secondUser, () -> runtime.triggerOrder(902).revision())).isEqualTo(2);
                 var plain = runtime.dispatchLaneMutation(2, java.util.List.of(7L, second));
                 assertThat(plain).isSameAs(event);
                 awaitCommit(runtime, plain);
                 runtime.releaseLaneCommit(plain);
                 assertThat(runtime.revision()).isEqualTo(12);
-                assertThat(runtime.triggerOrder(901).revision()).isEqualTo(2);
+                assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901).revision())).isEqualTo(2);
             } finally { runtime.exitAsynchronousCommandScope(); }
         }
     }
@@ -68,44 +82,34 @@ class TriggerOrderIndexTest {
     }
 
     @Test
-    void ownerReadsPublishedTriggersAndRemovalWithoutSubmittingLaneTasks() throws Exception {
+    void accountThreadMutatesTriggerWhileOwnerUsesOnlyCommitReceipts() {
         try (var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
             long user = 1;
             while (runtime.topology().accountLaneId(user) != 3) user++;
-            var trigger = trigger(901, user, 100);
-            runtime.putTriggerOrder(trigger);
-            runtime.clearChangedKeys();
-            runtime.startAccountLanes();
-            var tasksField = TradingRuntimeState.class.getDeclaredField("laneMutationTasks");
-            tasksField.setAccessible(true);
-            var tasks = (Object[]) tasksField.get(runtime);
-            assertThat(tasks).containsOnlyNulls();
-            assertThat(runtime.triggerOrder(901)).isSameAs(trigger);
-            assertThat(runtime.triggerOrder(999)).isNull();
-            assertThat(tasks).as("owner lookup must not enqueue any Lane read").containsOnlyNulls();
-
-            var changed = trigger(901, user, 110);
-            runtime.putTriggerOrder(changed);
-            assertThat(runtime.triggerOrder(901)).isSameAs(changed);
-            var observed = new java.util.HashMap<Long, CoreTriggerOrderState>();
+            final long userId = user;
+            var initial = trigger(901, userId, 100);
+            runtime.putTriggerOrder(initial); runtime.clearChangedKeys(); runtime.startAccountLanes();
+            assertThatThrownBy(() -> runtime.triggerOrder(901)).isInstanceOf(IllegalStateException.class);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.triggerOrder(901))).isSameAs(initial);
+            var changed = trigger(901, userId, 110);
+            runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), ignored -> { runtime.putTriggerOrder(changed); return null; });
+            LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.triggerOrder(901))).isSameAs(changed);
+            var observed = new java.util.TreeMap<Long, com.surprising.aeron.service.state.model.CoreTriggerOrderState>();
             var consumer = new TradingRuntimeState.ChangedIndexConsumer() {
-                public void triggerOrder(long id, CoreTriggerOrderState before, CoreTriggerOrderState after) {
-                    observed.put(id, after);
-                }
+                @Override public void triggerOrder(long id, com.surprising.aeron.service.state.model.CoreTriggerOrderState before,
+                        com.surprising.aeron.service.state.model.CoreTriggerOrderState after) { observed.put(id, after); }
             };
             runtime.visitChangedIndexes(consumer);
             assertThat(observed).containsEntry(901L, changed);
-            assertThat(tasks[0]).isNull();
-            assertThat(tasks[1]).isNull();
-            assertThat(tasks[2]).isNull();
-            runtime.removeTriggerOrder(901);
+            runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), ignored -> { runtime.removeTriggerOrder(901); return null; });
+            LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
             runtime.visitChangedIndexes(consumer);
-            assertThat(runtime.triggerOrder(901)).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.triggerOrder(901))).isNull();
             assertThat(observed).containsEntry(901L, null);
-
-            runtime.rollbackActiveCommand(runtime.revision(), 1);
-            assertThat(runtime.triggerOrder(901)).isSameAs(trigger);
-            assertThat(runtime.hasTriggerClient(user, trigger.clientTriggerOrderId())).isTrue();
+            LedgerControlTestSupport.await(runtime, runtime.beginCommandRollback(runtime.revision(), 1));
+            assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.triggerOrder(901))).isSameAs(initial);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.hasTriggerClient(userId, initial.clientTriggerOrderId()))).isTrue();
         }
     }
 
@@ -117,11 +121,13 @@ class TriggerOrderIndexTest {
                 CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), Map.of(), Map.of(), Map.of(901L, initial));
         try (var runtime = RuntimeStateProjector.project(state, new RuntimeIdentityRegistry())) {
             runtime.startAccountLanes();
-            assertThat(runtime.triggerOrder(901)).isEqualTo(initial);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901))).isEqualTo(initial);
+            while (!runtime.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
             runtime.replaceAuxiliaryState(TradingCoreState.empty(ProductLine.SPOT));
             assertThat(runtime.triggerOrder(901)).isNull();
             runtime.replaceAuxiliaryState(state);
-            assertThat(runtime.triggerOrder(901)).isEqualTo(initial);
+            runtime.releaseOwnerLaneAccess();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901))).isEqualTo(initial);
         }
     }
 

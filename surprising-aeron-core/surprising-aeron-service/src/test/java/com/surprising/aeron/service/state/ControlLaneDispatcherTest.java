@@ -92,9 +92,9 @@ class ControlLaneDispatcherTest {
                 return null;
             });
             awaitControl(runtime);
-            assertThat(runtime.order(11)).isNotNull();
-            assertThat(runtime.balance(7, 3).availableUnits()).isEqualTo(800);
-            assertThat(runtime.reservation(11).reservedUnits()).isEqualTo(200);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.order(11).orderId())).isEqualTo(11);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.balance(7, 3).availableUnits())).isEqualTo(800);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.reservation(11).reservedUnits())).isEqualTo(200);
         }
     }
 

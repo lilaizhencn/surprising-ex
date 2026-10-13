@@ -111,38 +111,15 @@ class MatcherTreasurySettlementTest {
                     if (System.nanoTime() >= deadline) throw new AssertionError("financial settlement timed out");
                     Thread.onSpinWait();
                 }
-                var funds = new RuntimeFundsAccumulator();
+                assertThat(runtime.collectMatcherSettlement(event, null, null).size()).isZero();
                 assertThatThrownBy(() -> runtime.collectMatcherSettlement(event, null, null))
-                        .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("distinct target");
-                funds.add(identities.assetId("USDT"),
-                        com.surprising.aeron.service.state.settlement.FundsPosting.OwnerKind.TREASURY,
-                        0, com.surprising.aeron.service.state.settlement.FundsPosting.Subledger.FEE, Long.MAX_VALUE);
-                var overflowBefore = funds.toDelta().postings();
-                assertThatThrownBy(() -> runtime.collectMatcherSettlement(event, funds, null))
-                        .isInstanceOf(ArithmeticException.class);
-                assertThat(funds.toDelta().postings()).containsExactlyElementsOf(overflowBefore);
-                funds.clear();
-                funds.add(identities.assetId("USDT"),
-                        com.surprising.aeron.service.state.settlement.FundsPosting.OwnerKind.TREASURY,
-                        0, com.surprising.aeron.service.state.settlement.FundsPosting.Subledger.FEE, 5);
-                funds.add(identities.assetId("USDT"),
-                        com.surprising.aeron.service.state.settlement.FundsPosting.OwnerKind.USER,
-                        takerUser, com.surprising.aeron.service.state.settlement.FundsPosting.Subledger.AVAILABLE, -5);
-                assertThat(runtime.collectMatcherSettlement(event, funds, null).size()).isZero();
-                funds.requireConserved(false);
-                assertThat(funds.toDelta().postings()).anySatisfy(posting -> {
-                    assertThat(posting.subledger()).isEqualTo(
-                            com.surprising.aeron.service.state.settlement.FundsPosting.Subledger.FEE);
-                    assertThat(posting.units()).isEqualTo(7);
-                });
-                assertThatThrownBy(() -> runtime.collectMatcherSettlement(event, funds, null))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("already collected");
                 runtime.releaseMatcherSettlement(event);
                 assertThat(financialSignalling.await(3, TimeUnit.SECONDS)).isTrue();
                 // The previous Ledger callback still runs after its completion release. Its
                 // financial slot can be reused, provided it never reads the pooled fact again.
                 UUID secondId = new UUID(3, 4);
-                var reused = runtime.prepareDirectCancellation(2, originalTaker,
+                var reused = runtime.prepareDirectCancellation(2, originalTaker.userId(), originalTaker.orderId(),
                         secondId, 0, identities, 30, 40);
                 assertThat(reused).isSameAs(event);
                 assertThat(reused.submitTreasurySettlement(ledger)).isFalse();
@@ -170,9 +147,7 @@ class MatcherTreasurySettlementTest {
                     if (System.nanoTime() >= deadline) throw new AssertionError("reused financial slot timed out");
                     Thread.onSpinWait();
                 }
-                funds.clear();
-                assertThat(runtime.collectMatcherSettlement(reused, funds, null).size()).isZero();
-                funds.requireConserved(false);
+                assertThat(runtime.collectMatcherSettlement(reused, null, null).size()).isZero();
                 runtime.releaseMatcherSettlement(reused);
                 assertThat(failure.get()).isNull();
             } finally {

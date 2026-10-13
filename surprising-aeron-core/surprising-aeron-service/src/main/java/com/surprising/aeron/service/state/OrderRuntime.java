@@ -15,8 +15,9 @@ import java.util.UUID;
  * Runtime order state owned by one Account Lane.
  *
  * <p>The Lane mutates its execution fields in place. Cross-thread publication captures the
- * mutable fields into primitive event storage and updates a distinct Owner-owned mirror, so a
- * later Lane command can never change an already committed value. Explicit snapshot/rollback
+ * mutable fields into command-local primitive receipts. Owner consumes these receipts for
+ * ordered publication and retains only route keys; later Lane commands cannot change a
+ * committed receipt. Explicit snapshot/rollback
  * boundaries still use {@link #snapshot()}.</p>
  */
 public final class OrderRuntime {

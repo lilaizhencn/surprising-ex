@@ -14,11 +14,22 @@ final class LedgerControlTestSupport {
         }
     }
 
+    static void awaitFunds(TradingRuntimeState runtime, boolean external) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!runtime.pollControlFundsValidation(external)) {
+            runtime.assertAccountLanesHealthy();
+            if (System.nanoTime() >= deadline) throw new AssertionError("Ledger funds validation timed out");
+            Thread.onSpinWait();
+        }
+    }
+
     static TradingCoreState commit(TradingRuntimeState runtime, RuntimeIdentityRegistry identities, boolean external) {
-        RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
-        runtime.appendFundsDelta(funds);
-        funds.requireConserved(external);
+        awaitFunds(runtime, external);
         runtime.clearChangedKeys();
-        return RuntimeStateMaterializer.materialize(runtime, identities);
+        boolean acquired = runtime.accountLanesStarted && !runtime.ownerLaneAccess;
+        try {
+            if (acquired) while (!runtime.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
+            return RuntimeStateMaterializer.materialize(runtime, identities);
+        } finally { if (acquired) runtime.releaseOwnerLaneAccess(); }
     }
 }

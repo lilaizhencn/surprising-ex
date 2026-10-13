@@ -18,7 +18,6 @@ import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
-import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import java.util.ArrayList;
 import java.util.List;
@@ -45,7 +44,8 @@ final class MatchingCommandAdmission {
     private final PrimitiveLongChangeSet batchChangedOrders = new PrimitiveLongChangeSet();
 
     /** 在释放 Lane 访问权前绑定已冻结的子订单；仅存活到登记 CommandSlot，不建立第二份订单索引。 */
-    record QueuedTriggerMatching(CoreMessage command, OrderRuntime order) { }
+    record QueuedTriggerMatching(CoreMessage command, OrderRuntime order,
+            com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger) { }
 
     void appendQueuedMatching(long clusterTimestamp, long clusterPosition) {
         if (queuedMatching.isEmpty()) return;
@@ -54,6 +54,7 @@ final class MatchingCommandAdmission {
             long sequence = Math.incrementExact(owner.appliedCommandCount);
             CommandSlot pending = newPendingMatching(sequence, CommandSlot.Operation.TRIGGER, command);
             pending.triggerAdmission(queued.order());
+            pending.sourceTrigger(queued.trigger());
             pending.establishCommitFence(clusterTimestamp, clusterPosition);
             owner.matchingFlow.putPendingMatching(pending);
             registerPendingLifecycle(pending);
@@ -97,7 +98,7 @@ final class MatchingCommandAdmission {
                                                ResolvedMatchingAdmission admission) {
         return owner.pendingMatching.acquire(sequence, operation, command, owner.fingerprints.of(command),
                 preMatchingCancellations,
-                owner.commandFundsAccumulator, decodedCommand, admission);
+                owner.runtimeState.coldCommandFunds(), decodedCommand, admission);
     }
 
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
@@ -106,7 +107,7 @@ final class MatchingCommandAdmission {
                                                DecodedMatchingCommand decodedCommand,
                                                ResolvedMatchingAdmission admission) {
         return owner.pendingMatching.acquire(sequence, operation, command, fingerprint, preMatchingCancellations,
-                owner.commandFundsAccumulator,
+                owner.runtimeState.coldCommandFunds(),
                 decodedCommand, admission);
     }
 
@@ -297,7 +298,7 @@ final class MatchingCommandAdmission {
 
     void validatePendingCancel(CoreMessage message, DecodedMatchingCommand decodedCommand) {
         var command = decodedCommand.cancelOrder();
-        var order = owner.activeOrderIndex.activeOrderRuntime(command.orderId());
+        var order = owner.activeOrderIndex.activeOrderRoute(command.orderId());
         if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
         if (order.userId() != message.header().userId()) {
             throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
@@ -310,18 +311,12 @@ final class MatchingCommandAdmission {
             CoreMessage message, DecodedMatchingCommand decodedCommand, boolean amend, long sequence) {
         long originalOrderId = amend ? decodedCommand.amendOrder().originalOrderId()
                 : decodedCommand.replaceOrder().originalOrderId();
-        var order = owner.activeOrderIndex.activeOrderRuntime(originalOrderId);
+        var order = owner.activeOrderIndex.activeOrderRoute(originalOrderId);
         if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
         if (order.userId() != message.header().userId()) {
             throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
         }
-        if (order.status() != com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN) {
-            throw new CoreStateRejectedException("INVALID_COMMAND", "order is not replaceable");
-        }
-        if (amend && order.orderType() != com.surprising.aeron.protocol.CoreOrderType.LIMIT) {
-            throw new CoreStateRejectedException("INVALID_COMMAND", "order is not amendable");
-        }
-        String instrumentId = amend ? owner.identities.instrumentId(order.symbolId())
+        String instrumentId = amend ? order.instrumentId()
                 : decodedCommand.replaceOrder().replacement().instrumentId();
         var decision = CoreOrderDecisionResolver.context(owner.runtimeState, owner.identities,
                 message.header().userId(), instrumentId, owner.currentClusterTimestamp);
@@ -333,102 +328,21 @@ final class MatchingCommandAdmission {
                 owner.matchingAdapter.matcherShardId(instrumentId), owner.identities);
     }
 
-    List<Long> replacementPreMatchingCancellations(CommandSlot pending) {
-        return replacementPreMatchingCancellations(pending.matchingAdmission(),
-                pending.replacementAdmission().closeCapacityCancellations());
-    }
-
-    List<Long> replacementPreMatchingCancellations(ResolvedMatchingAdmission admission, List<Long> close) {
-        long[] selfTrade = preMatchingSelfTradeCancellations(admission.userId(), admission.command(),
-                admission.originalOrderId(), admission.resolved().matchingPriceTicks());
-        if (close.isEmpty()) return ImmutableLongArrayList.takeOwnership(selfTrade);
-        if (selfTrade.length == 0) return close;
-        var ids = new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
-        for (int i = 0; i < close.size(); i++)
-            ids.add(close instanceof ImmutableLongArrayList primitive ? primitive.valueAt(i) : close.get(i));
-        for (long id : selfTrade) ids.add(id);
-        long[] sorted = ids.toArray(); java.util.Arrays.sort(sorted);
-        return ImmutableLongArrayList.takeOwnership(sorted);
-    }
-
-    List<Long> preMatchingCloseCapacityCancellations(
-            CommandSlot.Operation operation,
-            CoreMessage message,
-            DecodedMatchingCommand decodedCommand,
+    List<Long> preMatchingCloseCapacityCancellations(CommandSlot.Operation operation,
+            CoreMessage message, DecodedMatchingCommand decodedCommand,
             com.surprising.aeron.service.state.PlaceAdmissionEvent placeAdmission) {
         if (operation != CommandSlot.Operation.PLACE) return List.of();
         if (placeAdmission == null) throw new IllegalStateException("place matching requires its Lane admission");
-        PlaceOrderCommand placement = decodedCommand.placeOrder();
-        long excludedOrderId = placement.orderId();
-        // 未完成的Lane回执由Matcher准入续接消费，Owner不等待或读取账户准入状态。
-        List<Long> closeCapacity = placeAdmission.complete() ? placeAdmission.closeCapacityCancellations() : List.of();
-        long matchingPrice = placeAdmission.matchingPriceTicks();
-        long[] selfTrade = preMatchingSelfTradeCancellations(
-                message.header().userId(), placement, excludedOrderId, matchingPrice);
-        // Self-trade IDs are already unique and sorted. Usually both sources are empty;
-        // no merge set or replacement array is needed for that command.
-        if (closeCapacity.isEmpty()) return ImmutableLongArrayList.takeOwnership(selfTrade);
-        org.eclipse.collections.impl.set.mutable.primitive.LongHashSet cancellations =
-                new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
-        for (int index = 0; index < closeCapacity.size(); index++) {
-            cancellations.add(closeCapacity instanceof ImmutableLongArrayList primitive
-                    ? primitive.valueAt(index) : closeCapacity.get(index));
-        }
-        for (long orderId : selfTrade) cancellations.add(orderId);
-        long[] ordered = cancellations.toArray();
-        java.util.Arrays.sort(ordered);
-        return ImmutableLongArrayList.takeOwnership(ordered);
-    }
-
-    long[] preMatchingSelfTradeCancellations(
-            long userId,
-            PlaceOrderCommand placement,
-            long excludedOrderId,
-            long matchingPrice) {
-        if (matchingPrice <= 0) throw new IllegalArgumentException("matching price must be positive");
-        var candidates = owner.activeOrderIndex.matchingIds(userId, placement.instrumentId());
-        org.eclipse.collections.impl.list.mutable.primitive.LongArrayList cancellations = null;
-        while (candidates.hasNext()) {
-            long orderId = candidates.next();
-            if (orderId == excludedOrderId || orderId == placement.orderId()) continue;
-            OrderRuntime order = owner.activeOrderIndex.activeOrderRuntime(orderId);
-            if (order == null || order.status() != com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN
-                    || order.side() == placement.side()) continue;
-            boolean crosses = placement.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
-                    ? matchingPrice >= order.priceTicks() : matchingPrice <= order.priceTicks();
-            if (crosses) {
-                if (cancellations == null) {
-                    cancellations = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
-                }
-                cancellations.add(orderId);
-            }
-        }
-        if (cancellations == null) return TradingCoreRuntime.EMPTY_ORDER_IDS;
-        long[] result = cancellations.toArray();
-        java.util.Arrays.sort(result);
-        return result;
+        return placeAdmission.complete() ? placeAdmission.closeCapacityCancellations() : List.of();
     }
 
     void validatePendingLiquidation(DecodedMatchingCommand decodedCommand) {
         var command = decodedCommand.liquidation();
-        var liquidation = owner.runtimeState.liquidation(command.liquidationId());
-        if (liquidation == null) {
-            throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
-        }
-        if (liquidation.status() == CoreLiquidationState.Status.PLANNED && command.cursorOrderId() != 0
-                || liquidation.status() == CoreLiquidationState.Status.ORDERED
-                && command.cursorOrderId() != liquidation.nextCancelOrderId()) {
-            throw new CoreStateRejectedException("LIQUIDATION_CURSOR_CONFLICT",
-                    "liquidation cancellation cursor does not match state");
-        }
-        if (liquidation.status() != CoreLiquidationState.Status.PLANNED
-                && liquidation.status() != CoreLiquidationState.Status.ORDERED) {
-            throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "liquidation is not executable");
-        }
-        owner.resultBuilder.setSingleChangedUser(liquidation.userId());
-        TradingCoreRuntime.LifecycleOrderChunk chunk = owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
-                command.cursorOrderId(), command.maxOrders());
-        owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(chunk.orders());
+        var route = owner.liquidationIndex.route(command.liquidationId());
+        if (route == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
+        owner.resultBuilder.setSingleChangedUser(route.userId());
+        owner.resultBuilder.commandChangedOrderIds = owner.activeOrderIndex.page(route.userId(), route.instrumentId(),
+                command.cursorOrderId(), command.maxOrders()).orderIds();
     }
 
     void validatePendingLiquidationBatch(DecodedMatchingCommand decodedCommand) {
@@ -453,24 +367,12 @@ final class MatchingCommandAdmission {
         batchChangedOrders.clear();
         int remaining = command.maxCancelOrders();
         for (var action : command.actions()) {
-            var liquidation = owner.runtimeState.liquidation(action.liquidationId());
-            if (liquidation == null || liquidation.status() == CoreLiquidationState.Status.COMPLETED
-                    || liquidation.status() == CoreLiquidationState.Status.INSURANCE_REQUIRED
-                    || liquidation.status() == CoreLiquidationState.Status.ADL_REQUIRED
-                    || liquidation.status() == CoreLiquidationState.Status.CANCELED) continue;
-            if (liquidation.userId() != action.userId()
-                    || !owner.runtimeLiquidationSymbol(liquidation).equals(action.instrumentId())
-                    || liquidation.triggerPriceSequence() != action.triggerPriceSequence()
-                    || action.executionPriceTicks() <= 0) {
-                throw new CoreStateRejectedException("INVALID_COMMAND", "liquidation batch action does not match state");
-            }
-            if (liquidation.status() == CoreLiquidationState.Status.PLANNED && action.cursorOrderId() != 0
-                    || liquidation.status() == CoreLiquidationState.Status.ORDERED
-                    && action.cursorOrderId() != liquidation.nextCancelOrderId()) {
-                throw new CoreStateRejectedException("LIQUIDATION_CURSOR_CONFLICT",
-                        "liquidation batch cursor does not match state");
-            }
-            String liquidationSymbol = owner.runtimeLiquidationSymbol(liquidation);
+            var liquidation = owner.liquidationIndex.route(action.liquidationId());
+            if (liquidation == null || !liquidation.executable()) continue;
+            if (liquidation.userId() != action.userId() || !liquidation.instrumentId().equals(action.instrumentId())
+                    || action.executionPriceTicks() <= 0)
+                throw new CoreStateRejectedException("INVALID_COMMAND", "liquidation batch route does not match action");
+            String liquidationSymbol = liquidation.instrumentId();
             for (int scopeIndex = 0; scopeIndex < batchScopeCount; scopeIndex++) {
                 if (batchScopeUsers[scopeIndex] == liquidation.userId()
                         && batchScopeSymbols[scopeIndex].equals(liquidationSymbol)) {
@@ -487,12 +389,12 @@ final class MatchingCommandAdmission {
             batchScopeSymbols[batchScopeCount++] = liquidationSymbol;
             ensureLifecycleScopeAvailable(new LifecycleScope(false, liquidation.userId(),
                     liquidationSymbol,
-                    liquidation.liquidationId(), true, false));
+                    action.liquidationId(), true, false));
             batchChangedUsers.add(liquidation.userId());
             if (remaining > 0) {
                 TradingCoreRuntime.LifecycleOrderChunk chunk = owner.matchingFlow.lifecycleOrders(liquidation.userId(), liquidationSymbol,
                         action.cursorOrderId(), remaining);
-                for (CoreOrderState order : chunk.orders()) batchChangedOrders.add(order.orderId());
+                for (var order : chunk.orders()) batchChangedOrders.add(order.orderId());
                 remaining -= chunk.orders().size();
             }
         }
@@ -589,11 +491,10 @@ final class MatchingCommandAdmission {
     private boolean hasCommittedLiquidationConflict(long userId, int symbolId, long excludedId) {
         for (long id : owner.liquidationIndex.activeIds()) {
             if (id == excludedId) continue;
-            var liquidation = owner.runtimeState.liquidation(id);
+            var liquidation = owner.liquidationIndex.route(id);
             if (liquidation != null && (userId == 0 || liquidation.userId() == userId)
-                    && liquidation.symbolId() == symbolId
-                    && (liquidation.status() == CoreLiquidationState.Status.PLANNED
-                    || liquidation.status() == CoreLiquidationState.Status.ORDERED)) return true;
+                    && liquidation.instrumentId().equals(owner.identities.instrumentId(symbolId))
+                    && liquidation.executable()) return true;
         }
         return false;
     }
@@ -626,10 +527,10 @@ final class MatchingCommandAdmission {
         return switch (operation) {
             case LIQUIDATION -> {
                 var command = decodedCommand.liquidation();
-                var liquidation = owner.runtimeState.liquidation(command.liquidationId());
+                var liquidation = owner.liquidationIndex.route(command.liquidationId());
                 yield liquidation == null ? new LifecycleScope(false, 0, "", 0, true, false)
-                        : new LifecycleScope(false, liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
-                                liquidation.liquidationId(), true, false);
+                        : new LifecycleScope(false, liquidation.userId(), liquidation.instrumentId(),
+                                command.liquidationId(), true, false);
             }
             case SETTLEMENT -> new LifecycleScope(true, 0, decodedCommand.settlement().instrumentId(),
                     decodedCommand.settlement().settlementId(), true, false);
@@ -662,19 +563,19 @@ final class MatchingCommandAdmission {
             case PLACE -> decodedCommand.placeOrder().instrumentId();
             case CANCEL -> {
                 var command = decodedCommand.cancelOrder();
-                var order = owner.activeOrderIndex.activeOrderRuntime(command.orderId());
-                yield order == null ? "" : owner.identities.instrumentId(order.symbolId());
+                var order = owner.activeOrderIndex.activeOrderRoute(command.orderId());
+                yield order == null ? "" : order.instrumentId();
             }
             case REPLACE, AMEND -> {
                 long orderId = operation == CommandSlot.Operation.REPLACE
                         ? decodedCommand.replaceOrder().originalOrderId()
                         : decodedCommand.amendOrder().originalOrderId();
-                var order = owner.activeOrderIndex.activeOrderRuntime(orderId);
-                yield order == null ? "" : owner.identities.instrumentId(order.symbolId());
+                var order = owner.activeOrderIndex.activeOrderRoute(orderId);
+                yield order == null ? "" : order.instrumentId();
             }
             case TRIGGER -> {
                 long[] execute = decodedCommand.trigger();
-                var trigger = owner.runtimeState.triggerOrder(execute[0]);
+                var trigger = owner.triggerOrderIndex.route(execute[0]);
                 yield trigger == null ? "" : trigger.instrumentId();
             }
             case LIQUIDATION, SETTLEMENT -> "";
@@ -693,9 +594,9 @@ final class MatchingCommandAdmission {
             var batch = pending.decodedCommand().liquidationBatch();
             return batch.actions().isEmpty() ? "" : batch.actions().getFirst().instrumentId();
         }
-        var liquidation = owner.runtimeState.liquidation(
+        var liquidation = owner.liquidationIndex.route(
                 pending.decodedCommand().liquidation().liquidationId());
-        return liquidation == null ? "" : owner.runtimeLiquidationSymbol(liquidation);
+        return liquidation == null ? "" : liquidation.instrumentId();
     }
 
 }

@@ -103,7 +103,7 @@ public final class RuntimeInstrumentStateTransitions {
             throw new CoreStateRejectedException("INVALID_COMMAND", "instrument settlement is already complete");
         }
         if (after.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
-                && runtime.hasUnresolvedLiquidation(symbolId)) {
+                && runtime.hasUnresolvedLiquidation(instrument.instrumentId(), symbolId)) {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
                     "finish active liquidation, insurance and ADL work before fixed-price clearance");
         }

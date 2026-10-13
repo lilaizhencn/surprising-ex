@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.command.settlement;
 
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
+
 import com.surprising.aeron.service.command.CommandResultContext;
 import com.surprising.aeron.service.state.PositionUserIndex;
 import com.surprising.aeron.service.state.TreasuryRuntime;
@@ -17,7 +19,7 @@ public interface SettlementCommandContext extends CommandResultContext {
 
     LifecycleOrderPage settlementLifecycleOrders(long userId, String instrumentId, long cursorOrderId, int maxOrders);
 
-    record LifecycleOrderPage(List<CoreOrderState> orders, long nextCursorOrderId) {
+    record LifecycleOrderPage(List<CancellationOrder> orders, long nextCursorOrderId) {
         public boolean more() {
             return nextCursorOrderId != 0;
         }
