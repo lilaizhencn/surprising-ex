@@ -924,7 +924,6 @@ final class OrderBatchExecutor {
                                           long clusterTimestamp, long clusterPosition) {
         if (!batch.finishing()) {
             owner.activateFactContext(pending.command(), pending.fingerprint());
-            owner.setCommandFunds(pending.fundsAccumulator());
             batch.finishing(true);
         }
         initializeOrderBatchLaneContext(batch, pending);
@@ -1109,6 +1108,9 @@ final class OrderBatchExecutor {
     void beginOrderBatchCommitContext(OrderBatchPending batch, CommandSlot pending) {
         owner.activateFactContext(pending.command(), pending.fingerprint());
         owner.resultBuilder.beginCommand();
+        // Seed once before any item receipt is collected. Finalization must retain the Ledger
+        // receipts accumulated across sequential items and suspended Owner turns.
+        owner.setCommandFunds(pending.fundsAccumulator());
         owner.runtimeState.beginOrderBatchMutationScope();
         batch.runtimeCheckpoint = owner.runtimeState.commandRevisionCheckpoint();
         batch.positionIdentityCheckpoint = owner.identities.positionCheckpoint();

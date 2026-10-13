@@ -843,7 +843,12 @@ public final class TradingCoreRuntime implements AutoCloseable,
         if (settlement != null && settlement.complete()) return true;
         if (pending.commitEvent != null && pending.commitEvent.complete()) return true;
         OrderBatchPending batch = pending.orderBatch;
-        return batch != null && batch.laneCommitEvent != null && batch.laneCommitEvent.complete();
+        if (batch == null) return false;
+        // Batch facts are retained on the batch, not on the ordinary command slot. Ledger can
+        // finish after every Matcher/Lane notification was consumed, so read these same facts.
+        if (batch.itemSettlementEvent != null && batch.itemSettlementEvent.complete()) return true;
+        if (batch.settlementEvent != null && batch.settlementEvent.complete()) return true;
+        return batch.laneCommitEvent != null && batch.laneCommitEvent.complete();
     }
 
     /** Consumes Lane/Matcher notifications and advances the ordered matching pipeline. */

@@ -8,6 +8,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
+import com.surprising.aeron.protocol.AmendOrderBatchCommand;
+import com.surprising.aeron.protocol.AmendOrderCommand;
+import com.surprising.aeron.protocol.CancelOrderBatchCommand;
+import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -22,9 +26,11 @@ import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -153,6 +159,149 @@ class TradingCoreOwnerTest {
                                        long user, byte[] payload) {
         return new CoreMessage(CoreMessageHeader.command(type, new UUID(995, sequence), line,
                 CommandSource.OPERATIONS, 995, sequence, user, 1_000, sequence), payload);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("batchLedgerCompletionCases")
+    void batchLedgerCompletionResumesOrderedHeadWithoutAnotherMatcherNotification(
+            ProductLine line, CoreMessageType type) throws Exception {
+        var service = new TradingOwnerTestSupport(line);
+        var responses = new CopyOnWriteArrayList<byte[]>();
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        service.onStart(cluster(), null);
+        try {
+            onSessionMessage(service, responses, command(line, CoreMessageType.REGISTER_INSTRUMENT, 1, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
+                            ContractType.valueOf(line.contractTypeCode()).ordinal(), "BTC", "USDT", "USDT",
+                            1, 1, 1, 100_000, 50_000, 10_000, 10_000, 0, -1, 0))));
+            onSessionMessage(service, responses, command(line, CoreMessageType.APPLY_MARK_PRICE, 2, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(
+                            new com.surprising.aeron.protocol.ApplyMarkPriceCommand("1", 100, 1, 1_000))));
+            for (int user = 1; user <= 2; user++) {
+                onSessionMessage(service, responses, command(line, CoreMessageType.ADJUST_BALANCE, 2 + user, user,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));
+            }
+            if (line == ProductLine.SPOT) {
+                onSessionMessage(service, responses, command(line, CoreMessageType.ADJUST_BALANCE, 5, 2,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 20))));
+            }
+            onSessionMessage(service, responses, command(line, CoreMessageType.PLACE_ORDER, 6, 2,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(9900, "1", CoreOrderSide.SELL,
+                            100, 20, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                            CoreTimeInForce.GTC, false, "batch-ledger-maker"))));
+            long sequence = 7;
+            var placements = new java.util.ArrayList<PlaceOrderCommand>();
+            var cancellations = new java.util.ArrayList<CancelOrderCommand>();
+            var amendments = new java.util.ArrayList<AmendOrderCommand>();
+            for (int item = 0; item < 20; item++) {
+                long orderId = 10_000 + item;
+                placements.add(new PlaceOrderCommand(orderId, "1", CoreOrderSide.BUY, 100, 1,
+                        false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                        CoreTimeInForce.IOC, false, "batch-ledger-place-" + item));
+                cancellations.add(new CancelOrderCommand(orderId));
+                amendments.add(new AmendOrderCommand(orderId, 11_000 + item, "batch-ledger-amend-" + item,
+                        100L, 1L, CoreTimeInForce.GTC, false));
+                if (type != CoreMessageType.PLACE_ORDER_BATCH) {
+                    onSessionMessage(service, responses, command(line, CoreMessageType.PLACE_ORDER, sequence++, 1,
+                            TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "1",
+                                    CoreOrderSide.BUY, 99, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                                    CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "batch-ledger-original-" + item))));
+                }
+            }
+            byte[] payload = switch (type) {
+                case PLACE_ORDER_BATCH -> TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(placements));
+                case CANCEL_ORDER_BATCH -> TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(cancellations));
+                case AMEND_ORDER_BATCH -> TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(amendments));
+                default -> throw new AssertionError(type);
+            };
+            var core = service.state();
+            var runtime = core.runtimeState;
+            assertThat(runtime.systemLedgerStarted()).isTrue();
+            assertThat(core.laneTopology().accountLaneId(1)).isNotEqualTo(core.laneTopology().accountLaneId(2));
+            assertThat(runtime.dispatchLedgerQuery(ledger -> {
+                entered.countDown();
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Batch Ledger release timeout");
+                } catch (InterruptedException interrupted) { throw new AssertionError(interrupted); }
+            })).isTrue();
+            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+            int before = responses.size();
+            service.acceptCommittedCommand(clientSession(responses), command(line, type, sequence++, 1, payload), 2_000, 2_000);
+            service.acceptCommittedCommand(clientSession(responses), command(line, CoreMessageType.PLACE_ORDER, sequence, 1,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(9800, "1", CoreOrderSide.BUY,
+                            98, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                            CoreTimeInForce.IOC, false, "batch-ledger-following"))), 2_001, 2_001);
+            com.surprising.aeron.service.state.MatcherSettlementEvent event;
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            do {
+                service.pollCommands();
+                var head = core.pendingMatching.head();
+                var batch = head == null ? null : head.orderBatch;
+                event = batch == null ? null : batch.itemSettlementEvent != null
+                        ? batch.itemSettlementEvent : batch.settlementEvent;
+                if (event != null && event.requiredLaneMask() != 0
+                        && (event.completedLaneMask() & event.requiredLaneMask()) == event.requiredLaneMask()
+                        && !core.hasMatchingNotifications()
+                        && (type != CoreMessageType.CANCEL_ORDER_BATCH || !service.ownerWorkAvailable())) break;
+                if (System.nanoTime() > deadline) throw new AssertionError("Batch Owner did not await Ledger completion");
+                java.util.concurrent.locks.LockSupport.parkNanos(100_000);
+            } while (true);
+            assertThat(event.complete()).isFalse();
+            assertThat(responses).hasSize(before);
+            release.countDown();
+            deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (!event.complete()) {
+                if (System.nanoTime() > deadline) throw new AssertionError("Ledger did not finish batch settlement");
+                java.util.concurrent.locks.LockSupport.parkNanos(100_000);
+            }
+            assertThat(core.hasMatchingNotifications()).isFalse();
+            assertThat(service.ownerCompletionAvailable()).isTrue();
+            assertThat(service.ownerWorkAvailable()).isTrue();
+            finishCommands(service);
+            assertThat(responses).hasSize(before + 2);
+            var batchResponse = CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.get(before)).payload());
+            assertThat(batchResponse.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(TradingOrderBatchCodec.firstNonAppliedItem(batchResponse, 20)).isEqualTo(-1);
+            assertThat(CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.get(before + 1)).payload())
+                    .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(service.pendingCommandCount()).isZero();
+            var state = core.tradingState();
+            assertThat(state.user(1).reservations()).isEmpty();
+            assertThat(state.user(1).balances().get("USDT").lockedUnits()).isEqualTo(
+                    line == ProductLine.SPOT || type == CoreMessageType.CANCEL_ORDER_BATCH ? 0 : 200);
+            assertThat(state.order(9800)).isNull();
+            for (int item = 0; item < 20; item++) {
+                assertThat(state.order(10_000 + item)).isNull();
+                assertThat(state.order(11_000 + item)).isNull();
+            }
+            long fees = state.treasuryState().feeBalances().getOrDefault("USDT", 0L);
+            long funds = state.users().values().stream().mapToLong(user -> user.totalUnits("USDT")).sum();
+            assertThat(funds + fees).isEqualTo(20_000);
+            if (type == CoreMessageType.CANCEL_ORDER_BATCH) {
+                assertThat(fees).isZero();
+                assertThat(core.terminalTradeCount).isZero();
+                assertThat(state.order(9900).remainingQuantitySteps()).isEqualTo(20);
+            } else {
+                assertThat(fees).isEqualTo(40);
+                assertThat(core.terminalTradeCount).isEqualTo(20);
+                assertThat(state.order(9900)).isNull();
+                if (line == ProductLine.SPOT) {
+                    assertThat(state.user(1).totalUnits("BTC")).isEqualTo(20);
+                    assertThat(state.user(2).totalUnits("BTC")).isZero();
+                } else {
+                    assertThat(state.user(1).positions().get("1").signedQuantitySteps()).isEqualTo(20);
+                    assertThat(state.user(2).positions().get("1").signedQuantitySteps()).isEqualTo(-20);
+                }
+            }
+        } finally { release.countDown(); service.onTerminate(null); }
+    }
+
+    private static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> batchLedgerCompletionCases() {
+        return java.util.stream.Stream.of(ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL)
+                .flatMap(line -> java.util.stream.Stream.of(CoreMessageType.PLACE_ORDER_BATCH,
+                        CoreMessageType.CANCEL_ORDER_BATCH, CoreMessageType.AMEND_ORDER_BATCH)
+                        .map(type -> org.junit.jupiter.params.provider.Arguments.of(line, type)));
     }
 
     @org.junit.jupiter.params.ParameterizedTest
