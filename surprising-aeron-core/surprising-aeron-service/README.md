@@ -82,3 +82,14 @@ HotSpot JDK27的18个必要测试执行通过：六产品线直接/扫描触发�
 `RuntimeFundsAccumulator.transferTo` 保留空目标原语数组交换；目标已有前一项流水时，先检查所有同键金额溢出，再合并完成回执并清空源。失败保留目标与源，`MatcherSettlementEvent` 此时不标记已消费；拒绝无接收目标，防止财务流水被静默回收。实际业务资金仍由原Treasury单写者应用，资金流水不是第二份账户状态。
 
 12个必要用例通过，含跨Lane实际手续费、已有批次前缀、溢出可重试、空缓冲交换、复用与Mailbox顺序。不做压测/JMH/JFR或快照/恢复/wallet；尚未启用完整生产账本链路，不宣称Owner已退出全部资金写入。证据见 [账本流水验证](../../docs/validation/ledger-batch-funds-receipt-20261012.json)。
+
+
+### 账本投递与响应退休分离（2026-10-13）
+
+生产 `SystemLedgerLane` 已由 `CoreRuntimeLifecycle` 自动启动。原先 `financialHeadReady` 只在响应队首投递财务事实，导致后续独立命令即使完成账户结算，也要等 Owner 退休前一条响应才能进入账本。
+
+现在 `PendingMatchingRing.ledgerDispatchHead` 只表示尚未投递的日志前缀，复用原有槽位和 `nextSlots`，由 Owner 单线程维护。`OrderedCommitCoordinator.advanceMatchingProgress` 先推进 Matcher/Lane，再连续投递已派发的独立命令与流水下单批次；`TradingRuntimeState.dispatchMatcherFinancialSettlement` 只负责非阻塞投递，原 `pollMatcherFinancialSettlement` 继续用于队首完成检查。Ledger 单写者按 FIFO 等账户完成位、应用原 Treasury 并验证资金守恒；Owner 只消费既有回执，响应和槽位回收仍等原终态条件。
+
+控制命令、顺序批次和尚未就绪的前缀不能被跳过。Mailbox 满时不推进游标、不重建或回收事实；已有 Owner 本地工作判定保留有界重试，避免没有新 Matcher 通知时停止推进。没有新增线程、业务镜像、队列或全窗口重复扫描，等待配置及在途上限不变。
+
+现货/U本位永续的独立单笔和流水批次已验证：暂停 Ledger、完成账户任务，停止 Owner 轮询后放行 Ledger，两条命令能在第一条响应退休前结算；随后响应顺序、手续费、资金、订单与持仓正确。72 个必要用例通过，另 3 个旧用例误含快照恢复已记录并排除。本轮未压测/JMH/JFR或启动 wallet，性能改善仍待实测。证据见 [账本流水验证](../../docs/validation/ledger-pipeline-20261013.json)。

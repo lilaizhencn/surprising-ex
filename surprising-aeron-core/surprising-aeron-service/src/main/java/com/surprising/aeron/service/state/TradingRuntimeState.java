@@ -1626,14 +1626,18 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (order == null) throw new IllegalArgumentException("observed admission order is required");
     }
 
-    /** Owner调用此入口的事件必须属于日志提交队首，财务不按Matcher完成先后排序。 */
-    public boolean pollMatcherFinancialSettlement(MatcherSettlementEvent event, boolean sequentialBatch) {
+    /** Owner按日志顺序投递；队列满时保留同一事实，不能跳过或回收。 */
+    public boolean dispatchMatcherFinancialSettlement(MatcherSettlementEvent event, boolean sequentialBatch) {
         assertOwner();
         if (event == null) return true;
-        if (systemLedger == null) return event.complete();
+        if (systemLedger == null) return true;
         if (ledgerControl != null) throw new IllegalStateException("Matcher money cannot enter an unfinished control scope");
-        if (!event.hasLedgerSettlement() && !event.submitTreasurySettlement(systemLedger, sequentialBatch)) return false;
-        return event.complete();
+        return event.hasLedgerSettlement() || event.submitTreasurySettlement(systemLedger, sequentialBatch);
+    }
+
+    /** 有序响应等待已有财务回执；顺序批次仍在队首逐项投递。 */
+    public boolean pollMatcherFinancialSettlement(MatcherSettlementEvent event, boolean sequentialBatch) {
+        return dispatchMatcherFinancialSettlement(event, sequentialBatch) && (event == null || event.complete());
     }
 
     public RuntimeTreasuryDelta collectMatcherSettlement(MatcherSettlementEvent event) {

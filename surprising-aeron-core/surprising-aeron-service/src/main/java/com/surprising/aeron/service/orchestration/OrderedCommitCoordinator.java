@@ -20,6 +20,7 @@ import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.RuntimeDerivativeRiskProcessor;
 import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
+import com.surprising.aeron.service.state.MatcherSettlementEvent;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import exchange.core2.core.common.MatcherEventType;
@@ -1035,6 +1036,37 @@ final class OrderedCommitCoordinator {
         }
         if (owner.hasMatchingDrainWork()) owner.drainMatchingCompletions();
         dispatchReadyPlaceSettlements(clusterTimestamp, clusterPosition, throughSequence);
+        dispatchReadyMatcherFinancialSettlements(throughSequence);
+    }
+
+    /** Fill the existing Ledger FIFO in log order without waiting for response retirement. */
+    void dispatchReadyMatcherFinancialSettlements(long throughSequence) {
+        if (!owner.runtimeState.systemLedgerStarted()) return;
+        CommandSlot pending;
+        while ((pending = owner.pendingMatching.ledgerDispatchHead()) != null
+                && pending.sequence() <= throughSequence) {
+            MatcherSettlementEvent event = financialDispatchEvent(pending);
+            if (event == null) return;
+            if (!owner.runtimeState.dispatchMatcherFinancialSettlement(event, false)) return;
+            owner.pendingMatching.completeLedgerDispatch(pending.sequence());
+        }
+    }
+
+    /** A full mailbox needs a bounded Owner retry even when no new Matcher notification arrives. */
+    boolean hasFinancialDispatchWork() {
+        return owner.runtimeState.systemLedgerStarted()
+                && financialDispatchEvent(owner.pendingMatching.ledgerDispatchHead()) != null;
+    }
+
+    private MatcherSettlementEvent financialDispatchEvent(CommandSlot pending) {
+        // Control and sequential batches can produce more money later in the same command.
+        // Their existing ordered continuation must finish before later facts enter Ledger.
+        if (pending == null || pending.controlPending || (!pending.clusterIndependent
+                && pending.sequence() != owner.pendingMatching.firstSequence())) return null;
+        OrderBatchPending batch = pending.orderBatch;
+        if (batch != null && !batch.pipelined) return null;
+        MatcherSettlementEvent event = batch == null ? pending.settlementEvent() : batch.settlementEvent;
+        return event != null && event.ready() && event.dispatched() ? event : null;
     }
 
     private boolean financialHeadReady(CommandSlot pending) {

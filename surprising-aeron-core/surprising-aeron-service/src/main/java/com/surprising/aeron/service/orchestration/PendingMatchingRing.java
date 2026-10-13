@@ -28,6 +28,8 @@ final class PendingMatchingRing {
     private int head = -1;
     private int tail = -1;
     private int dispatchHead = -1;
+    /** Owner-only FIFO cursor for money not yet offered; response retirement keeps its own head. */
+    private int ledgerDispatchHead = -1;
     private int size;
     /** Owner 调度进度标记：队列变化或异步完成后重新尝试派发。 */
     private long dispatchRevision;
@@ -110,6 +112,7 @@ final class PendingMatchingRing {
         else nextSlots[tail] = index;
         tail = index;
         if (dispatchHead == -1) dispatchHead = index;
+        if (ledgerDispatchHead == -1) ledgerDispatchHead = index;
         addIndexes(pending);
         size++;
         partitionDependenciesChanged();
@@ -167,6 +170,7 @@ final class PendingMatchingRing {
         int previous = previousSlots[entryIndex];
         int next = nextSlots[entryIndex];
         if (dispatchHead == entryIndex) dispatchHead = next;
+        if (ledgerDispatchHead == entryIndex) ledgerDispatchHead = next;
         if (previous == -1) head = next;
         else nextSlots[previous] = next;
         if (next == -1) tail = previous;
@@ -197,6 +201,17 @@ final class PendingMatchingRing {
 
     CommandSlot dispatchHead() {
         return dispatchHead < 0 ? null : pendingAt(dispatchHead);
+    }
+
+    CommandSlot ledgerDispatchHead() {
+        return ledgerDispatchHead < 0 ? null : pendingAt(ledgerDispatchHead);
+    }
+
+    /** Move only after the existing Ledger mailbox accepted this command's entire money fact. */
+    void completeLedgerDispatch(long sequence) {
+        if (ledgerDispatchHead < 0 || pendingAt(ledgerDispatchHead).sequence() != sequence)
+            throw new IllegalStateException("Ledger settlement dispatch is out of order");
+        ledgerDispatchHead = nextSlots[ledgerDispatchHead];
     }
 
     void completeDispatch(long sequence) {

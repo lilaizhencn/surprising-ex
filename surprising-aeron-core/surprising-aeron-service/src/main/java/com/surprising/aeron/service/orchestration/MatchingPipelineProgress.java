@@ -272,7 +272,7 @@ final class MatchingPipelineProgress {
 
     /** Owner-local progress must continue even when no new cross-thread notification arrives. */
     boolean hasLocalMatchingWork() {
-        if (readyShardMask != 0) return true;
+        if (readyShardMask != 0 || owner.commits.hasFinancialDispatchWork()) return true;
         CommandSlot head = owner.pendingMatching.get(owner.pendingMatching.firstSequence());
         OrderBatchPending batch = head == null ? null : head.orderBatch;
         // Handoff and the final metadata commit have no matcher-settlement cursor. Keep polling

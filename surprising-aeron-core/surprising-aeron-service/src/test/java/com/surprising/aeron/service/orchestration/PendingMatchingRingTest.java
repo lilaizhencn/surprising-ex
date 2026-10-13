@@ -15,6 +15,52 @@ import org.junit.jupiter.api.Test;
 class PendingMatchingRingTest {
 
     @Test
+    void ledgerDispatchAdvancesWithoutRetiringResponsesAndSurvivesSlotReuse() {
+        var ring = new PendingMatchingRing(4, 1, 4);
+        var first = acquire(ring, 1, UUID.randomUUID(), 1001);
+        var second = acquire(ring, 2, UUID.randomUUID(), 1002);
+        ring.put(first); ring.put(second);
+        assertThat(ring.ledgerDispatchHead()).isSameAs(first);
+        assertThatThrownBy(() -> ring.completeLedgerDispatch(2)).isInstanceOf(IllegalStateException.class);
+        ring.completeLedgerDispatch(1);
+        assertThat(ring.ledgerDispatchHead()).isSameAs(second);
+        assertThat(ring.head()).isSameAs(first);
+        ring.completeLedgerDispatch(2);
+        assertThat(ring.ledgerDispatchHead()).isNull();
+        assertThat(ring.size()).isEqualTo(2);
+        // A new tail must remain visible even when every retained predecessor was offered.
+        var third = acquire(ring, 3, UUID.randomUUID(), 1003);
+        ring.put(third);
+        assertThat(ring.ledgerDispatchHead()).isSameAs(third);
+        ring.remove(1); ring.remove(2);
+        assertThat(ring.ledgerDispatchHead()).isSameAs(third);
+        ring.clear();
+        assertThat(ring.ledgerDispatchHead()).isNull();
+        var reused = acquire(ring, 5, UUID.randomUUID(), 1004);
+        ring.put(reused);
+        assertThat(ring.ledgerDispatchHead()).isSameAs(reused);
+        ring.completeLedgerDispatch(5);
+        assertThat(ring.ledgerDispatchHead()).isNull();
+    }
+
+    @Test
+    void removingUnfundedOrRejectedHeadKeepsTheLedgerCursorInOriginalOrder() {
+        var ring = new PendingMatchingRing(4, 1, 4);
+        var first = acquire(ring, 1, UUID.randomUUID(), 1001);
+        var second = acquire(ring, 2, UUID.randomUUID(), 1002);
+        var third = acquire(ring, 3, UUID.randomUUID(), 1003);
+        ring.put(first); ring.put(second); ring.put(third);
+        // No financial fact is created by this rejection, so its response removes the cursor.
+        ring.remove(1);
+        assertThat(ring.ledgerDispatchHead()).isSameAs(second);
+        ring.remove(3);
+        assertThat(ring.ledgerDispatchHead()).isSameAs(second);
+        ring.completeLedgerDispatch(2);
+        assertThat(ring.ledgerDispatchHead()).isNull();
+        assertThatThrownBy(() -> ring.completeLedgerDispatch(2)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void partitionDispatchPreservesBookOrderAndGlobalCommitWatermark() {
         var ring = new PendingMatchingRing(4, 2, 4);
         var first = acquire(ring, 1, UUID.randomUUID(), 1001);
