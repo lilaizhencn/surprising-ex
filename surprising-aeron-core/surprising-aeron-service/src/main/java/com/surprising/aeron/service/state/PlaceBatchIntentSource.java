@@ -8,6 +8,8 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 public interface PlaceBatchIntentSource {
     PlaceOrderCommand intent(int index);
     Decision decision(int index);
+    ResolvedPlaceOrder resolvedOrderSlot(int index);
+    OrderRuntime captureAdmittedOrder(int index, OrderRuntime order);
     /** 同币对共享的只读行情、费率和全局准入视图，资产身份由 Owner 预先解析。 */
     record Decision(CoreOrderDecisionResolver.Context context, long openInterestSteps,
                     int baseAssetId, int quoteAssetId, int settleAssetId) { }

@@ -105,9 +105,11 @@ public final class ClusterServiceEgress {
             processor.releaseResponse(response);
             return;
         }
+        header.retainForEgress();
         if (!output.offer(new Output(session, header, response, committedSequence, length,
                 ownerEpoch, CoreMatchingPhaseMetrics.sampleStart(header)))) {
             outputOverflow = true;
+            header.releaseFromEgress();
             processor.releaseResponse(response);
             return;
         }
@@ -135,14 +137,16 @@ public final class ClusterServiceEgress {
                 CoreMessageCodec.encodeResponse(next.header, next.response, next.committedSequence, sendScratch);
                 deferred.offer(next.session, sendBuffer, next.length, System.nanoTime());
             } finally {
-                processor.releaseResponse(next.response);
+                try { processor.releaseResponse(next.response); }
+                finally { next.header.releaseFromEgress(); }
             }
         }
         return work + deferred.poll(System.nanoTime(), 256);
     }
 
     public void clear() {
-        output.clear();
+        Output next;
+        while ((next = output.poll()) != null) next.header.releaseFromEgress();
         deferred.clear();
         sessions.forEachValue(TransportSession::disconnect);
         sessions.clear();

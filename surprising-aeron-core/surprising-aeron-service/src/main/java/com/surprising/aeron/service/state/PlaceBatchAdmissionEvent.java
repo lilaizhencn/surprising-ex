@@ -97,7 +97,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                 for (int index = 0; index < itemCount; index++) {
                     if (source != null) {
                         var decision = source.decision(index);
-                        var resolved = CoreOrderDecisionResolver.resolve(decision.context(), source.intent(index));
+                        var resolved = CoreOrderDecisionResolver.resolveInto(source.resolvedOrderSlot(index), decision.context(), source.intent(index));
                         orders[index] = resolved;
                         symbolIds[index] = resolved.symbolId();
                         assetIds[index] = runtime.productLine().isDerivative() ? decision.settleAssetId()
@@ -132,7 +132,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                             requiredReservation, clientKeys[index], symbolIds[index], assetIds[index],
                             coreSequence, null, timestamp, position);
                     // Matcher/Owner receive admission versions, never mutable Lane aliases.
-                    admittedOrders[index] = lane.orders.get(order.orderId()).publicationValue();
+                    admittedOrders[index] = source == null ? lane.orders.get(order.orderId()).publicationValue()
+                            : source.captureAdmittedOrder(index, lane.orders.get(order.orderId()));
                     admittedCount++;
                 }
                 changes.prepareAdmissionLane(laneId, runtime);

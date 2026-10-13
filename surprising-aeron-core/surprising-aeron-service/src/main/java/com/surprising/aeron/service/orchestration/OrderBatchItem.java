@@ -21,6 +21,24 @@ final class OrderBatchItem {
     CoreResultCode resultCode;
     /** 本项撮合事件；完成交接后只读，终态时释放引用。 */
     List<MatcherEvent> executionEvents = List.of();
+    private exchange.core2.core.common.MatcherResult executionSlot;
+    private com.surprising.aeron.service.state.OrderRuntime admissionCopy;
+    private com.surprising.aeron.service.state.OrderRuntime resultCopy;
+
+    void captureAdmittedOrder(com.surprising.aeron.service.state.OrderRuntime order) {
+        admittedOrder = order == null ? null : (admissionCopy = order.copyIntoCommandSlot(admissionCopy));
+    }
+
+    void captureResultOrder(com.surprising.aeron.service.state.OrderRuntime order) {
+        resultOrder = order == null ? null : (resultCopy = order.copyIntoCommandSlot(resultCopy));
+    }
+
+
+    void captureExecutions(List<MatcherEvent> events) {
+        if (executionSlot == null) executionSlot = exchange.core2.core.common.MatcherResult.commandSlot();
+        executionSlot.captureEvents(events);
+        executionEvents = executionSlot.events();
+    }
     /** 本项结果由批次项唯一持有，结算输入通过索引引用，避免第二个结果列表。 */
     com.surprising.aeron.service.matching.MatchingResult matchingResult;
     /** 延后批量结算的 Lane 路由；零表示尚未登记。 */
@@ -61,6 +79,7 @@ final class OrderBatchItem {
         status = null;
         resultCode = null;
         executionEvents = List.of();
+        if (executionSlot != null) executionSlot.clearCommandSlot();
         matchingResult = null;
         settlementLaneMask = 0;
         executionCount = 0;
@@ -70,6 +89,8 @@ final class OrderBatchItem {
         laneResultPrepared = false;
         realtimeTakerOrder = null;
         admittedOrder = null;
+        if (admissionCopy != null) admissionCopy.clearCommandSlot();
+        if (resultCopy != null) resultCopy.clearCommandSlot();
         cancelSymbol = null;
     }
 

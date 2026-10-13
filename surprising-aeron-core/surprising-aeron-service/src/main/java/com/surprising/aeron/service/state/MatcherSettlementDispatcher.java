@@ -18,13 +18,28 @@ final class MatcherSettlementDispatcher {
             OrderRuntime single, OrderRuntime[] orders, int count, java.util.UUID commandId, int shard,
             RuntimeIdentityRegistry identities, long timestamp, long position,
             List<Long> cancellations, LaneOrderResultTarget target) {
+        return prepareDirect(coreSequence, commitSequence, laneMask, single, orders, count, commandId, shard,
+                identities, timestamp, position, cancellations, target, null);
+    }
+
+    private MatcherSettlementEvent prepareDirect(long coreSequence, long commitSequence, long laneMask,
+            OrderRuntime single, OrderRuntime[] orders, int count, java.util.UUID commandId, int shard,
+            RuntimeIdentityRegistry identities, long timestamp, long position,
+            List<Long> cancellations, LaneOrderResultTarget target,
+            com.surprising.aeron.service.command.order.ResolvedMatchingAdmission replacement) {
         owner.assertOwner();
-        if (count <= 0 || single == null && (orders == null || count > orders.length))
+        if (count <= 0 || replacement == null && single == null && (orders == null || count > orders.length))
             throw new IllegalArgumentException("direct settlement admission is missing");
         owner.ensureMatcherSettlementDispatchCapacity(laneMask);
         MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
         if (event == null) event = new MatcherSettlementEvent();
         MatcherSettlementEvent.BatchStorage storage = event.batchStorage(count);
+        if (replacement != null) {
+            if (count != 1) throw new IllegalStateException("replacement must have one admission slot");
+            var resolved = replacement.resolved();
+            single = storage.replacementOrder = OrderRuntime.prepareCommandOrder(storage.replacementOrder,
+                    owner.productLine(), replacement.userId(), resolved, commandId, resolved.symbolId(), timestamp, position);
+        }
         for (int index = 0; index < count; index++) {
             OrderRuntime order = single == null ? orders[index] : single;
             if (order == null) throw new IllegalStateException("direct settlement order was not admitted");
@@ -84,10 +99,8 @@ final class MatcherSettlementDispatcher {
             long timestamp, long position, List<Long> cancellations, LaneOrderResultTarget resultTarget) {
         owner.assertOwner();
         var resolved = admission.resolved();
-        OrderRuntime order = TradingRuntimeState.preparedOrder(owner.productLine(), admission.userId(),
-                resolved, commandId, resolved.symbolId(), timestamp, position);
-        MatcherSettlementEvent event = prepareDirect(sequence, commitSequence, laneMask, order, null, 1,
-                commandId, shard, identities, timestamp, position, cancellations, resultTarget);
+        MatcherSettlementEvent event = prepareDirect(sequence, commitSequence, laneMask, null, null, 1,
+                commandId, shard, identities, timestamp, position, cancellations, resultTarget, admission);
         event.replacement(admission, identities.assetId(resolved.reservationAsset()));
         return event;
     }

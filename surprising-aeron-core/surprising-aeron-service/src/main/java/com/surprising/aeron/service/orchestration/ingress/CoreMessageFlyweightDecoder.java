@@ -15,27 +15,52 @@ import org.agrona.DirectBuffer;
 
 public final class CoreMessageFlyweightDecoder {
     /** Owned by one serial ingress callback or benchmark producer. */
+    private final CoreMessage[] commandSlots = new CoreMessage[512];
+    private int nextSlot;
     private final DirectMessageReader messageReader = new DirectMessageReader();
+
+    public void reset() { java.util.Arrays.fill(commandSlots, null); nextSlot = 0; }
 
     public DirectMessageReader reader(DirectBuffer buffer, int offset, int length) {
         return messageReader.wrap(buffer, offset, length);
     }
 
+    /** Bounded reuse cache. Busy slots remain untouched, even when ingress exceeds the command window. */
+    public CoreMessage decodeBorrowed(DirectBuffer buffer, int offset, int length) {
+        if (length > 16_384) return decode(buffer, offset, length);
+        int index = nextSlot++ & (commandSlots.length - 1);
+        CoreMessage slot = commandSlots[index];
+        if (slot == null) commandSlots[index] = slot = CoreMessage.decoderSlot();
+        if (!slot.acquireDecoderSlot()) return decode(buffer, offset, length);
+        try { return decodeInto(buffer, offset, length, slot); }
+        catch (RuntimeException invalid) { slot.releaseDecoderSlot(); throw invalid; }
+    }
+
     public CoreMessage decode(DirectBuffer buffer, int offset, int length) {
+        return decodeInto(buffer, offset, length, null);
+    }
+
+    private CoreMessage decodeInto(DirectBuffer buffer, int offset, int length, CoreMessage slot) {
         DirectMessageReader reader = reader(buffer, offset, length);
         UUID commandId = new UUID(reader.commandIdMsb(), reader.commandIdLsb());
         CoreRoute route = CoreRoute.fromWireCodes(reader.shardCode(), reader.routeVersion());
         String traceId = reader.traceId();
         int payloadLen = reader.payloadLength();
-        byte[] payload = payloadLen == 0 ? CoreMessage.EMPTY_PAYLOAD : new byte[payloadLen];
+        byte[] payload = slot != null ? slot.decoderPayloadBuffer(payloadLen)
+                : payloadLen == 0 ? CoreMessage.EMPTY_PAYLOAD : new byte[payloadLen];
         if (payloadLen > 0) {
             buffer.getBytes(reader.payloadOffset(), payload);
         }
-        CoreMessageHeader header = new CoreMessageHeader(
+        if (slot == null) return CoreMessage.owned(new CoreMessageHeader(
+                reader.schemaVersion(), reader.kind(), reader.messageType(), commandId,
+                reader.productLine(), route, reader.source(), reader.sourceId(),
+                reader.sourceSequence(), reader.userId(), reader.submittedAtEpochMillis(),
+                reader.correlationId(), traceId), payload);
+        slot.decoderHeader(
                 reader.schemaVersion(), reader.kind(), reader.messageType(), commandId,
                 reader.productLine(), route, reader.source(), reader.sourceId(),
                 reader.sourceSequence(), reader.userId(), reader.submittedAtEpochMillis(),
                 reader.correlationId(), traceId);
-        return CoreMessage.owned(header, payload);
+        return slot;
     }
 }

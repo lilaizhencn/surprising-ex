@@ -225,7 +225,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     private boolean balancesChanged;
     /** 当前提交范围内变化的订单；与提交/回滚边界同步维护。 */
     final OwnerIndexedChanges<OrderRuntime, Void> changedOrders =
-            new OwnerIndexedChanges<>();
+            new OwnerIndexedChanges<>(new RuntimeOrderChangeBuffer());
     /** 当前提交范围内变化的预留；与提交/回滚边界同步维护。 */
     final LongHashSet changedReservations = new LongHashSet();
     /** 当前提交范围内变化的持仓；与提交/回滚边界同步维护。 */
@@ -365,6 +365,15 @@ public final class TradingRuntimeState implements AutoCloseable {
                     (long) METRIC_LONGS.getOpaque(accountLaneMaxLatencyNanos[laneId], operation));
         }
         accountLanes[laneId].writeMetrics(encoder, depth, capacity, highWater);
+    }
+
+    private volatile long retiredOwnerSequence;
+
+    /** Only routing/lifetime metadata crosses this Owner-to-Lane release boundary. */
+    public void releaseRetiredOrderFence(long sequence) {
+        assertOwner();
+        if (sequence < retiredOwnerSequence) throw new IllegalStateException("order retirement fence moved backwards");
+        retiredOwnerSequence = sequence;
     }
 
     public void startAccountLanes() {
@@ -931,9 +940,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     void publishOrder(long orderId, OrderRuntime value) {
         AccountLaneState scoped = currentLaneCommandScope();
         if (scoped != null) {
-            MatcherSettlementChanges changes = currentMatcherSettlementChangesScope();
-            laneDelta(scoped.laneId()).putOrder(orderId,
-                    value == null || changes == null ? value == null ? null : value.publicationValue() : value);
+            laneDelta(scoped.laneId()).putOrder(orderId, value);
         }
     }
 
@@ -1011,6 +1018,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void releaseMatcherSettlementChanges(MatcherSettlementChanges changes) {
         if (changes == null || !changes.inUse) throw new IllegalStateException("LaneCommitDelta slot is not active");
+        changes.returnRetiredOrders(this);
         changes.clear();
         changes.inUse = false;
         freeMatcherSettlementChangeSlots[freeMatcherSettlementChangeCount++] = changes.ringIndex;
@@ -1633,17 +1641,24 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     /** Owner按日志顺序投递；队列满时保留同一事实，不能跳过或回收。 */
-    public boolean dispatchMatcherFinancialSettlement(MatcherSettlementEvent event, boolean sequentialBatch) {
+    public void applyCollectedTreasuryBeforeActivation(RuntimeTreasuryDelta delta) {
+        assertOwner();
+        if (delta == null || delta.size() == 0) return;
+        if (systemLedger != null) throw new IllegalStateException("live money must be applied by SystemLedgerLane");
+        delta.apply(treasury);
+    }
+
+    public boolean dispatchMatcherFinancialSettlement(MatcherSettlementEvent event) {
         assertOwner();
         if (event == null) return true;
         if (systemLedger == null) return true;
         if (ledgerControl != null) throw new IllegalStateException("Matcher money cannot enter an unfinished control scope");
-        return event.hasLedgerSettlement() || event.submitTreasurySettlement(systemLedger, sequentialBatch);
+        return event.hasLedgerSettlement() || event.submitTreasurySettlement(systemLedger);
     }
 
     /** 有序响应等待已有财务回执；顺序批次仍在队首逐项投递。 */
-    public boolean pollMatcherFinancialSettlement(MatcherSettlementEvent event, boolean sequentialBatch) {
-        return dispatchMatcherFinancialSettlement(event, sequentialBatch) && (event == null || event.complete());
+    public boolean pollMatcherFinancialSettlement(MatcherSettlementEvent event) {
+        return dispatchMatcherFinancialSettlement(event) && (event == null || event.complete());
     }
 
     public RuntimeTreasuryDelta collectMatcherSettlement(MatcherSettlementEvent event) {
@@ -4160,7 +4175,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     void changedOrder(long orderId, OrderRuntime order) {
         AccountLaneState lane = currentLaneCommandScope();
         if (lane == null) changedOrders.put(orderId, order == null ? null : order.publicationValue());
-        else laneDelta(lane.laneId()).putOrder(orderId, order == null ? null : order.publicationValue());
+        else laneDelta(lane.laneId()).putOrder(orderId, order);
     }
 
     void changedPosition(long positionKey) {
@@ -4611,8 +4626,9 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
                     "available balance is insufficient");
         }
-        OrderRuntime order = prepared == null ? preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position)
-                : prepared;
+        OrderRuntime order = prepared != null && !prepared.commandSlotValue() ? prepared : accountLanesStarted
+                ? lane.preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position, retiredOwnerSequence)
+                : preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position);
         ReservationRuntime reservation = new ReservationRuntime(command.orderId(), userId, symbolId,
                 command.reservationKind(), assetId, requiredReservation,
                 0, 0, command.quantitySteps());

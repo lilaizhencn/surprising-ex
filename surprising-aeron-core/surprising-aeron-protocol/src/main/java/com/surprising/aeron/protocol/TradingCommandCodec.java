@@ -233,36 +233,20 @@ public final class TradingCommandCodec {
     }
 
     public static byte[] encodePlaceOrder(PlaceOrderCommand command) {
-        byte[] instrumentId = text(command.instrumentId());
-        byte[] clientOrderId = optionalText(command.clientOrderId());
-        byte[] payload = new byte[Integer.BYTES + Long.BYTES * 3 + Short.BYTES * 2
-                + instrumentId.length + clientOrderId.length + Integer.BYTES * 5 + Byte.BYTES * 2];
-        int offset = 0;
-        offset = putInt(payload, offset, PLACE_ORDER_VERSION);
-        offset = putLong(payload, offset, command.orderId());
-        offset = putShort(payload, offset, instrumentId.length);
-        System.arraycopy(instrumentId, 0, payload, offset, instrumentId.length);
-        offset += instrumentId.length;
-        offset = putInt(payload, offset, command.side().wireCode());
-        offset = putLong(payload, offset, command.limitPriceTicks());
-        offset = putLong(payload, offset, command.quantitySteps());
-        payload[offset++] = (byte) (command.reduceOnly() ? 1 : 0);
-        offset = putInt(payload, offset, command.marginMode().wireCode());
-        offset = putInt(payload, offset, command.positionSide().wireCode());
-        offset = putInt(payload, offset, command.orderType().wireCode());
-        offset = putInt(payload, offset, command.timeInForce().wireCode());
-        payload[offset++] = (byte) (command.postOnly() ? 1 : 0);
-        offset = putShort(payload, offset, clientOrderId.length);
-        System.arraycopy(clientOrderId, 0, payload, offset, clientOrderId.length);
+        byte[] payload = new byte[encodedPlaceOrderLength(command)];
+        writePlaceOrder(ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN), command);
         return payload;
     }
 
-    static int encodedPlaceOrderLength(PlaceOrderCommand command) {
+    public static int encodedPlaceOrderLength(PlaceOrderCommand command) {
         return Integer.BYTES + Long.BYTES * 3 + Short.BYTES * 2 + Integer.BYTES * 5 + Byte.BYTES * 2
                 + commandTextLength(command.instrumentId(), false) + commandTextLength(command.clientOrderId(), true);
     }
 
-    static void writePlaceOrder(ByteBuffer output, PlaceOrderCommand command) {
+    /** Writes into an existing little-endian command buffer; no temporary UTF-8 arrays. */
+    public static void writePlaceOrder(ByteBuffer output, PlaceOrderCommand command) {
+        if (output.order() != ByteOrder.LITTLE_ENDIAN || output.remaining() < encodedPlaceOrderLength(command))
+            throw new IllegalArgumentException("place order output must have capacity and little-endian order");
         output.putInt(PLACE_ORDER_VERSION).putLong(command.orderId());
         putCommandText(output, command.instrumentId(), false);
         output.putInt(command.side().wireCode()).putLong(command.limitPriceTicks()).putLong(command.quantitySteps())
@@ -306,8 +290,13 @@ public final class TradingCommandCodec {
     }
 
     private static void putCommandText(ByteBuffer output, String value, boolean optional) {
-        byte[] bytes = optional ? optionalText(value) : text(value);
-        output.putShort((short) bytes.length).put(bytes);
+        int start = output.position();
+        output.putShort((short) 0);
+        if (value != null) CoreStateQueryCodec.writeUtf8Bytes(output, value);
+        int length = output.position() - start - Short.BYTES;
+        if (length > MAX_TEXT_BYTES || !optional && length == 0)
+            throw new IllegalArgumentException("invalid command text length");
+        output.putShort(start, (short) length);
     }
 
     public static PlaceOrderCommand decodePlaceOrder(byte[] payload) {
@@ -315,6 +304,10 @@ public final class TradingCommandCodec {
     }
 
     static PlaceOrderCommand decodePlaceOrder(byte[] payload, int start, int length) {
+        return decodePlaceOrderInto(payload, start, length, null);
+    }
+
+    public static PlaceOrderCommand decodePlaceOrderInto(byte[] payload, int start, int length, PlaceOrderCommand target) {
         requireRange(payload, start, length);
         int limit = start + length;
         requireRange(payload, start, Integer.BYTES + Long.BYTES, limit);
@@ -369,9 +362,13 @@ public final class TradingCommandCodec {
                 : new String(payload, offset, clientLength, StandardCharsets.UTF_8);
         offset += clientLength;
         if (offset != limit) throw new ProtocolException("trailing bytes in trading command payload");
-        return new PlaceOrderCommand(orderId, instrumentId, side, limitPriceTicks,
+        if (target == null) return new PlaceOrderCommand(orderId, instrumentId, side, limitPriceTicks,
                 quantitySteps, reduceOnlyCode == 1, marginMode, positionSide,
                 orderType, timeInForce, postOnlyCode == 1, clientOrderId);
+        target.decodeInto(orderId, instrumentId, side, limitPriceTicks,
+                quantitySteps, reduceOnlyCode == 1, marginMode, positionSide,
+                orderType, timeInForce, postOnlyCode == 1, clientOrderId);
+        return target;
     }
 
     public static byte[] encodeUpsertFeePolicy(UpsertFeePolicyCommand command) {

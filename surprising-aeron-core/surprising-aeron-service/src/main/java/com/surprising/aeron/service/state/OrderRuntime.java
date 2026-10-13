@@ -21,27 +21,27 @@ import java.util.UUID;
  * boundaries still use {@link #snapshot()}.</p>
  */
 public final class OrderRuntime {
-    private final long orderId;
-    private final ProductLine productLine;
-    private final long userId;
-    private final int symbolId;
-    private final CoreInstrument instrument;
-    private final CoreOrderSide side;
-    private final long priceTicks;
-    private final long matchingPriceTicks;
-    private final long quantitySteps;
+    private long orderId;
+    private ProductLine productLine;
+    private long userId;
+    private int symbolId;
+    private CoreInstrument instrument;
+    private CoreOrderSide side;
+    private long priceTicks;
+    private long matchingPriceTicks;
+    private long quantitySteps;
     private long executedQuantitySteps;
     private long remainingQuantitySteps;
-    private final boolean reduceOnly;
-    private final CoreMarginMode marginMode;
-    private final CorePositionSide positionSide;
-    private final CoreOrderType orderType;
-    private final CoreTimeInForce timeInForce;
-    private final boolean postOnly;
-    private final String clientOrderId;
-    private final UUID commandId;
-    private final long makerFeeRatePpm;
-    private final long takerFeeRatePpm;
+    private boolean reduceOnly;
+    private CoreMarginMode marginMode;
+    private CorePositionSide positionSide;
+    private CoreOrderType orderType;
+    private CoreTimeInForce timeInForce;
+    private boolean postOnly;
+    private String clientOrderId;
+    private UUID commandId;
+    private long makerFeeRatePpm;
+    private long takerFeeRatePpm;
     private long cumulativeFeeUnits;
     private long executedValueHigh;
     private long executedValueLow;
@@ -231,6 +231,112 @@ public final class OrderRuntime {
                 postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
                 status, revision, false);
+    }
+
+    /** The caller owns this fixed command slot until response retirement. Never reuse snapshot(). */
+    public OrderRuntime copyIntoCommandSlot(OrderRuntime target) {
+        if (target == null) {
+            target = new OrderRuntime();
+            target.commandSlotValue = true;
+        }
+        if (!target.commandSlotValue) throw new IllegalArgumentException("order copy target is not a command slot");
+        target.orderId = orderId;
+        target.productLine = productLine;
+        target.userId = userId;
+        target.symbolId = symbolId;
+        target.instrument = instrument;
+        target.side = side;
+        target.priceTicks = priceTicks;
+        target.matchingPriceTicks = matchingPriceTicks;
+        target.quantitySteps = quantitySteps;
+        target.reduceOnly = reduceOnly;
+        target.marginMode = marginMode;
+        target.positionSide = positionSide;
+        target.orderType = orderType;
+        target.timeInForce = timeInForce;
+        target.postOnly = postOnly;
+        target.clientOrderId = clientOrderId;
+        target.commandId = commandId;
+        target.makerFeeRatePpm = makerFeeRatePpm;
+        target.takerFeeRatePpm = takerFeeRatePpm;
+        target.executedQuantitySteps = executedQuantitySteps;
+        target.remainingQuantitySteps = remainingQuantitySteps;
+        target.cumulativeFeeUnits = cumulativeFeeUnits;
+        target.executedValueHigh = executedValueHigh;
+        target.executedValueLow = executedValueLow;
+        target.createdAtEpochMillis = createdAtEpochMillis;
+        target.updatedAtEpochMillis = updatedAtEpochMillis;
+        target.clusterPosition = clusterPosition;
+        target.status = status;
+        target.revision = revision;
+        target.mutable = false;
+        return target;
+    }
+
+    /** Release request-specific references; the slot object remains allocated for its next command. */
+    public void clearCommandSlot() {
+        if (!commandSlotValue) throw new IllegalStateException("cannot clear an authoritative order as a command slot");
+        productLine = null; instrument = null; side = null; marginMode = null; positionSide = null;
+        orderType = null; timeInForce = null; clientOrderId = null; commandId = null; status = null;
+        orderId = userId = revision = 0;
+    }
+
+    private boolean commandSlotValue;
+    private OrderRuntime() { }
+
+    private boolean pooledAuthority;
+    private long retiredAfterSequence;
+
+    boolean commandSlotValue() { return commandSlotValue; }
+
+    static OrderRuntime prepareCommandOrder(OrderRuntime target, ProductLine product, long userId,
+            ResolvedPlaceOrder intent, UUID commandId, int symbolId, long timestamp, long position) {
+        if (target == null) { target = new OrderRuntime(); target.commandSlotValue = true; }
+        if (!target.commandSlotValue) throw new IllegalStateException("order is not a command slot");
+        initializeAdmission(target, product, userId, intent, commandId, symbolId, timestamp, position);
+        target.mutable = false;
+        return target;
+    }
+
+    static OrderRuntime preparePooled(OrderRuntime target, ProductLine product, long userId,
+            ResolvedPlaceOrder intent, UUID commandId, int symbolId, long timestamp, long position) {
+        if (intent == null || commandId == null || userId <= 0 || symbolId < 0 || timestamp < 0 || position < 0)
+            throw new IllegalArgumentException("invalid pooled order admission");
+        if (target == null) { target = new OrderRuntime(); target.pooledAuthority = true; }
+        if (!target.pooledAuthority || target.commandSlotValue) throw new IllegalStateException("order is not a Lane pool value");
+        initializeAdmission(target, product, userId, intent, commandId, symbolId, timestamp, position);
+        return target;
+    }
+
+    private static void initializeAdmission(OrderRuntime target, ProductLine product, long userId,
+            ResolvedPlaceOrder intent, UUID commandId, int symbolId, long timestamp, long position) {
+        if (intent == null || commandId == null || product == null || userId <= 0 || symbolId < 0 || timestamp < 0 || position < 0)
+            throw new IllegalArgumentException("invalid order admission");
+        target.orderId = intent.orderId(); target.productLine = product; target.userId = userId;
+        target.symbolId = symbolId; target.instrument = intent.instrument(); target.side = intent.side();
+        target.priceTicks = intent.limitPriceTicks(); target.matchingPriceTicks = intent.matchingPriceTicks();
+        target.quantitySteps = target.remainingQuantitySteps = intent.quantitySteps();
+        target.executedQuantitySteps = target.cumulativeFeeUnits = target.executedValueHigh = target.executedValueLow = 0;
+        target.reduceOnly = intent.reduceOnly(); target.marginMode = intent.marginMode(); target.positionSide = intent.positionSide();
+        target.orderType = intent.orderType(); target.timeInForce = intent.timeInForce(); target.postOnly = intent.postOnly();
+        target.clientOrderId = intent.clientOrderId(); target.commandId = commandId;
+        target.makerFeeRatePpm = intent.makerFeeRatePpm(); target.takerFeeRatePpm = intent.takerFeeRatePpm();
+        target.createdAtEpochMillis = target.updatedAtEpochMillis = timestamp; target.clusterPosition = position;
+        target.status = CoreOrderStatus.OPEN; target.revision = 1; target.mutable = true; target.retiredAfterSequence = 0;
+    }
+
+    boolean retireForReuse(long sequence) {
+        if (!pooledAuthority) return false;
+        if (sequence <= 0 || retiredAfterSequence != 0) throw new IllegalStateException("invalid order retirement");
+        retiredAfterSequence = sequence;
+        return true;
+    }
+
+    long retiredAfterSequence() { return retiredAfterSequence; }
+
+    void clearRetiredReferences() {
+        if (!pooledAuthority || retiredAfterSequence == 0) throw new IllegalStateException("order was not retired");
+        clientOrderId = null; commandId = null; instrument = null; productLine = null;
     }
 
     OrderRuntime laneValue() { return mutable ? this : mutableCopy(); }

@@ -15,6 +15,23 @@ public final class LaneCommitDelta {
     private String[] terminalOrderClients = new String[4];
     private int terminalOrderCount;
 
+    private OrderRuntime[] retiredOrders = new OrderRuntime[4];
+    private int retiredOrderCount;
+
+    void retiredOrder(OrderRuntime order) {
+        if (retiredOrderCount == retiredOrders.length)
+            retiredOrders = java.util.Arrays.copyOf(retiredOrders, retiredOrders.length * 2);
+        retiredOrders[retiredOrderCount++] = order;
+    }
+
+    void returnRetiredOrders(AccountLaneState lane) {
+        for (int index = 0; index < retiredOrderCount; index++) {
+            lane.returnRetiredOrder(retiredOrders[index]);
+            retiredOrders[index] = null;
+        }
+        retiredOrderCount = 0;
+    }
+
     void ensureTerminalCapacity(int expectedCount) {
         if (expectedCount <= terminalOrderIds.length) return;
         int capacity = terminalOrderIds.length;
@@ -41,6 +58,7 @@ public final class LaneCommitDelta {
                 if (order != null && order.status().terminal()) recordTerminalOrder(order);
             });
         }
+        orders.freezeValues();
         publicationPrepared = true;
     }
 
@@ -57,7 +75,7 @@ public final class LaneCommitDelta {
     /** 本次需要发布的用户变化。 */
     final RuntimeChangeBuffer<UserRuntime> users = new RuntimeChangeBuffer<>();
     /** 本次需要发布的订单变化。 */
-    final RuntimeIndexedChangeBuffer<OrderRuntime, Void> orders = new RuntimeIndexedChangeBuffer<>();
+    final RuntimeOrderChangeBuffer orders = new RuntimeOrderChangeBuffer();
     /** 本次需要发布的预留变化。 */
     final RuntimeChangeBuffer<ReservationRuntime> reservations = new RuntimeChangeBuffer<>();
     /** 本次需要发布的持仓变化。 */
@@ -90,7 +108,7 @@ public final class LaneCommitDelta {
     }
 
     void putOrder(long key, OrderRuntime value) {
-        orders.put(key, value);
+        orders.putLive(key, value);
     }
 
     void putReservation(long key, ReservationRuntime value) {
@@ -272,6 +290,8 @@ public final class LaneCommitDelta {
 
     void clear() {
         closedTriggerCount = 0;
+        java.util.Arrays.fill(retiredOrders, 0, retiredOrderCount, null);
+        retiredOrderCount = 0;
         if (triggers != null) triggers.clear();
         if (algos != null) algos.clear();
         publicationPrepared = false;

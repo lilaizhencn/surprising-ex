@@ -480,7 +480,7 @@ final class OrderedCommitCoordinator {
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
         RuntimeTreasuryDelta settledTreasuryDelta = settlementTreasuryDelta;
             if (settledTreasuryDelta != null) {
-                if (settledTreasuryDelta.size() != 0) settledTreasuryDelta.apply(owner.runtimeState.treasury());
+                owner.runtimeState.applyCollectedTreasuryBeforeActivation(settledTreasuryDelta);
                 owner.runtimeState.setMetadata(owner.productLine,
                         Math.addExact(owner.runtimeState.revision(),
                                 pending.operation() == CommandSlot.Operation.TRIGGER && !matchingResult.accepted() ? 2 : 1));
@@ -535,6 +535,7 @@ final class OrderedCommitCoordinator {
         long terminalStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         owner.validateFundsConservation(pending.command());
         recordMatchingCompletion(applyStartNanos);
+        closeFinancialDispatch(pending);
         CoreResponse response = storeTerminalResponse(
                 pending, matchingResult, status, resultCode);
         owner.runtimeState.releaseMatcherSettlement(pending.takeSettlementEvent());
@@ -588,7 +589,7 @@ final class OrderedCommitCoordinator {
                     || pending.operation() == CommandSlot.Operation.TRIGGER) {
                 requestCommitPublication();
             }
-            if (settlementTreasuryDelta.size() != 0) settlementTreasuryDelta.apply(owner.runtimeState.treasury());
+            owner.runtimeState.applyCollectedTreasuryBeforeActivation(settlementTreasuryDelta);
             long revisionDelta = switch (pending.operation()) {
                 case CANCEL -> matchingResult.accepted() ? 1 : 0;
                 case REPLACE, AMEND -> matchingResult.accepted() ? 2 : 0;
@@ -623,6 +624,7 @@ final class OrderedCommitCoordinator {
         recordMatchingCompletion(pending.settlementApplyStartNanos());
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
+        closeFinancialDispatch(pending);
         CoreResponse response = storeTerminalResponse(
                 pending, matchingResult, status, resultCode);
         if (pending.takePipelinedSettlementCounted()) {
@@ -671,6 +673,7 @@ final class OrderedCommitCoordinator {
         recordMatchingCompletion(pending.settlementApplyStartNanos());
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
+        closeFinancialDispatch(pending);
         CoreResponse response = storeTerminalResponse(
                 pending, matchingResult, status, resultCode);
         owner.runtimeState.releaseCancel(pending.takeCancelEvent());
@@ -1056,38 +1059,57 @@ final class OrderedCommitCoordinator {
         CommandSlot pending;
         while ((pending = owner.pendingMatching.ledgerDispatchHead()) != null
                 && pending.sequence() <= throughSequence) {
+            if (pending.ledgerDispatchClosed) {
+                owner.pendingMatching.completeLedgerDispatch(pending.sequence());
+                continue;
+            }
             MatcherSettlementEvent event = financialDispatchEvent(pending);
             if (event == null) return;
-            if (!owner.runtimeState.dispatchMatcherFinancialSettlement(event, false)) return;
+            boolean sequential = pending.orderBatch != null && !pending.orderBatch.pipelined;
+            if (!owner.runtimeState.dispatchMatcherFinancialSettlement(event)) return;
+            // Sequential batches can produce another item. Keep their money cursor until the
+            // final item or explicit business close, while the response slot remains leased.
+            if (sequential && !pending.orderBatch.matchingApplied()) return;
             owner.pendingMatching.completeLedgerDispatch(pending.sequence());
         }
     }
 
     /** A full mailbox needs a bounded Owner retry even when no new Matcher notification arrives. */
     boolean hasFinancialDispatchWork() {
-        return owner.runtimeState.systemLedgerStarted()
-                && financialDispatchEvent(owner.pendingMatching.ledgerDispatchHead()) != null;
+        if (!owner.runtimeState.systemLedgerStarted()) return false;
+        CommandSlot pending = owner.pendingMatching.ledgerDispatchHead();
+        if (pending == null) return false;
+        if (pending.ledgerDispatchClosed) return true;
+        MatcherSettlementEvent event = financialDispatchEvent(pending);
+        return event != null && (!event.hasLedgerSettlement()
+                || pending.orderBatch == null || pending.orderBatch.matchingApplied());
     }
 
     private MatcherSettlementEvent financialDispatchEvent(CommandSlot pending) {
         // Control and sequential batches can produce more money later in the same command.
         // Their existing ordered continuation must finish before later facts enter Ledger.
-        if (pending == null || pending.controlPending || (!pending.clusterIndependent
-                && pending.sequence() != owner.pendingMatching.firstSequence())) return null;
+        if (pending == null || pending.controlPending || pending.ledgerDispatchClosed) return null;
         OrderBatchPending batch = pending.orderBatch;
-        if (batch != null && !batch.pipelined) return null;
-        MatcherSettlementEvent event = batch == null ? pending.settlementEvent() : batch.settlementEvent;
+        MatcherSettlementEvent event = batch == null ? pending.settlementEvent()
+                : batch.itemSettlementEvent != null ? batch.itemSettlementEvent : batch.settlementEvent;
         return event != null && event.ready() && event.dispatched() ? event : null;
+    }
+
+    /** Release only the money ordering fence; all publication/response references stay leased. */
+    void closeFinancialDispatch(CommandSlot pending) {
+        if (!owner.runtimeState.systemLedgerStarted()) return;
+        pending.ledgerDispatchClosed = true;
+        dispatchReadyMatcherFinancialSettlements(Long.MAX_VALUE);
     }
 
     private boolean financialHeadReady(CommandSlot pending) {
         if (!owner.runtimeState.systemLedgerStarted()) return true;
         if (pending.sequence() != owner.pendingMatching.firstSequence()) return false;
         OrderBatchPending batch = pending.orderBatch;
-        if (batch == null) return owner.runtimeState.pollMatcherFinancialSettlement(pending.settlementEvent(), false);
+        if (batch == null) return owner.runtimeState.pollMatcherFinancialSettlement(pending.settlementEvent());
         if (batch.itemSettlementEvent != null
-                && !owner.runtimeState.pollMatcherFinancialSettlement(batch.itemSettlementEvent, true)) return false;
-        return owner.runtimeState.pollMatcherFinancialSettlement(batch.settlementEvent, !batch.pipelined);
+                && !owner.runtimeState.pollMatcherFinancialSettlement(batch.itemSettlementEvent)) return false;
+        return owner.runtimeState.pollMatcherFinancialSettlement(batch.settlementEvent);
     }
 
     boolean matchingCommitReady(CommandSlot pending) {

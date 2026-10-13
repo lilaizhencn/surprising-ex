@@ -6,14 +6,19 @@ package com.surprising.aeron.service.state;
  */
 final class OwnerIndexedChanges<V, I> {
     /** Owner 同步控制操作的变更；写入前合并此前接管的 Lane 结果。 */
-    private final RuntimeIndexedChangeBuffer<V, I> direct = new RuntimeIndexedChangeBuffer<>();
+    private final RuntimeIndexedChangeBuffer<V, I> direct;
     /** 与协议 Lane 位图上限一致，槽位按需初始化，清空后保留容量。 */
     private final RuntimeIndexedChangeBuffer<V, I>[] lanes;
     /** 本次提交中有内容的 Lane；热路径仅访问置位槽。 */
     private long laneMask;
 
+    OwnerIndexedChanges() { this(new RuntimeIndexedChangeBuffer<>()); }
+
     @SuppressWarnings("unchecked")
-    OwnerIndexedChanges() { lanes = new RuntimeIndexedChangeBuffer[Long.SIZE]; }
+    OwnerIndexedChanges(RuntimeIndexedChangeBuffer<V, I> direct) {
+        this.direct = direct;
+        lanes = new RuntimeIndexedChangeBuffer[Long.SIZE];
+    }
 
     void adopt(int laneId, RuntimeIndexedChangeBuffer<V, I> source) {
         if (laneId < 0 || laneId >= lanes.length) throw new IllegalArgumentException("invalid change Lane");
@@ -23,7 +28,7 @@ final class OwnerIndexedChanges<V, I> {
             return;
         }
         var target = lanes[laneId];
-        if (target == null) lanes[laneId] = target = new RuntimeIndexedChangeBuffer<>();
+        if (target == null) lanes[laneId] = target = source.emptyLike();
         if (target.isEmpty()) target.swapWith(source);
         else source.drainIndexedTo(target::putIndexed);
         laneMask |= 1L << laneId;

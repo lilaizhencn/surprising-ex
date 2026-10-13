@@ -96,7 +96,7 @@ final class MatcherSettlementChanges {
         }
     }
 
-    void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountLaneState lane, TradingRuntimeState runtime) {
+    void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountLaneState lane, TradingRuntimeState runtime, long sequence) {
         applyUserRevisions(laneId, lane);
         LaneCommitDelta changes = laneDeltas[laneId];
         // The Owner applies and commits these changes serially. Keep terminal identity
@@ -117,6 +117,7 @@ final class MatcherSettlementChanges {
             OrderRuntime removed = lane.removeOrder(orderId);
             if (removed != null) {
                 changes.removeOrderRoute(orderId);
+                if (removed.retireForReuse(sequence)) changes.retiredOrder(removed);
             }
             lane.clientKeysByOrderId.forEach(orderId,
                     clientKey -> identities.releaseClientKeyInLane(lane, order.userId(), clientKey));
@@ -170,6 +171,14 @@ final class MatcherSettlementChanges {
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
             target.add(laneFundsDeltas[laneId]);
+        }
+    }
+
+    void returnRetiredOrders(TradingRuntimeState runtime) {
+        long lanes = activeLaneMask;
+        while (lanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
+            laneDeltas[laneId].returnRetiredOrders(runtime.accountLanes[laneId]);
         }
     }
 

@@ -138,6 +138,28 @@ public final class AccountLaneState {
         this.localFundsHash = computeFundsHash();
     }
 
+    /** Owner returns detached orders; the Lane waits for the final command-retirement fence. */
+    private final org.agrona.concurrent.OneToOneConcurrentArrayQueue<OrderRuntime> retiredOrders =
+            new org.agrona.concurrent.OneToOneConcurrentArrayQueue<>(4_096);
+    private final java.util.ArrayDeque<OrderRuntime> reusableOrders = new java.util.ArrayDeque<>();
+
+    void returnRetiredOrder(OrderRuntime order) {
+        // Retention is bounded. A full recycling cache drops its detached value, never business work.
+        retiredOrders.offer(order);
+    }
+
+    OrderRuntime preparedOrder(com.surprising.product.api.ProductLine product, long userId, ResolvedPlaceOrder intent,
+            java.util.UUID commandId, int symbolId, long timestamp, long position, long retiredOwnerSequence) {
+        assertOwner();
+        OrderRuntime ready;
+        while ((ready = retiredOrders.peek()) != null && ready.retiredAfterSequence() <= retiredOwnerSequence) {
+            retiredOrders.poll();
+            ready.clearRetiredReferences();
+            if (reusableOrders.size() < 4_096) reusableOrders.addLast(ready);
+        }
+        return OrderRuntime.preparePooled(reusableOrders.pollLast(), product, userId, intent, commandId, symbolId, timestamp, position);
+    }
+
     private volatile Thread owner;
     private static final VarHandle OWNER;
     static {

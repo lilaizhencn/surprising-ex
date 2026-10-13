@@ -32,7 +32,7 @@ class SettlementChangesReuseTest {
             openReservation.consumeInPlace(40);
             filledReservation.consumeInPlace(100);
 
-            changes.prepareLaneTerminal(laneId, identities, lane, runtime);
+            changes.prepareLaneTerminal(laneId, identities, lane, runtime, 1);
             assertThat(lane.orders.get(12)).isNull();
             assertThat(lane.reservations.get(12)).isNull();
             assertThat(delta.reservations.get(11).consumedUnits()).isEqualTo(40);
@@ -50,7 +50,7 @@ class SettlementChangesReuseTest {
             openReservation.releaseInPlace(60);
             delta.putOrder(11, open);
             delta.putReservation(11, openReservation);
-            changes.prepareLaneTerminal(laneId, identities, lane, runtime);
+            changes.prepareLaneTerminal(laneId, identities, lane, runtime, 2);
             assertThat(delta.terminalOrderCount()).isEqualTo(1);
             assertThat(delta.terminalOrderId(0)).isEqualTo(11);
             assertThat(lane.orders.get(11)).isNull();

@@ -16,7 +16,10 @@ import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 
 public final class DecodedMatchingCommand {
 
-    private final Object value;
+    private Object value;
+    private PlaceOrderCommand placeSlot;
+    private PlaceOrderBatchCommand placeBatchSlot;
+    private boolean commandSlot;
     /** 命令作用域内最后一个币对的稳定路由，避免同币对批量逐阶段查询并发字典。 */
     private String routedSymbol;
     private int routedShard;
@@ -32,6 +35,31 @@ public final class DecodedMatchingCommand {
 
     private DecodedMatchingCommand(Object value) {
         this.value = value;
+    }
+
+    public static DecodedMatchingCommand commandSlot() {
+        var result = new DecodedMatchingCommand(null);
+        result.commandSlot = true;
+        return result;
+    }
+
+    public void decodeInto(CoreMessage message) {
+        if (!commandSlot) throw new IllegalStateException("decoded command is not a window slot");
+        clearCommandSlot();
+        if (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.PLACE_ORDER) {
+            if (placeSlot == null) placeSlot = PlaceOrderCommand.commandSlot();
+            value = TradingCommandCodec.decodePlaceOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), placeSlot);
+        } else if (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.PLACE_ORDER_BATCH) {
+            if (placeBatchSlot == null) placeBatchSlot = PlaceOrderBatchCommand.commandSlot();
+            value = TradingOrderBatchCodec.decodePlaceOrderBatchInto(message.payloadUnsafe(), placeBatchSlot);
+        } else value = decode(message).value;
+    }
+
+    public void clearCommandSlot() {
+        if (!commandSlot) throw new IllegalStateException("cannot clear an immutable decoded command");
+        value = null; routedSymbol = null; routedShard = 0;
+        if (placeSlot != null) placeSlot.clearCommandSlot();
+        if (placeBatchSlot != null) placeBatchSlot.clearCommandSlot();
     }
 
     public static DecodedMatchingCommand decode(CoreMessage message) {

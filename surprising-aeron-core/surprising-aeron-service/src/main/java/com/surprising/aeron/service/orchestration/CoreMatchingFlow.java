@@ -116,6 +116,7 @@ final class CoreMatchingFlow {
                 ? owner.appliedCommandCount
                 : Math.subtractExact(owner.pendingMatching.firstSequence(), 1);
         if (candidate > owner.committedCoreSequence) owner.committedCoreSequence = candidate;
+        owner.runtimeState.releaseRetiredOrderFence(owner.committedCoreSequence);
     }
 
     void commitMatchingSequence(long sequence) {

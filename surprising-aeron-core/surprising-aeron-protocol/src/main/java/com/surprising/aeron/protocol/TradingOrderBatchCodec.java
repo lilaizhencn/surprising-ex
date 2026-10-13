@@ -55,6 +55,41 @@ public final class TradingOrderBatchCodec {
                 TradingCommandCodec::decodePlaceOrder));
     }
 
+    /** Reuse a batch owned by one command window entry, with no frame wrappers or item list. */
+    public static PlaceOrderBatchCommand decodePlaceOrderBatchInto(byte[] encoded, PlaceOrderBatchCommand target) {
+        if (target == null) throw new IllegalArgumentException("decoder batch slot is required");
+        target.clearCommandSlot();
+        if (encoded == null || encoded.length < 8 || encoded.length > MAX_BATCH_PAYLOAD_BYTES)
+            throw new ProtocolException("invalid order batch payload");
+        if (littleInt(encoded, 0) != PlaceOrderBatchCommand.WIRE_VERSION)
+            throw new ProtocolException("unsupported order batch version");
+        int count = littleInt(encoded, 4);
+        if (count <= 0 || count > PlaceOrderBatchCommand.MAX_ORDERS) throw new ProtocolException("invalid order batch count");
+        target.activeCount(count);
+        int offset = 8;
+        try {
+            for (int index = 0; index < count; index++) {
+                if (offset > encoded.length - 8) throw new ProtocolException("truncated command item");
+                if (littleInt(encoded, offset) != index) throw new ProtocolException("order batch indexes must be contiguous");
+                int length = littleInt(encoded, offset + 4);
+                offset += 8;
+                if (length <= 0 || length > encoded.length - offset) throw new ProtocolException("invalid command item length");
+                TradingCommandCodec.decodePlaceOrderInto(encoded, offset, length, target.orderSlot(index));
+                offset += length;
+            }
+            if (offset != encoded.length) throw new ProtocolException("trailing order batch bytes");
+            return target;
+        } catch (IllegalArgumentException invalid) {
+            target.clearCommandSlot();
+            throw invalid instanceof ProtocolException ? invalid : new ProtocolException("invalid order batch item: " + invalid.getMessage());
+        }
+    }
+
+    private static int littleInt(byte[] bytes, int offset) {
+        return (bytes[offset] & 255) | (bytes[offset + 1] & 255) << 8
+                | (bytes[offset + 2] & 255) << 16 | bytes[offset + 3] << 24;
+    }
+
     public static CancelOrderBatchCommand decodeCancelOrderBatch(byte[] encoded) {
         return new CancelOrderBatchCommand(decodeCommand(encoded, CancelOrderBatchCommand.MAX_ORDERS,
                 TradingCommandCodec::decodeCancelOrder));

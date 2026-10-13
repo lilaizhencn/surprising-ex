@@ -93,3 +93,34 @@ HotSpot JDK27的18个必要测试执行通过：六产品线直接/扫描触发�
 控制命令、顺序批次和尚未就绪的前缀不能被跳过。Mailbox 满时不推进游标、不重建或回收事实；已有 Owner 本地工作判定保留有界重试，避免没有新 Matcher 通知时停止推进。没有新增线程、业务镜像、队列或全窗口重复扫描，等待配置及在途上限不变。
 
 现货/U本位永续的独立单笔和流水批次已验证：暂停 Ledger、完成账户任务，停止 Owner 轮询后放行 Ledger，两条命令能在第一条响应退休前结算；随后响应顺序、手续费、资金、订单与持仓正确。72 个必要用例通过，另 3 个旧用例误含快照恢复已记录并排除。本轮未压测/JMH/JFR或启动 wallet，性能改善仍待实测。证据见 [账本流水验证](../../docs/validation/ledger-pipeline-20261013.json)。
+
+
+### 命令槽位复用与连续 Ledger（2026-10-13）
+
+普通下单与改单的权威 `OrderRuntime` 由 Account Lane 创建。已终态且脱离 Lane 表的订单进入
+该 Lane 的有界回收缓存；必须等 `CoreMatchingFlow` 发布对应 Owner 退休序号后才能重新初始化。
+开放订单继续持有自身对象。订单变更在 Lane 完成时写入 `RuntimeOrderChangeBuffer` 的复用副本，
+副本与物理数组一起交接；长于单项结算的批量响应、链式改单身份和成交记录由批次自己的槽位持有。
+这两种存活期不能混用，也不建立全局订单镜像。
+
+`DeterministicExchangeCoreAdapter` 的直达入口使用 exchange-core `placeInto/cancelInto`。
+每条在途命令、每个批量项以及改单的撤单结果分别持有 native 结果槽；在 SharedPool 回收原生成交链
+前复制 primitive 字段，响应与结算消费者完成后复用。冷边界的独立值入口仍保留不可变语义。
+
+入口 `CoreMessageFlyweightDecoder.decodeBorrowed` 复用有界消息/Header/payload 槽，Owner 与响应出口
+通过固定槽的读者计数交接。Egress 必须在发布 Output 前保留 Header，并在编码、丢弃旧 epoch 或清理
+Output 时释放；Owner 退休后仍有出口读者时，Decoder 不得复用该槽。槽忙或帧大于 16 KiB 时使用独占
+消息存储，缓存 payload 总上限 8 MiB。公开独立消息构造与 `decode` 保留独立值；需要在租约外保存 Header
+时调用 `immutableValue()`。单笔及批量意图随命令窗口复用；UTF-8 编码直接写已有 ByteBuffer，字段、长度、
+布尔校验及 wire version 不变。`CoreMessageHeader`、`PlaceOrderCommand`、`PlaceOrderBatchCommand` 改为带同名
+访问器的类，反射调用方不能再假定它们是 Java record。
+
+Ledger 投递只受日志前缀、实际资金屏障和 mailbox 容量约束，不再要求已就绪事实占据响应队首。
+顺序批量的逐项财务事件可以先入队，但在最后一项或业务关闭前保留资金游标；控制命令仍保留
+commit/rollback 屏障。Ledger 取到就绪任务即释放队列容量，再执行原 Treasury 上的资金写入。
+全部资金合并、守恒校验和资金临时缓冲清理均留在 Ledger 线程，生产路径不会把资金明细传回 Owner。
+Owner 只观察完成并推进路由、日志顺序、投影发布与响应退休。未激活账本的独立测试执行使用原同步
+Treasury，生产线程启动后非空财务 delta 不能由 Owner 应用。
+
+验证范围与局部分配结果见 [槽位与 Ledger 验证](../../docs/validation/hot-command-slots-ledger-20261013.json)。
+局部 JMH 不代表整链路 `bytes/business op` 或真实 Aeron 吞吐；本轮不执行单节点压测、快照恢复或 wallet。

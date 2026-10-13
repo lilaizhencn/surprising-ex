@@ -4,7 +4,23 @@ import com.surprising.product.api.ProductLine;
 import java.util.Objects;
 import java.util.UUID;
 
-public record CoreMessageHeader(
+public final class CoreMessageHeader {
+    private final CoreMessage decoderOwner;
+    private int schemaVersion;
+    private WireMessageKind kind;
+    private CoreMessageType messageType;
+    private UUID commandId;
+    private ProductLine productLine;
+    private CoreRoute route;
+    private CommandSource source;
+    private long sourceId;
+    private long sourceSequence;
+    private long userId;
+    private long submittedAtEpochMillis;
+    private long correlationId;
+    private String traceId;
+
+    public CoreMessageHeader(
         int schemaVersion,
         WireMessageKind kind,
         CoreMessageType messageType,
@@ -16,21 +32,28 @@ public record CoreMessageHeader(
         long sourceSequence,
         long userId,
         long submittedAtEpochMillis,
-        long correlationId, String traceId) {
-
-    public CoreMessageHeader(int schemaVersion, WireMessageKind kind, CoreMessageType messageType,
-            UUID commandId, ProductLine productLine, CoreRoute route, CommandSource source,
-            long sourceId, long sourceSequence, long userId, long submittedAtEpochMillis, long correlationId) {
-        this(schemaVersion, kind, messageType, commandId, productLine, route, source, sourceId,
-                sourceSequence, userId, submittedAtEpochMillis, correlationId, "");
+        long correlationId,
+        String traceId) {
+        decoderOwner = null;
+        assign(schemaVersion, kind, messageType, commandId, productLine, route, source, sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId, traceId);
     }
 
-    public CoreMessageHeader withTraceId(String id) {
-        return new CoreMessageHeader(schemaVersion, kind, messageType, commandId, productLine, route,
-                source, sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId, id);
-    }
+    CoreMessageHeader(CoreMessage decoderOwner) { this.decoderOwner = decoderOwner; }
 
-    public CoreMessageHeader {
+    void assign(
+        int schemaVersion,
+        WireMessageKind kind,
+        CoreMessageType messageType,
+        UUID commandId,
+        ProductLine productLine,
+        CoreRoute route,
+        CommandSource source,
+        long sourceId,
+        long sourceSequence,
+        long userId,
+        long submittedAtEpochMillis,
+        long correlationId,
+        String traceId) {
         if (schemaVersion <= 0) {
             throw new IllegalArgumentException("schemaVersion must be positive");
         }
@@ -50,7 +73,60 @@ public record CoreMessageHeader(
         if (submittedAtEpochMillis < 0) {
             throw new IllegalArgumentException("submittedAtEpochMillis must not be negative");
         }
+        this.schemaVersion = schemaVersion;
+        this.kind = kind;
+        this.messageType = messageType;
+        this.commandId = commandId;
+        this.productLine = productLine;
+        this.route = route;
+        this.source = source;
+        this.sourceId = sourceId;
+        this.sourceSequence = sourceSequence;
+        this.userId = userId;
+        this.submittedAtEpochMillis = submittedAtEpochMillis;
+        this.correlationId = correlationId;
+        this.traceId = traceId;
     }
+
+    public int schemaVersion() { return schemaVersion; }
+    public WireMessageKind kind() { return kind; }
+    public CoreMessageType messageType() { return messageType; }
+    public UUID commandId() { return commandId; }
+    public ProductLine productLine() { return productLine; }
+    public CoreRoute route() { return route; }
+    public CommandSource source() { return source; }
+    public long sourceId() { return sourceId; }
+    public long sourceSequence() { return sourceSequence; }
+    public long userId() { return userId; }
+    public long submittedAtEpochMillis() { return submittedAtEpochMillis; }
+    public long correlationId() { return correlationId; }
+    public String traceId() { return traceId; }
+
+    /** Queue an asynchronous response reader before releasing the command's decoder lease. */
+    public void retainForEgress() { if (decoderOwner != null) decoderOwner.retainDecoderReader(); }
+    public void releaseFromEgress() { if (decoderOwner != null) decoderOwner.releaseDecoderReader(); }
+
+    public CoreMessageHeader immutableValue() {
+        return decoderOwner == null ? this : new CoreMessageHeader(schemaVersion, kind, messageType, commandId, productLine, route, source, sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId, traceId);
+    }
+
+    void clearDecoderReferences() {
+        kind = null; messageType = null; commandId = null; productLine = null;
+        route = null; source = null; traceId = null;
+    }
+
+    public CoreMessageHeader(int schemaVersion, WireMessageKind kind, CoreMessageType messageType,
+            UUID commandId, ProductLine productLine, CoreRoute route, CommandSource source,
+            long sourceId, long sourceSequence, long userId, long submittedAtEpochMillis, long correlationId) {
+        this(schemaVersion, kind, messageType, commandId, productLine, route, source, sourceId,
+                sourceSequence, userId, submittedAtEpochMillis, correlationId, "");
+    }
+
+    public CoreMessageHeader withTraceId(String id) {
+        return new CoreMessageHeader(schemaVersion, kind, messageType, commandId, productLine, route,
+                source, sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId, id);
+    }
+
 
     public static CoreMessageHeader command(
             CoreMessageType messageType,
@@ -88,4 +164,7 @@ public record CoreMessageHeader(
                 submittedAtEpochMillis, correlationId, traceId);
     }
 
+    @Override public boolean equals(Object other) { return other instanceof CoreMessageHeader value && schemaVersion == value.schemaVersion && java.util.Objects.equals(kind, value.kind) && java.util.Objects.equals(messageType, value.messageType) && java.util.Objects.equals(commandId, value.commandId) && java.util.Objects.equals(productLine, value.productLine) && java.util.Objects.equals(route, value.route) && java.util.Objects.equals(source, value.source) && sourceId == value.sourceId && sourceSequence == value.sourceSequence && userId == value.userId && submittedAtEpochMillis == value.submittedAtEpochMillis && correlationId == value.correlationId && java.util.Objects.equals(traceId, value.traceId); }
+    @Override public int hashCode() { return Objects.hash(schemaVersion, kind, messageType, commandId, productLine, route, source, sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId, traceId); }
+    @Override public String toString() { return "CoreMessageHeader[messageType=" + messageType + ", commandId=" + commandId + ", productLine=" + productLine + ", sourceSequence=" + sourceSequence + "]"; }
 }

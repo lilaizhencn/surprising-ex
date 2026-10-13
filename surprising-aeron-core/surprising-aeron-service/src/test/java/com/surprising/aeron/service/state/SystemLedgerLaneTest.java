@@ -224,6 +224,32 @@ class SystemLedgerLaneTest {
         assertThat(ledger.fee(1)).isZero();
     }
 
+    @Test void executingHeadReleasesMailboxCapacityBeforeCompletion() throws Exception {
+        var treasury = new TreasuryRuntime();
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var done = new CountDownLatch(1);
+        try (var lane = new SystemLedgerLane(treasury, 1, ignored -> { })) {
+            try {
+                assertThat(lane.offer(ledger -> {
+                    entered.countDown();
+                    try { if (!release.await(3, TimeUnit.SECONDS)) throw new AssertionError("release timeout"); }
+                    catch (InterruptedException interrupted) { throw new AssertionError(interrupted); }
+                    ledger.setFee(0, 1); ledger.clearChangedKeys();
+                })).isTrue();
+                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+                assertThat(lane.depth()).isZero();
+                assertThat(lane.offer(ledger -> {
+                    assertThat(ledger.fee(0)).isEqualTo(1);
+                    ledger.setFee(0, 2); ledger.clearChangedKeys(); done.countDown();
+                })).isTrue();
+                assertThat(lane.offer(ledger -> { })).isFalse();
+            } finally { release.countDown(); }
+            assertThat(done.await(2, TimeUnit.SECONDS)).isTrue();
+        }
+        assertThat(treasury.fee(0)).isEqualTo(2);
+    }
+
     private static final class TreasurySlot implements SystemLedgerLane.Entry {
         final RuntimeTreasuryDelta delta = new RuntimeTreasuryDelta();
         long fee, insurance;

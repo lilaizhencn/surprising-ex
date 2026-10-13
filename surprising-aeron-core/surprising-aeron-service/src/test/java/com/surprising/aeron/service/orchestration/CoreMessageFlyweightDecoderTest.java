@@ -48,6 +48,34 @@ class CoreMessageFlyweightDecoderTest {
         assertThat(decoded.payload()).isEqualTo(CoreProtocol.probePayload(7));
     }
 
+    @Test void borrowedFramesWaitForRetirementAndKeepResponseHeadersStable() {
+        var expected = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+                new UUID(1, 2), ProductLine.SPOT, CommandSource.GATEWAY, 8, 42, 1001, 1, 99), CoreProtocol.probePayload(7));
+        var encoded = CoreMessageCodec.encode(expected);
+        var buffer = new UnsafeBuffer(encoded);
+        var decoder = new CoreMessageFlyweightDecoder();
+        var messages = new CoreMessage[512];
+        for (int index = 0; index < messages.length; index++) messages[index] = decoder.decodeBorrowed(buffer, 0, encoded.length);
+        var headerForEgress = messages[0].header().immutableValue();
+        var payload = messages[0].payloadUnsafe();
+        var overflow = decoder.decodeBorrowed(buffer, 0, encoded.length);
+        assertThat(overflow).isNotSameAs(messages[0]).isEqualTo(expected);
+        for (var message : messages) message.releaseDecoderSlot();
+        CoreMessage reused = null;
+        for (int index = 0; index < 512; index++) {
+            var value = decoder.decodeBorrowed(buffer, 0, encoded.length);
+            if (value == messages[0]) reused = value;
+            assertThat(value).isEqualTo(expected);
+        }
+        assertThat(reused).isSameAs(messages[0]);
+        assertThat(reused.payloadUnsafe()).isSameAs(payload);
+        assertThat(headerForEgress).isEqualTo(expected.header());
+        assertThat(headerForEgress).isNotSameAs(reused.header());
+        encoded[CoreProtocol.HEADER_LENGTH] = 0;
+        assertThat(reused.payloadUnsafe()).isEqualTo(expected.payloadUnsafe());
+        for (var message : messages) message.releaseDecoderSlot();
+    }
+
     @Test
     void decodesDirectBufferIntoOwnedPayload() {
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,

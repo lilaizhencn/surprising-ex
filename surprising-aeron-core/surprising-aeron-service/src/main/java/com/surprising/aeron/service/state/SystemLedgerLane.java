@@ -78,10 +78,13 @@ public final class SystemLedgerLane implements AutoCloseable {
             while (running || !entries.isEmpty()) {
                 Entry entry = entries.peek();
                 if (entry != null && entry.ready()) {
-                    // Keep the head leased until apply returns. A completion release may allow
-                    // immediate slot reuse; do not read the entry again after calling apply.
-                    entry.apply(ledger);
+                    // The worker now owns the ready head. Release transport capacity before
+                    // applying money; business completion still comes from the entry's release
+                    // marker. Owner can continuously enqueue even before a response retires.
                     entries.poll();
+                    entry.apply(ledger);
+                    // apply may publish completion and immediately allow slot reuse. Never
+                    // read entry fields again after that ownership handoff.
                     spins = 0;
                     continue;
                 }

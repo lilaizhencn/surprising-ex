@@ -417,6 +417,17 @@ public final class CoreStateQueryCodec {
         // encoding instead of scanning every string a second time for its length.
         int lengthOffset = output.position();
         output.putInt(0);
+        writeUtf8Bytes(output, value);
+        int length = output.position() - lengthOffset - Integer.BYTES;
+        if (length > maxBytes || !optional && length == 0) {
+            throw new IllegalArgumentException(optional
+                    ? "invalid optional query text length" : "invalid query text length");
+        }
+        output.putInt(lengthOffset, length);
+    }
+
+    /** Shared UTF-8 wire writer, including Java's replacement for an unpaired surrogate. */
+    static void writeUtf8Bytes(java.nio.ByteBuffer output, String value) {
         for (int index = 0; index < value.length(); index++) {
             char current = value.charAt(index);
             if (current < 0x80) {
@@ -439,12 +450,6 @@ public final class CoreStateQueryCodec {
                 output.put((byte) (0x80 | current & 0x3f));
             }
         }
-        int length = output.position() - lengthOffset - Integer.BYTES;
-        if (length > maxBytes || !optional && length == 0) {
-            throw new IllegalArgumentException(optional
-                    ? "invalid optional query text length" : "invalid query text length");
-        }
-        output.putInt(lengthOffset, length);
     }
 
     private static int textLength(String value) {

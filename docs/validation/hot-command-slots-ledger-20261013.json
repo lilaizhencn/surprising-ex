@@ -1,0 +1,606 @@
+{
+  "status": "functional_pass_component_allocation_pass_whole_core_target_unverified",
+  "scope": "necessary functional tests and bounded component JMH; no real Aeron stress, snapshot or recovery scenarios",
+  "main_base_commit": "89514aa1ded90f60abb839aadfda142d791c05c1",
+  "matcher_commit": "de966af900c9b8064f68636166dcdab52251ac95",
+  "plan": {
+    "hypotheses": [
+      "Command-owned order copies and native fill result slots allocate approximately zero bytes after their high-water capacities warm up",
+      "Lane may recycle detached authoritative orders only after Owner retires the owning sequence",
+      "A completed money prefix can enter Ledger without response retirement, preserving control and sequential-batch fences",
+      "Decoder frame/payload reuse cannot overwrite in-flight input or retained egress headers",
+      "Borrowed Header lives in the frame slot; egress retains that lease through encoding, leaving only an immutable UUID allocation per frame."
+    ],
+    "thresholds": {
+      "reused_order_and_matcher_slots_bytes_per_operation_max": 1.0,
+      "place_decode_ascii_bytes_per_operation_max": 100.0,
+      "frame_decode_bytes_per_operation_max": 100.0,
+      "system_ledger_bytes_per_operation_max": 1.0,
+      "correctness": "zero failed tests, exact ordered terminal responses, no unbalanced funds",
+      "place_encode_reused_buffer_bytes_per_operation_max": 1.0
+    },
+    "jmh": {
+      "forks": 1,
+      "threads": 1,
+      "warmup_iterations": 3,
+      "measurement_iterations": 3,
+      "iteration_seconds": 1,
+      "profiler": "gc",
+      "global_slot_window": 256,
+      "jdk": "Amazon HotSpot 27",
+      "gc": "G1",
+      "heap": "512m fixed",
+      "jvm_args_append": [
+        "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED"
+      ]
+    },
+    "sources": [
+      "HotCommandSlotAllocationBenchmark: authoritative pool, after-image freeze/swap, native matching, command decode, borrowed ingress decode",
+      "SystemLedgerAllocationBenchmark: seven Treasury subledgers on original single-writer worker"
+    ],
+    "excluded": [
+      "Real Aeron transport capacity",
+      "Whole-Core bytes per business operation",
+      "snapshot",
+      "recovery"
+    ],
+    "target_note": "Historical ~1180 B/business op belongs to older code and is not a comparison baseline. Component results must not be represented as whole-Core <100 B/op.",
+    "machine": {
+      "os": "26.7.2",
+      "cpu": "Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz",
+      "physical_cores": 8
+    },
+    "environment_corrections": [
+      "Initial JMH fork lacked Agrona required module export, produced no samples; logs retained as invalid-module-exports.",
+      "Initial component fixture used baseBuilder/Naive book; native matcher allocation is a diagnostic, excluded from production comparison. Production fixture uses latencyPerformanceBuilder/Direct book exactly as DeterministicExchangeCoreAdapter."
+    ],
+    "sample_scope": "HotSpot JDK27, Direct book matching-only as production, ASCII client ID, empty trace, window 256; per component metrics are separately normalized."
+  },
+  "results": {
+    "functional_runs": [
+      {
+        "log": "logs/surprising-hot-slots-header-egress-tests-retry.log",
+        "passed_tests": 100,
+        "suites": [
+          {
+            "suite": "com.surprising.aeron.protocol.CoreStateQueryCodecTest",
+            "tests": 14,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.protocol.OrderDecoderSlotTest",
+            "tests": 3,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.protocol.TradingOrderBatchCodecTest",
+            "tests": 11,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.protocol.CoreMessageCodecTest",
+            "tests": 10,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.protocol.TradingCommandCodecTest",
+            "tests": 14,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.state.MatcherTreasurySettlementTest",
+            "tests": 1,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.state.SystemLedgerLaneTest",
+            "tests": 9,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest",
+            "tests": 22,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest",
+            "tests": 4,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.TradingCoreOwnerTest",
+            "tests": 5,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.ClusterCommandWindowRoutingTest",
+            "tests": 2,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.BorrowedHeaderEgressTest",
+            "tests": 1,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.CoreMessageFlyweightDecoderTest",
+            "tests": 4,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        ],
+        "status": "passed",
+        "counts_note": "Per run; repeated suites are not added into a unique-test claim."
+      },
+      {
+        "log": "logs/surprising-hot-slots-ledger-no-owner-funds-tests.log",
+        "passed_tests": 78,
+        "suites": [
+          {
+            "suite": "com.surprising.aeron.protocol.OrderDecoderSlotTest",
+            "tests": 2,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.protocol.TradingOrderBatchCodecTest",
+            "tests": 11,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.protocol.TradingCommandCodecTest",
+            "tests": 14,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.state.SystemLedgerFundsValidationTest",
+            "tests": 1,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.state.MatcherTreasurySettlementTest",
+            "tests": 1,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.state.SystemLedgerLaneTest",
+            "tests": 9,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.state.SystemLedgerControlTest",
+            "tests": 5,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.PendingMatchingRingTest",
+            "tests": 10,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest",
+            "tests": 4,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+            "tests": 4,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.TradingCoreOwnerTest",
+            "tests": 15,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.ProductionSourceBoundaryTest",
+            "tests": 2,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        ],
+        "status": "passed",
+        "counts_note": "Per run; repeated suites are not added into a unique-test claim."
+      },
+      {
+        "log": "logs/surprising-hot-slots-final-boundary-tests-retry.log",
+        "passed_tests": 25,
+        "suites": [
+          {
+            "suite": "com.surprising.aeron.service.state.CoreOrderDecisionResolverTest",
+            "tests": 5,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.state.OrderSlotReuseTest",
+            "tests": 2,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.state.ReplacementAdmissionEventTest",
+            "tests": 1,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+            "tests": 4,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.TradingCoreOwnerTest",
+            "tests": 7,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.ClusterCommandWindowRoutingTest",
+            "tests": 2,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.CoreMessageFlyweightDecoderTest",
+            "tests": 4,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        ],
+        "status": "passed",
+        "counts_note": "Per run; repeated suites are not added into a unique-test claim."
+      },
+      {
+        "log": "logs/surprising-hot-slots-gateway-tests.log",
+        "passed_tests": 11,
+        "suites": [
+          {
+            "suite": "com.surprising.trading.order.service.AeronOrderCommandServiceTest",
+            "tests": 9,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.trading.order.service.StableOrderIdentityTest",
+            "tests": 2,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        ],
+        "status": "passed",
+        "counts_note": "Per run; repeated suites are not added into a unique-test claim."
+      },
+      {
+        "log": "logs/surprising-hot-slots-library-shipping-install.log",
+        "passed_tests": 7,
+        "suites": [
+          {
+            "suite": "exchange.core2.core.common.MatcherResultTest",
+            "tests": 3,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "exchange.core2.core.SynchronousMatchingEngineTest",
+            "tests": 4,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        ],
+        "status": "passed",
+        "counts_note": "Per run; repeated suites are not added into a unique-test claim."
+      }
+    ],
+    "component_jmh": [
+      {
+        "benchmark": "com.surprising.aeron.service.state.HotCommandSlotAllocationBenchmark.decodeBorrowedFrames",
+        "params": {
+          "clientId": "ASCII"
+        },
+        "bytes_per_operation": 24.008477337112197,
+        "allocation_score_error": 0.2567828564736366,
+        "allocation_confidence": [
+          23.75169448063856,
+          24.265260193585835
+        ],
+        "unit": "B/op",
+        "primary_score": 17840990.158932436,
+        "primary_score_unit": "ops/s",
+        "primary_score_error": 9540025.001608185,
+        "source": "slots-and-ledger-final.json",
+        "role": "component_validation"
+      },
+      {
+        "benchmark": "com.surprising.aeron.service.state.HotCommandSlotAllocationBenchmark.decodeIntoCommandSlots",
+        "params": {
+          "clientId": "ASCII"
+        },
+        "bytes_per_operation": 48.01434619931256,
+        "allocation_score_error": 0.4410609537888587,
+        "allocation_confidence": [
+          47.57328524552371,
+          48.45540715310142
+        ],
+        "unit": "B/op",
+        "primary_score": 14537244.594452525,
+        "primary_score_unit": "ops/s",
+        "primary_score_error": 84449731.8360811,
+        "source": "slots-and-ledger-final.json",
+        "role": "component_validation"
+      },
+      {
+        "benchmark": "com.surprising.aeron.service.state.HotCommandSlotAllocationBenchmark.encodeIntoCommandBuffers",
+        "params": {
+          "clientId": "ASCII"
+        },
+        "bytes_per_operation": 0.006438998050409292,
+        "allocation_score_error": 0.19479012136338364,
+        "allocation_confidence": [
+          -0.18835112331297435,
+          0.20122911941379293
+        ],
+        "unit": "B/op",
+        "primary_score": 22882487.713946354,
+        "primary_score_unit": "ops/s",
+        "primary_score_error": 6189194.055301134,
+        "source": "slots-and-ledger-final.json",
+        "role": "component_validation"
+      },
+      {
+        "benchmark": "com.surprising.aeron.service.state.HotCommandSlotAllocationBenchmark.freezeOrderAfterImages",
+        "params": {
+          "clientId": "ASCII"
+        },
+        "bytes_per_operation": 0.007325991026587763,
+        "allocation_score_error": 0.22161876244066434,
+        "allocation_confidence": [
+          -0.21429277141407657,
+          0.2289447534672521
+        ],
+        "unit": "B/op",
+        "primary_score": 20075437.389379833,
+        "primary_score_unit": "ops/s",
+        "primary_score_error": 5397093.237703546,
+        "source": "slots-and-ledger-final.json",
+        "role": "component_validation"
+      },
+      {
+        "benchmark": "com.surprising.aeron.service.state.HotCommandSlotAllocationBenchmark.matchIntoNativeSlots",
+        "params": {
+          "clientId": "ASCII"
+        },
+        "bytes_per_operation": 0.010036964349622597,
+        "allocation_score_error": 0.3035823615405884,
+        "allocation_confidence": [
+          -0.2935453971909658,
+          0.31361932589021096
+        ],
+        "unit": "B/op",
+        "primary_score": 14663420.097229347,
+        "primary_score_unit": "ops/s",
+        "primary_score_error": 1540107.3681897698,
+        "source": "slots-and-ledger-final.json",
+        "role": "component_validation"
+      },
+      {
+        "benchmark": "com.surprising.aeron.service.state.HotCommandSlotAllocationBenchmark.recycleAuthoritativeOrders",
+        "params": {
+          "clientId": "ASCII"
+        },
+        "bytes_per_operation": 0.008203425486369417,
+        "allocation_score_error": 0.2483208574206376,
+        "allocation_confidence": [
+          -0.24011743193426816,
+          0.256524282907007
+        ],
+        "unit": "B/op",
+        "primary_score": 18139253.301342387,
+        "primary_score_unit": "ops/s",
+        "primary_score_error": 4990014.404607913,
+        "source": "slots-and-ledger-final.json",
+        "role": "component_validation"
+      },
+      {
+        "benchmark": "com.surprising.aeron.service.state.SystemLedgerAllocationBenchmark.settleAndConserve",
+        "params": {},
+        "bytes_per_operation": 0.0011178514403534098,
+        "allocation_score_error": 0.00021586464891861057,
+        "allocation_confidence": [
+          0.0009019867914347992,
+          0.0013337160892720203
+        ],
+        "unit": "B/op",
+        "primary_score": 5690815.182956609,
+        "primary_score_unit": "ops/s",
+        "primary_score_error": 683691.2523797463,
+        "source": "slots-and-ledger-final.json",
+        "role": "component_validation"
+      },
+      {
+        "benchmark": "com.surprising.aeron.service.state.HotCommandSlotAllocationBenchmark.decodeIntoCommandSlots",
+        "params": {
+          "clientId": "EMPTY"
+        },
+        "bytes_per_operation": 0.0050130492546429815,
+        "allocation_score_error": 0.1513617000447298,
+        "allocation_confidence": [
+          -0.1463486507900868,
+          0.15637474929937278
+        ],
+        "unit": "B/op",
+        "primary_score": 28689707.41038884,
+        "primary_score_unit": "ops/s",
+        "primary_score_error": 10725381.178151239,
+        "source": "text-boundaries-final.json",
+        "role": "component_validation"
+      },
+      {
+        "benchmark": "com.surprising.aeron.service.state.HotCommandSlotAllocationBenchmark.decodeIntoCommandSlots",
+        "params": {
+          "clientId": "UNICODE"
+        },
+        "bytes_per_operation": 104.01190894832614,
+        "allocation_score_error": 0.35946311676870785,
+        "allocation_confidence": [
+          103.65244583155743,
+          104.37137206509485
+        ],
+        "unit": "B/op",
+        "primary_score": 12060429.809919989,
+        "primary_score_unit": "ops/s",
+        "primary_score_error": 3548561.6457230365,
+        "source": "text-boundaries-final.json",
+        "role": "non_ascii_boundary_diagnostic"
+      },
+      {
+        "benchmark": "com.surprising.aeron.service.state.HotCommandSlotAllocationBenchmark.encodeIntoCommandBuffers",
+        "params": {
+          "clientId": "EMPTY"
+        },
+        "bytes_per_operation": 0.0034759358160535,
+        "allocation_score_error": 0.10504687099973475,
+        "allocation_confidence": [
+          -0.10157093518368125,
+          0.10852280681578826
+        ],
+        "unit": "B/op",
+        "primary_score": 41840812.27748688,
+        "primary_score_unit": "ops/s",
+        "primary_score_error": 4857680.910184487,
+        "source": "text-boundaries-final.json",
+        "role": "component_validation"
+      },
+      {
+        "benchmark": "com.surprising.aeron.service.state.HotCommandSlotAllocationBenchmark.encodeIntoCommandBuffers",
+        "params": {
+          "clientId": "UNICODE"
+        },
+        "bytes_per_operation": 0.006745766764668548,
+        "allocation_score_error": 0.20384600611410394,
+        "allocation_confidence": [
+          -0.1971002393494354,
+          0.21059177287877248
+        ],
+        "unit": "B/op",
+        "primary_score": 21529578.341718063,
+        "primary_score_unit": "ops/s",
+        "primary_score_error": 4226444.845869593,
+        "source": "text-boundaries-final.json",
+        "role": "non_ascii_boundary_diagnostic"
+      }
+    ],
+    "conclusion": "Prelocked component allocation thresholds passed for the selected warmed ASCII workload. Whole-Core <100 B/business op and real Aeron throughput were not measured. Separate component scores are not an end-to-end sum.",
+    "known_allocation_limits": [
+      "Unicode clientOrderId decode still allocates about 104 B/op in this fixture; the ASCII threshold does not apply to arbitrary text.",
+      "Immutable UUID allocates about 24 B/frame in the measured empty-trace frame.",
+      "Pool high-water growth, new active business state, oversized frame fallback, other commands and full response/realtime encoding are outside these component scores."
+    ],
+    "untested_by_user_scope": [
+      "real-node stress/throughput",
+      "snapshot and recovery",
+      "JFR and long-stability native/heap growth"
+    ]
+  },
+  "cleanup": {
+    "status": "complete",
+    "completed_at_utc": "2026-10-13T13:53:56.541978+00:00",
+    "raw_artifact_directory_deleted": "/Users/atomex/Desktop/surprising/performance-artifacts/hot-command-slots-ledger-20261013",
+    "temporary_logs_deleted": 32,
+    "generated_report_files_deleted_after_archiving": 80,
+    "archive_retained": "/Users/atomex/Desktop/surprising/performance-artifacts/hot-command-slots-ledger-20261013.tar.gz",
+    "note": "Only files generated by this task were removed after archive verification. No real cluster, archive recording, JFR, wallet or snapshot/recovery process was launched. Compiled build outputs remain available."
+  },
+  "artifact_directory": "/Users/atomex/Desktop/surprising/performance-artifacts/hot-command-slots-ledger-20261013",
+  "completed_at_utc": "2026-10-13T13:53:21.221910+00:00",
+  "implementation": {
+    "ledger": "Money dispatch cursor advances independently of response retirement; sequential batches and control commands retain their money ordering fences. Ready queue capacity is released before Ledger applies the head; completion remains separately published.",
+    "owner_funds_boundary": "Treasury writes, conservation aggregation and scratch clearing stay on SystemLedgerLane. Live Owner rejects collected nonempty Treasury deltas; cold pre-activation initialization remains explicit.",
+    "order_lifetime": "Account Lane alone creates/reinitializes canonical orders. Detached terminal orders cannot be recycled before Owner retirement fence. Command-owned immutable after-images freeze after Lane mutations and keep storage ownership during buffer swaps.",
+    "matcher_lifetime": "Native execution and fill primitives copy into leased command/event slots before matcher pooled chains release. Batch response storage owns longer-lived copies.",
+    "ingress_and_egress_lifetime": "Decoder owns bounded 512 frame slots with maximum cached payload 16KiB each (8MiB bound); retained egress headers hold frame lease through encoding. Independent public messages and normal public constructors retain immutable value semantics.",
+    "public_api_compatibility": "CoreMessageHeader, PlaceOrderCommand, PlaceOrderBatchCommand and native MatcherResult now use final classes with constructor/accessor/equality compatibility. Java record reflection/pattern behavior is changed and documented."
+  },
+  "reproduction": {
+    "functional_commands": {
+      "gateway": "JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn PATH=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin:$PATH mvn -pl surprising-gateway -am -Dtest=AeronOrderCommandServiceTest#*,StableOrderIdentityTest#* -Dsurefire.failIfNoSpecifiedTests=false test",
+      "matcher": "JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn PATH=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin:$PATH mvn -Dtest=MatcherResultTest,SynchronousMatchingEngineTest install",
+      "core_selector": "CoreMessageCodecTest#*,CoreStateQueryCodecTest#*,TradingCommandCodecTest#*,TradingOrderBatchCodecTest#*,OrderDecoderSlotTest#*,BorrowedHeaderEgressTest#*,CoreMessageFlyweightDecoderTest#*,ClusterCommandWindowRoutingTest#*,CoreFinancialLedgerProductionTest#*,MatcherTreasurySettlementTest#*,SystemLedgerLaneTest#*,TradingCoreOwnerTest#ledgerSettlesIndependentCommandsBeforeOwnerRetiresTheFirstResponse+fullLedgerMailboxKeepsItsDispatchCursorAndRetriesWithoutNewMatcherNotifications,ClusterCommandPipelineTest#atomicOcoPairWithoutSnapshot+triggerNativeRejectionWithoutSnapshot+internalTriggerPagesWithoutSnapshot+selectedTriggerPriceStreamsWithoutSnapshot",
+      "core_command_template": "JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn PATH=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin:$PATH mvn -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=\"<core_selector>\" -Dsurefire.failIfNoSpecifiedTests=false test"
+    },
+    "jmh_command": "JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn PATH=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin:$PATH java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -cp 'surprising-aeron-core/surprising-aeron-benchmarks/target/classes:surprising-aeron-core/surprising-aeron-service/target/classes:surprising-aeron-core/surprising-aeron-protocol/target/classes:surprising-product-api/target/classes:../exchange-core-lilaizhencn/target/classes:surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar' org.openjdk.jmh.Main 'HotCommandSlotAllocationBenchmark|SystemLedgerAllocationBenchmark' -p clientId=ASCII -f 1 -t 1 -wi 3 -i 3 -w 1s -r 1s -prof gc -jvmArgsAppend '--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --enable-native-access=ALL-UNNAMED' -rf json -rff /Users/atomex/Desktop/surprising/performance-artifacts/hot-command-slots-ledger-20261013/slots-and-ledger-final.json",
+    "jmh_text_boundary_variation": "same JVM/JMH options; regex HotCommandSlotAllocationBenchmark.(decodeIntoCommandSlots|encodeIntoCommandBuffers), -p clientId=EMPTY,UNICODE, output text-boundaries-final.json",
+    "classpath_note": "Current target/classes precede packaged dependency jar. This run compiled current service/protocol/benchmark sources and uses matcher de966af; packaged jar supplies dependencies."
+  },
+  "artifact_archive": "/Users/atomex/Desktop/surprising/performance-artifacts/hot-command-slots-ledger-20261013.tar.gz",
+  "evidence_files": [
+    "source-sha256-shipping.json",
+    "class-sha256-shipping.json",
+    "logs/",
+    "reports/",
+    "slots-and-ledger-final.json",
+    "text-boundaries-final.json"
+  ],
+  "artifact_archive_sha256": "7e51c53f883ef5bddc08f1f3d72306967dabc79fc01bc927f638f473193fa3b4",
+  "artifact_archive_size_bytes": 126709
+}

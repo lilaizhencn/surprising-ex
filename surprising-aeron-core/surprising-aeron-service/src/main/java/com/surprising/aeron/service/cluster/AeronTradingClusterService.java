@@ -68,6 +68,7 @@ public final class AeronTradingClusterService implements ClusteredService {
     @Override
     public void onStart(Cluster cluster, Image snapshot) {
         this.cluster = cluster;
+        messageDecoder.reset();
         egress.start(cluster);
         owner.start(cluster, snapshotTransfer.read(snapshot, cluster));
     }
@@ -92,7 +93,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         CoreMessage command;
         try {
             // 将 Aeron 收到的协议帧解码为 Core 消息；解码失败时没有可信的命令内容可继续处理。
-            command = messageDecoder.decode(buffer, offset, length);
+            command = messageDecoder.decodeBorrowed(buffer, offset, length);
         } catch (IllegalArgumentException invalid) {
             // 非法帧直接丢弃，不进入 Owner 命令队列。
             return;

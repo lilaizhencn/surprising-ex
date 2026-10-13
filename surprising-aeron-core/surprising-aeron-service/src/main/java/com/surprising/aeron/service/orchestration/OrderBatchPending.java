@@ -25,13 +25,24 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     }
     public com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision decision(int index) { return preparedDecisions[index]; }
     /** 每项只引用本批按币对共享的上下文，Lane 接管后填充准入输出。 */
+    private final ResolvedPlaceOrder[] resolvedOrderSlots;
+    private final OrderRuntime[] admittedOrderCopies;
+    public ResolvedPlaceOrder resolvedOrderSlot(int index) {
+        var slot = resolvedOrderSlots[index];
+        if (slot == null) resolvedOrderSlots[index] = slot = new ResolvedPlaceOrder();
+        return slot;
+    }
+    public OrderRuntime captureAdmittedOrder(int index, OrderRuntime order) {
+        return admittedOrderCopies[index] = order.copyIntoCommandSlot(admittedOrderCopies[index]);
+    }
+
     final com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision[] preparedDecisions;
     public int resultCount() { return items.size(); }
     public long resultOrderId(int index) { return items.get(index).orderId(); }
     public long resultOriginalOrderId(int index) { return items.get(index).originalOrderId(); }
     public void resultOrder(int index, OrderRuntime order, String instrumentId) {
         var item = items.get(index);
-        item.resultOrder = order;
+        item.captureResultOrder(order);
         item.resultOrderSymbol = instrumentId;
         item.laneResultPrepared = true;
     }
@@ -335,6 +346,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         preparedClientIds = new String[capacity];
         preparedClientKeys = new long[capacity];
         preparedOrders = new ResolvedPlaceOrder[capacity];
+        resolvedOrderSlots = new ResolvedPlaceOrder[capacity];
+        admittedOrderCopies = new OrderRuntime[capacity];
         preparedDecisions = new com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision[capacity];
         preparedClientKeyValues = new long[capacity];
         preparedOpenInterestSteps = new long[capacity];
@@ -414,6 +427,10 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         java.util.Arrays.fill(preparedFundingInProgress, 0, preparedCount, false);
         java.util.Arrays.fill(preparedClientKeyValues, 0, preparedCount, 0);
         java.util.Arrays.fill(preparedAdmittedOrders, 0, preparedCount, null);
+        for (int index = 0; index < preparedCount; index++) {
+            if (admittedOrderCopies[index] != null) admittedOrderCopies[index].clearCommandSlot();
+            if (resolvedOrderSlots[index] != null) resolvedOrderSlots[index].clear();
+        }
         java.util.Arrays.fill(preparedContextDecisions, 0, preparedSymbols.size(), null);
         preparedSymbols.clear();
         lifecycleFlags = 0;

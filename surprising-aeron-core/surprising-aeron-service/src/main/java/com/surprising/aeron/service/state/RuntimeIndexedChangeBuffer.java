@@ -16,6 +16,8 @@ class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
         void accept(long key, V value, boolean hasPrepared, I indexValue);
     }
 
+    RuntimeIndexedChangeBuffer<V, I> emptyLike() { return new RuntimeIndexedChangeBuffer<>(); }
+
     /** 将 Lane 的实体和预计算索引一起交给 Owner，交还空缓冲以供事件池复用。 */
     void swapWith(RuntimeIndexedChangeBuffer<V, I> other) {
         swapStorage(other);

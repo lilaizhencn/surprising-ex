@@ -303,6 +303,8 @@ public final class TradingCoreOwner {
         if (last.response == null) throw new IllegalStateException("missing pipeline terminal response");
         if (last.session != null) offerResponse(last.session, last.request, last.response);
         CoreMatchingPhaseMetrics.finishHeadAttempt(headTiming, headAttemptStarted, null);
+        // Diagnostic samples can retain their header across decoder-slot retirement.
+        if (retirementStart != 0) timingHeader = timingHeader.immutableValue();
         commandPipeline.finishHeadCommit();
         state.runtimeState.releaseCompletedSequentialLaneStage();
         if (window.size() == 0) progressRealtimeReads(System.nanoTime());
@@ -341,6 +343,9 @@ public final class TradingCoreOwner {
         state.runtimeState.releaseOwnerLaneAccess();
         commandPipeline.finishControl();
         commandPipeline.pendingIngress().remove();
+        if (commandPipeline.commandWindow().decodedIfPresent(request) != null)
+            commandPipeline.commandWindow().releaseDecoded();
+        request.releaseDecoderSlot();
         commandPipeline.recordControlProgress();
         return true;
     }
@@ -516,11 +521,13 @@ public final class TradingCoreOwner {
     void terminate() {
         log.info("Aeron core command-window productLine={} {}",
                 productLine, commandPipeline.terminationSummary());
-        commandPipeline.clearCommandContainers();
         this.cluster = null;
         realtimeBoundary.close();
-        if (state != null) {
-            state.close();
+        try {
+            if (state != null) state.close();
+        } finally {
+            // Borrowed decoded input must outlive the Matcher/Lane workers during shutdown.
+            commandPipeline.clearCommandContainers();
             state = null;
         }
     }

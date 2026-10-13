@@ -7,8 +7,12 @@ public final class CoreMessage {
 
     public static final byte[] EMPTY_PAYLOAD = new byte[0];
 
-    private final CoreMessageHeader header;
-    private final byte[] payload;
+    private CoreMessageHeader header;
+    private byte[] payload;
+    private final boolean decoderSlot;
+    private volatile boolean decoderLeased;
+    private final CoreMessageHeader decoderHeader;
+    private final java.util.concurrent.atomic.AtomicInteger decoderReaders;
 
     public CoreMessage(CoreMessageHeader header, byte[] payload) {
         this(header, payload, false);
@@ -19,10 +23,65 @@ public final class CoreMessage {
     }
 
     private CoreMessage(CoreMessageHeader header, byte[] payload, boolean owned) {
-        this.header = Objects.requireNonNull(header, "header");
+        decoderSlot = false;
+        decoderHeader = null;
+        decoderReaders = null;
+        this.header = Objects.requireNonNull(header, "header").immutableValue();
         this.payload = owned
                 ? Objects.requireNonNull(payload, "payload")
                 : payload == null || payload.length == 0 ? EMPTY_PAYLOAD : Arrays.copyOf(payload, payload.length);
+    }
+
+    private CoreMessage() {
+        decoderSlot = true; payload = EMPTY_PAYLOAD;
+        decoderHeader = new CoreMessageHeader(this);
+        decoderReaders = new java.util.concurrent.atomic.AtomicInteger();
+    }
+    public static CoreMessage decoderSlot() { return new CoreMessage(); }
+
+    /** One serial decoder producer; release comes from the final Owner/response consumer. */
+    public boolean acquireDecoderSlot() {
+        if (!decoderSlot) throw new IllegalStateException("message is not a decoder slot");
+        if (decoderLeased) return false;
+        decoderReaders.set(1);
+        decoderLeased = true;
+        return true;
+    }
+
+    public byte[] decoderPayloadBuffer(int length) {
+        if (!decoderSlot || !decoderLeased || length < 0) throw new IllegalStateException("decoder slot is not owned");
+        if (payload.length != length) payload = length == 0 ? EMPTY_PAYLOAD : new byte[length];
+        return payload;
+    }
+
+    public void decoderHeader(int schemaVersion, WireMessageKind kind, CoreMessageType messageType,
+            java.util.UUID commandId, com.surprising.product.api.ProductLine productLine, CoreRoute route,
+            CommandSource source, long sourceId, long sourceSequence, long userId, long submittedAtEpochMillis,
+            long correlationId, String traceId) {
+        if (!decoderSlot || !decoderLeased) throw new IllegalStateException("decoder slot is not owned");
+        decoderHeader.assign(schemaVersion, kind, messageType, commandId, productLine, route, source,
+                sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId, traceId);
+        header = decoderHeader;
+    }
+
+    void retainDecoderReader() {
+        if (!decoderLeased || decoderReaders.get() <= 0) throw new IllegalStateException("decoder slot is not leased");
+        decoderReaders.incrementAndGet();
+    }
+
+    void releaseDecoderReader() {
+        int remaining = decoderReaders.decrementAndGet();
+        if (remaining < 0) throw new IllegalStateException("decoder slot was released twice");
+        if (remaining == 0) {
+            decoderHeader.clearDecoderReferences();
+            header = null;
+            decoderLeased = false;
+        }
+    }
+
+    public void releaseDecoderSlot() {
+        if (!decoderSlot) return;
+        releaseDecoderReader();
     }
 
     public CoreMessageHeader header() {

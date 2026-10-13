@@ -111,6 +111,8 @@ class MatcherTreasurySettlementTest {
                     if (System.nanoTime() >= deadline) throw new AssertionError("financial settlement timed out");
                     Thread.onSpinWait();
                 }
+                assertThatThrownBy(() -> runtime.collectMatcherSettlement(event, new RuntimeFundsAccumulator(), null))
+                        .isInstanceOf(IllegalStateException.class).hasMessageContaining("funds remain on SystemLedgerLane");
                 assertThat(runtime.collectMatcherSettlement(event, null, null).size()).isZero();
                 assertThatThrownBy(() -> runtime.collectMatcherSettlement(event, null, null))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("already collected");
@@ -122,7 +124,7 @@ class MatcherTreasurySettlementTest {
                 var reused = runtime.prepareDirectCancellation(2, originalTaker.userId(), originalTaker.orderId(),
                         secondId, 0, identities, 30, 40);
                 assertThat(reused).isSameAs(event);
-                assertThat(reused.submitTreasurySettlement(ledger)).isFalse();
+                assertThat(reused.submitTreasurySettlement(ledger)).isTrue();
                 reused.beginMatcherPublication();
                 reused.publishDirectNativeResult(new MatcherResult(2,
                         exchange.core2.core.common.cmd.OrderCommandType.CANCEL_ORDER, 2, identities.symbolId("1"),
@@ -136,11 +138,6 @@ class MatcherTreasurySettlementTest {
                 try { runtime.dispatchOwnerControlledSettlement(reused); }
                 finally { runtime.exitAsynchronousCommandScope(); }
                 releaseFinancialSignal.countDown();
-                admissionDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
-                while (!reused.submitTreasurySettlement(ledger)) {
-                    if (System.nanoTime() >= admissionDeadline) throw new AssertionError("reused Ledger slot not admitted");
-                    Thread.onSpinWait();
-                }
                 deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                 while (!reused.complete()) {
                     ledger.assertHealthy(); runtime.assertAccountLanesHealthy();

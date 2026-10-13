@@ -47,6 +47,7 @@ public final class ClusterCommandWindow {
     private CoreMessage routedSource;
     private CoreMessage decodedSource;
     private DecodedMatchingCommand decoded;
+    private DecodedMatchingCommand candidateDecoder = DecodedMatchingCommand.commandSlot();
 
     public ClusterCommandWindow() {
         this(Integer.parseInt(System.getProperty("surprising.aeron.owner-command-window",
@@ -152,7 +153,10 @@ public final class ClusterCommandWindow {
             decodedSource = request;
             decoded = null;
         }
-        if (decoded == null) decoded = DecodedMatchingCommand.decode(request);
+        if (decoded == null) {
+            candidateDecoder.decodeInto(request);
+            decoded = candidateDecoder;
+        }
         return decoded;
     }
 
@@ -161,6 +165,8 @@ public final class ClusterCommandWindow {
     }
 
     public void releaseDecoded() {
+        if (decoded == candidateDecoder) candidateDecoder.clearCommandSlot();
+        if (routedSource == decodedSource) routedSource = null;
         decodedSource = null;
         decoded = null;
     }
@@ -186,6 +192,11 @@ public final class ClusterCommandWindow {
         entry.routePresent = true;
         int physical = (head + size - 1) & indexMask;
         entry.orderCount = copyTrackedOrderIds(entry, physical);
+        if (decodedSource == request && decoded == candidateDecoder) {
+            var spare = entry.decodedSlot;
+            entry.decodedSlot = candidateDecoder;
+            candidateDecoder = spare;
+        }
         entry.physicalSlot = physical;
         if (candidateUser > 0) {
             userSlots.put(candidateUser, physical + 1L);
@@ -278,8 +289,11 @@ public final class ClusterCommandWindow {
             if (entry.sequence != 0) {
                 removedLastMatching |= physical == lastMatchingPhysical;
             }
+            entry.decodedSlot.clearCommandSlot();
             entry.orderCount = 0;
             entry.session = null;
+            if (decodedSource == entry.request) releaseDecoded();
+            if (entry.request != null) entry.request.releaseDecoderSlot();
             entry.request = null;
             entry.response = null;
             entry.sequence = entry.timestamp = entry.position = 0;
@@ -307,6 +321,7 @@ public final class ClusterCommandWindow {
     }
 
     public static final class Entry {
+        private DecodedMatchingCommand decodedSlot = DecodedMatchingCommand.commandSlot();
         /** Optional JFR state for the current sampled head; never read by business logic. */
         CoreMatchingPhaseMetrics.OwnerHead headTiming;
         /** Only exact identities needed for cancellation/retry fencing. */

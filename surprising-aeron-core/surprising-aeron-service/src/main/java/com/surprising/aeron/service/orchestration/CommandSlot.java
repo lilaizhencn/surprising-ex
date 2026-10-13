@@ -72,6 +72,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     /** 跨分片清算撤单已进入异步协调队列，防止重复派发。 */
     boolean crossShardCancellationStarted;
     boolean clusterIndependent;
+    /** This command cannot emit further money; response storage may remain leased. */
+    boolean ledgerDispatchClosed;
     /** 准入时固定的潜在成交账户分区，整个命令终态前保持不变。 */
     long partitionLaneMask;
     /** 派发前的不可变订单身份；仅实时推送启用时保留，提交后释放。 */
@@ -343,6 +345,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         deferredSourceKey = null;
         crossShardCancellationStarted = false;
         clusterIndependent = false;
+        ledgerDispatchClosed = false;
         partitionLaneMask = 0;
         realtimeTakerOrder = null;
         realtimeResolvedTakerOrder = null;
@@ -1171,6 +1174,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             implements com.surprising.aeron.service.state.LaneOrderResultTarget {
         private final long[] ids = new long[2];
         private final OrderRuntime[] orders = new OrderRuntime[2];
+        private final OrderRuntime[] orderCopies = new OrderRuntime[2];
         private final String[] symbols = new String[2];
         private int count;
         private boolean prepared;
@@ -1207,7 +1211,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         @Override public long resultOrderId(int index) { return ids[index]; }
         @Override public long resultOriginalOrderId(int index) { return 0; }
         @Override public void resultOrder(int index, OrderRuntime order, String instrumentId) {
-            orders[index] = order;
+            orders[index] = order == null ? null : (orderCopies[index] = order.copyIntoCommandSlot(orderCopies[index]));
             symbols[index] = instrumentId;
         }
         @Override public boolean includeTerminalAfterImage() { return true; }
@@ -1277,6 +1281,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         void clear() {
             if (responseSlot != null && responseArena != null) responseArena.release(responseSlot);
             java.util.Arrays.fill(orders, null);
+            for (OrderRuntime copy : orderCopies) if (copy != null) copy.clearCommandSlot();
             java.util.Arrays.fill(symbols, null);
             java.util.Arrays.fill(ids, 0);
             count = 0;

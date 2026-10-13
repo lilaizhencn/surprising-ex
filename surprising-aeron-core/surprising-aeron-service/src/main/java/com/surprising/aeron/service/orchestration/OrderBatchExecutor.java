@@ -306,9 +306,9 @@ final class OrderBatchExecutor {
                             pending.command().header().submittedAtEpochMillis(), userId, matchingOrder,
                             batch.settlementEvent);
                     if (firstNative == null) firstNative = result;
-                    item.admittedOrder = batch.preparedAdmittedOrders[index];
+                    item.captureAdmittedOrder(batch.preparedAdmittedOrders[index]);
                     item.realtimeTakerOrder = item.admittedOrder;
-                    item.executionEvents = result.events();
+                    item.captureExecutions(result.events());
                     item.executionTakerUserId = userId;
                     for (int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
                         if (item.executionEvents.get(eventIndex).eventType() == MatcherEventType.TRADE) {
@@ -429,7 +429,7 @@ final class OrderBatchExecutor {
                 owner.identities.recordLaneClientAllocations(1);
             OrderRuntime admitted = work.admittedOrder();
             owner.runtimeState.collectControlReservation(admitted, batch.sequence);
-            batch.items.get(batch.nextIndex).admittedOrder = admitted;
+            batch.items.get(batch.nextIndex).captureAdmittedOrder(admitted);
             batch.currentPreMatchingCancellationOrderIds = work.closeCapacityCancellations();
             batch.retainPreparedClientKey(userId, work.clientOrderId(),
                     com.surprising.aeron.service.state.RuntimeIdentityRegistry.clientKeyValue(key));
@@ -543,7 +543,7 @@ final class OrderBatchExecutor {
             OrderBatchItem item = batch.items.get(batch.nextIndex);
             OrderRuntime admitted = item.admittedOrder;
             if (admitted == null) throw new IllegalStateException("batch item admission order is missing");
-            item.admittedOrder = admitted;
+            item.captureAdmittedOrder(admitted);
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
             direct = owner.directMatcherSettlements.prepareBatchPlaceItem(pending, batch, admitted, shard);
             batch.itemSettlementEvent = direct;
@@ -553,8 +553,8 @@ final class OrderBatchExecutor {
             direct = owner.directMatcherSettlements.prepareBatchAmend(pending,
                     java.util.Objects.requireNonNull(batch.replacementAdmission), shard);
             batch.itemSettlementEvent = direct;
-            batch.items.get(batch.nextIndex).admittedOrder = direct.admittedOrder();
-            if (owner.realtimeCapture != null) batch.items.get(batch.nextIndex).realtimeTakerOrder = direct.admittedOrder();
+            batch.items.get(batch.nextIndex).captureAdmittedOrder(direct.admittedOrder());
+            if (owner.realtimeCapture != null) batch.items.get(batch.nextIndex).realtimeTakerOrder = batch.items.get(batch.nextIndex).admittedOrder;
         }
         owner.matcherPipeline.submit(shard, pending.sequence(),
                 prepareOrderBatchMatchingCommand(
@@ -849,7 +849,7 @@ final class OrderBatchExecutor {
             MatchingResult matchingResult) {
         item.matchingResult = matchingResult;
         if (item.admittedOrder == null && batch.kind == OrderBatchKind.PLACE && batch.pipelined) {
-            item.admittedOrder = batch.preparedAdmittedOrders[batch.nextIndex];
+            item.captureAdmittedOrder(batch.preparedAdmittedOrders[batch.nextIndex]);
         }
         if (item.admittedOrder == null && batch.kind == OrderBatchKind.PLACE)
             throw new IllegalStateException("batch place admission receipt is missing");
@@ -857,7 +857,7 @@ final class OrderBatchExecutor {
                 && owner.realtimeCapture.active()) item.realtimeTakerOrder = item.admittedOrder;
 
         if (batch.kind != OrderBatchKind.CANCEL) {
-            item.executionEvents = matchingResult.matcherEvents();
+            item.captureExecutions(matchingResult.matcherEvents());
             item.executionTakerUserId = pending.command().header().userId();
             for (int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
                 MatcherEvent event = item.executionEvents.get(eventIndex);
@@ -990,7 +990,7 @@ final class OrderBatchExecutor {
             throw failOrderBatch(batch, pending, "order batch account lane mask mismatch", null);
         }
         try {
-            if (batch.treasuryDelta != null && batch.treasuryDelta.size() != 0) batch.treasuryDelta.apply(owner.runtimeState.treasury());
+            owner.runtimeState.applyCollectedTreasuryBeforeActivation(batch.treasuryDelta);
             owner.runtimeState.setMetadata(owner.productLine,
                     Math.incrementExact(owner.runtimeState.revision()));
             if (pending.completedLaneMask() != pending.expectedLaneMask()) {
@@ -1005,6 +1005,7 @@ final class OrderBatchExecutor {
         long publicationStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         owner.commits.completeCommitPublicationBatch();
         CoreMatchingPhaseMetrics.recordBoundary("ownerFactPublication", timingHeader, publicationStart);
+        owner.commits.closeFinancialDispatch(pending);
         long terminalStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         if (batch.preparedResponse == null)
             throw failOrderBatch(batch, pending, "final account Lane did not prepare the batch response", null);

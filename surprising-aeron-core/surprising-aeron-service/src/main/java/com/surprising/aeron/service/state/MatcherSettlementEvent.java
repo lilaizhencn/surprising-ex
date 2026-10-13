@@ -131,6 +131,10 @@ public final class MatcherSettlementEvent implements
         final CoreInstrument[] instruments;
         final OrderRuntime[] admittedOrders;
         final long[] cancellationOrderIds;
+        /** One native result per in-flight item; Matcher writes before Lane publication. */
+        final exchange.core2.core.common.MatcherResult[] nativeResults;
+        exchange.core2.core.common.MatcherResult replacementCancellation;
+        OrderRuntime replacementOrder;
         final int[] baseAssetIds, quoteAssetIds, settleAssetIds;
         /** Number of slots populated by the current preparation, not backing capacity. */
         private int activeSize;
@@ -140,6 +144,7 @@ public final class MatcherSettlementEvent implements
             instruments = new CoreInstrument[size];
             admittedOrders = new OrderRuntime[size];
             cancellationOrderIds = new long[size];
+            nativeResults = new exchange.core2.core.common.MatcherResult[size];
             baseAssetIds = new int[size]; quoteAssetIds = new int[size]; settleAssetIds = new int[size];
         }
         void activate(int size) {
@@ -153,10 +158,30 @@ public final class MatcherSettlementEvent implements
                 instruments[index] = null;
                 admittedOrders[index] = null;
                 cancellationOrderIds[index] = 0;
+                if (nativeResults[index] != null) nativeResults[index].clearCommandSlot();
             }
+            if (replacementCancellation != null) replacementCancellation.clearCommandSlot();
+            if (replacementOrder != null) replacementOrder.clearCommandSlot();
             activeSize = 0;
         }
     }
+    /** Borrowed until this event retires, never shared with another in-flight command. */
+    public exchange.core2.core.common.MatcherResult nativeResultSlot(int index) {
+        if (batchStorage == null || index < 0 || index >= batchPlanCount || directPublished)
+            throw new IllegalStateException("native result slot is not writable");
+        var result = batchStorage.nativeResults[index];
+        if (result == null) batchStorage.nativeResults[index] = result = exchange.core2.core.common.MatcherResult.commandSlot();
+        return result;
+    }
+
+    public exchange.core2.core.common.MatcherResult replacementCancellationSlot() {
+        if (batchStorage == null || directPublished)
+            throw new IllegalStateException("replacement cancellation is not writable");
+        if (batchStorage.replacementCancellation == null)
+            batchStorage.replacementCancellation = exchange.core2.core.common.MatcherResult.commandSlot();
+        return batchStorage.replacementCancellation;
+    }
+
     BatchStorage batchStorage(int size) {
         if (plan != null) throw new IllegalStateException("settlement event is still active");
         if (size <= 0) throw new IllegalArgumentException("settlement batch must not be empty");
@@ -886,7 +911,7 @@ public final class MatcherSettlementEvent implements
             throw new IllegalStateException("place admission receipt is missing");
         }
         if (admissionRequired && !admissionAccepted) {
-            if (changes != null) changes.prepareLaneTerminal(laneId, identities, lane, runtime);
+            if (changes != null) changes.prepareLaneTerminal(laneId, identities, lane, runtime, direct ? directCoreSequence : plan.coreSequence());
             publishCompletion(lane, startedNanos);
             return;
         }
@@ -915,7 +940,7 @@ public final class MatcherSettlementEvent implements
                 }
             }
             if (changes != null) {
-                changes.prepareLaneTerminal(laneId, identities, lane, runtime);
+                changes.prepareLaneTerminal(laneId, identities, lane, runtime, direct ? directCoreSequence : plan.coreSequence());
             }
             if (resultTarget != null && changes != null
                     && laneId == runtime.topology().accountLaneId(plan.activeUserId())) {
@@ -1044,7 +1069,7 @@ public final class MatcherSettlementEvent implements
                 replacement.requiredReservationUnits(), clientKey, prepared.symbolId(), replacementAssetId,
                 directCoreSequence, prepared, commitTimestamp, commitClusterPosition);
         runtime.publishUser(userId, lane.users.get(userId));
-        runtime.publishOrder(prepared.orderId(), prepared);
+        runtime.publishOrder(prepared.orderId(), lane.orders.get(prepared.orderId()));
         runtime.publishReservation(prepared.orderId(), lane.reservations.get(prepared.orderId()));
         runtime.accountRollback.captureBalanceAfter(lane, userId, replacementAssetId);
     }
@@ -1154,7 +1179,8 @@ public final class MatcherSettlementEvent implements
     RuntimeTreasuryDelta collectTreasuryDelta(RuntimeFundsAccumulator target) {
         if (!complete()) return null;
         if (collected) throw new IllegalStateException("matcher settlement event was already collected");
-        if (hasLedgerSettlement()) transferLedgerFundsTo(target);
+        if (hasLedgerSettlement() && target != null)
+            throw new IllegalStateException("Ledger funds remain on SystemLedgerLane");
         collected = true;
         if (treasurySettlement != null && treasurySettlement.queued) return EMPTY_TREASURY_DELTA;
         return mergeTreasuryDeltas();
@@ -1171,37 +1197,21 @@ public final class MatcherSettlementEvent implements
         return aggregate;
     }
 
-    boolean submitTreasurySettlement(SystemLedgerLane ledger) { return submitTreasurySettlement(ledger, false); }
-
-    boolean submitTreasurySettlement(SystemLedgerLane ledger, boolean sequentialBatch) {
+    boolean submitTreasurySettlement(SystemLedgerLane ledger) {
         if (ledger == null || runtime == null || changes == null || collected)
             throw new IllegalStateException("Ledger settlement requires retained isolated account facts");
         if (treasurySettlement == null) treasurySettlement = new TreasurySettlement();
         if (treasurySettlement.queued) throw new IllegalStateException("Treasury settlement was already queued");
         treasurySettlement.ledger = ledger;
-        treasurySettlement.sequentialBatch = sequentialBatch;
-        if (sequentialBatch && treasurySettlement.treasuryFunds == null)
-            treasurySettlement.treasuryFunds = new RuntimeFundsAccumulator();
         if (!ledger.offer(treasurySettlement)) return false;
         treasurySettlement.queued = true;
         return true;
     }
 
-    boolean hasLedgerSettlement() { return treasurySettlement != null && treasurySettlement.queued; }
-
-    private void transferLedgerFundsTo(RuntimeFundsAccumulator target) {
-        if (!hasLedgerSettlement() || !treasurySettlement.completed)
-            throw new IllegalStateException("Ledger funds receipt is incomplete");
-        RuntimeFundsAccumulator receipt = treasurySettlement.sequentialBatch
-                ? treasurySettlement.treasuryFunds : treasurySettlement.funds;
-        if (target == null) receipt.clear();
-        else receipt.transferTo(target);
-    }
+    public boolean hasLedgerSettlement() { return treasurySettlement != null && treasurySettlement.queued; }
 
     private final class TreasurySettlement implements SystemLedgerLane.Entry {
         private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
-        private RuntimeFundsAccumulator treasuryFunds;
-        private boolean sequentialBatch;
         private volatile SystemLedgerLane ledger;
         private boolean queued;
         private volatile boolean completed;
@@ -1213,11 +1223,9 @@ public final class MatcherSettlementEvent implements
                 throw new IllegalStateException("invalid Ledger financial scope");
             mergeTreasuryDeltas().apply(treasury);
             changes.appendFundsDelta(requiredLaneMask, funds);
-            if (sequentialBatch) {
-                treasury.appendFundsDelta(treasuryFunds);
-                funds.add(treasuryFunds);
-            } else treasury.appendFundsDelta(funds);
+            treasury.appendFundsDelta(funds);
             funds.requireConserved(false);
+            funds.clear();
             treasury.clearChangedKeys();
             TradingRuntimeState completionRuntime = runtime;
             // Owner may immediately move the buffers and recycle this slot. Capture the wake
@@ -1228,9 +1236,7 @@ public final class MatcherSettlementEvent implements
 
         void clear() {
             if (ledger != null && !completed) throw new IllegalStateException("Ledger still owns this settlement");
-            funds.clear();
-            if (treasuryFunds != null) treasuryFunds.clear();
-            sequentialBatch = false;
+            if (!funds.isEmpty()) throw new IllegalStateException("Ledger funds scratch was not cleared");
             ledger = null;
             queued = completed = false;
         }

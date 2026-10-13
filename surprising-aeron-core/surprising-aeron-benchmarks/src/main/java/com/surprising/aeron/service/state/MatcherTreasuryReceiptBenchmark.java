@@ -28,7 +28,6 @@ public class MatcherTreasuryReceiptBenchmark {
     private MatcherResult nativeResult;
     private long sequence;
     private final UUID commandId = new UUID(1, 2);
-    private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
 
     @Setup public void setup() {
         runtime = new TradingRuntimeState(new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0,
@@ -66,9 +65,7 @@ public class MatcherTreasuryReceiptBenchmark {
         event.completeMatcherPublication();
         runtime.dispatchOwnerControlledSettlement(event);
         while (!event.complete()) { ledger.assertHealthy(); runtime.assertAccountLanesHealthy(); Thread.onSpinWait(); }
-        runtime.collectMatcherSettlement(event, funds, null);
-        funds.requireConserved(false);
-        funds.clear();
+        runtime.collectMatcherSettlement(event, null, null);
         long sequence = event.directResultCoreSequence();
         runtime.releaseMatcherSettlement(event);
         return sequence;

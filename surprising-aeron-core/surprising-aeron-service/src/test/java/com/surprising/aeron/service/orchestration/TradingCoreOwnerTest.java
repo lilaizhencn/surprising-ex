@@ -359,7 +359,25 @@ class TradingCoreOwnerTest {
                 assertThat(core.hasMatchingNotifications()).isFalse();
                 assertThat(core.hasLocalMatchingWork()).isTrue();
                 assertThat(responses).hasSize(before);
+                // Facts are already ready. Even commands admitted outside the independent
+                // ingress path must feed the Ledger before the first response is retired.
+                core.pendingMatching.findByCommandId(first.header().commandId()).clusterIndependent = false;
+                core.pendingMatching.findByCommandId(following.header().commandId()).clusterIndependent = false;
                 release.countDown();
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while (core.pendingMatching.ledgerDispatchHead() != null) {
+                    core.commits.dispatchReadyMatcherFinancialSettlements(Long.MAX_VALUE);
+                    if (System.nanoTime() >= deadline) throw new AssertionError("Ledger dispatch still waits for response retirement");
+                    Thread.onSpinWait();
+                }
+                var inspected = new java.util.concurrent.CountDownLatch(1);
+                var fees = new AtomicLong(-1);
+                int asset = core.identities.assetId("USDT");
+                assertThat(runtime.dispatchLedgerQuery(ledger -> { fees.set(ledger.fee(asset)); inspected.countDown(); })).isTrue();
+                assertThat(inspected.await(2, TimeUnit.SECONDS)).isTrue();
+                assertThat(fees).hasValue(4);
+                assertThat(core.pendingMatching.size()).isEqualTo(2);
+                assertThat(responses).hasSize(before);
                 finishCommands(service);
             }
             assertThat(responses).hasSize(before + 2);
