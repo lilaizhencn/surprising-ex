@@ -68,8 +68,11 @@ public final class CoreOrderDecisionResolver {
 
     /** 同一批、同一用户和币对的只读决策上下文；不跨命令复用。 */
     public record Context(CoreInstrument instrument, int symbolId, MarkPriceRuntime mark,
-                          FeePolicyBook policies, long clusterTimestamp, boolean lifecycleSettled,
-                          boolean fundingInProgress) { }
+                          FeePolicyBook policies, long clusterTimestamp,
+                          com.surprising.aeron.service.state.TreasuryRuntime.SettlementStatus settlementStatus) {
+        public boolean lifecycleSettled() { return settlementStatus.lifecycleSettled(); }
+        public boolean fundingInProgress() { return settlementStatus.fundingInProgress(); }
+    }
 
     public static Context context(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                   long userId, String instrumentId, long clusterTimestamp) {
@@ -79,9 +82,7 @@ public final class CoreOrderDecisionResolver {
         Integer symbolId = identities.findSymbolId(instrument.instrumentId());
         if (symbolId == null) throw new IllegalStateException("instrument instrumentId identity is missing");
         return new Context(instrument, symbolId, runtime.markPrice(symbolId),
-                runtime.feePolicyBook(), clusterTimestamp,
-                runtime.treasury().lifecycleSettlement(symbolId) != 0,
-                runtime.treasury().fundingProgress(symbolId) != null);
+                runtime.feePolicyBook(), clusterTimestamp, runtime.treasury().settlementStatus(symbolId));
     }
 
     public static ResolvedPlaceOrder resolve(Context context, long userId, PlaceOrderCommand intent) {
@@ -101,7 +102,7 @@ public final class CoreOrderDecisionResolver {
                 mark.markPriceTicks(), mark.indexPriceTicks(), mark.forwardPriceTicks(), mark.priceSequence(),
                 mark.generatedAtEpochMillis(), mark.lastPriceTicks());
         return new Context(instrument, source.symbolId(), captured, source.policies(), source.clusterTimestamp(),
-                source.lifecycleSettled(), source.fundingInProgress());
+                source.settlementStatus());
     }
 
     private static ResolvedPlaceOrder resolveValues(ResolvedPlaceOrder target,

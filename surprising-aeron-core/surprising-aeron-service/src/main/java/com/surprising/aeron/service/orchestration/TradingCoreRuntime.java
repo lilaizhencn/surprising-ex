@@ -1161,15 +1161,14 @@ public final class TradingCoreRuntime implements AutoCloseable,
             long timestamp, long position) {
         var event = runtimeState.acquirePlaceAdmission();
         long openInterestSteps;
-        boolean lifecycleSettled;
-        boolean fundingInProgress;
+        com.surprising.aeron.service.state.TreasuryRuntime.SettlementStatus settlementStatus;
         int assetId;
         try {
             CoreOrderDecisionResolver.prepare(event, runtimeState, identities, userId,
                     command, currentClusterTimestamp);
-            openInterestSteps = openInterestIndex.openInterestSteps(event.instrumentId());
-            lifecycleSettled = runtimeState.treasury().lifecycleSettlement(event.symbolId()) != 0;
-            fundingInProgress = runtimeState.treasury().fundingProgress(event.symbolId()) != null;
+            openInterestSteps = event.instrument().usesOpenInterestForUserLimit() && !command.reduceOnly()
+                    ? openInterestIndex.openInterestSteps(event.instrumentId()) : 0;
+            settlementStatus = runtimeState.treasury().settlementStatus(event.symbolId());
             var instrument = event.instrument();
             assetId = identities.assetId(productLine.isDerivative() ? instrument.settleAsset()
                     : command.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
@@ -1179,7 +1178,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             throw failure;
         }
         return runtimeState.dispatchPlaceAdmission(coreSequence, userId, event, commandId,
-                openInterestSteps, lifecycleSettled, fundingInProgress,
+                openInterestSteps, settlementStatus,
                 assetId, identities, timestamp, position);
     }
 
@@ -1189,7 +1188,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 identities, userId, command, currentClusterTimestamp);
         var admissionIdentity = com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(
                 runtimeState, identities, userId, resolved);
-        long openInterestSteps = openInterestIndex.openInterestSteps(command.instrumentId());
+        long openInterestSteps = resolved.instrument().usesOpenInterestForUserLimit() && !command.reduceOnly()
+                ? openInterestIndex.openInterestSteps(command.instrumentId()) : 0;
         int symbolId = resolved.symbolId();
         int assetId = identities.assetId(resolved.reservationAsset());
         runtimeState.executeUserSettlement(userId, () -> {

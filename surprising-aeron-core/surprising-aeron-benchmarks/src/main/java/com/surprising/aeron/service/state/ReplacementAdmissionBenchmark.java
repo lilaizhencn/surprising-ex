@@ -66,7 +66,7 @@ public class ReplacementAdmissionBenchmark {
                         LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, WINDOW, WINDOW, WINDOW));
         decision = new CoreOrderDecisionResolver.Context(instrument, identities.symbolId("1"),
                 new MarkPriceRuntime(identities.symbolId("1"), instrument, 100, 1, 1_000),
-                FeePolicyBook.EMPTY, 1_001, false, false);
+                FeePolicyBook.EMPTY, 1_001, runtime.treasury().settlementStatus(identities.symbolId("1")));
         runtime.startAccountLanes();
     }
 

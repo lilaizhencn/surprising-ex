@@ -324,7 +324,8 @@ final class MatchingCommandAdmission {
         owner.resultBuilder.setSingleChangedOrder(originalOrderId);
         return owner.runtimeState.dispatchReplacementAdmission(sequence, message.header().userId(), originalOrderId,
                 amend ? decodedCommand.amendOrder() : null, amend ? null : decodedCommand.replaceOrder(),
-                decision, owner.openInterestIndex.openInterestSteps(instrumentId),
+                decision, decision.instrument().usesOpenInterestForUserLimit()
+                        ? owner.openInterestIndex.openInterestSteps(instrumentId) : 0,
                 owner.matchingAdapter.matcherShardId(instrumentId), owner.identities);
     }
 

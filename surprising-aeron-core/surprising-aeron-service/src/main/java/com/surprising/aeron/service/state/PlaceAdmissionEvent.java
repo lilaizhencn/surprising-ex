@@ -15,8 +15,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     private long userId;
     private UUID commandId;
     private long openInterestSteps;
-    private boolean lifecycleSettled;
-    private boolean fundingInProgress;
+    private TreasuryRuntime.SettlementStatus settlementStatus;
     private long preparedClientKey;
     /** Queued admissions are retained through terminal command retirement because they own resolved input. */
     private boolean matcherWaitRequired;
@@ -63,13 +62,13 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     }
 
     PlaceAdmissionEvent prepare(long coreSequence, long userId, UUID commandId,
-                                long openInterestSteps, boolean lifecycleSettled, boolean fundingInProgress,
+                                long openInterestSteps, TreasuryRuntime.SettlementStatus settlementStatus,
                                 int assetId, int laneId, boolean matcherWaitRequired,
                                 TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                 long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0
                 || intent() == null || commandId == null || openInterestSteps < 0
-                || symbolId() < 0 || assetId < 0
+                || symbolId() < 0 || assetId < 0 || settlementStatus == null
                 || laneId < 0 || runtime == null) {
             throw new IllegalArgumentException("invalid place admission event");
         }
@@ -79,8 +78,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         this.userId = userId;
         this.commandId = commandId;
         this.openInterestSteps = openInterestSteps;
-        this.lifecycleSettled = lifecycleSettled;
-        this.fundingInProgress = fundingInProgress;
+        this.settlementStatus = settlementStatus;
         this.preparedClientKey = 0;
         this.identities = identities;
         identityAllocations = 0;
@@ -105,8 +103,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         }
         clearResolvedOrder();
         commandId = null;
-        lifecycleSettled = false;
-        fundingInProgress = false;
+        settlementStatus = null;
         preparedClientKey = 0;
         runtime = null;
         identities = null;
@@ -133,6 +130,8 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         try {
             runtime.enterLaneCommandScope(lane);
             try {
+                boolean lifecycleSettled = settlementStatus.lifecycleSettled();
+                boolean fundingInProgress = settlementStatus.fundingInProgress();
                 if (!resolvedOrderInitialized())
                     com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.resolvePrepared(
                             this, decisionMark, decisionPolicies, userId, decisionTimestamp, lifecycleSettled);
@@ -186,8 +185,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         if (complete()) throw new IllegalStateException("completed place admission must be collected");
         clearResolvedOrder();
         commandId = null;
-        lifecycleSettled = false;
-        fundingInProgress = false;
+        settlementStatus = null;
         preparedClientKey = 0;
         runtime = null;
         identities = null;

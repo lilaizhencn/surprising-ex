@@ -739,7 +739,6 @@ public final class TriggerOrderCommands {
         private com.surprising.aeron.service.state.ResolvedPlaceOrder order;
         private String failureReason;
         private long preparedClientKey;
-        private boolean lifecycleSettled, fundingInProgress;
         private int assetId, laneId;
         private int baseAssetId, quoteAssetId, settleAssetId;
         private com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context decision;
@@ -760,9 +759,8 @@ public final class TriggerOrderCommands {
             baseAssetId = owner.identities().assetId(decision.instrument().baseAsset());
             quoteAssetId = owner.identities().assetId(decision.instrument().quoteAsset());
             settleAssetId = owner.identities().assetId(decision.instrument().settleAsset());
-            lifecycleSettled = owner.runtimeState().treasury().lifecycleSettlement(decision.symbolId()) != 0;
-            fundingInProgress = owner.runtimeState().treasury().fundingProgress(decision.symbolId()) != null;
-            openInterest = owner.openInterestIndex().openInterestSteps(route.instrumentId());
+            openInterest = decision.instrument().usesOpenInterestForUserLimit()
+                    ? owner.openInterestIndex().openInterestSteps(route.instrumentId()) : 0;
             childSequence = Math.addExact(Math.addExact(owner.appliedCommandCount(), 2), owner.queuedMatchingCount());
             siblings = cancelOco ? owner.triggerOrderIndex().ocoSiblings(route).descendingSet()
                     : java.util.Collections.emptyNavigableSet();
@@ -798,7 +796,7 @@ public final class TriggerOrderCommands {
                 var receipt = RuntimeOrderStateTransitions.placeTriggerChildInLane(owner.runtimeState(), trigger.userId(), order,
                         commandId, childSequence, openInterest, owner.identities(),
                         com.surprising.aeron.service.state.RuntimeIdentityRegistry.clientKeyValue(key), assetId,
-                        lifecycleSettled, fundingInProgress);
+                        decision.lifecycleSettled(), decision.fundingInProgress());
                 preparedClientKey = key;
                 return receipt;
             } catch (CoreStateRejectedException rejected) {

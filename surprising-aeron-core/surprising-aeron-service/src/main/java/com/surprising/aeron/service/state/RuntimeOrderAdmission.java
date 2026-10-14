@@ -57,12 +57,10 @@ public final class RuntimeOrderAdmission {
             throw new IllegalArgumentException("invalid runtime order admission identity");
         }
         int symbolId = order.symbolId();
-        boolean lifecycleSettled = symbolId >= 0
-                && runtime.treasury().lifecycleSettlement(symbolId) != 0;
         return new AdmissionIdentity(identities.findClientKeyValue(userId, order.clientOrderId()),
                 symbolId,
-                identities.findPositionKeyValue(userId, order.instrument(), order.positionSide()), lifecycleSettled,
-                symbolId >= 0 && runtime.treasury().fundingProgress(symbolId) != null);
+                identities.findPositionKeyValue(userId, order.instrument(), order.positionSide()),
+                runtime.treasury().settlementStatus(symbolId));
     }
 
     public static long requiredReservationPrepared(
@@ -265,11 +263,14 @@ public final class RuntimeOrderAdmission {
         if (projectedNotional > instrument.maxPositionNotionalUnits()) {
             throw rejected("POSITION_NOTIONAL_LIMIT_EXCEEDED", "projected position exceeds instrument limit");
         }
-        long openInterestNotional = openInterestSteps == 0 ? 0
-                : CoreContractMath.riskNotionalUnits(instrument, openInterestSteps, riskPriceTicks);
-        long scaledLimit = CoreArithmetic.scaledFloorCapped(
-                openInterestNotional, instrument.userOpenInterestLimitRatePpm(), PPM,
-                instrument.userOpenInterestLimitFloorUnits(), instrument.maxPositionNotionalUnits());
+        long scaledLimit = Math.min(instrument.userOpenInterestLimitFloorUnits(), instrument.maxPositionNotionalUnits());
+        if (instrument.usesOpenInterestForUserLimit()) {
+            long openInterestNotional = openInterestSteps == 0 ? 0
+                    : CoreContractMath.riskNotionalUnits(instrument, openInterestSteps, riskPriceTicks);
+            scaledLimit = CoreArithmetic.scaledFloorCapped(
+                    openInterestNotional, instrument.userOpenInterestLimitRatePpm(), PPM,
+                    instrument.userOpenInterestLimitFloorUnits(), instrument.maxPositionNotionalUnits());
+        }
         if (projectedNotional > scaledLimit) {
             throw rejected("OPEN_INTEREST_LIMIT_EXCEEDED", "projected position exceeds open-interest limit");
         }

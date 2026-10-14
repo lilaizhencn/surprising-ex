@@ -24,6 +24,8 @@ import org.openjdk.jmh.infra.IterationParams;
  * Lanes, exercising settlement-slot reuse from single-Lane admission to cross-Lane fills.
  * Unique production-range IDs also exercise active-order and reservation membership deletion
  * while the rolling window retains live entries; this is not a repeated-key map benchmark.
+ * Admissions borrow the existing immutable Treasury status; this instrument uses a fixed user
+ * limit, so no market OI input or pending-position scan is needed for its admission.
  * Aeron transport and Archive are excluded.
  */
 @State(Scope.Thread) @BenchmarkMode(Mode.Throughput) @OutputTimeUnit(TimeUnit.SECONDS)

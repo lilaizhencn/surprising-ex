@@ -105,10 +105,11 @@ final class OrderBookQueryService {
         var identity = new com.surprising.aeron.service.state.admission.AdmissionIdentity(
                 owner.identities.findClientKeyValue(userId, command.clientOrderId()), context.symbolId(),
                 owner.identities.findPositionKeyValue(userId, context.instrument(), command.positionSide()),
-                context.lifecycleSettled(), context.fundingInProgress());
+                context.settlementStatus());
         long id = nextAsyncQueryId++;
         var query = new PreflightQuery(id, owner.appliedCommandCount, userId, command, context, identity,
-                owner.openInterestIndex.openInterestSteps(command.instrumentId()));
+                context.instrument().usesOpenInterestForUserLimit() && !command.reduceOnly()
+                        ? owner.openInterestIndex.openInterestSteps(command.instrumentId()) : 0);
         queryIds.put(message.header().commandId(), id);
         try {
             if (!owner.runtimeState.dispatchAccountQuery(owner.runtimeState.topology().accountLaneMask(userId), query)) {

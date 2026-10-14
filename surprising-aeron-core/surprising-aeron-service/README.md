@@ -196,3 +196,12 @@ Lane结算通过已有 `RuntimePositionChangeBuffer` 交接冻结after-image，�
 `AccountLaneState.activeOrderIdsByUser` 与 `reservationIdsByUser` 使用已有Agrona primitive集合。订单准入增加成员，终态/回滚原位删除并整理探测链，达到活跃容量后不因唯一ID周转反复重建数组；集合仍归所属账户Lane，用户删除时移除容器。预约成员的增删集中在该Lane的 `addReservationId` / `removeReservationId`，清除旧通用容器辅助方法。Lane内部扫描复用迭代器并读primitive值；风险游标仍选择最小后继，平仓冲突仍显式按业务顺序排序，外部预约ID查询仍返回独立集合。
 
 必要验证覆盖大ID周转时保留在途项、容器释放、独立查询值、终态及回滚恢复，并覆盖六产品线、风险/ADL查询、平仓容量、预检和realtime输出。原来直接在Owner读写活跃账户的旧测试夹具改为Lane邮箱执行，保留原冻结/别名/回滚断言，生产所有权检查没有放宽。验证及已纠正的失败记录见 [Lane成员集合验证](../../docs/validation/lane-membership-backshift-20261015.json)。完整Owner职责、客户端身份/编解码等剩余分配和完整Core百字节目标仍未完成；本轮不验证Cluster快照/恢复或wallet，数值诊断只留本地。
+
+
+### 准入交接账本事实与按需OI输入（2026-10-15）
+
+Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatus` 借出其已经发布的不可变 `SettlementStatus`。Owner准备普通下单、批量、改单、预检和触发子单时只传递该引用；`PlaceAdmissionEvent`、`CoreOrderDecisionResolver.Context` 和 `AdmissionIdentity` 不再由Owner提取或复制生命周期/资金费布尔值。账户Lane执行时读取捕获的事实，随后账本发布新进度或回滚也不会改变旧命令的输入。没有新状态镜像、队列、线程或逐单状态副本。
+
+`CoreInstrument.usesOpenInterestForUserLimit` 明确限额对市场OI的依赖：现货、比例为0或下限已经达到固定上限时无需全局OI输入。对应准入跳过全局查表及批内持仓扫描；Lane仍执行固定下限、持仓上限、风险档位和有效比例限额检查。80个必要用例覆盖固定下限拒绝、有效比例读取、下单/改单/批量/预检、捕获事实延迟执行、六产品线触发与资金费分页，见 [准入输入所有权验证](../../docs/validation/admission-input-ownership-20261015.json)。首次误选含快照用例及查询夹具错误均保留记录，最终仅执行已审查的必要方法。
+
+这一改动不代表Owner迁移完成：有效比例限额仍由Owner准备OI输入，OI/ADL/持仓用户索引与部分业务收据、市场/风险控制及输出编码仍待迁移；完整Core百字节与真实单节点验收尚未完成。

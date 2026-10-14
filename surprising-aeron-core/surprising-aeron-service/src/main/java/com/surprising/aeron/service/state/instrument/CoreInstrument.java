@@ -145,6 +145,12 @@ public final class CoreInstrument {
     public long maxPositionNotionalUnits() { return configuration.maxPositionNotionalUnits(); }
     public long userOpenInterestLimitRatePpm() { return configuration.userOpenInterestLimitRatePpm(); }
     public long userOpenInterestLimitFloorUnits() { return configuration.userOpenInterestLimitFloorUnits(); }
+    /** Only a proportional limit strictly below the fixed cap needs market-wide position totals. */
+    public boolean usesOpenInterestForUserLimit() {
+        Configuration current = configuration;
+        return current.contractType() != ContractType.SPOT && current.userOpenInterestLimitRatePpm() != 0
+                && current.userOpenInterestLimitFloorUnits() < current.maxPositionNotionalUnits();
+    }
     public List<CoreRiskLimitBracket> riskLimitBrackets() { return configuration.riskLimitBrackets(); }
     public InstrumentStatus instrumentStatus() { return configuration.instrumentStatus(); }
     public boolean marketOrderEnabled() { return configuration.marketOrderEnabled(); }

@@ -377,7 +377,8 @@ public final class TreasuryRuntime {
         return result;
     }
 
-    private SettlementStatus settlementStatus(int symbolId) {
+    /** Borrow the already-published immutable fact; only the Ledger replaces it. */
+    public SettlementStatus settlementStatus(int symbolId) {
         SettlementStatusCell[] states = settlementStates;
         if (symbolId < 0 || symbolId >= states.length) return SettlementStatus.EMPTY;
         SettlementStatusCell cell = states[symbolId];
@@ -407,9 +408,11 @@ public final class TreasuryRuntime {
         private volatile SettlementStatus value = SettlementStatus.EMPTY;
     }
 
-    private record SettlementStatus(long fundingSettlementId, FundingProgressRuntime fundingProgress,
-                                    long lifecycleSettlementId, LifecycleProgressRuntime lifecycleProgress) {
+    public record SettlementStatus(long fundingSettlementId, FundingProgressRuntime fundingProgress,
+                                   long lifecycleSettlementId, LifecycleProgressRuntime lifecycleProgress) {
         private static final SettlementStatus EMPTY = new SettlementStatus(0, null, 0, null);
+        public boolean lifecycleSettled() { return lifecycleSettlementId != 0; }
+        public boolean fundingInProgress() { return fundingProgress != null; }
     }
 
     private static void setSigned(IntLongHashMap balances, int assetId, long units) {

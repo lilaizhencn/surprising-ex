@@ -49,7 +49,7 @@ class ReplacementAdmissionEventTest {
             guard(lane, "balances", eclipseGuard(lane.balances, owner));
             var decision = new CoreOrderDecisionResolver.Context(instrument, symbolId,
                     new MarkPriceRuntime(symbolId, instrument, 100, 1, 1_000),
-                    FeePolicyBook.EMPTY, 1_001, false, false);
+                    FeePolicyBook.EMPTY, 1_001, runtime.treasury().settlementStatus(symbolId));
             runtime.startAccountLanes();
             var workerHeld = new CountDownLatch(1);
             var releaseWorker = new CountDownLatch(1);

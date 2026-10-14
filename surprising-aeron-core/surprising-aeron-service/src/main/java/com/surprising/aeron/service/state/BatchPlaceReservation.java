@@ -16,7 +16,6 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
     private long sequence, userId, openInterestSteps;
     private UUID commandId;
     private int assetId;
-    private boolean lifecycleSettled, fundingInProgress;
     private long preparedClientKey;
     private OrderRuntime admittedOrder;
     private List<Long> closeCapacityCancellations = List.of();
@@ -41,8 +40,6 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
         this.openInterestSteps = openInterestSteps;
         assetId = identities.assetId(runtime.productLine().isDerivative() ? decision.instrument().settleAsset()
                 : command.side() == CoreOrderSide.BUY ? decision.instrument().quoteAsset() : decision.instrument().baseAsset());
-        lifecycleSettled = decision.lifecycleSettled();
-        fundingInProgress = decision.fundingInProgress();
         completed = false;
     }
 
@@ -59,7 +56,7 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
             long positionKey = identities.findPositionKeyValueInLane(lane, userId, instrument(), positionSide());
             long required = RuntimeOrderAdmission.requiredReservationPrepared(runtime, userId, this,
                     openInterestSteps, lane.admissionOrderIndex(symbolId()), clientKey, symbolId(), positionKey,
-                    lifecycleSettled, fundingInProgress);
+                    decision.lifecycleSettled(), decision.fundingInProgress());
             PositionRuntime position = positionKey == 0 ? null : lane.positions.get(positionKey);
             if (instrument().contractType().productLine().isDerivative() && !reduceOnly()
                     && position != null && position.signedQuantitySteps() != 0
@@ -104,7 +101,6 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
         commandId = null;
         sequence = userId = openInterestSteps = preparedClientKey = 0;
         assetId = 0;
-        lifecycleSettled = fundingInProgress = false;
         admittedOrder = null;
         closeCapacityCancellations = List.of();
     }

@@ -228,7 +228,7 @@ final class OrderBatchExecutor {
                             userId, command.instrumentId(), owner.currentClusterTimestamp);
                     var instrument = context.instrument();
                     decision = new com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision(context,
-                            batchOpenInterestSteps(command.instrumentId()),
+                            batchOpenInterestSteps(instrument),
                             owner.identities.assetId(instrument.baseAsset()), owner.identities.assetId(instrument.quoteAsset()),
                             owner.identities.assetId(instrument.settleAsset()));
                     contextIndex = batch.preparedSymbols.size();
@@ -419,7 +419,7 @@ final class OrderBatchExecutor {
                 userId, command.instrumentId(), owner.currentClusterTimestamp);
         var work = batch.placeReservation;
         work.prepare(owner.runtimeState, owner.identities, batch.sequence, userId, commandId,
-                command, decision, batchOpenInterestSteps(command.instrumentId()));
+                command, decision, batchOpenInterestSteps(decision.instrument()));
         int laneId = owner.runtimeState.topology().accountLaneId(userId);
         owner.runtimeState.dispatchControlLanes(1L << laneId, work);
         return () -> {
@@ -480,7 +480,7 @@ final class OrderBatchExecutor {
                             userId, instrumentId, owner.currentClusterTimestamp);
                     batch.replacementAdmissionEvent = owner.runtimeState.dispatchReplacementAdmission(
                             batch.sequence, userId, command.originalOrderId(), command, null, decision,
-                            batchOpenInterestSteps(instrumentId),
+                            batchOpenInterestSteps(decision.instrument()),
                             owner.matchingAdapter.matcherShardId(instrumentId), owner.identities);
                 }
             }
@@ -814,8 +814,9 @@ final class OrderBatchExecutor {
         batch.matchingApplied(true);
     }
 
-    long batchOpenInterestSteps(String instrumentId) {
-        return owner.openInterestIndex.pendingOpenInterestSteps(instrumentId,
+    long batchOpenInterestSteps(com.surprising.aeron.service.state.instrument.CoreInstrument instrument) {
+        if (!instrument.usesOpenInterestForUserLimit()) return 0;
+        return owner.openInterestIndex.pendingOpenInterestSteps(instrument.instrumentId(),
                 owner.runtimeState, owner.adlPositionIndex, owner.identities);
     }
 

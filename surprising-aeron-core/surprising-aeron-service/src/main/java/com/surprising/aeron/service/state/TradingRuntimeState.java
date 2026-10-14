@@ -1305,14 +1305,14 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public PlaceAdmissionEvent dispatchPlaceAdmission(
             long coreSequence, long userId, PlaceAdmissionEvent event, java.util.UUID commandId,
-            long openInterestSteps, boolean lifecycleSettled, boolean fundingInProgress,
+            long openInterestSteps, TreasuryRuntime.SettlementStatus settlementStatus,
             int assetId, RuntimeIdentityRegistry identities,
             long timestamp, long position) {
         assertOwner();
         int laneId = topology.accountLaneId(userId);
         if (event == null) throw new IllegalArgumentException("place admission event is required");
         event.prepare(
-                coreSequence, userId, commandId, openInterestSteps, lifecycleSettled, fundingInProgress,
+                coreSequence, userId, commandId, openInterestSteps, settlementStatus,
                 assetId, laneId, asynchronousCommands(), this, identities, timestamp, position);
         try {
             if (!accountLanesStarted) {

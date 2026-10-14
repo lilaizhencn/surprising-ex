@@ -58,7 +58,8 @@ public class HotCommandSlotAllocationBenchmark {
         decision = new com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context(
                 instrument, 0, new com.surprising.aeron.service.state.market.MarkPriceRuntime(0, instrument, 100, 1, 1),
                 FeePolicyBook.from(java.util.Map.of(1L, new com.surprising.aeron.service.state.model.CoreFeePolicyState(
-                        1, 1, 7, "1", -10, 20, 0, true, 1, 0))), 1_000, false, false);
+                        1, 1, 7, "1", -10, 20, 0, true, 1, 0))), 1_000,
+                new TreasuryRuntime().settlementStatus(0));
         for (int index = 0; index < WINDOW; index++) {
             String client = switch (clientId) { case "EMPTY" -> ""; case "ASCII" -> "client-" + index; default -> "客户-" + index; };
             var order = new PlaceOrderCommand(index + 1, "1", CoreOrderSide.BUY, 100, 10, false,
