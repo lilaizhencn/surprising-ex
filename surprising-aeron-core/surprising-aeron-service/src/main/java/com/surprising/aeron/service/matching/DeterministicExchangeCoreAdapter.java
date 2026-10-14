@@ -343,6 +343,42 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 orderType(command.orderType(), command.timeInForce()), symbolId, userId);
     }
 
+    /** Matcher converts the batch item's frozen admission without constructing a CoreMatchingOrder. */
+    private exchange.core2.core.common.MatcherResult placeNativeAdmitted(long userId,
+            com.surprising.aeron.service.state.OrderRuntime command, exchange.core2.core.common.MatcherResult target) {
+        int symbolId = ensureSymbol(command.instrument().instrumentId());
+        recordUser(userId);
+        long price = protectedMarketPrice(symbolId, command.side(), command.orderType(),
+                command.matchingPriceTicks(), CoreMatchingOrder.slippagePpm(command.productLine()));
+        return engine(symbolId).placeInto(target,
+                currentCommandScope().aeronTimestamp, command.orderId(), 0,
+                price, command.matchingPriceTicks(), command.remainingQuantitySteps(),
+                command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
+                orderType(command.orderType(), command.timeInForce()), symbolId, userId);
+    }
+
+    /** The existing Matcher slot owns this call; Account Lane authorities are rejected before touching the book. */
+    public exchange.core2.core.common.MatcherResult placeAdmittedDirect(
+            int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
+            long userId, com.surprising.aeron.service.state.OrderRuntime command,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null || target == null)
+            throw new IllegalArgumentException("invalid direct matcher command");
+        command.requireFrozenMatcherInput(userId);
+        validateCommandEvidence(coreSequence, commandId, command.orderId(), aeronTimestamp);
+        MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
+        try {
+            return publishNativeMatcherResult(shardId, coreSequence, commandId, command.orderId(),
+                    aeronTimestamp, placeNativeAdmitted(userId, command, target.nativeResultSlot(0)), target);
+        } catch (RuntimeException exception) {
+            matcherFailure.compareAndSet(null, exception);
+            throw exception;
+        } finally {
+            scope.aeronTimestamp = 0;
+            scope.active = false;
+        }
+    }
+
     /** A single native placement produces its immutable result and recovery evidence once. */
     public CoreMatchingResult placeWithEvidence(
             int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp, long userId, CoreMatchingOrder command) {

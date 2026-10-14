@@ -127,6 +127,7 @@ final class MatchingPipelineProgress {
                         owner.runtimeState.releasePlaceBatchAdmission(batchAdmission);
                         orderBatch.placeBatchAdmissionEvent = null;
                         owner.batches.unregisterPipelinedBatchSymbols(orderBatch);
+                        orderBatch.clearPreparedDecisionCache();
                         orderBatch.rollbackPreparedClientKeys(owner.identities);
                         orderBatch.pipelined = false;
                         orderBatch.sequentialAdmission = true;

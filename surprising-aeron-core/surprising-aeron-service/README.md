@@ -240,3 +240,16 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 `MatcherSettlementEvent.BatchStorage` 的元数据槽改用以-1表示缺失的primitive表，清空后保留容量，symbolId及槽号0均有效。`TradingRuntimeState.reserveOrderInLane` 在已有Lane作用域直接执行原冻结步骤；`RuntimeIndexedChangeBuffer` 直接把冻结值和可选删除证明交给目标缓冲，再清空源，避免捕获型回调。Owner控制及终态收据的相关小循环沿用原顺序，不再逐次创建lambda；这尚未把所有收据业务搬离Owner。
 
 必要用例覆盖数量替换和部分成交、跨分组复用、0及最大symbolId、用户移除顺序、缓存上限、独立输出租约、拒绝及回滚、六产品线双币对反复交错批量、风险查询、触发及Ledger，见 [索引周转功能验证](../../docs/validation/admission-routing-reuse-20261015.json)。局部索引生命周期基准与进程内交易流水线JMH/JFR分开记录，仅保留本地数值；不做真实单节点压测、Cluster快照/恢复或wallet。Owner剩余控制/输出及完整Core百字节目标继续保持未完成。
+
+
+### 顺序批量的配置捕获与Matcher输入（2026-10-15）
+
+`OrderBatchExecutor.prepareBatchDecision` 复用批次已有的币对列表和决策数组，同一批、同一币对只捕获一次只读配置与资产身份。资金、仓位、费用选择及依赖OI的准入仍由Account Lane和原SystemLedgerLane逐项执行，不能缓存批内变化的余额或OI。同步准备失败和Lane整批准入拒绝转顺序执行时，都先释放失败前缀的配置引用，再按新的执行前缀准备；批次退休后清空引用。
+
+顺序PLACE通过原 `PlaceBatchIntentSource.captureAdmittedOrder` 在Lane直接填写批次自有的冻结输入槽。`BatchPlaceReservation` 只轮询原控制任务，Owner完成后绑定引用，不再把该输入复制到另一订单对象；它的下一项准备不会清空先前项的批次槽。资产选择在Lane执行，Owner只提供已解析的资产身份。这个配置捕获和输入租约不形成新的账户表、全局镜像、worker或队列。
+
+`CommandSlot.PlaceMatchingContinuation` 复用现有撮合任务，Matcher通过 `DeterministicExchangeCoreAdapter.placeAdmittedDirect` 读取冻结输入，直接调用原生 `placeInto`，保留剩余数量、产品线滑点、订单类型和撮合证据。Owner的普通活跃顺序提交不再创建 `CoreMatchingOrder` 或本项提交lambda；前置撤单仍沿用原wrapper，后续继续迁移。适配入口拒绝Lane活权威对象、错误用户、已释放槽及无剩余数量。原生事实发布前所有输入已经成为调用参数，continuation发布后不再读取这些可复用字段；输入值本身保留至批次退休。冷同步接口仍使用独立公开值。
+
+必要验证见 [批量输入功能验证](../../docs/validation/sequential-matcher-input-20261015.json)，覆盖六产品线的双币对市价/限价、重复项拒绝和转顺序执行、配置版本、独立输入、改单、触发、Ledger和异常退出。异常退出夹具按生产方式推进Ledger，并在等待时保留已提供的撮合结果；关闭前后比较真实致命边界已观察的撮合序号，仍保留精确相等断言。按要求没有执行Cluster快照/恢复或wallet。
+
+分配诊断分别记录单笔请求的每请求字节和20项批量的每项字节，不能把两种口径互代；两者都仍排除真实Aeron网络/Archive及realtime。JMH增加双币对交错场景并逐币对核对终态持仓，数值只留本地。Owner其他业务收据、部分控制及输出编码、客户端身份/用户修订等分配和完整Core百字节目标仍未完成。

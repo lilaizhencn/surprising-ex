@@ -179,6 +179,13 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         return placeMatching;
     }
 
+    /** Sequential batch input is already frozen in its item slot; Matcher consumes that lease directly. */
+    java.util.function.Supplier<?> prepareAdmittedPlaceMatching(TradingCoreRuntime owner,
+            int matcherShard, long userId, OrderRuntime admittedOrder, MatcherSettlementEvent direct) {
+        placeMatching.prepare(owner, matcherShard, userId, null, null, admittedOrder, direct);
+        return placeMatching;
+    }
+
     /** Reuses the command slot for the common cancellation path instead of allocating a lambda. */
     java.util.function.Supplier<?> prepareCancelMatching(TradingCoreRuntime owner,
             int matcherShard, long orderId, long userId, String instrumentId, MatcherSettlementEvent direct) {
@@ -956,12 +963,20 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         private long userId;
         private ResolvedPlaceOrder resolvedOrder;
         private CoreMatchingOrder matchingOrder;
+        private OrderRuntime admittedOrder;
         private MatcherSettlementEvent direct;
 
         void prepare(TradingCoreRuntime owner, int matcherShard, long userId,
                      ResolvedPlaceOrder resolvedOrder, CoreMatchingOrder matchingOrder,
                      MatcherSettlementEvent direct) {
-            if ((resolvedOrder == null) == (matchingOrder == null)) {
+            prepare(owner, matcherShard, userId, resolvedOrder, matchingOrder, null, direct);
+        }
+
+        void prepare(TradingCoreRuntime owner, int matcherShard, long userId,
+                     ResolvedPlaceOrder resolvedOrder, CoreMatchingOrder matchingOrder,
+                     OrderRuntime admittedOrder, MatcherSettlementEvent direct) {
+            if ((resolvedOrder == null ? 0 : 1) + (matchingOrder == null ? 0 : 1)
+                    + (admittedOrder == null ? 0 : 1) != 1 || admittedOrder != null && direct == null) {
                 throw new IllegalArgumentException("exactly one ordinary PLACE order representation is required");
             }
             this.owner = Objects.requireNonNull(owner);
@@ -969,6 +984,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             this.userId = userId;
             this.resolvedOrder = resolvedOrder;
             this.matchingOrder = matchingOrder;
+            this.admittedOrder = admittedOrder;
             this.direct = direct;
         }
 
@@ -978,11 +994,19 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             userId = 0;
             resolvedOrder = null;
             matchingOrder = null;
+            admittedOrder = null;
             direct = null;
         }
 
         @Override
         public Object get() {
+            if (admittedOrder != null) {
+                // All input references become native-call arguments before its fact is published.
+                // Do not read these reusable continuation fields after that publication.
+                return owner.matchingAdapter.placeAdmittedDirect(
+                        matcherShard, coreSequence, command.header().commandId(),
+                        command.header().submittedAtEpochMillis(), userId, admittedOrder, direct);
+            }
             if (direct != null) {
                 if (resolvedOrder != null) {
                     return owner.matchingAdapter.placeDirect(

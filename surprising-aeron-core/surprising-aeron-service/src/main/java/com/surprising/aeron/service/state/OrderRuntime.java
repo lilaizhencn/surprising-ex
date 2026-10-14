@@ -245,6 +245,13 @@ public final class OrderRuntime {
         return target;
     }
 
+    /** Matcher may consume a frozen admission lease, never the Lane's live authoritative order. */
+    public void requireFrozenMatcherInput(long userId) {
+        if (mutable || this.userId != userId || orderId <= 0 || instrument == null
+                || remainingQuantitySteps <= 0 || matchingPriceTicks <= 0)
+            throw new IllegalArgumentException("matcher requires a frozen order with remaining quantity for this user");
+    }
+
     /** Restore a frozen control before-value into its original Lane authority, preserving the pool lease. */
     void restoreCapturedValue(OrderRuntime before) {
         if (!mutable || commandSlotValue || before == null || before.mutable || before.commandSlotValue

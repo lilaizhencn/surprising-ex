@@ -1780,32 +1780,54 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void fatalTeardownReleasesAdmissionWithoutErasingMatcherForensics() throws Exception {
-        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
-        applySpotInstrument(state);
-        applyBalance(state, 1001, 20_000);
-        UUID commandId = UUID.randomUUID();
-        CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, commandId, 2,
-                TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
-                        place(15_401, "fatal-close-first", 1_000),
-                        place(15_402, "fatal-close-second", 1_000),
-                        place(15_401, "fatal-close-duplicate", 1_000)))));
-        assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-        long sequence = state.matchingSequence(commandId);
-        assertThat(state.completeMatching(sequence, awaitMatching(state, sequence), 2_000, 3)).isNull();
-        finishCurrentItemSettlement(state, sequence, 2_000, 3);
-        long[] matcherSequences = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
-        Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(() -> state.completeMatching(
-                sequence, new com.surprising.aeron.service.matching.CoreMatchingResult(
-                        false, "EXCHANGE_CORE_FAILURE"), 2_001, 4));
-        assertThat(divergence).isInstanceOf(
-                FatalMatchingDivergenceException.class);
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 20_000);
+            UUID commandId = UUID.randomUUID();
+            CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, commandId, 2,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(15_401, "fatal-close-first", 1_000),
+                            place(15_402, "fatal-close-second", 1_000),
+                            place(15_401, "fatal-close-duplicate", 1_000)))));
+            assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            long sequence = state.matchingSequence(commandId);
+            var firstResult = awaitMatching(state, sequence);
+            OrderBatchPending activeBatch = state.batches.batch(sequence);
+            long firstDeadline = System.nanoTime() + 5_000_000_000L;
+            while (activeBatch.nextIndex == 0) {
+                assertThat(System.nanoTime()).isLessThan(firstDeadline);
+                // Keep the supplied native result while Ledger dispatch catches up, as the production completion pump does.
+                state.commits.advanceMatchingProgress(2_000, 3, sequence);
+                assertThat(state.completeMatching(sequence, firstResult, 2_000, 3)).isNull();
+                Thread.onSpinWait();
+            }
+            long[] matcherSequences = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
+            var failedResult = new com.surprising.aeron.service.matching.CoreMatchingResult(false, "EXCHANGE_CORE_FAILURE");
+            Throwable divergence = null;
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (divergence == null) {
+                assertThat(System.nanoTime()).isLessThan(deadline);
+                state.commits.advanceMatchingProgress(2_001, 4, sequence);
+                divergence = org.assertj.core.api.Assertions.catchThrowable(() ->
+                        state.completeMatching(sequence, failedResult, 2_001, 4));
+                Thread.onSpinWait();
+            }
+            assertThat(divergence).isInstanceOf(
+                    FatalMatchingDivergenceException.class);
 
-        state.close();
+            // The next native fact can arrive while Ledger catches up. Shutdown must preserve
+            // the progress observed at the actual fatal boundary, including that valid successor.
+            long[] fatalMatcherSequences = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
+            for (int shard = 0; shard < matcherSequences.length; shard++)
+                assertThat(fatalMatcherSequences[shard]).isGreaterThanOrEqualTo(matcherSequences[shard]);
 
-        assertThat(state.pendingMatchingCount()).isZero();
-        assertThat(state.snapshotHasPendingCommands()).isFalse();
-        assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(matcherSequences);
-        assertThat(state.takeMatchingResult(sequence)).isNull();
+            state.close();
+
+            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.snapshotHasPendingCommands()).isFalse();
+            assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(fatalMatcherSequences);
+            assertThat(state.takeMatchingResult(sequence)).isNull();
+        }
     }
 
     @Test
@@ -1834,6 +1856,15 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void sequentialNativeAndAdmissionRejectionsReleaseFundsWithoutLaneHandoff() throws Exception {
+        sequentialNativeAndAdmissionRejectionsReleaseFunds(true);
+    }
+
+    @Test
+    void sequentialNativeAndAdmissionRejectionsReleaseFundsWithoutRecovery() throws Exception {
+        sequentialNativeAndAdmissionRejectionsReleaseFunds(false);
+    }
+
+    private void sequentialNativeAndAdmissionRejectionsReleaseFunds(boolean recovery) throws Exception {
         try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, "BTC", 1, 1);
@@ -1860,7 +1891,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(user.balances().get("BTC").availableUnits()).isOne();
             assertThat(user.balances().get("BTC").lockedUnits()).isZero();
             assertThat(state.tradingState().order(97_000)).isNotNull();
-            try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            if (recovery) try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             }
         }

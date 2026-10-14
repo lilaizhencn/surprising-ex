@@ -375,6 +375,12 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         return preparedOrders.length;
     }
 
+    /** Only before admission publication or after batch retirement; failed pipeline preparation drops its old prefix. */
+    void clearPreparedDecisionCache() {
+        java.util.Arrays.fill(preparedContextDecisions, 0, preparedSymbols.size(), null);
+        preparedSymbols.clear();
+    }
+
     void addItem(long orderId, long originalOrderId, long replacementOrderId, Object command) {
         int index = items.size();
         OrderBatchItem item = itemSlots[index];
@@ -431,8 +437,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
             if (admittedOrderCopies[index] != null) admittedOrderCopies[index].clearCommandSlot();
             if (resolvedOrderSlots[index] != null) resolvedOrderSlots[index].clear();
         }
-        java.util.Arrays.fill(preparedContextDecisions, 0, preparedSymbols.size(), null);
-        preparedSymbols.clear();
+        clearPreparedDecisionCache();
         lifecycleFlags = 0;
         actualLaneMask = 0;
         lastMatchingResult = null;

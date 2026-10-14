@@ -24,8 +24,15 @@ class CoreSelfTradePrefixTest {
                 .map(priorFill -> Arguments.of(line, priorFill)));
     }
 
-    @ParameterizedTest @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
-    void repeatedMixedSymbolBatchesKeepAssetMetadataAndReleaseBothUsersReservations(ProductLine line) throws Exception {
+    static Stream<Arguments> productsAndBatchRejection() {
+        return Stream.of(ProductLine.values()).flatMap(line -> Stream.of(false, true)
+                .flatMap(rejectDuplicate -> Stream.of(false, true)
+                        .map(marketTaker -> Arguments.of(line, rejectDuplicate, marketTaker))));
+    }
+
+    @ParameterizedTest @MethodSource("productsAndBatchRejection")
+    void repeatedMixedSymbolBatchesKeepAssetMetadataAndReleaseBothUsersReservations(
+            ProductLine line, boolean rejectDuplicate, boolean marketTaker) throws Exception {
         try (var core = new TradingCoreRuntime(line)) {
             var type = ContractType.valueOf(line.contractTypeCode());
             for (String symbol : new String[]{"1", "2"}) {
@@ -35,7 +42,7 @@ class CoreSelfTradePrefixTest {
                                 base, "USDT", type.isInverse() ? base : "USDT", 1, 1, type.isInverse() ? 1000 : 1,
                                 100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? TIME + 20_000 : 0,
                                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))));
-                if (line != ProductLine.SPOT) applied(core, message(core, CoreMessageType.APPLY_MARK_PRICE, 0,
+                if (line != ProductLine.SPOT || marketTaker) applied(core, message(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                                 ? new ApplyMarkPriceCommand(symbol, 100, 100, 100, 1, TIME)
                                 : new ApplyMarkPriceCommand(symbol, 100, 1, TIME))));
@@ -49,15 +56,21 @@ class CoreSelfTradePrefixTest {
                         var orders = new java.util.ArrayList<PlaceOrderCommand>();
                         for (String symbol : cycle % 2 == 0 ? new String[]{"1", "2"} : new String[]{"2", "1"}) {
                             long id = 1000L + cycle * 100 + user * 10 + Integer.parseInt(symbol);
+                            boolean market = user == 8 && marketTaker;
                             orders.add(new PlaceOrderCommand(id, symbol, user == 7 ? CoreOrderSide.SELL : CoreOrderSide.BUY,
-                                    100, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
-                                    CoreTimeInForce.GTC, false, "mixed-" + id));
+                                    market ? 0 : 100, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                                    market ? CoreOrderType.MARKET : CoreOrderType.LIMIT,
+                                    market ? CoreTimeInForce.IOC : CoreTimeInForce.GTC, false, "mixed-" + id));
                         }
+                        // Duplicate admission rolls the speculative batch back, then runs the valid prefix sequentially.
+                        if (rejectDuplicate) orders.add(orders.getFirst());
                         var response = CoreTestCompletion.applyAsynchronously(core, message(core, CoreMessageType.PLACE_ORDER_BATCH,
                                 user, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders))));
                         assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                         var items = TradingOrderBatchCodec.decodeResult(response.data()).items();
-                        assertThat(items).hasSize(2).allSatisfy(item -> {
+                        assertThat(items).hasSize(rejectDuplicate ? 3 : 2);
+                        if (rejectDuplicate) assertThat(items.getLast().status()).isEqualTo(ResponseStatus.REJECTED);
+                        assertThat(items.subList(0, 2)).allSatisfy(item -> {
                             assertThat(item.status()).isEqualTo(ResponseStatus.APPLIED);
                             assertThat(item.executions()).hasSize(user == 8 ? 1 : 0);
                         });

@@ -168,10 +168,12 @@ public final class LaneCommitDelta {
         reservations.clear();
         positions.clear();
         liquidations.clear();
-        riskSnapshots.drainTo((key, value) -> {
-            if (value == null) state.riskPositionIdentities.remove(key);
+        for (int index = 0; index < riskSnapshots.size(); index++) {
+            long key = riskSnapshots.keyAt(index);
+            if (riskSnapshots.valueAt(index) == null) state.riskPositionIdentities.remove(key);
             else state.riskPositionIdentities.add(key);
-        });
+        }
+        riskSnapshots.clear();
         if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
         if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
     }

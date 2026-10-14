@@ -26,6 +26,8 @@ import org.openjdk.jmh.infra.IterationParams;
  * while the rolling window retains live entries; this is not a repeated-key map benchmark.
  * Admissions borrow the existing immutable Treasury status. FIXED keeps normal pipeline
  * admission; PROPORTIONAL exercises ordered Ledger OI input and sequential batch prefixes.
+ * Sequential batches exercise frozen Matcher inputs and one captured context per symbol.
+ * symbols=2 interleaves the two books inside a batch; teardown checks each position.
  * Aeron transport and Archive are excluded.
  */
 @State(Scope.Thread) @BenchmarkMode(Mode.Throughput) @OutputTimeUnit(TimeUnit.SECONDS)
@@ -53,10 +55,12 @@ public class InProcessTradingAllocationBenchmark {
     private Interval interval;
 
     @Param({"FIXED", "PROPORTIONAL"}) public String oiLimitMode;
+    @Param({"1"}) public int symbols;
 
     @Setup public void setup() {
         if (!streamMode.equals("OPEN_ONLY") && !streamMode.equals("REVERSE"))
             throw new IllegalArgumentException("streamMode must be OPEN_ONLY or REVERSE");
+        if (symbols != 1 && symbols != 2) throw new IllegalArgumentException("symbols must be 1 or 2");
         var cluster = (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(), new Class<?>[]{Cluster.class},
                 (proxy, method, args) -> switch (method.getName()) {
                     case "role" -> Cluster.Role.LEADER;
@@ -73,22 +77,26 @@ public class InProcessTradingAllocationBenchmark {
         owner.start(cluster, null);
         if (!oiLimitMode.equals("FIXED") && !oiLimitMode.equals("PROPORTIONAL"))
             throw new IllegalArgumentException("invalid OI input mode");
-        var instrument = oiLimitMode.equals("FIXED")
-                ? new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
-                        1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)
-                : new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
-                        1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0, 10_000_000,
-                        Long.MAX_VALUE, 1_000_000, Long.MAX_VALUE / 2,
-                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000)));
-        control(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(instrument));
-        control(CoreMessageType.APPLY_MARK_PRICE, 0,
-                TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
+        for (int symbol = 0; symbol < symbols; symbol++) {
+            String instrumentId = Integer.toString(symbol + 1);
+            var instrument = oiLimitMode.equals("FIXED")
+                    ? new RegisterInstrumentCommand(instrumentId, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                            1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)
+                    : new RegisterInstrumentCommand(instrumentId, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                            1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0, 10_000_000,
+                            Long.MAX_VALUE, 1_000_000, Long.MAX_VALUE / 2,
+                            java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000)));
+            control(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(instrument));
+            control(CoreMessageType.APPLY_MARK_PRICE, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId, 100, 1, TIME)));
+        }
         for (long user : new long[]{7, 8}) control(CoreMessageType.ADJUST_BALANCE, user,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", INITIAL_BALANCE)));
         for (int direction = 0; direction < 2; direction++) for (int index = 0; index < WINDOW; index++) {
             boolean sell = ((index & 1) ^ (streamMode.equals("REVERSE") ? direction : 0)) == 0;
             var orders = new ArrayList<PlaceOrderCommand>(batchSize);
-            for (int item = 0; item < batchSize; item++) orders.add(new PlaceOrderCommand(item + 1, "1",
+            for (int item = 0; item < batchSize; item++) orders.add(new PlaceOrderCommand(item + 1,
+                    Integer.toString((((index >>> 1) * batchSize) + item) % symbols + 1),
                     sell ? CoreOrderSide.SELL : CoreOrderSide.BUY, 100, 1, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                     false, "0000000000000000"));
@@ -124,6 +132,7 @@ public class InProcessTradingAllocationBenchmark {
         interval = new Interval(); interval.phase = params.getType().name(); interval.batchSize = batchSize;
         interval.streamMode = streamMode;
         interval.oiLimitMode = oiLimitMode;
+        interval.symbols = symbols;
         interval.startedMessages = session.tradingMessages;
         interval.startedAtEpochMillis = System.currentTimeMillis();
         interval.begin();
@@ -175,7 +184,7 @@ public class InProcessTradingAllocationBenchmark {
         System.out.println("pipelineInterval phase=" + interval.phase + " batchSize=" + batchSize
                 + " startEpochMillis=" + interval.startedAtEpochMillis + " endEpochMillis=" + interval.finishedAtEpochMillis
                 + " terminalMessages=" + interval.terminalMessages + " terminalBusinessOperations=" + interval.terminalBusinessOperations
-                + " streamMode=" + streamMode + " oiLimitMode=" + oiLimitMode);
+                + " streamMode=" + streamMode + " oiLimitMode=" + oiLimitMode + " symbols=" + symbols);
     }
 
     @TearDown public void close() {
@@ -191,6 +200,11 @@ public class InProcessTradingAllocationBenchmark {
                     quantity = Math.addExact(quantity, position.signedQuantitySteps());
                 }
                 long expectedQuantity = streamMode.equals("REVERSE") ? 0 : submitted * batchSize / 2 * (user == 7 ? -1 : 1);
+                if (!streamMode.equals("REVERSE") && state.positions().size() != symbols)
+                    throw new IllegalStateException("missing symbol position");
+                for (var position : state.positions())
+                    if (position.signedQuantitySteps() != expectedQuantity / symbols)
+                        throw new IllegalStateException("per-symbol terminal quantity differs");
                 if (units != INITIAL_BALANCE || quantity != expectedQuantity || !state.reservations().isEmpty())
                     throw new IllegalStateException("terminal account/funds differ user=" + user + " units=" + units
                             + " quantity=" + quantity + " expectedQuantity=" + expectedQuantity + " reservations=" + state.reservations());
@@ -246,6 +260,7 @@ public class InProcessTradingAllocationBenchmark {
         public String streamMode;
         public String oiLimitMode;
         public int batchSize;
+        public int symbols;
         public long startedMessages, terminalMessages, terminalBusinessOperations;
         public long startedAtEpochMillis, finishedAtEpochMillis;
     }
