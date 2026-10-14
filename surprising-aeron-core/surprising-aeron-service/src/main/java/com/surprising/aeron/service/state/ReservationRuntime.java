@@ -16,6 +16,7 @@ public final class ReservationRuntime {
     private boolean mutable;
     /** Only the resident reservation of a recycled authoritative order may be reset. */
     private boolean orderSlot;
+    private boolean publicationSlot;
 
     public ReservationRuntime(long orderId, long userId, int symbolId, ReservationKind kind,
                               int assetId, long totalReservedUnits,
@@ -73,6 +74,29 @@ public final class ReservationRuntime {
                 totalReservedUnits, releasedUnits, consumedUnits, orderQuantitySteps);
         copy.mutable = false;
         return copy;
+    }
+
+    /** Only the physical change buffer owns and reuses this frozen value. */
+    ReservationRuntime copyIntoPublicationSlot(ReservationRuntime target) {
+        if (target == null) {
+            target = snapshot();
+            target.publicationSlot = true;
+            return target;
+        }
+        if (!target.publicationSlot || target.mutable || target.orderSlot)
+            throw new IllegalArgumentException("reservation copy target is not a publication slot");
+        target.orderId = orderId; target.userId = userId; target.symbolId = symbolId;
+        target.kind = kind; target.assetId = assetId; target.totalReservedUnits = totalReservedUnits;
+        target.releasedUnits = releasedUnits; target.consumedUnits = consumedUnits;
+        target.orderQuantitySteps = orderQuantitySteps;
+        return target;
+    }
+
+    void clearPublicationSlot() {
+        if (!publicationSlot || mutable || orderSlot)
+            throw new IllegalStateException("reservation is not a publication slot");
+        orderId = userId = 0;
+        kind = null;
     }
 
     ReservationRuntime laneValue() {

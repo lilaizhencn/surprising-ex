@@ -44,6 +44,14 @@ final class LaneLongCaptures<V> {
         size++;
     }
 
+    /** Freeze an already captured mutable reference without replacing its logical before-value. */
+    void replaceReference(long key, V expected, V frozen) {
+        int slot = indexOf(key);
+        if (slot < 0 || values[slot] != expected)
+            throw new IllegalStateException("captured reference changed before freezing");
+        values[slot] = frozen;
+    }
+
     long key(int index) {
         if (index < 0 || index >= size) throw new IndexOutOfBoundsException(index);
         return keys[index];

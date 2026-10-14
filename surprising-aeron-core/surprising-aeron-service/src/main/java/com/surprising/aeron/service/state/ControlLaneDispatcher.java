@@ -148,6 +148,7 @@ final class ControlLaneDispatcher {
             catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
                 rejection = failure;
             } finally {
+                owner.laneDeltas[laneId].freezeControlValues();
                 executing = false;
                 operation = null;
             }

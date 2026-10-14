@@ -109,7 +109,7 @@ class TradingRuntimeStateTest {
                 var first = state.dispatchLaneMutation(1, java.util.List.of(7L, second),
                         java.util.List.of(11L, 12L), 100, 200);
                 awaitMetadataCommit(state, first);
-                assertThat(maps[topology.accountLaneId(7)].inspect(11)).isNotSameAs(original);
+                assertThat(maps[topology.accountLaneId(7)].inspect(11)).isSameAs(original);
                 assertThat(state.ownerLaneAccess).isFalse();
                 state.releaseLaneCommit(first);
                 assertThat(maps[topology.accountLaneId(7)].inspect(11).updatedAtEpochMillis()).isEqualTo(100);

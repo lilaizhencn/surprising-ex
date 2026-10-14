@@ -123,6 +123,7 @@ public class InProcessTradingAllocationBenchmark {
     @Setup(Level.Iteration) public void beginInterval(IterationParams params) {
         interval = new Interval(); interval.phase = params.getType().name(); interval.batchSize = batchSize;
         interval.streamMode = streamMode;
+        interval.oiLimitMode = oiLimitMode;
         interval.startedMessages = session.tradingMessages;
         interval.startedAtEpochMillis = System.currentTimeMillis();
         interval.begin();
@@ -173,7 +174,8 @@ public class InProcessTradingAllocationBenchmark {
         // One marker per iteration, outside the trading loop, joins GCProfiler runs to host samples.
         System.out.println("pipelineInterval phase=" + interval.phase + " batchSize=" + batchSize
                 + " startEpochMillis=" + interval.startedAtEpochMillis + " endEpochMillis=" + interval.finishedAtEpochMillis
-                + " terminalMessages=" + interval.terminalMessages + " terminalBusinessOperations=" + interval.terminalBusinessOperations);
+                + " terminalMessages=" + interval.terminalMessages + " terminalBusinessOperations=" + interval.terminalBusinessOperations
+                + " streamMode=" + streamMode + " oiLimitMode=" + oiLimitMode);
     }
 
     @TearDown public void close() {
@@ -242,6 +244,7 @@ public class InProcessTradingAllocationBenchmark {
     static final class Interval extends Event {
         public String phase;
         public String streamMode;
+        public String oiLimitMode;
         public int batchSize;
         public long startedMessages, terminalMessages, terminalBusinessOperations;
         public long startedAtEpochMillis, finishedAtEpochMillis;

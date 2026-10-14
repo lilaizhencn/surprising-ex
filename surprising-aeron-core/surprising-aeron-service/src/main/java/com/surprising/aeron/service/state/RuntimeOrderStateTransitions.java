@@ -48,15 +48,8 @@ public final class RuntimeOrderStateTransitions {
             throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
                     "available balance is insufficient");
         }
-        OrderRuntime order = new OrderRuntime(command.orderId(), runtime.productLine(), userId, symbolId,
-                command.instrument(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
-                command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
-                command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(),
-                command.clientOrderId(), commandId, command.makerFeeRatePpm(), command.takerFeeRatePpm(),
-                0, 0, 0, 0, CoreOrderStatus.OPEN, 1);
-        ReservationRuntime reservation = new ReservationRuntime(command.orderId(), userId, symbolId,
-                command.reservationKind(), assetId, requiredReservation,
-                0, 0, command.quantitySteps());
+        OrderRuntime order = runtime.prepareControlOrder(userId, command, commandId, symbolId);
+        ReservationRuntime reservation = order.prepareReservation(command.reservationKind(), assetId, requiredReservation);
         runtime.reserveOrder(order, reservation, clientKey);
         runtime.putUser(new UserRuntime(runtime.productLine(), userId,
                 Math.incrementExact(user.revision()), user.positionMode()));
@@ -79,7 +72,9 @@ public final class RuntimeOrderStateTransitions {
         lane.markPendingReservation(command.orderId(), coreSequence);
         OrderRuntime receipt = runtime.laneDelta(lane.laneId()).orders.get(command.orderId());
         if (receipt == null) throw new IllegalStateException("trigger admission receipt is missing");
-        return receipt;
+        // Each queued trigger owns this input through Matcher admission; a later trigger
+        // may reuse the control worker and its output buffers before that admission starts.
+        return receipt.copyIntoCommandSlot(null);
     }
 
     public static void reserveBatchOrderInLane(TradingRuntimeState runtime, long userId,

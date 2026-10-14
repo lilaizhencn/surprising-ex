@@ -18,6 +18,8 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
     private int assetId;
     private long preparedClientKey;
     private OrderRuntime admittedOrder;
+    /** This continuation's input lease outlives any physical Lane-output buffer swap/clear. */
+    private OrderRuntime admissionCopy;
     private List<Long> closeCapacityCancellations = List.of();
     private volatile boolean completed = true;
     private volatile boolean inputReady = true;
@@ -92,10 +94,9 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
             }
             RuntimeOrderStateTransitions.reserveBatchOrderInLane(runtime, userId, this, commandId,
                     required, clientKey, assetId, sequence);
-            // reserveOrder already published the immutable admission value. Retain
-            // that receipt, never the mutable order being settled by this Lane.
-            admittedOrder = runtime.laneDelta(laneId).orders.get(orderId());
-            if (admittedOrder == null) throw new IllegalStateException("batch admission order is missing");
+            OrderRuntime admitted = runtime.laneDelta(laneId).orders.get(orderId());
+            if (admitted == null) throw new IllegalStateException("batch admission order is missing");
+            admittedOrder = admissionCopy = admitted.copyIntoCommandSlot(admissionCopy);
             return null;
         } catch (RuntimeException | Error failure) {
             if (identity != 0) identities.rollbackClientKeyInLane(lane, userId, clientOrderId(), identity);
@@ -128,6 +129,7 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
         sequence = userId = openInterestSteps = preparedClientKey = 0;
         assetId = 0;
         admittedOrder = null;
+        if (admissionCopy != null) admissionCopy.clearCommandSlot();
         closeCapacityCancellations = List.of();
         inputReady = true;
         inputQueued = accountDispatched = false;

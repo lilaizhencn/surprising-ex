@@ -35,15 +35,23 @@ final class OwnerIndexedChanges<V, I> {
     }
 
     void put(long key, V value) {
-        consolidate();
+        // value may be borrowed from one of the retained Lane buffers. Freeze it in
+        // direct before releasing that source; the old Lane row must not overwrite it.
         direct.put(key, value);
+        consolidateExcept(key);
     }
 
-    private void consolidate() {
+    private void consolidateExcept(long replacementKey) {
         long remaining = laneMask;
         while (remaining != 0) {
             int lane = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
-            lanes[lane].drainIndexedTo(direct::putIndexed);
+            var source = lanes[lane];
+            for (int slot = 0; slot < source.size(); slot++) {
+                long key = source.keyAt(slot);
+                if (key != replacementKey)
+                    direct.putIndexed(key, source.valueAt(slot), source.hasPreparedAt(slot), source.preparedAt(slot));
+            }
+            source.clear();
         }
         laneMask = 0;
     }

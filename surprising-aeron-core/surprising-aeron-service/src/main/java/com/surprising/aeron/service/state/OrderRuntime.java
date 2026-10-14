@@ -240,6 +240,20 @@ public final class OrderRuntime {
             target.commandSlotValue = true;
         }
         if (!target.commandSlotValue) throw new IllegalArgumentException("order copy target is not a command slot");
+        copyStateTo(target);
+        target.mutable = false;
+        return target;
+    }
+
+    /** Restore a frozen control before-value into its original Lane authority, preserving the pool lease. */
+    void restoreCapturedValue(OrderRuntime before) {
+        if (!mutable || commandSlotValue || before == null || before.mutable || before.commandSlotValue
+                || orderId != before.orderId)
+            throw new IllegalStateException("invalid authoritative order restoration");
+        before.copyStateTo(this);
+    }
+
+    private void copyStateTo(OrderRuntime target) {
         target.orderId = orderId;
         target.productLine = productLine;
         target.userId = userId;
@@ -269,8 +283,6 @@ public final class OrderRuntime {
         target.clusterPosition = clusterPosition;
         target.status = status;
         target.revision = revision;
-        target.mutable = false;
-        return target;
     }
 
     /** Release request-specific references; the slot object remains allocated for its next command. */

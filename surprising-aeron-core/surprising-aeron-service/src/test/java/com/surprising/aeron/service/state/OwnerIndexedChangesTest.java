@@ -5,6 +5,24 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 
 class OwnerIndexedChangesTest {
+    @Test void directUpdateFreezesABorrowedLaneCellBeforeItsSourceIsReleased() {
+        var owner = new OwnerIndexedChanges<OrderRuntime, Void>(new RuntimeOrderChangeBuffer());
+        var lane = new RuntimeOrderChangeBuffer();
+        lane.put(11, CoreStateTestFixtures.order(11, 7, 0, 2));
+        lane.put(12, CoreStateTestFixtures.order(12, 8, 0, 3));
+        owner.adopt(0, lane);
+        OrderRuntime borrowed = owner.get(11);
+        owner.put(11, borrowed);
+        assertThat(owner.get(11).orderId()).isEqualTo(11);
+        assertThat(owner.get(11).quantitySteps()).isEqualTo(2);
+        assertThat(owner.get(12).orderId()).isEqualTo(12);
+        assertThat(owner.get(12).quantitySteps()).isEqualTo(3);
+        assertThat(owner.get(11)).isNotSameAs(borrowed);
+        owner.put(11, null);
+        assertThat(owner.get(11)).isNull();
+        assertThat(owner.get(12).quantitySteps()).isEqualTo(3);
+    }
+
     @Test void laneStorageMovesWithoutCopyAndCanBeReusedBeforeOwnerPublication() throws Exception {
         var owner = new OwnerIndexedChanges<String, String>();
         var first = new RuntimeIndexedChangeBuffer<String, String>();

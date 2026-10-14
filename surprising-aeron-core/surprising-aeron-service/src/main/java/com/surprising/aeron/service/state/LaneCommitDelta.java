@@ -59,6 +59,7 @@ public final class LaneCommitDelta {
             });
         }
         orders.freezeValues();
+        reservations.freezeValues();
         publicationPrepared = true;
     }
 
@@ -77,7 +78,7 @@ public final class LaneCommitDelta {
     /** 本次需要发布的订单变化。 */
     final RuntimeOrderChangeBuffer orders = new RuntimeOrderChangeBuffer();
     /** 本次需要发布的预留变化。 */
-    final RuntimeChangeBuffer<ReservationRuntime> reservations = new RuntimeChangeBuffer<>();
+    final RuntimeReservationChangeBuffer reservations = new RuntimeReservationChangeBuffer();
     /** 本次需要发布的持仓变化。 */
     final RuntimePositionChangeBuffer positions = new RuntimePositionChangeBuffer();
     /** 本次需要发布的清算变化。 */
@@ -112,8 +113,11 @@ public final class LaneCommitDelta {
     }
 
     void putReservation(long key, ReservationRuntime value) {
-        reservations.put(key, value);
+        reservations.putLive(key, value);
     }
+
+    /** The Account worker freezes its output before publishing the control completion bit. */
+    void freezeControlValues() { orders.freezeValues(); reservations.freezeValues(); }
 
     void putPosition(long key, PositionRuntime value) {
         positions.put(key, value);

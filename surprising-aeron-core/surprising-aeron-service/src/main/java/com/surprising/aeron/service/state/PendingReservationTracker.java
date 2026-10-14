@@ -135,7 +135,9 @@ final class PendingReservationTracker {
         if (pendingReservationUsers.containsKey(orderId))
             throw new IllegalStateException("control reservation receipt was collected twice");
         indexPendingReservation(userId, orderId, coreSequence, Math.incrementExact(totalPendingReservations));
-        owner.changedOrder(orderId, order);
+        // pollControlLanes already adopted the frozen order buffer. Registering this
+        // identity must not copy the same order into a second Owner buffer.
+        owner.changedOrder(orderId);
         owner.changedReservations.add(orderId);
         owner.changedUsers.add(userId);
         owner.markBalancesChanged();

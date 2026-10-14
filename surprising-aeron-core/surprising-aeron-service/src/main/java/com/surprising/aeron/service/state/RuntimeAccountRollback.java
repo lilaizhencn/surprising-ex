@@ -92,8 +92,13 @@ final class RuntimeAccountRollback {
         LaneLongCaptures<PatchOrderBefore> orders = patchOrdersBeforeByLane[laneId];
         for (int index = 0; index < orders.size(); index++) {
             lane.removeOrder(orders.key(index));
-            OrderRuntime before = orders.value(index).value();
-            if (before != null) lane.putOrder(before);
+            PatchOrderBefore captured = orders.value(index);
+            OrderRuntime before = captured.value();
+            if (before != null) {
+                OrderRuntime authority = captured.authority();
+                if (authority != before) authority.restoreCapturedValue(before);
+                lane.putOrder(authority);
+            }
         }
         LaneLongCaptures<PatchReservationBefore> reservations = patchReservationsBeforeByLane[laneId];
         for (int index = 0; index < reservations.size(); index++) {
@@ -243,6 +248,17 @@ final class RuntimeAccountRollback {
         }
     }
 
+    /** Metadata updates retain the live order slot; preserve an existing pre-command value first. */
+    void captureOrderMetadataBefore(OrderRuntime order) {
+        var captured = patchOrdersBeforeByLane[state.topology.accountLaneId(order.userId())];
+        var before = captured.get(order.orderId());
+        if (!captured.containsKey(order.orderId()))
+            captured.put(order.orderId(), new PatchOrderBefore(order.snapshot(),
+                    state.pendingReservations.pendingReservation(order.orderId(), order.userId()), order));
+        else if (before != null && before.value() == order)
+            captured.replaceReference(order.orderId(), before, new PatchOrderBefore(order.snapshot(), before.pending(), before.authority()));
+    }
+
     void captureReservationBefore(long orderId) {
         captureReservationBefore(orderId, 0);
     }
@@ -365,6 +381,8 @@ final class RuntimeAccountRollback {
         return captured == null ? state.order(orderId) : captured.value();
     }
 
-    record PatchOrderBefore(OrderRuntime value, boolean pending) {}
+    record PatchOrderBefore(OrderRuntime value, boolean pending, OrderRuntime authority) {
+        PatchOrderBefore(OrderRuntime value, boolean pending) { this(value, pending, value); }
+    }
     record PatchReservationBefore(ReservationRuntime value, boolean pending) {}
 }

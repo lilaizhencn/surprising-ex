@@ -29,7 +29,8 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
     // The affected Lanes resolve these identities in their own tables. The Owner never reads
     // an account table to discover the order's Lane at this final commit boundary.
     private LongArrayList metadataOrderIds;
-    private OrderRuntime[][] stampedOrders;
+    /** Physical output buffers are frozen on Lane and swapped to Owner only after completion. */
+    private RuntimeOrderChangeBuffer[] metadataOrders;
     private long metadataTimestamp, metadataPosition;
 
     private LongArrayList[] triggerCancelIds;
@@ -79,7 +80,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
             if (orderId == null) continue;
             if (metadataOrderIds == null) {
                 metadataOrderIds = new LongArrayList(4);
-                stampedOrders = new OrderRuntime[usersByLane.length][];
+                metadataOrders = new RuntimeOrderChangeBuffer[usersByLane.length];
             }
             metadataOrderIds.add(orderId);
         }
@@ -89,8 +90,8 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
             int count = metadataOrderIds.size();
-            if (stampedOrders[laneId] == null || stampedOrders[laneId].length < count)
-                stampedOrders[laneId] = new OrderRuntime[Math.max(4, count)];
+            if (metadataOrders[laneId] == null) metadataOrders[laneId] = new RuntimeOrderChangeBuffer();
+            metadataOrders[laneId].ensureCapacity(count);
         }
     }
 
@@ -107,10 +108,10 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
                 if (order.updatedAtEpochMillis() == metadataTimestamp && order.clusterPosition() == metadataPosition)
                     continue;
                 runtime.accountRollback.captureUserBefore(order.userId());
-                runtime.accountRollback.captureOrderBefore(id);
-                OrderRuntime stamped = order.withCommitMetadata(metadataTimestamp, metadataPosition);
-                lane.putOrder(stamped);
-                stampedOrders[laneId][index] = stamped;
+                runtime.accountRollback.captureOrderMetadataBefore(order);
+                order.applyCommitMetadataInPlace(metadataTimestamp, metadataPosition);
+                metadataOrders[laneId].put(id, order);
+                if (!usersByLane[laneId].contains(order.userId())) usersByLane[laneId].add(order.userId());
             }
         } finally { runtime.exitLaneCommandScope(lane); }
     }
@@ -133,12 +134,9 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         while (lanes != 0) {
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
-            for (int index = 0; index < metadataOrderIds.size(); index++) {
-                OrderRuntime order = stampedOrders[laneId][index];
-                if (order == null) continue;
-                runtime.changedOrder(order.orderId(), order);
-                runtime.changedUsers.add(order.userId());
-            }
+            if (metadataOrders[laneId].isEmpty()) continue;
+            runtime.changedOrders.adopt(laneId, metadataOrders[laneId]);
+            usersByLane[laneId].forEach(runtime.changedUsers::add);
         }
     }
 
@@ -265,9 +263,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
             while (metadataLanes != 0) {
                 int laneId = Long.numberOfTrailingZeros(metadataLanes);
                 metadataLanes &= metadataLanes - 1;
-                if (stampedOrders[laneId] != null)
-                    java.util.Arrays.fill(stampedOrders[laneId], 0,
-                            Math.min(metadataOrderIds.size(), stampedOrders[laneId].length), null);
+                if (metadataOrders[laneId] != null) metadataOrders[laneId].clear();
             }
             metadataOrderIds.clear();
         }

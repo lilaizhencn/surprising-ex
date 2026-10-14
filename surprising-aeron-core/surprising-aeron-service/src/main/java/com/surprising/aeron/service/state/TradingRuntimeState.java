@@ -986,9 +986,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     void publishReservation(long orderId, ReservationRuntime value) {
         AccountLaneState scoped = currentLaneCommandScope();
         if (scoped != null) {
-            MatcherSettlementChanges changes = currentMatcherSettlementChangesScope();
-            laneDelta(scoped.laneId()).putReservation(orderId,
-                    value == null || changes == null ? value == null ? null : value.publicationValue() : value);
+            laneDelta(scoped.laneId()).putReservation(orderId, value);
         }
     }
 
@@ -4305,7 +4303,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void changedOrder(long orderId, OrderRuntime order) {
         AccountLaneState lane = currentLaneCommandScope();
-        if (lane == null) changedOrders.put(orderId, order == null ? null : order.publicationValue());
+        if (lane == null) changedOrders.put(orderId, order);
         else laneDelta(lane.laneId()).putOrder(orderId, order);
     }
 
@@ -4750,10 +4748,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    /**
-     * Lane-owned provisional PLACE mutation. Admission is not externally visible until the owner
-     * collects the event, so it deliberately creates no checkpoint, changed-key or commit-patch state.
-     */
+    /** Cold construction also supplies detached benchmark values; live admission uses the Lane pool. */
     static OrderRuntime preparedOrder(com.surprising.product.api.ProductLine productLine,
             long userId, ResolvedPlaceOrder command, java.util.UUID commandId, int symbolId,
             long timestamp, long position) {
@@ -4765,6 +4760,16 @@ public final class TradingRuntimeState implements AutoCloseable {
                 0, timestamp, timestamp, position, CoreOrderStatus.OPEN, 1);
     }
 
+    /** Control admission shares the same retirement fence as ordinary Lane admission. */
+    OrderRuntime prepareControlOrder(long userId, ResolvedPlaceOrder command, java.util.UUID commandId, int symbolId) {
+        if (!accountLanesStarted) return preparedOrder(productLine, userId, command, commandId, symbolId, 0, 0);
+        AccountLaneState lane = currentLaneCommandScope();
+        if (lane == null || lane.laneId() != topology.accountLaneId(userId))
+            throw new IllegalStateException("active order creation requires its Account Lane");
+        return lane.preparedOrder(productLine, userId, command, commandId, symbolId, 0, 0, retiredOwnerSequence);
+    }
+
+    /** Provisional ordinary PLACE does not capture control rollback images. */
     void placeOrderInLane(AccountLaneState lane, long userId, ResolvedPlaceOrder command,
             java.util.UUID commandId, long requiredReservation, long clientKey,
             int symbolId, int assetId, long coreSequence, OrderRuntime prepared, long timestamp, long position) {

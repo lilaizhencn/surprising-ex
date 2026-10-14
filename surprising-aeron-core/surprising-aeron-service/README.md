@@ -218,3 +218,14 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 资金费与生命周期在已有continuation内从Ledger选用户页；风险账户任务只携带本片预算加1的primitive用户ID页，不能再读取全局索引。内部Core的OI与维护分页由Ledger编码，风险/ADL由Ledger选路、Account Lane读取并编码；外部Redis投影路径未改动。风险查询仅在明确的查询入口冻结市场配置版本，交易热路径不做该复制。110个必要用例及已修正失败见 [Ledger索引所有权验证](../../docs/validation/ledger-position-index-ownership-20261015.json)。
 
 这完成的是三项业务索引的所有权边界。Owner仍有业务收据遍历、部分控制编排和输出编码要继续迁移；完整Core百字节分配及真实单节点验收仍未完成。数值分配诊断只保留本地，本轮不做Cluster快照/恢复、wallet或真实单节点压测。
+
+
+### 顺序批量订单、预约输出与提交元数据复用（2026-10-15）
+
+`RuntimeOrderStateTransitions.placePrepared` 在活跃账户线程上使用该Lane已有订单池及订单自带的预约，沿用响应退休序号；冷初始化仍创建独立权威值。`ControlLaneDispatcher` 在发布完成标记前，把订单及预约输出冻结到物理缓冲自己的槽。新增 `RuntimeReservationChangeBuffer` 只承担这一跨线程输出生命周期，清空后保留容量，不形成第二份账户表。
+
+`BatchPlaceReservation` 保留自己的准入输入槽，不能借用随后可能被Owner接管并清空的Lane输出。触发队列的子单输入也保持独立生命周期，目前仍需独立复制。`PendingReservationTracker` 仅登记已接管输出的身份，Owner不再额外做一次订单快照；直接写入已借出的变更值时，先冻结输入，再释放来源缓冲。
+
+`LaneCommitEvent` 在实际Lane上原位填写权威订单的提交元数据，冻结事件输出后按缓冲交接，保留权威订单及其预约的池身份。若命令修改已有订单，先保存回滚前值，拒绝时恢复到同一权威对象；不能用冻结副本替换仍带预约和退休租约的对象。Owner不再为该事件逐订单创建元数据副本。
+
+必要功能验证、缓冲生命周期缺陷的修正以及误选旧矩阵测试的失败记录见 [顺序订单槽验证](../../docs/validation/sequential-order-slot-reuse-20261015.json)。本模块没有完成全部Owner收据/控制/编码迁移，也不代表所有路径零分配或完整Core小于100 B/业务项；分配诊断留在本地，未做真实单节点压测。最终必要用例排除了Cluster快照/恢复及wallet；此前误选含快照方法的旧测试类不计入最终验收。
