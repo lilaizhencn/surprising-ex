@@ -211,11 +211,13 @@ public final class LaneCommitDelta {
             com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedUsers,
             com.surprising.aeron.service.command.support.PrimitiveLongChangeSet changedOrders) {
         // 单写者架构：零 Map 复制与搬运，仅收集变更集合用于下游输出
-        users.drainTo((id, value) -> {
+        for (int index = 0; index < users.size(); index++) {
+            long id = users.keyAt(index);
             if (changedUsers != null) changedUsers.add(id);
             state.changedUsers.add(id);
-            state.captureUserMetadata(value);
-        });
+            state.captureUserMetadata(users.valueAt(index));
+        }
+        users.clear();
         for (int index = 0; index < orders.size(); index++) {
             long id = orders.keyAt(index);
             if (changedOrders != null) changedOrders.add(id);
@@ -253,8 +255,8 @@ public final class LaneCommitDelta {
             state.revision = Math.addExact(state.revision, closedTriggerCount);
             closedTriggerCount = 0;
         }
-        users.forEach((userId, ignored) -> state.changedUsers.add(userId));
-        reservations.forEach((orderId, ignored) -> state.changedReservations.add(orderId));
+        for (int index = 0; index < users.size(); index++) state.changedUsers.add(users.keyAt(index));
+        for (int index = 0; index < reservations.size(); index++) state.changedReservations.add(reservations.keyAt(index));
         state.changedOrders.adopt(laneId, orders);
         state.changedPositions.adopt(laneId, positions);
         for (int index = 0; index < liquidations.size(); index++)

@@ -54,8 +54,10 @@ public final class RuntimeFundsAccumulator {
     }
 
     public void add(RuntimeFundsDelta delta) {
-        if (delta == null) return;
-        for (RuntimeFundsDelta.Posting posting : delta.postings()) {
+        if (delta == null || delta.postingCount() == 0) return;
+        var postings = delta.postings();
+        for (int index = 0; index < postings.size(); index++) {
+            RuntimeFundsDelta.Posting posting = postings.get(index);
             add(posting.assetId(), posting.ownerKind(), posting.ownerId(), posting.subledger(), posting.units());
         }
     }

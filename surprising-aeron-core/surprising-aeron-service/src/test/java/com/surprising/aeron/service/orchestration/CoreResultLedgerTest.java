@@ -22,6 +22,42 @@ import org.junit.jupiter.api.Test;
 class CoreResultLedgerTest {
 
     @Test
+    void borrowedFingerprintsOutliveDecoderReuseAndExposedValuesOutliveLedgerRecordReuse() {
+        var ledger = new CommandResultLedger(new LinkedHashMap<>());
+        var calculator = new com.surprising.aeron.protocol.CommandFingerprint.Calculator();
+        var decoder = new com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder();
+        var expected = new LinkedHashMap<UUID, com.surprising.aeron.protocol.CommandFingerprint>();
+        com.surprising.aeron.protocol.CommandFingerprint firstExposed = null;
+        com.surprising.aeron.protocol.CommandFingerprint firstExpected = null;
+        for (int sequence = 1; sequence <= 2048; sequence++) {
+            UUID id = new UUID(18, sequence);
+            var owned = probe(id, sequence, sequence);
+            byte[] frame = com.surprising.aeron.protocol.CoreMessageCodec.encode(owned);
+            var input = decoder.decodeBorrowed(new org.agrona.concurrent.UnsafeBuffer(frame), 0, frame.length);
+            var fingerprint = calculator.ofBorrowed(input);
+            var stable = calculator.of(owned);
+            ledger.storeOwnedResult(id, fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                    sequence, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+            if (sequence == 1) {
+                firstExposed = ledger.get(id).fingerprint();
+                firstExpected = stable;
+            }
+            input.releaseDecoderSlot();
+            expected.put(id, stable);
+            if (expected.size() > TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS)
+                expected.remove(expected.keySet().iterator().next());
+            for (var entry : expected.entrySet())
+                assertThat(ledger.get(entry.getKey()).fingerprint()).isEqualTo(entry.getValue());
+            assertThat(ledger.duplicateResponse(ledger.get(id), owned, stable, sequence).status())
+                    .isEqualTo(ResponseStatus.DUPLICATE);
+            var changed = new CoreMessage(owned.header(), CoreProtocol.probePayload(sequence + 1));
+            assertThat(ledger.duplicateResponse(ledger.get(id), changed, calculator.of(changed), sequence).resultCode())
+                    .isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
+        }
+        assertThat(firstExposed).isEqualTo(firstExpected);
+    }
+
+    @Test
     void sustainedTurnoverPreservesLookupRetentionAndRestoreOrder() {
         var ledger = new CommandResultLedger(new LinkedHashMap<>());
         var expected = new LinkedHashMap<UUID, long[]>();

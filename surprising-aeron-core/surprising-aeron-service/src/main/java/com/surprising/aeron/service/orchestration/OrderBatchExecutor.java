@@ -131,8 +131,7 @@ final class OrderBatchExecutor {
                 ? activateOrderBatch(batch, pending, false) : null;
         if (completed != null) return completed;
         owner.runtimeState.releaseOwnerLaneAccess();
-        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
-                owner.appliedCommandCount, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+        return message.matchingPendingResponse(TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount);
     }
 
     CoreResponse activateOrderBatch(OrderBatchPending batch, CommandSlot pending,

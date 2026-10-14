@@ -103,7 +103,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         // Cluster 时间和日志位置；只有业务命令才计算指纹，用于命令幂等/冲突识别。
         owner.enqueue(command, session == null ? null : egress.transportSession(session), timestamp,
                 header.position(), command.header().kind() == WireMessageKind.COMMAND
-                        ? fingerprints.of(command) : null);
+                        ? fingerprints.ofBorrowed(command) : null);
 
         // 立即尝试发送 Owner 已经准备好的响应；仍在异步处理中的命令稍后由后台轮询继续发送。
         owner.drainResponses();

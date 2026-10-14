@@ -248,7 +248,6 @@ final class MatchingCommandAdmission {
             owner.matchingFlow.refreshCommittedCoreSequence();
             owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
         }
-        byte[] responseData = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
         if (TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED) {
             owner.matchingPhaseMetrics.recordPrepare(System.nanoTime() - matchingStartNanos);
         }
@@ -259,8 +258,7 @@ final class MatchingCommandAdmission {
         // the Account Lane performs the funds reservation in parallel; the ordered commit head
         // collects the Lane admission only when both facts are ready.
         owner.matchingFlow.submitMatching(pending);
-        return CoreResponse.owned(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
-                sequence, responseData);
+        return message.matchingPendingResponse(TradingCoreRuntime.matchingPendingCode(), sequence);
     }
 
     CoreResponse deferMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
@@ -282,8 +280,7 @@ final class MatchingCommandAdmission {
         owner.appliedCommandCount = sequence;
         owner.matchingFlow.refreshCommittedCoreSequence();
         owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
-        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
-                sequence, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+        return message.matchingPendingResponse(TradingCoreRuntime.matchingPendingCode(), sequence);
     }
 
     CoreResponse recordRejectedDeferredMatching(CommandSlot pending, CoreResultCode resultCode) {

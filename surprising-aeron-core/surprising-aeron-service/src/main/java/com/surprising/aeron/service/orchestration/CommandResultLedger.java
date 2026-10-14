@@ -71,9 +71,10 @@ final class CommandResultLedger {
      * the primitive ledger leaves the Owner command path free of result-record
      * field plumbing.
      */
-    CoreResponse duplicateResponse(StoredResult duplicate, CommandFingerprint fingerprint,
+    CoreResponse duplicateResponse(StoredResult duplicate, com.surprising.aeron.protocol.CoreMessage message,
+                                   CommandFingerprint fingerprint,
                                    long appliedCommandCount) {
-        if (!duplicate.fingerprint().equals(fingerprint)) {
+        if (!duplicate.fingerprint.matchesCommittedCommand(message, fingerprint)) {
             return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                     CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount, EMPTY_RESPONSE_DATA);
         }
@@ -320,6 +321,8 @@ final class CommandResultLedger {
         private final int ringSlot;
         /** 不可变命令指纹，防止相同命令 ID 对应不同请求内容。 */
         private CommandFingerprint fingerprint;
+        /** The ledger outlives an ingress lease; reuse this record's own digest bytes. */
+        private CommandFingerprint fingerprintSlot;
         /** 该命令或业务项的执行状态。 */
         private ResponseStatus status;
         /** 该命令或业务项的确定性结果码。 */
@@ -383,7 +386,8 @@ final class CommandResultLedger {
                     && responseOffset > responseData.length - responseLength) {
                 throw new IllegalArgumentException("invalid stored result");
             }
-            this.fingerprint = fingerprint;
+            this.fingerprint = fingerprint.isSlotValue()
+                    ? (fingerprintSlot = fingerprint.copyIntoSlot(fingerprintSlot)) : fingerprint;
             this.status = status;
             this.resultCode = resultCode;
             this.appliedCommandCount = appliedCommandCount;
@@ -424,7 +428,7 @@ final class CommandResultLedger {
                     sequence, true);
         }
 
-        CommandFingerprint fingerprint() { return fingerprint; }
+        CommandFingerprint fingerprint() { return fingerprint.immutableValue(); }
         ResponseStatus status() { return status; }
         CoreResultCode resultCode() { return resultCode; }
         long appliedCommandCount() { return appliedCommandCount; }

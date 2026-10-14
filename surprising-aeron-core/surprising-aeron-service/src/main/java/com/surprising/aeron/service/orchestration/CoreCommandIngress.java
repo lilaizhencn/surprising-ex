@@ -252,9 +252,7 @@ final class CoreCommandIngress {
     private CoreResponse checkCommandReplay(CoreMessage message, CommandFingerprint fingerprint) {
         StoredResult terminalDuplicate = runtime.resultLedger.get(message.header().commandId());
         if (terminalDuplicate != null) {
-            CommandFingerprint stored = terminalDuplicate.fingerprint();
-            return runtime.resultLedger.duplicateResponse(terminalDuplicate,
-                    stored.matchesCommittedCommand(message, fingerprint) ? stored : fingerprint,
+            return runtime.resultLedger.duplicateResponse(terminalDuplicate, message, fingerprint,
                     runtime.appliedCommandCount);
         }
         CommandSlot pendingDuplicate = runtime.pendingMatching.findByCommandId(message.header().commandId());

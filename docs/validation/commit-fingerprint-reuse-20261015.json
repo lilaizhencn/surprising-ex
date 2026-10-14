@@ -1,0 +1,169 @@
+{
+  "date": "2026-10-15",
+  "type": "必要功能验证；不是数值压测记录或完整性能验收",
+  "base_head": "2cb87dbd2904e75f8e59e7755d40809df398baea",
+  "business_steps": [
+    "原Aeron回调显式调用Calculator.ofBorrowed，32字节SHA-256直接写本输入的常驻指纹；原Calculator.of继续返回独立不可变值",
+    "有序提交前，原StoredResult池中的记录把借入指纹复制进自己的常驻32字节单元；输入退休不清除结果账本摘要，对外fingerprint()仍返回独立值；普通重复比对直接用账本内部值，兼容划转v1/v2等价编码",
+    "输入内另有一个待撮合响应单元，供普通、延后和批量的内部等待元数据复用；与终态响应单元分开，同一租约不能改序号，最后Header/egress读者释放时一并清空",
+    "原OwnerIndexedChanges按direct、Lane号递增及原业务种类顺序访问已有primitive缓冲；保留删除标记和预计算持仓值，Ledger激活时仍跳过Owner持仓索引更新",
+    "清理风险身份再清理持仓身份，最后清缓冲；Lane用户收据直接循环接管，空资金流水不创建迭代器，非空流水顺序及守恒校验保留"
+  ],
+  "new_state_reason": [
+    "仅现有decoder槽及结果记录各保留32字节摘要单元；这是协议/幂等持久化边界的必要独立生命周期，不是账户或订单镜像",
+    "每个decoder另有一个空载待处理响应单元，避免它抢占终态响应；没有新业务Map、worker、队列或阶段",
+    "新增的三个私有访问方法直接遍历现有订单/持仓缓冲和释放身份，不引入通用执行框架"
+  ],
+  "functional_validation": {
+    "unique_cases": 130,
+    "rows": [
+      {
+        "class": "com.surprising.aeron.protocol.CommandFingerprintLeaseTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "final_log": "protocol-vector-final.log"
+      },
+      {
+        "class": "com.surprising.aeron.service.state.LedgerPositionPublicationTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.state.CommittedIndexVisitTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.state.OwnerIndexedChangesTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.state.RuntimeFundsAccumulatorTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.orchestration.CommandSlotTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.orchestration.CoreResultLedgerTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.orchestration.CoreCommandFingerprintTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.orchestration.CoreFundsIdempotencyTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.orchestration.CoreSelfTradePrefixTest",
+        "tests": 42,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.orchestration.CoreActiveLaneIngressTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest",
+        "tests": 24,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.orchestration.CoreRiskLaneQueryTest",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.orchestration.BorrowedHeaderEgressTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.orchestration.RealtimeTerminalEmissionTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "source": "functional-first.log",
+    "scope": "protocol canonical6products/lease,ledger turnover and conflict, funds-v1/v2 duplicate/eviction/non-self rejection, callback tombstones/field order/frozen sources, six-product trading/funds/risk/trigger/realtime/Ledger",
+    "final_followup": "protocol-final.log revalidates only owned-value read guard after review; ABI and other runtime code unchanged",
+    "excluded": "no Cluster snapshots/recovery,wallet,real-node pressure or whole-suite assertion",
+    "corrected_fixtures": [
+      "unit-first: old synchronous Probe test returnednull after asynchronous control; now existing production-completion pump and try-with-resources with all original conflict/count/source assertions retained",
+      "unit-second: new funds test used cold Owner pendingTransfer/user getters; replaced with actual Lane query and unchanged pending-command/balance assertions"
+    ],
+    "followup_detail": "129-case matrix passed; subsequent final owned-value read guard was checked by8protocol cases, then9protocol cases including one added independent canonical wire SHA-256 vector. Unique total130, not counting repeats; no other production changes after matrix."
+  },
+  "selection": {
+    "selection": "CommandFingerprintLeaseTest,CoreResultLedgerTest#borrowedFingerprintsOutliveDecoderReuseAndExposedValuesOutliveLedgerRecordReuse+ownedInsertionPreservesSequenceAndPriorResultWhenReplacing+retentionMetadataReusesOwnedResponseBytesWithoutExposingThem,CoreCommandFingerprintTest#changedPayloadWithSameCommandIdConflictsBeforeAnyMutation,CoreFundsIdempotencyTest#publishedTransferV1AndV2RetriesRemainEquivalentWithoutRecovery,RuntimeFundsAccumulatorTest,OwnerIndexedChangesTest,CommittedIndexVisitTest,CoreSelfTradePrefixTest,CoreActiveLaneIngressTest,CoreFinancialLedgerProductionTest,CoreRiskLaneQueryTest,LedgerPositionPublicationTest,RealtimeTerminalEmissionTest,BorrowedHeaderEgressTest,CommandSlotTest,ClusterCommandPipelineTest#proportionalOiAdmissionUsesTheCompletedGlobalAndSequentialBatchPrefix+triggerAdmissionAndMatchingNeverReadOwnerAccountTables+triggerNativeRejectionWithoutSnapshot+triggerAdmissionFailureWithoutSnapshot+internalTriggerPagesWithoutSnapshot,CoreOrderedOrderBatchTest#finalAmendBatchResolvesChainedAndRejectedItemsWithoutOwnerOrderReads+sequentialPlaceLedgerKeepsOwnerOffAccountAndFinancialTables+alternatingSingleOrdersAndBatchesReleaseContextsBeforeTheNextBatchResumes+sequentialNativeAndAdmissionRejectionsReleaseFundsWithoutRecovery",
+    "manual_helper_review": "Unit metadata tests do not execute snapshot/restore. Cluster trigger helpers recovery=false. New funds compatibility case uses actual async pump and Lane query, not cold Owner getters. CoreOrdered rejection shared helper recovery=false. Ledger publication tests exercise control rollback and ownership only. New index-visitor fixture uses plain frozen buffers, not snapshot codecs."
+  },
+  "corrected_fixtures": [
+    "unit-first: old synchronous Probe test returnednull after asynchronous control; now existing production-completion pump and try-with-resources with all original conflict/count/source assertions retained",
+    "unit-second: new funds test used cold Owner pendingTransfer/user getters; replaced with actual Lane query and unchanged pending-command/balance assertions"
+  ],
+  "canonical_vector": "canonical-v1/schema8/PROBE1/SPOT1/shard0/route3/gateway1/user7/payload8/LEdelta1 -> SHA256 f1d0788b350d61d3c37ff2657c5d76c1cc4fb8f73b8b1f026237953df1c6e330; independent static vector and six-product owned/borrowed comparisons pass",
+  "not_claimed": [
+    "Owner全部业务收据、市场/风险控制及输出已经迁走",
+    "Owner资金幂等RocksDB读写已经移走；当前仍确认属于剩余工作",
+    "客户端身份已经由各Lane独占，或用户修订/任意UTF8解码已无分配",
+    "所有业务路径零分配或完整Core小于100 B/业务项",
+    "真实Aeron网络/Archive/realtime单节点吞吐、完整分配或长稳通过",
+    "Cluster快照/恢复或所有旧矩阵用例通过"
+  ],
+  "performance_policy": "仅本地保留单笔、20项批量、反向及比例限额场景GC/JFR与正式环境窗数据。重新构建当前协议及打包Jar并记录实际加载类和指纹；不提交数值压测记录。"
+}

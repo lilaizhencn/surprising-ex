@@ -4375,22 +4375,49 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         if (consumer == null) throw new IllegalArgumentException("changed-index consumer is required");
         RuntimeFactIndexes preparedConsumer = consumer instanceof RuntimeFactIndexes indexes ? indexes : null;
-        changedOrders.forEach((orderId, value) -> consumer.order(orderId, null, value));
-        if (systemLedger == null || preparedConsumer == null)
-            changedPositions.forEachIndexed((positionKey, value, hasPrepared, prepared) -> {
-                if (hasPrepared && preparedConsumer != null) preparedConsumer.preparedPosition(positionKey, prepared);
-                else consumer.position(positionKey, null, value);
-            });
-        changedLiquidations.forEach((liquidationId, value) ->
-                consumer.liquidation(liquidationId, null, value));
-        changedAlgoOrders.forEach((algoOrderId, value) -> consumer.algoOrder(algoOrderId, null, value));
-        changedTriggerOrders.forEach((triggerOrderId, value) -> {
+        visitChangedOrderIndexes(consumer, changedOrders.directBuffer());
+        long remaining = changedOrders.retainedLaneMask();
+        while (remaining != 0) {
+            int laneId = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
+            visitChangedOrderIndexes(consumer, changedOrders.laneBuffer(laneId));
+        }
+        if (systemLedger == null || preparedConsumer == null) {
+            visitChangedPositionIndexes(consumer, preparedConsumer, changedPositions.directBuffer());
+            remaining = changedPositions.retainedLaneMask();
+            while (remaining != 0) {
+                int laneId = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
+                visitChangedPositionIndexes(consumer, preparedConsumer, changedPositions.laneBuffer(laneId));
+            }
+        }
+        for (int index = 0; index < changedLiquidations.size(); index++)
+            consumer.liquidation(changedLiquidations.keyAt(index), null, changedLiquidations.valueAt(index));
+        for (int index = 0; index < changedAlgoOrders.size(); index++)
+            consumer.algoOrder(changedAlgoOrders.keyAt(index), null, changedAlgoOrders.valueAt(index));
+        for (int index = 0; index < changedTriggerOrders.size(); index++) {
+            long triggerOrderId = changedTriggerOrders.keyAt(index);
+            CoreTriggerOrderState value = changedTriggerOrders.valueAt(index);
             if (realtimeCapture != null && realtimeCapture.active()) {
                 try { realtimeCapture.trigger(value); } catch (RuntimeException failure) { realtimeCapture.failed(); }
             }
             consumer.triggerOrder(triggerOrderId, null, value);
-        });
-        changedCancelAllAfterTimers.forEach(key -> consumer.timer(key, null, cancelAllAfterTimer(key)));
+        }
+        if (!changedCancelAllAfterTimers.isEmpty())
+            for (var key : changedCancelAllAfterTimers) consumer.timer(key, null, cancelAllAfterTimer(key));
+    }
+
+    private void visitChangedOrderIndexes(ChangedIndexConsumer consumer, RuntimeChangeBuffer<OrderRuntime> orders) {
+        for (int index = 0; index < orders.size(); index++)
+            consumer.order(orders.keyAt(index), null, orders.valueAt(index));
+    }
+
+    private void visitChangedPositionIndexes(ChangedIndexConsumer consumer, RuntimeFactIndexes preparedConsumer,
+            RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> positions) {
+        for (int index = 0; index < positions.size(); index++) {
+            long key = positions.keyAt(index);
+            if (positions.hasPreparedAt(index) && preparedConsumer != null)
+                preparedConsumer.preparedPosition(key, positions.preparedAt(index));
+            else consumer.position(key, null, positions.valueAt(index));
+        }
     }
 
     /**
@@ -4401,15 +4428,28 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         if (identities == null) throw new IllegalArgumentException("runtime identities are required");
         // 风险先清理，以已有持仓变更排除本次随后重开的持仓；不回读Lane表。
-        changedRiskSnapshots.drainIndexedTo((positionKey, value, hasProof, positionAbsent) -> {
-            if (value == null && hasProof && Boolean.TRUE.equals(positionAbsent)
+        for (int index = 0; index < changedRiskSnapshots.size(); index++) {
+            long positionKey = changedRiskSnapshots.keyAt(index);
+            if (changedRiskSnapshots.valueAt(index) == null && changedRiskSnapshots.hasPreparedAt(index)
+                    && Boolean.TRUE.equals(changedRiskSnapshots.preparedAt(index))
                     && changedPositions.get(positionKey) == null)
                 releaseRetiredPositionIdentity(identities, positionKey);
-        });
-        changedPositions.drainTo((positionKey, value) -> {
-            if (value == null) releaseRetiredPositionIdentity(identities, positionKey);
-        });
+        }
+        changedRiskSnapshots.clear();
+        releaseRetiredPositionIdentities(identities, changedPositions.directBuffer());
+        long remaining = changedPositions.retainedLaneMask();
+        while (remaining != 0) {
+            int laneId = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
+            releaseRetiredPositionIdentities(identities, changedPositions.laneBuffer(laneId));
+        }
+        changedPositions.clear();
         clearChangedKeys();
+    }
+
+    private void releaseRetiredPositionIdentities(RuntimeIdentityRegistry identities,
+            RuntimeChangeBuffer<PositionRuntime> positions) {
+        for (int index = 0; index < positions.size(); index++)
+            if (positions.valueAt(index) == null) releaseRetiredPositionIdentity(identities, positions.keyAt(index));
     }
 
     void releaseRetiredPositionIdentity(RuntimeIdentityRegistry identities, long positionKey) {

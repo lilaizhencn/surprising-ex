@@ -243,7 +243,7 @@ public class InProcessTradingAllocationBenchmark {
             if (actual != orderId - batchSize + 1)
                 throw new IllegalStateException("source payload ID differs from its encoded template: " + actual + " != " + (orderId - batchSize + 1));
         }
-        owner.enqueue(message, session, TIME, position, command ? fingerprints.of(message) : null);
+        owner.enqueue(message, session, TIME, position, command ? fingerprints.ofBorrowed(message) : null);
     }
 
     private void await(long expected) {

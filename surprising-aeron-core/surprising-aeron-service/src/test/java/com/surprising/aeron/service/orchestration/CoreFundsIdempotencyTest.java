@@ -153,6 +153,60 @@ class CoreFundsIdempotencyTest {
         }
     }
 
+    @Test
+    void publishedTransferV1AndV2RetriesRemainEquivalentWithoutRecovery() {
+        var transfer = new TransferFundsCommand(7003, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
+                "FUNDING", "USDT_PERPETUAL", "USDT", 250, "old-transfer", "allocation", 1001, 1001);
+        byte[] v2 = TradingCommandCodec.encodeTransferFunds(transfer);
+        byte[] v1 = new byte[v2.length - 16];
+        java.nio.ByteBuffer.wrap(v1).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(1).putLong(7003);
+        System.arraycopy(v2, 28, v1, 12, v2.length - 28);
+        UUID id = new UUID(7003, 1);
+        var original = command(ProductLine.SPOT, CoreMessageType.TRANSFER_OUT, id, 2, v1);
+        var retry = command(ProductLine.SPOT, CoreMessageType.TRANSFER_OUT, id, 2, v2);
+        try (var source = new TradingCoreRuntime(ProductLine.SPOT)) {
+            CoreTestCompletion.applyAsynchronously(source, command(CoreMessageType.ADJUST_BALANCE, new UUID(7003, 0), 1,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 5000))));
+            assertThat(CoreTestCompletion.applyAsynchronously(source, original).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(CoreTestCompletion.applyAsynchronously(source, retry).status()).isEqualTo(ResponseStatus.DUPLICATE);
+            for (int i = 3; i < 150; i++)
+                CoreTestCompletion.applyAsynchronously(source, command(CoreMessageType.ADJUST_BALANCE, new UUID(7003, i), i,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1))));
+            assertThat(source.resultLedger.get(id)).isNull();
+            for (var command : java.util.List.of(original, retry))
+                assertThat(CoreTestCompletion.applyAsynchronously(source, command).status()).isEqualTo(ResponseStatus.DUPLICATE);
+            var pendingQuery = new CoreMessage(CoreMessageHeader.query(CoreMessageType.PENDING_TRANSFER_QUERY,
+                    new UUID(7003, 9001), ProductLine.SPOT, CommandSource.OPERATIONS, 7003, 0, 0, 0, 0),
+                    com.surprising.aeron.protocol.CorePendingTransferCodec.encodeQuery(16));
+            assertThat(com.surprising.aeron.protocol.CorePendingTransferCodec.decode(
+                    CoreTestCompletion.querySynchronously(source, pendingQuery).data()))
+                    .singleElement().satisfies(value -> assertThat(value.command()).isEqualTo(transfer));
+            assertThat(totalUnits(source, 1001)).isEqualTo(4750 + 147);
+            var wrong = new TransferFundsCommand(7003, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
+                    "FUNDING", "USDT_PERPETUAL", "USDT", 250, "old-transfer", "allocation", 1001, 1002);
+            assertThat(CoreTestCompletion.applyAsynchronously(source,
+                    command(ProductLine.SPOT, CoreMessageType.TRANSFER_OUT, id, 151,
+                            TradingCommandCodec.encodeTransferFunds(wrong))).resultCode().name())
+                    .isEqualTo("IDEMPOTENCY_CONFLICT");
+            assertThat(totalUnits(source, 1001)).isEqualTo(4750 + 147);
+        }
+        try (var target = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+            assertThat(CoreTestCompletion.applyAsynchronously(target,
+                    command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.TRANSFER_IN, id, 1, v1)).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+            assertThat(CoreTestCompletion.applyAsynchronously(target,
+                    command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.TRANSFER_IN, id, 1, v2)).status())
+                    .isEqualTo(ResponseStatus.DUPLICATE);
+            assertThat(totalUnits(target, 1001)).isEqualTo(250);
+        }
+    }
+
+    private static long totalUnits(TradingCoreRuntime core, long userId) {
+        return CoreTestCompletion.userState(core, userId).balances().stream()
+                .filter(value -> value.asset().equals("USDT"))
+                .mapToLong(value -> value.availableUnits() + value.lockedUnits()).sum();
+    }
+
     private static CoreMessage command(CoreMessageType type, UUID commandId, long sourceSequence, byte[] payload) {
         return command(ProductLine.SPOT, type, commandId, sourceSequence, payload);
     }

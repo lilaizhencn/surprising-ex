@@ -14,6 +14,9 @@ public final class CoreMessage {
     private final CoreMessageHeader decoderHeader;
     private final CoreMessageHeader decoderResponseHeader;
     private final CoreResponse decoderResponse;
+    /** Internal waiting metadata must not occupy the independent terminal-response lease. */
+    private final CoreResponse decoderPendingResponse;
+    private final CommandFingerprint decoderFingerprint;
     private final java.util.concurrent.atomic.AtomicInteger decoderReaders;
 
     public CoreMessage(CoreMessageHeader header, byte[] payload) {
@@ -29,6 +32,8 @@ public final class CoreMessage {
         decoderHeader = null;
         decoderResponseHeader = null;
         decoderResponse = null;
+        decoderPendingResponse = null;
+        decoderFingerprint = null;
         decoderReaders = null;
         this.header = Objects.requireNonNull(header, "header").immutableValue();
         this.payload = owned
@@ -41,6 +46,8 @@ public final class CoreMessage {
         decoderHeader = new CoreMessageHeader(this);
         decoderResponseHeader = new CoreMessageHeader(this);
         decoderResponse = new CoreResponse();
+        decoderPendingResponse = new CoreResponse();
+        decoderFingerprint = CommandFingerprint.reusableSlot();
         decoderReaders = new java.util.concurrent.atomic.AtomicInteger();
     }
     public static CoreMessage decoderSlot() { return new CoreMessage(); }
@@ -82,6 +89,8 @@ public final class CoreMessage {
             decoderHeader.clearDecoderReferences();
             decoderResponseHeader.clearDecoderReferences();
             decoderResponse.clearCommandSlot();
+            decoderPendingResponse.clearCommandSlot();
+            decoderFingerprint.clearSlot();
             header = null;
             decoderLeased = false;
         }
@@ -90,6 +99,12 @@ public final class CoreMessage {
     public void releaseDecoderSlot() {
         if (!decoderSlot) return;
         releaseDecoderReader();
+    }
+
+    CommandFingerprint fingerprintSlot() {
+        if (!decoderSlot) return null;
+        if (!decoderLeased) throw new IllegalStateException("decoder slot is not leased");
+        return decoderFingerprint;
     }
 
     /** Transport header shares this input's lease; its consumer must retain before publication. */
@@ -116,6 +131,21 @@ public final class CoreMessage {
         if (!decoderSlot) return CoreResponse.owned(status, commandStatus, resultCode, sequence, data, offset, length);
         if (!decoderLeased) throw new IllegalStateException("decoder slot is not leased");
         return decoderResponse.prepareCommandSlot(status, commandStatus, resultCode, sequence, data, offset, length);
+    }
+
+    /** Waiting metadata is stable for this input lease, separate from its eventual terminal response. */
+    public CoreResponse matchingPendingResponse(CoreResultCode resultCode, long sequence) {
+        if (!decoderSlot) return CoreResponse.owned(ResponseStatus.OK, ResponseStatus.OK, resultCode,
+                sequence, EMPTY_PAYLOAD);
+        if (!decoderLeased) throw new IllegalStateException("decoder slot is not leased");
+        if (decoderPendingResponse.status() != null) {
+            if (decoderPendingResponse.resultCode() != resultCode
+                    || decoderPendingResponse.appliedCommandCount() != sequence)
+                throw new IllegalStateException("pending response changed within one input lease");
+            return decoderPendingResponse;
+        }
+        return decoderPendingResponse.prepareCommandSlot(ResponseStatus.OK, ResponseStatus.OK,
+                resultCode, sequence, EMPTY_PAYLOAD, 0, 0);
     }
 
     public CoreMessageHeader header() {

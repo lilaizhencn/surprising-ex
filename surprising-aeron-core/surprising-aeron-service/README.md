@@ -266,3 +266,16 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 116个必要用例及选择范围见 [单笔入口与响应功能验证](../../docs/validation/single-ingress-reuse-20261015.json)，覆盖满入口队列、等待中断、两轮真实Owner槽周转、协议边界、延迟出口、生命周期隔离以及六产品线成交、拒绝、触发、资金和实时事件。没有执行Cluster快照/恢复、wallet或真实单节点压测。分配数值只保留本地；完整Core百字节目标，以及Owner其他业务收据、控制及输出职责继续保持未完成。
 
 本轮诊断入口曾误用旧shaded Jar中的协议类，新增编码方法缺失导致预热失败；已要求重新打包并锁定实际JAR指纹，失败轮次单独保留。该故障暴露的空闲故障传播也已修复：`SettlementLaneWorker` 先保留原始故障，再发布通知，报告回调异常不能盖掉原故障；`TradingRuntimeState` 在完成探测时检查原故障引用并唤醒Owner。关闭时无论RuntimeException还是Error，都继续停止其余Account Lane和Ledger，最后再抛故障。补充用例覆盖Error身份、通知失败及所有线程退出，不将异常当作未完成请求持续等待。
+
+
+### 指纹与提交访问的槽生命周期（2026-10-15）
+
+`AeronTradingClusterService` 显式使用 `CommandFingerprint.Calculator.ofBorrowed`：计算器把SHA-256摘要写入当前decoder槽自己的32字节单元，header/payload在该租约内保持不变。原 `of` API仍返回独立不可变值。原 `CommandResultLedger.StoredResult` 池在提交时把借入摘要复制到该记录自有的常驻单元，输入退出不会修改保留结果；对外 `fingerprint()` 返回独立值，内部重复比对直接读记录摘要，不逐次物化。固定canonical字段、32字节编码及划转v1/v2等价规则未变。
+
+`CoreMessage.matchingPendingResponse` 复用独立的待撮合元数据单元，覆盖普通、延后及批量入口；它与终态响应分开，不能在同一输入租约内改变序号。最后一个Header/出口读者退出后，指纹和两种响应单元一起清除。没有新增业务状态表、线程、队列或执行阶段。
+
+`TradingRuntimeState.visitChangedIndexes` 直接遍历已有primitive变更缓冲，保留direct、Lane号及订单/持仓/强平/算法单/触发单/定时器的原访问顺序；准备好的持仓索引和删除标记仍沿原字段传递。Ledger启用时，Owner继续跳过持仓业务索引。提交后的风险身份先于持仓身份清理，随后才清空缓冲。`LaneCommitDelta` 的用户交接和批量身份登记改用原位循环；`RuntimeFundsAccumulator` 跳过空流水迭代器，非空流水仍按原顺序核算。
+
+130个必要用例及修正夹具见 [指纹和提交访问功能验证](../../docs/validation/commit-fingerprint-reuse-20261015.json)，包括独立canonical摘要向量、六产品线摘要与槽周转、结果记录淘汰、旧暴露值独立、冲突不变更状态、划转重复/淘汰/错误收款人、提交顺序及删除标记、Ledger和六产品线成交/拒绝/风险/触发/实时事件。主矩阵129例通过后，协议小范围收尾及新增固定向量由9例协议测试验证，重复项不计入130个独立用例。未执行Cluster快照/恢复或wallet。
+
+本模块仍未达到完整Core百字节目标，也未完成Owner的全部业务/输出职责。客户端身份、用户修订、任意UTF8解码，以及Owner资金幂等索引的同步RocksDB读写仍待迁移；资金幂等不能因为减小Owner成本而缩短保留。数值诊断只留本地，不做真实单节点压测或提交数值压测记录。

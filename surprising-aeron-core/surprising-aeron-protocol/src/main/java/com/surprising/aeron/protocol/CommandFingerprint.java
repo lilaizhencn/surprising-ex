@@ -1,6 +1,7 @@
 package com.surprising.aeron.protocol;
 
 import java.security.MessageDigest;
+import java.security.DigestException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Objects;
@@ -11,28 +12,91 @@ public final class CommandFingerprint {
     private static final int CANONICAL_VERSION = 1;
     private static final int HEADER_LENGTH = Integer.BYTES * 8 + Long.BYTES;
     private final byte[] value;
+    private final boolean slotValue;
+    private boolean initialized;
 
     private CommandFingerprint(byte[] value) {
         this(value, false);
     }
 
     private CommandFingerprint(byte[] value, boolean owned) {
+        this(value, owned, false);
+    }
+
+    private CommandFingerprint(byte[] value, boolean owned, boolean slotValue) {
         if (value.length != LENGTH) {
             throw new IllegalArgumentException("command fingerprint must be " + LENGTH + " bytes");
         }
         this.value = owned ? value : value.clone();
+        this.slotValue = slotValue;
+        initialized = !slotValue;
+    }
+
+    /** The owning decoder or result record may overwrite this metadata only between its leases. */
+    public static CommandFingerprint reusableSlot() {
+        return new CommandFingerprint(new byte[LENGTH], true, true);
+    }
+
+    public boolean isSlotValue() { return slotValue; }
+
+    public CommandFingerprint copyIntoSlot(CommandFingerprint target) {
+        requireInitialized();
+        if (target == null) target = reusableSlot();
+        if (!target.slotValue) throw new IllegalArgumentException("fingerprint target is not a reusable slot");
+        System.arraycopy(value, 0, target.value, 0, LENGTH);
+        target.initialized = true;
+        return target;
+    }
+
+    public CommandFingerprint immutableValue() {
+        requireInitialized();
+        return slotValue ? new CommandFingerprint(value) : this;
+    }
+
+    void clearSlot() {
+        if (!slotValue) throw new IllegalStateException("fingerprint is not a reusable slot");
+        initialized = false;
+    }
+
+    private void requireInitialized() {
+        if (slotValue && !initialized) throw new IllegalStateException("fingerprint slot is not leased");
     }
 
     public static CommandFingerprint of(CoreMessage message) {
         return new Calculator().of(message);
     }
 
-    /** One serial producer owns the digest and header; returned fingerprints own their bytes. */
+    /** One serial producer owns the digest/header; only ofBorrowed opts into an input lease. */
     public static final class Calculator {
         private final MessageDigest digest = newDigest();
         private final byte[] header = new byte[HEADER_LENGTH];
 
         public CommandFingerprint of(CoreMessage message) {
+            prepareDigest(message);
+            return new CommandFingerprint(digest.digest(), true);
+        }
+
+        /**
+         * Explicit input-lease API for the serial Aeron producer. The payload/header must remain
+         * unchanged for the lease. Retainers copy into their own slot or request immutableValue().
+         */
+        public CommandFingerprint ofBorrowed(CoreMessage message) {
+            Objects.requireNonNull(message, "message");
+            CommandFingerprint target = message.fingerprintSlot();
+            if (target == null) return of(message);
+            if (target.initialized) return target;
+            prepareDigest(message);
+            try {
+                if (digest.digest(target.value, 0, LENGTH) != LENGTH)
+                    throw new IllegalStateException("invalid SHA-256 output length");
+            } catch (DigestException failure) {
+                throw new IllegalStateException("SHA-256 cannot write the fingerprint slot", failure);
+            }
+            target.initialized = true;
+            return target;
+        }
+
+        private void prepareDigest(CoreMessage message) {
             Objects.requireNonNull(message, "message");
             CoreMessageHeader header = message.header();
             byte[] payload = message.payloadUnsafe();
@@ -50,7 +114,6 @@ public final class CommandFingerprint {
             if (offset != HEADER_LENGTH) throw new IllegalStateException("invalid fingerprint header length");
             digest.update(this.header, 0, offset);
             digest.update(payload);
-            return new CommandFingerprint(digest.digest(), true);
         }
     }
 
@@ -95,26 +158,32 @@ public final class CommandFingerprint {
     }
 
     public byte[] bytes() {
+        requireInitialized();
         return value.clone();
     }
 
     public byte byteAt(int index) {
+        requireInitialized();
         return value[index];
     }
 
     @Override
     public boolean equals(Object other) {
+        requireInitialized();
+        if (other instanceof CommandFingerprint fingerprint) fingerprint.requireInitialized();
         return this == other || other instanceof CommandFingerprint fingerprint
                 && Arrays.equals(value, fingerprint.value);
     }
 
     @Override
     public int hashCode() {
+        requireInitialized();
         return Arrays.hashCode(value);
     }
 
     @Override
     public String toString() {
+        requireInitialized();
         StringBuilder result = new StringBuilder(value.length * 2);
         for (byte byteValue : value) {
             result.append(String.format("%02x", Byte.toUnsignedInt(byteValue)));

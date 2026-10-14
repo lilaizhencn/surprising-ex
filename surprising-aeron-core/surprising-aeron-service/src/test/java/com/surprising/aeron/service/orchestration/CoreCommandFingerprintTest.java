@@ -18,20 +18,20 @@ class CoreCommandFingerprintTest {
 
     @Test
     void changedPayloadWithSameCommandIdConflictsBeforeAnyMutation() {
-        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
-        UUID commandId = UUID.randomUUID();
+        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            UUID commandId = UUID.randomUUID();
+            CoreMessage first = probe(commandId, 1, 7, 1_000, 11);
+            CoreMessage changed = probe(commandId, 2, 99, 9_999, 12);
 
-        CoreMessage first = probe(commandId, 1, 7, 1_000, 11);
-        CoreMessage changed = probe(commandId, 2, 99, 9_999, 12);
+            assertThat(CoreTestCompletion.applyAsynchronously(state, first).status()).isEqualTo(ResponseStatus.APPLIED);
+            CoreResponse conflict = CoreTestCompletion.applyAsynchronously(state, changed);
 
-        assertThat(state.apply(first).status()).isEqualTo(ResponseStatus.APPLIED);
-        CoreResponse conflict = state.apply(changed);
-
-        assertThat(conflict.resultCode().name()).isEqualTo("IDEMPOTENCY_CONFLICT");
-        assertThat(state.probeValue()).isEqualTo(7);
-        assertThat(state.appliedCommandCount()).isOne();
-        assertThat(state.lastSourceSequences())
-                .containsEntry(new TradingCoreRuntime.SourceKey(CommandSource.GATEWAY, 7), 1L);
+            assertThat(conflict.resultCode().name()).isEqualTo("IDEMPOTENCY_CONFLICT");
+            assertThat(state.probeValue()).isEqualTo(7);
+            assertThat(state.appliedCommandCount()).isOne();
+            assertThat(state.lastSourceSequences())
+                    .containsEntry(new TradingCoreRuntime.SourceKey(CommandSource.GATEWAY, 7), 1L);
+        }
     }
 
     @Test
