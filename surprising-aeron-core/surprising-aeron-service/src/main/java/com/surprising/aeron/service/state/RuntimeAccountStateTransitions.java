@@ -35,12 +35,11 @@ public final class RuntimeAccountStateTransitions {
         if (nextAvailable < 0) throw new IllegalArgumentException("available balance cannot be negative");
         UserRuntime user = runtime.user(userId);
         // Complete arithmetic validation before the first account write to avoid partial mutation on overflow.
-        UserRuntime nextUser = new UserRuntime(runtime.productLine(), userId,
-                user == null ? 1 : Math.incrementExact(user.revision()),
-                user == null ? com.surprising.aeron.protocol.CorePositionMode.ONE_WAY : user.positionMode());
+        long userRevision = user == null ? 1 : Math.incrementExact(user.revision());
+        var mode = user == null ? com.surprising.aeron.protocol.CorePositionMode.ONE_WAY : user.positionMode();
         BalanceRuntime nextBalance = new BalanceRuntime(userId, assetId, nextAvailable,
                 current == null ? 0 : current.lockedUnits());
-        runtime.putUser(nextUser);
+        runtime.setUserState(userId, userRevision, mode);
         if (current == null) runtime.putBalance(nextBalance);
         else runtime.replaceBalance(nextBalance);
     }
@@ -88,11 +87,10 @@ public final class RuntimeAccountStateTransitions {
         if (balance == null || balance.availableUnits() < amountUnits)
             throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE", "transfer available balance is insufficient");
         UserRuntime user = runtime.requireUser(userId);
-        UserRuntime advanced = new UserRuntime(runtime.productLine(), userId,
-                Math.incrementExact(user.revision()), user.positionMode());
+        long userRevision = Math.incrementExact(user.revision());
         BalanceRuntime debited = new BalanceRuntime(userId, assetId,
                 Math.subtractExact(balance.availableUnits(), amountUnits), balance.lockedUnits());
-        runtime.putUser(advanced);
+        runtime.setUserState(userId, userRevision, user.positionMode());
         runtime.replaceBalance(debited);
     }
 

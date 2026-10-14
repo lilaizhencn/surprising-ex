@@ -69,8 +69,8 @@ final class MatcherSettlementChanges {
             if (current == null) {
                 throw new IllegalStateException("runtime user disappeared during matcher settlement: " + userId);
             }
-            UserRuntime advanced = new UserRuntime(current.productLine(), userId,
-                    Math.addExact(current.revision(), count), current.positionMode());
+            long revision = Math.addExact(current.revision(), count);
+            UserRuntime advanced = current.laneValue().withState(revision, current.positionMode());
             lane.users.put(userId, advanced);
             changes.putUser(userId, advanced);
         });

@@ -50,9 +50,9 @@ public final class RuntimeOrderStateTransitions {
         }
         OrderRuntime order = runtime.prepareControlOrder(userId, command, commandId, symbolId);
         ReservationRuntime reservation = order.prepareReservation(command.reservationKind(), assetId, requiredReservation);
+        long userRevision = Math.incrementExact(user.revision());
         runtime.reserveOrder(order, reservation, clientKey);
-        runtime.putUser(new UserRuntime(runtime.productLine(), userId,
-                Math.incrementExact(user.revision()), user.positionMode()));
+        runtime.setUserState(userId, userRevision, user.positionMode());
         runtime.incrementCommandRevision();
     }
 

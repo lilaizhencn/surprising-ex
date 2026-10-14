@@ -83,7 +83,7 @@ public record RealtimeUserSnapshot(
         if (leverageKeys != null)
             leverageKeys.forEach(k -> l.add(new LeverageValue(k, lane.cold.leverages.get(k))));
         return new RealtimeUserSnapshot(
-                lane.users.get(userId),
+                lane.users.get(userId) == null ? null : lane.users.get(userId).publicationValue(),
                 List.copyOf(b),
                 List.copyOf(re),
                 List.copyOf(p),

@@ -1531,7 +1531,11 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (balance == null) throw new IllegalStateException("batch admission rollback balance is missing");
             balance.release(reservation.reservedUnits());
         }
-        if (userBefore != null) lane.users.put(userId, userBefore);
+        if (userBefore != null) {
+            UserRuntime current = lane.users.get(userId);
+            lane.users.put(userId, (accountLanesStarted ? current.laneValue() : current)
+                    .withState(userBefore.revision(), userBefore.positionMode()));
+        }
     }
 
     /** Owner 登记的 matcher 结算通知范围；其序号仍由各 Lane 的 SPSC 队列承载。 */
@@ -3428,7 +3432,13 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         accountRollback.captureUserBefore(user.userId());
         onLane(user.userId(), lane -> {
-            lane.users.put(user.userId(), user);
+            UserRuntime current = lane.users.get(user.userId());
+            UserRuntime value = user;
+            if (accountLanesStarted) {
+                value = current == null || current.productLine() != user.productLine() ? user.laneValue()
+                        : current.laneValue().withState(user.revision(), user.positionMode());
+            }
+            lane.users.put(user.userId(), value);
             lane.registerUser(user.userId());
             return null;
         });
@@ -3453,16 +3463,29 @@ public final class TradingRuntimeState implements AutoCloseable {
                 throw new IllegalArgumentException("runtime user is not registered: " + userId);
             }
             // Matching can advance one user several times in a settlement. Coalesce the delta
-            // and publish one immutable UserRuntime when the Lane finalizes the settlement.
+            // and freeze its final value when the Lane finalizes the settlement.
             settlementChanges.addUserRevision(lane.laneId(), userId, count);
             return;
         }
-        accountRollback.captureUserBefore(userId);
         UserRuntime current = requireUser(userId);
-        UserRuntime advanced = new UserRuntime(current.productLine(), userId,
-                Math.addExact(current.revision(), count), current.positionMode());
-        onLane(userId, lane -> lane.users.put(userId, advanced));
-        publishUser(userId, advanced);
+        setUserState(userId, Math.addExact(current.revision(), count), current.positionMode());
+    }
+
+    /** Update user metadata on its Lane; the command buffer owns a separate frozen receipt. */
+    void setUserState(long userId, long revision, com.surprising.aeron.protocol.CorePositionMode mode) {
+        assertOwner();
+        if (userId <= 0 || revision < 0 || mode == null) throw new IllegalArgumentException("invalid runtime user");
+        accountRollback.captureUserBefore(userId);
+        UserRuntime updated = onLane(userId, lane -> {
+            UserRuntime current = lane.users.get(userId);
+            UserRuntime value = current == null ? new UserRuntime(productLine, userId, revision, mode)
+                    : (accountLanesStarted ? current.laneValue() : current).withState(revision, mode);
+            if (accountLanesStarted) value = value.laneValue();
+            lane.users.put(userId, value);
+            lane.registerUser(userId);
+            return value;
+        });
+        publishUser(userId, updated);
         if (currentLaneCommandScope() == null) markUserChanged(userId);
     }
 
@@ -4653,7 +4676,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     LongObjectHashMap<UserRuntime> usersForSnapshot() {
         LongObjectHashMap<UserRuntime> values = new LongObjectHashMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLane(laneId, lane -> new LongObjectHashMap<>(lane.users)));
+            values.putAll(onLane(laneId, lane -> {
+                LongObjectHashMap<UserRuntime> copy = new LongObjectHashMap<>(lane.users.size());
+                lane.users.forEachKeyValue((userId, user) -> copy.put(userId, user.publicationValue()));
+                return copy;
+            }));
         }
         return values;
     }
@@ -4854,14 +4881,14 @@ public final class TradingRuntimeState implements AutoCloseable {
                 : preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position);
         ReservationRuntime reservation = order.prepareReservation(
                 command.reservationKind(), assetId, requiredReservation);
-        UserRuntime advanced = new UserRuntime(productLine, userId,
-                Math.incrementExact(user.revision()), user.positionMode());
+        long nextUserRevision = Math.incrementExact(user.revision());
         balance.reserve(requiredReservation);
         lane.putOrder(order);
         lane.reservations.put(reservation.orderId(), reservation.laneValue());
         lane.addReservationId(userId, order.orderId());
         if (clientKey != 0) putClientOrderIndex(lane, userId, clientKey, order.orderId());
-        lane.users.put(userId, advanced);
+        lane.users.put(userId, (accountLanesStarted ? user.laneValue() : user)
+                .withState(nextUserRevision, user.positionMode()));
         if (prepared == null) lane.markPendingReservation(order.orderId(), coreSequence);
     }
 

@@ -74,7 +74,7 @@ public final class LaneCommitDelta {
     RuntimeChangeBuffer<com.surprising.aeron.service.state.model.CoreAlgoOrderState> algos;
     int closedTriggerCount;
     /** 本次需要发布的用户变化。 */
-    final RuntimeChangeBuffer<UserRuntime> users = new RuntimeChangeBuffer<>();
+    final RuntimeUserChangeBuffer users = new RuntimeUserChangeBuffer();
     /** 本次需要发布的订单变化。 */
     final RuntimeOrderChangeBuffer orders = new RuntimeOrderChangeBuffer();
     /** 本次需要发布的预留变化。 */

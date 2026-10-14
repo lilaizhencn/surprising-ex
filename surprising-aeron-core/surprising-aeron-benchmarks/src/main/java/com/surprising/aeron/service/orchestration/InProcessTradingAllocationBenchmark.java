@@ -29,6 +29,7 @@ import org.openjdk.jmh.infra.IterationParams;
  * Sequential batches exercise frozen Matcher inputs and one captured context per symbol.
  * symbols=2 interleaves the two books inside a batch; teardown checks each position.
  * Single requests include the production input-wrapper return queue and the leased response writer.
+ * Terminal queries also check user revisions after resident user/receipt reuse, outside measurement.
  * Aeron transport and Archive are excluded.
  */
 @State(Scope.Thread) @BenchmarkMode(Mode.Throughput) @OutputTimeUnit(TimeUnit.SECONDS)
@@ -194,6 +195,16 @@ public class InProcessTradingAllocationBenchmark {
             session.trading = false;
             for (long user : new long[]{7, 8}) {
                 var state = userState(user);
+                // Admission and fill each advance once per order. This fixture's maker (user7)
+                // also advances on terminal release (rounding remainder on open, unused budget on close).
+                long expectedRevision = Math.addExact(1, Math.multiplyExact(submitted, batchSize));
+                if (user == 7) expectedRevision = Math.addExact(expectedRevision, submitted * batchSize / 2);
+                else if (streamMode.equals("REVERSE"))
+                    expectedRevision = Math.addExact(expectedRevision, submitted * batchSize / 4);
+                if (state.revision() != expectedRevision
+                        || state.positionMode() != CorePositionMode.ONE_WAY)
+                    throw new IllegalStateException("terminal user metadata differs user=" + user
+                            + " revision=" + state.revision() + " expectedRevision=" + expectedRevision);
                 long units = 0, quantity = 0;
                 for (var balance : state.balances()) units = Math.addExact(units, Math.addExact(balance.availableUnits(), balance.lockedUnits()));
                 for (var position : state.positions()) {

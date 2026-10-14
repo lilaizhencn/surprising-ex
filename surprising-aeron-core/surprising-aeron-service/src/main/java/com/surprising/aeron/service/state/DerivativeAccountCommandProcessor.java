@@ -43,8 +43,8 @@ public final class DerivativeAccountCommandProcessor {
         if (runtime.hasOpenAccountExposure(userId))
             throw new CoreStateRejectedException("POSITION_MODE_SWITCH_BLOCKED", "open positions or orders block position mode update");
         Math.incrementExact(runtime.revision()); // 首次写入前检查提交修订号；无变化的命令无需递增。
-        runtime.putUser(new UserRuntime(runtime.productLine(), userId,
-                current == null ? 1 : Math.incrementExact(current.revision()), command.positionMode()));
+        runtime.setUserState(userId, current == null ? 1 : Math.incrementExact(current.revision()),
+                command.positionMode());
         return true;
     }
 
@@ -165,12 +165,11 @@ public final class DerivativeAccountCommandProcessor {
             BalanceRuntime next = new BalanceRuntime(key.userId(), assetId,
                     Math.subtractExact(balance.availableUnits(), additional), Math.addExact(balance.lockedUnits(), additional));
             UserRuntime user = runtime.requireUser(key.userId());
-            UserRuntime nextUser = new UserRuntime(user.productLine(), user.userId(),
-                    Math.incrementExact(user.revision()), user.positionMode());
+            long userRevision = Math.incrementExact(user.revision());
             // All business rejection and arithmetic checks precede the first mutation.
             runtime.replaceBalance(next);
             for (var position : positions) runtime.replacePosition(position.getKey(), position.getValue());
-            runtime.putUser(nextUser);
+            runtime.setUserState(user.userId(), userRevision, user.positionMode());
         }
         runtime.putLeverage(key, leveragePpm);
         return true;
@@ -227,11 +226,10 @@ public final class DerivativeAccountCommandProcessor {
                 position.marginMode(), position.positionSide(), position.instrument(), position.signedQuantitySteps(),
                 position.entryPriceTicks(), position.entryValueTicks(), position.realizedPnlUnits(), nextMargin);
         UserRuntime user = runtime.requireUser(userId);
-        UserRuntime nextUser = new UserRuntime(user.productLine(), userId,
-                Math.incrementExact(user.revision()), user.positionMode());
+        long userRevision = Math.incrementExact(user.revision());
         runtime.replaceBalance(nextBalance);
         runtime.replacePosition(positionKey, nextPosition);
-        runtime.putUser(nextUser);
+        runtime.setUserState(userId, userRevision, user.positionMode());
         return position.assetId();
     }
 }

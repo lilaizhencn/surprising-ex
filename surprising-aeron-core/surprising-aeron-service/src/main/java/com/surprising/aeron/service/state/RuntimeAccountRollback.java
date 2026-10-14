@@ -8,7 +8,7 @@ import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 /** Account Lane before-images and their two-phase rollback restoration. */
 final class RuntimeAccountRollback {
     private final TradingRuntimeState state;
-    final LaneLongCaptures<UserRuntime>[] patchUsersBeforeByLane;
+    final RuntimeUserChangeBuffer[] patchUsersBeforeByLane;
     final LaneBalancePatches[] patchBalancesBeforeByLane;
     final LaneLongCaptures<PatchReservationBefore>[] patchReservationsBeforeByLane;
     final LaneLongCaptures<PatchOrderBefore>[] patchOrdersBeforeByLane;
@@ -19,7 +19,7 @@ final class RuntimeAccountRollback {
     @SuppressWarnings("unchecked")
     RuntimeAccountRollback(TradingRuntimeState state, int laneCount) {
         this.state = java.util.Objects.requireNonNull(state);
-        patchUsersBeforeByLane = (LaneLongCaptures<UserRuntime>[]) new LaneLongCaptures<?>[laneCount];
+        patchUsersBeforeByLane = new RuntimeUserChangeBuffer[laneCount];
         patchBalancesBeforeByLane = new LaneBalancePatches[laneCount];
         patchReservationsBeforeByLane = (LaneLongCaptures<PatchReservationBefore>[]) new LaneLongCaptures<?>[laneCount];
         patchOrdersBeforeByLane = (LaneLongCaptures<PatchOrderBefore>[]) new LaneLongCaptures<?>[laneCount];
@@ -27,7 +27,7 @@ final class RuntimeAccountRollback {
         patchClientOrdersBeforeByLane = new LaneClientOrderCaptures[laneCount];
         patchTriggersBeforeByLane = (LaneLongCaptures<CoreTriggerOrderState>[]) new LaneLongCaptures<?>[laneCount];
         for (int laneId = 0; laneId < laneCount; laneId++) {
-            patchUsersBeforeByLane[laneId] = new LaneLongCaptures<>();
+            patchUsersBeforeByLane[laneId] = new RuntimeUserChangeBuffer();
             patchBalancesBeforeByLane[laneId] = new LaneBalancePatches();
             patchReservationsBeforeByLane[laneId] = new LaneLongCaptures<>();
             patchOrdersBeforeByLane[laneId] = new LaneLongCaptures<>();
@@ -42,9 +42,9 @@ final class RuntimeAccountRollback {
 
     void captureUserBefore(long userId) {
         if (state.currentMatcherSettlementChangesScope() != null) return;
-        LaneLongCaptures<UserRuntime> captured =
+        RuntimeUserChangeBuffer captured =
                 patchUsersBeforeByLane[state.topology.accountLaneId(userId)];
-        if (!captured.containsKey(userId)) captured.put(userId, state.user(userId));
+        if (!captured.containsKey(userId)) captured.captureBefore(userId, state.user(userId));
     }
 
     /**
@@ -60,7 +60,7 @@ final class RuntimeAccountRollback {
                 || laneId < 0 || laneId >= patchOrdersBeforeByLane.length) {
             throw new IllegalArgumentException("invalid batch admission before-image");
         }
-        LaneLongCaptures<UserRuntime> userCaptures = patchUsersBeforeByLane[laneId];
+        RuntimeUserChangeBuffer userCaptures = patchUsersBeforeByLane[laneId];
         if (!userCaptures.containsKey(userId)) userCaptures.put(userId, userBefore);
         LaneLongCaptures<PatchOrderBefore> orderCaptures = patchOrdersBeforeByLane[laneId];
         LaneLongCaptures<PatchReservationBefore> reservationCaptures = patchReservationsBeforeByLane[laneId];
@@ -151,10 +151,10 @@ final class RuntimeAccountRollback {
             balances.after(userId, assetId, userBalances == null ? null : userBalances.get(assetId),
                     lane.pendingReservedUnits(userId, assetId));
         }
-        LaneLongCaptures<UserRuntime> users = patchUsersBeforeByLane[laneId];
+        RuntimeUserChangeBuffer users = patchUsersBeforeByLane[laneId];
         for (int index = 0; index < users.size(); index++) {
-            long userId = users.key(index);
-            UserRuntime before = users.value(index);
+            long userId = users.keyAt(index);
+            UserRuntime before = users.valueAt(index);
             if (before == null) {
                 lane.users.remove(userId);
                 lane.removeUser(userId);
@@ -162,7 +162,12 @@ final class RuntimeAccountRollback {
                 lane.reservationIdsByUser.remove(userId);
                 lane.activeOrderIdsByUser.remove(userId);
             } else {
-                lane.users.put(userId, before);
+                UserRuntime authority = users.hasPreparedAt(index) ? users.preparedAt(index) : lane.users.get(userId);
+                if (state.accountLanesStarted) {
+                    authority = (authority == null ? before : authority).laneValue()
+                            .withState(before.revision(), before.positionMode());
+                } else authority = before.publicationValue();
+                lane.users.put(userId, authority);
                 lane.registerUser(userId);
             }
         }
@@ -189,9 +194,9 @@ final class RuntimeAccountRollback {
         for (LaneLongCaptures<PositionRuntime> positions : patchPositionsBeforeByLane)
             for (int index = 0; index < positions.size(); index++)
                 state.publishPosition(positions.key(index), positions.value(index));
-        for (LaneLongCaptures<UserRuntime> users : patchUsersBeforeByLane)
+        for (RuntimeUserChangeBuffer users : patchUsersBeforeByLane)
             for (int index = 0; index < users.size(); index++)
-                state.publishUser(users.key(index), users.value(index));
+                state.publishUser(users.keyAt(index), users.valueAt(index));
         for (LaneLongCaptures<CoreTriggerOrderState> triggers : patchTriggersBeforeByLane)
             for (int index = 0; index < triggers.size(); index++)
                 state.publishTriggerOrder(triggers.key(index), triggers.value(index));
@@ -332,7 +337,7 @@ final class RuntimeAccountRollback {
     }
 
     boolean hasCaptured() {
-        for (LaneLongCaptures<UserRuntime> captured : patchUsersBeforeByLane)
+        for (RuntimeUserChangeBuffer captured : patchUsersBeforeByLane)
             if (!captured.isEmpty()) return true;
         for (LaneBalancePatches captured : patchBalancesBeforeByLane)
             if (captured.size() != 0) return true;
