@@ -71,6 +71,14 @@ class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
         clear();
     }
 
+    /** Copy between owned buffers without allocating a capturing callback, then release the source lease. */
+    void drainIndexedTo(RuntimeIndexedChangeBuffer<V, I> target) {
+        if (target == this) throw new IllegalArgumentException("change source and target must differ");
+        for (int slot = 0; slot < size; slot++)
+            target.putIndexed(keyAt(slot), valueAt(slot), hasPreparedAt(slot), preparedAt(slot));
+        clear();
+    }
+
     @Override void drainTo(org.eclipse.collections.api.block.procedure.primitive.LongObjectProcedure<V> consumer) {
         forEach(consumer);
         // Also release prepared facts and specialized publication cells before reuse.

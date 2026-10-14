@@ -229,3 +229,14 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 `LaneCommitEvent` 在实际Lane上原位填写权威订单的提交元数据，冻结事件输出后按缓冲交接，保留权威订单及其预约的池身份。若命令修改已有订单，先保存回滚前值，拒绝时恢复到同一权威对象；不能用冻结副本替换仍带预约和退休租约的对象。Owner不再为该事件逐订单创建元数据副本。
 
 必要功能验证、缓冲生命周期缺陷的修正以及误选旧矩阵测试的失败记录见 [顺序订单槽验证](../../docs/validation/sequential-order-slot-reuse-20261015.json)。本模块没有完成全部Owner收据/控制/编码迁移，也不代表所有路径零分配或完整Core小于100 B/业务项；分配诊断留在本地，未做真实单节点压测。最终必要用例排除了Cluster快照/恢复及wallet；此前误选含快照方法的旧测试类不计入最终验收。
+
+
+### 准入及路由索引周转、结果交接回调（2026-10-15）
+
+`AccountLaneState.LaneAdmissionOrderIndex` 在最后订单离开时摘除币对汇总，最多复用256个已归零且不含身份的单元；仍存在的用户保留空索引表，删除用户后释放。若先删除用户再清订单，最后订单负责释放该表，不能提前丢掉有效汇总。原有内部表改用Agrona primitive表，直接支持symbolId 0并保留数组容量；外部币对ID、分组数量和回滚语义不变。
+
+`ActiveOrderIndex` 仍仅保存Owner路由身份。用户和币对的最后订单离开后即移除身份键，空primitive成员表最多缓存64个、单表容量最多4096，过大的表直接释放；清空的路由对象最多缓存4096个。币对表改用开放寻址以保留数组容量，没有新账户镜像或永久历史用户桶。查询游标仍必须在下一次索引修改前消费。
+
+`MatcherSettlementEvent.BatchStorage` 的元数据槽改用以-1表示缺失的primitive表，清空后保留容量，symbolId及槽号0均有效。`TradingRuntimeState.reserveOrderInLane` 在已有Lane作用域直接执行原冻结步骤；`RuntimeIndexedChangeBuffer` 直接把冻结值和可选删除证明交给目标缓冲，再清空源，避免捕获型回调。Owner控制及终态收据的相关小循环沿用原顺序，不再逐次创建lambda；这尚未把所有收据业务搬离Owner。
+
+必要用例覆盖数量替换和部分成交、跨分组复用、0及最大symbolId、用户移除顺序、缓存上限、独立输出租约、拒绝及回滚、六产品线双币对反复交错批量、风险查询、触发及Ledger，见 [索引周转功能验证](../../docs/validation/admission-routing-reuse-20261015.json)。局部索引生命周期基准与进程内交易流水线JMH/JFR分开记录，仅保留本地数值；不做真实单节点压测、Cluster快照/恢复或wallet。Owner剩余控制/输出及完整Core百字节目标继续保持未完成。

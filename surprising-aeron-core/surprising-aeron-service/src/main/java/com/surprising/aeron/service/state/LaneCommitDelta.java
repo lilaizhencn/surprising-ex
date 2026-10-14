@@ -189,14 +189,17 @@ public final class LaneCommitDelta {
         publishPreparedToOwner(state, changedUsers, changedOrders);
         if (terminalOrderSink != null && terminalOrderCount != 0)
             terminalOrderSink.acceptBatch(this, coreSequence);
-        liquidations.drainTo((id, value) -> {
-            state.changedLiquidations.put(id, value);
-        });
-        riskSnapshots.drainIndexedTo((key, value, hasProof, positionAbsent) -> {
-            state.changedRiskSnapshots.putIndexed(key, value, hasProof, positionAbsent);
+        for (int index = 0; index < liquidations.size(); index++)
+            state.changedLiquidations.put(liquidations.keyAt(index), liquidations.valueAt(index));
+        liquidations.clear();
+        for (int index = 0; index < riskSnapshots.size(); index++) {
+            long key = riskSnapshots.keyAt(index);
+            RiskSnapshotRuntime value = riskSnapshots.valueAt(index);
+            state.changedRiskSnapshots.putIndexed(key, value, riskSnapshots.hasPreparedAt(index), riskSnapshots.preparedAt(index));
             if (value == null) state.riskPositionIdentities.remove(key);
             else state.riskPositionIdentities.add(key);
-        });
+        }
+        riskSnapshots.clear();
         state.changedOrders.adopt(laneId, orders);
         state.changedPositions.adopt(laneId, positions);
     }
@@ -252,8 +255,11 @@ public final class LaneCommitDelta {
         reservations.forEach((orderId, ignored) -> state.changedReservations.add(orderId));
         state.changedOrders.adopt(laneId, orders);
         state.changedPositions.adopt(laneId, positions);
-        liquidations.forEach(state.changedLiquidations::put);
-        riskSnapshots.forEachIndexed(state.changedRiskSnapshots::putIndexed);
+        for (int index = 0; index < liquidations.size(); index++)
+            state.changedLiquidations.put(liquidations.keyAt(index), liquidations.valueAt(index));
+        for (int index = 0; index < riskSnapshots.size(); index++)
+            state.changedRiskSnapshots.putIndexed(riskSnapshots.keyAt(index), riskSnapshots.valueAt(index),
+                    riskSnapshots.hasPreparedAt(index), riskSnapshots.preparedAt(index));
         if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
         if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
     }
@@ -288,8 +294,11 @@ public final class LaneCommitDelta {
         }
         state.changedOrders.adopt(laneId, orders);
         state.changedPositions.adopt(laneId, positions);
-        liquidations.forEach(state.changedLiquidations::put);
-        riskSnapshots.forEachIndexed(state.changedRiskSnapshots::putIndexed);
+        for (int index = 0; index < liquidations.size(); index++)
+            state.changedLiquidations.put(liquidations.keyAt(index), liquidations.valueAt(index));
+        for (int index = 0; index < riskSnapshots.size(); index++)
+            state.changedRiskSnapshots.putIndexed(riskSnapshots.keyAt(index), riskSnapshots.valueAt(index),
+                    riskSnapshots.hasPreparedAt(index), riskSnapshots.preparedAt(index));
     }
 
     void clear() {

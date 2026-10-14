@@ -25,7 +25,7 @@ class RuntimeIndexedChangeBufferTest {
         source.put(1, "open"); source.putPrepared(1, "active");
         source.put(2, "closed"); source.putPrepared(2, null);
         source.put(3, "control");
-        source.drainIndexedTo(target::putIndexed);
+        source.drainIndexedTo(target);
         assertThat(source.isEmpty()).isTrue();
         target.putIndexed(1, "filled", true, null);
         var result = new java.util.HashMap<Long, String>();
@@ -34,6 +34,21 @@ class RuntimeIndexedChangeBufferTest {
         assertThat(result).containsEntry(1L, "filled:true:null").containsEntry(2L, "closed:true:null")
                 .containsEntry(3L, "control:false:null");
         assertThat(target.size()).isEqualTo(3);
+    }
+
+    @Test void directDrainKeepsFrozenOrderValuesAfterReleasingTheirSourceCells() {
+        var source = new RuntimeOrderChangeBuffer();
+        var target = new RuntimeOrderChangeBuffer();
+        source.put(11, CoreStateTestFixtures.order(11, 7, 0, 10));
+        var borrowed = source.get(11);
+        assertThatThrownBy(() -> source.drainIndexedTo(source)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(source.get(11)).isSameAs(borrowed);
+        source.drainIndexedTo(target);
+        assertThat(source.isEmpty()).isTrue();
+        assertThat(borrowed.instrument()).isNull();
+        assertThat(target.get(11).orderId()).isEqualTo(11);
+        assertThat(target.get(11).instrument()).isNotNull();
+        assertThat(target.get(11)).isNotSameAs(borrowed);
     }
 
     @Test void reuseAndGrowthDoNotRetainPreparedValues() throws Exception {

@@ -4714,24 +4714,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         accountRollback.captureReservationBefore(orderId, userId);
         accountRollback.captureBalanceBefore(userId, assetId);
         if (clientKey != 0) accountRollback.captureClientOrderBefore(userId, clientKey);
-        onLane(userId, lane -> {
-            Long2LongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
-            if (clientKey != 0 && userClientOrders != null && userClientOrders.containsKey(clientKey)) {
-                throw new IllegalArgumentException("runtime client order already exists: " + clientKey);
-            }
-            UserRuntime user = lane.users.get(userId);
-            if (user == null) throw new IllegalArgumentException("runtime user is not registered: " + userId);
-            IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(userId);
-            BalanceRuntime balance = balances == null ? null : balances.get(assetId);
-            if (balance == null) {
-                throw new IllegalArgumentException("runtime balance is not registered: " + userId + "/" + assetId);
-            }
-            balance.reserve(reservedUnits);
-            lane.putOrder(order);
-            lane.reservations.put(orderId, reservation);
-            lane.addReservationId(userId, orderId);
-            if (clientKey != 0) putClientOrderIndex(lane, userId, clientKey, orderId);
-            accountRollback.captureBalanceAfter(lane, userId, assetId);
+        AccountLaneState scoped = currentLaneCommandScope();
+        if (scoped != null) reserveOrderInLane(scoped, order, reservation, clientKey, reservedUnits);
+        else onLane(userId, lane -> {
+            reserveOrderInLane(lane, order, reservation, clientKey, reservedUnits);
             return null;
         });
         // Control tasks run while Owner may suspend/drain its current commit context.
@@ -4746,6 +4732,30 @@ public final class TradingRuntimeState implements AutoCloseable {
             publishOrder(orderId, order);
             publishReservation(orderId, reservation);
         }
+    }
+
+    private void reserveOrderInLane(AccountLaneState lane, OrderRuntime order, ReservationRuntime reservation,
+                                    long clientKey, long reservedUnits) {
+        lane.assertOwner();
+        long userId = order.userId(), orderId = order.orderId();
+        int assetId = reservation.assetId();
+        if (lane.laneId() != topology.accountLaneId(userId))
+            throw new IllegalStateException("reservation crossed Account Lane");
+        Long2LongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
+        if (clientKey != 0 && userClientOrders != null && userClientOrders.containsKey(clientKey))
+            throw new IllegalArgumentException("runtime client order already exists: " + clientKey);
+        if (lane.users.get(userId) == null)
+            throw new IllegalArgumentException("runtime user is not registered: " + userId);
+        IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(userId);
+        BalanceRuntime balance = balances == null ? null : balances.get(assetId);
+        if (balance == null)
+            throw new IllegalArgumentException("runtime balance is not registered: " + userId + "/" + assetId);
+        balance.reserve(reservedUnits);
+        lane.putOrder(order);
+        lane.reservations.put(orderId, reservation);
+        lane.addReservationId(userId, orderId);
+        if (clientKey != 0) putClientOrderIndex(lane, userId, clientKey, orderId);
+        accountRollback.captureBalanceAfter(lane, userId, assetId);
     }
 
     /** Cold construction also supplies detached benchmark values; live admission uses the Lane pool. */

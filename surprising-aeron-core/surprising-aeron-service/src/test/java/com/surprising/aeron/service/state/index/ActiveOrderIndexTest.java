@@ -25,6 +25,57 @@ import org.junit.jupiter.api.Test;
 
 class ActiveOrderIndexTest {
 
+    @Test void recycledMembershipDoesNotRetainPreviousUsersOrDisturbLiveRoutes() {
+        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
+        var held = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY,
+                90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+        index.apply(1, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(held, identities, instrument("1")), identities);
+        var otherInstrument = instrument("2");
+        for (long id = 1_000_000; id < 1_001_000; id++) {
+            long user = id + 1;
+            var order = new CoreOrderState(id, ProductLine.SPOT, user, "2", CoreOrderSide.SELL,
+                    100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+            index.apply(id, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(order, identities, otherInstrument), identities);
+            assertThat(index.sortedIds(user, "2")).containsExactly(id);
+            index.apply(id, null, identities);
+            index.apply(id, null, identities);
+            assertThat(index.ids(user)).isEmpty();
+            assertThat(index.count("2")).isZero();
+            assertThat(index.ids(7)).containsExactly(1L);
+            assertThat(index.activeOrderRoute(1).userId()).isEqualTo(7);
+        }
+        assertThat(index.count()).isOne();
+        assertThat(index.page(0, null, 0, 10).orderIds()).containsExactly(1L);
+    }
+
+    @Test void completedBurstLeavesBoundedEmptyCachesAndNoIdentityEntries() throws Exception {
+        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
+        var instrument = instrument("1");
+        for (long id = 1; id <= 4_097; id++) {
+            var order = new CoreOrderState(id, ProductLine.SPOT, id, "1", CoreOrderSide.BUY,
+                    90, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+            index.apply(id, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(order, identities, instrument), identities);
+        }
+        for (long id = 1; id <= 4_097; id++) index.apply(id, null, identities);
+        assertThat(index.count()).isZero();
+        for (String name : new String[]{"idsByUser", "idsBySymbol"}) {
+            var field = ActiveOrderIndex.class.getDeclaredField(name); field.setAccessible(true);
+            assertThat((Map<?, ?>) field.get(index)).isEmpty();
+        }
+        var routesField = ActiveOrderIndex.class.getDeclaredField("recycledOrders"); routesField.setAccessible(true);
+        var routes = (java.util.ArrayDeque<ActiveOrderIndex.IndexedOrder>) routesField.get(index);
+        assertThat(routes).hasSizeLessThanOrEqualTo(4_096).allSatisfy(route -> {
+            assertThat(route.orderId()).isZero(); assertThat(route.userId()).isZero(); assertThat(route.instrumentId()).isNull();
+        });
+        var setsField = ActiveOrderIndex.class.getDeclaredField("recycledMemberships"); setsField.setAccessible(true);
+        var sets = (java.util.ArrayDeque<org.agrona.collections.LongHashSet>) setsField.get(index);
+        assertThat(sets).hasSizeLessThanOrEqualTo(64).allSatisfy(ids -> {
+            assertThat(ids.size()).isZero(); assertThat(ids.capacity()).isLessThanOrEqualTo(4_096);
+        });
+    }
+
     @Test
     void terminalRemovalIsIdempotentAndPreservesOtherAccountAndSymbolOrders() {
         for (var status : CoreOrderStatus.values()) {

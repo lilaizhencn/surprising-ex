@@ -19,6 +19,7 @@ import org.openjdk.jmh.annotations.Fork;
 import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.OperationsPerInvocation;
 import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
@@ -81,6 +82,37 @@ public class OrderAdmissionAllocationBenchmark {
                         true, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                         CoreTimeInForce.GTC, 0, 0, 1, 0, 1, false).withCommitMetadata(1000, index + 1));
             }
+        }
+    }
+
+    /** One Lane's real pending-order index, including last-order deletion and fresh group admission. */
+    @Benchmark @OperationsPerInvocation(20)
+    public long laneAdmissionOrderTurnover(AdmissionIndexState state) {
+        for (var order : state.orders) state.lane.putOrder(order);
+        long pending = state.lane.admissionOrderIndex(0).inspect(4, "1", CorePositionSide.NET,
+                CoreOrderSide.BUY, CoreMarginMode.CROSS).pendingQuantity();
+        for (var order : state.orders) state.lane.removeOrder(order.orderId());
+        return pending;
+    }
+
+    @State(Scope.Thread)
+    public static class AdmissionIndexState {
+        @Param({"1", "20"}) public int users;
+        @Param({"1", "4"}) public int symbols;
+        AccountLaneState lane;
+        final OrderRuntime[] orders = new OrderRuntime[20];
+
+        @Setup public void setup() {
+            lane = new AccountLaneState(0, 256); lane.bindOwner();
+            for (int user = 1; user <= users; user++) lane.registerUser(4L * user);
+            var instruments = new CoreInstrument[symbols];
+            for (int symbol = 0; symbol < symbols; symbol++) instruments[symbol] = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
+                    new RegisterInstrumentCommand(Integer.toString(symbol + 1), ContractType.LINEAR_PERPETUAL.ordinal(),
+                            "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+            for (int item = 0; item < orders.length; item++) orders[item] = new OrderRuntime(1_000_000L + item,
+                    4L * (item % users + 1), item % symbols, instruments[item % symbols], CoreOrderSide.BUY, 100,
+                    false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                    CoreTimeInForce.GTC, 0, 0, 1, 0, 1, false);
         }
     }
 }

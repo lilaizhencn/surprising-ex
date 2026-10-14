@@ -16,6 +16,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import org.agrona.collections.Long2ObjectHashMap;
+import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.Long2LongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
@@ -219,6 +220,7 @@ public final class AccountLaneState {
     void removeUser(long userId) {
         assertOwner();
         userIds.remove(userId);
+        admissionOrderIndex.removeUnusedUser(userId);
     }
 
     void markPendingReservation(long orderId, long coreSequence) {
@@ -511,8 +513,10 @@ public final class AccountLaneState {
     }
 
     private final class LaneAdmissionOrderIndex implements AdmissionOrderIndex {
-        private final Long2ObjectHashMap<IntObjectHashMap<AdmissionAggregate>> summariesByUser =
+        private final Long2ObjectHashMap<Int2ObjectHashMap<AdmissionAggregate>> summariesByUser =
                 new Long2ObjectHashMap<>();
+        /** Detached zero-valued cells contain no user or instrument identity; only this Lane reuses them. */
+        private final java.util.ArrayDeque<AdmissionAggregate> emptyAggregates = new java.util.ArrayDeque<>();
         private final AdmissionSummary summary = new AdmissionSummary();
         private int symbolId;
 
@@ -520,7 +524,7 @@ public final class AccountLaneState {
         public AdmissionSummary inspect(
                 long userId, String instrumentId, CorePositionSide positionSide,
                 CoreOrderSide side, CoreMarginMode conflictingMarginMode) {
-            IntObjectHashMap<AdmissionAggregate> bySymbol = summariesByUser.get(userId);
+            Int2ObjectHashMap<AdmissionAggregate> bySymbol = summariesByUser.get(userId);
             AdmissionAggregate aggregate = bySymbol == null ? null : bySymbol.get(symbolId);
             return aggregate == null ? summary.set(0, 0, 0)
                     : summary.set(aggregate.pending(positionSide, side), aggregate.reduceOnly(side),
@@ -560,13 +564,14 @@ public final class AccountLaneState {
         }
 
         private void update(OrderRuntime order, int direction, long remainingQuantity) {
-            IntObjectHashMap<AdmissionAggregate> bySymbol = summariesByUser.get(order.userId());
+            Int2ObjectHashMap<AdmissionAggregate> bySymbol = summariesByUser.get(order.userId());
             AdmissionAggregate aggregate = bySymbol == null ? null : bySymbol.get(order.symbolId());
             if (aggregate == null) {
                 if (direction < 0) throw new IllegalStateException("admission order index is missing");
-                bySymbol = bySymbol == null ? new IntObjectHashMap<>() : bySymbol;
-                aggregate = new AdmissionAggregate();
-                aggregate.update(order, direction);
+                aggregate = emptyAggregates.pollLast();
+                if (aggregate == null) aggregate = new AdmissionAggregate();
+                aggregate.update(order, direction, remainingQuantity);
+                bySymbol = bySymbol == null ? new Int2ObjectHashMap<>(8, 0.65f, false) : bySymbol;
                 bySymbol.put(order.symbolId(), aggregate);
                 summariesByUser.put(order.userId(), bySymbol);
                 return;
@@ -574,8 +579,16 @@ public final class AccountLaneState {
             aggregate.update(order, direction, remainingQuantity);
             if (aggregate.empty()) {
                 bySymbol.remove(order.symbolId());
-                if (bySymbol.isEmpty()) summariesByUser.remove(order.userId());
+                if (emptyAggregates.size() < 256) emptyAggregates.addLast(aggregate);
+                removeUnusedUser(order.userId());
             }
+        }
+
+        private void removeUnusedUser(long userId) {
+            var bySymbol = summariesByUser.get(userId);
+            // Keep only the empty table while its actual user exists, as for order membership.
+            // If user removal precedes order cleanup, the last order releases the table instead.
+            if (bySymbol != null && bySymbol.isEmpty() && !userIds.contains(userId)) summariesByUser.remove(userId);
         }
 
     }
@@ -614,10 +627,6 @@ public final class AccountLaneState {
             long next = Math.addExact(remaining, nextRemaining);
             if (reduce) assignReduceOnly(side, next);
             else assignPending(positionSide, side, next);
-        }
-
-        void update(OrderRuntime order, int direction) {
-            update(order, direction, order.remainingQuantitySteps());
         }
 
         private void update(OrderRuntime order, int direction, long remainingQuantity) {

@@ -44,7 +44,7 @@ final class MatcherSettlementDispatcher {
             OrderRuntime order = single == null ? orders[index] : single;
             if (order == null) throw new IllegalStateException("direct settlement order was not admitted");
             storage.admittedOrders[index] = order;
-            int prior = storage.metadataSlots.getIfAbsent(order.symbolId(), -1);
+            int prior = storage.metadataSlots.get(order.symbolId());
             if (prior < 0) {
                 CoreInstrument instrument = owner.instrument(identities.instrumentId(order.symbolId()));
                 if (instrument == null || instrument != order.instrument())
@@ -359,7 +359,7 @@ final class MatcherSettlementDispatcher {
                 OrderRuntime taker = batch.settlementOrder(index);
                 if (taker == null) taker = owner.order(takerOrderId);
                 if (taker == null) throw new IllegalStateException("taker order is missing");
-                int slot = storage.metadataSlots.getIfAbsent(taker.symbolId(), -1);
+                int slot = storage.metadataSlots.get(taker.symbolId());
                 if (slot < 0) {
                     CoreInstrument instrument = owner.instrument(identities.instrumentId(taker.symbolId()));
                     if (instrument == null) throw new IllegalStateException("match instrument is missing");

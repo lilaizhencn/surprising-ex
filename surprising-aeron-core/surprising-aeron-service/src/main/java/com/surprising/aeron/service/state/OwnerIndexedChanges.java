@@ -24,13 +24,13 @@ final class OwnerIndexedChanges<V, I> {
         if (laneId < 0 || laneId >= lanes.length) throw new IllegalArgumentException("invalid change Lane");
         if (source.isEmpty()) return;
         if (!direct.isEmpty()) {
-            source.drainIndexedTo(direct::putIndexed);
+            source.drainIndexedTo(direct);
             return;
         }
         var target = lanes[laneId];
         if (target == null) lanes[laneId] = target = source.emptyLike();
         if (target.isEmpty()) target.swapWith(source);
-        else source.drainIndexedTo(target::putIndexed);
+        else source.drainIndexedTo(target);
         laneMask |= 1L << laneId;
     }
 

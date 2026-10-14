@@ -12,7 +12,6 @@ import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.ArrayDeque;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
@@ -44,11 +43,16 @@ public final class ActiveOrderIndex {
     // Independent iterators preserve nested admission/query cursors.
     private final Long2ObjectHashMap<LongHashSet> idsByUser =
             new Long2ObjectHashMap<>(INITIAL_USER_INDEX_CAPACITY, 0.65f, false);
-    private final Map<String, LongHashSet> idsBySymbol = new HashMap<>(INITIAL_INDEX_CAPACITY);
+    private final Map<String, LongHashSet> idsBySymbol =
+            new org.agrona.collections.Object2ObjectHashMap<>(INITIAL_INDEX_CAPACITY, 0.65f, false);
     private final Long2ObjectHashMap<IndexedOrder> ordersById =
             new Long2ObjectHashMap<>(INITIAL_INDEX_CAPACITY, 0.65f, false);
     /** Owner-only wrapper pool; its lifetime follows this index and retains no terminal values. */
     private final ArrayDeque<IndexedOrder> recycledOrders = new ArrayDeque<>(INITIAL_INDEX_CAPACITY);
+    /** Empty primitive membership tables carry no route keys; bound both count and retained table size. */
+    private final ArrayDeque<LongHashSet> recycledMemberships = new ArrayDeque<>();
+    private static final int MAX_RECYCLED_ORDERS = 4_096;
+    private static final int MAX_RECYCLED_MEMBERSHIPS = 64, MAX_RECYCLED_MEMBERSHIP_CAPACITY = 4_096;
 
     /** Owner routing metadata only; authoritative orders remain in Account Lane. */
     public static final class IndexedOrder {
@@ -278,7 +282,7 @@ public final class ActiveOrderIndex {
                 remove(idsByUser, previous.userId(), orderId);
                 remove(idsBySymbol, previous.instrumentId(), orderId);
                 previous.clear();
-                recycledOrders.addFirst(previous);
+                if (recycledOrders.size() < MAX_RECYCLED_ORDERS) recycledOrders.addFirst(previous);
             }
             return;
         }
@@ -327,49 +331,50 @@ public final class ActiveOrderIndex {
 
     private void add(IndexedOrder order) {
         ordersById.put(order.orderId(), order);
-        LongHashSet userIds = idsByUser.get(order.userId());
-        if (userIds == null) {
-            // User buckets are removed when the last order leaves.  Keep their
-            // per-user allocation small so short-lived users do not pay the
-            // process-wide active-order capacity.
-            userIds = new LongHashSet(8, 0.65f, false);
-            idsByUser.put(order.userId(), userIds);
-        }
-        userIds.add(order.orderId());
-        idsBySymbol.computeIfAbsent(order.instrumentId(), ignored ->
-                new LongHashSet(INITIAL_SYMBOL_INDEX_CAPACITY, 0.65f, false)).add(order.orderId());
+        add(idsByUser, order.userId(), order.orderId());
+        add(idsBySymbol, order.instrumentId(), order.orderId());
     }
 
-    private static void remove(Long2ObjectHashMap<LongHashSet> values, long key, long id) {
+    private void remove(Long2ObjectHashMap<LongHashSet> values, long key, long id) {
         LongHashSet ids = values.get(key);
         if (ids == null) return;
         ids.remove(id);
-        if (ids.isEmpty()) values.remove(key);
+        if (ids.isEmpty()) { values.remove(key); recycleMembership(ids); }
     }
 
-    private static <K> void remove(Map<K, LongHashSet> values, K key, long id) {
+    private <K> void remove(Map<K, LongHashSet> values, K key, long id) {
         LongHashSet ids = values.get(key);
         if (ids == null) return;
         ids.remove(id);
-        if (ids.isEmpty()) values.remove(key);
+        if (ids.isEmpty()) { values.remove(key); recycleMembership(ids); }
     }
 
-    private static <K> void add(Map<K, LongHashSet> values, K key, long id) {
+    private <K> void add(Map<K, LongHashSet> values, K key, long id) {
         LongHashSet ids = values.get(key);
         if (ids == null) {
-            ids = new LongHashSet(8, 0.65f, false);
+            ids = membership();
             values.put(key, ids);
         }
         ids.add(id);
     }
 
-    private static void add(Long2ObjectHashMap<LongHashSet> values, long key, long id) {
+    private void add(Long2ObjectHashMap<LongHashSet> values, long key, long id) {
         LongHashSet ids = values.get(key);
         if (ids == null) {
-            ids = new LongHashSet(8, 0.65f, false);
+            ids = membership();
             values.put(key, ids);
         }
         ids.add(id);
+    }
+
+    private LongHashSet membership() {
+        LongHashSet ids = recycledMemberships.pollFirst();
+        return ids == null ? new LongHashSet(INITIAL_SYMBOL_INDEX_CAPACITY, 0.65f, false) : ids;
+    }
+
+    private void recycleMembership(LongHashSet ids) {
+        if (ids.capacity() <= MAX_RECYCLED_MEMBERSHIP_CAPACITY
+                && recycledMemberships.size() < MAX_RECYCLED_MEMBERSHIPS) recycledMemberships.addFirst(ids);
     }
 
     private long[] orderIds() {

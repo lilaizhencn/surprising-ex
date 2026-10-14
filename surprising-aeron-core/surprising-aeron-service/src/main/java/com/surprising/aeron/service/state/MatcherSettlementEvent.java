@@ -125,8 +125,8 @@ public final class MatcherSettlementEvent implements
     LaneOrderResultTarget resultTarget;
     static final class BatchStorage {
         /** 本批币对ID到首个元数据槽；只在Owner构建阶段写入，事件回收时清空。 */
-        final org.eclipse.collections.impl.map.mutable.primitive.IntIntHashMap metadataSlots =
-                new org.eclipse.collections.impl.map.mutable.primitive.IntIntHashMap();
+        final org.agrona.collections.Int2IntHashMap metadataSlots =
+                new org.agrona.collections.Int2IntHashMap(8, 0.65f, -1, false);
         final MatcherSettlementPlan[] plans;
         final CoreInstrument[] instruments;
         final OrderRuntime[] admittedOrders;

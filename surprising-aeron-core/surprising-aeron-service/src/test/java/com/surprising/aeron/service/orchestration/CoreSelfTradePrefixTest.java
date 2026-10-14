@@ -24,6 +24,61 @@ class CoreSelfTradePrefixTest {
                 .map(priorFill -> Arguments.of(line, priorFill)));
     }
 
+    @ParameterizedTest @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
+    void repeatedMixedSymbolBatchesKeepAssetMetadataAndReleaseBothUsersReservations(ProductLine line) throws Exception {
+        try (var core = new TradingCoreRuntime(line)) {
+            var type = ContractType.valueOf(line.contractTypeCode());
+            for (String symbol : new String[]{"1", "2"}) {
+                String base = symbol.equals("1") ? "BTC" : "ETH";
+                applied(core, message(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
+                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(symbol, type.ordinal(),
+                                base, "USDT", type.isInverse() ? base : "USDT", 1, 1, type.isInverse() ? 1000 : 1,
+                                100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? TIME + 20_000 : 0,
+                                type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))));
+                if (line != ProductLine.SPOT) applied(core, message(core, CoreMessageType.APPLY_MARK_PRICE, 0,
+                        TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
+                                ? new ApplyMarkPriceCommand(symbol, 100, 100, 100, 1, TIME)
+                                : new ApplyMarkPriceCommand(symbol, 100, 1, TIME))));
+            }
+            for (long user : new long[]{7, 8}) for (String asset : new String[]{"BTC", "ETH", "USDT"})
+                applied(core, message(core, CoreMessageType.ADJUST_BALANCE, user,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, CAPITAL))));
+            try (var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+                for (int cycle = 0; cycle < 3; cycle++) {
+                    for (long user : new long[]{7, 8}) {
+                        var orders = new java.util.ArrayList<PlaceOrderCommand>();
+                        for (String symbol : cycle % 2 == 0 ? new String[]{"1", "2"} : new String[]{"2", "1"}) {
+                            long id = 1000L + cycle * 100 + user * 10 + Integer.parseInt(symbol);
+                            orders.add(new PlaceOrderCommand(id, symbol, user == 7 ? CoreOrderSide.SELL : CoreOrderSide.BUY,
+                                    100, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                                    CoreTimeInForce.GTC, false, "mixed-" + id));
+                        }
+                        var response = CoreTestCompletion.applyAsynchronously(core, message(core, CoreMessageType.PLACE_ORDER_BATCH,
+                                user, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders))));
+                        assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                        var items = TradingOrderBatchCodec.decodeResult(response.data()).items();
+                        assertThat(items).hasSize(2).allSatisfy(item -> {
+                            assertThat(item.status()).isEqualTo(ResponseStatus.APPLIED);
+                            assertThat(item.executions()).hasSize(user == 8 ? 1 : 0);
+                        });
+                    }
+                }
+            }
+            Map<String, Long> totals = new HashMap<>();
+            for (long user : new long[]{7, 8}) {
+                var account = CoreTestCompletion.userState(core, user);
+                assertThat(account.reservations()).isEmpty();
+                for (var balance : account.balances()) totals.merge(balance.asset(),
+                        Math.addExact(balance.availableUnits(), balance.lockedUnits()), Math::addExact);
+                if (line == ProductLine.SPOT) assertThat(account.positions()).isEmpty();
+                else assertThat(account.positions()).hasSize(2).allSatisfy(position ->
+                        assertThat(position.signedQuantitySteps()).isEqualTo(user == 7 ? -6 : 6));
+            }
+            assertThat(totals).containsEntry("BTC", CAPITAL * 2).containsEntry("ETH", CAPITAL * 2)
+                    .containsEntry("USDT", CAPITAL * 2);
+        }
+    }
+
     @ParameterizedTest @MethodSource("productsAndPriorFill")
     void cancelBeforePlaceHandlesRestingAndAlreadyMatchedOwnOrders(ProductLine line, int priorFill) throws Exception {
         var releaseMaker = new CountDownLatch(1);
