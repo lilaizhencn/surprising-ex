@@ -21,6 +21,58 @@ import static org.assertj.core.api.Assertions.*;
 
 class MatcherTreasurySettlementTest {
     @Test
+    void shrinkingLaneRoutesRetainTreasurySlotsAndExcludeInactiveContributions() throws Exception {
+        var event = new MatcherSettlementEvent();
+        var prepare = MatcherSettlementEvent.class.getDeclaredMethod("prepareTreasuryDeltas", long.class, boolean.class);
+        prepare.setAccessible(true);
+        var storage = MatcherSettlementEvent.class.getDeclaredField("touchedLaneTreasuryDeltas");
+        storage.setAccessible(true);
+        var mask = MatcherSettlementEvent.class.getDeclaredField("requiredLaneMask");
+        mask.setAccessible(true);
+        var trades = MatcherSettlementEvent.class.getDeclaredField("treasuryTrades");
+        trades.setAccessible(true);
+        var merge = MatcherSettlementEvent.class.getDeclaredMethod("mergeTreasuryDeltas");
+        merge.setAccessible(true);
+
+        prepare.invoke(event, 1L, false);
+        assertThat(storage.get(event)).isNull();
+        prepare.invoke(event, 1L, true);
+        RuntimeTreasuryDelta first = ((RuntimeTreasuryDelta[]) storage.get(event))[0];
+        first.addFee(2, 17);
+        prepare.invoke(event, 5L, true);
+        RuntimeTreasuryDelta[] slots = (RuntimeTreasuryDelta[]) storage.get(event);
+        assertThat(slots).hasSize(2);
+        assertThat(slots[0]).isSameAs(first);
+        assertThat(first.size()).isZero();
+        RuntimeTreasuryDelta second = slots[1];
+
+        for (int iteration = 0; iteration < 64; iteration++) {
+            prepare.invoke(event, 1L << 63, true);
+            assertThat(storage.get(event)).isSameAs(slots);
+            assertThat(slots[0]).isSameAs(first);
+            assertThat(slots[1]).isSameAs(second);
+            assertThat(first.size()).isZero();
+            assertThat(second.size()).isZero();
+            mask.setLong(event, 1L << 63);
+            trades.setBoolean(event, true);
+            first.addFee(2, 3);
+            // Capacity is not the current business range, even if an inactive cell has data.
+            second.addFee(2, 100);
+            assertThat(((RuntimeTreasuryDelta) merge.invoke(event)).feeUnits(0)).isEqualTo(3);
+
+            prepare.invoke(event, (1L << 63) | 1, true);
+            mask.setLong(event, (1L << 63) | 1);
+            first.addFee(2, 5);
+            second.addFee(2, 7);
+            assertThat(((RuntimeTreasuryDelta) merge.invoke(event)).feeUnits(0)).isEqualTo(12);
+            prepare.invoke(event, 1L, false);
+            assertThat(storage.get(event)).isSameAs(slots);
+            assertThat(first.size()).isZero();
+            assertThat(second.size()).isZero();
+        }
+    }
+
+    @Test
     void independentAccountWritersThenOriginalLedgerSettleFeesBeforeOwnerCollects() throws Exception {
         var topology = LaneTopology.productionDefault();
         long makerUser = 8, takerUser = 7;

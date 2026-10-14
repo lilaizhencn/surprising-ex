@@ -19,7 +19,11 @@ import org.agrona.concurrent.UnsafeBuffer;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.IterationParams;
 
-/** Real decoder/Owner/Matcher/Lane/Ledger/response path. Aeron transport and Archive are excluded. */
+/**
+ * Real decoder/Owner/Matcher/Lane/Ledger/response path. The two users route to different Account
+ * Lanes, exercising settlement-slot reuse from single-Lane admission to cross-Lane fills.
+ * Aeron transport and Archive are excluded.
+ */
 @State(Scope.Thread) @BenchmarkMode(Mode.Throughput) @OutputTimeUnit(TimeUnit.SECONDS)
 @Warmup(iterations = 3, time = 10) @Measurement(iterations = 3, time = 5)
 @Fork(value = 1, jvmArgsAppend = {"--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",

@@ -1074,21 +1074,25 @@ public final class MatcherSettlementEvent implements
         runtime.accountRollback.captureBalanceAfter(lane, userId, replacementAssetId);
     }
 
-    /** Treasury slots follow the compact touched-Lane order used by laneSlot(). */
+    /**
+     * Treasury slots follow the compact touched-Lane order used by laneSlot(). Capacity belongs
+     * to the pooled event: initial admission often touches one Lane, then matching discovers
+     * more. Keep the cells through that expansion and through the next single-Lane admission.
+     */
     private void prepareTreasuryDeltas(long laneMask, boolean trades) {
-        if (!trades) {
-            if (touchedLaneTreasuryDeltas != null) {
-                for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) delta.clear();
+        if (trades) {
+            int touchedLaneCount = Long.bitCount(laneMask);
+            int capacity = touchedLaneTreasuryDeltas == null ? 0 : touchedLaneTreasuryDeltas.length;
+            if (capacity < touchedLaneCount) {
+                touchedLaneTreasuryDeltas = capacity == 0
+                        ? new RuntimeTreasuryDelta[touchedLaneCount]
+                        : java.util.Arrays.copyOf(touchedLaneTreasuryDeltas, touchedLaneCount);
+                for (int index = capacity; index < touchedLaneCount; index++) {
+                    touchedLaneTreasuryDeltas[index] = new RuntimeTreasuryDelta();
+                }
             }
-            return;
         }
-        int touchedLaneCount = Long.bitCount(laneMask);
-        if (touchedLaneTreasuryDeltas == null || touchedLaneTreasuryDeltas.length != touchedLaneCount) {
-            touchedLaneTreasuryDeltas = new RuntimeTreasuryDelta[touchedLaneCount];
-            for (int index = 0; index < touchedLaneCount; index++) {
-                touchedLaneTreasuryDeltas[index] = new RuntimeTreasuryDelta();
-            }
-        } else {
+        if (touchedLaneTreasuryDeltas != null) {
             for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) delta.clear();
         }
     }
@@ -1189,7 +1193,9 @@ public final class MatcherSettlementEvent implements
     private RuntimeTreasuryDelta mergeTreasuryDeltas() {
         if (!treasuryTrades) return EMPTY_TREASURY_DELTA;
         RuntimeTreasuryDelta aggregate = null;
-        for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) {
+        int touchedLaneCount = Long.bitCount(requiredLaneMask);
+        for (int index = 0; index < touchedLaneCount; index++) {
+            RuntimeTreasuryDelta delta = touchedLaneTreasuryDeltas[index];
             if (aggregate == null) aggregate = delta;
             else aggregate.merge(delta);
         }
