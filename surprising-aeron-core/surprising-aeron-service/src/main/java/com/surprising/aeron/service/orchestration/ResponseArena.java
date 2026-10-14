@@ -38,10 +38,17 @@ final class ResponseArena {
         byte[] storage;
         final boolean arenaBacked;
         int length;
+        /** Same lease as storage; only the claiming encoder touches its position. */
+        private java.nio.ByteBuffer writer;
 
         private Slot(byte[] storage, boolean arenaBacked) {
             this.storage = storage;
             this.arenaBacked = arenaBacked;
+        }
+
+        java.nio.ByteBuffer writer() {
+            if (writer == null || writer.array() != storage) writer = java.nio.ByteBuffer.wrap(storage);
+            return writer.clear();
         }
     }
 

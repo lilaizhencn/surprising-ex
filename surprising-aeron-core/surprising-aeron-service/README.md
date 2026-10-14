@@ -253,3 +253,16 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 必要验证见 [批量输入功能验证](../../docs/validation/sequential-matcher-input-20261015.json)，覆盖六产品线的双币对市价/限价、重复项拒绝和转顺序执行、配置版本、独立输入、改单、触发、Ledger和异常退出。异常退出夹具按生产方式推进Ledger，并在等待时保留已提供的撮合结果；关闭前后比较真实致命边界已观察的撮合序号，仍保留精确相等断言。按要求没有执行Cluster快照/恢复或wallet。
 
 分配诊断分别记录单笔请求的每请求字节和20项批量的每项字节，不能把两种口径互代；两者都仍排除真实Aeron网络/Archive及realtime。JMH增加双币对交错场景并逐币对核对终态持仓，数值只留本地。Owner其他业务收据、部分控制及输出编码、客户端身份/用户修订等分配和完整Core百字节目标仍未完成。
+
+
+### 单笔入口包装、生命周期判断及响应writer复用（2026-10-15）
+
+`TradingOwnerLoop` 沿用原入口SPSC队列，固定预分配8192个 `Input` 包装。Aeron回调从 `availableInput` 取得空槽，填写原命令、日志时间、位置、会话和指纹后发布；Owner把命令接入已有 `PendingClusterIngress` 后，才清空并通过归还队列发布该包装。原命令和响应仍遵循各自租约，包装归还不释放它们。等待字节预算被中断时，未发布包装清空后留在回调线程，下次直接重用；不能由两个线程向同一SPSC归还队列写入。容量、字节预算、截止时间和原等待策略保留，没有新的业务状态表、worker或执行阶段。
+
+普通订单在 `MatchingCommandAdmission` 直接用用户及币对路由检查已有生命周期范围，不再逐请求创建 `LifecycleScope` 或stream；强平/交割需要保留的范围仍是独立值，用户隔离、整币对交割及退休后放行语义保留。`PendingReservationTracker` 的首个预约成员改用Agrona primitive表，清除后保留数组；多成员提升及其他在途序号不会被清空。`TradingRealtimeBoundary.beginCapture` 在确认实时捕获已启用且当前为Leader后才生成缺省追踪字符串。
+
+单订单响应使用原 `ResponseArena.Slot` 持有的 `ByteBuffer`，每次编码重置position，沿用原存储及transport/ledger引用计数；另一个未释放的响应不能借到这个writer。协议新增接受已有ByteBuffer的写入入口，原byte[]及offset接口保持一致字节。两订单/批量等其他编码分配仍待处理。
+
+116个必要用例及选择范围见 [单笔入口与响应功能验证](../../docs/validation/single-ingress-reuse-20261015.json)，覆盖满入口队列、等待中断、两轮真实Owner槽周转、协议边界、延迟出口、生命周期隔离以及六产品线成交、拒绝、触发、资金和实时事件。没有执行Cluster快照/恢复、wallet或真实单节点压测。分配数值只保留本地；完整Core百字节目标，以及Owner其他业务收据、控制及输出职责继续保持未完成。
+
+本轮诊断入口曾误用旧shaded Jar中的协议类，新增编码方法缺失导致预热失败；已要求重新打包并锁定实际JAR指纹，失败轮次单独保留。该故障暴露的空闲故障传播也已修复：`SettlementLaneWorker` 先保留原始故障，再发布通知，报告回调异常不能盖掉原故障；`TradingRuntimeState` 在完成探测时检查原故障引用并唤醒Owner。关闭时无论RuntimeException还是Error，都继续停止其余Account Lane和Ledger，最后再抛故障。补充用例覆盖Error身份、通知失败及所有线程退出，不将异常当作未完成请求持续等待。

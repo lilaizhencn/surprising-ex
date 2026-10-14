@@ -147,6 +147,26 @@ class SettlementLaneWorkerTest {
         }
     }
 
+    @org.junit.jupiter.api.Test
+    void fatalErrorRemainsVisibleWhenItsReportingCallbackAlsoFails() throws Exception {
+        var failure = new NoSuchMethodError("synthetic incompatible settlement method");
+        var reportingFailure = new IllegalStateException("synthetic reporting failure");
+        var reported = new CountDownLatch(1);
+        var worker = new SettlementLaneWorker("fatal", new AccountLaneState(0, 8), 8, problem -> {
+            reported.countDown();
+            throw reportingFailure;
+        });
+        try {
+            worker.submit(lane -> { throw failure; });
+            assertThat(reported.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(worker::assertHealthy).isSameAs(failure);
+        } finally {
+            assertThatThrownBy(worker::close).isSameAs(failure);
+        }
+        assertThat(failure.getSuppressed()).containsExactly(reportingFailure);
+        assertThat(worker.thread().isAlive()).isFalse();
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"BLOCKING", "BUSY_SPIN", "YIELDING"})
     void controlOwnershipHandoffIsPolledAndQueuedWorkResumesOnlyAfterRelease(String strategy) throws Exception {

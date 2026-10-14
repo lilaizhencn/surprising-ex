@@ -28,6 +28,7 @@ import org.openjdk.jmh.infra.IterationParams;
  * admission; PROPORTIONAL exercises ordered Ledger OI input and sequential batch prefixes.
  * Sequential batches exercise frozen Matcher inputs and one captured context per symbol.
  * symbols=2 interleaves the two books inside a batch; teardown checks each position.
+ * Single requests include the production input-wrapper return queue and the leased response writer.
  * Aeron transport and Archive are excluded.
  */
 @State(Scope.Thread) @BenchmarkMode(Mode.Throughput) @OutputTimeUnit(TimeUnit.SECONDS)

@@ -4,6 +4,7 @@ import com.surprising.aeron.client.AeronRealtimeReceiver;
 import com.surprising.aeron.client.AeronRealtimeSender;
 import com.surprising.aeron.client.RealtimeOutbox;
 import com.surprising.aeron.protocol.RealtimeFrame;
+import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.service.state.realtime.RealtimeStateCapture;
 import com.surprising.product.api.ProductLine;
@@ -87,9 +88,10 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
     }
 
     /** 在一条命令开始修改实时导出状态时建立捕获边界。 */
-    public void beginCapture(TradingCoreRuntime state, long position, long timestamp, String traceId) {
+    public void beginCapture(TradingCoreRuntime state, long position, long timestamp, CoreMessageHeader header) {
         if (capture == null || !leader) return;
         try {
+            String traceId = header.traceId().isEmpty() ? header.commandId().toString() : header.traceId();
             capture.begin(position, timestamp, 0, state.realtimeExportSequence(), traceId);
         } catch (RuntimeException failure) {
             capture.failed();

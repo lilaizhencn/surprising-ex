@@ -1264,7 +1264,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                 responseSlot = responseArena.acquireSlot(length);
                 response = responseSlot.storage;
                 responseLength = single
-                        ? com.surprising.aeron.protocol.CoreCommandResultCodec.encodeSingleOrderInto(first, response, 0)
+                        ? com.surprising.aeron.protocol.CoreCommandResultCodec.encodeSingleOrderInto(first, responseSlot.writer())
                         : com.surprising.aeron.protocol.CoreCommandResultCodec.encodeInto(responseOrders, java.util.List.of(), response, 0);
                 responseSlot.length = responseLength;
             } catch (IllegalArgumentException ignored) {

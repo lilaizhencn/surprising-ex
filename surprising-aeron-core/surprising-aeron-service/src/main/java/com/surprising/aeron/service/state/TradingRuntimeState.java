@@ -391,7 +391,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             AccountLaneState lane = accountLanes[laneId];
             laneWorkers[laneId] = new SettlementLaneWorker(
                     "account", lane, topology.accountLaneQueueCapacity(),
-                    failure -> accountLaneFailure.compareAndSet(null, failure),
+                    failure -> {
+                        accountLaneFailure.compareAndSet(null, failure);
+                        signalOwnerCompletion();
+                    },
                     topology.matchingEngineCount());
         }
         accountLanesStarted = true;
@@ -1071,21 +1074,22 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void close() {
         releaseOwnerLaneAccess();
         accountLanesStarted = false;
-        RuntimeException failure = null;
+        Throwable failure = null;
         for (SettlementLaneWorker worker : laneWorkers) {
             try { if (worker != null) worker.close(); }
-            catch (RuntimeException problem) {
+            catch (RuntimeException | Error problem) {
                 if (failure == null) failure = problem; else if (failure != problem) failure.addSuppressed(problem);
             }
         }
         try { if (systemLedger != null) systemLedger.close(); }
-        catch (RuntimeException problem) {
+        catch (RuntimeException | Error problem) {
             if (failure == null) failure = problem; else if (failure != problem) failure.addSuppressed(problem);
         } finally {
             if (systemLedger != null && !systemLedger.thread().isAlive() && factIndexes != null)
                 factIndexes.bindBusinessOwner(null);
             systemLedger = null;
         }
+        if (failure instanceof Error error) throw error;
         if (failure != null) throw new IllegalStateException("Core workers stopped with a failure", failure);
     }
 
@@ -1595,6 +1599,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 仅读两个就绪字，不消费序号；滞后的置位最多造成一次无效收集，不会丢通知。 */
     public boolean hasMatchingNotifications() {
         assertOwner();
+        assertAccountLanesHealthy();
         return placeAdmissionReadyLanes.get() != 0
                 || hasPlaceAdmissionNotifications() || hasSettlementNotifications();
     }

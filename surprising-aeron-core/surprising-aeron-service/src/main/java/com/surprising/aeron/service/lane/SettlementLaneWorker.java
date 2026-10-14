@@ -354,10 +354,13 @@ public final class SettlementLaneWorker implements AutoCloseable {
                 }
             }
         } catch (Throwable laneFailure) {
-            failurePublisher.accept(laneFailure);
             failure = laneFailure;
             running = false;
             started = true;
+            try { failurePublisher.accept(laneFailure); }
+            catch (Throwable reportingFailure) {
+                if (reportingFailure != laneFailure) laneFailure.addSuppressed(reportingFailure);
+            }
         } finally {
             finishWaitPhase();
             lane.releaseOwnerForHandoff();

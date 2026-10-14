@@ -106,9 +106,18 @@ public final class CoreCommandResultCodec {
         if (offset > destination.length - length) {
             throw new IllegalArgumentException("command result destination is too small");
         }
+        return encodeSingleOrderInto(order, ByteBuffer.wrap(destination, offset, length));
+    }
+
+    /** Writes at the current position in little-endian order; a leased response slot may reuse its writer. */
+    public static int encodeSingleOrderInto(CoreOrderStateSource order, ByteBuffer buffer) {
+        int length = encodedSingleOrderLength(order);
+        if (buffer == null || buffer.isReadOnly() || buffer.remaining() < length) {
+            throw new IllegalArgumentException("command result destination is too small or not writable");
+        }
         int orderStateLength = CoreStateQueryCodec.encodedOrderStateLength(order);
         int ordersLength = Math.addExact(Integer.BYTES * 2, orderStateLength);
-        ByteBuffer buffer = ByteBuffer.wrap(destination, offset, length).slice().order(ByteOrder.LITTLE_ENDIAN);
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(VERSION);
         buffer.putInt(ordersLength);
         buffer.putInt(1);

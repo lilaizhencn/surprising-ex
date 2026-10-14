@@ -243,7 +243,7 @@ class TradingRuntimeStateTest {
             var additional = index.additionalOrdersBySequence.get(19);
             long expected = additional == null || additional.isEmpty() ? 0 : additional.toArray()[0];
             index.remove(19, first);
-            assertThat(index.firstOrderBySequence.getIfAbsent(19, 0)).isEqualTo(expected);
+            assertThat(index.firstOrderBySequence.get(19)).isEqualTo(expected);
         }
         assertThat(index.additionalOrdersBySequence.isEmpty()).isTrue();
     }
@@ -283,6 +283,53 @@ class TradingRuntimeStateTest {
 
         assertThat(index.isEmpty()).isTrue();
         assertThat(index.orderIds(101)).isEmpty();
+    }
+
+    @Test
+    void pendingReservationSequenceRolloverPreservesTheActivePrefixAndLongKeys() {
+        var index = new PendingReservationTracker.PendingReservationSequenceIndex(4);
+        for (long sequence = 1; sequence <= 20_000; sequence++) {
+            index.add(sequence, Long.MAX_VALUE - sequence);
+            if (sequence > 256) index.remove(sequence - 256, Long.MAX_VALUE - (sequence - 256));
+            assertThat(index.firstOrderId(sequence)).isEqualTo(Long.MAX_VALUE - sequence);
+            assertThat(index.firstOrderId(Math.max(1, sequence - 255)))
+                    .isEqualTo(Long.MAX_VALUE - Math.max(1, sequence - 255));
+            if (sequence > 256) assertThat(index.containsKey(sequence - 256)).isFalse();
+        }
+        index.add(Long.MAX_VALUE, 1);
+        index.add(Long.MAX_VALUE, 2);
+        index.remove(Long.MAX_VALUE, 1);
+        assertThat(index.firstOrderId(Long.MAX_VALUE)).isEqualTo(2);
+        index.clear();
+        assertThat(index.isEmpty()).isTrue();
+        assertThat(index.additionalOrdersBySequence.isEmpty()).isTrue();
+        index.add(1, 11);
+        assertThat(index.orderIds(1)).containsExactly(11);
+    }
+
+    @Test
+    void idleCompletionProbeRaisesLaneErrorAndShutdownStopsEveryWorker() throws Exception {
+        var topology = new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0, 2,
+                LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
+        var state = new TradingRuntimeState(topology);
+        state.setMetadata(com.surprising.product.api.ProductLine.SPOT, 10);
+        var announced = new java.util.concurrent.CountDownLatch(1);
+        state.ownerCompletionSignal(announced::countDown);
+        state.startAccountLanes();
+        state.startSystemLedgerLane();
+        var ledgerField = TradingRuntimeState.class.getDeclaredField("systemLedger");
+        ledgerField.setAccessible(true);
+        Thread ledgerThread = ((SystemLedgerLane) ledgerField.get(state)).thread();
+        var failure = new NoSuchMethodError("synthetic settlement linkage failure");
+        try {
+            state.laneWorkers[0].submit(lane -> { throw failure; });
+            assertThat(announced.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(state::hasMatchingNotifications).isSameAs(failure);
+        } finally {
+            assertThatThrownBy(state::close).isSameAs(failure);
+        }
+        for (var worker : state.laneWorkers) assertThat(worker.thread().isAlive()).isFalse();
+        assertThat(ledgerThread.isAlive()).isFalse();
     }
 
     @Test

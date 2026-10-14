@@ -438,46 +438,62 @@ final class MatchingCommandAdmission {
 
     void rejectLifecycleOverlap(CoreMessage message, CommandSlot.Operation operation,
                                         DecodedMatchingCommand decodedCommand) {
-        LifecycleScope candidate = lifecycleScope(message, operation, decodedCommand);
-        if (candidate.instrumentId().isBlank()) return;
-        ensureLifecycleScopeAvailable(candidate);
+        if (operation == CommandSlot.Operation.LIQUIDATION || operation == CommandSlot.Operation.SETTLEMENT) {
+            ensureLifecycleScopeAvailable(lifecycleScope(message, operation, decodedCommand));
+        } else {
+            ensureLifecycleScopeAvailable(message.header().userId(),
+                    matchingSymbol(message, operation, decodedCommand), null);
+        }
     }
 
     void ensureLifecycleScopeAvailable(LifecycleScope candidate) {
-        if (candidate.instrumentId().isBlank()) return;
-        if (candidate.lifecycle()) {
+        ensureLifecycleScopeAvailable(candidate.userId(), candidate.instrumentId(), candidate);
+    }
+
+    /** Ordinary orders carry their existing routing fields, without allocating a retained lifecycle scope. */
+    private void ensureLifecycleScopeAvailable(long userId, String instrumentId, LifecycleScope candidate) {
+        if (instrumentId.isBlank()) return;
+        boolean lifecycle = candidate != null && candidate.lifecycle();
+        boolean settlement = candidate != null && candidate.settlement();
+        long lifecycleId = candidate == null ? 0 : candidate.lifecycleId();
+        boolean orderChanging = candidate == null || candidate.orderChanging();
+        if (lifecycle) {
             owner.pendingMatching.forEach(pending -> {
                 if (pendingLifecycleConflicts(candidate, pending)) {
                     throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
                             "matching lifecycle scope is in progress");
                 }
             });
-        } else {
+        } else if (!pendingLifecycleScopes.isEmpty()) {
             for (List<LifecycleScope> scopes : pendingLifecycleScopes.values()) {
-                if (scopes.stream().anyMatch(scope -> conflicts(candidate, scope))) {
-                    throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
-                            "matching lifecycle scope is in progress");
+                for (int i = 0; i < scopes.size(); i++) {
+                    LifecycleScope scope = scopes.get(i);
+                    if (instrumentId.equals(scope.instrumentId()) && scope.lifecycle()
+                            && (settlement || scope.settlement() || userId == scope.userId())) {
+                        throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
+                                "matching lifecycle scope is in progress");
+                    }
                 }
             }
         }
-        Integer candidateSymbolId = owner.identities.findSymbolId(candidate.instrumentId());
+        Integer candidateSymbolId = owner.identities.findSymbolId(instrumentId);
         if (candidateSymbolId != null && owner.runtimeState.treasury().fundingProgress(candidateSymbolId) != null) {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "funding position cut is in progress");
         }
         boolean settlementProgress = candidateSymbolId != null
                 && owner.runtimeState.treasury().lifecycleProgress(candidateSymbolId) != null;
         if (settlementProgress
-                && candidate.orderChanging()) {
+                && orderChanging) {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
                     "settlement lifecycle is in progress");
         }
-        if (candidate.lifecycle()) {
+        if (lifecycle) {
             boolean liquidationActive = candidateSymbolId != null
                     && hasCommittedLiquidationConflict(
-                    candidate.settlement() ? 0 : candidate.userId(), candidateSymbolId, candidate.lifecycleId());
-            boolean settlementContinuation = settlementProgress && candidate.settlement()
+                    settlement ? 0 : userId, candidateSymbolId, lifecycleId);
+            boolean settlementContinuation = settlementProgress && settlement
                     && owner.runtimeState.treasury().lifecycleProgress(candidateSymbolId).settlementId()
-                    == candidate.lifecycleId();
+                    == lifecycleId;
             if (settlementProgress && !settlementContinuation || liquidationActive) {
                 throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
                         "matching lifecycle scope is in progress");

@@ -12,6 +12,27 @@ import org.junit.jupiter.api.Test;
 
 class ResponseArenaTest {
     @Test
+    void writerIsReusedOnlyAfterTheResponseStorageLeaseIsReturned() {
+        var arena = new ResponseArena(1, 16);
+        var first = arena.acquireSlot(8);
+        var writer = first.writer();
+        writer.putLong(123);
+        arena.retain(first.storage);
+        arena.release(first);
+        var other = arena.acquireSlot(8);
+        assertThat(other.writer()).isNotSameAs(writer);
+        assertThat(writer.getLong(0)).isEqualTo(123);
+        arena.release(first);
+        var reused = arena.acquireSlot(8);
+        assertThat(reused).isSameAs(first);
+        assertThat(reused.writer()).isSameAs(writer);
+        assertThat(writer.position()).isZero();
+        assertThat(writer.limit()).isEqualTo(16);
+        arena.release(reused);
+        arena.release(other);
+    }
+
+    @Test
     void releasesAndReusesBoundedSlotsWithoutGrowingForCommonResponses() {
         ResponseArena arena = new ResponseArena(2, 16);
         byte[] first = arena.acquire(8);

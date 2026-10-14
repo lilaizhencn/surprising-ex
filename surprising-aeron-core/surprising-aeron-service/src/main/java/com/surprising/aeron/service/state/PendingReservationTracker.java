@@ -3,7 +3,6 @@ package com.surprising.aeron.service.state;
 import org.agrona.collections.Long2LongHashMap;
 
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
-import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 import java.util.ArrayList;
@@ -375,17 +374,17 @@ final class PendingReservationTracker {
         static final long[] EMPTY_ORDER_IDS = new long[0];
 
         /** 每个命令序号的首个预留订单，避免单元素集合分配。 */
-        final LongLongHashMap firstOrderBySequence;
+        final Long2LongHashMap firstOrderBySequence;
         /** 同一命令的其余预留订单，仅多订单场景使用。 */
         final LongObjectHashMap<LongHashSet> additionalOrdersBySequence;
 
         PendingReservationSequenceIndex(int initialCapacity) {
-            firstOrderBySequence = new LongLongHashMap(initialCapacity);
+            firstOrderBySequence = new Long2LongHashMap(initialCapacity, 0.65f, 0);
             additionalOrdersBySequence = new LongObjectHashMap<>();
         }
 
         long firstOrderId(long coreSequence) {
-            return firstOrderBySequence.getIfAbsent(coreSequence, 0);
+            return firstOrderBySequence.get(coreSequence);
         }
 
         boolean hasAdditional(long coreSequence) {
@@ -394,7 +393,7 @@ final class PendingReservationTracker {
         }
 
         void add(long coreSequence, long orderId) {
-            long firstOrderId = firstOrderBySequence.getIfAbsent(coreSequence, 0);
+            long firstOrderId = firstOrderBySequence.get(coreSequence);
             if (firstOrderId == 0) {
                 firstOrderBySequence.put(coreSequence, orderId);
                 return;
@@ -417,14 +416,14 @@ final class PendingReservationTracker {
         }
 
         boolean contains(long coreSequence, long orderId) {
-            long firstOrderId = firstOrderBySequence.getIfAbsent(coreSequence, 0);
+            long firstOrderId = firstOrderBySequence.get(coreSequence);
             if (firstOrderId == orderId) return orderId != 0;
             LongHashSet additionalOrderIds = additionalOrdersBySequence.get(coreSequence);
             return additionalOrderIds != null && additionalOrderIds.contains(orderId);
         }
 
         long[] orderIds(long coreSequence) {
-            long firstOrderId = firstOrderBySequence.getIfAbsent(coreSequence, 0);
+            long firstOrderId = firstOrderBySequence.get(coreSequence);
             if (firstOrderId == 0) return EMPTY_ORDER_IDS;
             LongHashSet additionalOrderIds = additionalOrdersBySequence.get(coreSequence);
             if (additionalOrderIds == null || additionalOrderIds.isEmpty()) {
@@ -438,7 +437,7 @@ final class PendingReservationTracker {
         }
 
         void remove(long coreSequence, long orderId) {
-            long firstOrderId = firstOrderBySequence.getIfAbsent(coreSequence, 0);
+            long firstOrderId = firstOrderBySequence.get(coreSequence);
             if (firstOrderId == 0) {
                 throw new IllegalStateException("pending reservation sequence is missing");
             }
@@ -451,7 +450,7 @@ final class PendingReservationTracker {
                 return;
             }
             if (additionalOrderIds == null || additionalOrderIds.isEmpty()) {
-                firstOrderBySequence.removeKey(coreSequence);
+                firstOrderBySequence.remove(coreSequence);
                 return;
             }
             // The set is known to be non-empty.  Use its primitive iterator directly so

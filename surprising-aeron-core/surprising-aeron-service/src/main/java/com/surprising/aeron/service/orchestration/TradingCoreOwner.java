@@ -244,8 +244,7 @@ public final class TradingCoreOwner {
 
     /** 在命令开始改变业务状态前建立实时事件捕获边界。 */
     private void beginCapture(long position, long timestamp, CoreMessageHeader header) {
-        realtimeBoundary.beginCapture(state, position, timestamp,
-                header.traceId().isEmpty() ? header.commandId().toString() : header.traceId());
+        realtimeBoundary.beginCapture(state, position, timestamp, header);
     }
 
     /** 每条命令有固定提交边界，不能让各副本的线程完成速度改变推送分组。 */
