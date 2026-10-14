@@ -4,30 +4,57 @@ import com.surprising.aeron.protocol.ReservationKind;
 
 /** Lane-owned reservation; consumption/release mutates primitive counters in place. */
 public final class ReservationRuntime {
-    private final long orderId;
-    private final long userId;
-    private final int symbolId;
-    private final ReservationKind kind;
-    private final int assetId;
-    private final long totalReservedUnits;
+    private long orderId;
+    private long userId;
+    private int symbolId;
+    private ReservationKind kind;
+    private int assetId;
+    private long totalReservedUnits;
     private long releasedUnits;
     private long consumedUnits;
-    private final long orderQuantitySteps;
+    private long orderQuantitySteps;
     private boolean mutable;
+    /** Only the resident reservation of a recycled authoritative order may be reset. */
+    private boolean orderSlot;
 
     public ReservationRuntime(long orderId, long userId, int symbolId, ReservationKind kind,
                               int assetId, long totalReservedUnits,
                               long releasedUnits, long consumedUnits, long orderQuantitySteps) {
-        if (orderId <= 0 || userId <= 0 || symbolId < 0 || kind == null
-                || assetId < 0 || totalReservedUnits <= 0 || releasedUnits < 0 || consumedUnits < 0
-                || Math.addExact(releasedUnits, consumedUnits) > totalReservedUnits || orderQuantitySteps <= 0) {
-            throw new IllegalArgumentException("invalid runtime reservation");
-        }
+        validate(orderId, userId, symbolId, kind, assetId, totalReservedUnits,
+                releasedUnits, consumedUnits, orderQuantitySteps);
         this.orderId = orderId; this.userId = userId; this.symbolId = symbolId;
         this.kind = kind; this.assetId = assetId;
         this.totalReservedUnits = totalReservedUnits; this.releasedUnits = releasedUnits;
         this.consumedUnits = consumedUnits; this.orderQuantitySteps = orderQuantitySteps;
         this.mutable = true;
+    }
+
+    private static void validate(long orderId, long userId, int symbolId, ReservationKind kind,
+                                 int assetId, long totalReservedUnits, long releasedUnits,
+                                 long consumedUnits, long orderQuantitySteps) {
+        if (orderId <= 0 || userId <= 0 || symbolId < 0 || kind == null
+                || assetId < 0 || totalReservedUnits <= 0 || releasedUnits < 0 || consumedUnits < 0
+                || Math.addExact(releasedUnits, consumedUnits) > totalReservedUnits || orderQuantitySteps <= 0) {
+            throw new IllegalArgumentException("invalid runtime reservation");
+        }
+    }
+
+    static ReservationRuntime prepareForOrderSlot(ReservationRuntime target, long orderId, long userId,
+            int symbolId, ReservationKind kind, int assetId, long reservedUnits, long quantitySteps) {
+        validate(orderId, userId, symbolId, kind, assetId, reservedUnits, 0, 0, quantitySteps);
+        if (target == null) {
+            target = new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
+                    reservedUnits, 0, 0, quantitySteps);
+            target.orderSlot = true;
+            return target;
+        }
+        if (!target.orderSlot || !target.mutable)
+            throw new IllegalArgumentException("reservation is not an authoritative order slot");
+        target.orderId = orderId; target.userId = userId; target.symbolId = symbolId;
+        target.kind = kind; target.assetId = assetId; target.totalReservedUnits = reservedUnits;
+        target.releasedUnits = target.consumedUnits = 0;
+        target.orderQuantitySteps = quantitySteps;
+        return target;
     }
 
     public long orderId() { return orderId; }

@@ -41,6 +41,50 @@ class OrderSlotReuseTest {
         assertThat(stable.executedQuantitySteps()).isEqualTo(10);
         assertThatThrownBy(() -> reused.copyIntoCommandSlot(stable)).isInstanceOf(IllegalArgumentException.class);
     }
+    @Test void reservationReuseWaitsForItsOrderFenceAndKeepsIndependentValuesStable() {
+        var lane = new AccountLaneState(0, 256);
+        lane.bindOwner();
+        var first = lane.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7, intent(1), new UUID(1, 1), 0, 100, 200, 0);
+        var reservation = first.prepareReservation(ReservationKind.DERIVATIVE_MARGIN, 3, 100);
+        reservation.consumeInPlace(60);
+        reservation.releaseInPlace(40);
+        var retained = reservation.snapshot(); // Independent value copy, no cluster snapshot scenario.
+        assertThatThrownBy(() -> first.prepareReservation(ReservationKind.DERIVATIVE_MARGIN, 4, 200))
+                .isInstanceOf(IllegalStateException.class);
+        first.applyFillInPlace(10, 0, 0, CoreOrderStatus.FILLED, 2, 110, 210);
+        assertThat(first.retireForReuse(4)).isTrue();
+        lane.returnRetiredOrder(first);
+        assertThatThrownBy(() -> first.prepareReservation(ReservationKind.DERIVATIVE_MARGIN, 4, 200))
+                .isInstanceOf(IllegalStateException.class);
+
+        var beforeFence = lane.preparedOrder(ProductLine.LINEAR_PERPETUAL, 8, intent(2), new UUID(1, 2), 1, 120, 220, 3);
+        assertThat(beforeFence.prepareReservation(ReservationKind.DERIVATIVE_MARGIN, 5, 70)).isNotSameAs(reservation);
+        assertThat(reservation.orderId()).isEqualTo(1);
+        assertThat(reservation.userId()).isEqualTo(7);
+        assertThat(reservation.reservedUnits()).isZero();
+
+        var reused = lane.preparedOrder(ProductLine.LINEAR_PERPETUAL, 9, intent(3), new UUID(1, 3), 2, 130, 230, 4);
+        var next = reused.prepareReservation(ReservationKind.DERIVATIVE_MARGIN, 4, 200);
+        assertThat(reused).isSameAs(first);
+        assertThat(next).isSameAs(reservation);
+        assertThat(next.orderId()).isEqualTo(3);
+        assertThat(next.userId()).isEqualTo(9);
+        assertThat(next.symbolId()).isEqualTo(2);
+        assertThat(next.assetId()).isEqualTo(4);
+        assertThat(next.kind()).isEqualTo(ReservationKind.DERIVATIVE_MARGIN);
+        assertThat(next.totalReservedUnits()).isEqualTo(200);
+        assertThat(next.releasedUnits()).isZero();
+        assertThat(next.consumedUnits()).isZero();
+        assertThat(next.orderQuantitySteps()).isEqualTo(10);
+        assertThat(retained.orderId()).isEqualTo(1);
+        assertThat(retained.assetId()).isEqualTo(3);
+        assertThat(retained.kind()).isEqualTo(ReservationKind.DERIVATIVE_MARGIN);
+        assertThat(retained.releasedUnits()).isEqualTo(40);
+        assertThat(retained.consumedUnits()).isEqualTo(60);
+        assertThatThrownBy(() -> ReservationRuntime.prepareForOrderSlot(retained, 4, 8, 0,
+                ReservationKind.DERIVATIVE_MARGIN, 3, 100, 10)).isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test void afterImagesFreezeAtLaneCompletionAndMoveWithPhysicalBuffers() {
         var laneBuffer = new RuntimeOrderChangeBuffer();
         var ownerBuffer = new RuntimeOrderChangeBuffer();

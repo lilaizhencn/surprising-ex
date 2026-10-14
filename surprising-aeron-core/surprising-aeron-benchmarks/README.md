@@ -68,3 +68,5 @@ JDK 27/G1，1 fork/1 thread，3×1s 预热、5×1s 测量的独立 `-prof gc` �
 默认 `streamMode=OPEN_ONLY`，`batchSize=1/20`；可显式指定 `REVERSE` 验证反向交易，任一非APPLIED项都会终止该轮。结束时用Lane用户查询核对数量、可用加冻结总额和空预约，不执行快照。冻结余额已包含持仓保证金，核对不得再次加保证金。
 
 基准内嵌HotSpot 27所需访问参数、1GiB固定G1和BUSY_SPIN设置。JMH `gc.alloc.rate.norm` 单位为字节/Core消息，除以batchSize才是字节/业务订单。自定义 `surprising.InProcessAllocationInterval` 记录每个预热/测量窗口的终态计数，JFR归因应只选择MEASUREMENT窗口。它不包含实际Aeron网络、consensus、Archive和realtime输出，不能作为真实单节点容量或完整Core分配验收。
+
+分配诊断在每个迭代结束后输出一次 `pipelineInterval`，包含epoch起止时间及终态计数，便于与同机CPU/swap采样对齐。该输出位于交易循环之外，JFR事件也保留相同边界；仅使用正式窗口及其前后系统采样判断环境有效性，启动/预热单独列出。

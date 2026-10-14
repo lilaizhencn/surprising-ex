@@ -4690,9 +4690,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         OrderRuntime order = prepared != null && !prepared.commandSlotValue() ? prepared : accountLanesStarted
                 ? lane.preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position, retiredOwnerSequence)
                 : preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position);
-        ReservationRuntime reservation = new ReservationRuntime(command.orderId(), userId, symbolId,
-                command.reservationKind(), assetId, requiredReservation,
-                0, 0, command.quantitySteps());
+        ReservationRuntime reservation = order.prepareReservation(
+                command.reservationKind(), assetId, requiredReservation);
         UserRuntime advanced = new UserRuntime(productLine, userId,
                 Math.incrementExact(user.revision()), user.positionMode());
         balance.reserve(requiredReservation);

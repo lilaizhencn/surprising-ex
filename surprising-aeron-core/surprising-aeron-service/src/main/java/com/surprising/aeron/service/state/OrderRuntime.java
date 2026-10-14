@@ -286,6 +286,9 @@ public final class OrderRuntime {
 
     private boolean pooledAuthority;
     private long retiredAfterSequence;
+    /** One authoritative reservation follows this order through the existing retirement fence. */
+    private ReservationRuntime reservationSlot;
+    private boolean reservationPrepared;
 
     boolean commandSlotValue() { return commandSlotValue; }
 
@@ -323,6 +326,19 @@ public final class OrderRuntime {
         target.makerFeeRatePpm = intent.makerFeeRatePpm(); target.takerFeeRatePpm = intent.takerFeeRatePpm();
         target.createdAtEpochMillis = target.updatedAtEpochMillis = timestamp; target.clusterPosition = position;
         target.status = CoreOrderStatus.OPEN; target.revision = 1; target.mutable = true; target.retiredAfterSequence = 0;
+        target.reservationPrepared = false;
+    }
+
+    ReservationRuntime prepareReservation(com.surprising.aeron.protocol.ReservationKind kind,
+                                           int assetId, long reservedUnits) {
+        if (!pooledAuthority) return new ReservationRuntime(orderId, userId, symbolId, kind,
+                assetId, reservedUnits, 0, 0, quantitySteps);
+        if (retiredAfterSequence != 0 || reservationPrepared)
+            throw new IllegalStateException("reservation is already prepared or its order is retired");
+        reservationSlot = ReservationRuntime.prepareForOrderSlot(reservationSlot, orderId, userId,
+                symbolId, kind, assetId, reservedUnits, quantitySteps);
+        reservationPrepared = true;
+        return reservationSlot;
     }
 
     boolean retireForReuse(long sequence) {

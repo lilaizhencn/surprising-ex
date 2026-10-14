@@ -107,6 +107,7 @@ public class InProcessTradingAllocationBenchmark {
         interval = new Interval(); interval.phase = params.getType().name(); interval.batchSize = batchSize;
         interval.streamMode = streamMode;
         interval.startedMessages = session.tradingMessages;
+        interval.startedAtEpochMillis = System.currentTimeMillis();
         interval.begin();
     }
 
@@ -148,9 +149,14 @@ public class InProcessTradingAllocationBenchmark {
 
     @TearDown(Level.Iteration) public void finishInterval() {
         interval.end();
+        interval.finishedAtEpochMillis = System.currentTimeMillis();
         interval.terminalMessages = session.tradingMessages - interval.startedMessages;
         interval.terminalBusinessOperations = interval.terminalMessages * batchSize;
         interval.commit();
+        // One marker per iteration, outside the trading loop, joins GCProfiler runs to host samples.
+        System.out.println("pipelineInterval phase=" + interval.phase + " batchSize=" + batchSize
+                + " startEpochMillis=" + interval.startedAtEpochMillis + " endEpochMillis=" + interval.finishedAtEpochMillis
+                + " terminalMessages=" + interval.terminalMessages + " terminalBusinessOperations=" + interval.terminalBusinessOperations);
     }
 
     @TearDown public void close() {
@@ -221,6 +227,7 @@ public class InProcessTradingAllocationBenchmark {
         public String streamMode;
         public int batchSize;
         public long startedMessages, terminalMessages, terminalBusinessOperations;
+        public long startedAtEpochMillis, finishedAtEpochMillis;
     }
 
     private static final class Sink implements ClientSession {
