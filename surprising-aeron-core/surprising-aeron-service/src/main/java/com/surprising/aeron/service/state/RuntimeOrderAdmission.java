@@ -11,7 +11,6 @@ import com.surprising.aeron.service.state.admission.AdmissionOrderIndex;
 import com.surprising.aeron.service.state.admission.AdmissionSummary;
 
 import com.surprising.aeron.service.state.model.AssetBalance;
-import com.surprising.aeron.service.state.model.CoreLeverageKey;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -288,7 +287,7 @@ public final class RuntimeOrderAdmission {
             TradingRuntimeState runtime, CoreInstrument instrument,
             ResolvedPlaceOrder order, long userId) {
         if (!runtime.productLine().isDerivative()) return instrument.maxLeveragePpm();
-        Long configured = runtime.leverage(new CoreLeverageKey(userId, instrument.instrumentId(), order.marginMode()));
+        Long configured = runtime.leverage(userId, instrument.instrumentId(), order.marginMode());
         return configured == null ? instrument.maxLeveragePpm() : configured;
     }
 

@@ -161,3 +161,10 @@ Lane结算通过已有 `RuntimePositionChangeBuffer` 交接冻结after-image，�
 `AccountLaneState.pendingReservationSequences` 与每用户 `clientOrderIndex` 改用既有 Agrona `Long2LongHashMap`。准入写入序号与客户别名，结算或回滚删除；删除时原位整理哈希链，已达到活跃容量的数组继续复用。两表仍由账户Lane独占，正序号和订单ID使用0表示缺失，客户端键0的既有内部语义保留；没有Owner业务镜像或逐命令索引副本。冷序列化出口只做原类型转换。
 
 `LaneEntityMembershipTest` 覆盖唯一ID周转、保留在途项及实际客户端别名回滚，资金计数和六产品线入口的必要验证见 [Lane primitive索引验证](../../docs/validation/lane-primitive-index-churn-20261015.json)。本次只解决对应表的删除分配，预约对象、余额lambda、业务聚合与完整Core分配仍需继续处理。
+
+
+### Lane余额及杠杆热查询（2026-10-15）
+
+`TradingRuntimeState.replaceBalance` 在已有Lane命令作用域内直接调用 `replaceBalanceInLane`，保留余额前像和after-image，不创建路由lambda；作用域与用户路由必须匹配。`RuntimeOrderAdmission.effectiveLeverage` 使用现有primitive参数查询，查询键由各Lane自己的 `LeverageLookup` 复用并在查询后清除引用，不再逐单创建 `CoreLeverageKey`。不存在新增共享scratch或余额镜像。
+
+并发Lane配置查询、跨Lane写入拒绝、余额回滚、六产品线成交与Ledger的必要验证见 [余额与杠杆路径](../../docs/validation/lane-balance-leverage-direct-20261015.json)。这只减少对应临时对象，完整Core百字节分配和Owner业务索引迁移仍未完成。

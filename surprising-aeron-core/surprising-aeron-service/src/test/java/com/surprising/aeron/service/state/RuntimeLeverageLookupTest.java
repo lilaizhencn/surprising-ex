@@ -50,6 +50,53 @@ class RuntimeLeverageLookupTest {
         }
     }
 
+    @Test
+    void activeLanesReuseTheirOwnLookupAndUpdateBalancesWithoutOwnerAccess() throws Exception {
+        try (var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
+            long first = 7, candidate = 8;
+            while (runtime.accountLaneId(candidate) == runtime.accountLaneId(first)) candidate++;
+            long second = candidate;
+            for (long user : new long[]{first, second}) {
+                runtime.putUser(new com.surprising.aeron.service.state.account.UserRuntime(user));
+                runtime.putBalance(new com.surprising.aeron.service.state.account.BalanceRuntime(user, 3, 1000, 0));
+            }
+            runtime.putLeverage(new CoreLeverageKey(first, "1", CoreMarginMode.CROSS), 2_000_000);
+            runtime.putLeverage(new CoreLeverageKey(second, "2", CoreMarginMode.ISOLATED), 3_000_000);
+            runtime.clearChangedKeys();
+            runtime.startAccountLanes();
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> runtime.leverage(first, "1", CoreMarginMode.CROSS))
+                    .isInstanceOf(IllegalStateException.class);
+            var entered = new CountDownLatch(2);
+            long mask = runtime.topology().accountLaneMask(first) | runtime.topology().accountLaneMask(second);
+            runtime.dispatchControlLanes(mask, lane -> {
+                entered.countDown(); await(entered);
+                boolean isFirst = lane == runtime.accountLaneId(first);
+                long user = isFirst ? first : second;
+                String symbol = isFirst ? "1" : "2";
+                CoreMarginMode mode = isFirst ? CoreMarginMode.CROSS : CoreMarginMode.ISOLATED;
+                for (int i = 0; i < 256; i++) {
+                    assertThat(runtime.leverage(user, symbol, mode)).isEqualTo(isFirst ? 2_000_000L : 3_000_000L);
+                    assertThat(runtime.leverage(user, symbol, mode == CoreMarginMode.CROSS
+                            ? CoreMarginMode.ISOLATED : CoreMarginMode.CROSS)).isNull();
+                    runtime.replaceBalance(user, 3, 900, 100);
+                }
+                assertThat(runtime.balance(user, 3).availableUnits()).isEqualTo(900);
+                assertThat(runtime.balance(user, 3).lockedUnits()).isEqualTo(100);
+                org.assertj.core.api.Assertions.assertThatThrownBy(() -> runtime.replaceBalance(
+                        isFirst ? second : first, 3, 0, 0)).isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("balance write crossed its owner Lane");
+                return runtime.leverage(user, symbol, mode);
+            });
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!runtime.pollControlLanes()) {
+                if (System.nanoTime() >= deadline) throw new AssertionError("Lane reads/writes did not finish");
+                Thread.onSpinWait();
+            }
+            assertThat(runtime.controlLaneResult(runtime.accountLaneId(first))).isEqualTo(2_000_000L);
+            assertThat(runtime.controlLaneResult(runtime.accountLaneId(second))).isEqualTo(3_000_000L);
+        }
+    }
+
     private static void await(CountDownLatch latch) {
         try {
             if (!latch.await(5, TimeUnit.SECONDS)) throw new AssertionError("lookup handoff timed out");

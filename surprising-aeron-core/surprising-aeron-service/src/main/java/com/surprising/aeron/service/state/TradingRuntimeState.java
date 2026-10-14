@@ -3570,20 +3570,30 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** Matching settlement fast path: update a Lane-owned balance without creating a replacement object. */
     void replaceBalance(long userId, int assetId, long availableUnits, long lockedUnits) {
         assertOwner();
+        AccountLaneState scoped = currentLaneCommandScope();
+        if (scoped != null && scoped.laneId() != topology.accountLaneId(userId))
+            throw new IllegalStateException("balance write crossed its owner Lane");
         accountRollback.captureUserBefore(userId);
         accountRollback.captureBalanceBefore(userId, assetId);
+        if (scoped != null) {
+            replaceBalanceInLane(scoped, userId, assetId, availableUnits, lockedUnits);
+            return;
+        }
         onLane(userId, lane -> {
-            IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(userId);
-            BalanceRuntime current = balances == null ? null : balances.get(assetId);
-            if (current == null) throw new IllegalArgumentException("runtime balance is not registered");
-            current.replace(availableUnits, lockedUnits);
-            accountRollback.captureBalanceAfter(lane, userId, assetId);
+            replaceBalanceInLane(lane, userId, assetId, availableUnits, lockedUnits);
             return null;
         });
-        if (currentLaneCommandScope() == null) {
-            markBalancesChanged();
-            markUserChanged(userId);
-        }
+        markBalancesChanged();
+        markUserChanged(userId);
+    }
+
+    private void replaceBalanceInLane(AccountLaneState lane, long userId, int assetId,
+                                      long availableUnits, long lockedUnits) {
+        IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(userId);
+        BalanceRuntime current = balances == null ? null : balances.get(assetId);
+        if (current == null) throw new IllegalArgumentException("runtime balance is not registered");
+        current.replace(availableUnits, lockedUnits);
+        accountRollback.captureBalanceAfter(lane, userId, assetId);
     }
 
     public void removeBalance(long userId, int assetId) {
