@@ -6,10 +6,11 @@ import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.aeron.service.state.OrderReservation;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.PlaceAdmissionEvent;
+import com.surprising.aeron.service.state.FeePolicyBook;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.TradingCoreState;
-import com.surprising.aeron.service.state.model.CoreFeeRate;
+
 import com.surprising.aeron.service.state.model.CoreMarkPriceState;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -35,39 +36,39 @@ public final class CoreOrderDecisionResolver {
         Integer symbolId = identities.findSymbolId(instrument.instrumentId());
         if (symbolId == null) throw new IllegalStateException("instrument instrumentId identity is missing");
         return resolveValues(null, instrument, symbolId, runtime.markPrice(symbolId),
-                runtime.resolveFee(userId, intent.instrumentId(), clusterTimestamp, instrument),
+                runtime.feePolicyBook(), userId,
                 clusterTimestamp, runtime.treasury().lifecycleSettlement(symbolId) != 0, intent);
     }
 
-    /** Resolves the ordinary PLACE directly into its existing pooled admission event or reusable resolved order. */
-    public static <T extends ResolvedPlaceOrder> T resolveInto(T target,
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-            long userId, PlaceOrderCommand intent, long clusterTimestamp) {
+    public static void prepare(PlaceAdmissionEvent target, TradingRuntimeState runtime,
+            RuntimeIdentityRegistry identities, long userId, PlaceOrderCommand intent, long clusterTimestamp) {
         if (target == null || runtime == null || identities == null || intent == null
-                || userId <= 0 || clusterTimestamp <= 0) {
+                || userId <= 0 || clusterTimestamp <= 0)
             throw new IllegalArgumentException("invalid order decision input");
-        }
         runtime.assertOwner();
         CoreInstrument instrument = runtime.instrument(intent.instrumentId());
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         Integer symbolId = identities.findSymbolId(instrument.instrumentId());
         if (symbolId == null) throw new IllegalStateException("instrument instrumentId identity is missing");
-        resolveValues(target, instrument, symbolId, runtime.markPrice(symbolId),
-                runtime.resolveFee(userId, intent.instrumentId(), clusterTimestamp, instrument),
-                clusterTimestamp, runtime.treasury().lifecycleSettlement(symbolId) != 0, intent);
-        return target;
+        target.prepareDecision(intent, instrument, symbolId, runtime.markPrice(symbolId), runtime.feePolicyBook(), clusterTimestamp);
     }
 
-    public static <T extends ResolvedPlaceOrder> T resolveInto(T target, Context context, PlaceOrderCommand intent) {
+    public static void resolvePrepared(PlaceAdmissionEvent target, MarkPriceRuntime mark,
+            FeePolicyBook policies, long userId, long clusterTimestamp, boolean lifecycleSettled) {
+        resolveValues(target, target.instrument(), target.symbolId(), mark, policies, userId,
+                clusterTimestamp, lifecycleSettled, target.intent());
+    }
+
+    public static <T extends ResolvedPlaceOrder> T resolveInto(T target, Context context, long userId, PlaceOrderCommand intent) {
         if (target == null || context == null || intent == null) throw new IllegalArgumentException("invalid order decision input");
-        resolveValues(target, context.instrument(), context.symbolId(), context.mark(), context.fee(),
+        resolveValues(target, context.instrument(), context.symbolId(), context.mark(), context.policies(), userId,
                 context.clusterTimestamp(), context.lifecycleSettled(), intent);
         return target;
     }
 
     /** 同一批、同一用户和币对的只读决策上下文；不跨命令复用。 */
     public record Context(CoreInstrument instrument, int symbolId, MarkPriceRuntime mark,
-                          CoreFeeRate fee, long clusterTimestamp, boolean lifecycleSettled,
+                          FeePolicyBook policies, long clusterTimestamp, boolean lifecycleSettled,
                           boolean fundingInProgress) { }
 
     public static Context context(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
@@ -78,14 +79,14 @@ public final class CoreOrderDecisionResolver {
         Integer symbolId = identities.findSymbolId(instrument.instrumentId());
         if (symbolId == null) throw new IllegalStateException("instrument instrumentId identity is missing");
         return new Context(instrument, symbolId, runtime.markPrice(symbolId),
-                runtime.resolveFee(userId, instrumentId, clusterTimestamp, instrument), clusterTimestamp,
+                runtime.feePolicyBook(), clusterTimestamp,
                 runtime.treasury().lifecycleSettlement(symbolId) != 0,
                 runtime.treasury().fundingProgress(symbolId) != null);
     }
 
-    public static ResolvedPlaceOrder resolve(Context context, PlaceOrderCommand intent) {
+    public static ResolvedPlaceOrder resolve(Context context, long userId, PlaceOrderCommand intent) {
         if (context == null || intent == null) throw new IllegalArgumentException("invalid order decision input");
-        return resolveValues(null, context.instrument(), context.symbolId(), context.mark(), context.fee(),
+        return resolveValues(null, context.instrument(), context.symbolId(), context.mark(), context.policies(), userId,
                 context.clusterTimestamp(), context.lifecycleSettled(), intent);
     }
 
@@ -99,15 +100,16 @@ public final class CoreOrderDecisionResolver {
                 : new MarkPriceRuntime(mark.symbolId(), instrument,
                 mark.markPriceTicks(), mark.indexPriceTicks(), mark.forwardPriceTicks(), mark.priceSequence(),
                 mark.generatedAtEpochMillis(), mark.lastPriceTicks());
-        return new Context(instrument, source.symbolId(), captured, source.fee(), source.clusterTimestamp(),
+        return new Context(instrument, source.symbolId(), captured, source.policies(), source.clusterTimestamp(),
                 source.lifecycleSettled(), source.fundingInProgress());
     }
 
     private static ResolvedPlaceOrder resolveValues(ResolvedPlaceOrder target,
                                                     CoreInstrument instrument, int symbolId,
-                                                    MarkPriceRuntime mark, CoreFeeRate fee,
+                                                    MarkPriceRuntime mark, FeePolicyBook policies, long userId,
                                                     long clusterTimestamp, boolean lifecycleSettled,
                                                     PlaceOrderCommand intent) {
+        if (policies == null || userId <= 0) throw new IllegalArgumentException("invalid fee decision input");
         if (!instrument.instrumentId().equals(intent.instrumentId())) throw new IllegalArgumentException("decision context instrumentId mismatch");
         instrument.requireOrderEnabled(intent);
         if (instrument.expiryEpochMillis() > 0 && clusterTimestamp >= instrument.expiryEpochMillis())
@@ -133,14 +135,17 @@ public final class CoreOrderDecisionResolver {
         String reservationAsset = reservationKind == ReservationKind.DERIVATIVE_MARGIN
                 ? instrument.settleAsset()
                 : intent.side() == CoreOrderSide.BUY ? instrument.quoteAsset() : instrument.baseAsset();
+        var fee = policies.select(userId, instrument.instrumentId(), clusterTimestamp);
+        long makerFee = fee == null ? instrument.makerFeeRatePpm() : fee.makerFeeRatePpm();
+        long takerFee = fee == null ? instrument.takerFeeRatePpm() : fee.takerFeeRatePpm();
         if (target == null) {
             return new ResolvedPlaceOrder(intent, instrument, symbolId, matchingPriceTicks, reservationPriceTicks,
                     markPriceTicks, indexPriceTicks, forwardPriceTicks, reservationKind, reservationAsset,
-                    fee.makerFeeRatePpm(), fee.takerFeeRatePpm());
+                    makerFee, takerFee);
         }
         target.resolve(intent, instrument, symbolId, matchingPriceTicks, reservationPriceTicks,
                 markPriceTicks, indexPriceTicks, forwardPriceTicks, reservationKind, reservationAsset,
-                fee.makerFeeRatePpm(), fee.takerFeeRatePpm());
+                makerFee, takerFee);
         return target;
     }
 

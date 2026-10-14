@@ -30,6 +30,20 @@ class CoreActiveLaneIngressTest {
                     TradingCommandCodec.encodeApplyMarkPrice(line.isOptionProduct()
                             ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, TIME)
                             : new ApplyMarkPriceCommand("1", 100, 1, TIME))));
+            var fee = new UpsertFeePolicyCommand(51, 2, 1, "1", 300, 700, 0, true, TIME, 0);
+            assertThatThrownBy(() -> core.runtimeState.upsertFeePolicy(fee))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("configuration Lane 0");
+            applied(core, message(core, CoreMessageType.UPSERT_FEE_POLICY, 0,
+                    TradingCommandCodec.encodeUpsertFeePolicy(fee)));
+            long configuredRevision = core.runtimeState.revision();
+            applied(core, message(core, CoreMessageType.UPSERT_FEE_POLICY, 0,
+                    TradingCommandCodec.encodeUpsertFeePolicy(fee)));
+            assertThat(core.runtimeState.revision()).isEqualTo(configuredRevision);
+            var stale = message(core, CoreMessageType.UPSERT_FEE_POLICY, 0,
+                    TradingCommandCodec.encodeUpsertFeePolicy(new UpsertFeePolicyCommand(
+                            51, 1, 1, "1", 300, 700, 0, true, TIME, 0)));
+            assertThat(complete(core, stale, core.apply(stale)).resultCode()).isEqualTo(CoreResultCode.STALE_FEE_POLICY_VERSION);
+            assertThat(core.runtimeState.revision()).isEqualTo(configuredRevision);
             String asset = type.isInverse() ? "BTC" : "USDT";
             var entered = new CountDownLatch(1);
             assertThat(core.runtimeState.dispatchAccountQuery(core.runtimeState.topology().accountLaneMask(1), lane -> {

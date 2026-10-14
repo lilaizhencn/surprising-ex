@@ -1,0 +1,90 @@
+{
+  "date": "2026-10-14",
+  "base_commit": "d28c18f748108fea18dbd0d381841c968aad7285",
+  "scope": "普通下单及顺序批量价格/费率决策迁入Lane，费率配置由Lane 0更新",
+  "implementation": {
+    "owner": "捕获不可变instrument、mark及费率版本，分配身份与路由；不执行普通下单和顺序批量的价格保护/预留价格计算，不选择费率。",
+    "account_lane": "按命令捕获的时间和配置执行价格/费率及账户准入。Matcher先消费准入完成标记再读取计算结果；Owner预派发仅访问从未被Lane重写的路由身份。",
+    "configuration_lane": "费率控制命令在既有Lane 0执行，验证版本及优先级后发布新的FeePolicyBook，配置未变时复用原版本。只在配置更新分配数组；无第二份可变全局策略Map。",
+    "remaining": "OI与ADL数量索引、Owner变更收据遍历、转账/市场/风险控制以及部分实时输出仍待迁移。"
+  },
+  "validation": {
+    "jdk": "HotSpot 27",
+    "status": "passed",
+    "log": "/Users/atomex/Desktop/surprising/performance-artifacts/owner-business-allocation-20261014/admission-boundaries-final.log",
+    "sha256": "9586b9813440b4ee0a26c236f6ebfdc30d3b834ba1cf500cc0b1678af04874b3",
+    "test_count": 30,
+    "suites": [
+      {
+        "suite": "com.surprising.aeron.service.state.FeePolicyBookTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.aeron.service.state.CoreOrderDecisionResolverTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.aeron.service.state.ReplacementAdmissionEventTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.aeron.service.state.PlaceLaneDecisionTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.aeron.service.orchestration.CoreActiveLaneIngressTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.aeron.service.orchestration.CorePreflightLaneQueryTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "cases": [
+      "六产品线入口与资金、Ledger",
+      "Owner直接配置写入拒绝、真实Lane控制、相同/过期版本处理",
+      "Lane阻塞时Owner不执行普通下单价格决策；拒绝后复用槽",
+      "规则优先级、symbol/user、到期、版本冲突及已捕获配置稳定",
+      "批量/改单/预检回归"
+    ],
+    "excluded": [
+      "快照/恢复场景",
+      "wallet",
+      "真实节点压测",
+      "整链路百字节目标验收"
+    ]
+  },
+  "allocation_evidence": "局部JMH保留在本地证据目录，不提交压测记录；不能推导整链路分配或容量。"
+}

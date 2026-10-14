@@ -56,7 +56,7 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
             if (amend != null && original.orderType() != CoreOrderType.LIMIT)
                 throw rejected("INVALID_COMMAND", "order is not amendable");
             PlaceOrderCommand command = replace == null ? amendCommand(original) : replace.replacement();
-            CoreOrderDecisionResolver.resolveInto(this, decision, command);
+            CoreOrderDecisionResolver.resolveInto(this, decision, userId, command);
             long positionKey = identities.findPositionKeyValueInLane(lane, userId, instrument(), positionSide());
             long required = RuntimeOrderAdmission.requiredReplacementReservationPrepared(
                     runtime, userId, this, openInterestSteps, lane.admissionOrderIndex(symbolId()),

@@ -10,6 +10,7 @@ public class ResolvedPlaceOrder {
     private PlaceOrderCommand intent;
     private CoreInstrument instrument;
     private int symbolId;
+    private boolean resolved;
     private long matchingPriceTicks;
     private long reservationPriceTicks;
     private long markPriceTicks;
@@ -61,7 +62,8 @@ public class ResolvedPlaceOrder {
             long matchingPriceTicks, long reservationPriceTicks, long markPriceTicks,
             long indexPriceTicks, long forwardPriceTicks, ReservationKind reservationKind,
             String reservationAsset, long makerFeeRatePpm, long takerFeeRatePpm) {
-        if (this.intent != null || intent == null || instrument == null || symbolId < -1
+        if (resolved || intent == null || instrument == null || symbolId < -1
+                || (this.intent != null && (this.intent != intent || this.instrument != instrument || this.symbolId != symbolId))
                 || matchingPriceTicks <= 0 || reservationPriceTicks <= 0
                 || markPriceTicks <= 0 || indexPriceTicks < 0 || forwardPriceTicks < 0
                 || (forwardPriceTicks > 0 && indexPriceTicks == 0)
@@ -71,9 +73,8 @@ public class ResolvedPlaceOrder {
                 || makerFeeRatePpm > takerFeeRatePpm) {
             throw new IllegalArgumentException("invalid resolved place order");
         }
-        this.intent = intent;
-        this.instrument = instrument;
-        this.symbolId = symbolId;
+        // Routing identity is bound by Owner before dispatch and never rewritten by the Lane.
+        if (this.intent == null) initializeOrderIntent(intent, instrument, symbolId);
         this.matchingPriceTicks = matchingPriceTicks;
         this.reservationPriceTicks = reservationPriceTicks;
         this.markPriceTicks = markPriceTicks;
@@ -83,6 +84,16 @@ public class ResolvedPlaceOrder {
         this.reservationAsset = AssetBalance.normalizeAsset(reservationAsset);
         this.makerFeeRatePpm = makerFeeRatePpm;
         this.takerFeeRatePpm = takerFeeRatePpm;
+        resolved = true;
+    }
+
+    public final void initializeOrderIntent(PlaceOrderCommand intent, CoreInstrument instrument, int symbolId) {
+        if (this.intent != null || intent == null || instrument == null || symbolId < -1
+                || !intent.instrumentId().equals(instrument.instrumentId()))
+            throw new IllegalArgumentException("invalid order routing input");
+        this.intent = intent;
+        this.instrument = instrument;
+        this.symbolId = symbolId;
     }
 
     public final void clearResolvedOrder() {
@@ -94,9 +105,10 @@ public class ResolvedPlaceOrder {
         reservationKind = null;
         reservationAsset = null;
         makerFeeRatePpm = takerFeeRatePpm = 0;
+        resolved = false;
     }
 
-    public final boolean resolvedOrderInitialized() { return intent != null; }
+    public final boolean resolvedOrderInitialized() { return resolved; }
     public PlaceOrderCommand intent() { return intent; }
     public CoreInstrument instrument() { return instrument; }
     public int symbolId() { return symbolId; }

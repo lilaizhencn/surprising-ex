@@ -123,7 +123,7 @@ final class OrderBookQueryService {
         }
 
         @Override public CoreResponse apply(AccountLaneState lane) {
-            var order = com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.resolve(context, command);
+            var order = com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.resolve(context, userId, command);
             long reserved = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationForQuery(
                     owner.runtimeState, userId, order, openInterest, identity);
             return new CoreResponse(ResponseStatus.OK, commandCount, com.surprising.aeron.protocol.CoreOrderPreflightCodec.encode(

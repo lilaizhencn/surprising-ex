@@ -12,6 +12,7 @@ import java.util.function.IntFunction;
 public final class BatchPlaceReservation extends ResolvedPlaceOrder implements IntFunction<Object> {
     private TradingRuntimeState runtime;
     private RuntimeIdentityRegistry identities;
+    private CoreOrderDecisionResolver.Context decision;
     private long sequence, userId, openInterestSteps;
     private UUID commandId;
     private int assetId;
@@ -30,14 +31,16 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
         runtime.assertOwner();
         if (!completed) throw new IllegalStateException("Account Lane still owns this batch reservation");
         clear();
-        CoreOrderDecisionResolver.resolveInto(this, decision, command);
+        this.decision = decision;
+        initializeOrderIntent(command, decision.instrument(), decision.symbolId());
         this.runtime = runtime;
         this.identities = identities;
         this.sequence = sequence;
         this.userId = userId;
         this.commandId = commandId;
         this.openInterestSteps = openInterestSteps;
-        assetId = identities.assetId(reservationAsset());
+        assetId = identities.assetId(runtime.productLine().isDerivative() ? decision.instrument().settleAsset()
+                : command.side() == CoreOrderSide.BUY ? decision.instrument().quoteAsset() : decision.instrument().baseAsset());
         lifecycleSettled = decision.lifecycleSettled();
         fundingInProgress = decision.fundingInProgress();
         completed = false;
@@ -49,6 +52,7 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
             throw new IllegalStateException("batch place reservation requires its Account Lane");
         long identity = 0;
         try {
+            CoreOrderDecisionResolver.resolveInto(this, decision, userId, intent());
             identity = identities.prepareClientKeyInLane(lane, userId, clientOrderId());
             preparedClientKey = identity;
             long clientKey = RuntimeIdentityRegistry.clientKeyValue(identity);
@@ -96,6 +100,7 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
         clearResolvedOrder();
         runtime = null;
         identities = null;
+        decision = null;
         commandId = null;
         sequence = userId = openInterestSteps = preparedClientKey = 0;
         assetId = 0;

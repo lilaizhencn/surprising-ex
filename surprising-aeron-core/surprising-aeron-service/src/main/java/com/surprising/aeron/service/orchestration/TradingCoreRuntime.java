@@ -1165,12 +1165,15 @@ public final class TradingCoreRuntime implements AutoCloseable,
         boolean fundingInProgress;
         int assetId;
         try {
-            CoreOrderDecisionResolver.resolveInto(event, runtimeState, identities, userId,
+            CoreOrderDecisionResolver.prepare(event, runtimeState, identities, userId,
                     command, currentClusterTimestamp);
             openInterestSteps = openInterestIndex.openInterestSteps(event.instrumentId());
             lifecycleSettled = runtimeState.treasury().lifecycleSettlement(event.symbolId()) != 0;
             fundingInProgress = runtimeState.treasury().fundingProgress(event.symbolId()) != null;
-            assetId = identities.assetId(event.reservationAsset());
+            var instrument = event.instrument();
+            assetId = identities.assetId(productLine.isDerivative() ? instrument.settleAsset()
+                    : command.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
+                    ? instrument.quoteAsset() : instrument.baseAsset());
         } catch (RuntimeException | Error failure) {
             runtimeState.discardPlaceAdmission(event);
             throw failure;

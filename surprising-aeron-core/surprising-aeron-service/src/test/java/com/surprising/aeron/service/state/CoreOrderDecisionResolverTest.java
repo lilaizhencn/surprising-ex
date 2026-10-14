@@ -71,20 +71,25 @@ class CoreOrderDecisionResolverTest {
             runtime.putMarkPrice(new MarkPriceRuntime(symbolId, runtime.instrument("1"), 60_000, 9, 1_000));
             var context = CoreOrderDecisionResolver.context(runtime, identities, 1001, "1", 1_500);
             runtime.putMarkPrice(new MarkPriceRuntime(symbolId, runtime.instrument("1"), 80_000, 10, 1_500));
+            runtime.upsertFeePolicy(new UpsertFeePolicyCommand(71, 1, 1001, "1", -25, 75, 0, true, 900, 0));
             var buy = new PlaceOrderCommand(91, "1", CoreOrderSide.BUY, 0, 2,
                     false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET,
                     CoreTimeInForce.IOC, false, "buy");
             var sell = new PlaceOrderCommand(92, "1", CoreOrderSide.SELL, 0, 2,
                     false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET,
                     CoreTimeInForce.IOC, false, "sell");
-            assertThat(CoreOrderDecisionResolver.resolve(context, buy).matchingPriceTicks()).isEqualTo(60_600);
-            assertThat(CoreOrderDecisionResolver.resolve(context, sell).matchingPriceTicks()).isEqualTo(59_400);
+            assertThat(CoreOrderDecisionResolver.resolve(context, 1001, buy).matchingPriceTicks()).isEqualTo(60_600);
+            assertThat(CoreOrderDecisionResolver.resolve(context, 1001, buy).makerFeeRatePpm())
+                    .isEqualTo(runtime.instrument("1").makerFeeRatePpm());
+            assertThat(CoreOrderDecisionResolver.resolve(runtime, identities, 1001, buy, 1_500).makerFeeRatePpm())
+                    .isEqualTo(-25);
+            assertThat(CoreOrderDecisionResolver.resolve(context, 1001, sell).matchingPriceTicks()).isEqualTo(59_400);
             assertThat(CoreOrderDecisionResolver.resolve(runtime, identities, 1001, buy, 1_500).markPriceTicks())
                     .isEqualTo(80_000);
             var limit = new PlaceOrderCommand(93, "1", CoreOrderSide.BUY, 100, 2,
                     false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                     CoreTimeInForce.GTC, false, "limit");
-            assertThat(CoreOrderDecisionResolver.resolve(context, limit).matchingPriceTicks()).isEqualTo(100);
+            assertThat(CoreOrderDecisionResolver.resolve(context, 1001, limit).matchingPriceTicks()).isEqualTo(100);
         }
     }
 

@@ -97,7 +97,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                 for (int index = 0; index < itemCount; index++) {
                     if (source != null) {
                         var decision = source.decision(index);
-                        var resolved = CoreOrderDecisionResolver.resolveInto(source.resolvedOrderSlot(index), decision.context(), source.intent(index));
+                        var resolved = CoreOrderDecisionResolver.resolveInto(source.resolvedOrderSlot(index), decision.context(), userId, source.intent(index));
                         orders[index] = resolved;
                         symbolIds[index] = resolved.symbolId();
                         assetIds[index] = runtime.productLine().isDerivative() ? decision.settleAssetId()

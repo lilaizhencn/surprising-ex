@@ -39,6 +39,7 @@ public class HotCommandSlotAllocationBenchmark {
     private final CoreMessageFlyweightDecoder frameDecoder = new CoreMessageFlyweightDecoder();
     private AccountLaneState lane;
     private SynchronousMatchingEngine matcher;
+    private com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context decision;
     private long retiredSequence;
 
     @Setup public void setup() {
@@ -54,6 +55,10 @@ public class HotCommandSlotAllocationBenchmark {
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
                 new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
                         1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+        decision = new com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context(
+                instrument, 0, new com.surprising.aeron.service.state.market.MarkPriceRuntime(0, instrument, 100, 1, 1),
+                FeePolicyBook.from(java.util.Map.of(1L, new com.surprising.aeron.service.state.model.CoreFeePolicyState(
+                        1, 1, 7, "1", -10, 20, 0, true, 1, 0))), 1_000, false, false);
         for (int index = 0; index < WINDOW; index++) {
             String client = switch (clientId) { case "EMPTY" -> ""; case "ASCII" -> "client-" + index; default -> "客户-" + index; };
             var order = new PlaceOrderCommand(index + 1, "1", CoreOrderSide.BUY, 100, 10, false,
@@ -90,6 +95,18 @@ public class HotCommandSlotAllocationBenchmark {
             checksum += removed.executedQuantitySteps();
             removed.retireForReuse(++retiredSequence);
             lane.returnRetiredOrder(removed);
+        }
+        return checksum;
+    }
+
+    @Benchmark @OperationsPerInvocation(WINDOW)
+    public long resolvePriceAndFee() {
+        long checksum = 0;
+        for (int index = 0; index < WINDOW; index++) {
+            var target = resolved[index];
+            com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.resolveInto(
+                    target, decision, 7, target.intent());
+            checksum += target.matchingPriceTicks() + target.makerFeeRatePpm() + target.takerFeeRatePpm();
         }
         return checksum;
     }

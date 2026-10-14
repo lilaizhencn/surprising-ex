@@ -133,3 +133,10 @@ Treasury，生产线程启动后非空财务 delta 不能由 Owner 应用。
 `CommandSlot.LaneResultTarget` 在Lane编码一条或两条订单结果。终态 `CoreResponse` 与独立的响应Header由已租用的 `CoreMessage` 持有；`OwnerResponsePublisher` 使用该响应Header，`ClusterServiceEgress` 保留租约直至Aeron编码消费，随后归还响应和8192个出口槽。异步消费者必须持有Header租约，不能保留已释放槽的引用。正常公开构造的消息和响应继续拥有独立值。
 
 必要验证覆盖六产品线入口、资金守恒、挂起集合恢复、延迟响应和超过出口容量的循环。持仓索引事实、部分控制与实时输出、背压缓冲仍有分配；Owner业务迁移及完整Core百字节目标尚未验收。范围和一次误选旧快照用例的失败记录见 [功能验证](../../docs/validation/leased-response-position-slots-20261014.json)。
+
+
+### 下单价格与费率决策归属（2026-10-14）
+
+`TradingCoreRuntime.dispatchPlaceAdmission` 通过 `CoreOrderDecisionResolver.prepare` 捕获不可变instrument、mark和 `FeePolicyBook` 版本，绑定命令路由。`PlaceAdmissionEvent.execute` 在账户Lane计算价格保护、撮合/预留价格与费率，再做冻结准入；Matcher收到准入完成后才读取这些结果。Owner提前构造结算事件只读已固定的路由身份，该身份不会由Lane重写。`BatchPlaceReservation` 同样把顺序批量项的决策放在Lane。改单、整批下单、触发和预检继续在既有Lane执行，费率输入统一改为配置版本，消除逐单 `CoreFeeRate` 对象。
+
+`FeePolicyCommands` 复用既有控制任务把配置更新交给Lane 0，Owner消费完成通知并发布命令修订。`FeePolicyBook` 是唯一不可变策略配置，优先级在更新时排序；Lane按命令时间选择有效策略，已捕获版本不随后续更新改变。没有逐命令复制策略，也没有新增可变策略镜像或线程。Owner侧的OI、ADL数量、转账与市场/风险控制仍在后续范围，不能据此认定Owner迁移完成。验证见 [下单价格及费率边界](../../docs/validation/lane-price-fee-decisions-20261014.json)。

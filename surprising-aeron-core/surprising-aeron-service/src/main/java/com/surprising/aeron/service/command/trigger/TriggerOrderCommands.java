@@ -776,7 +776,7 @@ public final class TriggerOrderCommands {
             if (trigger == null) return null;
             try {
                 order = com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.resolve(
-                        decision, childOrder(trigger, price, trigger.instrument(), childOrderId));
+                        decision, trigger.userId(), childOrder(trigger, price, trigger.instrument(), childOrderId));
             } catch (CoreStateRejectedException rejected) { failureReason = rejected.code(); }
             assetId = order == null ? 0 : order.reservationAsset().equals(decision.instrument().baseAsset()) ? baseAssetId
                     : order.reservationAsset().equals(decision.instrument().quoteAsset()) ? quoteAssetId : settleAssetId;

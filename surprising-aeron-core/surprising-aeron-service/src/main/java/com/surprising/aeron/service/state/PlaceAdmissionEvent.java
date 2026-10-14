@@ -24,6 +24,9 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     private int laneId;
     private TradingRuntimeState runtime;
     private RuntimeIdentityRegistry identities;
+    private com.surprising.aeron.service.state.market.MarkPriceRuntime decisionMark;
+    private FeePolicyBook decisionPolicies;
+    private long decisionTimestamp;
     private long identityAllocations;
     private long reservedAmount;
     private long admittedAccountVersion;
@@ -35,6 +38,17 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     private volatile boolean matcherConsumed;
 
     public PlaceAdmissionEvent() {
+    }
+
+    /** Owner binds immutable market/configuration inputs; price and fee decisions belong to the Lane. */
+    public void prepareDecision(com.surprising.aeron.protocol.PlaceOrderCommand intent,
+            com.surprising.aeron.service.state.instrument.CoreInstrument instrument, int symbolId,
+            com.surprising.aeron.service.state.market.MarkPriceRuntime mark, FeePolicyBook policies, long timestamp) {
+        if (policies == null || timestamp <= 0) throw new IllegalArgumentException("invalid place decision input");
+        initializeOrderIntent(intent, instrument, symbolId);
+        decisionMark = mark;
+        decisionPolicies = policies;
+        decisionTimestamp = timestamp;
     }
 
     public void resolve(com.surprising.aeron.protocol.PlaceOrderCommand intent,
@@ -54,7 +68,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
                                 TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                 long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0
-                || !resolvedOrderInitialized() || commandId == null || openInterestSteps < 0
+                || intent() == null || commandId == null || openInterestSteps < 0
                 || symbolId() < 0 || assetId < 0
                 || laneId < 0 || runtime == null) {
             throw new IllegalArgumentException("invalid place admission event");
@@ -96,6 +110,9 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         preparedClientKey = 0;
         runtime = null;
         identities = null;
+        decisionMark = null;
+        decisionPolicies = null;
+        decisionTimestamp = 0;
         admittedAccountVersion = 0;
         rejection = null;
         closeCapacityCancellations = List.of();
@@ -116,6 +133,9 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         try {
             runtime.enterLaneCommandScope(lane);
             try {
+                if (!resolvedOrderInitialized())
+                    com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.resolvePrepared(
+                            this, decisionMark, decisionPolicies, userId, decisionTimestamp, lifecycleSettled);
                 preparedClientKey = RuntimeIdentityRegistry.clientKeyValue(
                         identities.prepareClientKeyInLane(lane, userId, clientOrderId()));
                 long positionKey = identities.findPositionKeyValueInLane(
@@ -171,6 +191,9 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         preparedClientKey = 0;
         runtime = null;
         identities = null;
+        decisionMark = null;
+        decisionPolicies = null;
+        decisionTimestamp = 0;
         admittedAccountVersion = 0;
         rejection = null;
         closeCapacityCancellations = List.of();
@@ -256,18 +279,17 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     }
 
     /**
-     * Immutable matcher input is available as soon as the owner prepares the admission.  The
-     * matcher can therefore run in parallel with the account Lane; it must not wait for the Lane
-     * to publish the mutable runtime order just to reconstruct these command fields.
+     * Routing identity is available before admission. Matcher may retain this reference but
+     * must await its admission receipt before reading Lane-resolved prices and fees.
      */
     public ResolvedPlaceOrder matchingOrder() {
-        if (!resolvedOrderInitialized()) throw new IllegalStateException("place admission is not prepared");
+        if (intent() == null) throw new IllegalStateException("place admission is not prepared");
         return this;
     }
 
     /** Owner-only immutable input used to preconstruct a direct settlement before Lane admission. */
     ResolvedPlaceOrder preparedOrder() {
-        if (!resolvedOrderInitialized()) throw new IllegalStateException("place admission is not prepared");
+        if (intent() == null) throw new IllegalStateException("place admission is not prepared");
         return this;
     }
 

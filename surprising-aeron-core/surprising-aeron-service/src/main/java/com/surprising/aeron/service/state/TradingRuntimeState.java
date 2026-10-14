@@ -20,7 +20,6 @@ import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
 import com.surprising.aeron.service.state.model.CoreFeePolicyState;
-import com.surprising.aeron.service.state.model.CoreFeeRate;
 import com.surprising.aeron.service.state.model.CoreLeverageKey;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
@@ -191,7 +190,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 用户自动撤单定时器状态。 */
     final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new HashMap<>();
     /** 用户手续费策略状态，参与持久化与恢复。 */
-    final Map<Long, CoreFeePolicyState> feePolicies = new HashMap<>();
+    /** Lane 0 writes active fee configuration; readers retain immutable versions. */
+    private volatile FeePolicyBook feePolicies = FeePolicyBook.EMPTY;
     /** 尚未结束的跨账户资金转账，完成后移除。 */
     final java.util.NavigableMap<Long, TransferRuntime> pendingTransfers = new TreeMap<>();
     /** Owner-only query cursor; not a money fact. Recovery starts a new fair scan from zero. */
@@ -3127,11 +3127,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         return values;
     }
 
-    Map<Long, CoreFeePolicyState> feePoliciesForRuntime() {
-        assertOwner();
-        return feePolicies;
-    }
-
     public TransferRuntime pendingTransfer(long transferId) {
         assertOwner();
         return pendingTransfers.get(transferId);
@@ -3196,56 +3191,35 @@ public final class TradingRuntimeState implements AutoCloseable {
         return true;
     }
 
+    public FeePolicyBook feePolicyBook() {
+        assertOwner();
+        return feePolicies;
+    }
+
     public Map<Long, CoreFeePolicyState> feePoliciesSnapshot() {
         assertOwner();
-        return Collections.unmodifiableMap(new TreeMap<>(feePolicies));
+        return feePolicies.snapshot();
     }
 
     public void restoreFeePolicies(Map<Long, CoreFeePolicyState> restored) {
         assertOwner();
-        if (restored == null) throw new IllegalArgumentException("fee policy snapshot is required");
-        feePolicies.clear();
-        feePolicies.putAll(restored);
+        if (accountLanesStarted) throw new IllegalStateException("fee policy restore requires stopped Lanes");
+        feePolicies = FeePolicyBook.from(restored);
         changedFeePolicies.clear();
     }
 
     public void upsertFeePolicy(com.surprising.aeron.protocol.UpsertFeePolicyCommand command) {
         assertOwner();
+        if (accountLanesStarted && (currentLaneCommandScope() == null || currentLaneCommandScope().laneId() != 0))
+            throw new IllegalStateException("active fee policy updates must run on configuration Lane 0");
         rejectUnsupportedOrderBatchMutation("fee-policy state");
         CoreFeePolicyState next = CoreFeePolicyState.from(command);
-        CoreFeePolicyState current = feePolicies.get(next.policyId());
-        if (current != null && next.policyRevision() < current.policyRevision()) {
-            throw new CoreStateRejectedException("STALE_FEE_POLICY_VERSION", "fee policy version must increase");
-        }
-        if (current != null && next.policyRevision() == current.policyRevision()) {
-            if (!current.equals(next)) {
-                throw new CoreStateRejectedException("FEE_POLICY_VERSION_CONFLICT",
-                        "fee policy version contains different data");
-            }
-            return;
-        }
+        FeePolicyBook updated = feePolicies.upsert(next);
+        if (updated == feePolicies) return;
         requireRevisionCapacity();
-        feePolicies.put(next.policyId(), next);
+        feePolicies = updated;
         changedFeePolicies.add(next.policyId());
-        setMetadata(productLine, Math.incrementExact(revision));
-    }
-
-    public CoreFeeRate resolveFee(long userId, String instrumentId, long clusterTimestamp,
-                                  CoreInstrument instrument) {
-        assertOwner();
-        String normalizedSymbol = instrument.instrumentId().equals(instrumentId)
-                ? instrument.instrumentId() : OrderReservation.requireInstrumentId(instrumentId);
-        CoreFeePolicyState selected = null;
-        for (CoreFeePolicyState policy : feePolicies.values()) {
-            if (policy.effective(userId, normalizedSymbol, clusterTimestamp)
-                    && (selected == null || policy.compareTo(selected) < 0)) {
-                selected = policy;
-            }
-        }
-        return selected == null
-                ? new CoreFeeRate(instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm(), 0)
-                : new CoreFeeRate(selected.makerFeeRatePpm(), selected.takerFeeRatePpm(),
-                selected.policyRevision());
+        incrementCommandRevision();
     }
 
     public void replaceAuxiliaryState(TradingCoreState source) {
