@@ -109,7 +109,7 @@ final class MatcherSettlementChanges {
             if (reservation != null && reservation.reservedUnits() != 0) return;
             if (reservation != null) {
                 lane.reservations.remove(orderId);
-                TradingRuntimeState.removeUserEntityKeepingContainer(lane.reservationIdsByUser, order.userId(), orderId);
+                lane.removeReservationId(order.userId(), orderId);
                 changes.removeReservationRoute(orderId);
             }
             // 原生拒单保留已有的 REJECTED 查询记录，但不再持有冻结或 reservation。

@@ -117,9 +117,9 @@ public final class DerivativeAccountCommandProcessor {
             throw new CoreStateRejectedException("LEVERAGE_REPRICE_INCREASE_BLOCKED", "only lowering leverage is supported");
         var orderIds = lane.activeOrderIdsByUser.get(key.userId());
         if (orderIds != null) {
-            var it = orderIds.longIterator();
+            var it = orderIds.iterator();
             while (it.hasNext()) {
-                var order = lane.orders.get(it.next());
+                var order = lane.orders.get(it.nextValue());
                 if (order != null && order.symbolId() == symbolId && order.marginMode() == key.marginMode()
                         && order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN)
                     throw new CoreStateRejectedException("LEVERAGE_UPDATE_BLOCKED", "cancel open orders before repricing margin");

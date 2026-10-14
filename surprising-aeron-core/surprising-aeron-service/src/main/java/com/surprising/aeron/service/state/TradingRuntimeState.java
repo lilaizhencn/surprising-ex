@@ -1465,7 +1465,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 removeClientOrderIndex(lane, userId, clientKeys[index]);
             }
             lane.reservations.remove(orderId);
-            removeUserEntityKeepingContainer(lane.reservationIdsByUser, userId, orderId);
+            lane.removeReservationId(userId, orderId);
             lane.removeOrder(orderId);
             IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(userId);
             BalanceRuntime balance = balances == null ? null : balances.get(reservation.assetId());
@@ -2368,12 +2368,12 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     long nextRiskReservationId(long userId, long cursor) {
         AccountLaneState lane = riskCursorLane(userId);
-        LongHashSet ids = lane.reservationIdsByUser.get(userId);
+        var ids = lane.reservationIdsByUser.get(userId);
         long selected = 0;
         if (ids != null) {
-            var iterator = ids.longIterator();
+            var iterator = ids.iterator();
             while (iterator.hasNext()) {
-                long id = iterator.next();
+                long id = iterator.nextValue();
                 if (id > cursor && (selected == 0 || id < selected)) selected = id;
             }
         }
@@ -2418,7 +2418,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     boolean hasOpenAccountExposure(long userId) {
         assertOwner();
         return onLane(userId, lane -> {
-            LongHashSet orders = lane.activeOrderIdsByUser.get(userId);
+            var orders = lane.activeOrderIdsByUser.get(userId);
             if (orders != null && !orders.isEmpty()) return true;
             LongHashSet positions = lane.positionKeysByUser.get(userId);
             if (positions != null) {
@@ -2428,11 +2428,11 @@ public final class TradingRuntimeState implements AutoCloseable {
                     if (position != null && position.signedQuantitySteps() != 0) return true;
                 }
             }
-            LongHashSet reservations = lane.reservationIdsByUser.get(userId);
+            var reservations = lane.reservationIdsByUser.get(userId);
             if (reservations != null) {
-                var it = reservations.longIterator();
+                var it = reservations.iterator();
                 while (it.hasNext()) {
-                    ReservationRuntime reservation = lane.reservations.get(it.next());
+                    ReservationRuntime reservation = lane.reservations.get(it.nextValue());
                     if (reservation != null && reservation.reservedUnits() != 0) return true;
                 }
             }
@@ -2444,11 +2444,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     boolean hasOpenLeverageExposure(CoreLeverageKey key, int symbolId) {
         assertOwner();
         return onLane(key.userId(), lane -> {
-            LongHashSet orders = lane.activeOrderIdsByUser.get(key.userId());
+            var orders = lane.activeOrderIdsByUser.get(key.userId());
             if (orders != null) {
-                var it = orders.longIterator();
+                var it = orders.iterator();
                 while (it.hasNext()) {
-                    OrderRuntime order = lane.orders.get(it.next());
+                    OrderRuntime order = lane.orders.get(it.nextValue());
                     if (order != null && order.status() == CoreOrderStatus.OPEN
                             && order.symbolId() == symbolId && order.marginMode() == key.marginMode()) return true;
                 }
@@ -2477,15 +2477,17 @@ public final class TradingRuntimeState implements AutoCloseable {
     public LongHashSet reservationIdsForUser(long userId) {
         assertOwner();
         return onLane(userId, lane -> {
-            LongHashSet orderIds = lane.reservationIdsByUser.get(userId);
-            return orderIds == null ? new LongHashSet() : new LongHashSet(orderIds);
+            var orderIds = lane.reservationIdsByUser.get(userId);
+            LongHashSet result = new LongHashSet(orderIds == null ? 0 : orderIds.size());
+            if (orderIds != null) orderIds.forEachLong(result::add);
+            return result;
         });
     }
 
     public int reservationCountForUser(long userId) {
         assertOwner();
         return onLane(userId, lane -> {
-            LongHashSet orderIds = lane.reservationIdsByUser.get(userId);
+            var orderIds = lane.reservationIdsByUser.get(userId);
             return orderIds == null ? 0 : orderIds.size();
         });
     }
@@ -3458,14 +3460,13 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (previous != null) {
             onLane(previous.userId(), lane -> {
                 lane.reservations.remove(previous.orderId());
-                removeUserEntityKeepingContainer(
-                        lane.reservationIdsByUser, previous.userId(), previous.orderId());
+                lane.removeReservationId(previous.userId(), previous.orderId());
                 return null;
             });
         }
         onLane(reservation.userId(), lane -> {
             lane.reservations.put(reservation.orderId(), reservation.laneValue());
-            addUserEntity(lane.reservationIdsByUser, reservation.userId(), reservation.orderId());
+            lane.addReservationId(reservation.userId(), reservation.orderId());
             return null;
         });
         publishReservation(reservation.orderId(), reservation);
@@ -3526,7 +3527,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (previous != null) lane.replacePendingReservation(previous, reservation);
             lane.reservations.put(reservation.orderId(), reservation.laneValue());
             if (previous == null)
-                addUserEntity(lane.reservationIdsByUser, reservation.userId(), reservation.orderId());
+                lane.addReservationId(reservation.userId(), reservation.orderId());
             if (pending) {
                 accountRollback.captureBalanceAfter(lane, previous.userId(), previous.assetId());
                 accountRollback.captureBalanceAfter(lane, reservation.userId(), reservation.assetId());
@@ -3554,7 +3555,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 throw new IllegalStateException("pending reservation must complete before removal");
             }
             lane.reservations.remove(orderId);
-            removeUserEntityKeepingContainer(lane.reservationIdsByUser, userId, orderId);
+            lane.removeReservationId(userId, orderId);
             return null;
         });
         publishReservation(orderId, null);
@@ -4120,8 +4121,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                     }
                     reservationAssetId = reservation.assetId();
                     lane.reservations.remove(prune.orderId());
-                    removeUserEntityKeepingContainer(
-                            lane.reservationIdsByUser, prune.userId(), prune.orderId());
+                    lane.removeReservationId(prune.userId(), prune.orderId());
                 }
                 lane.removeOrder(prune.orderId());
                 if (prune.clientKey() != 0) {
@@ -4629,7 +4629,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             balance.reserve(reservedUnits);
             lane.putOrder(order);
             lane.reservations.put(orderId, reservation);
-            addUserEntity(lane.reservationIdsByUser, userId, orderId);
+            lane.addReservationId(userId, orderId);
             if (clientKey != 0) putClientOrderIndex(lane, userId, clientKey, orderId);
             accountRollback.captureBalanceAfter(lane, userId, assetId);
             return null;
@@ -4697,7 +4697,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         balance.reserve(requiredReservation);
         lane.putOrder(order);
         lane.reservations.put(reservation.orderId(), reservation.laneValue());
-        addUserEntity(lane.reservationIdsByUser, userId, order.orderId(), lane.admissionIndexCapacity);
+        lane.addReservationId(userId, order.orderId());
         if (clientKey != 0) putClientOrderIndex(lane, userId, clientKey, order.orderId());
         lane.users.put(userId, advanced);
         if (prepared == null) lane.markPendingReservation(order.orderId(), coreSequence);
@@ -4797,13 +4797,9 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     static void addUserEntity(LongObjectHashMap<LongHashSet> index, long userId, long entityId) {
-        addUserEntity(index, userId, entityId, 2);
-    }
-
-    private static void addUserEntity(LongObjectHashMap<LongHashSet> index, long userId, long entityId, int capacity) {
         LongHashSet entities = index.get(userId);
         if (entities == null) {
-            entities = new LongHashSet(capacity);
+            entities = new LongHashSet(2);
             index.put(userId, entities);
         }
         entities.add(entityId);
@@ -4814,12 +4810,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (entities == null) return;
         entities.remove(entityId);
         if (entities.isEmpty()) index.remove(userId);
-    }
-
-    static void removeUserEntityKeepingContainer(
-            LongObjectHashMap<LongHashSet> index, long userId, long entityId) {
-        LongHashSet entities = index.get(userId);
-        if (entities != null) entities.remove(entityId);
     }
 
     static void putClientOrderIndex(AccountLaneState lane, long userId, long clientKey, long orderId) {

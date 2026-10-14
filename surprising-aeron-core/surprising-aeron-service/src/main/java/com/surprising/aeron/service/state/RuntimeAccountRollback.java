@@ -103,13 +103,12 @@ final class RuntimeAccountRollback {
                 throw new IllegalStateException("order batch overlapped an existing pending reservation");
             ReservationRuntime current = lane.reservations.remove(orderId);
             if (current != null) {
-                TradingRuntimeState.removeUserEntityKeepingContainer(
-                        lane.reservationIdsByUser, current.userId(), orderId);
+                lane.removeReservationId(current.userId(), orderId);
             }
             ReservationRuntime before = captured.value();
             if (before != null) {
                 lane.reservations.put(orderId, before.laneValue());
-                TradingRuntimeState.addUserEntity(lane.reservationIdsByUser, before.userId(), orderId);
+                lane.addReservationId(before.userId(), orderId);
             }
         }
         LaneLongCaptures<PositionRuntime> positions = patchPositionsBeforeByLane[laneId];

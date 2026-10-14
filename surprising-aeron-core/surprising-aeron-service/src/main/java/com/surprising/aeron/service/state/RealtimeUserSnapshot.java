@@ -46,14 +46,14 @@ public record RealtimeUserSnapshot(
                     v -> b.add(new BalanceValue(v.assetId(), v.availableUnits(), v.lockedUnits())));
         var o = new ArrayList<OrderRuntime>();
         if (orderIds != null)
-            orderIds.forEach(
+            orderIds.forEachLong(
                     id -> {
                         var v = lane.orders.get(id);
                         if (v != null && !v.status().terminal()) o.add(v.publicationValue());
                     });
         var re = new ArrayList<ReservationRuntime>();
         if (reservationIds != null)
-            reservationIds.forEach(
+            reservationIds.forEachLong(
                     id -> {
                         var v = lane.reservations.get(id);
                         if (v != null) re.add(v.publicationValue());
@@ -94,6 +94,10 @@ public record RealtimeUserSnapshot(
     }
 
     private static long size(LongHashSet values) {
+        return values == null ? 0 : values.size();
+    }
+
+    private static long size(org.agrona.collections.LongHashSet values) {
         return values == null ? 0 : values.size();
     }
 }

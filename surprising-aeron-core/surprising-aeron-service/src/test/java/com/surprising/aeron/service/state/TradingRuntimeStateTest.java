@@ -164,19 +164,20 @@ class TradingRuntimeStateTest {
             state.putBalance(new BalanceRuntime(7, 3, 1000, 0));
             state.clearChangedKeys();
             state.startAccountLanes();
-            for (int index = 0; index < 2; index++)
-                CoreStateTestFixtures.reserveOrder(state, 11 + index, 7, 91 + index, 5, 2, 3, 200);
+            int laneId = state.accountLaneId(7);
+            state.dispatchControlLanes(1L << laneId, id -> {
+                for (int index = 0; index < 2; index++) {
+                    CoreStateTestFixtures.reserveOrder(state, 11 + index, 7, 91 + index, 5, 2, 3, 200);
+                    state.accountLanes[id].markPendingReservation(11 + index, 4);
+                }
+                return new OrderRuntime[]{state.order(11), state.order(12)};
+            });
+            awaitControlLanes(state);
+            var admitted = (OrderRuntime[]) state.controlLaneResult(laneId);
             if (batch) {
-                state.onLane(7L, lane -> {
-                    lane.markPendingReservation(11, 4);
-                    lane.markPendingReservation(12, 4);
-                    return null;
-                });
-                state.pendingReservations.registerBatch(4, 7,
-                        new OrderRuntime[]{state.order(11), state.order(12)}, 2);
+                state.pendingReservations.registerBatch(4, 7, admitted, 2);
             } else {
-                state.markPendingReservation(7, 11, 4);
-                state.markPendingReservation(7, 12, 4);
+                for (var order : admitted) state.pendingReservations.collectControlReservation(order, 4);
             }
             state.enterAsynchronousCommandScope();
             try {
@@ -188,15 +189,19 @@ class TradingRuntimeStateTest {
                 }
                 assertThat(state.ownerLaneAccess).isFalse();
             } finally { state.exitAsynchronousCommandScope(); }
-            assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1000);
-            assertThat(state.balance(7, 3).lockedUnits()).isZero();
-            assertThat(state.order(11)).isNull();
-            assertThat(state.order(12)).isNull();
-            assertThat(state.reservation(11)).isNull();
-            assertThat(state.orderIdByClient(7, 91)).isNull();
             assertThat(state.pendingReservationCount()).isZero();
-            assertThat(state.pendingReservationCount(7)).isZero();
-            assertThat(state.pendingReservedUnits(7, 3)).isZero();
+            state.dispatchControlLanes(1L << laneId, id -> {
+                assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1000);
+                assertThat(state.balance(7, 3).lockedUnits()).isZero();
+                assertThat(state.order(11)).isNull();
+                assertThat(state.order(12)).isNull();
+                assertThat(state.reservation(11)).isNull();
+                assertThat(state.orderIdByClient(7, 91)).isNull();
+                assertThat(state.pendingReservationCount(7)).isZero();
+                assertThat(state.pendingReservedUnits(7, 3)).isZero();
+                return null;
+            });
+            awaitControlLanes(state);
         }
     }
 
@@ -1266,23 +1271,28 @@ class TradingRuntimeStateTest {
             ReservationRuntime reservation = new ReservationRuntime(11, 7, 5,
                     com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN, 3, 200, 0, 0, 2);
             state.startAccountLanes();
-            state.reserveOrder(order, reservation, 91);
-            assertThat(state.order(11)).isSameAs(order);
-            assertThat(state.reservation(11)).isSameAs(reservation);
-            assertThat(state.balance(7, 3).availableUnits()).isEqualTo(800);
-            assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
-            assertThatThrownBy(() -> state.reserveOrder(order, reservation, 92))
-                    .isInstanceOf(IllegalArgumentException.class);
-            var next = CoreStateTestFixtures.order(12, 7, 5, 2);
-            var nextReservation = new ReservationRuntime(12, 7, 5,
-                    com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN, 3, 200, 0, 0, 2);
-            assertThatThrownBy(() -> state.reserveOrder(next, nextReservation, 91))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThat(state.order(12)).isNull();
-            assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
-            state.cancelOrder(11, 7, 200);
-            assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1_000);
-            assertThat(state.balance(7, 3).lockedUnits()).isZero();
+            assertThatThrownBy(() -> state.order(11)).isInstanceOf(IllegalStateException.class);
+            state.dispatchControlLanes(state.topology().accountLaneMask(7), id -> {
+                state.reserveOrder(order, reservation, 91);
+                assertThat(state.order(11)).isSameAs(order);
+                assertThat(state.reservation(11)).isSameAs(reservation);
+                assertThat(state.balance(7, 3).availableUnits()).isEqualTo(800);
+                assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
+                assertThatThrownBy(() -> state.reserveOrder(order, reservation, 92))
+                        .isInstanceOf(IllegalArgumentException.class);
+                var next = CoreStateTestFixtures.order(12, 7, 5, 2);
+                var nextReservation = new ReservationRuntime(12, 7, 5,
+                        com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN, 3, 200, 0, 0, 2);
+                assertThatThrownBy(() -> state.reserveOrder(next, nextReservation, 91))
+                        .isInstanceOf(IllegalArgumentException.class);
+                assertThat(state.order(12)).isNull();
+                assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
+                state.cancelOrder(11, 7, 200);
+                assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1_000);
+                assertThat(state.balance(7, 3).lockedUnits()).isZero();
+                return null;
+            });
+            awaitControlLanes(state);
         }
     }
 

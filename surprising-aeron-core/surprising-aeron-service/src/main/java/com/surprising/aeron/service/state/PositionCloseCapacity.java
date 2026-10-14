@@ -127,9 +127,9 @@ public record PositionCloseCapacity(
         ArrayList<Commitment> commitments = null;
         var ids = lane.activeOrderIdsByUser.get(userId);
         if (ids != null) {
-            var iterator = ids.longIterator();
+            var iterator = ids.iterator();
             while (iterator.hasNext()) {
-                long orderId = iterator.next();
+                long orderId = iterator.nextValue();
                 if (orderId == excludedOrderId || lane.pendingReservationSequences.containsKey(orderId)) continue;
                 OrderRuntime order = lane.orders.get(orderId);
                 if (order == null || order.status() != CoreOrderStatus.OPEN || order.userId() != userId

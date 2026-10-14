@@ -52,11 +52,12 @@ public final class AccountLaneState {
     // Back-shift deletion avoids tombstone-triggered whole-table allocation under order churn.
     final Long2ObjectHashMap<OrderRuntime> orders =
             new Long2ObjectHashMap<>(INITIAL_ENTITY_CAPACITY, 0.65f, false);
-    final LongObjectHashMap<LongHashSet> activeOrderIdsByUser =
+    // Lane-owned membership uses back-shift deletion; unique order IDs do not accumulate tombstones.
+    final LongObjectHashMap<org.agrona.collections.LongHashSet> activeOrderIdsByUser =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final Long2ObjectHashMap<ReservationRuntime> reservations =
             new Long2ObjectHashMap<>(INITIAL_ENTITY_CAPACITY, 0.65f, false);
-    final LongObjectHashMap<LongHashSet> reservationIdsByUser =
+    final LongObjectHashMap<org.agrona.collections.LongHashSet> reservationIdsByUser =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final LongObjectHashMap<PositionRuntime> positions = new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final LongObjectHashMap<LongHashSet> positionKeysByUser =
@@ -364,12 +365,12 @@ public final class AccountLaneState {
             com.surprising.aeron.protocol.CoreOrderSide side, long matchingPrice,
             long excludedOrderId, long newOrderId, java.util.List<Long> closeCapacity) {
         assertOwner();
-        LongHashSet active = activeOrderIdsByUser.get(userId);
+        var active = activeOrderIdsByUser.get(userId);
         if (active == null || active.isEmpty()) return closeCapacity;
         LongHashSet cancellations = null;
-        var iterator = active.longIterator();
+        var iterator = active.iterator();
         while (iterator.hasNext()) {
-            long id = iterator.next();
+            long id = iterator.nextValue();
             if (id == excludedOrderId || id == newOrderId || pendingReservation(id)) continue;
             OrderRuntime order = orders.get(id);
             if (order == null || order.symbolId() != symbolId || order.side() == side) continue;
@@ -449,12 +450,12 @@ public final class AccountLaneState {
     long openReduceOnlyQuantity(long userId, int symbolId, CorePositionSide positionSide,
                                 CoreOrderSide side, CoreMarginMode marginMode) {
         assertOwner();
-        LongHashSet orderIds = activeOrderIdsByUser.get(userId);
+        var orderIds = activeOrderIdsByUser.get(userId);
         if (orderIds == null) return 0;
         long total = 0;
-        var iterator = orderIds.longIterator();
+        var iterator = orderIds.iterator();
         while (iterator.hasNext()) {
-            long orderId = iterator.next();
+            long orderId = iterator.nextValue();
             OrderRuntime order = orders.get(orderId);
             if (order != null && order.symbolId() == symbolId && order.reduceOnly()
                     && order.positionSide() == positionSide && order.side() == side
@@ -473,21 +474,36 @@ public final class AccountLaneState {
     }
 
     private void addActiveOrder(long userId, long orderId) {
-        LongHashSet orderIds = activeOrderIdsByUser.get(userId);
+        var orderIds = activeOrderIdsByUser.get(userId);
         if (orderIds == null) {
-            orderIds = new LongHashSet(admissionIndexCapacity);
+            orderIds = new org.agrona.collections.LongHashSet(admissionIndexCapacity, 0.65f, true);
             activeOrderIdsByUser.put(userId, orderIds);
         }
         orderIds.add(orderId);
     }
 
     private void removeActiveOrder(long userId, long orderId) {
-        LongHashSet orderIds = activeOrderIdsByUser.get(userId);
+        var orderIds = activeOrderIdsByUser.get(userId);
         if (orderIds == null || !orderIds.remove(orderId)) {
             throw new IllegalStateException("active order index is missing");
         }
         // Keep the primitive container while the user exists. Terminal-to-next-order churn is
         // the common path; removing it here only replaces a cleared table with a new allocation.
+    }
+
+    void addReservationId(long userId, long orderId) {
+        var ids = reservationIdsByUser.get(userId);
+        if (ids == null) {
+            ids = new org.agrona.collections.LongHashSet(admissionIndexCapacity, 0.65f, true);
+            reservationIdsByUser.put(userId, ids);
+        }
+        ids.add(orderId);
+    }
+
+    void removeReservationId(long userId, long orderId) {
+        var ids = reservationIdsByUser.get(userId);
+        if (ids != null) ids.remove(orderId);
+        // Retain the user's existing container, just like active order membership.
     }
 
     private static boolean active(OrderRuntime order) {

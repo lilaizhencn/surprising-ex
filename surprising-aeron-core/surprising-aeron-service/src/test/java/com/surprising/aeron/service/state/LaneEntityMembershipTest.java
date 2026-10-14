@@ -9,6 +9,102 @@ import static org.assertj.core.api.Assertions.*;
 
 class LaneEntityMembershipTest {
     @Test
+    void liveOrderAndReservationMembershipSurvivesUniqueIdChurnWithoutReplacingArrays() throws Exception {
+        try (var state = new TradingRuntimeState()) {
+            state.putUser(new UserRuntime(7));
+            state.putUser(new UserRuntime(8));
+            state.putOrder(CoreStateTestFixtures.order(1, 7, 1, 2));
+            state.putReservation(CoreStateTestFixtures.reservation(1, 7, 3, 13));
+            state.putOrder(CoreStateTestFixtures.order(Long.MAX_VALUE, 8, 1, 2));
+            state.putReservation(CoreStateTestFixtures.reservation(Long.MAX_VALUE, 8, 3, 17));
+            var lane = state.onLane(7L, value -> value);
+            var orders = lane.activeOrderIdsByUser.get(7);
+            var reservations = lane.reservationIdsByUser.get(7);
+            Object orderStorage = null, reservationStorage = null;
+            state.clearChangedKeys();
+            for (int round = 0; round < 1_001; round++) {
+                // Eclipse's small-ID bit mask is not the production order-ID path.
+                long first = 1_000_000L + round * 20;
+                for (long id = first; id < first + 20; id++) {
+                    state.putOrder(CoreStateTestFixtures.order(id, 7, 1, 2));
+                    state.putReservation(CoreStateTestFixtures.reservation(id, 7, 3, 5));
+                }
+                if (round == 0) {
+                    orderStorage = membershipStorage(orders);
+                    reservationStorage = membershipStorage(reservations);
+                }
+                assertThat(orders.size()).isEqualTo(21);
+                assertThat(reservations.size()).isEqualTo(21);
+                for (long id = first; id < first + 20; id++) {
+                    state.removeOrder(id);
+                    state.removeReservation(id, 7);
+                }
+                assertThat(lane.activeOrderIdsByUser.get(7)).isSameAs(orders);
+                assertThat(lane.reservationIdsByUser.get(7)).isSameAs(reservations);
+                assertThat(membershipStorage(orders)).isSameAs(orderStorage);
+                assertThat(membershipStorage(reservations)).isSameAs(reservationStorage);
+                assertThat(orders.size()).isOne();
+                assertThat(reservations.size()).isOne();
+                assertThat(orders.contains(1)).isTrue();
+                assertThat(reservations.contains(1)).isTrue();
+                assertThat(state.reservationIdsForUser(8).toArray()).containsExactly(Long.MAX_VALUE);
+                state.clearChangedKeys();
+            }
+            var detached = state.reservationIdsForUser(7);
+            detached.remove(1);
+            assertThat(reservations.contains(1)).isTrue();
+            state.removeOrder(1);
+            state.removeReservation(1, 7);
+            assertThat(orders.size()).isZero();
+            assertThat(reservations.size()).isZero();
+            state.removeUser(7);
+            assertThat(lane.activeOrderIdsByUser.get(7)).isNull();
+            assertThat(lane.reservationIdsByUser.get(7)).isNull();
+        }
+    }
+
+    @Test
+    void rollbackRestoresRemovedMembershipAndDropsNewOrderAndReservation() {
+        try (var state = new TradingRuntimeState()) {
+            state.putUser(new UserRuntime(7));
+            for (long id : new long[]{1, 2}) {
+                state.putOrder(CoreStateTestFixtures.order(id, 7, 1, 2));
+                state.putReservation(CoreStateTestFixtures.reservation(id, 7, 3, 5));
+            }
+            var lane = state.onLane(7L, value -> value);
+            state.clearChangedKeys();
+            state.onLane(7L, current -> {
+                state.replaceOrder(state.order(1).withStatus(
+                        com.surprising.aeron.service.state.model.CoreOrderStatus.CANCELED, 3));
+                state.removeReservation(1, 7);
+                state.putOrder(CoreStateTestFixtures.order(3, 7, 1, 2));
+                state.putReservation(CoreStateTestFixtures.reservation(3, 7, 3, 5));
+                return null;
+            });
+            state.accountRollback.restoreLane(lane);
+            var orders = lane.activeOrderIdsByUser.get(7);
+            var reservations = state.reservationIdsForUser(7);
+            assertThat(orders.size()).isEqualTo(2);
+            assertThat(orders.contains(1)).isTrue();
+            assertThat(orders.contains(2)).isTrue();
+            assertThat(orders.contains(3)).isFalse();
+            assertThat(reservations.toArray()).containsExactlyInAnyOrder(1, 2);
+            assertThat(lane.orders.get(3)).isNull();
+            assertThat(lane.reservations.get(3)).isNull();
+        }
+    }
+
+    private static Object membershipStorage(Object set) throws Exception {
+        for (var field : set.getClass().getDeclaredFields()) {
+            if (field.getType() == long[].class && !java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+                field.setAccessible(true);
+                return field.get(set);
+            }
+        }
+        throw new AssertionError("membership has no primitive backing array");
+    }
+
+    @Test
     void reservationAmountAndAssetChangesKeepMembershipAndPendingTotals() {
         try (var state = new TradingRuntimeState()) {
             state.putUser(new UserRuntime(7));
@@ -23,7 +119,7 @@ class LaneEntityMembershipTest {
             assertThat(lane.pendingReservedUnits(7, 1)).isEqualTo(20);
             state.replaceReservation(CoreStateTestFixtures.reservation(11, 7, 2, 10));
             assertThat(lane.reservationIdsByUser.get(7)).isSameAs(ids);
-            assertThat(ids.toArray()).containsExactly(11);
+            assertThat(ids).containsExactly(11L);
             assertThat(lane.pendingReservedUnits(7, 1)).isZero();
             assertThat(lane.pendingReservedUnits(7, 2)).isEqualTo(10);
             assertThatThrownBy(() -> state.replaceReservation(CoreStateTestFixtures.reservation(11, 8, 2, 10)))

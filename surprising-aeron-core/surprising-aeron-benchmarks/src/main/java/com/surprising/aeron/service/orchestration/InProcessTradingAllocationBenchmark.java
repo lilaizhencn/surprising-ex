@@ -22,6 +22,8 @@ import org.openjdk.jmh.infra.IterationParams;
 /**
  * Real decoder/Owner/Matcher/Lane/Ledger/response path. The two users route to different Account
  * Lanes, exercising settlement-slot reuse from single-Lane admission to cross-Lane fills.
+ * Unique production-range IDs also exercise active-order and reservation membership deletion
+ * while the rolling window retains live entries; this is not a repeated-key map benchmark.
  * Aeron transport and Archive are excluded.
  */
 @State(Scope.Thread) @BenchmarkMode(Mode.Throughput) @OutputTimeUnit(TimeUnit.SECONDS)

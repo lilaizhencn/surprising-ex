@@ -189,3 +189,10 @@ Lane结算通过已有 `RuntimePositionChangeBuffer` 交接冻结after-image，�
 `MatcherSettlementEvent` 在所属命令退休并归还后继续保留已创建的 `RuntimeTreasuryDelta` 槽。下单最初只路由到一个账户Lane，Matcher发现其他成交方后扩展路由；参与Lane数缩小时不再重建数组或对象，增大时只补充新槽。Owner准备输入、Matcher发布事实之前清除槽内流水，账户Lane写入各自槽，原SystemLedgerLane在账户完成后按当前 `requiredLaneMask` 归并，数组容量不决定本次业务范围。没有新增账本、账户镜像、线程或回收阶段。
 
 必要验证覆盖槽位扩容和收缩、无成交、未参与槽位排除、独立账户线程和Ledger费用结算、六产品线连续交易及未完成事件禁止回收，见 [财务槽容量验证](../../docs/validation/treasury-slot-capacity-20261015.json)。这只消除该分配源；完整Core百字节目标和Owner业务迁移仍需继续完成。按要求未验证Cluster快照/恢复或启动wallet，分配诊断结果仅保存在本地。
+
+
+### Lane活跃订单与预约成员集合（2026-10-15）
+
+`AccountLaneState.activeOrderIdsByUser` 与 `reservationIdsByUser` 使用已有Agrona primitive集合。订单准入增加成员，终态/回滚原位删除并整理探测链，达到活跃容量后不因唯一ID周转反复重建数组；集合仍归所属账户Lane，用户删除时移除容器。预约成员的增删集中在该Lane的 `addReservationId` / `removeReservationId`，清除旧通用容器辅助方法。Lane内部扫描复用迭代器并读primitive值；风险游标仍选择最小后继，平仓冲突仍显式按业务顺序排序，外部预约ID查询仍返回独立集合。
+
+必要验证覆盖大ID周转时保留在途项、容器释放、独立查询值、终态及回滚恢复，并覆盖六产品线、风险/ADL查询、平仓容量、预检和realtime输出。原来直接在Owner读写活跃账户的旧测试夹具改为Lane邮箱执行，保留原冻结/别名/回滚断言，生产所有权检查没有放宽。验证及已纠正的失败记录见 [Lane成员集合验证](../../docs/validation/lane-membership-backshift-20261015.json)。完整Owner职责、客户端身份/编解码等剩余分配和完整Core百字节目标仍未完成；本轮不验证Cluster快照/恢复或wallet，数值诊断只留本地。
