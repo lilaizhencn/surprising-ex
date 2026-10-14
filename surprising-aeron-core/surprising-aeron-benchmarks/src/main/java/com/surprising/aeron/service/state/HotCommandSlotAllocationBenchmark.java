@@ -29,6 +29,8 @@ public class HotCommandSlotAllocationBenchmark {
     private final ResolvedPlaceOrder[] resolved = new ResolvedPlaceOrder[WINDOW];
     private final PlaceOrderCommand[] decoded = new PlaceOrderCommand[WINDOW];
     private final RuntimeOrderChangeBuffer[] changes = new RuntimeOrderChangeBuffer[WINDOW];
+    private final RuntimePositionChangeBuffer[] positionChanges = new RuntimePositionChangeBuffer[WINDOW];
+    private final PositionRuntime[] sourcePositions = new PositionRuntime[WINDOW];
     private final OrderRuntime[] sourceOrders = new OrderRuntime[WINDOW];
     private final MatcherResult[] nativeSlots = new MatcherResult[WINDOW];
     private final java.nio.ByteBuffer[] encodingBuffers = new java.nio.ByteBuffer[WINDOW];
@@ -63,6 +65,9 @@ public class HotCommandSlotAllocationBenchmark {
             decoded[index] = PlaceOrderCommand.commandSlot();
             nativeSlots[index] = MatcherResult.commandSlot();
             changes[index] = new RuntimeOrderChangeBuffer();
+            positionChanges[index] = new RuntimePositionChangeBuffer();
+            sourcePositions[index] = new PositionRuntime(index + 1, 0, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
+                    instrument, 10, 100, 1000, 0, 200);
             payloads[index] = TradingCommandCodec.encodePlaceOrder(order);
             encodingBuffers[index] = java.nio.ByteBuffer.allocate(payloads[index].length).order(java.nio.ByteOrder.LITTLE_ENDIAN);
             frames[index] = new UnsafeBuffer(CoreMessageCodec.encode(new CoreMessage(
@@ -85,6 +90,18 @@ public class HotCommandSlotAllocationBenchmark {
             checksum += removed.executedQuantitySteps();
             removed.retireForReuse(++retiredSequence);
             lane.returnRetiredOrder(removed);
+        }
+        return checksum;
+    }
+
+    @Benchmark @OperationsPerInvocation(WINDOW)
+    public long copyPositionAfterImages() {
+        long checksum = 0;
+        for (int i = 0; i < WINDOW; i++) {
+            var changes = positionChanges[i];
+            changes.put(i + 1, sourcePositions[i]);
+            checksum += changes.get(i + 1).signedQuantitySteps();
+            changes.clear();
         }
         return checksum;
     }

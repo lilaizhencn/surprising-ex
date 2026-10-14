@@ -1170,7 +1170,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         }
     }
 
-    private static final class LaneResultTarget
+    static final class LaneResultTarget
             implements com.surprising.aeron.service.state.LaneOrderResultTarget {
         private final long[] ids = new long[2];
         private final OrderRuntime[] orders = new OrderRuntime[2];
@@ -1220,14 +1220,20 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         }
         @Override public void prepareResponse() {
             prepared = true;
-            if (count != 1 || orders[0] == null || matcherResult == null) return;
+            if (matcherResult == null || responseOrders.isEmpty()) return;
+            if (responseSlot != null) responseArena.release(responseSlot);
+            responseSlot = null;
             try {
-                int length = com.surprising.aeron.protocol.CoreCommandResultCodec
-                        .encodedSingleOrderLength(source);
+                boolean single = responseOrders.size() == 1;
+                var first = responseOrders.get(0);
+                int length = single
+                        ? com.surprising.aeron.protocol.CoreCommandResultCodec.encodedSingleOrderLength(first)
+                        : com.surprising.aeron.protocol.CoreCommandResultCodec.encodedLength(responseOrders, java.util.List.of());
                 responseSlot = responseArena.acquireSlot(length);
                 response = responseSlot.storage;
-                responseLength = com.surprising.aeron.protocol.CoreCommandResultCodec
-                        .encodeSingleOrderInto(source, response, 0);
+                responseLength = single
+                        ? com.surprising.aeron.protocol.CoreCommandResultCodec.encodeSingleOrderInto(first, response, 0)
+                        : com.surprising.aeron.protocol.CoreCommandResultCodec.encodeInto(responseOrders, java.util.List.of(), response, 0);
                 responseSlot.length = responseLength;
             } catch (IllegalArgumentException ignored) {
                 if (responseSlot != null) responseArena.release(responseSlot);
@@ -1237,37 +1243,58 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             }
         }
 
-        private final com.surprising.aeron.protocol.CoreOrderStateSource source =
-                new com.surprising.aeron.protocol.CoreOrderStateSource() {
-                    private OrderRuntime value() { return orders[0]; }
-                    public long orderId() { return value().orderId(); }
-                    public com.surprising.product.api.ProductLine productLine() { return value().productLine(); }
-                    public long userId() { return value().userId(); }
-                    public String instrumentId() { return symbols[0]; }
-                    public com.surprising.aeron.protocol.CoreOrderSide side() { return value().side(); }
-                    public long priceTicks() { return value().priceTicks(); }
-                    public long quantitySteps() { return value().quantitySteps(); }
-                    public long executedQuantitySteps() { return value().executedQuantitySteps(); }
-                    public long remainingQuantitySteps() { return value().remainingQuantitySteps(); }
-                    public boolean reduceOnly() { return value().reduceOnly(); }
-                    public com.surprising.aeron.protocol.CoreMarginMode marginMode() { return value().marginMode(); }
-                    public com.surprising.aeron.protocol.CorePositionSide positionSide() { return value().positionSide(); }
-                    public com.surprising.aeron.protocol.CoreOrderType orderType() { return value().orderType(); }
-                    public com.surprising.aeron.protocol.CoreTimeInForce timeInForce() { return value().timeInForce(); }
-                    public boolean postOnly() { return value().postOnly(); }
-                    public String clientOrderId() { return value().clientOrderId(); }
-                    public java.util.UUID commandId() { return value().commandId(); }
-                    public long makerFeeRatePpm() { return value().makerFeeRatePpm(); }
-                    public long takerFeeRatePpm() { return value().takerFeeRatePpm(); }
-                    public long cumulativeFeeUnits() { return value().cumulativeFeeUnits(); }
-        public long executedValueHigh() { return value().executedValueHigh(); }
-        public long executedValueLow() { return value().executedValueLow(); }
-                    public long createdAtEpochMillis() { return value().createdAtEpochMillis(); }
-                    public long updatedAtEpochMillis() { return value().updatedAtEpochMillis(); }
-                    public long clusterPosition() { return value().clusterPosition(); }
-                    public String status() { return value().status().name(); }
-                    public long revision() { return value().revision(); }
-                };
+        private final OrderSource[] sources = {new OrderSource(0), new OrderSource(1)};
+        private final java.util.List<com.surprising.aeron.protocol.CoreOrderStateSource> responseOrders = new OrderSources();
+
+        private final class OrderSources extends java.util.AbstractList<com.surprising.aeron.protocol.CoreOrderStateSource>
+                implements java.util.RandomAccess {
+            @Override public int size() {
+                int size = 0;
+                for (int i = 0; i < count; i++) if (orders[i] != null) size++;
+                return size;
+            }
+            @Override public com.surprising.aeron.protocol.CoreOrderStateSource get(int index) {
+                if (index < 0) throw new IndexOutOfBoundsException(index);
+                for (int i = 0; i < count; i++) {
+                    if (orders[i] != null && index-- == 0) return sources[i];
+                }
+                throw new IndexOutOfBoundsException(index);
+            }
+        }
+
+        private final class OrderSource implements com.surprising.aeron.protocol.CoreOrderStateSource {
+            private final int index;
+            private OrderSource(int index) { this.index = index; }
+            private OrderRuntime value() { return orders[index]; }
+            public long orderId() { return value().orderId(); }
+            public com.surprising.product.api.ProductLine productLine() { return value().productLine(); }
+            public long userId() { return value().userId(); }
+            public String instrumentId() { return symbols[index]; }
+            public com.surprising.aeron.protocol.CoreOrderSide side() { return value().side(); }
+            public long priceTicks() { return value().priceTicks(); }
+            public long quantitySteps() { return value().quantitySteps(); }
+            public long executedQuantitySteps() { return value().executedQuantitySteps(); }
+            public long remainingQuantitySteps() { return value().remainingQuantitySteps(); }
+            public boolean reduceOnly() { return value().reduceOnly(); }
+            public com.surprising.aeron.protocol.CoreMarginMode marginMode() { return value().marginMode(); }
+            public com.surprising.aeron.protocol.CorePositionSide positionSide() { return value().positionSide(); }
+            public com.surprising.aeron.protocol.CoreOrderType orderType() { return value().orderType(); }
+            public com.surprising.aeron.protocol.CoreTimeInForce timeInForce() { return value().timeInForce(); }
+            public boolean postOnly() { return value().postOnly(); }
+            public String clientOrderId() { return value().clientOrderId(); }
+            public java.util.UUID commandId() { return value().commandId(); }
+            public long makerFeeRatePpm() { return value().makerFeeRatePpm(); }
+            public long takerFeeRatePpm() { return value().takerFeeRatePpm(); }
+            public long cumulativeFeeUnits() { return value().cumulativeFeeUnits(); }
+            public long executedValueHigh() { return value().executedValueHigh(); }
+            public long executedValueLow() { return value().executedValueLow(); }
+            public long createdAtEpochMillis() { return value().createdAtEpochMillis(); }
+            public long updatedAtEpochMillis() { return value().updatedAtEpochMillis(); }
+            public long clusterPosition() { return value().clusterPosition(); }
+            public String status() { return value().status().name(); }
+            public long revision() { return value().revision(); }
+        }
+
 
         @Override public byte[] preparedResponse() { return response; }
         @Override public int preparedResponseLength() { return responseLength; }

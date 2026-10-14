@@ -1,15 +1,17 @@
 package com.surprising.aeron.protocol;
 
 public final class CoreResponse {
-    private final ResponseStatus status;
-    private final ResponseStatus commandStatus;
-    private final CoreResultCode resultCode;
-    private final int routeVersion;
-    private final long committedCoreSequence;
-    private final long appliedCommandCount;
-    private final byte[] data;
-    private final int dataOffset;
-    private final int dataLength;
+    private ResponseStatus status;
+    private ResponseStatus commandStatus;
+    private CoreResultCode resultCode;
+    private int routeVersion;
+    private long committedCoreSequence;
+    private long appliedCommandCount;
+    private byte[] data;
+    private int dataOffset;
+    private int dataLength;
+
+    private final boolean commandSlot;
 
     private static final byte[] EMPTY_DATA = new byte[0];
 
@@ -31,6 +33,33 @@ public final class CoreResponse {
                          int routeVersion, long committedCoreSequence, long appliedCommandCount,
                          byte[] data,
                          int dataOffset, int dataLength, boolean ownedData) {
+        commandSlot = false;
+        initialize(status, commandStatus, resultCode, routeVersion, committedCoreSequence,
+                appliedCommandCount, data, dataOffset, dataLength, ownedData);
+    }
+
+    CoreResponse() { commandSlot = true; data = EMPTY_DATA; }
+
+    CoreResponse prepareCommandSlot(ResponseStatus status, ResponseStatus commandStatus,
+            CoreResultCode resultCode, long sequence, byte[] data, int offset, int length) {
+        if (!commandSlot || this.status != null)
+            throw new IllegalStateException("response slot is still leased");
+        initialize(status, commandStatus, resultCode, CoreRoute.DEFAULT.version(), sequence,
+                sequence, data, offset, length, true);
+        return this;
+    }
+
+    void clearCommandSlot() {
+        if (!commandSlot) throw new IllegalStateException("response is not a command slot");
+        status = commandStatus = null;
+        resultCode = null;
+        data = EMPTY_DATA;
+        dataOffset = dataLength = 0;
+    }
+
+    private void initialize(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
+            int routeVersion, long committedCoreSequence, long appliedCommandCount, byte[] data,
+            int dataOffset, int dataLength, boolean ownedData) {
         if (status == null || commandStatus == null || resultCode == null
                 || routeVersion != CoreRoute.DEFAULT.version() || committedCoreSequence < 0
                 || appliedCommandCount < 0 || dataOffset < 0

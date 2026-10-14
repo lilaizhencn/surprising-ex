@@ -1029,12 +1029,13 @@ final class OrderBatchExecutor {
                 throw new IllegalStateException("matcher settlement in-flight count underflow");
             }
         }
+        CoreMessage responseCommand = pending.command();
         unregisterBatch(pending, batch);
         owner.matchingFlow.removePendingMatching(batch.sequence);
         unregisterPipelinedBatchSymbols(batch);
         owner.matchingProgress.batchCompleted();
         owner.matchingProgress.submitDeferredMatchingAfterBatch();
-        CoreResponse response = CoreResponse.owned(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
+        CoreResponse response = responseCommand.ownedResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
                 CoreResultCode.NONE, batch.sequence,
                 responseData, 0, responseLength);
         releaseOrderBatchPending(batch);

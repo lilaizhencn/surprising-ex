@@ -45,7 +45,7 @@ public final class TradingCoreOwner {
     /** 已提交响应的显式出口交接函数。 */
     @FunctionalInterface
     interface ResponseSink {
-        /** 接收已经提交的不可变响应，由外部出口负责网络线程交接。 */
+        /** 接收已提交的只读响应；异步出口须保留 Header 租约直到编码完成。 */
         void offer(ClientSession session, CoreMessageHeader header, CoreResponse response, long committedSequence);
     }
 

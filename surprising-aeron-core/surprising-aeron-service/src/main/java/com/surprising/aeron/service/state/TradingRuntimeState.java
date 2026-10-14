@@ -230,7 +230,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     final LongHashSet changedReservations = new LongHashSet();
     /** 当前提交范围内变化的持仓；与提交/回滚边界同步维护。 */
     final OwnerIndexedChanges<PositionRuntime, RuntimePositionIndexValue> changedPositions =
-            new OwnerIndexedChanges<>();
+            new OwnerIndexedChanges<>(new RuntimePositionChangeBuffer());
     /** 当前提交范围内变化的清算；与提交/回滚边界同步维护。 */
     final RuntimeChangeBuffer<LiquidationRuntime> changedLiquidations =
             new RuntimeChangeBuffer<>();
@@ -956,9 +956,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     void publishPosition(long positionKey, PositionRuntime value) {
         AccountLaneState scoped = currentLaneCommandScope();
         if (scoped != null) {
-            MatcherSettlementChanges changes = currentMatcherSettlementChangesScope();
-            laneDelta(scoped.laneId()).putPosition(positionKey,
-                    value == null || changes == null ? value == null ? null : value.publicationValue() : value);
+            laneDelta(scoped.laneId()).putPosition(positionKey, value);
         }
     }
 
@@ -4189,8 +4187,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void changedPosition(long positionKey, PositionRuntime position) {
         AccountLaneState lane = currentLaneCommandScope();
-        if (lane == null) changedPositions.put(positionKey, position == null ? null : position.publicationValue());
-        else laneDelta(lane.laneId()).putPosition(positionKey, position == null ? null : position.publicationValue());
+        if (lane == null) changedPositions.put(positionKey, position);
+        else laneDelta(lane.laneId()).putPosition(positionKey, position);
     }
 
     public LongHashSet changedOrders() {

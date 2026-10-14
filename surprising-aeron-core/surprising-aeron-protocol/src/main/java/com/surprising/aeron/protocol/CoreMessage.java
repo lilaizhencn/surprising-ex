@@ -12,6 +12,8 @@ public final class CoreMessage {
     private final boolean decoderSlot;
     private volatile boolean decoderLeased;
     private final CoreMessageHeader decoderHeader;
+    private final CoreMessageHeader decoderResponseHeader;
+    private final CoreResponse decoderResponse;
     private final java.util.concurrent.atomic.AtomicInteger decoderReaders;
 
     public CoreMessage(CoreMessageHeader header, byte[] payload) {
@@ -25,6 +27,8 @@ public final class CoreMessage {
     private CoreMessage(CoreMessageHeader header, byte[] payload, boolean owned) {
         decoderSlot = false;
         decoderHeader = null;
+        decoderResponseHeader = null;
+        decoderResponse = null;
         decoderReaders = null;
         this.header = Objects.requireNonNull(header, "header").immutableValue();
         this.payload = owned
@@ -35,6 +39,8 @@ public final class CoreMessage {
     private CoreMessage() {
         decoderSlot = true; payload = EMPTY_PAYLOAD;
         decoderHeader = new CoreMessageHeader(this);
+        decoderResponseHeader = new CoreMessageHeader(this);
+        decoderResponse = new CoreResponse();
         decoderReaders = new java.util.concurrent.atomic.AtomicInteger();
     }
     public static CoreMessage decoderSlot() { return new CoreMessage(); }
@@ -74,6 +80,8 @@ public final class CoreMessage {
         if (remaining < 0) throw new IllegalStateException("decoder slot was released twice");
         if (remaining == 0) {
             decoderHeader.clearDecoderReferences();
+            decoderResponseHeader.clearDecoderReferences();
+            decoderResponse.clearCommandSlot();
             header = null;
             decoderLeased = false;
         }
@@ -82,6 +90,32 @@ public final class CoreMessage {
     public void releaseDecoderSlot() {
         if (!decoderSlot) return;
         releaseDecoderReader();
+    }
+
+    /** Transport header shares this input's lease; its consumer must retain before publication. */
+    public CoreMessageHeader responseHeader(CoreMessageType responseType) {
+        if (!decoderSlot) return header.response(responseType);
+        if (!decoderLeased) throw new IllegalStateException("decoder slot is not leased");
+        if (decoderResponseHeader.kind() != null) {
+            if (decoderResponseHeader.messageType() != responseType)
+                throw new IllegalStateException("response header type changed within one command");
+            return decoderResponseHeader;
+        }
+        decoderResponseHeader.assign(header.schemaVersion(), WireMessageKind.RESPONSE, responseType,
+                header.commandId(), header.productLine(), header.route(), header.source(), header.sourceId(),
+                header.sourceSequence(), header.userId(), header.submittedAtEpochMillis(), header.correlationId(), header.traceId());
+        return decoderResponseHeader;
+    }
+
+    /**
+     * A decoded command owns one terminal response until the final header/egress lease releases.
+     * Ordinary independently owned messages keep the stable CoreResponse value API.
+     */
+    public CoreResponse ownedResponse(ResponseStatus status, ResponseStatus commandStatus,
+            CoreResultCode resultCode, long sequence, byte[] data, int offset, int length) {
+        if (!decoderSlot) return CoreResponse.owned(status, commandStatus, resultCode, sequence, data, offset, length);
+        if (!decoderLeased) throw new IllegalStateException("decoder slot is not leased");
+        return decoderResponse.prepareCommandSlot(status, commandStatus, resultCode, sequence, data, offset, length);
     }
 
     public CoreMessageHeader header() {

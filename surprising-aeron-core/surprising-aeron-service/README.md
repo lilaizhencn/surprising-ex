@@ -124,3 +124,12 @@ Treasury，生产线程启动后非空财务 delta 不能由 Owner 应用。
 
 验证范围与局部分配结果见 [槽位与 Ledger 验证](../../docs/validation/hot-command-slots-ledger-20261013.json)。
 局部 JMH 不代表整链路 `bytes/business op` 或真实 Aeron 吞吐；本轮不执行单节点压测、快照恢复或 wallet。
+
+
+### 变长输入与持仓、响应槽复用（2026-10-14）
+
+普通命令从 `CoreMessageFlyweightDecoder` 进入时，按载荷长度寻找未租用的槽；缓存最多512项、单项16KiB，超长或全忙输入沿用独立所有权。`RuntimePositionChangeBuffer` 把持仓 after-image 复制到自身物理槽，随变更缓冲一起交接，消费者清空后才复用。变更用户/订单ID直接暴露当前命令范围内的只读primitive视图；挂起命令保留其原始集合，恢复时重新绑定视图。
+
+`CommandSlot.LaneResultTarget` 在Lane编码一条或两条订单结果。终态 `CoreResponse` 与独立的响应Header由已租用的 `CoreMessage` 持有；`OwnerResponsePublisher` 使用该响应Header，`ClusterServiceEgress` 保留租约直至Aeron编码消费，随后归还响应和8192个出口槽。异步消费者必须持有Header租约，不能保留已释放槽的引用。正常公开构造的消息和响应继续拥有独立值。
+
+必要验证覆盖六产品线入口、资金守恒、挂起集合恢复、延迟响应和超过出口容量的循环。持仓索引事实、部分控制与实时输出、背压缓冲仍有分配；Owner业务迁移及完整Core百字节目标尚未验收。范围和一次误选旧快照用例的失败记录见 [功能验证](../../docs/validation/leased-response-position-slots-20261014.json)。

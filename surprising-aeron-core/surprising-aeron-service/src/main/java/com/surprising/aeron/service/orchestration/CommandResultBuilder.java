@@ -92,8 +92,8 @@ final class CommandResultBuilder {
     /** Lane settlement already supplied the exact primitive user keys for this command. */
     private boolean laneCommitIdsSeeded;
 
-    /** Direct control commands stay on the owner until their response is encoded. Reuse views
-     * over the owner workspace instead of copying both sets into a fresh long[] per command. */
+    /** Read-only views live only in the current commit scope. Suspensions transfer the
+     * underlying primitive sets into the command slot, then rebind these views on resume. */
     private final MutableLongListView directChangedUsers = new MutableLongListView();
     private final MutableLongListView directChangedOrders = new MutableLongListView();
 
@@ -181,8 +181,10 @@ final class CommandResultBuilder {
         // set. Scanning the Owner-wide changed-user index again only duplicates probes and can
         // accidentally include an earlier command's users while a commit is suspended.
         if (!laneCommitIdsSeeded) owner.runtimeState.acceptChangedUserIds(changedUserIds::add);
-        commandChangedUserIds = changedUserIds.toImmutableList();
-        commandChangedOrderIds = changedOrderIds.toImmutableList();
+        directChangedUsers.bind(changedUserIds);
+        directChangedOrders.bind(changedOrderIds);
+        commandChangedUserIds = directChangedUsers;
+        commandChangedOrderIds = directChangedOrders;
     }
 
     void materializeDirectChangeAccumulators() {
@@ -195,6 +197,10 @@ final class CommandResultBuilder {
     }
 
     void materializeCommandOrderViews(CommandSlot pending) {
+        if (pending.lanePreparedResponse() != null) {
+            clearOrderViews();
+            return;
+        }
         switch (pending.operation()) {
             case PLACE -> {
                 materializeResponseOrder(pending, pending.decodedCommand().placeOrder().orderId());
@@ -491,12 +497,14 @@ final class CommandResultBuilder {
     }
 
     /** Owner-confined List facade; the direct command path never retains it after the callback. */
-    private static final class MutableLongListView extends AbstractList<Long> implements RandomAccess {
+    private static final class MutableLongListView extends AbstractList<Long> implements RandomAccess, PrimitiveLongView {
         private PrimitiveLongChangeSet values;
 
         void bind(PrimitiveLongChangeSet values) { this.values = values; }
 
         @Override public Long get(int index) { return values.valueAt(index); }
         @Override public int size() { return values == null ? 0 : values.size(); }
+        @Override public int primitiveSize() { return size(); }
+        @Override public long primitiveValueAt(int index) { return values.valueAt(index); }
     }
 }

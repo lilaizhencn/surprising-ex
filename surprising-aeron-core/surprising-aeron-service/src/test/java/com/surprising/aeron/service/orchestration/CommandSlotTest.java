@@ -22,6 +22,34 @@ import org.junit.jupiter.api.Test;
 
 class CommandSlotTest {
 
+    @Test void changedIdViewsFollowSuspendedPrimitiveBuffersWithoutPerCommitCopies() {
+        try (var runtime = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+            var builder = runtime.resultBuilder;
+            builder.beginCommand();
+            builder.changedUserIds.add(7);
+            builder.changedOrderIds.add(101);
+            builder.materializeChangeAccumulators();
+            var userView = builder.commandChangedUserIds;
+            assertThat(userView).isInstanceOf(com.surprising.aeron.service.command.support.PrimitiveLongView.class);
+            var pending = new CommandSlot(1, CommandSlot.Operation.PLACE, command(1), RuntimeFundsDelta.empty());
+            pending.suspendCommitContext(builder, null, false, false);
+            builder.commandChangedUserIds = List.of();
+            builder.commandChangedOrderIds = List.of();
+            builder.resetChangeAccumulators();
+            builder.changedUserIds.add(8);
+            builder.changedOrderIds.add(102);
+            builder.materializeChangeAccumulators();
+            assertThat(builder.commandChangedUserIds).isSameAs(userView).containsExactly(8L);
+            pending.restoreCommitContext(builder);
+            builder.commandChangedUserIds = List.of();
+            builder.commandChangedOrderIds = List.of();
+            builder.materializeChangeAccumulators();
+            assertThat(builder.commandChangedUserIds).isSameAs(userView).containsExactly(7L);
+            assertThat(builder.commandChangedOrderIds).containsExactly(101L);
+            pending.clearCommitContext();
+        }
+    }
+
     @Test
     void clearsControlResultAndWorkBeforeReusingTheSameSlot() {
         DirectCommandSlot slot = new DirectCommandSlot();

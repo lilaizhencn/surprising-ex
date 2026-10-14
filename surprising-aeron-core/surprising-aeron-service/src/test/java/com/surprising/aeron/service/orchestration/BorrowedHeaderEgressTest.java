@@ -14,6 +14,60 @@ import static org.assertj.core.api.Assertions.*;
 import java.lang.reflect.Proxy;
 
 class BorrowedHeaderEgressTest {
+    @Test void actualPublisherRetainsThePooledResponseAcrossDecoderAndOutputQueueWraps() {
+        var decoder = new CoreMessageFlyweightDecoder();
+        var bytes = frame(1);
+        var message = decoder.decodeBorrowed(new UnsafeBuffer(bytes), 0, bytes.length);
+        var egress = new ClusterServiceEgress();
+        var cluster = (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(), new Class<?>[]{Cluster.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "role" -> Cluster.Role.LEADER;
+                    case "time" -> 1L;
+                    default -> zero(method.getReturnType());
+                });
+        egress.start(cluster);
+        var processor = new TradingCoreOwner(ProductLine.SPOT, (session, header, response, sequence) -> { });
+        var sent = new AtomicReference<CoreMessage>();
+        var session = (ClientSession) Proxy.newProxyInstance(ClientSession.class.getClassLoader(), new Class<?>[]{ClientSession.class},
+                (proxy, method, args) -> {
+                    if (method.getName().equals("id")) return 1L;
+                    if (method.getName().equals("offer")) {
+                        byte[] result = new byte[(int) args[2]];
+                        ((DirectBuffer) args[0]).getBytes((int) args[1], result);
+                        sent.set(CoreMessageCodec.decode(result)); return 1L;
+                    }
+                    return zero(method.getReturnType());
+                });
+        var publisher = new OwnerResponsePublisher((transport, header, response, sequence) ->
+                egress.publishResponse(processor, transport, header, response, sequence, 0));
+        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            var response = message.ownedResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                    1, new byte[]{1, 2, 3}, 0, 3);
+            publisher.publish(session, message, response, state);
+            message.releaseDecoderSlot();
+            for (int i = 0; i < 1024; i++) {
+                var next = decoder.decodeBorrowed(new UnsafeBuffer(bytes), 0, bytes.length);
+                assertThat(next).isNotSameAs(message);
+                next.releaseDecoderSlot();
+            }
+            assertThat(response.data()).containsExactly(1, 2, 3);
+            egress.drainResponses(processor);
+            assertThat(sent.get().header().kind()).isEqualTo(WireMessageKind.RESPONSE);
+            assertThat(CoreProtocol.decodeResponse(sent.get().payloadUnsafe()).data()).containsExactly(1, 2, 3);
+            byte[] stable = sent.get().payload();
+            for (int i = 0; i < 8300; i++) {
+                var next = decoder.decodeBorrowed(new UnsafeBuffer(bytes), 0, bytes.length);
+                var reply = next.ownedResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                        i + 2, new byte[0], 0, 0);
+                publisher.publish(session, next, reply, state);
+                next.releaseDecoderSlot();
+                egress.drainResponses(processor);
+                assertThat(CoreProtocol.decodeResponse(sent.get().payloadUnsafe()).appliedCommandCount()).isEqualTo(i + 2);
+            }
+            assertThat(CoreProtocol.decodeResponse(stable).data()).containsExactly(1, 2, 3);
+        } finally { egress.clear(); }
+    }
+
     private static byte[] frame(long id) {
         return CoreMessageCodec.encode(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
                 new UUID(1, id), ProductLine.SPOT, CommandSource.GATEWAY, 1, id, 7, 1, id), CoreProtocol.probePayload(1)));

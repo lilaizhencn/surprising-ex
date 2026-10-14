@@ -16,8 +16,13 @@ import org.springframework.stereotype.Component;
 public final class ClusterServiceEgress {
     private static final byte[] EMPTY = new byte[0];
     private static final long OUTPUT_BYTES = 16L * 1024 * 1024;
+    private static final int OUTPUT_SLOTS = 8192;
 
-    private final OneToOneConcurrentArrayQueue<Output> output = new OneToOneConcurrentArrayQueue<>(8192);
+    private final OneToOneConcurrentArrayQueue<Output> output = new OneToOneConcurrentArrayQueue<>(OUTPUT_SLOTS);
+    /** Aeron returns consumed slots to the Owner; both queues publish the ownership handoff. */
+    private final OneToOneConcurrentArrayQueue<Output> availableOutput = new OneToOneConcurrentArrayQueue<>(OUTPUT_SLOTS);
+    /** Owner-only slot retained when the output queue rejects its publication. */
+    private Output unpublishedOutput;
     private final DeferredSessionResponses deferred = new DeferredSessionResponses();
     private final UnsafeBuffer sendBuffer = new UnsafeBuffer(new byte[0]);
     private byte[] sendScratch = EMPTY;
@@ -48,6 +53,7 @@ public final class ClusterServiceEgress {
 
     public ClusterServiceEgress(EgressFactory egressFactory) {
         this.egressFactory = Objects.requireNonNull(egressFactory);
+        for (int i = 0; i < OUTPUT_SLOTS; i++) availableOutput.add(new Output());
     }
 
     /** Initializes the Aeron-side session boundary after Cluster starts. */
@@ -105,12 +111,23 @@ public final class ClusterServiceEgress {
             processor.releaseResponse(response);
             return;
         }
+        Output slot = unpublishedOutput;
+        unpublishedOutput = null;
+        if (slot == null) slot = availableOutput.poll();
+        if (slot == null) {
+            outputOverflow = true;
+            processor.releaseResponse(response);
+            return;
+        }
         header.retainForEgress();
-        if (!output.offer(new Output(session, header, response, committedSequence, length,
-                ownerEpoch, CoreMatchingPhaseMetrics.sampleStart(header)))) {
+        slot.prepare(processor, session, header, response, committedSequence, length,
+                ownerEpoch, CoreMatchingPhaseMetrics.sampleStart(header));
+        if (!output.offer(slot)) {
             outputOverflow = true;
             header.releaseFromEgress();
             processor.releaseResponse(response);
+            slot.clear();
+            unpublishedOutput = slot;
             return;
         }
         outputProduced += length;
@@ -138,7 +155,10 @@ public final class ClusterServiceEgress {
                 deferred.offer(next.session, sendBuffer, next.length, System.nanoTime());
             } finally {
                 try { processor.releaseResponse(next.response); }
-                finally { next.header.releaseFromEgress(); }
+                finally {
+                    next.header.releaseFromEgress();
+                    returnOutput(next);
+                }
             }
         }
         return work + deferred.poll(System.nanoTime(), 256);
@@ -146,7 +166,13 @@ public final class ClusterServiceEgress {
 
     public void clear() {
         Output next;
-        while ((next = output.poll()) != null) next.header.releaseFromEgress();
+        while ((next = output.poll()) != null) {
+            try { next.processor.releaseResponse(next.response); }
+            finally {
+                next.header.releaseFromEgress();
+                returnOutput(next);
+            }
+        }
         deferred.clear();
         sessions.forEachValue(TransportSession::disconnect);
         sessions.clear();
@@ -197,6 +223,37 @@ public final class ClusterServiceEgress {
         }
     }
 
-    private record Output(ClientSession session, CoreMessageHeader header, CoreResponse response,
-                          long committedSequence, int length, long epoch, long publishedNanos) {}
+    private void returnOutput(Output slot) {
+        slot.clear();
+        if (!availableOutput.offer(slot)) throw new IllegalStateException("response output slot returned twice");
+    }
+
+    /** Slot is immutable between output publication and the Aeron consumer's final release. */
+    private static final class Output {
+        private TradingCoreOwner processor;
+        private ClientSession session;
+        private CoreMessageHeader header;
+        private CoreResponse response;
+        private long committedSequence, epoch, publishedNanos;
+        private int length;
+
+        void prepare(TradingCoreOwner processor, ClientSession session, CoreMessageHeader header,
+                CoreResponse response, long committedSequence, int length, long epoch, long publishedNanos) {
+            this.processor = processor;
+            this.session = session;
+            this.header = header;
+            this.response = response;
+            this.committedSequence = committedSequence;
+            this.length = length;
+            this.epoch = epoch;
+            this.publishedNanos = publishedNanos;
+        }
+
+        void clear() {
+            processor = null;
+            session = null;
+            header = null;
+            response = null;
+        }
+    }
 }

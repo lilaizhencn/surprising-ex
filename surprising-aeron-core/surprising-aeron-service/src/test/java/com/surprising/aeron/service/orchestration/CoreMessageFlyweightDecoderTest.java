@@ -16,6 +16,45 @@ import org.junit.jupiter.api.Test;
 
 class CoreMessageFlyweightDecoderTest {
 
+    @Test void mixedPayloadLengthsReuseTheirOwnBuffersWithoutChangingLeasedFrames() {
+        var decoder = new CoreMessageFlyweightDecoder();
+        int[] sizes = {0, 1, 8, 31, 256, 2048, 8192};
+        var frames = new byte[sizes.length][];
+        var payloads = new byte[sizes.length][];
+        for (int i = 0; i < sizes.length; i++) {
+            var value = new byte[sizes[i]];
+            java.util.Arrays.fill(value, (byte) (i + 1));
+            frames[i] = CoreMessageCodec.encode(new CoreMessage(CoreMessageHeader.command(
+                    CoreMessageType.PROBE_INCREMENT, new UUID(1, i + 1), ProductLine.SPOT,
+                    CommandSource.GATEWAY, 1, i + 1, 7, 1, 1), value));
+            var first = decoder.decodeBorrowed(new UnsafeBuffer(frames[i]), 0, frames[i].length);
+            payloads[i] = first.payloadUnsafe();
+            first.releaseDecoderSlot();
+        }
+        for (int generation = 0; generation < 1024; generation++) {
+            for (int i = 0; i < sizes.length; i++) {
+                var value = decoder.decodeBorrowed(new UnsafeBuffer(frames[i]), 0, frames[i].length);
+                assertThat(value.payloadUnsafe()).isSameAs(payloads[i]);
+                assertThat(value.payloadLength()).isEqualTo(sizes[i]);
+                if (sizes[i] != 0) assertThat(value.payloadUnsafe()[sizes[i] - 1]).isEqualTo((byte) (i + 1));
+                value.releaseDecoderSlot();
+            }
+        }
+        var held = decoder.decodeBorrowed(new UnsafeBuffer(frames[2]), 0, frames[2].length);
+        byte[] expected = held.payload();
+        for (int length = 1; length < 640; length++) {
+            var frame = CoreMessageCodec.encode(new CoreMessage(CoreMessageHeader.command(
+                    CoreMessageType.PROBE_INCREMENT, new UUID(2, length), ProductLine.SPOT,
+                    CommandSource.GATEWAY, 1, length, 7, 1, 1), new byte[length]));
+            var value = decoder.decodeBorrowed(new UnsafeBuffer(frame), 0, frame.length);
+            assertThat(value).isNotSameAs(held);
+            value.releaseDecoderSlot();
+        }
+        assertThat(held.payloadUnsafe()).containsExactly(expected);
+        assertThat(held.header().commandId()).isEqualTo(new UUID(1, 3));
+        held.releaseDecoderSlot();
+    }
+
     @Test
     void readersBelongToTheirDecoderAndCanBeReusedWithoutChangingOwnedMessages() {
         byte[] first = CoreMessageCodec.encode(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,

@@ -22,7 +22,7 @@ final class OwnerResponsePublisher {
 
     void publish(ClientSession session, CoreMessage request, CoreResponse response,
                  TradingCoreRuntime state) {
-        CoreMessageHeader header = request.header().response(responseType(request.header()));
+        CoreMessageHeader header = request.responseHeader(responseType(request.header()));
         sink.offer(session, header, response, state.committedCoreSequence());
     }
 

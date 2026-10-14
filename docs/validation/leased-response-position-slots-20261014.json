@@ -1,0 +1,154 @@
+{
+  "date": "2026-10-14",
+  "base_commit": "4e780d2f47640e1faaf1cbd74ba0d3c9ddcf4d26",
+  "scope": "已完成的报文/持仓副本/响应复用边界；Owner业务迁移与整链路分配目标仍未完成",
+  "changes": [
+    "变长报文按长度复用512个有界槽，已租用槽不会被覆盖，每个缓存载荷最大16KiB。",
+    "Lane持仓after-image随物理缓冲交换；清空只在消费完毕后进行，不返回权威可变持仓。",
+    "变更ID视图复用已有primitive集合，挂起与恢复沿用命令槽所有权。",
+    "双订单结果在Lane编码。",
+    "CoreMessage持有独立响应Header及终态CoreResponse；实际OwnerResponsePublisher保留报文租约，Aeron消费后释放。",
+    "8192个出口槽在Owner与Aeron之间通过两个SPSC队列交接；满队列的未发布槽仍由Owner单独持有。"
+  ],
+  "validation": {
+    "jdk": "HotSpot 27.0.0-amzn",
+    "runs": [
+      {
+        "log": "response-boundaries-final.log",
+        "sha256": "d136acb187ac5bc0537861d8502394d6ac566a25a0199b2edf221e94425bb370",
+        "status": "passed",
+        "test_count": 48,
+        "suites": [
+          {
+            "suite": "com.surprising.aeron.protocol.BorrowedResponseSlotTest",
+            "tests": 2,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.protocol.OrderDecoderSlotTest",
+            "tests": 3,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.protocol.CoreMessageCodecTest",
+            "tests": 10,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.state.PositionPublicationReuseTest",
+            "tests": 2,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.state.RuntimeChangedIndexCommitTest",
+            "tests": 3,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.state.OrderSlotReuseTest",
+            "tests": 2,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.CommandSlotTest",
+            "tests": 5,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.LaneReplacementResponseTest",
+            "tests": 1,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.CoreActiveLaneIngressTest",
+            "tests": 6,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest",
+            "tests": 4,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+            "tests": 3,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.BorrowedHeaderEgressTest",
+            "tests": 2,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.aeron.service.orchestration.CoreMessageFlyweightDecoderTest",
+            "tests": 5,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        ]
+      },
+      {
+        "log": "gateway-stage1.log",
+        "sha256": "37923ea10827eacd8b2d9d8a4ae78a90c6d610ae7cab8a422d7c6d50e59f4202",
+        "status": "passed",
+        "test_count": 11,
+        "suites": [
+          {
+            "suite": "com.surprising.trading.order.service.AeronOrderCommandServiceTest",
+            "tests": 9,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          {
+            "suite": "com.surprising.trading.order.service.StableOrderIdentityTest",
+            "tests": 2,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        ]
+      }
+    ],
+    "not_validated": [
+      "整链路bytes/business op<100",
+      "真实Aeron吞吐",
+      "背压时deferred响应分配",
+      "长期heap/native增长",
+      "Owner业务职责全部迁移"
+    ]
+  },
+  "selection_deviation": {
+    "log": "response-boundaries.log",
+    "case": "CoreOrderedOrderBatchTest.conservesFundsWhenABatchMatchesAnotherUser",
+    "detail": "该旧资金用例内部调用snapshot，选择前未识别。实际执行后在快照物化阶段因Lane线程访问检查失败；已保留原始失败日志。用户要求排除快照/恢复，此后选择不含该调用的资金及六产品线用例，没有修复或重跑快照场景。",
+    "error": "IllegalStateException: active account access must run on its owning Lane thread"
+  },
+  "evidence_directory": "/Users/atomex/Desktop/surprising/performance-artifacts/owner-business-allocation-20261014",
+  "performance_evidence_policy": "局部JMH计划及结果保留在本地证据目录；不提交压测记录，不据此宣称整链路目标达到。"
+}

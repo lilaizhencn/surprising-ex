@@ -162,7 +162,7 @@ final class CoreDirectCommandFlow {
         runtime.resultLedger.storeOwnedResult(message.header().commandId(), fingerprint, status, resultCode,
                 runtime.appliedCommandCount, responseData,
                 responseOffset, responseLength);
-        CoreResponse response = CoreResponse.owned(status, status, resultCode, runtime.appliedCommandCount,
+        CoreResponse response = message.ownedResponse(status, status, resultCode, runtime.appliedCommandCount,
                 responseData, responseOffset, responseLength);
         runtime.resultBuilder.transferResponseOwnership();
         return finishContext(response);

@@ -9,3 +9,10 @@
 HotSpot JDK 27 单线程组件采样：同一解码器读取直接缓冲区，比较先复制整帧到 byte[] 与直接按 ByteBuffer 解码；预热 10,000 次，测量 100,000 条 2,048 字节 payload，同时录制有大小上限的 JFR，并用 ThreadMXBean 统计调用线程。分配量从 650.330MB 降至 438.857MB（约 32.5%），CPU 时间从 157.528ms 降至 129.511ms。此为复制边界的隔离采样，不代表真实服务器吞吐或网络延迟。
 
 测试覆盖六产品和全部实时消息类型、非零缓冲区偏移、堆/直接/只读缓冲区、截断以及输入/输出修改隔离；共享 codec、六产品撮合/实时输出/快照恢复回归通过。原始 JFR 和临时程序汇总后清理。
+
+
+### 借用命令的终态响应生命周期（2026-10-14）
+
+解码槽通过 `CoreMessage.ownedResponse` 生成一份只读终态响应，并通过 `responseHeader` 生成独立的RESPONSE Header；两者共享输入帧的租约，响应Header不会改写请求Header。异步发布者在交接前调用 `retainForEgress`，编码或丢弃后调用 `releaseFromEgress`。最后一个消费者释放前，解码器不能复用输入、响应Header或响应元数据。调用 `CoreResponse.data()` 得到的独立字节副本可长期保留。
+
+独立构造的 `CoreMessage` 继续生成独立响应值；只有显式租用的解码槽允许复用。一个租约只能准备一次终态响应，重复准备会拒绝。验证见 [响应槽及跨模块功能记录](../../docs/validation/leased-response-position-slots-20261014.json)。

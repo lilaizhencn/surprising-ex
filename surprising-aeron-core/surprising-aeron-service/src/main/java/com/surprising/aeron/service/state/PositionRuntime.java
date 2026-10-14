@@ -6,18 +6,21 @@ import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 /** Lane-owned position state with primitive in-place updates and immutable publication snapshots. */
 public final class PositionRuntime {
-    private final long userId;
-    private final int symbolId;
-    private final int assetId;
-    private final CoreMarginMode marginMode;
-    private final CorePositionSide positionSide;
-    private final CoreInstrument instrument;
+    private long userId;
+    private int symbolId;
+    private int assetId;
+    private CoreMarginMode marginMode;
+    private CorePositionSide positionSide;
+    private CoreInstrument instrument;
     private long signedQuantitySteps;
     private long entryPriceTicks;
     private long entryValueTicks;
     private long realizedPnlUnits;
     private long positionMarginUnits;
     private boolean mutable;
+    private boolean publicationSlot;
+
+    private PositionRuntime() { publicationSlot = true; }
 
     public PositionRuntime(long userId, int symbolId, int assetId, CoreMarginMode marginMode,
                            CorePositionSide positionSide, CoreInstrument instrument,
@@ -66,6 +69,31 @@ public final class PositionRuntime {
                 realizedPnlUnits, positionMarginUnits);
         copy.mutable = false;
         return copy;
+    }
+
+    /** Borrowed after-image owned by the physical change-buffer slot, never a Lane authority. */
+    PositionRuntime copyIntoPublicationSlot(PositionRuntime target) {
+        if (target == null) target = new PositionRuntime();
+        if (!target.publicationSlot) throw new IllegalArgumentException("position target is not a publication slot");
+        target.userId = userId;
+        target.symbolId = symbolId;
+        target.assetId = assetId;
+        target.marginMode = marginMode;
+        target.positionSide = positionSide;
+        target.instrument = instrument;
+        target.signedQuantitySteps = signedQuantitySteps;
+        target.entryPriceTicks = entryPriceTicks;
+        target.entryValueTicks = entryValueTicks;
+        target.realizedPnlUnits = realizedPnlUnits;
+        target.positionMarginUnits = positionMarginUnits;
+        return target;
+    }
+
+    void clearPublicationSlot() {
+        if (!publicationSlot) throw new IllegalStateException("position is not a publication slot");
+        instrument = null;
+        marginMode = null;
+        positionSide = null;
     }
 
     PositionRuntime laneValue() {

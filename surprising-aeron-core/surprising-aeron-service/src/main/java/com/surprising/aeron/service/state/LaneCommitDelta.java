@@ -79,7 +79,7 @@ public final class LaneCommitDelta {
     /** 本次需要发布的预留变化。 */
     final RuntimeChangeBuffer<ReservationRuntime> reservations = new RuntimeChangeBuffer<>();
     /** 本次需要发布的持仓变化。 */
-    final RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> positions = new RuntimeIndexedChangeBuffer<>();
+    final RuntimePositionChangeBuffer positions = new RuntimePositionChangeBuffer();
     /** 本次需要发布的清算变化。 */
     final RuntimeChangeBuffer<LiquidationRuntime> liquidations = new RuntimeChangeBuffer<>();
     /** 本次需要发布的风险快照变化。 */

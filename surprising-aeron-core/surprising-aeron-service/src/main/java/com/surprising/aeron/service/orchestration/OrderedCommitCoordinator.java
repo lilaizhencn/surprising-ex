@@ -463,7 +463,7 @@ final class OrderedCommitCoordinator {
         owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
                 status, resultCode, applied, responseData,
                 responseOffset, responseLength);
-        CoreResponse response = CoreResponse.owned(status, status, resultCode, applied,
+        CoreResponse response = pending.command().ownedResponse(status, status, resultCode, applied,
                 responseData, responseOffset, responseLength);
         if (builderResponseOwned) owner.resultBuilder.transferResponseOwnership();
         if (laneResponse) pending.transferLaneResponseOwnership();

@@ -64,6 +64,12 @@ class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
         clear();
     }
 
+    @Override void drainTo(org.eclipse.collections.api.block.procedure.primitive.LongObjectProcedure<V> consumer) {
+        forEach(consumer);
+        // Also release prepared facts and specialized publication cells before reuse.
+        clear();
+    }
+
     @Override void clear() {
         if (size == 0) return;
         int length = Math.min(size, prepared.length);
