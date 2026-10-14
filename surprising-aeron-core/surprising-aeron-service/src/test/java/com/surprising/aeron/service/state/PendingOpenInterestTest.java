@@ -34,7 +34,7 @@ class PendingOpenInterestTest {
             lane1.putIndexed(102, null, true, null);
             runtime.changedPositions.adopt(1, lane1);
             assertThat(totals.pendingOpenInterestSteps("1", runtime, committed, identities)).isEqualTo(15);
-            assertThat(committed.value(102)).isSameAs(shortBefore);
+            assertThat(committed.value(102).signedQuantitySteps()).isEqualTo(-10);
         }
     }
 

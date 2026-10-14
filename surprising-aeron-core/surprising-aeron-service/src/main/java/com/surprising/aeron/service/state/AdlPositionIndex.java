@@ -13,7 +13,7 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 public final class AdlPositionIndex {
 
     private final Map<String, LongHashSet> keysByAsset = new HashMap<>();
-    private final LongObjectHashMap<RuntimePositionIndexValue> positions = new LongObjectHashMap<>();
+    private final LongObjectHashMap<IndexedPosition> positions = new LongObjectHashMap<>();
 
     public AdlPositionIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
         rebuild(state, identities);
@@ -34,7 +34,7 @@ public final class AdlPositionIndex {
         PositionKey[] captured = new PositionKey[values.size()];
         int[] cursor = {0};
         values.forEach(positionKey -> {
-            RuntimePositionIndexValue value = positions.get(positionKey);
+            IndexedPosition value = positions.get(positionKey);
             if (value != null) captured[cursor[0]++] = new PositionKey(
                     value.userId(), value.instrumentId(), value.positionSide());
         });
@@ -46,24 +46,51 @@ public final class AdlPositionIndex {
         return Collections.unmodifiableSet(result);
     }
 
-    RuntimePositionIndexValue value(long positionKey) {
+    IndexedPosition value(long positionKey) {
         return positions.get(positionKey);
     }
 
-    void apply(long positionKey, RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {
-        RuntimePositionIndexValue indexedPrevious = positions.get(positionKey);
-        if (indexedPrevious != previous) {
+    void apply(long positionKey, IndexedPosition previous, RuntimePositionIndexValue current) {
+        apply(positionKey, previous, current == null ? 0 : current.userId(),
+                current == null ? null : current.instrumentId(), current == null ? null : current.asset(),
+                current == null ? null : current.positionSide(), current == null ? 0 : current.signedQuantitySteps());
+    }
+
+    /** The index owns its entries; no command-owned after-image is retained after application. */
+    void apply(long positionKey, IndexedPosition previous, long userId, String instrumentId, String asset,
+            com.surprising.aeron.protocol.CorePositionSide side, long quantity) {
+        if (positions.get(positionKey) != previous)
             throw new IllegalStateException("ADL position index differs from shared position index");
-        }
-        if (current == null) positions.remove(positionKey);
-        else positions.put(positionKey, current);
-        // 非零持仓的资产成员关系不随数量或方向变化；仍须保存最新持仓值。
         boolean previousActive = previous != null && previous.signedQuantitySteps() != 0;
-        boolean currentActive = current != null && current.signedQuantitySteps() != 0;
-        if (previousActive == currentActive
-                && (!previousActive || previous.asset().equals(current.asset()))) return;
-        if (previousActive) remove(previous, positionKey);
-        if (currentActive) add(current, positionKey);
+        boolean currentActive = userId != 0 && quantity != 0;
+        boolean membershipChanged = previousActive != currentActive
+                || (previousActive && !previous.asset().equals(asset));
+        // Read the previous membership before updating this same owned cell.
+        if (membershipChanged && previousActive) remove(previous, positionKey);
+        if (membershipChanged && currentActive)
+            keysByAsset.computeIfAbsent(asset, ignored -> new LongHashSet()).add(positionKey);
+        if (userId == 0) positions.remove(positionKey);
+        else {
+            IndexedPosition entry = previous;
+            if (entry == null) {
+                entry = new IndexedPosition();
+                positions.put(positionKey, entry);
+            }
+            entry.userId = userId; entry.instrumentId = instrumentId; entry.asset = asset;
+            entry.positionSide = side; entry.signedQuantitySteps = quantity;
+        }
+    }
+
+    /** Mutable primitive index cell, exclusively owned by the index's writer. Never handed to a Lane. */
+    static final class IndexedPosition {
+        private long userId, signedQuantitySteps;
+        private String instrumentId, asset;
+        private com.surprising.aeron.protocol.CorePositionSide positionSide;
+        long userId() { return userId; }
+        long signedQuantitySteps() { return signedQuantitySteps; }
+        String instrumentId() { return instrumentId; }
+        String asset() { return asset; }
+        com.surprising.aeron.protocol.CorePositionSide positionSide() { return positionSide; }
     }
 
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
@@ -71,23 +98,18 @@ public final class AdlPositionIndex {
         positions.clear();
         state.users().values().forEach(user -> user.positions().forEach((key, position) -> {
             long positionKey = identities.positionKey(user.userId(), key);
-            RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(user.userId(), position);
-            positions.put(positionKey, indexed);
-            add(indexed, positionKey);
+            apply(positionKey, null, user.userId(), position.instrumentId(), position.marginAsset(),
+                    position.positionSide(), position.signedQuantitySteps());
         }));
     }
 
-    private void add(RuntimePositionIndexValue position, long positionKey) {
-        if (position.signedQuantitySteps() == 0) return;
-        keysByAsset.computeIfAbsent(position.asset(), ignored -> new LongHashSet()).add(positionKey);
-    }
-
-    private void remove(RuntimePositionIndexValue position, long positionKey) {
+    private void remove(IndexedPosition position, long positionKey) {
         if (position.signedQuantitySteps() == 0) return;
         LongHashSet values = keysByAsset.get(position.asset());
         if (values == null) return;
         values.remove(positionKey);
-        if (values.isEmpty()) keysByAsset.remove(position.asset());
+        // Asset identity remains registered. Keep its empty membership storage for reopen churn;
+        // queries already treat an empty set as absent, and rebuild clears the cache.
     }
 
     public record PositionKey(long userId, String instrumentId, com.surprising.aeron.protocol.CorePositionSide positionSide)

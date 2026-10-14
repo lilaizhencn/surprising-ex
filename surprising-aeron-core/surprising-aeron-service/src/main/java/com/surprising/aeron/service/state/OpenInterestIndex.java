@@ -24,8 +24,10 @@ public final class OpenInterestIndex {
 
     public NavigableMap<String, Totals> totals() {
         TreeMap<String, Totals> snapshot = new TreeMap<>();
-        totals.forEach((instrumentId, value) -> snapshot.put(
-                instrumentId, new Totals(value.longQuantity, value.shortQuantity)));
+        totals.forEach((instrumentId, value) -> {
+            if (value.longQuantity != 0 || value.shortQuantity != 0)
+                snapshot.put(instrumentId, new Totals(value.longQuantity, value.shortQuantity));
+        });
         return Collections.unmodifiableNavigableMap(snapshot);
     }
 
@@ -66,8 +68,8 @@ public final class OpenInterestIndex {
         pending.longQuantity = longQuantityNormalized(instrumentId);
         pending.shortQuantity = shortQuantityNormalized(instrumentId);
         try {
-            // The Owner owns this adopted buffer. Async settlements already prepared immutable
-            // position index values on their Lanes; no live Account Lane table is queried here.
+            // The Owner owns the adopted immutable after-images. No live Account Lane table
+            // or temporary position index value is needed to calculate this pending prefix.
             runtime.changedPositions.forEachIndexed(pending);
             if (pending.longQuantity < 0 || pending.shortQuantity < 0)
                 throw new IllegalStateException("pending open interest is negative");
@@ -90,32 +92,34 @@ public final class OpenInterestIndex {
                 RuntimePositionIndexValue prepared) {
             var previous = committedPositions.value(key);
             // Synchronous control changes use immutable publication values in the same buffer.
-            var current = hasPrepared ? prepared : published == null ? null
-                    : RuntimePositionIndexValue.from(published, identities);
+            String currentSymbol = hasPrepared ? prepared == null ? null : prepared.instrumentId()
+                    : published == null ? null : identities.instrumentId(published.symbolId());
+            long currentQuantity = hasPrepared ? prepared == null ? 0 : prepared.signedQuantitySteps()
+                    : published == null ? 0 : published.signedQuantitySteps();
             if (previous != null && instrumentId.equals(previous.instrumentId())) {
                 longQuantity = Math.subtractExact(longQuantity, longQuantity(previous.signedQuantitySteps()));
                 shortQuantity = Math.subtractExact(shortQuantity, shortQuantity(previous.signedQuantitySteps()));
             }
-            if (current != null && instrumentId.equals(current.instrumentId())) {
-                longQuantity = Math.addExact(longQuantity, longQuantity(current.signedQuantitySteps()));
-                shortQuantity = Math.addExact(shortQuantity, shortQuantity(current.signedQuantitySteps()));
+            if (instrumentId.equals(currentSymbol)) {
+                longQuantity = Math.addExact(longQuantity, longQuantity(currentQuantity));
+                shortQuantity = Math.addExact(shortQuantity, shortQuantity(currentQuantity));
             }
         }
     }
 
     void apply(RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {
-        if (previous != null && current != null && previous.instrumentId().equals(current.instrumentId())) {
-            adjust(current.instrumentId(),
-                    longQuantity(current.signedQuantitySteps()) - longQuantity(previous.signedQuantitySteps()),
-                    shortQuantity(current.signedQuantitySteps()) - shortQuantity(previous.signedQuantitySteps()));
+        applyQuantities(previous == null ? null : previous.instrumentId(), previous == null ? 0 : previous.signedQuantitySteps(),
+                current == null ? null : current.instrumentId(), current == null ? 0 : current.signedQuantitySteps());
+    }
+
+    void applyQuantities(String previousSymbol, long previousQuantity, String currentSymbol, long currentQuantity) {
+        if (previousSymbol != null && previousSymbol.equals(currentSymbol)) {
+            adjust(currentSymbol, longQuantity(currentQuantity) - longQuantity(previousQuantity),
+                    shortQuantity(currentQuantity) - shortQuantity(previousQuantity));
             return;
         }
-        if (previous != null) adjust(previous.instrumentId(),
-                -longQuantity(previous.signedQuantitySteps()),
-                -shortQuantity(previous.signedQuantitySteps()));
-        if (current != null) adjust(current.instrumentId(),
-                longQuantity(current.signedQuantitySteps()),
-                shortQuantity(current.signedQuantitySteps()));
+        if (previousSymbol != null) adjust(previousSymbol, -longQuantity(previousQuantity), -shortQuantity(previousQuantity));
+        if (currentSymbol != null) adjust(currentSymbol, longQuantity(currentQuantity), shortQuantity(currentQuantity));
     }
 
     public void rebuild(TradingCoreState state) {
@@ -174,7 +178,7 @@ public final class OpenInterestIndex {
         if (current.longQuantity < 0 || current.shortQuantity < 0) {
             throw new IllegalStateException("open interest index is negative for instrumentId=" + instrumentId);
         }
-        if (current.longQuantity == 0 && current.shortQuantity == 0) totals.remove(instrumentId);
+        // Retain one cell per encountered registered symbol; zero rows stay absent in query output.
     }
 
     private static long longQuantity(long signedQuantity) {

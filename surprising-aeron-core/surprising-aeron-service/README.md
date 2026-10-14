@@ -147,3 +147,10 @@ Treasury，生产线程启动后非空财务 delta 不能由 Owner 应用。
 `AccountTransferOut` 把指令交给来源账户Lane，由Lane检查完整划转身份、扣减可用资金并保存 `TransferRuntime`。`AccountTransferCompletion` 在同一Lane移除身份。完整指令仅保存在 `LaneColdState.pendingTransfers`；Owner保留有界的 `transferId → userId` 路由、容量和公平分页游标，收到完成通知后更新路由，不做扣款或完整幂等比较。相同转出可在容量满时重试，已完成身份的再次完成不改变修订。
 
 `PENDING_TRANSFER_QUERY` 是内部划转对账/重试查询：Owner选取至多256个路由ID，`OrderBookQueryService` 复用既有多Lane查询完成位，各Lane原位读取该页身份，最后完成的Lane编码响应。它不申请Owner账户访问权，也不持有长期业务镜像。查询分页只遍历本页ID，避免对131072条尾集合求size。冷初始化与序列化仍使用原划转协议结构，本轮按要求未执行快照/恢复场景。必要验证、入口边界首次失败及修复见 [划转Lane验证](../../docs/validation/lane-transfer-lifecycle-20261014.json)。
+
+
+### 持仓索引输入与条目生命周期（2026-10-14）
+
+Lane结算通过已有 `RuntimePositionChangeBuffer` 交接冻结after-image，不再为每次持仓变更创建 `RuntimePositionIndexValue`。`RuntimeFactIndexes` 消费其中的原语字段，`AdlPositionIndex` 保有自己的 `IndexedPosition` 单元；它不会保存随后被清空复用的命令槽对象。用户成员变化和OI增量先读取旧字段，再更新索引单元，保留数量、方向、关闭重开、资产变化和删除语义。批内未提交OI同样直接读冻结字段。
+
+按遇到的已注册asset/symbol保留空成员存储与零总量单元，关闭重开不会反复分配它们；零总量不进入公开OI查询，重建时清空缓存。没有新增权威账户表或业务镜像。不过这些业务索引的写入线程仍是Owner，后续迁移尚未完成，不能据此称Owner已纯化。必要功能验证见 [持仓索引生命周期](../../docs/validation/position-index-owned-cells-20261014.json)。

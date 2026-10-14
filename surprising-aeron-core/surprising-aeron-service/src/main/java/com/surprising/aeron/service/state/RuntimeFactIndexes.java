@@ -58,10 +58,18 @@ public final class RuntimeFactIndexes implements TradingRuntimeState.ChangedInde
     }
 
     void preparedPosition(long positionKey, RuntimePositionIndexValue current) {
-        RuntimePositionIndexValue previous = adlPositions.value(positionKey);
-        positionUsers.apply(previous, current);
-        openInterest.apply(previous, current);
-        adlPositions.apply(positionKey, previous, current);
+        applyPosition(positionKey, current == null ? 0 : current.userId(), current == null ? null : current.instrumentId(),
+                current == null ? null : current.asset(), current == null ? null : current.positionSide(),
+                current == null ? 0 : current.signedQuantitySteps());
+    }
+
+    private void applyPosition(long key, long userId, String symbol, String asset,
+            com.surprising.aeron.protocol.CorePositionSide side, long quantity) {
+        var previous = adlPositions.value(key);
+        positionUsers.applyRoutes(previous == null ? 0 : previous.userId(), previous == null ? null : previous.instrumentId(), userId, symbol);
+        openInterest.applyQuantities(previous == null ? null : previous.instrumentId(),
+                previous == null ? 0 : previous.signedQuantitySteps(), symbol, quantity);
+        adlPositions.apply(key, previous, userId, symbol, asset, side, quantity);
     }
 
     @Override
@@ -71,12 +79,10 @@ public final class RuntimeFactIndexes implements TradingRuntimeState.ChangedInde
 
     @Override
     public void position(long positionKey, PositionRuntime before, PositionRuntime after) {
-        RuntimePositionIndexValue previous = adlPositions.value(positionKey);
-        RuntimePositionIndexValue current = after == null
-                ? null : RuntimePositionIndexValue.from(after, activeIdentities);
-        positionUsers.apply(previous, current);
-        openInterest.apply(previous, current);
-        adlPositions.apply(positionKey, previous, current);
+        applyPosition(positionKey, after == null ? 0 : after.userId(),
+                after == null ? null : activeIdentities.instrumentId(after.symbolId()),
+                after == null ? null : activeIdentities.asset(after.assetId()),
+                after == null ? null : after.positionSide(), after == null ? 0 : after.signedQuantitySteps());
     }
 
     @Override

@@ -101,10 +101,14 @@ public final class PositionUserIndex {
     }
 
     void apply(RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {
-        if (previous != null && current != null && previous.userId() == current.userId()
-                && previous.instrumentId().equals(current.instrumentId())) return;
-        if (previous != null) removePosition(previous);
-        if (current != null) addPosition(current);
+        applyRoutes(previous == null ? 0 : previous.userId(), previous == null ? null : previous.instrumentId(),
+                current == null ? 0 : current.userId(), current == null ? null : current.instrumentId());
+    }
+
+    void applyRoutes(long previousUser, String previousSymbol, long currentUser, String currentSymbol) {
+        if (previousUser == currentUser && (previousUser == 0 || previousSymbol.equals(currentSymbol))) return;
+        if (previousUser != 0) removePosition(previousUser, previousSymbol);
+        if (currentUser != 0) addPosition(currentUser, currentSymbol);
     }
 
     /** Bounded online pagination: merges existing primitive Lane indexes without a full TreeSet copy. */
@@ -139,20 +143,23 @@ public final class PositionUserIndex {
     }
 
     private void addPosition(RuntimePositionIndexValue position) {
-        LongIntHashMap counts = positionCountsBySymbol.computeIfAbsent(
-                position.instrumentId(), ignored -> new LongIntHashMap());
-        int count = counts.addToValue(position.userId(), 1);
-        if (count == 1) add(position.instrumentId(), position.userId());
+        addPosition(position.userId(), position.instrumentId());
     }
 
-    private void removePosition(RuntimePositionIndexValue position) {
-        LongIntHashMap counts = positionCountsBySymbol.get(position.instrumentId());
+    private void addPosition(long userId, String instrumentId) {
+        LongIntHashMap counts = positionCountsBySymbol.computeIfAbsent(instrumentId, ignored -> new LongIntHashMap());
+        int count = counts.addToValue(userId, 1);
+        if (count == 1) add(instrumentId, userId);
+    }
+
+    private void removePosition(long userId, String instrumentId) {
+        LongIntHashMap counts = positionCountsBySymbol.get(instrumentId);
         if (counts == null) throw new IllegalStateException("position user count is missing");
-        int count = counts.addToValue(position.userId(), -1);
+        int count = counts.addToValue(userId, -1);
         if (count == 0) {
-            counts.removeKey(position.userId());
-            if (counts.isEmpty()) positionCountsBySymbol.remove(position.instrumentId());
-            remove(position.instrumentId(), position.userId());
+            counts.removeKey(userId);
+            if (counts.isEmpty()) positionCountsBySymbol.remove(instrumentId);
+            remove(instrumentId, userId);
         } else if (count < 0) throw new IllegalStateException("negative position user count");
     }
 

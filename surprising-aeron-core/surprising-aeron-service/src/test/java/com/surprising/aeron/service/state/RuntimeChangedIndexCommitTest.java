@@ -20,6 +20,34 @@ import org.junit.jupiter.api.Test;
 class RuntimeChangedIndexCommitTest {
 
     @Test
+    void closeReopenAndPublicationRecyclingKeepZeroTotalsOutOfQueries() {
+        var initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        var identities = new RuntimeIdentityRegistry();
+        try (var runtime = RuntimeStateProjector.project(initial, identities)) {
+            int symbol = identities.symbolId("1"), asset = identities.assetId("USDT");
+            long key = identities.positionKey(7, "1:NET");
+            var indexes = indexes(initial, identities);
+            for (long quantity : new long[]{2, -2, 0, 3, 0}) {
+                runtime.putPosition(key, new PositionRuntime(7, symbol, asset, CoreMarginMode.CROSS,
+                        CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(), quantity,
+                        quantity == 0 ? 0 : 100, Math.abs(quantity) * 100, 0, Math.abs(quantity) * 10));
+                indexes.coordinator.applyCurrent(runtime, identities);
+                runtime.clearChangedKeys();
+                assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(Math.abs(quantity));
+                assertThat(indexes.openInterest.longQuantity("1")).isEqualTo(Math.max(quantity, 0));
+                assertThat(indexes.openInterest.shortQuantity("1")).isEqualTo(Math.max(-quantity, 0));
+                if (quantity == 0) assertThat(indexes.openInterest.totals()).isEmpty();
+                else assertThat(indexes.openInterest.totals()).containsOnlyKeys("1");
+                assertThat(indexes.positionUsers.users("1")).containsExactly(7L);
+            }
+            runtime.removePosition(key, 7);
+            indexes.coordinator.applyCurrent(runtime, identities);
+            assertThat(indexes.openInterest.totals()).isEmpty();
+            assertThat(indexes.positionUsers.users("1")).isEmpty();
+        }
+    }
+
+    @Test
     void appliesAuthoritativeChangedIdsWithoutFactFrame() {
         TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();

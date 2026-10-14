@@ -15,13 +15,14 @@ class AdlPositionIndexTest {
         field.setAccessible(true);
         var assets = (java.util.Map<?, ?>) field.get(index);
         Object members = assets.get("USDT");
+        var stored = index.value(1);
         for (int quantity = 2; quantity < 100; quantity++) {
             var current = position("USDT", quantity % 2 == 0 ? quantity : -quantity);
-            index.apply(1, previous, current);
-            assertThat(index.value(1)).isSameAs(current);
+            index.apply(1, index.value(1), current);
+            assertThat(index.value(1)).isSameAs(stored);
+            assertThat(stored.signedQuantitySteps()).isEqualTo(current.signedQuantitySteps());
             assertThat(assets.get("USDT")).isSameAs(members);
             assertThat(index.positions("USDT")).hasSize(1);
-            previous = current;
         }
     }
 
@@ -32,19 +33,19 @@ class AdlPositionIndexTest {
         var closed = position("USDT", 0);
         var moved = position("BTC", -5);
         index.apply(1, null, open);
-        index.apply(1, open, closed);
+        index.apply(1, index.value(1), closed);
         assertThat(index.positions("USDT")).isEmpty();
-        assertThat(index.value(1)).isSameAs(closed);
-        index.apply(1, closed, open);
+        assertThat(index.value(1).signedQuantitySteps()).isZero();
+        index.apply(1, index.value(1), open);
         assertThat(index.positions("USDT")).hasSize(1);
-        index.apply(1, open, moved);
+        index.apply(1, index.value(1), moved);
         assertThat(index.positions("USDT")).isEmpty();
         assertThat(index.positions("BTC")).hasSize(1);
-        index.apply(1, moved, null);
+        index.apply(1, index.value(1), null);
         assertThat(index.positions("BTC")).isEmpty();
         assertThat(index.value(1)).isNull();
         index.apply(1, null, closed);
-        index.apply(1, closed, position("BTC", 0));
+        index.apply(1, index.value(1), position("BTC", 0));
         assertThat(index.positions("BTC")).isEmpty();
     }
 
@@ -55,12 +56,15 @@ class AdlPositionIndexTest {
         var second = new RuntimePositionIndexValue(8, "1", "USDT", CorePositionSide.NET, 2);
         index.apply(1, null, first);
         index.apply(2, null, second);
-        assertThatThrownBy(() -> index.apply(1, position("USDT", 1), null))
+        var unrelated = emptyIndex();
+        unrelated.apply(1, null, position("USDT", 1));
+        assertThatThrownBy(() -> index.apply(1, unrelated.value(1), null))
                 .isInstanceOf(IllegalStateException.class);
-        assertThat(index.value(1)).isSameAs(first);
+        assertThat(index.value(1).signedQuantitySteps()).isEqualTo(1);
         assertThat(index.positions("USDT")).hasSize(2);
-        index.apply(1, first, null);
-        assertThat(index.value(2)).isSameAs(second);
+        index.apply(1, index.value(1), null);
+        assertThat(index.value(2).userId()).isEqualTo(8);
+        assertThat(index.value(2).signedQuantitySteps()).isEqualTo(2);
         assertThat(index.positions("USDT")).hasSize(1);
     }
 
