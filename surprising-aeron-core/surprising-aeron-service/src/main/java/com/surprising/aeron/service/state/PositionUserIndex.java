@@ -9,6 +9,12 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
 public final class PositionUserIndex {
+    private Thread businessOwner;
+    void bindBusinessOwner(Thread thread) { businessOwner = thread; }
+    private void assertBusinessOwner() {
+        if (businessOwner != null && businessOwner != Thread.currentThread())
+            throw new IllegalStateException("position business index requires SystemLedgerLane");
+    }
 
     // Membership changes are much less frequent than mark/risk cursor reads. Keep the
     // authoritative users ordered in a primitive array so online scans never materialize a
@@ -34,6 +40,7 @@ public final class PositionUserIndex {
     }
 
     public NavigableSet<Long> users(String instrumentId) {
+        assertBusinessOwner();
         LongArrayList[] lanes = usersBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
         if (lanes == null) return Collections.emptyNavigableSet();
         TreeSet<Long> sorted = new TreeSet<>();
@@ -41,8 +48,9 @@ public final class PositionUserIndex {
         return Collections.unmodifiableNavigableSet(sorted);
     }
 
-    /** Owner查询路由：只遍历既有索引，数量门槛包含零数量持仓，不读取Lane账户表。 */
+    /** Ledger查询路由：只遍历既有索引，数量门槛包含零数量持仓，不读取Lane账户表。 */
     public RiskQueryRoutes riskQueryRoutes(long userId, int maximumPositions) {
+        assertBusinessOwner();
         if (userId < 0 || maximumPositions < 1) throw new IllegalArgumentException("invalid risk query route");
         TreeSet<Long> users = new TreeSet<>();
         TreeSet<String> instruments = new TreeSet<>();
@@ -74,6 +82,7 @@ public final class PositionUserIndex {
 
     /** Returns zero at end; the online risk path stays primitive and allocation-free. */
     public long higherUserId(String instrumentId, long cursorUserId) {
+        assertBusinessOwner();
         LongArrayList[] lanes = usersBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
         if (lanes == null) return 0;
         long higher = 0;
@@ -86,6 +95,7 @@ public final class PositionUserIndex {
 
     /** Returns the next user owned by one Account Lane without inspecting other lanes. */
     public long higherUserId(String instrumentId, int accountLaneId, long cursorUserId) {
+        assertBusinessOwner();
         if (accountLaneId < 0 || accountLaneId >= topology.accountLaneCount()) {
             throw new IllegalArgumentException("invalid Account Lane id");
         }
@@ -106,6 +116,7 @@ public final class PositionUserIndex {
     }
 
     void applyRoutes(long previousUser, String previousSymbol, long currentUser, String currentSymbol) {
+        assertBusinessOwner();
         if (previousUser == currentUser && (previousUser == 0 || previousSymbol.equals(currentSymbol))) return;
         if (previousUser != 0) removePosition(previousUser, previousSymbol);
         if (currentUser != 0) addPosition(currentUser, currentSymbol);
@@ -127,6 +138,7 @@ public final class PositionUserIndex {
     }
 
     public void rebuild(TradingCoreState state) {
+        assertBusinessOwner();
         usersBySymbol.clear();
         positionCountsBySymbol.clear();
         state.users().values().forEach(user -> user.positions().values()
@@ -134,6 +146,7 @@ public final class PositionUserIndex {
     }
 
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
+        assertBusinessOwner();
         usersBySymbol.clear();
         positionCountsBySymbol.clear();
         state.users().values().forEach(user -> user.positions().forEach((key, position) -> {

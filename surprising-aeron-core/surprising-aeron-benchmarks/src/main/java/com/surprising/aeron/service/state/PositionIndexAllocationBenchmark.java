@@ -21,6 +21,7 @@ public class PositionIndexAllocationBenchmark {
     private OpenInterestIndex openInterest;
     private AdlPositionIndex adl;
     private long generation, previousQuantity;
+    private final RuntimePositionChangeBuffer positions = new RuntimePositionChangeBuffer();
 
     @Setup public void setup() {
         var state = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
@@ -54,12 +55,12 @@ public class PositionIndexAllocationBenchmark {
             var old = adl.value(1);
             if (old != null && old.signedQuantitySteps() != previousQuantity)
                 throw new IllegalStateException("index retained a borrowed position cell");
-            runtime.changedPositions.put(1, source);
-            indexes.applyCurrent(runtime, identities);
+            positions.put(1, source);
+            indexes.applyPositions(positions, identities, null);
             long actual = openInterest.openInterestSteps("1");
             if (actual != Math.abs(quantity) || adl.value(1).signedQuantitySteps() != quantity)
                 throw new IllegalStateException("position indexes differ from the after-image");
-            runtime.clearChangedKeys();
+            positions.clear();
             previousQuantity = quantity;
             checksum += actual;
         }

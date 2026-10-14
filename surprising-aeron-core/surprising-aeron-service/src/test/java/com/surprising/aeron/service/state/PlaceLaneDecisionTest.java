@@ -44,7 +44,7 @@ class PlaceLaneDecisionTest {
                         CoreTimeInForce.IOC, false, "client");
                 var rejected = runtime.acquirePlaceAdmission();
                 CoreOrderDecisionResolver.prepare(rejected, runtime, identities, 7, command, 6_001);
-                runtime.dispatchPlaceAdmission(2, 7, rejected, new UUID(1, 2), 0, runtime.treasury().settlementStatus(symbol), asset,
+                runtime.dispatchPlaceAdmission(2, 7, rejected, new UUID(1, 2), runtime.treasury().settlementStatus(symbol), asset,
                         identities, 6_001, 2);
                 assertThat(rejected.complete()).isFalse();
                 assertThat(rejected.matchingOrder().intent()).isSameAs(command);
@@ -60,7 +60,7 @@ class PlaceLaneDecisionTest {
                 var accepted = runtime.acquirePlaceAdmission();
                 assertThat(accepted).isSameAs(rejected);
                 CoreOrderDecisionResolver.prepare(accepted, runtime, identities, 7, command, 1_001);
-                runtime.dispatchPlaceAdmission(3, 7, accepted, new UUID(1, 3), 0, runtime.treasury().settlementStatus(symbol), asset,
+                runtime.dispatchPlaceAdmission(3, 7, accepted, new UUID(1, 3), runtime.treasury().settlementStatus(symbol), asset,
                         identities, 1_001, 3);
                 await(runtime, accepted);
                 assertThat(accepted.rejection()).isNull();

@@ -24,8 +24,8 @@ import org.openjdk.jmh.infra.IterationParams;
  * Lanes, exercising settlement-slot reuse from single-Lane admission to cross-Lane fills.
  * Unique production-range IDs also exercise active-order and reservation membership deletion
  * while the rolling window retains live entries; this is not a repeated-key map benchmark.
- * Admissions borrow the existing immutable Treasury status; this instrument uses a fixed user
- * limit, so no market OI input or pending-position scan is needed for its admission.
+ * Admissions borrow the existing immutable Treasury status. FIXED keeps normal pipeline
+ * admission; PROPORTIONAL exercises ordered Ledger OI input and sequential batch prefixes.
  * Aeron transport and Archive are excluded.
  */
 @State(Scope.Thread) @BenchmarkMode(Mode.Throughput) @OutputTimeUnit(TimeUnit.SECONDS)
@@ -52,6 +52,8 @@ public class InProcessTradingAllocationBenchmark {
     private long sequence, orderId = 1_000_000, submitted;
     private Interval interval;
 
+    @Param({"FIXED", "PROPORTIONAL"}) public String oiLimitMode;
+
     @Setup public void setup() {
         if (!streamMode.equals("OPEN_ONLY") && !streamMode.equals("REVERSE"))
             throw new IllegalArgumentException("streamMode must be OPEN_ONLY or REVERSE");
@@ -69,9 +71,16 @@ public class InProcessTradingAllocationBenchmark {
         egress.start(cluster);
         owner = new TradingOwnerLoop(ProductLine.LINEAR_PERPETUAL, egress);
         owner.start(cluster, null);
-        control(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
-                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
-                        1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
+        if (!oiLimitMode.equals("FIXED") && !oiLimitMode.equals("PROPORTIONAL"))
+            throw new IllegalArgumentException("invalid OI input mode");
+        var instrument = oiLimitMode.equals("FIXED")
+                ? new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                        1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)
+                : new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                        1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0, 10_000_000,
+                        Long.MAX_VALUE, 1_000_000, Long.MAX_VALUE / 2,
+                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000)));
+        control(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(instrument));
         control(CoreMessageType.APPLY_MARK_PRICE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
         for (long user : new long[]{7, 8}) control(CoreMessageType.ADJUST_BALANCE, user,

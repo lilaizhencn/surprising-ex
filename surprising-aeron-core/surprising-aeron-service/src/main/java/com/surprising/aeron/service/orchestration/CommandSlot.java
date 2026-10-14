@@ -1141,6 +1141,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         @Override
         public boolean getAsBoolean() {
             if (!work.poll()) return false;
+            coordinator.owner.resultBuilder.beginChangedUsers();
+            for (long user : work.selectedUsers()) coordinator.owner.resultBuilder.addChangedUser(user);
             coordinator.owner.resultBuilder.commandSettlementProgress = work.result();
             coordinator.requestCommitPublication();
             return true;

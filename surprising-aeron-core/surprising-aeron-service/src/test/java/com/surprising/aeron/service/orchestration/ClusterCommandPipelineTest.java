@@ -27,6 +27,58 @@ class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL",
             "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
+    void proportionalOiAdmissionUsesTheCompletedGlobalAndSequentialBatchPrefix(ProductLine product) throws Exception {
+        try (Fixture live = new Fixture(product)) {
+            var type = ContractType.valueOf(product.contractTypeCode());
+            String asset = type.isInverse() ? "BTC" : "USDT";
+            long multiplier = type.isInverse() ? 1000 : 1;
+            long floor = type.isInverse() ? 20 : 200;
+            live.apply(live.message(CoreMessageType.REGISTER_INSTRUMENT, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", type.ordinal(),
+                            "BTC", "USDT", asset, 1, 1, multiplier, 100_000, 50_000, 0, 0,
+                            type.isDelivery() || type.isOption() ? TIME + 100_000 : 0, type.isOption() ? 0 : -1,
+                            type.isOption() ? 100 : 0, 10_000_000, 1_000_000, 1_000_000, floor,
+                            List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000, 100_000, 50_000))))));
+            live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
+                            ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, TIME)
+                            : new ApplyMarkPriceCommand("1", 100, 1, TIME))));
+            long maker = 11, taker = disjointUser(maker), secondMaker = 1001, secondTaker = 1002;
+            for (long user : new long[]{maker, taker, secondMaker, secondTaker})
+                live.apply(live.message(CoreMessageType.ADJUST_BALANCE, user,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20_000))));
+            live.responses.clear();
+            var firstMaker = live.place(maker, "1", 101, 100, 2, CoreOrderSide.SELL);
+            var firstTaker = live.place(taker, "1", 102, 100, 2, CoreOrderSide.BUY);
+            var nextMaker = live.place(secondMaker, "1", 103, 100, 2, CoreOrderSide.SELL);
+            var batch = live.message(CoreMessageType.PLACE_ORDER_BATCH, secondTaker,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            new PlaceOrderCommand(104, "1", CoreOrderSide.BUY, 100, 2, false, CoreMarginMode.CROSS,
+                                    CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prefix-104"),
+                            new PlaceOrderCommand(105, "1", CoreOrderSide.BUY, 80, 1, false, CoreMarginMode.CROSS,
+                                    CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prefix-105")))));
+            var commands = List.of(firstMaker, firstTaker, nextMaker, batch);
+            try (var guard = new OwnerAccountReadGuard(live.service.state().runtimeState)) {
+                for (var command : commands) live.service.enqueueCommittedCommand(live.session, command,
+                        command.header().submittedAtEpochMillis(), 0, null);
+                live.tick();
+                assertThat(live.responses).hasSize(4).allSatisfy(response ->
+                        assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
+                // The first batch fill grows global OI from two to four. The next item
+                // projects three on this user, which the old two-step market limit rejects.
+                assertThat(TradingOrderBatchCodec.decodeResult(live.responses.getLast().data()).items())
+                        .hasSize(2).allSatisfy(item -> assertThat(item.status()).isEqualTo(ResponseStatus.APPLIED));
+            }
+            var user = CoreTestCompletion.userState(live.service.state(), secondTaker);
+            assertThat(user.positions()).singleElement().satisfies(position -> assertThat(position.signedQuantitySteps()).isEqualTo(2));
+            assertThat(user.reservations()).hasSize(1);
+            live.service.state().assertClusterCallbackComplete();
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL",
+            "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
     void eligibleTakeProfitDoesNotWaitForBusyMakerRiskScan(ProductLine product) {
         try (Fixture live = new Fixture(product)) {
             live.setup();

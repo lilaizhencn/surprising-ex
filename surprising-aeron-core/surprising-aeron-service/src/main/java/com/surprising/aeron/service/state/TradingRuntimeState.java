@@ -206,7 +206,13 @@ public final class TradingRuntimeState implements AutoCloseable {
     final LongHashSet matcherSettlementOrderScratch = new LongHashSet();
     /** Owner 引用已有路由索引；完整业务状态只属于 Account Lane。 */
     private RuntimeFactIndexes factIndexes;
-    public void bindFactIndexes(RuntimeFactIndexes indexes) { assertOwner(); factIndexes = java.util.Objects.requireNonNull(indexes); }
+    private RuntimeIdentityRegistry indexIdentities;
+    public void bindFactIndexes(RuntimeFactIndexes indexes, RuntimeIdentityRegistry identities) {
+        assertOwner();
+        if (systemLedger != null) throw new IllegalStateException("position indexes must bind before Ledger activation");
+        factIndexes = java.util.Objects.requireNonNull(indexes);
+        indexIdentities = java.util.Objects.requireNonNull(identities);
+    }
     public com.surprising.aeron.service.state.index.LiquidationIndex.LiquidationRoute liquidationRoute(long id) {
         assertOwner(); return factIndexes == null ? null : factIndexes.liquidationRoute(id);
     }
@@ -470,9 +476,36 @@ public final class TradingRuntimeState implements AutoCloseable {
                     accountLaneFailure.compareAndSet(null, failure);
                     signalOwnerCompletion();
                 });
+        if (factIndexes != null) factIndexes.bindBusinessOwner(systemLedger.thread());
     }
 
     public boolean systemLedgerStarted() { return systemLedger != null; }
+
+    /** Ledger-owned business input; admission slots retain their own primitive result. */
+    public long ledgerAdmissionOpenInterest(String instrumentId) {
+        if (factIndexes == null) throw new IllegalStateException("position indexes are not bound");
+        return factIndexes.admissionOpenInterest(instrumentId);
+    }
+
+    void applyLedgerSettlementPositions(MatcherSettlementChanges changes, long mask, RuntimeIdentityRegistry identities) {
+        if (factIndexes != null) factIndexes.applySettlementPositions(changes, mask, identities);
+    }
+
+    void applyLedgerControlPositions(RuntimeFactIndexes.PositionUndo undo) {
+        if (factIndexes != null) factIndexes.applyControlPositions(changedPositions, indexIdentities, undo);
+    }
+
+    void rollbackLedgerPositions(RuntimeFactIndexes.PositionUndo undo) {
+        if (factIndexes != null) undo.rollback(factIndexes);
+    }
+
+    public void signalAccountLane(int laneId) {
+        var workers = laneWorkers;
+        if (workers != null) {
+            var worker = workers[laneId];
+            if (worker != null) worker.signalWork();
+        }
+    }
 
     public boolean dispatchLedgerCommand(SystemLedgerCommand command) {
         assertOwner();
@@ -497,7 +530,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             treasury.rollbackChangedValues();
             return true;
         }
-        if (ledgerControl == null) return true;
+        if (ledgerControl == null) return controlFundsValidation.requestRollback();
         // Queue the inverse scope only after the previously dispatched phase released it.
         return ledgerControl.requestRollback();
     }
@@ -1050,7 +1083,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         try { if (systemLedger != null) systemLedger.close(); }
         catch (RuntimeException problem) {
             if (failure == null) failure = problem; else if (failure != problem) failure.addSuppressed(problem);
-        } finally { systemLedger = null; }
+        } finally {
+            if (systemLedger != null && !systemLedger.thread().isAlive() && factIndexes != null)
+                factIndexes.bindBusinessOwner(null);
+            systemLedger = null;
+        }
         if (failure != null) throw new IllegalStateException("Core workers stopped with a failure", failure);
     }
 
@@ -1305,16 +1342,23 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public PlaceAdmissionEvent dispatchPlaceAdmission(
             long coreSequence, long userId, PlaceAdmissionEvent event, java.util.UUID commandId,
-            long openInterestSteps, TreasuryRuntime.SettlementStatus settlementStatus,
+            TreasuryRuntime.SettlementStatus settlementStatus,
             int assetId, RuntimeIdentityRegistry identities,
             long timestamp, long position) {
         assertOwner();
         int laneId = topology.accountLaneId(userId);
         if (event == null) throw new IllegalArgumentException("place admission event is required");
         event.prepare(
-                coreSequence, userId, commandId, openInterestSteps, settlementStatus,
+                coreSequence, userId, commandId, settlementStatus,
                 assetId, laneId, asynchronousCommands(), this, identities, timestamp, position);
         try {
+            if (accountLanesStarted && !laneWorkers[laneId].hasAdmissionCapacity())
+                throw new java.util.concurrent.RejectedExecutionException("account admission mailbox is full");
+            if (!event.accountReady()) {
+                if (!dispatchLedgerQuery(event))
+                    throw new java.util.concurrent.RejectedExecutionException("Ledger admission mailbox is full");
+                event.inputQueued();
+            }
             if (!accountLanesStarted) {
                 event.execute(accountLanes[laneId]);
             } else {
@@ -1322,6 +1366,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 laneWorkers[laneId].submitAdmission(event);
             }
         } catch (RuntimeException | Error failure) {
+            if (event.inputPending()) throw new IllegalStateException("Ledger still owns failed admission input", failure);
             if (!event.complete()) event.discard();
             placeAdmissionEventPool.addFirst(event);
             throw failure;
@@ -1340,18 +1385,30 @@ public final class TradingRuntimeState implements AutoCloseable {
             long originalOrderId, com.surprising.aeron.protocol.AmendOrderCommand amend,
             com.surprising.aeron.protocol.ReplaceOrderCommand replace,
             com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context decision,
-            long openInterestSteps, int matcherShard, RuntimeIdentityRegistry identities) {
+            int matcherShard, RuntimeIdentityRegistry identities) {
         assertOwner();
         int laneId = topology.accountLaneId(userId);
         ensureLaneWorkerCapacity(1L << laneId);
         ReplacementAdmissionEvent event = replacementAdmissionEventPool.pollFirst();
         if (event == null) event = new ReplacementAdmissionEvent();
         event.prepare(sequence, userId, originalOrderId, amend, replace, decision,
-                openInterestSteps, matcherShard, this, identities);
-        if (!accountLanesStarted) event.execute(accountLanes[laneId]);
-        else {
-            releaseOwnerLaneAccess();
-            laneWorkers[laneId].submit(event);
+                matcherShard, this, identities);
+        try {
+            if (!event.accountReady()) {
+                if (!dispatchLedgerQuery(event))
+                    throw new java.util.concurrent.RejectedExecutionException("Ledger replacement mailbox is full");
+                event.inputQueued();
+            }
+            if (!accountLanesStarted) event.execute(accountLanes[laneId]);
+            else {
+                releaseOwnerLaneAccess();
+                laneWorkers[laneId].submit(event);
+            }
+        } catch (RuntimeException | Error failure) {
+            if (event.inputPending()) throw new IllegalStateException("Ledger still owns failed replacement input", failure);
+            event.discard();
+            replacementAdmissionEventPool.addFirst(event);
+            throw failure;
         }
         return event;
     }
@@ -2830,6 +2887,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         return systemLedger.offer(query);
     }
 
+    /** Risk belongs to the current command: retain its index before-values in the same Ledger scope. */
+    boolean dispatchLedgerRiskInput(RiskScanCoordinator risk) {
+        assertOwner();
+        if (ledgerControl != null && !ledgerControl.allowsRiskInput())
+            throw new IllegalStateException("risk input requires a completed financial phase before scope close");
+        risk.bindLedgerScope(ledgerControl);
+        if (systemLedger == null) { risk.apply(treasury); return true; }
+        return systemLedger.offer(risk);
+    }
+
     public TreasuryRuntime treasury() {
         assertOwner();
         if (currentLaneCommandScope() != null) {
@@ -2837,6 +2904,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         return treasury;
     }
+
+    /** Borrowed configuration names, consumed on Owner at the explicit query-input boundary. */
+    public Iterable<String> instrumentIdsForQuery() { assertOwner(); return instruments.keySet(); }
 
     public CoreInstrument instrument(String instrumentId) {
         assertOwner();
@@ -4303,10 +4373,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (consumer == null) throw new IllegalArgumentException("changed-index consumer is required");
         RuntimeFactIndexes preparedConsumer = consumer instanceof RuntimeFactIndexes indexes ? indexes : null;
         changedOrders.forEach((orderId, value) -> consumer.order(orderId, null, value));
-        changedPositions.forEachIndexed((positionKey, value, hasPrepared, prepared) -> {
-            if (hasPrepared && preparedConsumer != null) preparedConsumer.preparedPosition(positionKey, prepared);
-            else consumer.position(positionKey, null, value);
-        });
+        if (systemLedger == null || preparedConsumer == null)
+            changedPositions.forEachIndexed((positionKey, value, hasPrepared, prepared) -> {
+                if (hasPrepared && preparedConsumer != null) preparedConsumer.preparedPosition(positionKey, prepared);
+                else consumer.position(positionKey, null, value);
+            });
         changedLiquidations.forEach((liquidationId, value) ->
                 consumer.liquidation(liquidationId, null, value));
         changedAlgoOrders.forEach((algoOrderId, value) -> consumer.algoOrder(algoOrderId, null, value));
@@ -4378,7 +4449,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         boolean accountFundsChanged = false;
         for (LaneBalancePatches patches : accountRollback.patchBalancesBeforeByLane)
             accountFundsChanged |= patches.size() != 0;
-        if (!accountFundsChanged) return true;
+        if (!accountFundsChanged && changedPositions.isEmpty()) return true;
         return controlFundsValidation.poll(externalAdjustment);
     }
 
@@ -4389,26 +4460,57 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     private final class ControlFundsValidation implements SystemLedgerLane.Entry {
         private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
-        private boolean queued, externalAdjustment;
-        private volatile boolean completed;
+        private final RuntimeFactIndexes.PositionUndo positionUndo = new RuntimeFactIndexes.PositionUndo();
+        private boolean queued, externalAdjustment, rollback;
+        private volatile boolean validated, requested, completed = true;
+
         boolean poll(boolean externalAdjustment) {
+            if (queued && requested) {
+                if (!completed) return false;
+                queued = false;
+            }
             if (!queued) {
                 this.externalAdjustment = externalAdjustment;
-                if (!systemLedger.offer(this)) return false;
+                rollback = requested = validated = false;
+                completed = false;
+                if (!systemLedger.offer(this)) { completed = true; return false; }
                 queued = true;
             }
-            return completed;
+            return validated;
         }
+
+        @Override public boolean ready() {
+            if (!validated && !requested) {
+                appendControlAccountFunds(funds);
+                funds.requireConserved(externalAdjustment);
+                funds.clear();
+                applyLedgerControlPositions(positionUndo);
+                validated = true;
+                signalOwnerCompletion();
+            }
+            return requested;
+        }
+
         @Override public void apply(TreasuryRuntime ledger) {
-            appendControlAccountFunds(funds);
-            funds.requireConserved(externalAdjustment);
-            funds.clear();
+            if (rollback) rollbackLedgerPositions(positionUndo);
+            else positionUndo.clear();
             completed = true;
             signalOwnerCompletion();
         }
+
+        boolean requestRollback() {
+            if (!queued) return true;
+            rollback = true;
+            requested = true;
+            systemLedger.signalWork();
+            return completed;
+        }
+
         void clear() {
-            if (queued && !completed) throw new IllegalStateException("Ledger funds validation is incomplete");
-            queued = completed = false;
+            if (!queued || completed) return;
+            if (!validated) throw new IllegalStateException("Ledger funds validation is incomplete");
+            requested = true;
+            systemLedger.signalWork();
         }
     }
 

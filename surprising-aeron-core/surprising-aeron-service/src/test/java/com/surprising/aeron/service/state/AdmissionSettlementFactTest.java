@@ -51,7 +51,7 @@ class AdmissionSettlementFactTest {
                 runtime.laneWorkers[laneId].submit(lane -> { entered.countDown(); await(release); });
                 assertThat(entered.await(3, TimeUnit.SECONDS)).isTrue();
                 try {
-                    runtime.dispatchPlaceAdmission(2, 7, event, new UUID(1, 2), 0, captured, asset, ids, 1_001, 2);
+                    runtime.dispatchPlaceAdmission(2, 7, event, new UUID(1, 2), captured, asset, ids, 1_001, 2);
                     var field = PlaceAdmissionEvent.class.getDeclaredField("settlementStatus");
                     field.setAccessible(true);
                     assertThat(field.get(event)).isSameAs(captured);

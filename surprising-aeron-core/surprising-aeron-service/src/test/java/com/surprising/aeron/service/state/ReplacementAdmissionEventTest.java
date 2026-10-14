@@ -62,7 +62,7 @@ class ReplacementAdmissionEventTest {
             try {
                 var event = runtime.dispatchReplacementAdmission(2, 7, 11,
                         new AmendOrderCommand(11, 12, "new-client", 101L, 1L, CoreTimeInForce.GTC, false),
-                        null, decision, 0, 0, identities);
+                        null, decision, 0, identities);
                 assertThat(event.complete()).isFalse();
                 assertThatThrownBy(() -> runtime.releaseReplacementAdmission(event))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("incomplete");
@@ -81,7 +81,7 @@ class ReplacementAdmissionEventTest {
                 runtime.releaseReplacementAdmission(event);
                 var retry = runtime.dispatchReplacementAdmission(3, 7, 404,
                         new AmendOrderCommand(404, 405, "missing", 101L, 1L, CoreTimeInForce.GTC, false),
-                        null, decision, 0, 0, identities);
+                        null, decision, 0, identities);
                 assertThat(retry).isSameAs(event);
                 await(runtime, retry);
                 assertThat(retry.rejection()).isInstanceOf(com.surprising.aeron.service.exception.CoreStateRejectedException.class);
@@ -90,7 +90,7 @@ class ReplacementAdmissionEventTest {
                 var accepted = runtime.dispatchReplacementAdmission(4, 7, 11, null,
                         new ReplaceOrderCommand(11, new PlaceOrderCommand(13, "1", CoreOrderSide.BUY, 100, 1,
                                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
-                                CoreTimeInForce.GTC, false, "new-client")), decision, 0, 0, identities);
+                                CoreTimeInForce.GTC, false, "new-client")), decision, 0, identities);
                 assertThat(accepted).isSameAs(event);
                 await(runtime, accepted);
                 assertThat(accepted.rejection()).isNull();

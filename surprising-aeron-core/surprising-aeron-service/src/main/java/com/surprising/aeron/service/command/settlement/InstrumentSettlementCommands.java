@@ -25,27 +25,15 @@ public final class InstrumentSettlementCommands {
         if (progress == null || !progress.ordersComplete()) {
             owner.setCommandChangedOrderIds(boxedOrderIds(chunk.orders()));
             owner.addChangedUsersFromOrders(chunk.orders());
-            if (!chunk.more()) {
-                addSettlementUsersToResult(command.instrumentId(), command.cursorUserId(), command.maxUsers());
-            }
             return;
         }
         owner.setCommandChangedOrderIds(List.of());
-        addSettlementUsersToResult(command.instrumentId(), command.cursorUserId(), command.maxUsers());
-    }
-
-    public List<Long> settlementUsers(String instrumentId, long cursorUserId, int maxUsers) {
-        List<Long> selected = new ArrayList<>(Math.min(maxUsers, 64));
-        for (Long userId : owner.positionUserIndex().usersAfter(instrumentId, cursorUserId)) {
-            if (userId == null || userId <= cursorUserId) continue;
-            if (selected.size() == maxUsers) break;
-            selected.add(userId);
-        }
-        return List.copyOf(selected);
     }
 
     /** Primitive pagination for the command result path; keeps no boxed user page alive. */
     public void addSettlementUsersToResult(String instrumentId, long cursorUserId, int maxUsers) {
+        if (owner.runtimeState().systemLedgerStarted())
+            throw new IllegalStateException("active settlement uses its Ledger route receipt");
         owner.beginChangedUsers();
         if (maxUsers <= 0) return;
         long userId = owner.positionUserIndex().higherUserId(instrumentId, cursorUserId);
@@ -59,6 +47,7 @@ public final class InstrumentSettlementCommands {
 
     public void settleInstrumentRuntime(com.surprising.aeron.protocol.SettleInstrumentCommand command,
                                         UUID commandId) {
+        addSettlementUsersToResult(command.instrumentId(), command.cursorUserId(), command.maxUsers());
         long beforeRevision = owner.runtimeState().revision();
         owner.setCommandSettlementProgress(RuntimeLifecycleSettlement.applyRuntime(command,
                 owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId()), commandId,

@@ -724,16 +724,9 @@ final class OrderedCommitCoordinator {
             var command = pending.decodedCommand().liquidation();
             var liquidation = pending.liquidationCheck().liquidation(0);
             if (liquidation != null) mask |= owner.matchingAdapter.topology().accountLaneMask(liquidation.userId());
-        } else if (pending.operation() == CommandSlot.Operation.SETTLEMENT) {
-            var command = pending.decodedCommand().settlement();
-            var progress = owner.runtimeLifecycleProgress(command.instrumentId());
-            if (progress != null && progress.ordersComplete()
-                    || !owner.matchingFlow.lifecycleOrders(0, command.instrumentId(), command.cursorOrderId(), command.maxOrders()).more()) {
-                for (long userId : owner.instrumentSettlement.settlementUsers(command.instrumentId(), command.cursorUserId(), command.maxUsers())) {
-                    mask |= owner.matchingAdapter.topology().accountLaneMask(userId);
-                }
-            }
         }
+        // Lifecycle users are selected by Ledger and registered through includeControlLanes
+        // only after the actual Account work completes; no speculative business-index read.
         return mask;
     }
 

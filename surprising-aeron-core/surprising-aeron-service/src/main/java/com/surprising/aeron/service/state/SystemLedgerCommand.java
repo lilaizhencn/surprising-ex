@@ -80,6 +80,11 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
     final boolean complete() { return completed; }
     final boolean scopeClosed() { return close.completed; }
 
+    /** A liquidation batch can value risk before committing this same financial scope. */
+    final boolean allowsRiskInput() { return completed && scopeCompleted && !closeQueued; }
+
+    final void publishRiskPositionInputs() { runtime.applyLedgerControlPositions(close.positionUndo); }
+
     private boolean queueClose() {
         if (closeQueued) return true;
         if (!runtime.enqueueLedgerScopeClose(close)) return false;
@@ -113,6 +118,7 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
 
     /** Queue head holds the original before-images until the Owner's commit/rollback decision. */
     private final class ScopeClose implements SystemLedgerLane.Entry {
+        private final RuntimeFactIndexes.PositionUndo positionUndo = new RuntimeFactIndexes.PositionUndo();
         private volatile boolean requested;
         private volatile boolean completed = true;
         private boolean rollback;
@@ -124,13 +130,17 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
                 runtime.appendControlAccountFunds(funds);
                 funds.requireConserved(externalAdjustment);
                 funds.clear();
+                runtime.applyLedgerControlPositions(positionUndo);
                 validated = true;
                 runtime.signalOwnerCompletion();
             }
             return requested;
         }
         @Override public void apply(TreasuryRuntime ledger) {
-            if (rollback) { ledger.rollbackChangedValues(); funds.clear(); }
+            if (rollback) {
+                ledger.rollbackChangedValues(); funds.clear();
+                runtime.rollbackLedgerPositions(positionUndo);
+            } else positionUndo.clear();
             ledger.clearChangedKeys();
             TradingRuntimeState completion = runtime;
             completed = true;

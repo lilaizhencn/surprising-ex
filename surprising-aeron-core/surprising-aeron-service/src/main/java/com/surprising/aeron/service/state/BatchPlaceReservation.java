@@ -9,7 +9,7 @@ import java.util.UUID;
 import java.util.function.IntFunction;
 
 /** 一个顺序批量项的 Lane 准入和冻结；批次槽复用，完成回执不复制账户状态。 */
-public final class BatchPlaceReservation extends ResolvedPlaceOrder implements IntFunction<Object> {
+public final class BatchPlaceReservation extends ResolvedPlaceOrder implements IntFunction<Object>, SystemLedgerLane.Entry {
     private TradingRuntimeState runtime;
     private RuntimeIdentityRegistry identities;
     private CoreOrderDecisionResolver.Context decision;
@@ -20,12 +20,14 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
     private OrderRuntime admittedOrder;
     private List<Long> closeCapacityCancellations = List.of();
     private volatile boolean completed = true;
+    private volatile boolean inputReady = true;
+    private boolean inputQueued, accountDispatched;
 
     public void prepare(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
             long sequence, long userId, UUID commandId, PlaceOrderCommand command,
-            CoreOrderDecisionResolver.Context decision, long openInterestSteps) {
+            CoreOrderDecisionResolver.Context decision) {
         if (runtime == null || identities == null || sequence <= 0 || userId <= 0
-                || commandId == null || command == null || decision == null || openInterestSteps < 0)
+                || commandId == null || command == null || decision == null)
             throw new IllegalArgumentException("invalid batch place reservation");
         runtime.assertOwner();
         if (!completed) throw new IllegalStateException("Account Lane still owns this batch reservation");
@@ -37,13 +39,37 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
         this.sequence = sequence;
         this.userId = userId;
         this.commandId = commandId;
-        this.openInterestSteps = openInterestSteps;
+        openInterestSteps = 0;
+        inputReady = !decision.instrument().usesOpenInterestForUserLimit() || command.reduceOnly();
+        inputQueued = accountDispatched = false;
         assetId = identities.assetId(runtime.productLine().isDerivative() ? decision.instrument().settleAsset()
                 : command.side() == CoreOrderSide.BUY ? decision.instrument().quoteAsset() : decision.instrument().baseAsset());
         completed = false;
     }
 
+    /** Owner advances mail only; Ledger supplies OI before the Account Lane sees this item. */
+    public boolean pollAdmission() {
+        runtime.assertOwner();
+        if (!inputReady) {
+            if (!inputQueued) inputQueued = runtime.dispatchLedgerQuery(this);
+            if (!inputReady) return false;
+        }
+        if (!accountDispatched) {
+            runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
+            accountDispatched = true;
+        }
+        return runtime.pollControlLanes();
+    }
+
+    @Override public void apply(TreasuryRuntime ignored) {
+        openInterestSteps = runtime.ledgerAdmissionOpenInterest(decision.instrument().instrumentId());
+        TradingRuntimeState completion = runtime;
+        inputReady = true;
+        completion.signalOwnerCompletion();
+    }
+
     @Override public Object apply(int laneId) {
+        if (!inputReady) throw new IllegalStateException("Ledger batch admission input is incomplete");
         AccountLaneState lane = runtime.currentLaneCommandScope();
         if (lane == null || lane.laneId() != laneId || laneId != runtime.topology().accountLaneId(userId))
             throw new IllegalStateException("batch place reservation requires its Account Lane");
@@ -103,5 +129,7 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
         assetId = 0;
         admittedOrder = null;
         closeCapacityCancellations = List.of();
+        inputReady = true;
+        inputQueued = accountDispatched = false;
     }
 }

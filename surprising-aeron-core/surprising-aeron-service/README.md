@@ -205,3 +205,16 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 `CoreInstrument.usesOpenInterestForUserLimit` 明确限额对市场OI的依赖：现货、比例为0或下限已经达到固定上限时无需全局OI输入。对应准入跳过全局查表及批内持仓扫描；Lane仍执行固定下限、持仓上限、风险档位和有效比例限额检查。80个必要用例覆盖固定下限拒绝、有效比例读取、下单/改单/批量/预检、捕获事实延迟执行、六产品线触发与资金费分页，见 [准入输入所有权验证](../../docs/validation/admission-input-ownership-20261015.json)。首次误选含快照用例及查询夹具错误均保留记录，最终仅执行已审查的必要方法。
 
 这一改动不代表Owner迁移完成：有效比例限额仍由Owner准备OI输入，OI/ADL/持仓用户索引与部分业务收据、市场/风险控制及输出编码仍待迁移；完整Core百字节与真实单节点验收尚未完成。
+
+
+### 持仓业务索引由原SystemLedgerLane独占（2026-10-15）
+
+`RuntimeFactIndexes` 的持仓用户、OI和ADL索引在Ledger激活后绑定该线程，Owner及Account Lane直接读写都会失败；停止Ledger后才允许冷路径物化和重建。正常成交在原 `MatcherSettlementEvent.TreasurySettlement` 中读取已有冻结持仓输出，应用索引后才发布完成。Owner的 `CommitPublication` 只继续维护订单等路由，跳过持仓业务索引。没有新增账户镜像、worker或逐持仓DTO。
+
+`SystemLedgerCommand.ScopeClose` 与仅账户控制的验证边界复用最小primitive前像数组，保留到Owner提交或拒绝；仅持仓变化也会验证并发布，不能因为没有余额流水而漏掉。强平批次内部继续扫描风险时，在同一财务scope内发布索引输入并保留同一回滚前值，不排到尚未请求关闭的队首后面。`LedgerPositionPublicationTest` 覆盖两种控制scope的重复回滚、可变ADL条目原位修改及线程边界。
+
+普通下单/改单复用原准入槽作为Ledger输入请求，账户worker依据 `accountReady` 消费；等待输入时仍能处理先前成交，并保留准入FIFO。顺序批量、触发和预检消费命令自有的OI primitive。有效比例限额复用原控制命令边界保证全局及批内前缀，固定限额保留普通并行窗口，Owner不阻塞等Lane。原Owner待提交OI扫描及其旧基准已删除。
+
+资金费与生命周期在已有continuation内从Ledger选用户页；风险账户任务只携带本片预算加1的primitive用户ID页，不能再读取全局索引。内部Core的OI与维护分页由Ledger编码，风险/ADL由Ledger选路、Account Lane读取并编码；外部Redis投影路径未改动。风险查询仅在明确的查询入口冻结市场配置版本，交易热路径不做该复制。110个必要用例及已修正失败见 [Ledger索引所有权验证](../../docs/validation/ledger-position-index-ownership-20261015.json)。
+
+这完成的是三项业务索引的所有权边界。Owner仍有业务收据遍历、部分控制编排和输出编码要继续迁移；完整Core百字节分配及真实单节点验收仍未完成。数值分配诊断只保留本地，本轮不做Cluster快照/恢复、wallet或真实单节点压测。

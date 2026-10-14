@@ -72,6 +72,9 @@ final class OwnerIndexedChanges<V, I> {
     }
 
     boolean isEmpty() { return laneMask == 0 && direct.isEmpty(); }
+    RuntimeIndexedChangeBuffer<V, I> directBuffer() { return direct; }
+    long retainedLaneMask() { return laneMask; }
+    RuntimeIndexedChangeBuffer<V, I> laneBuffer(int laneId) { return lanes[laneId]; }
     void forEachIndexed(RuntimeIndexedChangeBuffer.Consumer<V, I> consumer) {
         direct.forEachIndexed(consumer);
         long remaining = laneMask;

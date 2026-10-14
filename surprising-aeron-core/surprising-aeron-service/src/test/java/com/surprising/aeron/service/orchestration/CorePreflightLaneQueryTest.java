@@ -91,7 +91,7 @@ class CorePreflightLaneQueryTest {
                 var valid = place(305, CoreOrderSide.SELL, 110, 2, true, "close-valid");
                 var resolved = CoreOrderDecisionResolver.resolve(cold, identities, 1, valid, TIME);
                 long expected = RuntimeOrderAdmission.requiredReservation(cold, identities, 1, resolved,
-                        core.openInterestIndex.openInterestSteps("1"), cold.admissionOrders(1, resolved.symbolId()));
+                        new OpenInterestIndex(before, identities).openInterestSteps("1"), cold.admissionOrders(1, resolved.symbolId()));
                 try (var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                     assertThat(query(core, 1, place(304, CoreOrderSide.SELL, 110, 3, true, "close-oversized")).resultCode())
                             .isEqualTo(CoreResultCode.REDUCE_ONLY_CAPACITY_EXCEEDED);

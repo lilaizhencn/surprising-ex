@@ -731,7 +731,8 @@ public final class TriggerOrderCommands {
 
     /** Reusable Lane operation for a trigger child; keeps the large capture graph off each command. */
     private final class TriggerExecutionContinuation
-            implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
+            implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object>,
+            com.surprising.aeron.service.state.SystemLedgerLane.Entry {
         private com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger;
         private long triggerId, triggerSequence, price, triggeredAt, childSequence, childOrderId;
         private UUID commandId;
@@ -743,6 +744,8 @@ public final class TriggerOrderCommands {
         private int baseAssetId, quoteAssetId, settleAssetId;
         private com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context decision;
         private long openInterest;
+        private volatile boolean inputReady;
+        private boolean inputQueued, accountDispatched;
         private java.util.NavigableSet<Long> siblings;
 
         java.util.function.BooleanSupplier prepare(TriggerOrderIndex.TriggerRoute route,
@@ -759,17 +762,25 @@ public final class TriggerOrderCommands {
             baseAssetId = owner.identities().assetId(decision.instrument().baseAsset());
             quoteAssetId = owner.identities().assetId(decision.instrument().quoteAsset());
             settleAssetId = owner.identities().assetId(decision.instrument().settleAsset());
-            openInterest = decision.instrument().usesOpenInterestForUserLimit()
-                    ? owner.openInterestIndex().openInterestSteps(route.instrumentId()) : 0;
+            openInterest = 0;
+            inputReady = !decision.instrument().usesOpenInterestForUserLimit();
+            inputQueued = accountDispatched = false;
             childSequence = Math.addExact(Math.addExact(owner.appliedCommandCount(), 2), owner.queuedMatchingCount());
             siblings = cancelOco ? owner.triggerOrderIndex().ocoSiblings(route).descendingSet()
                     : java.util.Collections.emptyNavigableSet();
             laneId = owner.runtimeState().topology().accountLaneId(route.userId());
-            owner.runtimeState().dispatchControlLanes(1L << laneId, this);
             return this;
         }
 
+        @Override public void apply(com.surprising.aeron.service.state.TreasuryRuntime ignored) {
+            openInterest = owner.runtimeState().ledgerAdmissionOpenInterest(decision.instrument().instrumentId());
+            var runtime = owner.runtimeState();
+            inputReady = true;
+            runtime.signalOwnerCompletion();
+        }
+
         @Override public Object apply(int ignoredLaneId) {
+            if (!inputReady) throw new IllegalStateException("Ledger trigger admission input is incomplete");
             trigger = executableTrigger(owner.runtimeState().triggerOrder(triggerId), triggerSequence, price, decision.symbolId());
             if (trigger == null) return null;
             try {
@@ -813,6 +824,14 @@ public final class TriggerOrderCommands {
         }
 
         @Override public boolean getAsBoolean() {
+            if (!inputReady) {
+                if (!inputQueued) inputQueued = owner.runtimeState().dispatchLedgerQuery(this);
+                if (!inputReady) return false;
+            }
+            if (!accountDispatched) {
+                owner.runtimeState().dispatchControlLanes(1L << laneId, this);
+                accountDispatched = true;
+            }
             if (!owner.runtimeState().pollControlLanes()) return false;
             var result = owner.runtimeState().controlLaneResult(laneId);
             long clientKey = preparedClientKey;

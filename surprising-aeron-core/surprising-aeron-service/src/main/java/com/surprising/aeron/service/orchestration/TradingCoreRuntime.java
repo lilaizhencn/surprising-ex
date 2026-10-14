@@ -287,9 +287,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
     /** 真实撮合器适配器；命令经 matcher 队列推进。 */
     final DeterministicExchangeCoreAdapter matchingAdapter;
 
-    /** positionUserIndex 业务查询索引；由提交变化维护，不作为独立权威状态。 */
+    /** Ledger 单写者的持仓用户索引；Owner 仅转交查询描述和就绪回执。 */
     final PositionUserIndex positionUserIndex;
-    /** openInterestIndex 业务查询索引；由提交变化维护，不作为独立权威状态。 */
+    /** Ledger 单写者的全局持仓量；准入只消费命令槽中的 primitive 输入。 */
     final OpenInterestIndex openInterestIndex;
     /** triggerOrderIndex 业务查询索引；由提交变化维护，不作为独立权威状态。 */
     final TriggerOrderIndex triggerOrderIndex;
@@ -301,7 +301,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     final CancelAllAfterIndex cancelAllAfterIndex;
     /** activeOrderIndex 业务查询索引；由提交变化维护，不作为独立权威状态。 */
     final ActiveOrderIndex activeOrderIndex;
-    /** adlPositionIndex 业务查询索引；由提交变化维护，不作为独立权威状态。 */
+    /** Ledger 单写者的 ADL 持仓索引；可变索引单元不交给 Owner 或 Account Lane。 */
     final AdlPositionIndex adlPositionIndex;
     /** 撮合各阶段的运行观测指标，不参与确定性业务判断。 */
     final CoreMatchingPhaseMetrics matchingPhaseMetrics = new CoreMatchingPhaseMetrics();
@@ -401,7 +401,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 symbolId, positionKey, instrumentSettled);
     }
     @Override public PositionUserIndex positionUserIndex() { return positionUserIndex; }
-    @Override public OpenInterestIndex openInterestIndex() { return openInterestIndex; }
     @Override public TriggerOrderIndex triggerOrderIndex() { return triggerOrderIndex; }
     @Override public ActiveOrderIndex activeOrderIndex() { return activeOrderIndex; }
     @Override public Iterable<Long> activeLiquidationIds() { return liquidationIndex.activeIds(); }
@@ -517,7 +516,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         this.factIndexes = new com.surprising.aeron.service.state.RuntimeFactIndexes(
                 positionUserIndex, openInterestIndex, triggerOrderIndex, algoOrderIndex,
                 liquidationIndex, cancelAllAfterIndex, activeOrderIndex, adlPositionIndex);
-        runtimeState.bindFactIndexes(factIndexes);
+        runtimeState.bindFactIndexes(factIndexes, identities);
         this.runtimeState.restoreFeePolicies(restoredFeePolicies);
         this.runtimeState.restorePendingTransfers(restoredPendingTransfers);
         commits.initializeCommitPublication(snapshotState.revision(), projectionSequence);
@@ -1160,14 +1159,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
             long userId, PlaceOrderCommand command, UUID commandId, long coreSequence,
             long timestamp, long position) {
         var event = runtimeState.acquirePlaceAdmission();
-        long openInterestSteps;
         com.surprising.aeron.service.state.TreasuryRuntime.SettlementStatus settlementStatus;
         int assetId;
         try {
             CoreOrderDecisionResolver.prepare(event, runtimeState, identities, userId,
                     command, currentClusterTimestamp);
-            openInterestSteps = event.instrument().usesOpenInterestForUserLimit() && !command.reduceOnly()
-                    ? openInterestIndex.openInterestSteps(event.instrumentId()) : 0;
             settlementStatus = runtimeState.treasury().settlementStatus(event.symbolId());
             var instrument = event.instrument();
             assetId = identities.assetId(productLine.isDerivative() ? instrument.settleAsset()
@@ -1178,12 +1174,14 @@ public final class TradingCoreRuntime implements AutoCloseable,
             throw failure;
         }
         return runtimeState.dispatchPlaceAdmission(coreSequence, userId, event, commandId,
-                openInterestSteps, settlementStatus,
+                settlementStatus,
                 assetId, identities, timestamp, position);
     }
 
     @Override public void reservePlaceOrderRuntime(long userId, PlaceOrderCommand command, UUID commandId,
                                   long pendingCoreSequence) {
+        if (runtimeState.asynchronousCommands())
+            throw new IllegalStateException("active trigger admission requires its Account Lane continuation");
         ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimeState,
                 identities, userId, command, currentClusterTimestamp);
         var admissionIdentity = com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(

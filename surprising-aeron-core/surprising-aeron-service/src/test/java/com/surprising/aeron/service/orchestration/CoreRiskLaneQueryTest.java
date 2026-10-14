@@ -23,6 +23,29 @@ class CoreRiskLaneQueryTest {
 
     @ParameterizedTest
     @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL", "OPTION"})
+    void ledgerEncodesOpenInterestAndBoundedMaintenanceUsers(ProductLine line) throws Exception {
+        try (var core = initial(positionedState(line))) {
+            core.activate();
+            try (var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+                assertThat(query(core, CoreMessageType.OPEN_INTEREST_QUERY, 0, new byte[0]).data())
+                        .isEqualTo(CoreOpenInterestCodec.encode(List.of(new CoreOpenInterestView("1", 25, 0),
+                                new CoreOpenInterestView("2", 0, 8), new CoreOpenInterestView("3", 10, 0))));
+                var first = query(core, CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY, 0,
+                        CoreMaintenanceCodec.encodeQuery(new CoreMaintenanceCodec.Query("1", 0, 1)));
+                var page = CoreMaintenanceCodec.decodePage(first.data());
+                assertThat(page.userIds()).containsExactly(1L);
+                assertThat(page.hasMore()).isTrue();
+                var next = CoreMaintenanceCodec.decodePage(query(core, CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY, 0,
+                        CoreMaintenanceCodec.encodeQuery(new CoreMaintenanceCodec.Query("1", 1, 1))).data());
+                assertThat(next.userIds()).containsExactly(7L);
+                assertThat(next.hasMore()).isFalse();
+            }
+            core.assertClusterCallbackComplete();
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL", "OPTION"})
     void currentRiskAndAdlReadActualLanesAndMatchColdCalculation(ProductLine line) throws Exception {
         var state = positionedState(line);
         var identities = new RuntimeIdentityRegistry();

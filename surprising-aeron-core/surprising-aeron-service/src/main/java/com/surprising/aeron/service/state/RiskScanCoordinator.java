@@ -7,8 +7,8 @@ import com.surprising.aeron.service.state.model.RiskLaneProgress;
 import java.util.ArrayList;
 import java.util.List;
 
-/** owner 侧风险调度：有界分配预算、确定性分配清算编号、提交各 Lane 的可恢复游标。 */
-public final class RiskScanCoordinator {
+/** 风险续扫：Ledger 选出有界用户页，Account Lane 估值，Owner 只推进已有命令续步。 */
+public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
     /** 本命令固定的运行态和索引；命令完成前其他控制命令不能修改风险输入。 */
     private final TradingRuntimeState runtime;
     private final RuntimeIdentityRegistry identities;
@@ -21,6 +21,11 @@ public final class RiskScanCoordinator {
     private final RiskScanRuntime[] inputs;
     private final RiskLaneProcessor.Page[] results;
     private final int[] allocations;
+    private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] userPages;
+    private volatile boolean routesReady;
+    private boolean routesQueued;
+    private int sliceBudget;
+    private SystemLedgerCommand ledgerScope;
     /** 当前币对片段的不可变输入，Lane 仅读。 */
     private RiskScanRuntime initial;
     private CoreInstrument instrument;
@@ -29,7 +34,7 @@ public final class RiskScanCoordinator {
     /** 参与集合、新增清算集合及下一轮起点，均由 owner 写入。 */
     private long laneMask, creationMask, nextLiquidationId;
     private int nextLane, work;
-    /** 0：准备；1：收集估值；2：收集新增清算写入；3：完成。 */
+    /** 0：捕获市场输入；4：等待 Ledger 用户页；1：收集估值；2：收集清算写入；3：完成。 */
     private int phase;
 
     public RiskScanCoordinator(int maxWork, PositionUserIndex positionUsers, TradingRuntimeState runtime,
@@ -50,6 +55,8 @@ public final class RiskScanCoordinator {
         inputs = new RiskScanRuntime[lanes];
         results = new RiskLaneProcessor.Page[lanes];
         allocations = new int[lanes];
+        userPages = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[lanes];
+        for (int lane = 0; lane < lanes; lane++) userPages[lane] = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(9);
         resetForCommand(maxWork);
     }
 
@@ -62,6 +69,8 @@ public final class RiskScanCoordinator {
         if (maxWork <= 0 || maxWork > 4096) {
             throw new IllegalArgumentException("invalid risk scan budget");
         }
+        if (routesQueued && !routesReady) throw new IllegalStateException("Ledger still owns risk routes");
+        routesReady = routesQueued = false;
         // The direct command slot is serialized by the Owner.  A failed continuation may leave
         // the coordinator in phase 1/2 after its Lane work has been rolled back; re-arming here
         // is the recovery boundary for the next command and must not retain the abandoned page.
@@ -93,6 +102,13 @@ public final class RiskScanCoordinator {
             RiskScanRuntime selected = remaining == 0 ? null : runtime.firstRiskIncompleteScan();
             if (selected == null) { phase = 3; return true; }
             prepare(selected, Math.min(8, remaining));
+            phase = 4;
+        }
+        if (phase == 4) {
+            if (!routesReady) {
+                if (!routesQueued) routesQueued = runtime.dispatchLedgerRiskInput(this);
+                if (!routesReady) return false;
+            }
             if (laneMask != 0) runtime.dispatchRiskLanes(laneMask, this::scanLane);
             phase = 1;
         }
@@ -122,6 +138,7 @@ public final class RiskScanCoordinator {
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         RiskScanCoordinator c = new RiskScanCoordinator(maxWork, positionUsers, indexedUserIds, runtime, identities);
         c.prepare(runtime.riskScan(symbolId), c.budget);
+        c.apply(null);
         for (int lane = 0; lane < c.inputs.length; lane++) {
             if ((c.laneMask & (1L << lane)) == 0) continue;
             final int id = lane;
@@ -146,6 +163,12 @@ public final class RiskScanCoordinator {
         if (instrument == null || mark == null || mark.priceSequence() != initial.priceSequence())
             throw new IllegalStateException("risk scan input is missing");
         settleAssetId = identities.assetId(instrument.settleAsset());
+        this.sliceBudget = sliceBudget;
+        routesReady = routesQueued = false;
+    }
+
+    @Override public void apply(TreasuryRuntime ignored) {
+        if (ledgerScope != null) ledgerScope.publishRiskPositionInputs();
         List<RiskLaneProgress> cursors = initial.laneProgress();
         if (!cursors.isEmpty() && cursors.size() != inputs.length)
             throw new IllegalStateException("risk scan Lane topology differs");
@@ -154,15 +177,20 @@ public final class RiskScanCoordinator {
         int participants = 0;
         for (int lane = 0; lane < inputs.length; lane++) {
             RiskLaneProgress cursor = cursors.isEmpty() ? initialCursor(initial, lane) : cursors.get(lane);
-            if (!cursor.complete() && cursor.userId() == 0
-                    && !hasNextIndexedUser(lane, cursor.lastUserId()))
+            var page = userPages[lane];
+            page.clear();
+            long next = higherIndexedUser(lane, cursor.lastUserId());
+            for (int count = 0; next != 0 && count <= sliceBudget; count++) {
+                page.add(next); next = higherIndexedUser(lane, next);
+            }
+            if (!cursor.complete() && cursor.userId() == 0 && page.isEmpty())
                 cursor = new RiskLaneProgress(cursor.lastUserId(), true, 0, 0, "-", 0, 0, 0, 0, 0);
             inputs[lane] = laneInput(initial, lane, cursor);
             results[lane] = null;
             allocations[lane] = 0;
             if (!cursor.complete()) participants++;
         }
-        if (participants == 0) { nextLane = initial.accountLaneId(); return; }
+        if (participants == 0) { nextLane = initial.accountLaneId(); publishRoutes(); return; }
         int selectedCount = Math.min(participants, sliceBudget);
         int assigned = 0;
         nextLane = initial.accountLaneId();
@@ -174,23 +202,33 @@ public final class RiskScanCoordinator {
             nextLane = (lane + 1) % inputs.length;
             assigned++;
         }
+        publishRoutes();
     }
 
-    private boolean hasNextIndexedUser(int lane, long cursor) {
-        if (positionUsers != null) return positionUsers.higherUserId(instrument.instrumentId(), lane, cursor) != 0;
+    private void publishRoutes() {
+        ledgerScope = null;
+        TradingRuntimeState completion = runtime;
+        routesReady = true;
+        completion.signalOwnerCompletion();
+    }
+
+    void bindLedgerScope(SystemLedgerCommand scope) { ledgerScope = scope; }
+
+    private long higherIndexedUser(int lane, long cursor) {
+        if (positionUsers != null) return positionUsers.higherUserId(instrument.instrumentId(), lane, cursor);
         if (!(indexedUserIds instanceof java.util.NavigableSet<?>))
             throw new IllegalStateException("risk user index must be ordered for online scanning");
         @SuppressWarnings("unchecked")
         var users = (java.util.NavigableSet<Long>) indexedUserIds;
         for (Long next = users.higher(cursor); next != null; next = users.higher(next))
-            if (runtime.topology().accountLaneId(next) == lane) return true;
-        return false;
+            if (runtime.topology().accountLaneId(next) == lane) return next;
+        return 0;
     }
 
     private RiskLaneProcessor.Page scanLane(int lane) {
         RiskLaneProgress previous = initial.laneProgress().isEmpty()
                 ? initialCursor(initial, lane) : initial.laneProgress().get(lane);
-        return RiskLaneProcessor.scan(runtime, inputs[lane], positionUsers, indexedUserIds,
+        return RiskLaneProcessor.scan(runtime, inputs[lane], userPages[lane],
                 instrument, mark, settleAssetId, initial.symbolId(), allocations[lane], identities,
                 previous.userRevision(), previous.marketRevision());
     }

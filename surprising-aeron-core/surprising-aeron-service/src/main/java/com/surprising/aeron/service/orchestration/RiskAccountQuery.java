@@ -9,16 +9,19 @@ import com.surprising.aeron.service.state.query.RuntimeRiskQueryService;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 /** 单次风险/ADL查询的Lane交接：只保存路由、固定市场输入和有界响应DTO，消费后释放。 */
-final class RiskAccountQuery implements SettlementLaneWorker.Command, Function<AccountLaneState, Void> {
+final class RiskAccountQuery implements SettlementLaneWorker.Command, Function<AccountLaneState, Void>,
+        com.surprising.aeron.service.state.SystemLedgerLane.Entry {
     private final TradingCoreRuntime owner;
-    private final long id, commandCount;
-    final long laneMask;
-    private final long[] users, positionKeys;
+    final long id;
+    private final long commandCount, requestedUser;
+    private long laneMask;
+    private long[] users, positionKeys;
+    private volatile boolean routesReady;
+    private boolean ledgerResponded;
     private final String asset;
     private final int limit;
     private final RuntimeRiskQueryService.MarketInputs markets;
@@ -27,44 +30,23 @@ final class RiskAccountQuery implements SettlementLaneWorker.Command, Function<A
     private final CoreResultCode[] failures;
     private final AtomicLong completedLaneMask = new AtomicLong();
 
-    /** Owner只从已有索引获取路由；账户数值由Lane查询时读取。 */
+    /** Owner decodes the query; Ledger chooses bounded routes and Lanes read account values. */
     static RiskAccountQuery prepare(TradingCoreRuntime owner, CoreMessage message, long id) {
-        long[] users, keys = null;
-        Iterable<String> instruments;
         String asset = null;
         int limit = 0;
-        if (message.header().messageType() == CoreMessageType.RISK_STATE_QUERY) {
-            var routes = owner.positionUserIndex.riskQueryRoutes(message.header().userId(),
-                    RuntimeOperationalQueryService.MAX_INDEX_SCAN);
-            users = routes.userIds();
-            instruments = routes.instrumentIds();
-        } else {
+        if (message.header().messageType() != CoreMessageType.RISK_STATE_QUERY) {
             var query = CoreAdlQueryCodec.decodeQuery(message.payloadUnsafe());
             asset = AssetBalance.normalizeAsset(query.asset());
             limit = query.limit();
-            var routes = owner.adlPositionIndex.positions(asset, RuntimeOperationalQueryService.MAX_INDEX_SCAN);
-            users = new long[routes.size()];
-            keys = new long[routes.size()];
-            TreeSet<String> selectedInstruments = new TreeSet<>();
-            int index = 0;
-            for (var route : routes) {
-                users[index] = route.userId();
-                var instrument = owner.runtimeState.instrument(route.instrumentId());
-                keys[index++] = owner.identities.findPositionKeyValue(route.userId(), instrument, route.positionSide());
-                selectedInstruments.add(route.instrumentId());
-            }
-            instruments = selectedInstruments;
         }
-        long mask = 0;
-        for (long user : users) mask |= owner.runtimeState.topology().accountLaneMask(user);
-        var markets = RuntimeRiskQueryService.MarketInputs.capture(owner.runtimeState, owner.identities, instruments);
-        return new RiskAccountQuery(owner, id, owner.appliedCommandCount, mask, users, keys, asset, limit, markets);
+        return new RiskAccountQuery(owner, id, owner.appliedCommandCount, message.header().userId(), asset, limit,
+                RuntimeRiskQueryService.MarketInputs.capture(owner.runtimeState, owner.identities, owner.runtimeState.instrumentIdsForQuery()));
     }
 
-    private RiskAccountQuery(TradingCoreRuntime owner, long id, long commandCount, long laneMask,
-            long[] users, long[] positionKeys, String asset, int limit, RuntimeRiskQueryService.MarketInputs markets) {
-        this.owner = owner; this.id = id; this.commandCount = commandCount; this.laneMask = laneMask;
-        this.users = users; this.positionKeys = positionKeys; this.asset = asset; this.limit = limit; this.markets = markets;
+    private RiskAccountQuery(TradingCoreRuntime owner, long id, long commandCount,
+            long requestedUser, String asset, int limit, RuntimeRiskQueryService.MarketInputs markets) {
+        this.owner = owner; this.id = id; this.commandCount = commandCount; this.requestedUser = requestedUser;
+        this.asset = asset; this.limit = limit; this.markets = markets;
         int count = owner.runtimeState.topology().accountLaneCount();
         failures = new CoreResultCode[count];
         riskResults = new ArrayList<>(count); adlResults = new ArrayList<>(count);
@@ -72,6 +54,47 @@ final class RiskAccountQuery implements SettlementLaneWorker.Command, Function<A
             riskResults.add(new ArrayList<>());
             adlResults.add(new ArrayList<>(Math.min(limit, 64)));
         }
+    }
+
+    @Override public void apply(com.surprising.aeron.service.state.TreasuryRuntime ignored) {
+        try {
+            if (asset == null) {
+                var routes = owner.positionUserIndex.riskQueryRoutes(requestedUser,
+                        RuntimeOperationalQueryService.MAX_INDEX_SCAN);
+                users = routes.userIds();
+            } else {
+                var routes = owner.adlPositionIndex.positions(asset, RuntimeOperationalQueryService.MAX_INDEX_SCAN);
+                users = new long[routes.size()]; positionKeys = new long[routes.size()];
+                int index = 0;
+                for (var route : routes) {
+                    users[index] = route.userId();
+                    positionKeys[index++] = com.surprising.aeron.service.state.RuntimeIdentityRegistry.positionIdentityKey(
+                            route.userId(), route.instrumentId(), route.positionSide());
+                }
+            }
+            for (long user : users) laneMask |= owner.runtimeState.topology().accountLaneMask(user);
+            if (laneMask == 0) {
+                owner.bookQueries.completedBookQueries.put(id, OrderBookQueryService.CompletedBookQuery.encoded(completedResponse()));
+                ledgerResponded = true;
+            }
+        } catch (RuntimeOperationalQueryService.QueryTooLargeException failure) {
+            failRoutes(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
+        } catch (IllegalArgumentException failure) { failRoutes(CoreResultCode.INVALID_COMMAND); }
+        var runtime = owner.runtimeState;
+        routesReady = true;
+        runtime.signalOwnerCompletion();
+    }
+
+    private void failRoutes(CoreResultCode code) {
+        ledgerResponded = true;
+        owner.bookQueries.completedBookQueries.put(id, OrderBookQueryService.CompletedBookQuery.encoded(rejected(code)));
+    }
+
+    /** Owner publishes routes after Ledger readiness; market inputs retain query-entry versions. */
+    boolean dispatchAccounts() {
+        if (!routesReady) return false;
+        if (ledgerResponded) return true;
+        return owner.runtimeState.dispatchAccountQuery(laneMask, this);
     }
 
     @Override public void execute(AccountLaneState lane) {

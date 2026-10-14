@@ -59,6 +59,13 @@ class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
         }
     }
 
+    boolean hasPreparedAt(int slot) { return slot < prepared.length && prepared[slot] != null; }
+
+    @SuppressWarnings("unchecked") I preparedAt(int slot) {
+        Object value = slot < prepared.length ? prepared[slot] : null;
+        return value == DELETED_INDEX ? null : (I) value;
+    }
+
     void drainIndexedTo(Consumer<V, I> consumer) {
         forEachIndexed(consumer);
         clear();

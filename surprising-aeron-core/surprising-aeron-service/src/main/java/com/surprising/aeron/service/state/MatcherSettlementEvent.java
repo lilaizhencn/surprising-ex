@@ -1232,6 +1232,7 @@ public final class MatcherSettlementEvent implements
             treasury.appendFundsDelta(funds);
             funds.requireConserved(false);
             funds.clear();
+            runtime.applyLedgerSettlementPositions(changes, requiredLaneMask, identities);
             treasury.clearChangedKeys();
             TradingRuntimeState completionRuntime = runtime;
             // Owner may immediately move the buffers and recycle this slot. Capture the wake

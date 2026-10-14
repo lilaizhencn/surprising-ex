@@ -11,6 +11,12 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public final class AdlPositionIndex {
+    private Thread businessOwner;
+    void bindBusinessOwner(Thread thread) { businessOwner = thread; }
+    private void assertBusinessOwner() {
+        if (businessOwner != null && businessOwner != Thread.currentThread())
+            throw new IllegalStateException("position business index requires SystemLedgerLane");
+    }
 
     private final Map<String, LongHashSet> keysByAsset = new HashMap<>();
     private final LongObjectHashMap<IndexedPosition> positions = new LongObjectHashMap<>();
@@ -19,7 +25,8 @@ public final class AdlPositionIndex {
         rebuild(state, identities);
     }
 
-    public int count() { return positions.size(); }
+    private volatile int positionCount;
+    public int count() { return positionCount; }
 
     public Set<PositionKey> positions(String asset) {
         return positions(asset, Integer.MAX_VALUE);
@@ -27,6 +34,7 @@ public final class AdlPositionIndex {
 
     /** 在物化查询路由之前检查扫描边界，不为超限请求复制整个候选集合。 */
     public Set<PositionKey> positions(String asset, int maximumPositions) {
+        assertBusinessOwner();
         LongHashSet values = keysByAsset.get(AssetBalance.normalizeAsset(asset));
         if (values == null || values.isEmpty()) return Set.of();
         if (values.size() > maximumPositions)
@@ -47,6 +55,7 @@ public final class AdlPositionIndex {
     }
 
     IndexedPosition value(long positionKey) {
+        assertBusinessOwner();
         return positions.get(positionKey);
     }
 
@@ -59,6 +68,7 @@ public final class AdlPositionIndex {
     /** The index owns its entries; no command-owned after-image is retained after application. */
     void apply(long positionKey, IndexedPosition previous, long userId, String instrumentId, String asset,
             com.surprising.aeron.protocol.CorePositionSide side, long quantity) {
+        assertBusinessOwner();
         if (positions.get(positionKey) != previous)
             throw new IllegalStateException("ADL position index differs from shared position index");
         boolean previousActive = previous != null && previous.signedQuantitySteps() != 0;
@@ -69,12 +79,12 @@ public final class AdlPositionIndex {
         if (membershipChanged && previousActive) remove(previous, positionKey);
         if (membershipChanged && currentActive)
             keysByAsset.computeIfAbsent(asset, ignored -> new LongHashSet()).add(positionKey);
-        if (userId == 0) positions.remove(positionKey);
+        if (userId == 0) { positions.remove(positionKey); positionCount = positions.size(); }
         else {
             IndexedPosition entry = previous;
             if (entry == null) {
                 entry = new IndexedPosition();
-                positions.put(positionKey, entry);
+                positions.put(positionKey, entry); positionCount = positions.size();
             }
             entry.userId = userId; entry.instrumentId = instrumentId; entry.asset = asset;
             entry.positionSide = side; entry.signedQuantitySteps = quantity;
@@ -94,8 +104,9 @@ public final class AdlPositionIndex {
     }
 
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
+        assertBusinessOwner();
         keysByAsset.clear();
-        positions.clear();
+        positions.clear(); positionCount = 0;
         state.users().values().forEach(user -> user.positions().forEach((key, position) -> {
             long positionKey = identities.positionKey(user.userId(), key);
             apply(positionKey, null, user.userId(), position.instrumentId(), position.marginAsset(),

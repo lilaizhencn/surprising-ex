@@ -21,6 +21,54 @@ class CoreFinancialLedgerProductionTest {
     private long sequence;
 
     @Test
+    void liquidationBatchReadsRiskInputsInsideItsUncommittedLedgerScope() throws Exception {
+        try (var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+            register(core, core.productLine);
+            applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)), TIME);
+            balance(core, 1, "USDT", 110); balance(core, 2, "USDT", 10_000);
+            trade(core, core.productLine, 10, 100);
+            for (int item = 0; item < 48; item++) applied(core, CoreMessageType.PLACE_ORDER, 2,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(1000 + item, "1", CoreOrderSide.BUY,
+                            80, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                            CoreTimeInForce.GTC, false, "nested-risk-" + item)), TIME);
+            applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 1, 2, TIME)), TIME);
+            CoreLiquidationWorkView work;
+            for (int attempt = 0; ; attempt++) {
+                assertThat(attempt).isLessThan(32);
+                var request = new CoreMessage(CoreMessageHeader.query(CoreMessageType.LIQUIDATION_WORK_QUERY,
+                        new UUID(949, attempt + 1), core.productLine, CommandSource.OPERATIONS, 949, attempt + 1, 0, TIME, 0),
+                        CoreLiquidationWorkCodec.encodeQuery(core.productLine, CoreLiquidationWorkView.Purpose.EXECUTION, 0, 1000, 1_048_576));
+                var response = CoreTestCompletion.querySynchronously(core, request);
+                assertThat(response.status()).isEqualTo(ResponseStatus.OK);
+                work = CoreLiquidationWorkCodec.decodeWork(response.data());
+                if (!work.actions().isEmpty()) break;
+                applied(core, CoreMessageType.CONTINUE_RISK_SCAN, 0,
+                        TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(8)), TIME);
+            }
+            assertThat(work.riskScanPending()).isTrue();
+            assertThat(work.actions()).hasSize(1);
+            var action = work.actions().getFirst();
+            var expected = expected(core.tradingState(), (runtime, identities) ->
+                    RuntimeDerivativeLiquidationProcessor.applyExecutionRuntime(new ExecuteLiquidationCommand(
+                            action.liquidationId(), action.triggerPriceSequence(), action.markPriceTicks(), 0),
+                            List.of(), runtime, identities));
+            var response = appliedWithGuard(core, CoreMessageType.EXECUTE_LIQUIDATION_BATCH, 0,
+                    TradingCommandCodec.encodeExecuteLiquidationBatch(ExecuteLiquidationBatchCommand.fromWork(work, 0, 8)), TIME);
+            var result = CoreLiquidationBatchResultCodec.decode(response.data());
+            assertThat(result.appliedActions()).isEqualTo(1);
+            assertThat(result.riskScanContinuedUsers()).isPositive();
+            assertThat(CoreTestCompletion.userState(core, 1).positions()).allSatisfy(position ->
+                    assertThat(position.signedQuantitySteps()).isZero());
+            var actual = core.tradingState();
+            assertThat(actual.users()).isEqualTo(expected.users());
+            assertThat(actual.treasuryState()).isEqualTo(expected.treasuryState());
+            core.assertClusterCallbackComplete();
+        }
+    }
+
+    @Test
     void liquidationInsuranceAndAdlCommitOriginalLedgerInProductionOrder() throws Exception {
         var line = ProductLine.LINEAR_PERPETUAL;
         try (var core = new TradingCoreRuntime(line)) {

@@ -11,13 +11,13 @@ import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreRiskStatus;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.instrument.api.math.PerpetualContractMath;
-import java.util.NavigableSet;
+import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
 /** 仅在账户所属 Lane 执行估值及已有清算状态更新，不分配全局编号或修改全局扫描游标。 */
 final class RiskLaneProcessor {
     private RiskLaneProcessor() { }
     static Page scan(TradingRuntimeState runtime, RiskScanRuntime initial,
-                                        PositionUserIndex positionUsers, Iterable<Long> indexedUserIds,
+                                        LongArrayList indexedUserIds,
                                         CoreInstrument changedInstrument, MarkPriceRuntime changedMark,
                                         int settleAssetId, int changedSymbolId, int maxWork,
                                         RuntimeIdentityRegistry identities, long expectedUserRevision, long expectedMarketRevision) {
@@ -27,8 +27,7 @@ final class RiskLaneProcessor {
         long userRevision = expectedUserRevision;
         while (remaining > 0) {
             UserRuntime user = progress.riskUserId() == 0
-                    ? nextUser(runtime, positionUsers, indexedUserIds, changedInstrument.instrumentId(),
-                    progress.accountLaneId(), progress.lastUserId())
+                    ? nextUser(runtime, indexedUserIds, progress.lastUserId())
                     : runtime.user(progress.riskUserId());
             if (user == null) {
                 return new Page(progress, maxWork - remaining, true, creations, userRevision);
@@ -51,8 +50,7 @@ final class RiskLaneProcessor {
             }
         }
         boolean complete = progress.riskUserId() == 0
-                && nextUser(runtime, positionUsers, indexedUserIds, changedInstrument.instrumentId(),
-                progress.accountLaneId(), progress.lastUserId()) == null;
+                && nextUser(runtime, indexedUserIds, progress.lastUserId()) == null;
         return new Page(progress, maxWork - remaining, complete, creations, userRevision);
     }
 
@@ -282,23 +280,10 @@ final class RiskLaneProcessor {
         }
     }
 
-    private static UserRuntime nextUser(TradingRuntimeState runtime, PositionUserIndex positionUsers,
-                                        Iterable<Long> indexedUserIds, String instrumentId,
-                                        int accountLaneId, long cursor) {
-        if (positionUsers != null) {
-            long next = positionUsers.higherUserId(instrumentId, accountLaneId, cursor);
-            return next == 0 ? null : runtime.user(next);
-        }
-        if (indexedUserIds instanceof NavigableSet<?>) {
-            @SuppressWarnings("unchecked")
-            NavigableSet<Long> orderedUsers = (NavigableSet<Long>) indexedUserIds;
-            Long next = orderedUsers.higher(cursor);
-            while (next != null && runtime.topology().accountLaneId(next) != accountLaneId) {
-                next = orderedUsers.higher(next);
-            }
-            return next == null ? null : runtime.user(next);
-        }
-        throw new IllegalStateException("risk user index must be ordered for online scanning");
+    private static UserRuntime nextUser(TradingRuntimeState runtime, LongArrayList users, long cursor) {
+        int slot = users.binarySearch(cursor);
+        slot = slot >= 0 ? slot + 1 : -slot - 1;
+        return slot == users.size() ? null : runtime.user(users.get(slot));
     }
 
     private static long nextPositionKey(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,

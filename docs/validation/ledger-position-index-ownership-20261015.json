@@ -1,0 +1,81 @@
+{
+  "date": "2026-10-15",
+  "type": "必要功能验证；不是压测或性能验收记录",
+  "base_head": "6f53f3ec84907836547680e217d7b1272a80a3d0",
+  "scope": "OI/ADL/持仓用户业务索引的Ledger写入、所有活跃读取入口和命令槽准入输入交接",
+  "state_ownership": [
+    "原有三项业务索引在Ledger激活后绑定其线程；Owner与Account Lane直接读写会被拒绝，停止Ledger后才允许冷路径重建或物化",
+    "正常成交在账户完成且资金守恒验证后，于原TreasurySettlement消费冻结持仓事实，再发布Ledger完成标记",
+    "财务控制及仅持仓控制在已有验证/关闭边界发布索引；复用primitive前像数组直至提交或拒绝，回滚不保存可变ADL单元引用",
+    "强平批次内部的风险输入在同一财务scope内读取，保留同一索引前像；禁止排在尚未请求关闭的队首后面"
+  ],
+  "admission": [
+    "普通下单/改单复用原准入槽作Ledger输入请求；Account worker检查accountReady，等待输入时仍能消费先前成交",
+    "顺序批量、触发及预检消费已有槽中的OI primitive，不由Owner计算待提交持仓汇总",
+    "有效比例限额通过原控制命令边界排空先前前缀，再按Ledger顺序读取；固定限额普通交易保留原并行窗口；没有阻塞等待Owner线程"
+  ],
+  "readers": [
+    "资金费和生命周期在其已有continuation中从Ledger取得用户页，不跨线程消费索引迭代器",
+    "风险每Lane只带至多本片工作预算加1的primitive用户ID页；Lane不引用全局业务索引",
+    "Core内部OI/维护分页在Ledger编码，风险/ADL在Ledger选路后由Account Lane编码；Owner不为这两项查询接管账户",
+    "风险查询入口只在明确查询边界冻结市场配置版本，保留延迟查询前后配置变动隔离；交易热路径无该复制"
+  ],
+  "new_state_reason": [
+    "PositionUndo是未提交控制scope的最小回滚前值，数组达到用量后复用；既有ADL条目会原位改变，故不能保存其对象引用",
+    "命令槽inputReady/queued标记说明Ledger输入及Account消费的生命周期；没有逐单新事件、worker或账户镜像",
+    "风险primitive用户页是一次有界跨线程输入，保留容量供后续命令复用",
+    "pendingRiskQueries仅Owner登记未完成查询的路由交接，账户数据与索引单元均不存入"
+  ],
+  "functional_validation": {
+    "unique_cases": 110,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "per_class": {
+      "com.surprising.aeron.service.state.CorePerpetualFinancialMatrixTest": 4,
+      "com.surprising.aeron.service.state.LedgerPositionPublicationTest": 4,
+      "com.surprising.aeron.service.state.SettlementLaneWorkerTest": 12,
+      "com.surprising.aeron.service.state.CoreDeliveryOptionFinancialMatrixTest": 11,
+      "com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest": 19,
+      "com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest": 5,
+      "com.surprising.aeron.service.orchestration.CorePreflightLaneQueryTest": 9,
+      "com.surprising.aeron.service.state.AdmissionSettlementFactTest": 3,
+      "com.surprising.aeron.service.state.ParallelRiskScanTest": 5,
+      "com.surprising.aeron.service.state.TriggerOrderIndexTest": 5,
+      "com.surprising.aeron.service.state.ReplacementAdmissionEventTest": 1,
+      "com.surprising.aeron.service.state.PlaceLaneDecisionTest": 1,
+      "com.surprising.aeron.service.orchestration.AsyncFundingCommandTest": 2,
+      "com.surprising.aeron.service.orchestration.CoreActiveLaneIngressTest": 6,
+      "com.surprising.aeron.service.orchestration.CoreAdmissionInputOwnershipTest": 10,
+      "com.surprising.aeron.service.orchestration.CoreRiskLaneQueryTest": 10,
+      "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest": 3
+    },
+    "successful_logs": [
+      "controls-second.log",
+      "readers-final.log",
+      "paging-final.log",
+      "nested-verified.log"
+    ],
+    "selection_policy": "explicit method whitelists with manual helper review; selected trigger helpers pass recovery=false; no Snapshot codecs or Cluster snapshot/restore/recovery scenarios",
+    "excluded": "full suite, Cluster Snapshot/recovery, wallet, real-node load/capacity acceptance"
+  },
+  "corrected_failures": [
+    "initial lifecycle expected-mask over-registration; now actual users registered after Ledger route receipt",
+    "new readiness fixture attempted main publication after all admission slots were occupied; now publishes prior work before filling input mailbox and always releases its gate before close",
+    "new fixture used wrong fully-qualified state types and wrong result accessor; compiler rejected before execution",
+    "new financial fixture compared per-subledger FundsStateHash across liquidation; replaced with exact cold users/Treasury oracle",
+    "new index query routing still requested an account handoff; removed for OI/maintenance and verified by preparation assertion"
+  ],
+  "benchmarks_updated": [
+    "InProcessTradingAllocationBenchmark增加FIXED/PROPORTIONAL输入模式，1matcher/4Account Lanes/window256",
+    "PositionIndexAllocationBenchmark直接覆盖同一个Ledger持仓索引应用方法",
+    "已删除失去生产调用方的Owner待提交OI扫描及对应旧基准/测试，用Ledger前缀、回滚和线程边界用例替代"
+  ],
+  "not_claimed": [
+    "Owner完整业务职责和所有收据/输出编码已迁完",
+    "所有路径零分配或完整Core小于100 B/业务项",
+    "真实单节点吞吐/长稳通过",
+    "Cluster快照/恢复通过"
+  ],
+  "numerical_profiling_policy": "分配诊断计划和原始数据仅在工作区外本轮artifact目录，不提交压测记录"
+}

@@ -28,6 +28,8 @@ public final class SettlementLaneWorker implements AutoCloseable {
 
     public interface Command {
         void execute(AccountLaneState lane);
+        /** An already-queued command may still be waiting for its ordered Ledger input. */
+        default boolean accountReady() { return true; }
     }
 
     /** 首次失败发布到所属 runtime；正常任务不触碰共享故障状态。 */
@@ -272,12 +274,14 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     int admissionIndex = (int) admissionNext & admissionIndexMask;
                     Command admission = admissionCommands[admissionIndex];
                     if (admission == null) throw new IllegalStateException("admission publication gap");
-                    admissionCommands[admissionIndex] = null;
-                    admissionNext++;
-                    admissionConsumerSequence.value = admissionNext;
-                    execute(admission);
-                    idleSpins = 0;
-                    continue;
+                    if (ready(admission)) {
+                        admissionCommands[admissionIndex] = null;
+                        admissionNext++;
+                        admissionConsumerSequence.value = admissionNext;
+                        execute(admission);
+                        idleSpins = 0;
+                        continue;
+                    }
                 }
                 // Handoff is an ownership barrier.  Do not consume a Matcher ring after the
                 // worker has released its Lane to the Owner and before the Owner resumes it.
@@ -365,7 +369,11 @@ public final class SettlementLaneWorker implements AutoCloseable {
         try {
             // A producer either observes parked=true, or its earlier volatile publication is
             // visible in these rechecks. Admission must be checked even behind an unready fact.
-            if (!running || admissionConsumerSequence.value < admissionProducerSequence.value) return;
+            if (!running) return;
+            if (admissionConsumerSequence.value < admissionProducerSequence.value) {
+                Command admission = admissionCommands[(int) admissionConsumerSequence.value & admissionIndexMask];
+                if (admission != null && ready(admission)) return;
+            }
             if (waitingForHandoff) {
                 if (resumedHandoff >= completedHandoff) return;
             } else {
@@ -470,7 +478,13 @@ public final class SettlementLaneWorker implements AutoCloseable {
     }
 
     private static boolean ready(Object command) {
-        return !(command instanceof MatcherSettlementEvent event) || event.readyForLane();
+        return command instanceof MatcherSettlementEvent event ? event.readyForLane()
+                : ((Command) command).accountReady();
+    }
+
+    public boolean hasAdmissionCapacity() {
+        rethrowFailure();
+        return running && admissionProducerSequence.value - admissionConsumerSequence.value < admissionCommands.length;
     }
 
     private MatcherSettlementEvent peekMatcherSettlement() {

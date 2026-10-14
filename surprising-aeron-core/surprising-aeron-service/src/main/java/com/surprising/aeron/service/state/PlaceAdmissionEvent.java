@@ -9,12 +9,14 @@ import java.util.concurrent.locks.LockSupport;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 
 /** One-way place admission owned and completed by exactly one Account Lane. */
-public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements SettlementLaneWorker.Command {
+public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements SettlementLaneWorker.Command, SystemLedgerLane.Entry {
     private long coreSequence;
     private long timestamp, position;
     private long userId;
     private UUID commandId;
     private long openInterestSteps;
+    private volatile boolean inputReady = true;
+    private boolean inputQueued;
     private TreasuryRuntime.SettlementStatus settlementStatus;
     private long preparedClientKey;
     /** Queued admissions are retained through terminal command retirement because they own resolved input. */
@@ -62,12 +64,12 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     }
 
     PlaceAdmissionEvent prepare(long coreSequence, long userId, UUID commandId,
-                                long openInterestSteps, TreasuryRuntime.SettlementStatus settlementStatus,
+                                TreasuryRuntime.SettlementStatus settlementStatus,
                                 int assetId, int laneId, boolean matcherWaitRequired,
                                 TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                 long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0
-                || intent() == null || commandId == null || openInterestSteps < 0
+                || intent() == null || commandId == null
                 || symbolId() < 0 || assetId < 0 || settlementStatus == null
                 || laneId < 0 || runtime == null) {
             throw new IllegalArgumentException("invalid place admission event");
@@ -77,7 +79,9 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         this.position = position;
         this.userId = userId;
         this.commandId = commandId;
-        this.openInterestSteps = openInterestSteps;
+        openInterestSteps = 0;
+        inputQueued = false;
+        inputReady = !instrument().usesOpenInterestForUserLimit() || reduceOnly();
         this.settlementStatus = settlementStatus;
         this.preparedClientKey = 0;
         this.identities = identities;
@@ -116,12 +120,16 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         reservedAmount = 0;
         matcherWaitRequired = false;
         matcherConsumed = false;
+        inputQueued = false;
+        inputReady = true;
+        openInterestSteps = 0;
         // The next owner-side resolution can reject before prepare() runs.
         // A pooled event must already be discardable at that point.
         completed = false;
     }
 
     public void execute(AccountLaneState lane) {
+        if (!inputReady) throw new IllegalStateException("Ledger admission input is incomplete");
         long startedNanos = System.nanoTime();
         if (lane.laneId() != runtime.topology().accountLaneId(userId)) {
             throw new IllegalStateException("place admission reached the wrong Account Lane");
@@ -180,8 +188,21 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         return completed;
     }
 
+    @Override public boolean accountReady() { return inputReady; }
+    void inputQueued() { inputQueued = true; }
+    boolean inputPending() { return inputQueued && !inputReady; }
+
+    @Override public void apply(TreasuryRuntime ignored) {
+        openInterestSteps = runtime.ledgerAdmissionOpenInterest(instrumentId());
+        TradingRuntimeState completion = runtime;
+        int targetLane = laneId;
+        inputReady = true;
+        completion.signalAccountLane(targetLane);
+    }
+
     /** Abort a prepared event that was never submitted to a Lane. */
     void discard() {
+        if (inputPending()) throw new IllegalStateException("Ledger still owns place admission input");
         if (complete()) throw new IllegalStateException("completed place admission must be collected");
         clearResolvedOrder();
         commandId = null;
@@ -200,6 +221,9 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         coreSequence = 0;
         userId = 0;
         laneId = 0;
+        inputQueued = false;
+        inputReady = true;
+        openInterestSteps = 0;
         matcherWaitRequired = false;
         matcherConsumed = false;
         completed = false;

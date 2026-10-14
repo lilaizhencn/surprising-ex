@@ -13,7 +13,7 @@ import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import java.util.List;
 
 /** The owning Account Lane validates a replacement; the command retains its resolved input through terminal. */
-public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implements SettlementLaneWorker.Command {
+public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implements SettlementLaneWorker.Command, SystemLedgerLane.Entry {
     private long sequence, userId, originalOrderId, openInterestSteps;
     private int matcherShard;
     private AmendOrderCommand amend;
@@ -25,23 +25,29 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
     private List<Long> closeCapacityCancellations = List.of();
     private RuntimeException rejection;
     private volatile boolean completed;
+    private volatile boolean inputReady = true;
+    private boolean inputQueued;
 
     ReplacementAdmissionEvent prepare(long sequence, long userId, long originalOrderId,
             AmendOrderCommand amend, ReplaceOrderCommand replace,
-            CoreOrderDecisionResolver.Context decision, long openInterestSteps, int matcherShard,
+            CoreOrderDecisionResolver.Context decision, int matcherShard,
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         if (sequence <= 0 || userId <= 0 || originalOrderId <= 0 || (amend == null) == (replace == null)
-                || decision == null || openInterestSteps < 0 || runtime == null || identities == null
+                || decision == null || runtime == null || identities == null
                 || matcherShard < 0 || matcherShard >= runtime.topology().matchingEngineCount())
             throw new IllegalArgumentException("invalid replacement admission");
         this.sequence = sequence; this.userId = userId; this.originalOrderId = originalOrderId;
         this.amend = amend; this.replace = replace; this.decision = decision;
-        this.matcherShard = matcherShard; this.openInterestSteps = openInterestSteps; this.runtime = runtime; this.identities = identities;
+        this.matcherShard = matcherShard; openInterestSteps = 0; this.runtime = runtime; this.identities = identities;
+        inputReady = !decision.instrument().usesOpenInterestForUserLimit()
+                || replace != null && replace.replacement().reduceOnly();
+        inputQueued = false;
         admission = null; rejection = null; completed = false; closeCapacityCancellations = List.of();
         return this;
     }
 
     @Override public void execute(AccountLaneState lane) {
+        if (!inputReady) throw new IllegalStateException("Ledger replacement input is incomplete");
         TradingRuntimeState completionRuntime = runtime;
         int completionShard = matcherShard;
         int completionLane = lane.laneId();
@@ -104,6 +110,17 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
     }
 
     public boolean complete() { return completed; }
+    @Override public boolean accountReady() { return inputReady; }
+    void inputQueued() { inputQueued = true; }
+    boolean inputPending() { return inputQueued && !inputReady; }
+
+    @Override public void apply(TreasuryRuntime ignored) {
+        openInterestSteps = runtime.ledgerAdmissionOpenInterest(decision.instrument().instrumentId());
+        TradingRuntimeState completion = runtime;
+        int laneId = completion.topology().accountLaneId(userId);
+        inputReady = true;
+        completion.signalAccountLane(laneId);
+    }
     public long coreSequence() { return sequence; }
     public RuntimeException rejection() { requireComplete(); return rejection; }
     public ResolvedMatchingAdmission admission() { requireComplete(); return admission; }
@@ -111,9 +128,15 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
 
     @Override public void clear() {
         requireComplete();
+        discard();
+    }
+
+    void discard() {
+        if (inputPending()) throw new IllegalStateException("Ledger still owns replacement input");
         clearResolvedOrder();
         amend = null; replace = null; decision = null; runtime = null; identities = null;
         admission = null; rejection = null; closeCapacityCancellations = List.of(); completed = false;
+        inputQueued = false; inputReady = true; openInterestSteps = 0;
     }
 
     private void requireComplete() {

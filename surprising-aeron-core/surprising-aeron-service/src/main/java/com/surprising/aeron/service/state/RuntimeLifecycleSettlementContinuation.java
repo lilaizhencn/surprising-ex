@@ -72,16 +72,13 @@ public final class RuntimeLifecycleSettlementContinuation {
             moreOrders = !page.complete();
         }
         int assetId = identities.assetId(instrument.settleAsset());
-        RuntimeLifecycleSettlement.UserPage userPage = ordersComplete || !moreOrders
-                ? RuntimeLifecycleSettlement.selectUsers(indexedUserIds, runtime, accountLaneId, command.cursorUserId(), command.maxUsers())
-                : new RuntimeLifecycleSettlement.UserPage(List.of(), accountLaneId, 0, true);
         if (reuse == null || !reuse.reusable()) {
             return new SettlementWork(command, chunkCommandId, runtime,
                     instrument, kernel, symbolId, assetId, previousProgress, selectedOrders,
-                    moreOrders, userPage);
+                    moreOrders, indexedUserIds);
         }
         return reuse.reset(command, chunkCommandId, runtime, instrument, kernel, symbolId, assetId,
-                previousProgress, selectedOrders, moreOrders, userPage);
+                previousProgress, selectedOrders, moreOrders, indexedUserIds);
     }
 
     /** Bounded asynchronous settlement continuation. Instances are owner-confined. */
@@ -99,6 +96,10 @@ public final class RuntimeLifecycleSettlementContinuation {
         private List<CancellationOrder> selectedOrders;
         private boolean moreOrders;
         private List<Long> selectedUserIds;
+        private Iterable<Long> indexedUserIds;
+        private volatile boolean usersReady = true;
+        private boolean usersQueued;
+        private final SystemLedgerLane.Entry userInput = ignored -> selectAccountUsers();
         private final LongArrayList[] usersByLane;
         private final ArrayList<CancellationOrder>[] ordersByLane;
         private boolean usersComplete;
@@ -118,13 +119,13 @@ public final class RuntimeLifecycleSettlementContinuation {
                 TradingRuntimeState runtime, CoreInstrument instrument,
                 ProductTradingRules kernel, int symbolId, int assetId,
                 TreasuryRuntime.LifecycleProgressRuntime previousProgress,
-                List<CancellationOrder> selectedOrders, boolean moreOrders, RuntimeLifecycleSettlement.UserPage userPage) {
+                List<CancellationOrder> selectedOrders, boolean moreOrders, Iterable<Long> indexedUserIds) {
             int laneCount = runtime.topology().accountLaneCount();
             this.usersByLane = new LongArrayList[laneCount];
             for (int lane = 0; lane < laneCount; lane++) usersByLane[lane] = new LongArrayList();
             this.ordersByLane = newLaneOrderGroups(laneCount);
             reset(command, chunkCommandId, runtime, instrument, kernel, symbolId, assetId,
-                    previousProgress, selectedOrders, moreOrders, userPage);
+                    previousProgress, selectedOrders, moreOrders, indexedUserIds);
         }
 
         @SuppressWarnings("unchecked")
@@ -151,7 +152,8 @@ public final class RuntimeLifecycleSettlementContinuation {
                 TradingRuntimeState runtime, CoreInstrument instrument,
                 ProductTradingRules kernel, int symbolId, int assetId,
                 TreasuryRuntime.LifecycleProgressRuntime previousProgress,
-                List<CancellationOrder> selectedOrders, boolean moreOrders, RuntimeLifecycleSettlement.UserPage userPage) {
+                List<CancellationOrder> selectedOrders, boolean moreOrders, Iterable<Long> indexedUserIds) {
+            if (usersQueued && !usersReady) throw new IllegalStateException("Ledger still owns settlement routes");
             initializeLedgerCommand(runtime);
             if (usersByLane.length != runtime.topology().accountLaneCount()) {
                 throw new IllegalStateException("settlement continuation lane topology changed");
@@ -159,14 +161,12 @@ public final class RuntimeLifecycleSettlementContinuation {
             this.command = command; this.chunkCommandId = chunkCommandId; this.runtime = runtime;
             this.instrument = instrument; this.kernel = kernel; this.symbolId = symbolId; this.assetId = assetId;
             this.previousProgress = previousProgress; this.selectedOrders = selectedOrders;
-            this.moreOrders = moreOrders; this.selectedUserIds = userPage.userIds();
-            this.usersComplete = userPage.complete();
+            this.moreOrders = moreOrders; this.selectedUserIds = List.of();
+            this.indexedUserIds = indexedUserIds;
+            usersReady = usersQueued = false;
+            this.usersComplete = false;
             for (LongArrayList users : usersByLane) users.clear();
             for (ArrayList<CancellationOrder> orders : ordersByLane) if (orders != null) orders.clear();
-            for (int index = 0; index < selectedUserIds.size(); index++) {
-                long userId = selectedUserIds.get(index);
-                usersByLane[runtime.topology().accountLaneId(userId)].add(userId);
-            }
             for (CancellationOrder order : selectedOrders) {
                 if (order == null) continue;
                 int lane = runtime.topology().accountLaneId(order.userId());
@@ -188,15 +188,37 @@ public final class RuntimeLifecycleSettlementContinuation {
             this.result = null;
             this.dispatchedPhase = null;
             this.phase = selectedOrders.isEmpty() ? Phase.PREPARE : Phase.CANCEL;
+            if (!runtime.systemLedgerStarted()) selectAccountUsers();
             return this;
         }
 
+        private void selectAccountUsers() {
+            RuntimeLifecycleSettlement.UserPage page = moreOrders
+                    ? new RuntimeLifecycleSettlement.UserPage(List.of(), 0, 0, true)
+                    : RuntimeLifecycleSettlement.selectUsers(indexedUserIds, runtime, 0, command.cursorUserId(), command.maxUsers());
+            selectedUserIds = page.userIds(); usersComplete = page.complete();
+            for (long user : selectedUserIds) usersByLane[runtime.topology().accountLaneId(user)].add(user);
+            userLaneMask = RuntimeLifecycleSettlement.laneMask(usersByLane);
+            indexedUserIds = null;
+            TradingRuntimeState completion = runtime;
+            usersReady = true;
+            completion.signalOwnerCompletion();
+        }
+
+        /** IDs of the same bounded page consumed by Account Lanes; no second index traversal. */
+        public List<Long> selectedUsers() {
+            if (!usersReady) throw new IllegalStateException("Ledger settlement routes are incomplete");
+            return selectedUserIds;
+        }
+
         private SettlementWork resetCompleted(TradingRuntimeState runtime, CoreSettlementProgressView result) {
+            if (usersQueued && !usersReady) throw new IllegalStateException("Ledger still owns settlement routes");
             initializeLedgerCommand(runtime);
             this.command = null; this.chunkCommandId = null; this.runtime = runtime;
             this.instrument = null; this.kernel = null; this.symbolId = this.assetId = 0;
             this.previousProgress = null; this.selectedOrders = List.of(); this.selectedUserIds = List.of();
             this.moreOrders = false; this.usersComplete = true; this.orderLaneMask = this.userLaneMask = 0;
+            indexedUserIds = null; usersReady = true; usersQueued = false;
             for (LongArrayList users : usersByLane) users.clear();
             for (ArrayList<CancellationOrder> orders : ordersByLane) if (orders != null) orders.clear();
             if (prepared != null) Arrays.fill(prepared, null);
@@ -208,6 +230,8 @@ public final class RuntimeLifecycleSettlementContinuation {
 
         /** Drop command/page references before the fixed command slot is recycled. */
         public void clearReferences() {
+            if (usersQueued && !usersReady) return;
+            indexedUserIds = null;
             command = null; chunkCommandId = null; instrument = null; kernel = null;
             previousProgress = null; selectedOrders = List.of(); selectedUserIds = List.of();
             result = null; phase = Phase.DONE;
@@ -225,6 +249,10 @@ public final class RuntimeLifecycleSettlementContinuation {
         public boolean poll() {
             runtime.assertOwner();
             if (phase == Phase.DONE) return true;
+            if (!usersReady) {
+                if (!usersQueued) usersQueued = runtime.dispatchLedgerQuery(userInput);
+                if (!usersReady) return false;
+            }
             switch (phase) {
                 case CANCEL -> {
                     dispatchedPhase = Phase.CANCEL;

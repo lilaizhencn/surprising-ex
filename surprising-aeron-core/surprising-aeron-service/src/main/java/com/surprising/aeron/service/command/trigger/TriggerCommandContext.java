@@ -3,7 +3,6 @@ package com.surprising.aeron.service.command.trigger;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.service.command.CommandResultContext;
-import com.surprising.aeron.service.state.OpenInterestIndex;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.index.TriggerOrderIndex;
@@ -26,7 +25,6 @@ public interface TriggerCommandContext extends CommandResultContext {
 
     TriggerOrderIndex triggerOrderIndex();
 
-    OpenInterestIndex openInterestIndex();
 
     long appliedCommandCount();
 

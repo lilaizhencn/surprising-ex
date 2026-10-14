@@ -9,6 +9,55 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class SettlementLaneWorkerTest {
     @ParameterizedTest
+    @ValueSource(strings = {"BLOCKING", "BUSY_SPIN", "YIELDING"})
+    void pendingLedgerInputKeepsAdmissionFifoWithoutPreventingOlderSettlement(String strategy) throws Exception {
+        String key = "surprising.aeron.settlement-wait-strategy", previous = System.getProperty(key);
+        System.setProperty(key, strategy);
+        var inputReady = new java.util.concurrent.atomic.AtomicBoolean();
+        var executed = new AtomicInteger();
+        var completed = new CountDownLatch(8);
+        var release = new CountDownLatch(1);
+        try (var worker = new SettlementLaneWorker("ledger-input", new AccountLaneState(0, 8), 8)) {
+            try {
+                var entered = new CountDownLatch(1);
+                worker.submit(lane -> {
+                    entered.countDown();
+                    try { if (!release.await(2, TimeUnit.SECONDS)) throw new AssertionError("release timeout"); }
+                    catch (InterruptedException failure) { throw new AssertionError(failure); }
+                });
+                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+                var olderSettlement = new CountDownLatch(1);
+                worker.submit(lane -> olderSettlement.countDown());
+                worker.submitAdmission(new SettlementLaneWorker.Command() {
+                    @Override public boolean accountReady() { return inputReady.get(); }
+                    @Override public void execute(AccountLaneState lane) {
+                        if (executed.getAndIncrement() != 0) throw new AssertionError("input admission reordered");
+                        completed.countDown();
+                    }
+                });
+                for (int item = 1; item < 8; item++) {
+                    int expected = item;
+                    worker.submitAdmission(lane -> {
+                        if (executed.getAndIncrement() != expected) throw new AssertionError("later admission passed waiting input");
+                        completed.countDown();
+                    });
+                }
+                assertThat(worker.hasAdmissionCapacity()).isFalse();
+                assertThatThrownBy(() -> worker.submitAdmission(lane -> {})).isInstanceOf(RejectedExecutionException.class);
+                release.countDown();
+                assertThat(olderSettlement.await(2, TimeUnit.SECONDS)).isTrue();
+                assertThat(executed.get()).isZero();
+                inputReady.set(true);
+                worker.signalWork();
+                assertThat(completed.await(2, TimeUnit.SECONDS)).isTrue();
+                worker.assertHealthy();
+            } finally { inputReady.set(true); release.countDown(); worker.signalWork(); }
+        } finally {
+            if (previous == null) System.clearProperty(key); else System.setProperty(key, previous);
+        }
+    }
+
+    @ParameterizedTest
     @ValueSource(ints = {0, 256})
     void admissionPublishedAfterParkingAnnouncementKeepsMakingProgress(int spins) throws Exception {
         String strategyKey = "surprising.aeron.settlement-wait-strategy";

@@ -98,12 +98,10 @@ public final class RuntimePerpetualFundingProcessor {
             }
         }
 
-        UserPage userPage = selectUsers(indexedUserIds, command.cursorUserId(),
-                chunked ? command.maxUsers() : Integer.MAX_VALUE);
         if (reuse == null || !reuse.reusable()) return new FundingWork(command, chunkCommandId, runtime, instrument, symbolId,
-                settleAssetId, fundingMark, fundingPriceSequence, userPage);
+                settleAssetId, fundingMark, fundingPriceSequence, indexedUserIds);
         return reuse.reset(command, chunkCommandId, runtime, instrument, symbolId, settleAssetId,
-                fundingMark, fundingPriceSequence, userPage);
+                fundingMark, fundingPriceSequence, indexedUserIds);
     }
 
     /** 一页资金费：账户由各Lane计算，原Treasury收付与进度由账本线程提交。 */
@@ -119,6 +117,10 @@ public final class RuntimePerpetualFundingProcessor {
         private long fundingMark, fundingPriceSequence;
         /** 原有全局用户分页及其 Lane 参与范围。 */
         private UserPage userPage;
+        private Iterable<Long> indexedUserIds;
+        private volatile boolean usersReady;
+        private boolean usersQueued;
+        private final SystemLedgerLane.Entry userInput = ignored -> selectAccountUsers();
         private ImmutableLongArrayList selectedUserIds;
         private boolean chunked;
         private long laneMask;
@@ -133,19 +135,21 @@ public final class RuntimePerpetualFundingProcessor {
 
         private FundingWork(ApplyFundingCommand command, UUID chunkCommandId, TradingRuntimeState runtime,
                 CoreInstrument instrument, int symbolId, int settleAssetId, long fundingMark,
-                long fundingPriceSequence, UserPage userPage) {
+                long fundingPriceSequence, Iterable<Long> indexedUserIds) {
             reset(command, chunkCommandId, runtime, instrument, symbolId, settleAssetId,
-                    fundingMark, fundingPriceSequence, userPage);
+                    fundingMark, fundingPriceSequence, indexedUserIds);
         }
 
         private FundingWork reset(ApplyFundingCommand command, UUID chunkCommandId,
                 TradingRuntimeState runtime, CoreInstrument instrument, int symbolId,
-                int settleAssetId, long fundingMark, long fundingPriceSequence, UserPage userPage) {
+                int settleAssetId, long fundingMark, long fundingPriceSequence, Iterable<Long> indexedUserIds) {
+            if (usersQueued && !usersReady) throw new IllegalStateException("Ledger still owns funding routes");
             initializeLedgerCommand(runtime);
             this.command = command; this.chunkCommandId = chunkCommandId; this.runtime = runtime;
             this.instrument = instrument; this.symbolId = symbolId; this.settleAssetId = settleAssetId;
             this.fundingMark = fundingMark; this.fundingPriceSequence = fundingPriceSequence;
-            this.userPage = userPage; this.selectedUserIds = userPage.userIds();
+            this.indexedUserIds = indexedUserIds; userPage = null; selectedUserIds = null;
+            usersReady = usersQueued = false;
             this.chunked = chunkCommandId != null;
             if (usersByLane == null || usersByLane.length != runtime.topology().accountLaneCount()) {
                 usersByLane = new LongArrayList[runtime.topology().accountLaneCount()];
@@ -154,18 +158,25 @@ public final class RuntimePerpetualFundingProcessor {
             } else {
                 for (LongArrayList users : usersByLane) users.clear();
             }
-            for (int index = 0; index < selectedUserIds.size(); index++) {
-                long userId = selectedUserIds.valueAt(index);
-                usersByLane[runtime.topology().accountLaneId(userId)].add(userId);
-            }
-            long mask = 0;
-            for (int lane = 0; lane < usersByLane.length; lane++) {
-                if (!usersByLane[lane].isEmpty()) mask |= 1L << lane;
-            }
-            laneMask = mask; started = accountsCollected = ledgerDispatched = false; result = null;
+            laneMask = 0; started = accountsCollected = ledgerDispatched = false; result = null;
             java.util.Arrays.fill(laneResults, null);
             payments.clear(); treasuryDelta.clear();
+            if (!runtime.systemLedgerStarted()) selectAccountUsers();
             return this;
+        }
+
+        private void selectAccountUsers() {
+            userPage = selectUsers(indexedUserIds, command.cursorUserId(), chunked ? command.maxUsers() : Integer.MAX_VALUE);
+            selectedUserIds = userPage.userIds();
+            for (int index = 0; index < selectedUserIds.size(); index++) {
+                long user = selectedUserIds.valueAt(index);
+                int lane = runtime.topology().accountLaneId(user);
+                usersByLane[lane].add(user); laneMask |= 1L << lane;
+            }
+            indexedUserIds = null;
+            TradingRuntimeState completion = runtime;
+            usersReady = true;
+            completion.signalOwnerCompletion();
         }
 
         private LaneFundingResult applyLane(int laneId) {
@@ -176,6 +187,10 @@ public final class RuntimePerpetualFundingProcessor {
         public boolean poll() {
             runtime.assertOwner();
             if (result != null) return true;
+            if (!usersReady) {
+                if (!usersQueued) usersQueued = runtime.dispatchLedgerQuery(userInput);
+                if (!usersReady) return false;
+            }
             if (!started) {
                 started = true;
                 if (laneMask != 0) runtime.dispatchControlLanes(laneMask, this::applyLane);

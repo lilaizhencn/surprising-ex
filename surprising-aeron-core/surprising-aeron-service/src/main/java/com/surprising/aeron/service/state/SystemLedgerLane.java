@@ -59,6 +59,7 @@ public final class SystemLedgerLane implements AutoCloseable {
 
     void signalWork() { if (parked) LockSupport.unpark(thread); }
 
+    Thread thread() { return thread; }
     int depth() { return entries.size(); }
     boolean hasCapacity() { return running && failure == null && entries.size() < entries.capacity(); }
     boolean parked() { return parked; }

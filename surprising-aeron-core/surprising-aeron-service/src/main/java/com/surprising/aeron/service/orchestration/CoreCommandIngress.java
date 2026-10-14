@@ -88,6 +88,7 @@ final class CoreCommandIngress {
         if (type == CoreMessageType.TREASURY_STATE_QUERY || type == CoreMessageType.FUNDING_PROGRESS_QUERY
                 || type == CoreMessageType.SETTLEMENT_PROGRESS_QUERY) return false;
         if (type == CoreMessageType.LIQUIDATION_WORK_QUERY || type == CoreMessageType.PENDING_TRANSFER_QUERY) return false;
+        if (type == CoreMessageType.OPEN_INTEREST_QUERY || type == CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY) return false;
         return true;
     }
 
@@ -150,6 +151,9 @@ final class CoreCommandIngress {
             switch (message.header().messageType()) {
                 case PLACE_ORDER -> {
                     var command = decoded.placeOrder();
+                    var instrument = runtime.runtimeState.instrument(command.instrumentId());
+                    if (instrument != null && instrument.usesOpenInterestForUserLimit() && !command.reduceOnly())
+                        return rememberPipelineRoute(window, false);
                     window.route(decoded.matcherShard(runtime.matchingAdapter, command.instrumentId()),
                             runtime.runtimeState.topology().accountLaneMask(user));
                     return rememberPipelineRoute(window, true);
@@ -166,6 +170,9 @@ final class CoreCommandIngress {
                 case PLACE_ORDER_BATCH -> {
                     int shard = -1;
                     for (var order : decoded.placeOrderBatch().orders()) {
+                        var instrument = runtime.runtimeState.instrument(order.instrumentId());
+                        if (instrument != null && instrument.usesOpenInterestForUserLimit() && !order.reduceOnly())
+                            return rememberPipelineRoute(window, false);
                         int current = decoded.matcherShard(runtime.matchingAdapter, order.instrumentId());
                         if (shard >= 0 && current != shard) return rememberPipelineRoute(window, false);
                         if (shard < 0) {

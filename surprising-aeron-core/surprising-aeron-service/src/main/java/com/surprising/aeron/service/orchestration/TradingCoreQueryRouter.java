@@ -61,16 +61,7 @@ final class TradingCoreQueryRouter {
                 var query = com.surprising.aeron.protocol.CoreMaintenanceCodec.decodeQuery(message.payloadUnsafe());
                 var instrument = runtime.runtimeState.instrument(query.instrumentId());
                 if (instrument == null) return runtime.rejected(CoreResultCode.ENTITY_NOT_FOUND);
-                var users = new java.util.ArrayList<Long>(query.limit());
-                boolean more = false;
-                for (long userId : runtime.positionUserIndex.usersAfter(query.instrumentId(), query.afterUserId())) {
-                    if (users.size() == query.limit()) { more = true; break; }
-                    users.add(userId);
-                }
-                return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
-                        com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
-                                new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(
-                                        instrument.maintenance(), users, more)));
+                return runtime.bookQueries.beginPositionIndexQuery(message, query, instrument.maintenance());
             } catch (IllegalArgumentException | java.nio.BufferUnderflowException exception) {
                 return runtime.rejected(CoreResultCode.INVALID_COMMAND);
             }
@@ -170,16 +161,7 @@ final class TradingCoreQueryRouter {
         }
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.OPEN_INTEREST_QUERY) {
-            if (runtime.openInterestIndex.totals().size()
-                    > com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.MAX_QUERY_ENTITIES) {
-                return runtime.rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
-            }
-            var views = runtime.openInterestIndex.totals().entrySet().stream()
-                    .map(entry -> new com.surprising.aeron.protocol.CoreOpenInterestView(
-                            entry.getKey(), entry.getValue().longQuantity(), entry.getValue().shortQuantity()))
-                    .toList();
-            return new CoreResponse(ResponseStatus.OK, runtime.appliedCommandCount,
-                    com.surprising.aeron.protocol.CoreOpenInterestCodec.encode(views));
+            return runtime.bookQueries.beginPositionIndexQuery(message, null, null);
         }
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.CANCEL_ALL_AFTER_QUERY) {

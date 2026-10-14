@@ -9,10 +9,14 @@ import java.util.NavigableMap;
 import java.util.TreeMap;
 
 public final class OpenInterestIndex {
+    private Thread businessOwner;
+    void bindBusinessOwner(Thread thread) { businessOwner = thread; }
+    private void assertBusinessOwner() {
+        if (businessOwner != null && businessOwner != Thread.currentThread())
+            throw new IllegalStateException("position business index requires SystemLedgerLane");
+    }
 
     private final Map<String, MutableTotals> totals = new HashMap<>();
-    /** Owner-only scratch over completed Lane changes; never retains account state after the calculation. */
-    private final PendingPositions pendingPositions = new PendingPositions();
 
     public OpenInterestIndex(TradingCoreState state) {
         rebuild(state);
@@ -23,6 +27,7 @@ public final class OpenInterestIndex {
     }
 
     public NavigableMap<String, Totals> totals() {
+        assertBusinessOwner();
         TreeMap<String, Totals> snapshot = new TreeMap<>();
         totals.forEach((instrumentId, value) -> {
             if (value.longQuantity != 0 || value.shortQuantity != 0)
@@ -32,79 +37,33 @@ public final class OpenInterestIndex {
     }
 
     public long openInterestSteps(String instrumentId) {
+        assertBusinessOwner();
         MutableTotals value = totals.get(OrderReservation.requireInstrumentId(instrumentId));
         return value == null ? 0 : Math.max(value.longQuantity, value.shortQuantity);
     }
 
     public long longQuantity(String instrumentId) {
+        assertBusinessOwner();
         MutableTotals value = totals.get(OrderReservation.requireInstrumentId(instrumentId));
         return value == null ? 0 : value.longQuantity;
     }
 
     public long longQuantityNormalized(String instrumentId) {
+        assertBusinessOwner();
         MutableTotals value = totals.get(instrumentId);
         return value == null ? 0 : value.longQuantity;
     }
 
     public long shortQuantity(String instrumentId) {
+        assertBusinessOwner();
         MutableTotals value = totals.get(OrderReservation.requireInstrumentId(instrumentId));
         return value == null ? 0 : value.shortQuantity;
     }
 
     public long shortQuantityNormalized(String instrumentId) {
+        assertBusinessOwner();
         MutableTotals value = totals.get(instrumentId);
         return value == null ? 0 : value.shortQuantity;
-    }
-
-    /** Includes sequential batch fills which have completed on Lanes but are not yet journaled. */
-    public long pendingOpenInterestSteps(String instrumentId, TradingRuntimeState runtime,
-            AdlPositionIndex committedPositions, RuntimeIdentityRegistry identities) {
-        runtime.assertOwner();
-        var pending = pendingPositions;
-        if (pending.instrumentId != null) throw new IllegalStateException("nested pending open interest calculation");
-        pending.instrumentId = instrumentId;
-        pending.committedPositions = committedPositions;
-        pending.identities = identities;
-        pending.longQuantity = longQuantityNormalized(instrumentId);
-        pending.shortQuantity = shortQuantityNormalized(instrumentId);
-        try {
-            // The Owner owns the adopted immutable after-images. No live Account Lane table
-            // or temporary position index value is needed to calculate this pending prefix.
-            runtime.changedPositions.forEachIndexed(pending);
-            if (pending.longQuantity < 0 || pending.shortQuantity < 0)
-                throw new IllegalStateException("pending open interest is negative");
-            return Math.max(pending.longQuantity, pending.shortQuantity);
-        } finally {
-            pending.instrumentId = null;
-            pending.committedPositions = null;
-            pending.identities = null;
-        }
-    }
-
-    private static final class PendingPositions
-            implements RuntimeIndexedChangeBuffer.Consumer<PositionRuntime, RuntimePositionIndexValue> {
-        private String instrumentId;
-        private AdlPositionIndex committedPositions;
-        private RuntimeIdentityRegistry identities;
-        private long longQuantity, shortQuantity;
-
-        @Override public void accept(long key, PositionRuntime published, boolean hasPrepared,
-                RuntimePositionIndexValue prepared) {
-            var previous = committedPositions.value(key);
-            // Synchronous control changes use immutable publication values in the same buffer.
-            String currentSymbol = hasPrepared ? prepared == null ? null : prepared.instrumentId()
-                    : published == null ? null : identities.instrumentId(published.symbolId());
-            long currentQuantity = hasPrepared ? prepared == null ? 0 : prepared.signedQuantitySteps()
-                    : published == null ? 0 : published.signedQuantitySteps();
-            if (previous != null && instrumentId.equals(previous.instrumentId())) {
-                longQuantity = Math.subtractExact(longQuantity, longQuantity(previous.signedQuantitySteps()));
-                shortQuantity = Math.subtractExact(shortQuantity, shortQuantity(previous.signedQuantitySteps()));
-            }
-            if (instrumentId.equals(currentSymbol)) {
-                longQuantity = Math.addExact(longQuantity, longQuantity(currentQuantity));
-                shortQuantity = Math.addExact(shortQuantity, shortQuantity(currentQuantity));
-            }
-        }
     }
 
     void apply(RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {
@@ -113,6 +72,7 @@ public final class OpenInterestIndex {
     }
 
     void applyQuantities(String previousSymbol, long previousQuantity, String currentSymbol, long currentQuantity) {
+        assertBusinessOwner();
         if (previousSymbol != null && previousSymbol.equals(currentSymbol)) {
             adjust(currentSymbol, longQuantity(currentQuantity) - longQuantity(previousQuantity),
                     shortQuantity(currentQuantity) - shortQuantity(previousQuantity));
@@ -123,11 +83,13 @@ public final class OpenInterestIndex {
     }
 
     public void rebuild(TradingCoreState state) {
+        assertBusinessOwner();
         totals.clear();
         state.users().values().forEach(user -> user.positions().values().forEach(this::add));
     }
 
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
+        assertBusinessOwner();
         totals.clear();
         state.users().values().forEach(user -> user.positions().forEach((key, position) -> {
             RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(user.userId(), position);
@@ -173,11 +135,12 @@ public final class OpenInterestIndex {
             totals.put(instrumentId, new MutableTotals(longDelta, shortDelta));
             return;
         }
-        current.longQuantity = Math.addExact(current.longQuantity, longDelta);
-        current.shortQuantity = Math.addExact(current.shortQuantity, shortDelta);
-        if (current.longQuantity < 0 || current.shortQuantity < 0) {
+        long longs = Math.addExact(current.longQuantity, longDelta);
+        long shorts = Math.addExact(current.shortQuantity, shortDelta);
+        if (longs < 0 || shorts < 0) {
             throw new IllegalStateException("open interest index is negative for instrumentId=" + instrumentId);
         }
+        current.longQuantity = longs; current.shortQuantity = shorts;
         // Retain one cell per encountered registered symbol; zero rows stay absent in query output.
     }
 

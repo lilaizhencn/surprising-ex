@@ -47,6 +47,9 @@ final class OrderBookQueryService {
     /** 异步盘口查询失败标记；owner 生成对应终态响应。 */
     final Map<Long, Boolean> failedQueries = new ConcurrentHashMap<>();
 
+    /** Owner-only pending query handoffs; entries disappear once their Account mail is published. */
+    private final Map<Long, RiskAccountQuery> pendingRiskQueries = new java.util.HashMap<>();
+
     /** 外部查询 ID 到内部异步查询 ID 的关联。 */
     final Map<UUID, Long> queryIds = new ConcurrentHashMap<>();
 
@@ -107,11 +110,13 @@ final class OrderBookQueryService {
                 owner.identities.findPositionKeyValue(userId, context.instrument(), command.positionSide()),
                 context.settlementStatus());
         long id = nextAsyncQueryId++;
-        var query = new PreflightQuery(id, owner.appliedCommandCount, userId, command, context, identity,
-                context.instrument().usesOpenInterestForUserLimit() && !command.reduceOnly()
-                        ? owner.openInterestIndex.openInterestSteps(command.instrumentId()) : 0);
+        var query = new PreflightQuery(id, owner.appliedCommandCount, userId, command, context, identity);
         queryIds.put(message.header().commandId(), id);
         try {
+            if (!query.accountReady() && !owner.runtimeState.dispatchLedgerQuery(query)) {
+                queryIds.remove(message.header().commandId());
+                return owner.rejected(CoreResultCode.MATCHING_REJECTED);
+            }
             if (!owner.runtimeState.dispatchAccountQuery(owner.runtimeState.topology().accountLaneMask(userId), query)) {
                 queryIds.remove(message.header().commandId());
                 return owner.rejected(CoreResultCode.MATCHING_REJECTED);
@@ -125,17 +130,30 @@ final class OrderBookQueryService {
 
     /** 单Lane预检仅保留本次已准备输入；完成Lane编码，Owner消费后引用释放。 */
     private final class PreflightQuery implements SettlementLaneWorker.Command,
-            java.util.function.Function<AccountLaneState, CoreResponse> {
-        private final long id, commandCount, userId, openInterest;
+            java.util.function.Function<AccountLaneState, CoreResponse>, SystemLedgerLane.Entry {
+        private final long id, commandCount, userId;
+        private long openInterest;
+        private volatile boolean inputReady;
         private final com.surprising.aeron.protocol.PlaceOrderCommand command;
         private final com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context context;
         private final com.surprising.aeron.service.state.admission.AdmissionIdentity identity;
 
         private PreflightQuery(long id, long commandCount, long userId, com.surprising.aeron.protocol.PlaceOrderCommand command,
                 com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context context,
-                com.surprising.aeron.service.state.admission.AdmissionIdentity identity, long openInterest) {
+                com.surprising.aeron.service.state.admission.AdmissionIdentity identity) {
             this.id = id; this.commandCount = commandCount; this.userId = userId;
-            this.command = command; this.context = context; this.identity = identity; this.openInterest = openInterest;
+            this.command = command; this.context = context; this.identity = identity;
+            inputReady = !context.instrument().usesOpenInterestForUserLimit() || command.reduceOnly();
+        }
+
+        @Override public boolean accountReady() { return inputReady; }
+
+        @Override public void apply(TreasuryRuntime ignored) {
+            openInterest = owner.runtimeState.ledgerAdmissionOpenInterest(command.instrumentId());
+            var runtime = owner.runtimeState;
+            int laneId = runtime.topology().accountLaneId(userId);
+            inputReady = true;
+            runtime.signalAccountLane(laneId);
         }
 
         @Override public void execute(AccountLaneState lane) {
@@ -165,10 +183,9 @@ final class OrderBookQueryService {
     CoreResponse beginRiskAccountQuery(CoreMessage message) {
         long id = nextAsyncQueryId++;
         var query = RiskAccountQuery.prepare(owner, message, id);
-        if (query.laneMask == 0) return query.completedResponse();
         queryIds.put(message.header().commandId(), id);
         try {
-            if (!owner.runtimeState.dispatchAccountQuery(query.laneMask, query)) {
+            if (!owner.runtimeState.dispatchLedgerQuery(query)) {
                 queryIds.remove(message.header().commandId());
                 return owner.rejected(CoreResultCode.MATCHING_REJECTED);
             }
@@ -176,6 +193,7 @@ final class OrderBookQueryService {
             queryIds.remove(message.header().commandId());
             throw failure;
         }
+        pendingRiskQueries.put(id, query);
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount);
     }
 
@@ -602,6 +620,21 @@ final class OrderBookQueryService {
         }
     }
 
+    CoreResponse beginPositionIndexQuery(CoreMessage message,
+            com.surprising.aeron.protocol.CoreMaintenanceCodec.Query page,
+            com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance) {
+        long id = nextAsyncQueryId++;
+        queryIds.put(message.header().commandId(), id);
+        var query = new LedgerQuery(id, owner.appliedCommandCount, message.header().messageType(), page, maintenance);
+        try {
+            if (!owner.runtimeState.dispatchLedgerQuery(query)) {
+                queryIds.remove(message.header().commandId());
+                return owner.rejected(CoreResultCode.MATCHING_REJECTED);
+            }
+        } catch (RuntimeException failure) { queryIds.remove(message.header().commandId()); throw failure; }
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount);
+    }
+
     private CoreResponse beginLedgerQuery(CoreMessage message) {
         long id = nextAsyncQueryId++;
         queryIds.put(message.header().commandId(), id);
@@ -621,15 +654,42 @@ final class OrderBookQueryService {
     private final class LedgerQuery implements SystemLedgerLane.Entry {
         private final long id;
         private final long commandCount;
+        private final CoreMessageType type;
+        private final com.surprising.aeron.protocol.CoreMaintenanceCodec.Query page;
+        private final com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance;
         private LedgerQuery(long id, long commandCount) {
-            this.id = id;
-            this.commandCount = commandCount;
+            this(id, commandCount, CoreMessageType.TREASURY_STATE_QUERY, null, null);
+        }
+        private LedgerQuery(long id, long commandCount, CoreMessageType type,
+                com.surprising.aeron.protocol.CoreMaintenanceCodec.Query page,
+                com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance) {
+            this.id = id; this.commandCount = commandCount; this.type = type;
+            this.page = page; this.maintenance = maintenance;
         }
         @Override public void apply(TreasuryRuntime ledger) {
             CoreResponse response;
             try {
-                var assets = RuntimeOperationalQueryService.treasuryAssets(ledger, owner.identities);
-                byte[] encoded = CoreStateQueryCodec.encodeTreasuryState(assets);
+                byte[] encoded;
+                if (type == CoreMessageType.OPEN_INTEREST_QUERY) {
+                    var totals = owner.openInterestIndex.totals();
+                    if (totals.size() > RuntimeOperationalQueryService.MAX_QUERY_ENTITIES)
+                        throw new RuntimeOperationalQueryService.QueryTooLargeException();
+                    var views = totals.entrySet().stream().map(entry -> new com.surprising.aeron.protocol.CoreOpenInterestView(
+                            entry.getKey(), entry.getValue().longQuantity(), entry.getValue().shortQuantity())).toList();
+                    encoded = com.surprising.aeron.protocol.CoreOpenInterestCodec.encode(views);
+                } else if (type == CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY) {
+                    var users = new ArrayList<Long>(page.limit());
+                    boolean more = false;
+                    long next = owner.positionUserIndex.higherUserId(page.instrumentId(), page.afterUserId());
+                    while (next != 0) {
+                        if (users.size() == page.limit()) { more = true; break; }
+                        users.add(next);
+                        next = owner.positionUserIndex.higherUserId(page.instrumentId(), next);
+                    }
+                    encoded = com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
+                            new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(maintenance, users, more));
+                } else encoded = CoreStateQueryCodec.encodeTreasuryState(
+                        RuntimeOperationalQueryService.treasuryAssets(ledger, owner.identities));
                 response = new CoreResponse(ResponseStatus.OK, commandCount, encoded);
             } catch (RuntimeOperationalQueryService.QueryTooLargeException failure) {
                 response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
@@ -702,9 +762,12 @@ final class OrderBookQueryService {
         failedQueries.clear();
         queryIds.clear();
         deferredLiquidationWorkQuery = null;
+        pendingRiskQueries.clear();
     }
 
     public CoreResponse takeQueryResult(long queryId) {
+        var riskQuery = pendingRiskQueries.get(queryId);
+        if (riskQuery != null && riskQuery.dispatchAccounts()) pendingRiskQueries.remove(queryId);
         if (deferredLiquidationWorkQuery != null && deferredLiquidationWorkQuery.id == queryId
                 && owner.runtimeState.dispatchLedgerQuery(deferredLiquidationWorkQuery)) deferredLiquidationWorkQuery = null;
         if (failedQueries.remove(queryId) != null) {

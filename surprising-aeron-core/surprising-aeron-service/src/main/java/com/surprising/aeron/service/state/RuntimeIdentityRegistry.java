@@ -610,7 +610,7 @@ public final class RuntimeIdentityRegistry {
 
     static long positionIdentityKey(long userId, String name) { return deterministicKey(userId, name); }
 
-    static long positionIdentityKey(long userId, String instrumentId, CorePositionSide side) {
+    public static long positionIdentityKey(long userId, String instrumentId, CorePositionSide side) {
         if (side == CorePositionSide.NET) return deterministicKey(userId, instrumentId);
         long hash = 0xcbf29ce484222325L;
         for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE)

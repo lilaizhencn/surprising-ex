@@ -324,8 +324,7 @@ final class MatchingCommandAdmission {
         owner.resultBuilder.setSingleChangedOrder(originalOrderId);
         return owner.runtimeState.dispatchReplacementAdmission(sequence, message.header().userId(), originalOrderId,
                 amend ? decodedCommand.amendOrder() : null, amend ? null : decodedCommand.replaceOrder(),
-                decision, decision.instrument().usesOpenInterestForUserLimit()
-                        ? owner.openInterestIndex.openInterestSteps(instrumentId) : 0,
+                decision,
                 owner.matchingAdapter.matcherShardId(instrumentId), owner.identities);
     }
 
@@ -429,13 +428,11 @@ final class MatchingCommandAdmission {
         if (orderPhase && !orderChunk.more()) {
             owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(orderChunk.orders());
             owner.resultBuilder.addChangedUsersFromOrders(orderChunk.orders());
-            owner.instrumentSettlement.addSettlementUsersToResult(command.instrumentId(), command.cursorUserId(), command.maxUsers());
         } else if (orderPhase) {
             owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(orderChunk.orders());
             owner.resultBuilder.addChangedUsersFromOrders(orderChunk.orders());
         } else {
             owner.resultBuilder.commandChangedOrderIds = List.of();
-            owner.instrumentSettlement.addSettlementUsersToResult(command.instrumentId(), command.cursorUserId(), command.maxUsers());
         }
     }
 

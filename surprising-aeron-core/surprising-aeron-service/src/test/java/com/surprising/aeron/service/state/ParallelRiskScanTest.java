@@ -20,6 +20,41 @@ class ParallelRiskScanTest {
     private static final LaneTopology TOPOLOGY = LaneTopology.productionDefault();
     private static final String SYMBOL = "1";
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {1, 3, 7})
+    void ledgerUserPagesKeepSmallRiskBudgetsCompleteWithoutReadingIndexesOnLanes(int budget) {
+        var source = source(CoreMarginMode.ISOLATED, 12);
+        var ids = new RuntimeIdentityRegistry();
+        try (var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
+            var index = new PositionUserIndex(source, ids, TOPOLOGY);
+            runtime.bindFactIndexes(new RuntimeFactIndexes(index, new OpenInterestIndex(source, ids),
+                    new com.surprising.aeron.service.state.index.TriggerOrderIndex(source),
+                    new com.surprising.aeron.service.state.index.AlgoOrderIndex(source),
+                    new com.surprising.aeron.service.state.index.LiquidationIndex(source),
+                    new com.surprising.aeron.service.state.index.CancelAllAfterIndex(source),
+                    new com.surprising.aeron.service.state.index.ActiveOrderIndex(source, ids),
+                    new AdlPositionIndex(source, ids)), ids);
+            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
+            runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
+            try {
+                var work = new RiskScanCoordinator(budget, index, runtime, ids);
+                for (int page = 0; runtime.firstRiskIncompleteScan() != null; page++) {
+                    assertThat(page).isLessThan(4096);
+                    if (page != 0) work.resetForCommand(budget);
+                    await(work::poll);
+                    assertThat(work.completedWork()).isBetween(1, budget);
+                }
+            } finally { runtime.exitAsynchronousCommandScope(); }
+            runtime.close();
+            var complete = RuntimeStateMaterializer.materialize(runtime, ids);
+            assertThat(complete.riskState().snapshots()).hasSize(source.users().size());
+            assertThat(complete.riskState().liquidations()).hasSize(source.users().size());
+            assertThat(complete.riskState().nextLiquidationId()).isEqualTo(source.users().size() + 1L);
+            assertThat(complete.users()).isEqualTo(source.users());
+            assertThat(complete.treasuryState()).isEqualTo(source.treasuryState());
+        }
+    }
+
     @Test
     void slowLaneDoesNotPreventOtherLanesFromValuingAndIdsIgnoreCompletionOrder() throws Exception {
         var source = source(CoreMarginMode.ISOLATED, 1);
@@ -44,6 +79,7 @@ class ParallelRiskScanTest {
             while (!work.poll()) {
                 Thread.onSpinWait();
             }
+            runtime.close();
             return RuntimeStateMaterializer.materialize(runtime, ids);
         }
     }
@@ -191,6 +227,7 @@ class ParallelRiskScanTest {
             assertThatThrownBy(() -> run(runtime, ids, index, TOPOLOGY.accountLaneCount()))
                     .isInstanceOf(ArithmeticException.class);
             assertThat(runtime.nextLiquidationId()).isEqualTo(Long.MAX_VALUE - 1);
+            runtime.close();
             assertThat(RuntimeStateMaterializer.materialize(runtime, ids).riskState().liquidations()).isEmpty();
         }
     }

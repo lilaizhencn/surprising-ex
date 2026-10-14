@@ -74,7 +74,7 @@ public class ReplacementAdmissionBenchmark {
     public long admitAmendments() {
         for (int i = 0; i < WINDOW; i++)
             pending[i] = runtime.dispatchReplacementAdmission(++sequence, i + 1, commands[i].originalOrderId(),
-                    commands[i], null, decision, 0, 0, identities);
+                    commands[i], null, decision, 0, identities);
         long reservation = 0;
         for (int i = 0; i < WINDOW; i++) {
             var event = pending[i];
