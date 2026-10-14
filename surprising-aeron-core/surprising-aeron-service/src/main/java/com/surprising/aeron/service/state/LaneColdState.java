@@ -29,6 +29,8 @@ final class LaneColdState {
     final LongObjectHashMap<CoreAlgoOrderState> algoOrders = new LongObjectHashMap<>();
     final LongObjectHashMap<CoreTriggerOrderState> triggerOrders = new LongObjectHashMap<>();
     final LongObjectHashMap<LongHashSet> triggerIdsByUser = new LongObjectHashMap<>();
+    /** Full transfer identity belongs only to its source account Lane. */
+    final LongObjectHashMap<com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers = new LongObjectHashMap<>();
 
     void clear() {
         liquidations.clear();
@@ -39,5 +41,6 @@ final class LaneColdState {
         algoOrders.clear();
         triggerOrders.clear();
         triggerIdsByUser.clear();
+        pendingTransfers.clear();
     }
 }

@@ -13,10 +13,14 @@ import com.surprising.aeron.service.state.RuntimeAccountStateTransitions;
  *
  * @param owner 唯一 owner；仅在其线程访问共享交易状态和提交边界。
  */
-public record BalanceTransferCommands(BalanceCommandContext owner) {
+public final class BalanceTransferCommands {
+    private final BalanceCommandContext owner;
+    private final com.surprising.aeron.service.state.AccountTransferCompletion completion =
+            new com.surprising.aeron.service.state.AccountTransferCompletion();
 
-    public BalanceTransferCommands {
+    public BalanceTransferCommands(BalanceCommandContext owner) {
         if (owner == null) throw new IllegalArgumentException("owner context is required");
+        this.owner = owner;
     }
 
     public void executeAdjustBalance(CoreMessage message, long clusterTimestamp) {
@@ -65,8 +69,17 @@ public record BalanceTransferCommands(BalanceCommandContext owner) {
     }
 
     public void executeCompleteTransfer(CoreMessage message, long clusterTimestamp) {
-        RuntimeAccountStateTransitions.completeTransfer(owner.runtimeState(), message.header().userId(),
-                TradingCommandCodec.decodeCompleteTransfer(message.payloadUnsafe()).transferId());
-        owner.requestCommitPublication();
+        long id = TradingCommandCodec.decodeCompleteTransfer(message.payloadUnsafe()).transferId();
+        if (owner.asynchronousCommands()) {
+            completion.prepare(owner.runtimeState(), message.header().userId(), id);
+            owner.deferControl(() -> {
+                if (!completion.getAsBoolean()) return false;
+                owner.requestCommitPublication();
+                return true;
+            });
+        } else {
+            RuntimeAccountStateTransitions.completeTransfer(owner.runtimeState(), message.header().userId(), id);
+            owner.requestCommitPublication();
+        }
     }
 }

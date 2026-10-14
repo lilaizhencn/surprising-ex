@@ -193,7 +193,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** Lane 0 writes active fee configuration; readers retain immutable versions. */
     private volatile FeePolicyBook feePolicies = FeePolicyBook.EMPTY;
     /** 尚未结束的跨账户资金转账，完成后移除。 */
-    final java.util.NavigableMap<Long, TransferRuntime> pendingTransfers = new TreeMap<>();
+    /** Owner retains transfer identity routing/capacity only; the full command lives in its account Lane. */
+    private final java.util.NavigableMap<Long, Long> pendingTransferUsers = new TreeMap<>();
     /** Owner-only query cursor; not a money fact. Recovery starts a new fair scan from zero. */
     private long pendingTransferQueryAfterId;
     final Object[] laneMutationTasks;
@@ -3127,67 +3128,140 @@ public final class TradingRuntimeState implements AutoCloseable {
         return values;
     }
 
+    public long pendingTransferUser(long transferId) {
+        assertOwner();
+        if (currentLaneCommandScope() != null) throw new IllegalStateException("transfer routing belongs to Owner");
+        return pendingTransferUsers.getOrDefault(transferId, 0L);
+    }
+
     public TransferRuntime pendingTransfer(long transferId) {
         assertOwner();
-        return pendingTransfers.get(transferId);
+        AccountLaneState lane = currentLaneCommandScope();
+        if (lane != null) return lane.cold.pendingTransfers.get(transferId);
+        if (accountLanesStarted) throw new IllegalStateException("active transfer identity must be read on its Account Lane");
+        long userId = pendingTransferUser(transferId);
+        return userId == 0 ? null : accountLanes[topology.accountLaneId(userId)].cold.pendingTransfers.get(transferId);
     }
 
     public Map<Long, TransferRuntime> pendingTransfersSnapshot() {
         assertOwner();
-        return Collections.unmodifiableMap(new TreeMap<>(pendingTransfers));
+        TreeMap<Long, TransferRuntime> values = new TreeMap<>();
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            onLane(laneId, lane -> { lane.cold.pendingTransfers.forEachKeyValue(values::put); return null; });
+        }
+        return Collections.unmodifiableMap(values);
+    }
+
+    /** Per-query routing only, bounded by the protocol page size; no account payload is captured here. */
+    public record PendingTransferRoutes(long[] ids, long[] users, long laneMask) { }
+
+    public PendingTransferRoutes pendingTransferRoutes(int limit) {
+        assertOwner();
+        if (limit <= 0 || limit > com.surprising.aeron.protocol.CorePendingTransferCodec.MAX_RESULTS)
+            throw new IllegalArgumentException("invalid pending transfer limit");
+        var tail = pendingTransferUsers.tailMap(pendingTransferQueryAfterId, false);
+        if (tail.isEmpty()) tail = pendingTransferUsers;
+        // A sub-map size() scans its entire tail; pagination touches at most the requested IDs.
+        int count = Math.min(limit, pendingTransferUsers.size());
+        long[] ids = new long[count], users = new long[count];
+        long laneMask = 0;
+        int index = 0;
+        for (var entry : tail.entrySet()) {
+            if (index == count) break;
+            ids[index] = entry.getKey(); users[index++] = entry.getValue();
+            laneMask |= topology.accountLaneMask(entry.getValue());
+        }
+        if (index != count) {
+            ids = java.util.Arrays.copyOf(ids, index);
+            users = java.util.Arrays.copyOf(users, index);
+        }
+        return new PendingTransferRoutes(ids, users, laneMask);
+    }
+
+    public void completePendingTransferPage(PendingTransferRoutes page) {
+        assertOwner();
+        pendingTransferQueryAfterId = page.ids().length == 0 ? 0 : page.ids()[page.ids().length - 1];
     }
 
     public List<TransferRuntime> pendingTransfers(int limit) {
         assertOwner();
-        if (limit <= 0 || limit > com.surprising.aeron.protocol.CorePendingTransferCodec.MAX_RESULTS) {
-            throw new IllegalArgumentException("invalid pending transfer limit");
-        }
-        var tail = pendingTransfers.tailMap(pendingTransferQueryAfterId, false);
-        if (tail.isEmpty()) tail = pendingTransfers;
-        var page = tail.values().stream().limit(limit).toList();
-        pendingTransferQueryAfterId = page.isEmpty() ? 0 : page.getLast().transferId();
-        return page;
+        if (accountLanesStarted) throw new IllegalStateException("active transfer queries must run on Account Lanes");
+        PendingTransferRoutes page = pendingTransferRoutes(limit);
+        var values = new java.util.ArrayList<TransferRuntime>(page.ids().length);
+        for (long id : page.ids()) values.add(pendingTransfer(id));
+        completePendingTransferPage(page);
+        return List.copyOf(values);
     }
 
     public void restorePendingTransfers(Map<Long, TransferRuntime> restored) {
         assertOwner();
+        if (accountLanesStarted) throw new IllegalStateException("transfer restore requires stopped Account Lanes");
         if (restored == null || restored.size() > MAX_PENDING_TRANSFERS
                 || restored.entrySet().stream().anyMatch(entry -> entry.getKey() == null
-                || entry.getValue() == null || entry.getKey() != entry.getValue().transferId())) {
+                || entry.getValue() == null || entry.getKey() != entry.getValue().transferId()))
             throw new IllegalArgumentException("invalid pending transfer snapshot");
-        }
-        pendingTransfers.clear();
-        pendingTransfers.putAll(restored);
+        pendingTransferUsers.clear();
+        for (AccountLaneState lane : accountLanes) lane.cold.pendingTransfers.clear();
+        restored.forEach((id, transfer) -> {
+            pendingTransferUsers.put(id, transfer.userId());
+            accountLanes[topology.accountLaneId(transfer.userId())].cold.pendingTransfers.put(id, transfer);
+        });
         pendingTransferQueryAfterId = 0;
     }
 
     boolean hasPendingTransferCapacity() {
         assertOwner();
-        return pendingTransfers.size() < MAX_PENDING_TRANSFERS;
+        return pendingTransferUsers.size() < MAX_PENDING_TRANSFERS;
+    }
+
+    void registerPendingTransferRoute(long id, long userId) {
+        assertOwner();
+        if (!hasPendingTransferCapacity() || pendingTransferUsers.putIfAbsent(id, userId) != null)
+            throw new IllegalStateException("completed transfer route was not reserved");
+    }
+
+    void completePendingTransferRoute(long id, long userId) {
+        assertOwner();
+        Long previous = pendingTransferUsers.get(id);
+        if (previous != null && previous != userId) throw new IllegalStateException("transfer route owner changed");
+        pendingTransferUsers.remove(id);
     }
 
     void putPendingTransfer(TransferRuntime transfer) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("pending-transfer state");
-        if (!hasPendingTransferCapacity()) {
-            throw new CoreStateRejectedException("PENDING_TRANSFER_CAPACITY_FULL",
-                    "pending transfer runtime capacity is full");
-        }
         if (transfer == null) throw new IllegalArgumentException("pending transfer is required");
-        if (pendingTransfers.putIfAbsent(transfer.transferId(), transfer) != null) {
-            throw new IllegalArgumentException("pending transfer already exists");
+        AccountLaneState lane = currentLaneCommandScope();
+        if (lane == null) {
+            if (accountLanesStarted) throw new IllegalStateException("active transfer writes require their Account Lane");
+            if (!hasPendingTransferCapacity())
+                throw new CoreStateRejectedException("PENDING_TRANSFER_CAPACITY_FULL", "pending transfer runtime capacity is full");
+            lane = accountLanes[topology.accountLaneId(transfer.userId())];
         }
+        if (lane.laneId() != topology.accountLaneId(transfer.userId()) || lane.cold.pendingTransfers.containsKey(transfer.transferId()))
+            throw new IllegalArgumentException("pending transfer already exists or reached the wrong Lane");
+        lane.cold.pendingTransfers.put(transfer.transferId(), transfer);
+        if (!accountLanesStarted) registerPendingTransferRoute(transfer.transferId(), transfer.userId());
     }
 
     boolean removePendingTransfer(long transferId, long userId) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("pending-transfer state");
-        TransferRuntime current = pendingTransfers.get(transferId);
-        if (current == null) return false;
-        if (current.userId() != userId) {
-            throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer belongs to another user");
+        AccountLaneState lane = currentLaneCommandScope();
+        if (lane == null) {
+            if (accountLanesStarted) throw new IllegalStateException("active transfer completion requires its Account Lane");
+            long routed = pendingTransferUser(transferId);
+            if (routed == 0) return false;
+            if (routed != userId) throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer belongs to another user");
+            lane = accountLanes[topology.accountLaneId(userId)];
         }
-        pendingTransfers.remove(transferId);
+        if (lane.laneId() != topology.accountLaneId(userId)) throw new IllegalStateException("transfer completion crossed Account Lane");
+        TransferRuntime current = lane.cold.pendingTransfers.get(transferId);
+        if (current == null) return false;
+        if (current.userId() != userId) throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer belongs to another user");
+        requireRevisionCapacity();
+        lane.cold.pendingTransfers.remove(transferId);
+        if (!accountLanesStarted) completePendingTransferRoute(transferId, userId);
         return true;
     }
 

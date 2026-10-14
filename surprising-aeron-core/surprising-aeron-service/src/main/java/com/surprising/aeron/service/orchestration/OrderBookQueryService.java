@@ -67,6 +67,32 @@ final class OrderBookQueryService {
         return type == CoreMessageType.RISK_STATE_QUERY || type == CoreMessageType.ADL_CANDIDATE_QUERY;
     }
 
+    CoreResponse beginPendingTransferQuery(CoreMessage message, int limit) {
+        var page = owner.runtimeState.pendingTransferRoutes(limit);
+        if (page.ids().length == 0) {
+            owner.runtimeState.completePendingTransferPage(page);
+            return new CoreResponse(ResponseStatus.OK, owner.appliedCommandCount,
+                    com.surprising.aeron.protocol.CorePendingTransferCodec.encode(List.of()));
+        }
+        long id = nextAsyncQueryId++;
+        var query = new AccountQuery(id, owner.appliedCommandCount, CoreMessageType.PENDING_TRANSFER_QUERY,
+                0, 0, 0, page.laneMask(), null, null);
+        query.transferPage = new PendingTransferQueryPage(page.ids(), page.users(),
+                new com.surprising.aeron.protocol.CorePendingTransferView[page.ids().length]);
+        queryIds.put(message.header().commandId(), id);
+        try {
+            if (!owner.runtimeState.dispatchAccountQuery(page.laneMask(), query)) {
+                queryIds.remove(message.header().commandId());
+                return owner.rejected(CoreResultCode.MATCHING_REJECTED);
+            }
+        } catch (RuntimeException failure) {
+            queryIds.remove(message.header().commandId());
+            throw failure;
+        }
+        owner.runtimeState.completePendingTransferPage(page);
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount);
+    }
+
     CoreResponse beginPreflightQuery(CoreMessage message, long timestamp) {
         var command = TradingCommandCodec.decodePlaceOrder(message.payloadUnsafe());
         long userId = message.header().userId();
@@ -274,6 +300,8 @@ final class OrderBookQueryService {
 
     private record AlgoQueryPage(long[] ids, long[] users, com.surprising.aeron.protocol.CoreAlgoOrderView[] views) { }
 
+    private record PendingTransferQueryPage(long[] ids, long[] users, com.surprising.aeron.protocol.CorePendingTransferView[] views) { }
+
     private static CoreResponse missingAccountResponse(CoreMessageType type, long commandCount) {
         if (type == CoreMessageType.USER_STATE_HASH_QUERY || type == CoreMessageType.ORDER_STATE_HASH_QUERY)
             return new CoreResponse(ResponseStatus.OK, commandCount, CoreStateQueryCodec.encodeStateHash(0));
@@ -291,6 +319,7 @@ final class OrderBookQueryService {
         private final com.surprising.aeron.protocol.CoreOrderStateView[] openOrders;
         private final AlgoQueryPage algoPage;
         private TriggerQueryPage triggerPage;
+        private PendingTransferQueryPage transferPage;
         private final AtomicLong completedLaneMask = new AtomicLong();
 
         private AccountQuery(long id, long commandCount, CoreMessageType type, long userId,
@@ -334,6 +363,16 @@ final class OrderBookQueryService {
         }
 
         @Override public CoreResponse apply(AccountLaneState lane) {
+            if (transferPage != null) {
+                for (int index = 0; index < transferPage.ids.length; index++) {
+                    if (owner.runtimeState.topology().accountLaneId(transferPage.users[index]) != lane.laneId()) continue;
+                    var value = owner.runtimeState.pendingTransfer(transferPage.ids[index]);
+                    if (value == null || value.userId() != transferPage.users[index])
+                        throw new IllegalArgumentException("pending transfer routing differs from Lane identity");
+                    transferPage.views[index] = new com.surprising.aeron.protocol.CorePendingTransferView(value.userId(), value.command());
+                }
+                return null;
+            }
             if (triggerPage != null) {
                 for (int index = 0; index < triggerPage.ids.length; index++) {
                     if (owner.runtimeState.topology().accountLaneId(triggerPage.users[index]) != lane.laneId()) continue;
@@ -386,6 +425,8 @@ final class OrderBookQueryService {
                 if (response != null && (response.resultCode() == CoreResultCode.INVALID_COMMAND
                         || response.resultCode() == CoreResultCode.QUERY_RESPONSE_TOO_LARGE)) return response;
             }
+            if (transferPage != null) return new CoreResponse(ResponseStatus.OK, commandCount,
+                    com.surprising.aeron.protocol.CorePendingTransferCodec.encode(java.util.Arrays.asList(transferPage.views)));
             if (triggerPage != null) {
                 var selected = new ArrayList<com.surprising.aeron.protocol.CoreTriggerOrderStateView>(triggerPage.views.length);
                 for (var view : triggerPage.views) if (view != null) selected.add(view);

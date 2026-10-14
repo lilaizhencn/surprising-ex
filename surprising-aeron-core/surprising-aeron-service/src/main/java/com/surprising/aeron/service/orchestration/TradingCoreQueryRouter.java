@@ -237,6 +237,8 @@ final class TradingCoreQueryRouter {
             try {
                 int limit = com.surprising.aeron.protocol.CorePendingTransferCodec.decodeQuery(
                         message.payloadUnsafe());
+                if (runtime.runtimeState.asynchronousCommands())
+                    return runtime.bookQueries.beginPendingTransferQuery(message, limit);
                 var transfers = runtime.runtimeState.pendingTransfers(limit).stream()
                         .map(value -> new com.surprising.aeron.protocol.CorePendingTransferView(
                                 value.userId(), value.command()))

@@ -140,3 +140,10 @@ Treasury，生产线程启动后非空财务 delta 不能由 Owner 应用。
 `TradingCoreRuntime.dispatchPlaceAdmission` 通过 `CoreOrderDecisionResolver.prepare` 捕获不可变instrument、mark和 `FeePolicyBook` 版本，绑定命令路由。`PlaceAdmissionEvent.execute` 在账户Lane计算价格保护、撮合/预留价格与费率，再做冻结准入；Matcher收到准入完成后才读取这些结果。Owner提前构造结算事件只读已固定的路由身份，该身份不会由Lane重写。`BatchPlaceReservation` 同样把顺序批量项的决策放在Lane。改单、整批下单、触发和预检继续在既有Lane执行，费率输入统一改为配置版本，消除逐单 `CoreFeeRate` 对象。
 
 `FeePolicyCommands` 复用既有控制任务把配置更新交给Lane 0，Owner消费完成通知并发布命令修订。`FeePolicyBook` 是唯一不可变策略配置，优先级在更新时排序；Lane按命令时间选择有效策略，已捕获版本不随后续更新改变。没有逐命令复制策略，也没有新增可变策略镜像或线程。Owner侧的OI、ADL数量、转账与市场/风险控制仍在后续范围，不能据此认定Owner迁移完成。验证见 [下单价格及费率边界](../../docs/validation/lane-price-fee-decisions-20261014.json)。
+
+
+### 划转生命周期与内部查询归属（2026-10-14）
+
+`AccountTransferOut` 把指令交给来源账户Lane，由Lane检查完整划转身份、扣减可用资金并保存 `TransferRuntime`。`AccountTransferCompletion` 在同一Lane移除身份。完整指令仅保存在 `LaneColdState.pendingTransfers`；Owner保留有界的 `transferId → userId` 路由、容量和公平分页游标，收到完成通知后更新路由，不做扣款或完整幂等比较。相同转出可在容量满时重试，已完成身份的再次完成不改变修订。
+
+`PENDING_TRANSFER_QUERY` 是内部划转对账/重试查询：Owner选取至多256个路由ID，`OrderBookQueryService` 复用既有多Lane查询完成位，各Lane原位读取该页身份，最后完成的Lane编码响应。它不申请Owner账户访问权，也不持有长期业务镜像。查询分页只遍历本页ID，避免对131072条尾集合求size。冷初始化与序列化仍使用原划转协议结构，本轮按要求未执行快照/恢复场景。必要验证、入口边界首次失败及修复见 [划转Lane验证](../../docs/validation/lane-transfer-lifecycle-20261014.json)。

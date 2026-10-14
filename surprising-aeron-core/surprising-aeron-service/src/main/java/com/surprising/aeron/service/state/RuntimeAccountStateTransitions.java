@@ -51,32 +51,35 @@ public final class RuntimeAccountStateTransitions {
         TransferRuntime transfer = prepareTransferOut(runtime, userId, command);
         if (transfer == null) return false;
         int assetId = identities.assetId(command.asset());
-        long nextRevision = Math.incrementExact(runtime.revision());
+        runtime.requireRevisionCapacity();
         debitTransferAccount(runtime, userId, assetId, command.amountUnits());
         runtime.putPendingTransfer(transfer);
-        runtime.setMetadata(runtime.productLine(), nextRevision);
+        runtime.incrementCommandRevision();
         return true;
     }
 
     /** Validates transfer identity and idempotency without reading mutable balance state. */
     static TransferRuntime prepareTransferOut(TradingRuntimeState runtime, long userId,
                                               TransferFundsCommand command) {
+        validateTransferSource(runtime, userId, command);
+        TransferRuntime existing = runtime.pendingTransfer(command.transferId());
+        if (existing != null) {
+            if (existing.userId() != userId || !existing.command().equals(command))
+                throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer identity contains different data");
+            return null;
+        }
+        if (!runtime.accountLanesStarted && !runtime.hasPendingTransferCapacity())
+            throw new CoreStateRejectedException("PENDING_TRANSFER_CAPACITY_FULL", "pending transfer runtime capacity is full");
+        return new TransferRuntime(userId, command);
+    }
+
+    static void validateTransferSource(TradingRuntimeState runtime, long userId, TransferFundsCommand command) {
         if (runtime == null || command == null || userId <= 0)
             throw new IllegalArgumentException("invalid runtime transfer out");
         runtime.assertOwner();
         if (userId != command.sourceUserId()) throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer sender mismatch");
         if (runtime.productLine() != command.sourceProductLine())
             throw new CoreStateRejectedException("PRODUCT_LINE_MISMATCH", "transfer source product line mismatch");
-        TransferRuntime transfer = new TransferRuntime(userId, command);
-        TransferRuntime existing = runtime.pendingTransfer(command.transferId());
-        if (existing != null) {
-            if (!existing.equals(transfer))
-                throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer identity contains different data");
-            return null;
-        }
-        if (!runtime.hasPendingTransferCapacity())
-            throw new CoreStateRejectedException("PENDING_TRANSFER_CAPACITY_FULL", "pending transfer runtime capacity is full");
-        return transfer;
     }
 
     /** Single account write for a transfer out; locked balance and other products are not spendable. */

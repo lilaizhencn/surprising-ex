@@ -87,7 +87,7 @@ final class CoreCommandIngress {
         if (type == CoreMessageType.TRIGGER_ORDER_QUERY || type == CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY) return false;
         if (type == CoreMessageType.TREASURY_STATE_QUERY || type == CoreMessageType.FUNDING_PROGRESS_QUERY
                 || type == CoreMessageType.SETTLEMENT_PROGRESS_QUERY) return false;
-        if (type == CoreMessageType.LIQUIDATION_WORK_QUERY) return false;
+        if (type == CoreMessageType.LIQUIDATION_WORK_QUERY || type == CoreMessageType.PENDING_TRANSFER_QUERY) return false;
         return true;
     }
 
