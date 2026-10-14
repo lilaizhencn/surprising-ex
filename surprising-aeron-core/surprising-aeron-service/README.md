@@ -175,3 +175,10 @@ Lane结算通过已有 `RuntimePositionChangeBuffer` 交接冻结after-image，�
 普通Lane准入通过 `OrderRuntime.prepareReservation` 初始化一个resident `ReservationRuntime`。它与权威订单共用现有Owner退休序号、返还队列及有界复用缓存；旧命令尚未退休时不能重新初始化。订单的响应副本及独立值副本不保存该引用，预约没有Owner副本或独立回收线程。再次准入覆盖身份与原语计数，只允许重置带内部orderSlot标记的权威对象；公开值副本不能作为复用目标。
 
 `OrderSlotReuseTest` 验证延迟退休、重复准备、身份重置和独立值稳定；六产品线成交、资金计数、批量改单及Ledger回归见 [预约槽生命周期验证](../../docs/validation/reservation-order-slot-lifetime-20261015.json)。普通值复制不等于Cluster快照场景，本轮未对Cluster快照/恢复做验证。完整Core分配及长稳仍需后续验证。
+
+
+### 内部自动撤单与先前成交（2026-10-15）
+
+`CommandSlot.AdmissionMatchingContinuation` 处理的是下单前“若自己的旧单仍在簿上则撤销”的内部意图。Matcher可能已成交并移除旧单，而所属账户Lane尚未消费该成交；此时原生 `MATCHING_UNKNOWN_ORDER_ID` 代表不再需要撤销，继续提交新单，不追加撤单事实或再次解冻。只有真实撤销成功才记录 `recordDirectPreCancellation`；其他原生失败保留失败处理，公开撤单不存在订单仍拒绝。
+
+`CoreSelfTradePrefixTest` 用受控Maker Lane延迟覆盖六产品线的零、部分及全部成交，并检查资金/持仓及Owner未接管账户。稀有 `surprising.MatcherPrefixFailure` JFR事件记录原生前缀失败码和身份，成功交易路径不创建该事件。必要验证见 [条件自动撤单验证](../../docs/validation/conditional-self-trade-prefix-20261015.json)。

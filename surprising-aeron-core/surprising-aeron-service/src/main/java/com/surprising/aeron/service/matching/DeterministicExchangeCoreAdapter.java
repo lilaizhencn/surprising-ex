@@ -41,6 +41,18 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
+    /** Rare failed native cancellation prefix; never allocated for successful trading. */
+    @jdk.jfr.Name("surprising.MatcherPrefixFailure")
+    @jdk.jfr.Category("Surprising Core")
+    @jdk.jfr.StackTrace(false)
+    static final class MatcherPrefixFailure extends jdk.jfr.Event {
+        private static final jdk.jfr.EventType TYPE = jdk.jfr.EventType.getEventType(MatcherPrefixFailure.class);
+        public long coreSequence, commandIdHigh, commandIdLow, logicalOrderId, canceledOrderId, userId;
+        public int matcherShard, symbolId;
+        public String nativeResultCode;
+    }
+
+
     private SynchronousMatchingEngine[] engines;
     private final InMemorySerializationProcessor serializationProcessor =
             new InMemorySerializationProcessor();
@@ -561,6 +573,19 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int shardId, long coreSequence, java.util.UUID commandId, long logicalOrderId,
             long aeronTimestamp, exchange.core2.core.common.MatcherResult result,
             com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (MatcherPrefixFailure.TYPE.isEnabled()) {
+            var failure = new MatcherPrefixFailure();
+            failure.coreSequence = coreSequence;
+            failure.commandIdHigh = commandId.getMostSignificantBits();
+            failure.commandIdLow = commandId.getLeastSignificantBits();
+            failure.logicalOrderId = logicalOrderId;
+            failure.canceledOrderId = result.orderId();
+            failure.userId = result.uid();
+            failure.matcherShard = shardId;
+            failure.symbolId = result.symbol();
+            failure.nativeResultCode = result.resultCode().name();
+            failure.commit();
+        }
         var retained = target.nativeResultSlot(0);
         retained.capture(result);
         return publishNativeMatcherResult(shardId, coreSequence, commandId, logicalOrderId,

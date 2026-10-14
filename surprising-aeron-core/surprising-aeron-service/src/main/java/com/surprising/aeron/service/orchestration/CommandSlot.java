@@ -931,6 +931,12 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                 var result = owner.matchingAdapter.cancelDirectPrefix(
                         command.header().submittedAtEpochMillis(), command.header().userId(),
                         orderId, place.instrumentId());
+                if (result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.MATCHING_UNKNOWN_ORDER_ID) {
+                    // Lane admission can precede consumption of an older maker fill. This
+                    // internal intent only removes an order if it is still resting; an absent
+                    // order needs neither a cancellation fact nor another account release.
+                    continue;
+                }
                 if (result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
                         || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED) {
                     settlement.recordDirectPreCancellation(orderId);

@@ -32,7 +32,7 @@ public class InProcessTradingAllocationBenchmark {
     private static final int WINDOW = 256, OPERATIONS = 4096;
     private static final long TIME = 1_700_000_000_000L, INITIAL_BALANCE = 1_000_000_000_000L;
     @Param({"1", "20"}) public int batchSize;
-    @Param({"OPEN_ONLY"}) public String streamMode;
+    @Param({"OPEN_ONLY", "REVERSE"}) public String streamMode;
     private final CoreMessageFlyweightDecoder decoder = new CoreMessageFlyweightDecoder();
     private final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
     private final UnsafeBuffer[][] frames = new UnsafeBuffer[2][WINDOW];
