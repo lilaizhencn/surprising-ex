@@ -16,6 +16,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import org.agrona.collections.Long2ObjectHashMap;
+import org.agrona.collections.Long2LongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
@@ -65,7 +66,7 @@ public final class AccountLaneState {
     /** Open position keys stay sorted in primitive storage; scans no longer build a boxed TreeSet. */
     final IntObjectHashMap<LongObjectHashMap<LongArrayList>> positionKeysBySymbolAndUser
             = new IntObjectHashMap<>();
-    final LongObjectHashMap<LongLongHashMap> clientOrderIndex =
+    final LongObjectHashMap<Long2LongHashMap> clientOrderIndex =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final OrderClientKeyIndex clientKeysByOrderId = new OrderClientKeyIndex();
     /** 风险、清算、杠杆、算法单和触发单等低频结构与热状态分离。 */
@@ -99,14 +100,10 @@ public final class AccountLaneState {
         ids.remove(value.triggerOrderId());
         if (ids.isEmpty()) cold.triggerIdsByUser.remove(value.userId());
     }
-    /**
-     * Pending reservations are short lived but can reach the same in-flight
-     * cardinality as the lane's active entities.  The default primitive-map
-     * capacity is too small for the closed-loop benchmark and repeatedly
-     * reallocates while orders churn.  Reuse the lane baseline so normal
-     * admission/settlement cycles stay within one backing table.
-     */
-    final LongLongHashMap pendingReservationSequences = new LongLongHashMap(INITIAL_ENTITY_CAPACITY);
+    // Positive sequences use zero as absent. Back-shift deletion retains the backing table
+    // through repeated admission/settlement churn instead of rebuilding tombstones.
+    final Long2LongHashMap pendingReservationSequences =
+            new Long2LongHashMap(INITIAL_ENTITY_CAPACITY, 0.65f, 0, false);
     private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap(INITIAL_ENTITY_CAPACITY);
     /** One reusable table per asset; completed users are removed, capacity survives ordinary churn. */
     private final IntObjectHashMap<LongLongHashMap> pendingReservedUnitsByAsset = new IntObjectHashMap<>();
@@ -254,7 +251,7 @@ public final class AccountLaneState {
     /** Validate all counters before writing; validation and application share no temporary state object. */
     private void pendingReservationCompletion(long orderId, long coreSequence, boolean apply) {
         assertOwner();
-        long pendingSequence = pendingReservationSequences.getIfAbsent(orderId, 0);
+        long pendingSequence = pendingReservationSequences.get(orderId);
         if (pendingSequence != coreSequence) {
             throw new IllegalStateException("pending reservation sequence mismatch");
         }
@@ -266,7 +263,7 @@ public final class AccountLaneState {
         long previousUnits = pendingReservedUnits(reservation.userId(), reservation.assetId());
         long nextUnits = Math.max(0L, previousUnits - reservation.reservedUnits());
         if (!apply) return;
-        pendingReservationSequences.removeKey(orderId);
+        pendingReservationSequences.remove(orderId);
         if (nextUserCount == 0) pendingReservationCountsByUser.removeKey(reservation.userId());
         else pendingReservationCountsByUser.put(reservation.userId(), nextUserCount);
         setPendingReservedUnits(reservation.userId(), reservation.assetId(), nextUnits);
@@ -301,7 +298,7 @@ public final class AccountLaneState {
 
     long pendingReservationSequence(long orderId) {
         assertOwner();
-        return pendingReservationSequences.getIfAbsent(orderId, 0);
+        return pendingReservationSequences.get(orderId);
     }
 
     void updatePendingReservationInPlace(ReservationRuntime reservation, long previousReservedUnits) {

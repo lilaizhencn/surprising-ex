@@ -59,3 +59,12 @@ JDK 27/G1，1 fork/1 thread，3×1s 预热、5×1s 测量的独立 `-prof gc` �
 `ReplacementAdmissionBenchmark` 新增 LINEAR_PERPETUAL/SPOT 参数，测量实际 Account workers 上的改单只读准入，包含现货撮合前的资金判断。`PendingOpenInterestBenchmark` 测量0/128项已完成不可变持仓变更上的批次OI计算，初始化及市场输入是常驻夹具；这些技术阶段都不代表整链路容量。当前独立gc约152B/永续准入、128B/现货准入，OI计算接近零分配。
 
 `ClusterSequentialBatchBenchmark.proceedsAndAmendOnLane` 使用规范数字 instrumentId，在真实单成员现货节点验证128组交易收入再冻结、改单、撤单及资金核对。SingleShot含初始化/查询并逐请求等待，只作为改动路径功能/JFR诊断，不计持续吞吐。当前永续固定MIXED窗口观测42.15万business/s，但限频导致容量验收无效，正式窗口不持续执行AMEND。整链路JFR约1172B/业务项、DataLoss=0，未达全链路零堆分配，也未做长稳。记录见根 PERFORMANCE_VALIDATION.md 和 [验证JSON](../../docs/validation/batch-amend-lane-admission-20261011.json)。
+
+
+## 同进程交易流水线分配诊断
+
+`InProcessTradingAllocationBenchmark` 用借用协议帧进入真实 `TradingOwnerLoop` 线程，经一个native Matcher、四个配置Account Lane和SystemLedgerLane，最后由真实egress编码交给消费响应的ClientSession夹具。两用户分别买卖同一instrument，实际占用其路由到的两个Lane；全局在途上限256，每次调用连续提交4096条Core消息并排空。每条业务订单都使用唯一订单号和客户端单号，避免撞上终态身份保留规则。
+
+默认 `streamMode=OPEN_ONLY`，`batchSize=1/20`；可显式指定 `REVERSE` 验证反向交易，任一非APPLIED项都会终止该轮。结束时用Lane用户查询核对数量、可用加冻结总额和空预约，不执行快照。冻结余额已包含持仓保证金，核对不得再次加保证金。
+
+基准内嵌HotSpot 27所需访问参数、1GiB固定G1和BUSY_SPIN设置。JMH `gc.alloc.rate.norm` 单位为字节/Core消息，除以batchSize才是字节/业务订单。自定义 `surprising.InProcessAllocationInterval` 记录每个预热/测量窗口的终态计数，JFR归因应只选择MEASUREMENT窗口。它不包含实际Aeron网络、consensus、Archive和realtime输出，不能作为真实单节点容量或完整Core分配验收。

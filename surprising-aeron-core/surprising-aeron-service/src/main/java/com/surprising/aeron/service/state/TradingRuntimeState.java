@@ -28,6 +28,7 @@ import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
+import org.agrona.collections.Long2LongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.IntHashSet;
@@ -922,11 +923,15 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     static LongObjectHashMap<LongLongHashMap> copyClientOrderIndex(
-            LongObjectHashMap<LongLongHashMap> index) {
+            LongObjectHashMap<Long2LongHashMap> index) {
         LongObjectHashMap<LongLongHashMap> copy = new LongObjectHashMap<>(index.size());
         // Empty per-user maps are an internal allocation cache, not published state.
         index.forEachKeyValue((userId, values) -> {
-            if (!values.isEmpty()) copy.put(userId, new LongLongHashMap(values));
+            if (!values.isEmpty()) {
+                LongLongHashMap entries = new LongLongHashMap(values.size());
+                values.forEachLong(entries::put);
+                copy.put(userId, entries);
+            }
         });
         return copy;
     }
@@ -3340,7 +3345,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     private static long orderIdByClientValue(AccountLaneState lane, long userId, long clientKey) {
-        LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
+        Long2LongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
         return userClientOrders == null ? 0L : userClientOrders.get(clientKey);
     }
 
@@ -3390,8 +3395,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         accountRollback.captureUserBefore(userId);
         onLane(userId, lane -> {
-            LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
-            if (userClientOrders != null) userClientOrders.forEachKeyValue((clientKey, orderId) -> {
+            Long2LongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
+            if (userClientOrders != null) userClientOrders.forEachLong((clientKey, orderId) -> {
                 removeClientOrderReverse(lane, orderId, clientKey);
             });
             lane.users.remove(userId);
@@ -4110,7 +4115,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 }
                 lane.removeOrder(prune.orderId());
                 if (prune.clientKey() != 0) {
-                    LongLongHashMap clients = lane.clientOrderIndex.get(prune.userId());
+                    Long2LongHashMap clients = lane.clientOrderIndex.get(prune.userId());
                     if (clients != null && clients.containsKey(prune.clientKey())
                             && clients.get(prune.clientKey()) == prune.orderId()) {
                         removeClientOrderIndex(lane, prune.userId(), prune.clientKey());
@@ -4600,7 +4605,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         accountRollback.captureBalanceBefore(userId, assetId);
         if (clientKey != 0) accountRollback.captureClientOrderBefore(userId, clientKey);
         onLane(userId, lane -> {
-            LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
+            Long2LongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
             if (clientKey != 0 && userClientOrders != null && userClientOrders.containsKey(clientKey)) {
                 throw new IllegalArgumentException("runtime client order already exists: " + clientKey);
             }
@@ -4661,7 +4666,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (lane.orders.containsKey(command.orderId())) {
             throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "orderId already exists");
         }
-        LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
+        Long2LongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
         if (clientKey != 0 && userClientOrders != null && userClientOrders.containsKey(clientKey)) {
             throw new CoreStateRejectedException("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
         }
@@ -4809,9 +4814,9 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     static void putClientOrderIndex(AccountLaneState lane, long userId, long clientKey, long orderId) {
-        LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
+        Long2LongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
         if (userClientOrders == null) {
-            userClientOrders = new LongLongHashMap(lane.admissionIndexCapacity);
+            userClientOrders = new Long2LongHashMap(lane.admissionIndexCapacity, 0.65f, 0, false);
             lane.clientOrderIndex.put(userId, userClientOrders);
         }
         // Order IDs are allocated from the positive core sequence space; zero is
@@ -4826,7 +4831,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     static Long removeClientOrderIndex(AccountLaneState lane, long userId, long clientKey) {
-        LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
+        Long2LongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
         if (userClientOrders == null) return null;
         long orderId = userClientOrders.get(clientKey);
         if (orderId == 0) return null;
@@ -4840,9 +4845,9 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     static void removeClientOrdersForOrder(AccountLaneState lane, long userId, long orderId) {
-        LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
+        Long2LongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
         if (userClientOrders != null) {
-            lane.clientKeysByOrderId.forEach(orderId, userClientOrders::removeKey);
+            lane.clientKeysByOrderId.forEach(orderId, userClientOrders::remove);
         }
         lane.clientKeysByOrderId.remove(orderId);
     }

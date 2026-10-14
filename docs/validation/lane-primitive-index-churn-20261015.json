@@ -1,0 +1,71 @@
+{
+  "date": "2026-10-15",
+  "base_commit": "6e51890606754fab3af1ddd5db7b03de144a339d",
+  "scope": "Lane待结算序号与客户端订单正向索引的删除复用；不改变资金语义或状态所有权",
+  "implementation": [
+    "AccountLaneState.pendingReservationSequences 使用既有 Agrona Long2LongHashMap，正序号以0表示缺失，删除原位整理并保留数组。",
+    "Lane独占的clientOrderIndex按用户保存同类primitive map，订单ID仍为正数，客户端键0仍可保存；反向别名索引、身份去重及回滚保持原业务步骤。",
+    "冷序列化出口转回既有LongLongHashMap，维持原出口类型；未执行快照/恢复验证。"
+  ],
+  "validation": {
+    "jdk": "HotSpot 27",
+    "status": "passed",
+    "tests": 22,
+    "suites": [
+      {
+        "name": "com.surprising.aeron.service.state.LaneEntityMembershipTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "com.surprising.aeron.service.state.TradingRuntimeStateTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "com.surprising.aeron.service.state.OrderClientKeyIndexTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "com.surprising.aeron.service.orchestration.CoreActiveLaneIngressTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      }
+    ],
+    "log": "/Users/atomex/Desktop/surprising/performance-artifacts/memory-pipeline-20261015/lane-map-boundaries-verified.log",
+    "sha256": "e37d3475dd05016169276a6c7ac62c78fef34ce276b19381f85eec9e4da2d582",
+    "covered": [
+      "两万余个唯一ID连续插入/删除后底层数组保留、在途记录与资金计数不丢失",
+      "客户端别名改绑、移除、新建后的实际Lane回滚及反向索引恢复",
+      "错误完成/重复完成/溢出拒绝不漂移",
+      "六产品线实际Lane入口与Ledger资金用例"
+    ],
+    "excluded": [
+      "实际Aeron单节点压测",
+      "本轮最终针对性运行中的快照/恢复与wallet",
+      "全Core百字节和长稳验收"
+    ]
+  },
+  "earlier_test_selection_error": {
+    "log": "/Users/atomex/Desktop/surprising/performance-artifacts/memory-pipeline-20261015/lane-map-boundaries.log",
+    "description": "初次误选完整TradingRuntimeStateTest，实际触发快照相关用例，并出现15个旧状态用例失败；未作为通过依据。随后使用明确方法名单验证本次改动。"
+  },
+  "diagnostic_source": "InProcessTradingAllocationBenchmark真实执行借用解码、Owner线程、一个Matcher、四个配置Lane、Ledger及编码；默认固定方向，反向场景可显式指定并在拒单时失败；Aeron网络/Archive/consensus和realtime不在此基准中。",
+  "performance_evidence_policy": "分配诊断和原始记录仅留本地，不提交压测成绩；本次改动不表示完整百字节目标或Owner迁移完成。"
+}
