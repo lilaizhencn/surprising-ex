@@ -250,8 +250,7 @@ public final class MatcherSettlementEvent implements
         prepareTreasuryDeltas(laneMask, true);
         resetCompletions(runtime.topology().accountLaneCount());
         // Direct events expose their completion through the event-owned padded bitset.  Do not
-        // register per-Lane Owner notification expectations; that queue is only needed by the
-        // legacy Owner-dispatched settlement path.
+        // register per-Lane notification expectations used by materialized settlement plans.
     }
 
     /** Owner 在交给 Matcher 前选定撤单业务，Lane 只应用接受的撤单。 */
@@ -292,16 +291,6 @@ public final class MatcherSettlementEvent implements
     int directShard() { return directShard; }
     TradingRuntimeState runtime() { return runtime; }
     public boolean dispatched() { return dispatched; }
-    public void commitFence(long timestamp, long position) {
-        if (!direct || dispatched || timestamp < 0 || position < 0)
-            throw new IllegalStateException("invalid direct settlement commit fence");
-        commitTimestamp = timestamp;
-        commitClusterPosition = position;
-    }
-    void markDispatched() {
-        if (!direct || dispatched) throw new IllegalStateException("direct settlement dispatched twice");
-        dispatched = true;
-    }
     void markLaneQueued(int laneId) {
         if (!direct || !dispatched || laneId < 0 || laneId >= Long.SIZE)
             throw new IllegalStateException("invalid direct settlement Lane queue");
@@ -603,8 +592,8 @@ public final class MatcherSettlementEvent implements
             orders = Math.addExact(orders, batchPlans[index].orderCount());
         }
         // The initial route contains only the taker's Lane. The Matcher discovers maker Lanes
-        // while building the immutable fact, then releases the event to the Owner, which applies
-        // every routed account partition in commit order. The initial Lane remains in the route.
+        // while building the immutable fact, then publishes to each Lane's Matcher mailbox.
+        // Each Lane applies its facts in order. The initial Lane remains in the route.
         if (actualLanes == 0
                 || !expandLaneRoute && (actualLanes & ~routedLaneMask) != 0
                 || expandLaneRoute && (routedLaneMask & ~actualLanes) != 0)
@@ -944,8 +933,6 @@ public final class MatcherSettlementEvent implements
             }
             if (resultTarget != null && changes != null
                     && laneId == runtime.topology().accountLaneId(plan.activeUserId())) {
-                if (direct && hasEventOwnedResult())
-                    resultTarget.matcherResult(directResult());
                 LaneOrderResultTarget.capture(resultTarget, changes.laneDeltas[laneId], identities, lane);
             }
             if (commitSequence != 0) {

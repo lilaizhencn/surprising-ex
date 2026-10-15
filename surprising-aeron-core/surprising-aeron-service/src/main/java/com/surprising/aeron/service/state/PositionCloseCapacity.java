@@ -1,11 +1,8 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.index.ActiveOrderIndex;
 
-import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
-import com.surprising.aeron.service.state.model.CorePositionState;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
@@ -31,91 +28,6 @@ public record PositionCloseCapacity(
             throw new IllegalArgumentException("invalid position close capacity");
         }
         newestFirst = List.copyOf(newestFirst);
-    }
-
-    public static PositionCloseCapacity inspect(
-            TradingCoreState state,
-            CoreUserState user,
-            String instrumentId,
-            CorePositionSide positionSide,
-            CoreOrderSide closeSide,
-            ActiveOrderIndex activeOrderIndex) {
-        return inspect(state, user, instrumentId, positionSide, closeSide, activeOrderIndex, 0);
-    }
-
-    public static PositionCloseCapacity inspect(
-            TradingCoreState state,
-            CoreUserState user,
-            String instrumentId,
-            CorePositionSide positionSide,
-            CoreOrderSide closeSide,
-            ActiveOrderIndex activeOrderIndex,
-            long excludedOrderId) {
-        if (state == null || user == null || positionSide == null || closeSide == null) {
-            throw new IllegalArgumentException("position close capacity input is required");
-        }
-        String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
-        CorePositionState position = user.positions().get(positionKey(normalizedSymbol, positionSide));
-        long positionQuantity = position == null ? 0 : Math.absExact(position.signedQuantitySteps());
-        long requestedQuantity = 0;
-        ArrayList<Commitment> commitments = new ArrayList<>();
-        Iterable<Long> orderIds = activeOrderIndex == null
-                ? state.orders().keySet() : activeOrderIndex.ids(user.userId(), normalizedSymbol);
-        for (Long orderId : orderIds) {
-            if (orderId == null || orderId == excludedOrderId) continue;
-            CoreOrderState order = state.order(orderId);
-            if (order == null || order.status() != CoreOrderStatus.OPEN
-                    || order.userId() != user.userId() || !order.instrumentId().equals(normalizedSymbol)
-                    || order.positionSide() != positionSide || order.side() != closeSide) {
-                continue;
-            }
-            if (order.reduceOnly()) {
-                commitments.add(new Commitment(order.orderId(), order.remainingQuantitySteps(),
-                        order.clusterPosition()));
-            }
-            requestedQuantity = Math.addExact(requestedQuantity, order.remainingQuantitySteps());
-        }
-        commitments.sort(NEWEST_FIRST);
-        long committed = Math.min(positionQuantity, requestedQuantity);
-        return new PositionCloseCapacity(positionQuantity, requestedQuantity, committed,
-                Math.subtractExact(positionQuantity, committed), commitments);
-    }
-
-    public static PositionCloseCapacity inspectRuntime(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId, String instrumentId,
-            CorePositionSide positionSide, CoreOrderSide closeSide, ActiveOrderIndex activeOrderIndex,
-            long excludedOrderId) {
-        if (runtime == null || identities == null || userId <= 0 || positionSide == null
-                || closeSide == null || activeOrderIndex == null) {
-            throw new IllegalArgumentException("runtime close-capacity input is required");
-        }
-        String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
-        String positionName = positionSide == CorePositionSide.NET
-                ? normalizedSymbol : normalizedSymbol + ':' + positionSide.name();
-        Long positionKey = identities.findPositionKey(userId, positionName);
-        PositionRuntime position = positionKey == null ? null : runtime.position(positionKey);
-        long positionQuantity = position == null ? 0 : Math.absExact(position.signedQuantitySteps());
-        long requestedQuantity = 0;
-        ArrayList<Commitment> commitments = null;
-        var orderIds = activeOrderIndex.matchingIds(userId, normalizedSymbol);
-        while (orderIds.hasNext()) {
-            long orderId = orderIds.next();
-            if (orderId == excludedOrderId) continue;
-            OrderRuntime order = runtime.order(orderId);
-            if (order == null || order.status() != CoreOrderStatus.OPEN || order.userId() != userId
-                    || !identities.instrumentId(order.symbolId()).equals(normalizedSymbol)
-                    || order.positionSide() != positionSide || order.side() != closeSide) continue;
-            if (order.reduceOnly()) {
-                if (commitments == null) commitments = new ArrayList<>();
-                commitments.add(new Commitment(order.orderId(), order.remainingQuantitySteps(),
-                        order.clusterPosition()));
-            }
-            requestedQuantity = Math.addExact(requestedQuantity, order.remainingQuantitySteps());
-        }
-        if (commitments != null) commitments.sort(NEWEST_FIRST);
-        long committed = Math.min(positionQuantity, requestedQuantity);
-        return new PositionCloseCapacity(positionQuantity, requestedQuantity, committed,
-                Math.subtractExact(positionQuantity, committed), commitments == null ? List.of() : commitments);
     }
 
     /** Account Lane inspects its own live orders, excluding uncommitted reservations. */
@@ -171,10 +83,6 @@ public record PositionCloseCapacity(
             if (released >= overflow) break;
         }
         return List.copyOf(conflicts);
-    }
-
-    private static String positionKey(String instrumentId, CorePositionSide positionSide) {
-        return positionSide == CorePositionSide.NET ? instrumentId : instrumentId + ':' + positionSide.name();
     }
 
     public record Commitment(long orderId, long quantitySteps, long corePosition) {

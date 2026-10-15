@@ -1325,41 +1325,12 @@ final class OrderedCommitCoordinator {
             CommandSlot pending = first == null
                     ? owner.pendingMatching.readyPartitionHead(shard) : first;
             first = null;
-            if (pending != null && pending.sequence() <= throughSequence && pending.settlementEvent() != null
-                    && pending.settlementEvent().direct() && !pending.settlementEvent().matcherOwnedPublication()
-                    && pending.settlementEvent().ready()
-                    && !pending.settlementEvent().dispatched()) {
-                pending.establishCommitFence(clusterTimestamp, clusterPosition);
-                var event = pending.settlementEvent();
-                event.commitFence(pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
-                owner.runtimeState.dispatchOwnerControlledSettlement(event);
-                owner.pendingMatching.completePartitionDispatchKnown(pending.sequence(), shard);
-                owner.pendingMatching.progressChanged();
-                pending.countPipelinedSettlement();
-                dispatchedSettlementInFlight++;
-                dispatchedSettlementHighWaterMark = Math.max(dispatchedSettlementHighWaterMark, dispatchedSettlementInFlight);
-                continue;
-            }
             if (pending == null || pending.sequence() > throughSequence || pending.operation() != CommandSlot.Operation.PLACE
                     || pending.settlementEvent() != null || owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) {
                 return;
             }
             OrderBatchPending batch = pending.orderBatch;
             if (batch != null) {
-                if (batch.settlementEvent != null && batch.settlementEvent.direct()
-                        && batch.settlementEvent.ready() && !batch.settlementEvent.dispatched()) {
-                    if (!batch.admissionCollected() || !batch.canPredispatch()) return;
-                    pending.establishCommitFence(clusterTimestamp, clusterPosition);
-                    batch.settlementEvent.commitFence(pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
-                    owner.runtimeState.dispatchOwnerControlledSettlement(batch.settlementEvent);
-                    batch.markPredispatched();
-                    owner.pendingMatching.progressChanged();
-                    owner.pendingMatching.completePartitionDispatchKnown(pending.sequence(), shard);
-                    pending.countPipelinedSettlement();
-                    dispatchedSettlementInFlight++;
-                    dispatchedSettlementHighWaterMark = Math.max(dispatchedSettlementHighWaterMark, dispatchedSettlementInFlight);
-                    continue;
-                }
                 // The ordinary commit loop can reach this batch after completing a cancel
                 // without another dispatch pass. Once it owns the commit, it also owns Lane
                 // dispatch; pumping while its event is pending must not submit it a second time.

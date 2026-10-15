@@ -16,20 +16,14 @@ public interface LaneOrderResultTarget {
     /** 最终账户 Lane 已捕获结果后准备响应；在完成回执发布之前调用。 */
     void prepareResponse();
 
-    /** Matcher proof supplied before the Lane captures its immutable order after-image. */
-    default void matcherResult(com.surprising.aeron.service.matching.MatchingResult result) { }
-
     /** Batch item outcome published before the final Matcher-to-Lane release boundary. */
     default void matcherResult(int index, boolean accepted) { }
 
-    /** Optional response bytes prepared by the Lane; null means the Owner must use its fallback. */
-    default byte[] preparedResponse() { return null; }
+    /** Lane 捕获完成后提供响应；空结果使用空数组，Owner 不重新查询或编码。 */
+    byte[] preparedResponse();
 
     /** Logical length of the fixed response slot; the backing array may be larger than the payload. */
-    default int preparedResponseLength() {
-        byte[] response = preparedResponse();
-        return response == null ? 0 : response.length;
-    }
+    int preparedResponseLength();
 
     /** Direct single-command responses retain terminal after-images; batch responses preserve
      * their historical omission of orders that were already retired from a Lane. */

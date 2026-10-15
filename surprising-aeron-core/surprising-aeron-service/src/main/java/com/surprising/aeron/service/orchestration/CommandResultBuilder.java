@@ -197,7 +197,7 @@ final class CommandResultBuilder {
     }
 
     void materializeCommandOrderViews(CommandSlot pending) {
-        if (pending.lanePreparedResponse() != null) {
+        if (pending.laneResultPrepared()) {
             clearOrderViews();
             return;
         }
@@ -280,16 +280,14 @@ final class CommandResultBuilder {
 
     private OrderRuntime responseOrder(CommandSlot pending, long orderId) {
         if (pending != null && pending.laneResultPrepared()) {
-            OrderRuntime laneOrder = pending.laneResultOrder(orderId);
-            if (laneOrder != null) return laneOrder;
+            return pending.laneResultOrder(orderId);
         }
         return owner.responseOrder(orderId);
     }
 
     private String responseOrderSymbol(CommandSlot pending, long orderId, OrderRuntime order) {
         if (pending != null && pending.laneResultPrepared()) {
-            String instrumentId = pending.laneResultSymbol(orderId);
-            if (instrumentId != null) return instrumentId;
+            return pending.laneResultSymbol(orderId);
         }
         return owner.runtimeOrderSymbol(order);
     }
@@ -345,7 +343,8 @@ final class CommandResultBuilder {
         }
         if (pending != null) {
             byte[] prepared = pending.lanePreparedResponse();
-            if (prepared != null) {
+            if (pending.laneResultPrepared()) {
+                if (prepared == null) throw new IllegalStateException("Lane response was not encoded");
                 return setResponse(prepared, 0, pending.lanePreparedResponseLength());
             }
         }

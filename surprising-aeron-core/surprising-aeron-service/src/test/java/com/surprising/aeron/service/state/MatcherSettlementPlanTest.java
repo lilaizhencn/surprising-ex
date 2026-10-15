@@ -23,7 +23,7 @@ class MatcherSettlementPlanTest {
             List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000)));
 
     @Test
-    void ownerPredispatchWaitsForMatcherReadinessBeforeApplyingAccounts() {
+    void matcherPublicationWaitsForReadinessBeforeApplyingAccounts() {
         try (var runtime = new TradingRuntimeState()) {
             var identities = new RuntimeIdentityRegistry();
             int symbol = identities.symbolId("1");
@@ -32,8 +32,9 @@ class MatcherSettlementPlanTest {
             runtime.putOrder(original);
             var event = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
+            event.markMatcherOwnedPublication();
+            event.reserveMatcherPublication();
             event.beginMatcherPublication();
-            runtime.dispatchOwnerControlledSettlement(event);
             assertThat(event.ready()).isFalse();
             assertThat(event.completedLaneMask()).isZero();
             assertThat(runtime.collectMatcherSettlement(event)).isNull();
@@ -48,7 +49,7 @@ class MatcherSettlementPlanTest {
     }
 
     @Test
-    void readySuffixPredispatchCannotOvertakeEarlierAccountSettlement() {
+    void matcherPublishedFactsRetireInAccountOrder() {
         try (var runtime = new TradingRuntimeState()) {
             var identities = new RuntimeIdentityRegistry();
             int symbol = identities.symbolId("1");
@@ -57,15 +58,17 @@ class MatcherSettlementPlanTest {
             runtime.putOrder(original);
             var first = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
+            first.markMatcherOwnedPublication();
+            first.reserveMatcherPublication();
             first.beginMatcherPublication();
-            runtime.dispatchOwnerControlledSettlement(first);
             var suffix = runtime.prepareDirectCancellation(2, original.userId(), original.orderId(), new java.util.UUID(3, 4),
                     0, identities, 30, 40);
+            suffix.markMatcherOwnedPublication();
+            suffix.reserveMatcherPublication();
             suffix.beginMatcherPublication();
             suffix.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     symbol, 2, List.of()), 2, 3, 4, 11, 2, 0);
             suffix.completeMatcherPublication();
-            runtime.dispatchOwnerControlledSettlement(suffix);
             assertThat(suffix.completedLaneMask()).isZero();
             first.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
@@ -94,6 +97,7 @@ class MatcherSettlementPlanTest {
             var event = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
             event.markMatcherOwnedPublication();
+            event.reserveMatcherPublication();
             // The transport release must observe all event metadata already prepared, while
             // readiness still prevents the Owner from consuming or recycling it.
             event.matcherCompletionRoute(shard -> {

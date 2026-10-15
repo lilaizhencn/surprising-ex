@@ -266,13 +266,13 @@ final class OwnerCommandPipelineState {
         commandProgress++;
     }
 
-    /** 将 Matcher 的完成结果放回撮合窗口或当前控制命令。 */
-    void completeMatching(long sequence, CoreResponse response) {
-        if (commandWindow.size() != 0) {
-            commandWindow.complete(sequence, response);
-            return;
-        }
-        if (sequence == matchingResponseSequence) matchingResponse = response;
+    /** 控制命令已排空撮合窗口；内部触发子单独立提交，仅保存客户端命令自身的响应。 */
+    void completeControlMatching(long sequence, CoreResponse response) {
+        if (commandWindow.size() != 0 || response == null)
+            throw new IllegalStateException("control completion requires an empty trading window and a response");
+        if (sequence != matchingResponseSequence) return;
+        if (matchingResponse != null) throw new IllegalStateException("duplicate control matching completion");
+        matchingResponse = response;
     }
 
     /** 返回 Owner 进展计数。 */

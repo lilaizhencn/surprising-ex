@@ -52,9 +52,9 @@ public class ActiveOrderIndexBenchmark {
     @TearDown public void verifyEmpty() {
         if (index.count() != 0)
             throw new IllegalStateException("terminal orders remain in admission indexes");
-        for (int symbol = 1; symbol <= symbols; symbol++) if (!index.ids(Integer.toString(symbol)).isEmpty())
+        for (int symbol = 1; symbol <= symbols; symbol++) if (index.count(Integer.toString(symbol)) != 0)
             throw new IllegalStateException("terminal orders remain in symbol index");
-        for (int user = 1; user <= users; user++) if (!index.ids(user).isEmpty())
+        for (int user = 1; user <= users; user++) if (index.sortedIdsDescending(user).length != 0)
             throw new IllegalStateException("terminal orders remain in account index");
     }
 }

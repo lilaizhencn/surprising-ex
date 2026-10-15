@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.instrument.api.model.ContractType;
@@ -11,6 +10,38 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 class LaneReplacementResponseTest {
+    @Test
+    void laneCapturesUnchangedOrdersAndKeepsAlreadyCapturedTerminalImages() {
+        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        assertThat(identities.symbolId("1")).isZero();
+        try (var runtime = new com.surprising.aeron.service.state.TradingRuntimeState()) {
+            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            runtime.putOrder(order(11, false));
+            var lane = runtime.accountLaneForUser(7);
+            var target = new CommandSlot.LaneResultTarget();
+            var arena = new ResponseArena(1, 4096);
+            target.bind(11, 12, arena);
+            com.surprising.aeron.service.state.LaneOrderResultTarget.capture(target,
+                    new com.surprising.aeron.service.state.LaneCommitDelta(), identities, lane);
+            assertThat(target.resultPrepared(0)).isTrue();
+            assertThat(target.resultPrepared(1)).isTrue();
+            var view = CoreCommandResultCodec.decode(Arrays.copyOf(
+                    target.preparedResponse(), target.preparedResponseLength()));
+            assertThat(view.orders()).extracting(CoreOrderStateView::orderId).containsExactly(11L);
+            target.clear();
+
+            target.bind(11, 0, arena);
+            assertThat(target.resultPrepared(0)).isFalse();
+            target.resultOrder(0, order(11, true), "1");
+            com.surprising.aeron.service.state.LaneOrderResultTarget.capture(target,
+                    new com.surprising.aeron.service.state.LaneCommitDelta(), identities, lane);
+            view = CoreCommandResultCodec.decode(Arrays.copyOf(
+                    target.preparedResponse(), target.preparedResponseLength()));
+            assertThat(view.orders()).extracting(CoreOrderStateView::status).containsExactly("CANCELED");
+            target.clear();
+        }
+    }
+
     private static final CoreInstrument INSTRUMENT = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
             new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
                     1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
@@ -30,7 +61,6 @@ class LaneReplacementResponseTest {
             target.bind(id, id + 1, arena);
             target.resultOrder(0, order(id, true), "1");
             target.resultOrder(1, order(id + 1, false), "1");
-            target.matcherResult(new CoreMatchingResult(true, "SUCCESS"));
             target.prepareResponse();
             assertThat(target.preparedResponse()).isNotNull();
             byte[] response = Arrays.copyOf(target.preparedResponse(), target.preparedResponseLength());
@@ -41,7 +71,6 @@ class LaneReplacementResponseTest {
 
             target.bind(id, 0, arena);
             target.resultOrder(0, order(id, false), "1");
-            target.matcherResult(new CoreMatchingResult(true, "SUCCESS"));
             target.prepareResponse();
             view = CoreCommandResultCodec.decode(Arrays.copyOf(target.preparedResponse(), target.preparedResponseLength()));
             assertThat(view.orders()).extracting(CoreOrderStateView::orderId).containsExactly(id);

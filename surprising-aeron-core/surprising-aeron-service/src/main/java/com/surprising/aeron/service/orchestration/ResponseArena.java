@@ -72,22 +72,14 @@ final class ResponseArena {
      * must carry the explicit length to the response and ledger descriptors.
      */
     byte[] acquire(int requiredLength) {
-        if (requiredLength < 0) throw new IllegalArgumentException("negative response length");
-        if (requiredLength == 0) return TradingCoreRuntime.EMPTY_RESPONSE_DATA;
-        if (requiredLength > slotBytes) return new byte[requiredLength];
-        for (int index = 0; index < slots.length; index++) {
-            if (!leaseStates.compareAndSet(index, 0, 1)) continue;
-            byte[] slot = slots[index];
-            if (slot == null || slot.length < requiredLength) slots[index] = slot = new byte[slotBytes];
-            transportReferences[index] = 1;
-            ledgerReferences[index] = 0;
-            return slot;
-        }
-        // A full ledger can still receive a replacement or a large fan-out response. Preserve
-        // correctness by falling back to exact storage instead of blocking the Owner.
-        return new byte[requiredLength];
+        return acquireSlot(requiredLength).storage;
     }
 
+    /**
+     * Common responses lease a fixed slot. Large responses and responses produced while all
+     * slots are retained own dedicated storage: a completed trade must still have a response
+     * while transport or idempotency retention delays the return of pooled leases.
+     */
     Slot acquireSlot(int requiredLength) {
         if (requiredLength < 0) throw new IllegalArgumentException("negative response length");
         if (requiredLength == 0) return EMPTY_SLOT;
@@ -96,27 +88,6 @@ final class ResponseArena {
             if (!leaseStates.compareAndSet(index, 0, 1)) continue;
             byte[] slot = slots[index];
             if (slot == null || slot.length < requiredLength) slots[index] = slot = new byte[slotBytes];
-            transportReferences[index] = 1;
-            ledgerReferences[index] = 0;
-            Slot descriptor = slotDescriptors[index];
-            descriptor.storage = slot;
-            descriptor.length = 0;
-            return descriptor;
-        }
-        // Oversized and temporarily exhausted responses retain the old exact-size fallback.
-        // The normal single-order path never reaches this branch after the ring is warm.
-        return new Slot(new byte[requiredLength], false);
-    }
-
-    /** Acquires a stable fixed-size ring descriptor; callers carry the logical payload length. */
-    Slot acquireExactSlot(int requiredLength) {
-        if (requiredLength < 0) throw new IllegalArgumentException("negative response length");
-        if (requiredLength == 0) return EMPTY_SLOT;
-        if (requiredLength > slotBytes) return new Slot(new byte[requiredLength], false);
-        for (int index = 0; index < slots.length; index++) {
-            if (!leaseStates.compareAndSet(index, 0, 1)) continue;
-            byte[] slot = slots[index];
-            if (slot == null || slot.length != slotBytes) slots[index] = slot = new byte[slotBytes];
             transportReferences[index] = 1;
             ledgerReferences[index] = 0;
             Slot descriptor = slotDescriptors[index];

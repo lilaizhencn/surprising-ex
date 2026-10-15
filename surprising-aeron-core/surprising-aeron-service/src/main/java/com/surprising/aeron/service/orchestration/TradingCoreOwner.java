@@ -61,7 +61,7 @@ public final class TradingCoreOwner {
     private boolean processingLogCallback;
 
     /** Matcher 完成通知使用的统一回调，最终结果回到命令流水线状态。 */
-    private final TradingCoreRuntime.MatchingCommitHandler matchingCommitHandler = this::completeMatching;
+    private final TradingCoreRuntime.MatchingCommitHandler matchingCommitHandler = commandPipeline::completeControlMatching;
 
     TradingCoreOwner(ProductLine productLine, ResponseSink responseSink) {
         if (productLine == null) {
@@ -437,11 +437,6 @@ public final class TradingCoreOwner {
     /** 返回实时请求队列，供兼容测试和独立回放工具注入请求。 */
     ManyToOneConcurrentArrayQueue<RealtimeFrame> snapshotRequests() {
         return realtimeBoundary.requests();
-    }
-
-    /** 把 Matcher 的终态响应放回订单窗口或当前控制命令。 */
-    private void completeMatching(long sequence, CoreResponse response) {
-        commandPipeline.completeMatching(sequence, response);
     }
 
     /** 在异步命令等待期间让出 Owner 线程，同时执行中断和超时保护。 */

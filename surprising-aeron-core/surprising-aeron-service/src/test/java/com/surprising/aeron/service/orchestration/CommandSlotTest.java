@@ -22,6 +22,23 @@ import org.junit.jupiter.api.Test;
 
 class CommandSlotTest {
 
+    @Test
+    void laneEmptyResultIsFinalAndNeverQueriesOwnerState() {
+        var pending = new CommandSlot(1000, CommandSlot.Operation.PLACE, command(1000),
+                RuntimeFundsDelta.empty());
+        pending.prepareLaneResultTarget(new ResponseArena(1, 16));
+        var target = pending.laneResultTarget();
+        target.resultOrder(0, null, null);
+        target.prepareResponse();
+        assertThat(pending.laneResultPrepared()).isTrue();
+        assertThat(pending.lanePreparedResponse()).isEmpty();
+        assertThat(pending.lanePreparedResponseLength()).isZero();
+        // No Owner exists: any response-order lookup would fail instead of returning this Lane result.
+        var builder = new CommandResultBuilder(null);
+        builder.materializeCommandOrderViews(pending);
+        assertThat(builder.commandResultData(pending, null)).isSameAs(pending.lanePreparedResponse());
+    }
+
     @Test void changedIdViewsFollowSuspendedPrimitiveBuffersWithoutPerCommitCopies() {
         try (var runtime = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             var builder = runtime.resultBuilder;

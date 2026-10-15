@@ -109,7 +109,7 @@ final class DirectMatcherSettlementPreparation {
                 pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                 pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
         pending.settlement(direct, direct.plan(), System.nanoTime());
-        if (owner.runtimeState.asynchronousCommands()) reserveMatcherPublication(direct);
+        reserveMatcherPublication(direct);
         if (owner.realtimeCapture != null) pending.realtimeTakerOrder = direct.admittedOrder();
         return direct;
     }

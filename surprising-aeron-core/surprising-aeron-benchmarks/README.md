@@ -87,3 +87,8 @@ JDK 27/G1，1 fork/1 thread，3×1s 预热、5×1s 测量的独立 `-prof gc` �
 ### D1 会话边界适配（2026-10-15）
 
 Owner 的输入及响应接口现在只携带 `sessionId`。`ReplySlotAllocationBenchmark`、`InProcessTradingAllocationBenchmark` 的本地消费器实现已有 `SessionEgress`，去掉完整 `ClientSession` 的伪实现；会话注册和真实服务使用同一 ID 路由与出口环。批量及线性夹具同步更新无客户端哨兵值和响应参数。新增 `D1BenchmarkBoundaryTest` 只做有限功能调用及终态资金核对，没有执行 JMH 计时、JFR 或压测。连同服务的必要回归共 111 项通过，见 [D1 完成验证](../../docs/validation/d1-complete-20261015.json)。
+
+
+### D2 基准夹具接线清理（2026-10-15）
+
+`MatcherTreasuryReceiptBenchmark` 改为预留 Matcher 发布槽并使用实际 Matcher→Lane 邮箱，删除旧 Owner 派发调用；`ActiveOrderIndexBenchmark` 的清理检查改用现有 primitive API。新增 `MatcherTreasuryReceiptBenchmarkTest`，以 1/4 个 Lane 各执行有限次结算、复用事件并在关闭时核对 Treasury；2 项功能用例通过，详见 [D2 功能验证](../../docs/validation/d2-complete-20261015.json)。本轮未运行 JMH 计时、真实节点压测、快照或恢复，不给出性能结论。

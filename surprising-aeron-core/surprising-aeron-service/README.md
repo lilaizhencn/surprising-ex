@@ -376,3 +376,12 @@ D1 补充审查：`ClusterServiceEgress.TransportSession` 仍实现 `ClientSessi
 `OwnerLogContext` 与 `ClusterServiceEgress.TransportSession` 均不再实现 Aeron 接口；后者删除两处未实现方法和无调用的元数据转发，仅承担服务线程的具体响应出口。`TradingOwnerLoop.Input`、`PendingClusterIngress`、`ClusterCommandWindow`、响应 sink 和出口槽只传 `long sessionId`。真实 `ClientSession` 留在服务线程，响应消费时按 ID 查原会话表；无客户端日志使用 `NO_SESSION_ID=-1`，合法会话 ID 0 保留原语义。没有新增接口、线程、队列、账户镜像或逐命令对象。
 
 已关闭/移除会话及旧任期的响应直接丢弃，同时归还响应与 Header 租约；原背压 FIFO、容量、关闭回调及有序提交规则保留。111 个必要用例通过（服务 109、受影响基准夹具功能用例 2），包括六产品线真实 Owner 线程隔离、关闭后丢弃、池复用、资金及控制流水线。未启动真实网络集群、执行快照恢复或压测。此前 D1 补充审查记录中的会话伪实现未完成项已关闭，见 [D1 完成验证](../../docs/validation/d1-complete-20261015.json)。其他 Owner 迁移及性能验收仍是独立未完成事项。
+
+
+### D2 旧派发、兼容查询与响应回退清理（2026-10-15）
+
+`MatcherSettlementDispatcher` 和 `TradingRuntimeState` 的 Owner 直达派发入口已删除，改单也统一预留 Matcher 发布槽；Matcher 将成交事实交给各 Lane，Owner 不再补派发或修改事件 fence。`ClusterCommandWindow.complete()` 的扫描回调删除，普通订单由有序队首接收结果；控制回调只保存自身序号的响应，触发/OCO 子单继续独立提交。
+
+`ActiveOrderIndex` 的 boxed `ids()` API 及无调用的旧平仓检查删除。`ImmutableLongArrayList` 保留实际命令、分页和协议 List 契约所需的 primitive 存储，删除无调用的兼容工厂。Lane 必须提供已捕获响应及长度，包括未变化订单、终态后镜像和明确的空结果，Owner 不再回查或重编码；每个命令槽仅增加本代响应项的捕获位，复用时清零。响应存储申请合为一处，大响应及池槽被传输/幂等结果保留时仍使用独立存储，防止丢失已提交命令的响应。
+
+153 项必要功能用例通过（service 151 项、受影响基准夹具 2 项），覆盖六产品线成交资金守恒、跨 Lane IOC、改单/批量/触发、连续 Ledger 和槽位复用，见 [D2 功能验证](../../docs/validation/d2-complete-20261015.json)。未执行快照、恢复、wallet 或压测；未采集 JMH/JFR 性能数据。C1 引用计数并发审计、其他 D 项和整体 Owner 迁移不属于本次完成结论。

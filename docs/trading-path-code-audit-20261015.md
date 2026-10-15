@@ -29,9 +29,10 @@
 | 高收益低风险 | P2 | Lane 线程每次线性查找自己的 lane（85 处调用） | 低 |
 | 高收益低风险 | P3 | 市价单为读最优价走完整引擎命令 | 低到中 |
 | 高收益低风险 | P4 | 每命令 SHA-256 指纹 | 低（未上线可直接改格式） |
-| 中 | P5–P13、F3–F9、L1–L8 | 见正文 | 中 |
+| 中 | P5–P13、F3–F9、L1–L7 | 见正文 | 中 |
 | 已完成 | D1 | 已移除假 `Cluster` / `ClientSession` 实现，Owner 按会话 ID 路由 | 已验证，见 D1 |
-| 删除类 | D2–D9 | legacy 残留、四套适配器 API 等 | 低到中 |
+| 已完成 | D2 / L8 | 已删除旧 Owner 直达派发、窗口扫描回调及 Lane 响应回退 | 已验证，见 D2 |
+| 删除类 | D3–D9 | 四套适配器 API、重复中继等 | 低到中 |
 | 最后做 | D10 | `TradingCoreRuntime` 状态枢纽、状态重复 | 中高 |
 
 建议执行顺序见第 9 节。
@@ -252,10 +253,8 @@
 - **证据**：把同步引擎包成 ≥4 个 `CompletableFuture` 加多个 lambda；main 中仅 control 路径使用，其余是测试；热路径 `place / placeInto` 本身是同步的。
 - **方案**：删除这层包装（与 D3 一并处理）。
 
-### L8【报告】`ClusterCommandWindow` 兼容回调
-- **位置**：`orchestration/ClusterCommandWindow.java:246-247`。
-- **证据**：O(n) 的 `complete()` 是「兼容回调」，正常路径绕过。
-- **方案**：确认无生产调用后删除（与 D2 一并处理）。
+### L8【已完成，随 D2】`ClusterCommandWindow` 兼容回调
+- 原 O(n) `complete()` 已删除。普通订单由有序队首直接接收响应；控制命令在交易窗口排空后按序号保存自身响应，内部触发子单独立提交，不再扫描窗口。验证见 D2。
 
 ## 6. 过度设计（D）
 
@@ -267,14 +266,15 @@
 - **线程边界**：Owner 入口、命令窗口及响应出口槽仅携带 `long sessionId`；真实 `ClientSession` 的连接、发送和关闭由 Cluster 服务线程独占。响应消费时按 ID 查既有会话表，关闭、移除或旧任期的响应丢弃并归还租约；保留背压 FIFO 与有序提交。
 - **验证**：111 项必要用例通过（service 109 项、受影响 benchmark 夹具 2 项），失败、错误、跳过均为 0，详见 [D1 功能验证](validation/d1-complete-20261015.json)。该记录仅覆盖所选必要用例，不代表全量测试或其他审计项完成。
 
-### D2【报告】与「不要 fallback / legacy」冲突的残留
-- `state/MatcherSettlementDispatcher:142`：Legacy synchronous handoff。
-- `state/MatcherSettlementEvent:254`：legacy Owner-dispatched path。
-- `state/index/ActiveOrderIndex:183`、`command/ImmutableLongArrayList:9`：compatibility。
-- `orchestration/ClusterCommandWindow:246`：compatibility callback（O(n) `complete()`）。
-- `LaneOrderResultTarget:25`：null 时回退到 Owner。
-- `orchestration/ResponseArena:106`：exact-size fallback（另议，需先确认是否仍必要）。
-- **方案**：先用 `codegraph_callers` 确认无生产调用再删。风险低到中。
+### D2【已完成】与「不要 fallback / legacy」冲突的残留
+- **完成日期**：2026-10-15。以下为原审计项的逐项处理结果。
+- **旧结算派发**：删除 `MatcherSettlementDispatcher.dispatchOwnerControlled`、`TradingRuntimeState.dispatchOwnerControlledSettlement` 及 Owner 侧预派发分支；改单统一预留 Matcher 发布槽，由 Matcher 将事实投递至 Lane。删除 `MatcherSettlementEvent` 的旧派发标记、后补提交 fence 入口及过时说明；发布校验要求已预留的 Matcher 槽。
+- **订单 ID 兼容集合**：删除 `ActiveOrderIndex.ids()` 的四种 boxed `NavigableSet` API，调用方改用现有 primitive 查询。删除仅由旧查询路径使用、已无调用的 `PositionCloseCapacity.inspect/inspectRuntime`，平仓准入只保留实际使用的显式 Lane 检查。
+- **不可变 ID 列表**：`ImmutableLongArrayList` 仍用于命令、资金费分页及协议的实际 `List<Long>` 契约，不是第二套业务路径；删除无调用的 `copyOf`、`sortedDistinct`、`preservePrimitive` 和防御复制构造分支，内部继续使用 primitive 存储及访问。
+- **窗口完成回调**：删除 O(n) `ClusterCommandWindow.complete()`。普通订单响应由有序队首保存；控制命令回调只保存自身序号的结果，保留触发/OCO 内部子单的独立完成语义。
+- **Lane 响应**：`LaneOrderResultTarget` 必须实现响应与长度，不再默认返回 null 让 Owner 重查、重编码。Lane 捕获未变化订单及终态后镜像，空结果明确使用空数组；Owner 直接消费捕获结果。删除已无作用的单笔 Matcher 结果回调。
+- **响应存储核查**：合并 `ResponseArena` 的重复申请实现，删除 `acquireExactSlot()`。大响应及所有池槽仍被传输/幂等结果持有时，独立存储是完成响应所需的容量机制，已确认必须保留；不得因池满丢失已提交交易的响应。新增用例验证其与池内租约、复用及数据内容相互隔离。C1 的引用计数并发审计仍独立待办。
+- **验证**：HotSpot JDK 27 下 153 项必要功能用例通过（service 151 项、受影响 benchmark 夹具 2 项），失败、错误、跳过均为 0；包含六产品线成交资金核对、跨 Lane IOC、改单/撤单、批量、触发/OCO、连续 Ledger 与槽位复用。详见 [D2 功能验证](validation/d2-complete-20261015.json)。未执行压测、快照、恢复或 wallet，不据此宣称其他 D 项或整体性能目标完成。
 
 ### D3【报告】适配器四套 API 与 `MatcherCommandSubmission` 双路径
 - **位置**：`matching/DeterministicExchangeCoreAdapter.java`（1992 行）；`orchestration/MatcherCommandSubmission.java:24-110, 184-215`。
@@ -364,7 +364,7 @@
 
 1. **确认类**（先于一切性能优化）：C1（JCStress）、C2（决定溢出策略）。
 2. **局部低风险改动**（先写 JMH，再改，再测）：P1+F1+L1（unpark 标志与 HWM）、F2+L3（结算 ring 填充与 `setRelease`）、P2（Lane scope）。
-3. **删除类**（风险低）：D2、D5、D6、L8。D1 已于 `c2a7c5a6e` 完成。
+3. **删除类**（风险低）：D5、D6。D1 已于 `c2a7c5a6e` 完成；D2、L8 已于 2026-10-15 完成。
 4. **中等改动**：P3（最优价）、P4（指纹）、P5（traceId）、P7（网关 mailbox）、P9–P11、F3–F7、F9、L2。
 5. **需要先补测试与对账**：C3、D3、D4、D8。
 6. **最后**：D7、D9、D10（状态枢纽与重复状态），分步进行并跑恢复测试。

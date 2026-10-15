@@ -10,12 +10,9 @@ import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
-import java.util.NavigableSet;
-import java.util.TreeSet;
 import org.eclipse.collections.api.iterator.LongIterator;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.collections.LongHashSet;
@@ -33,7 +30,6 @@ public final class ActiveOrderIndex {
     private static final int INITIAL_USER_INDEX_CAPACITY = 64;
     /** Symbol buckets are usually short-lived in the 128-instrumentId turnover workload. */
     private static final int INITIAL_SYMBOL_INDEX_CAPACITY = 8;
-    private static final NavigableSet<Long> EMPTY_IDS = Collections.emptyNavigableSet();
     private static final LongIterator EMPTY_ITERATOR = new LongIterator() {
         public boolean hasNext() { return false; }
         public long next() { throw new java.util.NoSuchElementException(); }
@@ -78,20 +74,6 @@ public final class ActiveOrderIndex {
         rebuild(state);
     }
 
-    public NavigableSet<Long> ids() {
-        return descending(orderIds());
-    }
-
-    public NavigableSet<Long> ids(long userId) {
-        LongHashSet ids = idsByUser.get(userId);
-        return ids == null ? EMPTY_IDS : descending(idsArray(ids));
-    }
-
-    public NavigableSet<Long> ids(String instrumentId) {
-        LongHashSet ids = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
-        return ids == null ? EMPTY_IDS : descending(idsArray(ids));
-    }
-
     public int count(String instrumentId) {
         LongHashSet ids = instrumentId == null ? null : idsBySymbol.get(instrumentId);
         if (ids == null) ids = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
@@ -114,17 +96,6 @@ public final class ActiveOrderIndex {
     public String activeOrderSymbol(long orderId) {
         IndexedOrder entry = ordersById.get(orderId);
         return entry == null ? null : entry.instrumentId;
-    }
-
-    public NavigableSet<Long> ids(long userId, String instrumentId) {
-        LongHashSet userIds = idsByUser.get(userId);
-        LongHashSet symbolIds = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
-        if (userIds == null || symbolIds == null) return EMPTY_IDS;
-        LongHashSet source = userIds.size() <= symbolIds.size() ? userIds : symbolIds;
-        LongHashSet filter = source == userIds ? symbolIds : userIds;
-        TreeSet<Long> result = new TreeSet<>();
-        source.forEachLong(orderId -> { if (filter.contains(orderId)) result.add(orderId); });
-        return result.descendingSet();
     }
 
     /**
@@ -178,11 +149,7 @@ public final class ActiveOrderIndex {
         return values;
     }
 
-    /**
-     * Primitive descending instrumentId index for settlement/query cursors.  The public {@link #ids(String)}
-     * method is retained for compatibility, but callers on a runtime path should not create a
-     * boxed {@code TreeSet<Long>} just to iterate the same index.
-     */
+    /** Primitive descending instrument index for settlement and query cursors. */
     public long[] sortedIdsDescending(String instrumentId) {
         LongHashSet ids = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
         return sortedDescending(ids);
@@ -377,13 +344,6 @@ public final class ActiveOrderIndex {
                 && recycledMemberships.size() < MAX_RECYCLED_MEMBERSHIPS) recycledMemberships.addFirst(ids);
     }
 
-    private long[] orderIds() {
-        long[] ids = new long[ordersById.size()];
-        var iterator = ordersById.keySet().iterator();
-        for (int i = 0; iterator.hasNext(); i++) ids[i] = iterator.nextLong();
-        return ids;
-    }
-
     private static long[] idsArray(LongHashSet values) {
         long[] ids = new long[values.size()];
         var iterator = values.iterator();
@@ -391,22 +351,20 @@ public final class ActiveOrderIndex {
         return ids;
     }
 
-    private static NavigableSet<Long> descending(long[] values) {
-        TreeSet<Long> sorted = new TreeSet<>();
-        for (long value : values) sorted.add(value);
-        return sorted.descendingSet();
-    }
-
     private static long[] sortedDescending(LongHashSet values) {
         if (values == null || values.isEmpty()) return new long[0];
         long[] sorted = idsArray(values);
         java.util.Arrays.sort(sorted);
+        reverse(sorted);
+        return sorted;
+    }
+
+    private static void reverse(long[] sorted) {
         for (int left = 0, right = sorted.length - 1; left < right; left++, right--) {
             long value = sorted[left];
             sorted[left] = sorted[right];
             sorted[right] = value;
         }
-        return sorted;
     }
 
 }

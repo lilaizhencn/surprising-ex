@@ -177,6 +177,8 @@ class MatcherTreasurySettlementTest {
                         secondId, 0, identities, 30, 40);
                 assertThat(reused).isSameAs(event);
                 assertThat(reused.submitTreasurySettlement(ledger)).isTrue();
+                reused.markMatcherOwnedPublication();
+                reused.reserveMatcherPublication();
                 reused.beginMatcherPublication();
                 reused.publishDirectNativeResult(new MatcherResult(2,
                         exchange.core2.core.common.cmd.OrderCommandType.CANCEL_ORDER, 2, identities.symbolId("1"),
@@ -186,9 +188,6 @@ class MatcherTreasurySettlementTest {
                         List.of(), new MatcherResult.MarketData(List.of(), List.of(), 0, 0)),
                         2, 3, 4, 11, 2, 0);
                 reused.completeMatcherPublication();
-                runtime.enterAsynchronousCommandScope();
-                try { runtime.dispatchOwnerControlledSettlement(reused); }
-                finally { runtime.exitAsynchronousCommandScope(); }
                 releaseFinancialSignal.countDown();
                 deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                 while (!reused.complete()) {

@@ -5332,11 +5332,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                 identities, timestamp, position, resultTarget);
     }
 
-    /** Register Owner-controlled settlement without applying a ready suffix ahead of the head. */
-    public void dispatchOwnerControlledSettlement(MatcherSettlementEvent event) {
-        settlements.dispatchOwnerControlled(event);
-    }
-
     /** Matcher finishes dispatch metadata before releasing the pooled event to the Owner. */
     void publishMatcherSettlementDirect(MatcherSettlementEvent event) {
         settlements.publishMatcherOwned(event);

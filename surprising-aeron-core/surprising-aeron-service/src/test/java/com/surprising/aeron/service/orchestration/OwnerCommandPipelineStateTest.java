@@ -8,6 +8,24 @@ import static org.assertj.core.api.Assertions.*;
 
 class OwnerCommandPipelineStateTest {
     @Test
+    void controlCompletionAcceptsOnlyItsSequenceWithAnEmptyTradingWindow() {
+        var state = new OwnerCommandPipelineState();
+        state.rememberMatchingResponseSequence(7);
+        var response = new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
+                CoreResultCode.NONE, 7, CoreMessage.EMPTY_PAYLOAD);
+        state.completeControlMatching(8, response);
+        assertThat(state.matchingResponse()).isNull();
+        add(state, 1);
+        assertThatThrownBy(() -> state.completeControlMatching(7, response))
+                .isInstanceOf(IllegalStateException.class);
+        retire(state);
+        assertThat(state.matchingResponse()).isNull();
+        state.completeControlMatching(7, response);
+        assertThat(state.matchingResponse()).isSameAs(response);
+        assertThatThrownBy(() -> state.completeControlMatching(7, response))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("duplicate");
+    }
+    @Test
     void dependencyWaitSurvivesUnrelatedRetirementAndEndsAtActualBlocker() {
         var state = new OwnerCommandPipelineState();
         var request = request(9);

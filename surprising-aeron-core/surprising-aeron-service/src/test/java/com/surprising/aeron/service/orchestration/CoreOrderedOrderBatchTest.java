@@ -1339,8 +1339,14 @@ class CoreOrderedOrderBatchTest {
             assertThat(trading.user(1001).balances().get("USDT").lockedUnits()).isEqualTo(1_000);
             assertThat(trading.user(1001).reservations()).containsOnlyKeys(98_201L, 98_203L);
             assertThat(trading.order(98_200).userId()).isEqualTo(1002);
-            assertThat(state.identities.findClientKeyValue(1001, "lane-unaffordable")).isZero();
-            assertThat(state.identities.findClientKeyValue(1001, "all-rejected")).isZero();
+            var clientKeys = new java.util.concurrent.CompletableFuture<long[]>();
+            Object[] workers = field(state.runtimeState, "laneWorkers");
+            int laneId = state.runtimeState.topology().accountLaneId(1001);
+            ((com.surprising.aeron.service.lane.SettlementLaneWorker) workers[laneId]).submit(lane ->
+                    clientKeys.complete(new long[]{
+                            state.identities.findClientKeyValueInLane(lane, 1001, "lane-unaffordable"),
+                            state.identities.findClientKeyValueInLane(lane, 1001, "all-rejected")}));
+            assertThat(clientKeys.get(3, java.util.concurrent.TimeUnit.SECONDS)).containsExactly(0, 0);
         } finally {
             if (previous == null) System.clearProperty("surprising.aeron.account-lanes");
             else System.setProperty("surprising.aeron.account-lanes", previous);

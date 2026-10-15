@@ -243,18 +243,6 @@ public final class ClusterCommandWindow {
         if (entry == get(0)) CoreMatchingPhaseMetrics.recordOwnerHead(entry, false);
     }
 
-    /** Compatibility callback for control/replay paths; normal ordered heads bypass this scan. */
-    public void complete(long sequence, CoreResponse response) {
-        for (int i = 0; i < size; i++) {
-            Entry entry = get(i);
-            if (entry.sequence != sequence) continue;
-            if (entry.response != null) throw new IllegalStateException("duplicate pipeline completion");
-            entry.response = response;
-            return;
-        }
-        throw new IllegalStateException("pipeline completion has no request context");
-    }
-
     public int size() { return size; }
     public int capacity() { return entries.length; }
     public Entry get(int index) { return entries[(head + index) & indexMask]; }

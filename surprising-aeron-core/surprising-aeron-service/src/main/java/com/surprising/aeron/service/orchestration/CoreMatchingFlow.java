@@ -261,28 +261,6 @@ final class CoreMatchingFlow {
         owner.matcherPipeline.submit(matcherShard(pending), pending.sequence(), matcherSubmission, direct);
         pending.matchingSubmitted();
         if (pending.placeAdmission() == null) owner.matchingProgress.submissionCompleted(pending);
-        if (direct != null && !direct.matcherOwnedPublication()) {
-            predispatchDirectSettlement(pending, direct);
-        }
-    }
-
-    boolean predispatchDirectSettlement(CommandSlot pending,
-                                        com.surprising.aeron.service.state.MatcherSettlementEvent event) {
-        if (pending == null || event == null || !event.direct() || event.dispatched()) return false;
-        if (!pending.commitFenceEstablished()) return false;
-        int shard = pendingSubmissionShard(pending);
-        owner.pendingMatching.readyPartitionMask(pending.sequence());
-        if (owner.pendingMatching.readyPartitionHead(shard) != pending) return false;
-        pending.establishCommitFence(pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
-        owner.runtimeState.dispatchOwnerControlledSettlement(event);
-        owner.pendingMatching.completePartitionDispatchKnown(pending.sequence(), shard);
-        owner.pendingMatching.progressChanged();
-        pending.countPipelinedSettlement();
-        owner.commits.dispatchedSettlementInFlight++;
-        owner.commits.dispatchedSettlementHighWaterMark = Math.max(
-                owner.commits.dispatchedSettlementHighWaterMark,
-                owner.commits.dispatchedSettlementInFlight);
-        return true;
     }
 
     int singleMatcherShard(List<CancellationOrder> orders) {

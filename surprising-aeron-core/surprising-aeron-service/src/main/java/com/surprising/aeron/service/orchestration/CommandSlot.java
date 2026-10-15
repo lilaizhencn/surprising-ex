@@ -1209,8 +1209,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         private final OrderRuntime[] orderCopies = new OrderRuntime[2];
         private final String[] symbols = new String[2];
         private int count;
+        private int capturedMask;
         private boolean prepared;
-        private com.surprising.aeron.service.matching.MatchingResult matcherResult;
         private byte[] response;
         private int responseLength;
         private ResponseArena responseArena;
@@ -1240,21 +1240,23 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         }
 
         @Override public int resultCount() { return count; }
+        @Override public boolean captureUnchangedResults() { return true; }
+        @Override public boolean resultPrepared(int index) { return (capturedMask & (1 << index)) != 0; }
         @Override public long resultOrderId(int index) { return ids[index]; }
         @Override public long resultOriginalOrderId(int index) { return 0; }
         @Override public void resultOrder(int index, OrderRuntime order, String instrumentId) {
             orders[index] = order == null ? null : (orderCopies[index] = order.copyIntoCommandSlot(orderCopies[index]));
             symbols[index] = instrumentId;
+            capturedMask |= 1 << index;
         }
         @Override public boolean includeTerminalAfterImage() { return true; }
-        @Override public void matcherResult(com.surprising.aeron.service.matching.MatchingResult result) {
-            matcherResult = result;
-        }
         @Override public void prepareResponse() {
-            prepared = true;
-            if (matcherResult == null || responseOrders.isEmpty()) return;
             if (responseSlot != null) responseArena.release(responseSlot);
             responseSlot = null;
+            prepared = true;
+            response = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
+            responseLength = 0;
+            if (responseOrders.isEmpty()) return;
             try {
                 boolean single = responseOrders.size() == 1;
                 var first = responseOrders.get(0);
@@ -1270,7 +1272,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             } catch (IllegalArgumentException ignored) {
                 if (responseSlot != null) responseArena.release(responseSlot);
                 responseSlot = null;
-                response = null;
+                response = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
                 responseLength = 0;
             }
         }
@@ -1344,8 +1346,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             java.util.Arrays.fill(symbols, null);
             java.util.Arrays.fill(ids, 0);
             count = 0;
+            capturedMask = 0;
             prepared = false;
-            matcherResult = null;
             response = null;
             responseLength = 0;
             responseSlot = null;

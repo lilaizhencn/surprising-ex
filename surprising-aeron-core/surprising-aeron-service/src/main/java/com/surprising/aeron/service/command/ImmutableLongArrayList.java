@@ -6,25 +6,20 @@ import java.util.Collection;
 import java.util.RandomAccess;
 import java.util.function.LongConsumer;
 
-/** Immutable List compatibility view backed by primitive storage. */
+/** 命令、分页与协议 List 契约使用的不可变 primitive 存储；内部遍历使用 PrimitiveLongView。 */
 public final class ImmutableLongArrayList extends AbstractList<Long>
         implements RandomAccess, com.surprising.aeron.service.command.support.PrimitiveLongView {
 
-    private static final ImmutableLongArrayList EMPTY = new ImmutableLongArrayList(new long[0], true);
+    private static final ImmutableLongArrayList EMPTY = new ImmutableLongArrayList(new long[0]);
     private final long[] values;
 
-    private ImmutableLongArrayList(long[] values, boolean owned) {
-        this.values = owned ? values : values.clone();
-    }
-
-    public static ImmutableLongArrayList copyOf(long[] values) {
-        if (values == null || values.length == 0) return EMPTY;
-        return new ImmutableLongArrayList(values, false);
+    private ImmutableLongArrayList(long[] values) {
+        this.values = values;
     }
 
     public static ImmutableLongArrayList takeOwnership(long[] values) {
         if (values == null || values.length == 0) return EMPTY;
-        return new ImmutableLongArrayList(values, true);
+        return new ImmutableLongArrayList(values);
     }
 
     public static ImmutableLongArrayList empty() { return EMPTY; }
@@ -54,24 +49,6 @@ public final class ImmutableLongArrayList extends AbstractList<Long>
             if (size == 0) return EMPTY;
             return takeOwnership(size == values.length ? values : Arrays.copyOf(values, size));
         }
-    }
-
-    public static ImmutableLongArrayList sortedDistinct(long[] values, long additional) {
-        long[] copy = Arrays.copyOf(values, values.length + 1);
-        copy[values.length] = additional;
-        Arrays.sort(copy);
-        int size = 0;
-        for (long value : copy) {
-            if (size == 0 || copy[size - 1] != value) copy[size++] = value;
-        }
-        return size == 0 ? EMPTY : new ImmutableLongArrayList(Arrays.copyOf(copy, size), true);
-    }
-
-    public static java.util.List<Long> preservePrimitive(java.util.List<Long> values) {
-        if (values == null || values instanceof ImmutableLongArrayList) return values;
-        long[] primitive = new long[values.size()];
-        for (int index = 0; index < primitive.length; index++) primitive[index] = values.get(index);
-        return copyOf(primitive);
     }
 
     public long valueAt(int index) {

@@ -14,6 +14,21 @@ import org.junit.jupiter.api.Test;
 
 class ProductionSourceBoundaryTest {
     @Test
+    void d2HasNoOwnerDirectDispatchScanCallbackOrOptionalLaneResponse() throws Exception {
+        assertThat(java.util.Arrays.stream(com.surprising.aeron.service.state.TradingRuntimeState.class
+                .getDeclaredMethods()).map(java.lang.reflect.Method::getName))
+                .doesNotContain("dispatchOwnerControlledSettlement");
+        assertThat(java.util.Arrays.stream(ClusterCommandWindow.class.getDeclaredMethods())
+                .map(java.lang.reflect.Method::getName)).doesNotContain("complete");
+        assertThat(java.util.Arrays.stream(com.surprising.aeron.service.state.index.ActiveOrderIndex.class
+                .getDeclaredMethods()).map(java.lang.reflect.Method::getName)).doesNotContain("ids");
+        for (String name : java.util.List.of("preparedResponse", "preparedResponseLength")) {
+            var method = com.surprising.aeron.service.state.LaneOrderResultTarget.class.getMethod(name);
+            assertThat(method.isDefault()).as("Lane response contract %s", name).isFalse();
+        }
+    }
+
+    @Test
     void ownerCarriesSessionIdsAndNeitherD1HelperImplementsAnAeronInterface() throws IOException {
         Path root = Path.of("").toAbsolutePath();
         while (!Files.isDirectory(root.resolve("surprising-aeron-core"))) {

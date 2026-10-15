@@ -138,43 +138,15 @@ final class MatcherSettlementDispatcher {
         return event;
     }
 
-    /**
-     * Legacy synchronous handoff.  Asynchronous commands are Matcher-owned and never enter
-     * this method; keeping the name explicit prevents new code from accidentally reintroducing
-     * an Owner-produced Lane settlement.
-     */
-    void dispatchOwnerControlled(MatcherSettlementEvent event) {
-        owner.assertOwner();
-        if (event == null || event.runtime() != owner || !event.direct() || event.dispatched())
-            throw new IllegalStateException("invalid direct Lane ordering slot");
-        long mask = event.routedLaneMask();
-        owner.ensureLaneWorkerCapacity(mask);
-        owner.releaseOwnerLaneAccess();
-        event.markDispatched();
-        if (!owner.accountLanesStarted) return;
-        long lanes = mask;
-        while (lanes != 0) {
-            int laneId = Long.numberOfTrailingZeros(lanes);
-            lanes &= lanes - 1;
-            event.markLaneQueued(laneId);
-            owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
-                    owner.accountLaneQueueHighWaterMarks[laneId], owner.laneWorkers[laneId].depth() + 1);
-            owner.laneWorkers[laneId].submit(event);
-        }
-    }
-
     /** Publish a completed Matcher fact directly into each routed Lane's shard SPSC mailbox. */
     void publishMatcherOwned(MatcherSettlementEvent event) {
-        if (event == null || event.runtime() != owner || !event.direct() || !event.resultPrepared())
+        if (event == null || event.runtime() != owner || !event.direct() || !event.matcherOwnedPublication()
+                || !event.dispatched() || !event.resultPrepared())
             throw new IllegalStateException("invalid Matcher-owned settlement publication");
         if (event.dispatched() && event.queuedLaneMask() != 0)
             throw new IllegalStateException("Matcher settlement was already dispatched");
         long lanes = event.routedLaneMask();
         if (lanes == 0) throw new IllegalStateException("Matcher settlement has no routed Lane");
-        // A Matcher-owned slot is logically reserved before the Matcher starts work so
-        // admission/commit gates can observe it.  Publication only fills the rings; do not
-        // transition that reservation a second time.
-        if (!event.dispatched()) event.markDispatched();
         if (!owner.accountLanesStarted) return;
         int shard = event.directShard();
         while (lanes != 0) {

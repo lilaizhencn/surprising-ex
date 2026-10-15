@@ -40,9 +40,9 @@ class ActiveOrderIndexTest {
             assertThat(index.sortedIds(user, "2")).containsExactly(id);
             index.apply(id, null, identities);
             index.apply(id, null, identities);
-            assertThat(index.ids(user)).isEmpty();
+            assertThat(index.sortedIdsDescending(user)).isEmpty();
             assertThat(index.count("2")).isZero();
-            assertThat(index.ids(7)).containsExactly(1L);
+            assertThat(index.sortedIdsDescending(7)).containsExactly(1L);
             assertThat(index.activeOrderRoute(1).userId()).isEqualTo(7);
         }
         assertThat(index.count()).isOne();
@@ -96,15 +96,15 @@ class ActiveOrderIndexTest {
             index.apply(1, null, identities);
             index.apply(999, null, identities);
             assertThat(index.activeOrderRoute(1)).isNull();
-            assertThat(index.ids(7)).containsExactly(2L);
-            assertThat(index.ids(8)).containsExactly(3L);
-            assertThat(index.ids("1")).containsExactly(3L, 2L);
+            assertThat(index.sortedIdsDescending(7)).containsExactly(2L);
+            assertThat(index.sortedIdsDescending(8)).containsExactly(3L);
+            assertThat(index.sortedIdsDescending("1")).containsExactly(3L, 2L);
             index.apply(2, null, identities);
             index.apply(3, null, identities);
             assertThat(index.count()).isZero();
-            assertThat(index.ids(7)).isEmpty();
-            assertThat(index.ids(8)).isEmpty();
-            assertThat(index.ids("1")).isEmpty();
+            assertThat(index.sortedIdsDescending(7)).isEmpty();
+            assertThat(index.sortedIdsDescending(8)).isEmpty();
+            assertThat(index.sortedIdsDescending("1")).isEmpty();
         }
     }
 
@@ -141,8 +141,8 @@ class ActiveOrderIndexTest {
         assertThat(index.count()).isEqualTo(32);
         for (long id = 4065; id <= 4096; id++) index.apply(id, null, identities);
         assertThat(index.count()).isZero();
-        assertThat(index.ids(7)).isEmpty();
-        assertThat(index.ids("1")).isEmpty();
+        assertThat(index.sortedIdsDescending(7)).isEmpty();
+        assertThat(index.sortedIdsDescending("1")).isEmpty();
     }
 
     @Test
@@ -162,7 +162,7 @@ class ActiveOrderIndexTest {
         assertThat(index.page(7, "1", 0, 10).orderIds()).containsExactly(1L);
         index.apply(1, order.withStatus(CoreOrderStatus.CANCELED, 3), identities);
         assertThat(index.activeOrderRoute(1)).isNull();
-        assertThat(index.ids(7)).isEmpty();
+        assertThat(index.sortedIdsDescending(7)).isEmpty();
     }
 
     @Test
@@ -178,9 +178,9 @@ class ActiveOrderIndexTest {
         index.apply(1, replacement, identities);
         assertThat(index.activeOrderRoute(1).userId()).isEqualTo(8);
         assertThat(index.activeOrderSymbol(1)).isEqualTo("2");
-        assertThat(index.ids(7)).isEmpty();
-        assertThat(index.ids("1")).isEmpty();
-        assertThat(index.ids(8)).containsExactly(1L);
+        assertThat(index.sortedIdsDescending(7)).isEmpty();
+        assertThat(index.sortedIdsDescending("1")).isEmpty();
+        assertThat(index.sortedIdsDescending(8)).containsExactly(1L);
         assertThat(index.activeOrderRoute(1).instrumentId()).isEqualTo("2");
     }
 
@@ -209,7 +209,7 @@ class ActiveOrderIndexTest {
                     assertThat(nested.next()).isEqualTo(id);
                 }
                 assertThat(nested.hasNext()).isFalse();
-                assertThat(actual).containsExactlyElementsOf(index.ids(user, instrumentId).descendingSet());
+                assertThat(actual).containsExactlyElementsOf(java.util.Arrays.stream(index.sortedIds(user, instrumentId)).boxed().toList());
                 org.assertj.core.api.Assertions.assertThatThrownBy(first::next)
                         .isInstanceOf(java.util.NoSuchElementException.class);
             }
@@ -255,7 +255,7 @@ class ActiveOrderIndexTest {
                 instruments(ProductLine.SPOT, "1"), CoreRiskState.empty(), CoreTreasuryState.empty());
 
         ActiveOrderIndex index = new ActiveOrderIndex(state);
-        assertThat(index.ids()).containsExactly(7L);
+        assertThat(index.page(0, null, 0, 1024).orderIds()).containsExactly(7L);
         assertThat(index.activeOrderRoute(7).userId()).isEqualTo(11);
     }
 

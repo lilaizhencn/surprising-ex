@@ -65,6 +65,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     /** 所属用户 Lane 编码的不可变响应；事件完成回执发布后才允许 Owner 读取。 */
     byte[] preparedResponse;
     int preparedResponseLength;
+    @Override public byte[] preparedResponse() { return preparedResponse; }
+    @Override public int preparedResponseLength() { return preparedResponseLength; }
     private final ResponseArena responseArena;
     private ResponseArena.Slot preparedResponseSlot;
     /** Owner-only ordering links; never read by Matcher/Lane and detached before pool reuse. */
@@ -82,7 +84,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
             preparedResponseLength = preparedResponse.length;
         } else {
             int length = TradingOrderBatchCodec.encodedResultSourceLength(this);
-            preparedResponseSlot = responseArena.acquireExactSlot(length);
+            preparedResponseSlot = responseArena.acquireSlot(length);
             preparedResponse = preparedResponseSlot.storage;
             preparedResponseLength = TradingOrderBatchCodec.encodeResultSourceInto(
                     this, preparedResponse, 0);

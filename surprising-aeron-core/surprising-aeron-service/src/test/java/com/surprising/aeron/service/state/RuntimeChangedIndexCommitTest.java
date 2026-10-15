@@ -64,7 +64,7 @@ class RuntimeChangedIndexCommitTest {
         if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
 
-        assertThat(indexes.activeOrders.ids()).containsExactly(11L);
+        assertThat(indexes.activeOrders.page(0, null, 0, 1024).orderIds()).containsExactly(11L);
         assertThat(indexes.positionUsers.users("1")).containsExactly(7L);
         assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(2);
 
@@ -86,7 +86,7 @@ class RuntimeChangedIndexCommitTest {
         if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
 
-        assertThat(indexes.activeOrders.ids()).isEmpty();
+        assertThat(indexes.activeOrders.page(0, null, 0, 1024).orderIds()).isEmpty();
         assertThat(indexes.positionUsers.users("1")).isEmpty();
         assertThat(indexes.openInterest.openInterestSteps("1")).isZero();
         runtime.close();

@@ -147,13 +147,13 @@ class CoreMatchingStateTest {
             CoreMessage first = message(state, 3, 11, CoreMessageType.PLACE_ORDER,
                     place(101, CoreOrderSide.SELL, 100, 1,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 100));
-            assertThat(state.apply(first).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            assertThat(submit(state, first).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
 
             CoreMessage stale = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER,
                     UUID.randomUUID(), state.productLine(), CommandSource.GATEWAY, 77, 4, 22,
                     6_001, 4), place(202, CoreOrderSide.BUY, 100, 1,
                     ReservationKind.DERIVATIVE_MARGIN, "USDT", 100));
-            assertThat(state.apply(stale).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            assertThat(submit(state, stale).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
 
             CoreResponse firstCompleted = CoreTestCompletion.completeMatchingSynchronously(state,
                     state.matchingSequence(first.header().commandId()), 6_001, 4);
@@ -179,12 +179,12 @@ class CoreMatchingStateTest {
                     place(101, CoreOrderSide.BUY, 100, 1,
                             ReservationKind.SPOT_ASSET, "USDT", 100));
 
-            CoreResponse pending = state.apply(command);
-            CoreResponse duplicate = state.apply(command);
+            CoreResponse pending = submit(state, command);
+            CoreResponse duplicate = submit(state, command);
             CoreMessage conflicting = new CoreMessage(command.header(),
                     place(102, CoreOrderSide.BUY, 100, 1,
                             ReservationKind.SPOT_ASSET, "USDT", 100));
-            CoreResponse conflict = state.apply(conflicting);
+            CoreResponse conflict = submit(state, conflicting);
 
             assertThat(state.commandResults()).doesNotContainKey(command.header().commandId());
             assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
@@ -213,7 +213,7 @@ class CoreMatchingStateTest {
                     place(202, CoreOrderSide.BUY, 100, 5, ReservationKind.SPOT_ASSET, "USDT", 500,
                             CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100, false));
             long committedBefore = state.committedCoreSequence();
-            CoreResponse pending = state.apply(crossing);
+            CoreResponse pending = submit(state, crossing);
 
             assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
@@ -229,7 +229,7 @@ class CoreMatchingStateTest {
                             com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                             com.surprising.aeron.protocol.CorePositionSide.NET,
                             CoreOrderType.LIMIT, CoreTimeInForce.IOC, false, "client-202")));
-            assertThat(state.apply(duplicateClientId).status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(submit(state, duplicateClientId).status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(state.tradingState().user(8).balances().get("USDT").availableUnits()).isEqualTo(300);
             assertThat(state.tradingState().user(8).balances().get("USDT").lockedUnits()).isZero();
             assertThat(state.tradingState().user(8).totalUnits("BTC")).isEqualTo(2);
@@ -257,7 +257,7 @@ class CoreMatchingStateTest {
             CoreMessage crossingPostOnly = message(state, 4, 22, CoreMessageType.PLACE_ORDER,
                     place(202, CoreOrderSide.BUY, 100, 1, ReservationKind.SPOT_ASSET, "USDT", 100,
                             CoreOrderType.LIMIT, CoreTimeInForce.GTX, 100, true));
-            CoreResponse pending = state.apply(crossingPostOnly);
+            CoreResponse pending = submit(state, crossingPostOnly);
             CoreResponse completed = drainMatching(state, pending, crossingPostOnly);
             assertThat(completed.status()).isEqualTo(ResponseStatus.REJECTED);
 
@@ -280,7 +280,7 @@ class CoreMatchingStateTest {
             CoreMessage order = message(state, 2, 22, CoreMessageType.PLACE_ORDER,
                     place(202, CoreOrderSide.BUY, 100, 2, ReservationKind.SPOT_ASSET, "USDT", 200));
 
-            CoreResponse completed = drainMatching(state, state.apply(order), order);
+            CoreResponse completed = drainMatching(state, submit(state, order), order);
 
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
             var result = CoreCommandResultCodec.decode(completed.data());
@@ -449,7 +449,7 @@ class CoreMatchingStateTest {
             CoreMessage taker = message(state, sequence, 99, CoreMessageType.PLACE_ORDER,
                     place(2_000, CoreOrderSide.BUY, 100, 8,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 800));
-            CoreResponse pending = state.apply(taker);
+            CoreResponse pending = submit(state, taker);
             assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long matchingSequence = state.matchingSequence(taker.header().commandId());
             var matching = CoreTestCompletion.awaitMatchingResult(state, matchingSequence);
@@ -512,7 +512,7 @@ class CoreMatchingStateTest {
             CoreMessage tooLarge = message(state, 5, 22, CoreMessageType.PLACE_ORDER,
                     place(203, CoreOrderSide.SELL, 110, 3, true,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 1));
-            assertThat(drainMatching(state, state.apply(tooLarge), tooLarge).resultCode().name())
+            assertThat(drainMatching(state, submit(state, tooLarge), tooLarge).resultCode().name())
                     .isEqualTo("REDUCE_ONLY_CAPACITY_EXCEEDED");
 
             apply(state, 6, 11, CoreMessageType.PLACE_ORDER,
@@ -550,7 +550,7 @@ class CoreMatchingStateTest {
                     place(203, CoreOrderSide.SELL, 110, 1, false,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 1));
 
-            CoreResponse response = drainMatching(state, state.apply(close), close);
+            CoreResponse response = drainMatching(state, submit(state, close), close);
 
             assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.OPEN);
@@ -584,7 +584,7 @@ class CoreMatchingStateTest {
                     place(205, CoreOrderSide.SELL, 130, 1, false,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
             var response = asynchronous ? CoreTestCompletion.applyAsynchronously(state, close)
-                    : drainMatching(state, state.apply(close), close);
+                    : drainMatching(state, submit(state, close), close);
             assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
 
             assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.OPEN);
@@ -662,7 +662,7 @@ class CoreMatchingStateTest {
                     place(204, CoreOrderSide.SELL, 110, 1, false,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
             var response = asynchronous ? CoreTestCompletion.applyAsynchronously(state, request)
-                    : drainMatching(state, state.apply(request), request);
+                    : drainMatching(state, submit(state, request), request);
             assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.tradingState().order(203)).isNull();
             assertThat(state.tradingState().order(301)).isNull();
@@ -867,7 +867,7 @@ class CoreMatchingStateTest {
                             ReservationKind.SPOT_ASSET, "USDT", 240,
                             CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100, false, 100_000, 200_000));
 
-            CoreResponse completed = drainMatching(state, state.apply(buyer), buyer);
+            CoreResponse completed = drainMatching(state, submit(state, buyer), buyer);
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(orderIn(completed, 202).status()).isEqualTo("FILLED");
             assertThat(orderIn(completed, 202).executedQuantitySteps()).isEqualTo(2);
@@ -896,7 +896,7 @@ class CoreMatchingStateTest {
                     place(202, CoreOrderSide.BUY, 100, 2,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 200,
                             CoreOrderType.LIMIT, CoreTimeInForce.GTX, 100, true));
-            CoreResponse pending = state.apply(crossingPostOnly);
+            CoreResponse pending = submit(state, crossingPostOnly);
             CoreResponse completed = drainMatching(state, pending, crossingPostOnly);
 
             assertThat(completed.status()).isEqualTo(ResponseStatus.REJECTED);
@@ -989,7 +989,7 @@ class CoreMatchingStateTest {
             CoreMessage amend = message(state, 3, 22, CoreMessageType.AMEND_ORDER,
                     TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(202, 203, "amended",
                             110L, 2L, CoreTimeInForce.GTC, null)));
-            var response = drainMatching(state, state.apply(amend), amend);
+            var response = drainMatching(state, submit(state, amend), amend);
 
             assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(TradingCommandCodec.decodeAmendOrder(amend.payload()).replacementOrderId()).isEqualTo(203);
@@ -1076,14 +1076,14 @@ class CoreMatchingStateTest {
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                 UUID.randomUUID(), productLine, CommandSource.OPERATIONS, 88, 1, 1,
                 1_000, 1), TradingCommandCodec.encodeRegisterInstrument(instrument));
-        assertThat(state.apply(message).status()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(submit(state, message).status()).isEqualTo(ResponseStatus.APPLIED);
         CoreMessage mark = new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_MARK_PRICE,
                 UUID.randomUUID(), productLine, CommandSource.KAFKA_INPUT_BRIDGE, 89, 1, 1,
                 1_000, 2), TradingCommandCodec.encodeApplyMarkPrice(
                         type.isOption()
                                 ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, 1_000)
                                 : new ApplyMarkPriceCommand("1", 100, 1, 1_000)));
-        assertThat(state.apply(mark).status()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(submit(state, mark).status()).isEqualTo(ResponseStatus.APPLIED);
     }
 
     private static String settleAsset(ProductLine productLine) {
@@ -1097,6 +1097,21 @@ class CoreMatchingStateTest {
                 .orElseThrow(() -> new AssertionError("missing order " + orderId + " in command receipt"));
     }
 
+    /** Wait only for command admission/control work; Matcher commit remains explicit in each test. */
+    private static CoreResponse submit(TradingCoreRuntime state, CoreMessage command) {
+        CoreResponse response = state.apply(command);
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        while (state.hasPendingDirectCommand()) {
+            response = state.pollDirectCommand();
+            state.assertHealthy();
+            if (System.nanoTime() >= deadline)
+                throw new AssertionError("command admission timed out: " + command.header().messageType());
+            Thread.onSpinWait();
+        }
+        assertThat(response).isNotNull();
+        return response;
+    }
+
     private static CoreResponse apply(
             TradingCoreRuntime state,
             long sequence,
@@ -1104,7 +1119,7 @@ class CoreMatchingStateTest {
             CoreMessageType messageType,
             byte[] payload) {
         CoreMessage message = message(state, sequence, userId, messageType, payload);
-        CoreResponse response = drainMatching(state, state.apply(message), message);
+        CoreResponse response = drainMatching(state, submit(state, message), message);
         assertThat(response.status()).as("%s %s users=%s orders=%s", messageType, response.resultCode(),
                         state.tradingState().users().keySet(), state.tradingState().orders().keySet())
                 .isIn(ResponseStatus.APPLIED, ResponseStatus.OK);

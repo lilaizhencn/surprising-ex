@@ -53,12 +53,36 @@ class ResponseArenaTest {
     }
 
     @Test
-    void largeResponsesUseExactFallbackStorage() {
+    void largeResponsesOwnExactStorageWithoutConsumingPooledSlots() {
         ResponseArena arena = new ResponseArena(1, 16);
         byte[] response = arena.acquire(17);
         assertThat(response).hasSize(17);
         arena.release(response);
         assertThat(arena.acquire(16)).isNotSameAs(response);
+    }
+
+    @Test
+    void dedicatedDescriptorsStayIndependentOfRetainedPooledResponses() {
+        var arena = new ResponseArena(1, 16);
+        var pooled = arena.acquireSlot(8);
+        pooled.writer().putLong(123);
+        arena.retainLedger(pooled.storage);
+        arena.release(pooled);
+        var dedicated = arena.acquireSlot(8);
+        var large = arena.acquireSlot(17);
+        assertThat(dedicated.arenaBacked).isFalse();
+        assertThat(large.arenaBacked).isFalse();
+        assertThat(dedicated.storage).hasSize(8).isNotSameAs(pooled.storage);
+        assertThat(large.storage).hasSize(17);
+        dedicated.writer().putLong(456);
+        assertThat(pooled.writer().getLong(0)).isEqualTo(123);
+        arena.releaseLedger(pooled.storage);
+        var reused = arena.acquireSlot(8);
+        assertThat(reused).isSameAs(pooled);
+        assertThat(dedicated.writer().getLong(0)).isEqualTo(456);
+        arena.release(dedicated);
+        arena.release(large);
+        arena.release(reused);
     }
 
     @Test

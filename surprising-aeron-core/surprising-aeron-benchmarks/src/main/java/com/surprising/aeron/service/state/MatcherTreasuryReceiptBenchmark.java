@@ -58,12 +58,13 @@ public class MatcherTreasuryReceiptBenchmark {
         long currentSequence = ++sequence;
         var event = runtime.prepareDirectCancellation(currentSequence, original.userId(), original.orderId(), commandId, 0, identities, 10, 20);
         if (!event.submitTreasurySettlement(ledger)) throw new IllegalStateException("financial slot not admitted");
+        event.markMatcherOwnedPublication();
+        event.reserveMatcherPublication();
         event.beginMatcherPublication();
         // Matcher payload is a retained no-trade fixture; the Core proof/commit sequence
         // still increases for every Account application. This is not an API load generator.
         event.publishDirectNativeResult(nativeResult, currentSequence, 1, 2, 11, currentSequence, 0);
         event.completeMatcherPublication();
-        runtime.dispatchOwnerControlledSettlement(event);
         while (!event.complete()) { ledger.assertHealthy(); runtime.assertAccountLanesHealthy(); Thread.onSpinWait(); }
         runtime.collectMatcherSettlement(event, null, null);
         long sequence = event.directResultCoreSequence();
