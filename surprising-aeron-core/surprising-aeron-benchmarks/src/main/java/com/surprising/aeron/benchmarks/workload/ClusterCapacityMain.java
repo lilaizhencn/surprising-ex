@@ -139,8 +139,9 @@ public final class ClusterCapacityMain implements AutoCloseable {
         String symbolPrefix = System.getProperty("surprising.aeron.instrumentId", "15")
                 .trim().toUpperCase();
         int symbolCount = positiveInt("surprising.aeron.capacity-instrumentId-count", 128);
+        int baseSymbolId = Integer.parseInt(symbolPrefix);
         List<String> symbols = java.util.stream.IntStream.range(0, symbolCount)
-                .mapToObj(index -> symbolCount == 1 ? symbolPrefix : symbolPrefix + '-' + (index + 1))
+                .mapToObj(index -> String.valueOf(symbolCount == 1 ? baseSymbolId : baseSymbolId * 1000 + index + 1))
                 .toList();
         long seed = positiveLong("surprising.aeron.capacity-seed", 9901);
         int workers = positiveInt("surprising.aeron.capacity-workers", 4);
