@@ -16,3 +16,10 @@ HotSpot JDK 27 单线程组件采样：同一解码器读取直接缓冲区，�
 解码槽通过 `CoreMessage.ownedResponse` 生成一份只读终态响应，并通过 `responseHeader` 生成独立的RESPONSE Header；两者共享输入帧的租约，响应Header不会改写请求Header。异步发布者在交接前调用 `retainForEgress`，编码或丢弃后调用 `releaseFromEgress`。最后一个消费者释放前，解码器不能复用输入、响应Header或响应元数据。调用 `CoreResponse.data()` 得到的独立字节副本可长期保留。
 
 独立构造的 `CoreMessage` 继续生成独立响应值；只有显式租用的解码槽允许复用。一个租约只能准备一次终态响应，重复准备会拒绝。验证见 [响应槽及跨模块功能记录](../../docs/validation/leased-response-position-slots-20261014.json)。
+
+
+### 命令槽的 UTF8 客户端订单号解码（2026-10-15）
+
+`TradingCommandCodec.decodePlaceOrderInto` 保留原帧范围、64 字节文本上限及订单字段校验。仅解码槽中的 `PlaceOrderCommand` 在首次遇到非 ASCII 订单号时，取得自身的标准 UTF8 decoder、64 字节及 64 字符工作缓冲；随后复用这些转码缓冲，并创建独立的不可变 `String`。ASCII 及独立值入口沿用原 String 解码，不新增名称缓存、ThreadLocal 或线程。最终 String 存储及 JDK 的 compact-string 转换仍会分配，不能称为零分配。
+
+29 个协议用例和 166 个直接受影响的服务用例通过。随机字节验证在一个用例内比较 5,000 组输入与 JDK 原解码结果，另覆盖非法代理编码、截断多字节、空值、最大长度、保留旧值和槽位复用；跨服务验证覆盖六产品线及身份、查询、成交、风险、资金、批量、划转和实时输出。见 [UTF8 解码功能验证](../../docs/validation/utf8-command-text-20261015.json)。未运行快照/恢复、wallet 或真实节点压测；分配诊断数值仅保留本地，完整 Owner 迁移及 Core 百字节目标仍未完成。

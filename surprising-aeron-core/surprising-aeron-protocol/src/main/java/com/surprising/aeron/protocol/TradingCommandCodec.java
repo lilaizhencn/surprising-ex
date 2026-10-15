@@ -359,7 +359,8 @@ public final class TradingCommandCodec {
         }
         requireRange(payload, offset, clientLength, limit);
         String clientOrderId = clientLength == 0 ? ""
-                : new String(payload, offset, clientLength, StandardCharsets.UTF_8);
+                : target == null ? new String(payload, offset, clientLength, StandardCharsets.UTF_8)
+                : target.decodeClientOrderId(payload, offset, clientLength);
         offset += clientLength;
         if (offset != limit) throw new ProtocolException("trailing bytes in trading command payload");
         if (target == null) return new PlaceOrderCommand(orderId, instrumentId, side, limitPriceTicks,

@@ -1,5 +1,11 @@
 package com.surprising.aeron.protocol;
 
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
+
 /** Immutable API values, or a decoder-owned slot retained until command retirement. */
 public final class PlaceOrderCommand {
     private long orderId;
@@ -15,6 +21,10 @@ public final class PlaceOrderCommand {
     private boolean postOnly;
     private String clientOrderId;
     private final boolean commandSlot;
+    /** Lazy, bounded wire scratch owned by this decoder slot; never shared with the resulting String. */
+    private CharsetDecoder clientNameDecoder;
+    private ByteBuffer clientNameBytes;
+    private CharBuffer clientNameChars;
 
     public PlaceOrderCommand(
         long orderId,
@@ -35,6 +45,32 @@ public final class PlaceOrderCommand {
 
     private PlaceOrderCommand() { commandSlot = true; }
     public static PlaceOrderCommand commandSlot() { return new PlaceOrderCommand(); }
+
+    String decodeClientOrderId(byte[] payload, int offset, int length) {
+        if (!commandSlot) throw new IllegalStateException("cannot decode into an immutable order command");
+        if (length == 0) return "";
+        for (int index = offset; index < offset + length; index++) {
+            if (payload[index] >= 0) continue;
+            if (clientNameDecoder == null) {
+                clientNameDecoder = StandardCharsets.UTF_8.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPLACE)
+                        .onUnmappableCharacter(CodingErrorAction.REPLACE);
+                // The command wire format permits at most 64 client-name bytes. Decoding,
+                // including replacement of malformed bytes, cannot exceed 64 UTF-16 units.
+                clientNameBytes = ByteBuffer.allocate(64);
+                clientNameChars = CharBuffer.allocate(64);
+            }
+            clientNameBytes.clear();
+            clientNameBytes.put(payload, offset, length).flip();
+            clientNameChars.clear();
+            clientNameDecoder.reset();
+            if (!clientNameDecoder.decode(clientNameBytes, clientNameChars, true).isUnderflow()
+                    || !clientNameDecoder.flush(clientNameChars).isUnderflow())
+                throw new ProtocolException("client order id exceeds decode buffer");
+            return new String(clientNameChars.array(), 0, clientNameChars.position());
+        }
+        return new String(payload, offset, length, StandardCharsets.UTF_8);
+    }
 
     void decodeInto(
         long orderId,
