@@ -5,11 +5,65 @@ import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.Cluster;
 import java.util.ArrayList;
 import java.util.UUID;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 import org.agrona.concurrent.NoOpIdleStrategy;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 class OwnerIngressRingTest {
+    @Test void concurrentCommandsAndBoundariesKeepTheirFieldsAcrossThreeWraps() throws Exception {
+        var ring = new OwnerIngressRing();
+        var commands = new CoreMessage[]{probe(1), CoreMessage.owned(probe(2).header(), new byte[64])};
+        var fingerprints = new CommandFingerprint[]{CommandFingerprint.of(commands[0]), CommandFingerprint.of(commands[1])};
+        Runnable boundary = () -> { };
+        int count = OwnerIngressRing.CAPACITY * 3 + 17;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        var consumed = new FutureTask<Void>(() -> {
+            for (int i = 0; i < count; i++) {
+                OwnerIngressRing.Entry entry;
+                while ((entry = ring.first()) == null) {
+                    assertThat(Thread.currentThread().isInterrupted()).isFalse();
+                    assertThat(System.nanoTime()).isLessThan(deadline);
+                    Thread.onSpinWait();
+                }
+                boolean isBoundary = i % 7 == 0;
+                assertThat(entry.command).isSameAs(isBoundary ? null : commands[i & 1]);
+                assertThat(entry.action).isSameAs(isBoundary ? boundary : null);
+                assertThat(entry.fingerprint).isSameAs(isBoundary ? null : fingerprints[i & 1]);
+                assertThat(entry.sessionId).isEqualTo(i);
+                assertThat(entry.timestamp).isEqualTo(i + 10L);
+                assertThat(entry.position).isEqualTo(i + 20L);
+                assertThat(entry.enqueuedNanos).isEqualTo(i + 30L);
+                assertThat(entry.ownerObserved).isFalse();
+                entry.ownerObserved = true;
+                ring.remove();
+            }
+            return null;
+        });
+        var consumer = new Thread(consumed, "d4-ingress-consumer");
+        consumer.start();
+        try {
+            for (int i = 0; i < count; i++) {
+                boolean isBoundary = i % 7 == 0;
+                while (!ring.offer(isBoundary ? null : commands[i & 1], i, i + 10L, i + 20L,
+                        isBoundary ? boundary : null, i + 30L, isBoundary ? null : fingerprints[i & 1])) {
+                    if (consumed.isDone()) consumed.get();
+                    assertThat(System.nanoTime()).isLessThan(deadline);
+                    Thread.onSpinWait();
+                }
+            }
+            consumed.get(10, TimeUnit.SECONDS);
+            assertThat(ring.size()).isZero();
+            assertThat(ring.retainedBytes()).isZero();
+        } finally {
+            consumer.interrupt();
+            consumer.join(5_000);
+            assertThat(consumer.isAlive()).isFalse();
+            ring.discard();
+        }
+    }
+
     @Test void releasingTransportSlotDoesNotReleaseTheAdmittedCommandLease() {
         var ring = new OwnerIngressRing();
         var command = CoreMessage.decoderSlot();
