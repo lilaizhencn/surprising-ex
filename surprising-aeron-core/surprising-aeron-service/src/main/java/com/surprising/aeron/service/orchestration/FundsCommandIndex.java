@@ -18,7 +18,8 @@ import org.rocksdb.RocksIterator;
 import org.rocksdb.WriteOptions;
 
 /**
- * Product-owner confined disk index of committed funds command identities.
+ * Product-local disk index of committed funds command identities. Active get/put belongs to Ledger;
+ * cold construction, serialization and shutdown retain their existing phase boundaries.
  * Cluster Log and paired Core snapshots remain the recovery authority; this local directory is
  * rebuilt on recovery and is never opened as a substitute for replay. Cache and memtables are
  * bounded independently of the cumulative number of commands. Snapshot enumeration is key ordered.
@@ -31,8 +32,21 @@ final class FundsCommandIndex implements AutoCloseable {
     private WriteOptions writes;
     private RocksDB database;
     private long count;
-    private RuntimeException failure;
+    private volatile RuntimeException failure;
+    private volatile Thread ioOwner;
     private boolean closed;
+
+    void bindIoOwner() {
+        Thread current = Thread.currentThread();
+        if (ioOwner == null) ioOwner = current;
+        else if (ioOwner != current) throw new IllegalStateException("funds index I/O belongs to SystemLedgerLane");
+    }
+
+    private void assertIoOwner() {
+        Thread expected = ioOwner;
+        if (expected != null && expected != Thread.currentThread())
+            throw new IllegalStateException("funds index I/O belongs to SystemLedgerLane");
+    }
 
     void assertHealthy() {
         if (failure != null) throw failure;
@@ -41,6 +55,7 @@ final class FundsCommandIndex implements AutoCloseable {
 
     CommandFingerprint get(UUID id) {
         assertHealthy();
+        assertIoOwner();
         if (database == null) return null;
         try {
             byte[] value = database.get(key(id));
@@ -52,6 +67,7 @@ final class FundsCommandIndex implements AutoCloseable {
 
     void put(UUID id, CommandFingerprint fingerprint) {
         assertHealthy();
+        assertIoOwner();
         if (id == null || fingerprint == null) throw new IllegalArgumentException("funds identity is required");
         CommandFingerprint previous = get(id);
         if (previous != null) {

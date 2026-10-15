@@ -232,6 +232,11 @@ final class CoreCommandIngress {
         if (sourceKey == null) {
             sourceKey = new TradingCoreRuntime.SourceKey(message.header().source(), message.header().sourceId());
         }
+        if (TradingCoreRuntime.isFundsIdempotencyCommand(message.header().messageType())) {
+            runtime.directCommand.beginFundsCheck(message, fingerprint, sourceKey, clusterTimestamp,
+                    clusterPosition, lastSourceSequence, runtime.terminalRetention);
+            return null;
+        }
         CoreResponse sourceSequenceResponse = checkSourceSequence(message, lastSourceSequence);
         if (sourceSequenceResponse != null) return sourceSequenceResponse;
 
@@ -268,24 +273,23 @@ final class CoreCommandIngress {
                     pendingDuplicate.sequence(),
                     TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         }
-        if (TradingCoreRuntime.isFundsIdempotencyCommand(message.header().messageType())) {
-            CommandFingerprint retained = runtime.terminalRetention.fundsCommand(message.header().commandId());
-            if (retained != null) {
-                if (!retained.matchesCommittedCommand(message, fingerprint)) {
-                    return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
-                            com.surprising.aeron.protocol.ResponseStatus.REJECTED,
-                            CoreResultCode.IDEMPOTENCY_CONFLICT, runtime.appliedCommandCount,
-                            TradingCoreRuntime.EMPTY_RESPONSE_DATA);
-                }
-                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
-                        com.surprising.aeron.protocol.ResponseStatus.APPLIED, CoreResultCode.NONE,
-                        runtime.appliedCommandCount, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
-            }
-        }
         return null;
     }
 
-    private CoreResponse checkSourceSequence(CoreMessage message, long lastSourceSequence) {
+    CoreResponse fundsReplayResponse(CoreMessage message, CommandFingerprint fingerprint, CommandFingerprint retained) {
+        if (retained == null) return null;
+        if (!retained.matchesCommittedCommand(message, fingerprint)) {
+            return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
+                    com.surprising.aeron.protocol.ResponseStatus.REJECTED,
+                    CoreResultCode.IDEMPOTENCY_CONFLICT, runtime.appliedCommandCount,
+                    TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+        }
+        return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
+                com.surprising.aeron.protocol.ResponseStatus.APPLIED, CoreResultCode.NONE,
+                runtime.appliedCommandCount, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+    }
+
+    CoreResponse checkSourceSequence(CoreMessage message, long lastSourceSequence) {
         if (lastSourceSequence >= 0 && message.header().sourceSequence() <= lastSourceSequence) {
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
                     com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,

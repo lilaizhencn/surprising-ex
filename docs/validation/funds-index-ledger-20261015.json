@@ -1,0 +1,156 @@
+{
+  "classification": "Funds index I/O transferred to existing SystemLedgerLane; functionality passed; overall Owner/allocation work remains open",
+  "base_commit": "b8a1525f4",
+  "unique_cases": 177,
+  "rows": [
+    {
+      "test_class": "com.surprising.aeron.service.state.RuntimePerpetualFundingProcessorTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.LaneClientIdentitiesTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.RuntimeIdentityRegistryTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.UserRevisionReuseTest",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreAccountLaneQueryTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreUserRevisionTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreSelfTradePrefixTest",
+      "tests": 42,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.AsyncFundingCommandTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreActiveLaneIngressTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest",
+      "tests": 33,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreBusinessStateHashTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreRiskLaneQueryTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreTransferLaneLifecycleTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.RealtimeTerminalEmissionTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CorePreflightLaneQueryTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreFundsLedgerIndexTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "selector": "UserRevisionReuseTest,CoreSelfTradePrefixTest,CoreActiveLaneIngressTest,CoreFinancialLedgerProductionTest,CoreRiskLaneQueryTest,RealtimeTerminalEmissionTest,CoreAccountLaneQueryTest,CoreTransferLaneLifecycleTest,ClusterCommandPipelineTest#atomicOcoPairWithoutSnapshot+blockedBatchRetainsDecodeUntilItsDependencyCommits+rejectedBatchAndIndependentOrdinaryOrderKeepProgressAndFunds+proportionalOiAdmissionUsesTheCompletedGlobalAndSequentialBatchPrefix+internalTriggerPagesWithoutSnapshot+selectedTriggerPriceStreamsWithoutSnapshot,CoreOrderedOrderBatchTest#cancelIdentityAndPreparationNeverReadLaneOrderTables+rejectsMixedUserCancelBatchBeforeAnyMutation+rejectsProductLineMismatchBeforeAnyBatchMutation+sequentialNativeAndAdmissionRejectionsReleaseFundsWithoutRecovery,LaneClientIdentitiesTest,RuntimeIdentityRegistryTest#laneOwnsPreparationAndDuplicateRollbackPreservesLiveIdentity+streamedIdentityHashExactlyMatchesJavaUtf8IncludingMalformedSurrogates+clientIdentityReferenceProtectsAReusedKeyFromAnOlderTerminalRelease,CorePreflightLaneQueryTest,CoreUserRevisionTest,AsyncFundingCommandTest#fundingPagesUsePublishedProgressAndCompleteOnceWithoutOwnerLaneHandoff,RuntimePerpetualFundingProcessorTest,CoreBusinessStateHashTest,CoreFundsLedgerIndexTest",
+  "followup": "Final 16 overlapping cases cover 10 funds cases and 6 active Lane ingress cases after completion wakeup was added. Matrix 176 plus one new notification case equals 177 unique cases.",
+  "business_flow": [
+    "Ordinary in-memory replay remains first; funds cache miss posts a retained identity lookup to the existing Ledger mailbox before source sequence validation",
+    "Ledger owns RocksDB get/put; Owner polls a reusable DirectCommandSlot work item without touching the database",
+    "After financial publication and conservation validation, retain APPLIED identity on Ledger before advancing source/count and returning a terminal response",
+    "Queue full leaves request pending; Ledger/index failure remains fatal and cannot be converted to a business rejection; completion publishes payload before waking Owner"
+  ],
+  "coverage": [
+    "Six product lines and all four funds command kinds",
+    "Replay after 128-entry result cache eviction, stale source sequence, payload/other-user conflict, distinct full UUID",
+    "Actual full Ledger mailbox and exactly-once apply after drain",
+    "Cold metadata ownership handoff and rejection of direct active Owner get/put",
+    "Index failure before terminal acknowledgement",
+    "64 immediate work item reuses with Owner notification"
+  ],
+  "retention": "RocksDB format and full-history funds idempotency retention unchanged. No additional queue, worker or business-state mirror.",
+  "excluded": [
+    "actual snapshot/restore/recovery",
+    "wallet",
+    "real-node pressure",
+    "runtime allocation/capacity acceptance"
+  ]
+}

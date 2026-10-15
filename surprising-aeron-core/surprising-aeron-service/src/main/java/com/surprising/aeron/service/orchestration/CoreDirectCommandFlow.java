@@ -63,6 +63,10 @@ final class CoreDirectCommandFlow {
                         long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
                         ResponseStatus status, CoreResultCode resultCode) {
         long nextAppliedCommandCount = Math.incrementExact(runtime.appliedCommandCount);
+        if (runtime.directCommand.publicationComplete()) {
+            return finishResponseAfterFundsRetention(message, clusterTimestamp, clusterPosition,
+                    sourceKey, fingerprint, status, resultCode, nextAppliedCommandCount);
+        }
         if (!runtime.directCommand.finalizationPrepared()) {
             if (status != ResponseStatus.APPLIED
                     && (runtime.commits.commitPublicationDirty()
@@ -148,14 +152,26 @@ final class CoreDirectCommandFlow {
         runtime.directCommand.clearFinalizationPrepared();
         runtime.commits.completeCommitPublicationBatch();
         if (status == ResponseStatus.APPLIED) runtime.validateFundsConservation(message);
+        runtime.directCommand.markPublicationComplete();
+        return finishResponseAfterFundsRetention(message, clusterTimestamp, clusterPosition,
+                sourceKey, fingerprint, status, resultCode, nextAppliedCommandCount);
+    }
+
+    /** Publication and its financial checks run once; only the index write receipt remains pending here. */
+    private CoreResponse finishResponseAfterFundsRetention(CoreMessage message, long clusterTimestamp,
+            long clusterPosition, TradingCoreRuntime.SourceKey sourceKey, CommandFingerprint fingerprint,
+            ResponseStatus status, CoreResultCode resultCode, long nextAppliedCommandCount) {
+        if (TradingCoreRuntime.isFundsIdempotencyCommand(message.header().messageType())
+                && status == ResponseStatus.APPLIED) {
+            if (!runtime.directCommand.retainFundsOnLedger(runtime)) {
+                runtime.directCommand.result(status, resultCode);
+                return null;
+            }
+        }
         runtime.appliedCommandCount = nextAppliedCommandCount;
         runtime.matchingFlow.refreshCommittedCoreSequence();
         runtime.admissions.appendQueuedMatching(clusterTimestamp, clusterPosition);
         runtime.lastSourceSequences.put(sourceKey, message.header().sourceSequence());
-        if (TradingCoreRuntime.isFundsIdempotencyCommand(message.header().messageType())
-                && status == ResponseStatus.APPLIED) {
-            runtime.terminalRetention.retainFundsCommand(message.header().commandId(), fingerprint);
-        }
         byte[] responseData = runtime.resultBuilder.commandResultData();
         int responseOffset = runtime.resultBuilder.responseDataOffset();
         int responseLength = runtime.resultBuilder.responseDataLength();

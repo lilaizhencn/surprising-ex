@@ -188,6 +188,70 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
         fundsCommands.put(commandId, fingerprint);
     }
 
+    /** One reusable direct-command I/O request; only Ledger accesses its index payload. */
+    static final class FundsIndexWork implements com.surprising.aeron.service.state.SystemLedgerLane.Entry {
+        private TerminalStateRetention retention;
+        private TradingRuntimeState completionRuntime;
+        private UUID commandId;
+        private CommandFingerprint fingerprint, retained;
+        private boolean write, prepared, queued;
+        private volatile boolean completed = true;
+
+        void prepareLookup(TerminalStateRetention retention, UUID commandId) {
+            prepare(retention, commandId, null, false);
+        }
+
+        void prepareWrite(TerminalStateRetention retention, UUID commandId, CommandFingerprint fingerprint) {
+            prepare(retention, commandId, java.util.Objects.requireNonNull(fingerprint), true);
+        }
+
+        private void prepare(TerminalStateRetention retention, UUID commandId,
+                             CommandFingerprint fingerprint, boolean write) {
+            if (prepared) throw new IllegalStateException("funds index request is still retained");
+            this.retention = java.util.Objects.requireNonNull(retention);
+            this.commandId = java.util.Objects.requireNonNull(commandId);
+            this.fingerprint = fingerprint;
+            this.write = write;
+            retained = null;
+            queued = false;
+            completed = false;
+            prepared = true;
+        }
+
+        boolean poll(TradingCoreRuntime owner) {
+            owner.assertHealthy();
+            if (!prepared || !owner.runtimeState.systemLedgerStarted())
+                throw new IllegalStateException("funds index request requires active Ledger");
+            if (!queued) {
+                completionRuntime = owner.runtimeState;
+                if (!owner.runtimeState.dispatchLedgerQuery(this)) return false;
+                queued = true;
+            }
+            return completed;
+        }
+
+        @Override public void apply(com.surprising.aeron.service.state.TreasuryRuntime ignored) {
+            retention.fundsCommands.bindIoOwner();
+            if (write) retention.fundsCommands.put(commandId, fingerprint);
+            else retained = retention.fundsCommands.get(commandId);
+            TradingRuntimeState completion = completionRuntime;
+            completed = true;
+            completion.signalOwnerCompletion();
+        }
+
+        CommandFingerprint retained() {
+            if (!completed) throw new IllegalStateException("funds index lookup is incomplete");
+            return retained;
+        }
+
+        /** Normal completion, or shutdown after the Ledger worker has stopped. */
+        void clear() {
+            retention = null; completionRuntime = null; commandId = null; fingerprint = retained = null;
+            write = prepared = queued = false;
+            completed = true;
+        }
+    }
+
     void assertHealthy() { fundsCommands.assertHealthy(); }
 
     @Override

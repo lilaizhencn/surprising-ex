@@ -315,3 +315,12 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 `MatcherSettlementChanges.applyUserRevisions` 把当前命令合并后的 primitive 修订增量与对应 `LaneCommitDelta` 交给所属 `AccountLaneState`。Lane 构造一次原语 visitor，并按原规则校验用户、精确累加修订号、更新权威用户和独立收据；不再逐次创建捕获 Lane 及收据的 lambda。收据引用只在同步遍历期间借用，正常和异常返回均在 `finally` 清空；源增量仍只在成功后清空。没有新增线程、队列或账户镜像。
 
 167 个必要用例通过，新增用例验证算术溢出不改写用户或失败收据，后续命令不会沿用失败收据；同时覆盖六产品线、独立输出、实际 worker、成交及资金/风险路径，见 [Lane 修订回调验证](../../docs/validation/lane-revision-visitor-20261015.json)。本次运行时分配复验受宿主降频影响，尚未验收其动态成本；不据此宣称零分配或完整 Core 达标。未执行快照/恢复、wallet 或真实节点压测，数值记录仅留本地。
+
+
+### 资金幂等索引 I/O 归属 SystemLedgerLane（2026-10-15）
+
+资金命令先检查现有内存结果，未命中时由 `DirectCommandSlot` 把完整命令 UUID 的保留身份查询送入既有 SystemLedgerLane 邮箱。Ledger 查询 RocksDB，Owner 只检查完成状态；重复或冲突仍先于 sourceSequence 校验处理。新命令沿原账户及资金流水执行，完成发布与资金守恒检查后，由同一 Ledger 写入幂等身份；只有写入完成才推进已应用计数和来源序号并返回终态。队列满时保留原请求，索引故障仍使 Core 失败，不伪装成业务拒绝。
+
+`FundsCommandIndex` 继续保留全历史资金幂等和原磁盘格式，活跃读写绑定到 Ledger，Owner 直接 get/put 会失败。原单个 DirectCommandSlot 复用 I/O 请求，完成写入先发布结果再唤醒 Owner；没有增加线程、队列或账户镜像。冷构造、序列化及关闭边界保持原职责。
+
+177 个唯一必要用例通过，最后 16 个重叠用例验证完成通知的收尾修改，见 [资金索引 Ledger 验证](../../docs/validation/funds-index-ledger-20261015.json)。覆盖六产品线、结果缓存淘汰后的重复与冲突、四类资金命令、邮箱满、数据库故障及连续请求复用。没有执行快照/恢复、wallet 或真实节点压测。完整 Owner 迁移、显式 Lane 参数、锁归因和完整 Core 分配目标继续处理，不据功能测试宣称性能达标。

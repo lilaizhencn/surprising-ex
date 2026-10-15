@@ -51,6 +51,10 @@ final class DirectCommandSlot {
     private CoreResultCode resultCode;
     private com.surprising.aeron.service.state.LaneCommitEvent commitEvent;
     private boolean finalizationPrepared;
+    private boolean publicationComplete;
+    private boolean fundsPreflight, fundsRetainPrepared;
+    private long fundsLastSourceSequence;
+    private final TerminalStateRetention.FundsIndexWork fundsIndexWork = new TerminalStateRetention.FundsIndexWork();
 
     private final FundingControlContinuation fundingControl = new FundingControlContinuation();
     private final RiskScanControlContinuation riskScanControl = new RiskScanControlContinuation();
@@ -101,8 +105,41 @@ final class DirectCommandSlot {
         this.resultCode = resultCode;
     }
     boolean finalizationPrepared() { return finalizationPrepared; }
+    boolean publicationComplete() { return publicationComplete; }
+    void markPublicationComplete() { publicationComplete = true; }
     void markFinalizationPrepared() { finalizationPrepared = true; }
     void clearFinalizationPrepared() { finalizationPrepared = false; }
+
+    void beginFundsCheck(CoreMessage message, CommandFingerprint fingerprint,
+            TradingCoreRuntime.SourceKey sourceKey, long timestamp, long position, long lastSourceSequence,
+            TerminalStateRetention retention) {
+        // No business scope or before-image is acquired until the exact identity check passes.
+        initialize(message, fingerprint, sourceKey, timestamp, position, 0, 0, 0);
+        fundsPreflight = true;
+        fundsLastSourceSequence = lastSourceSequence;
+        fundsIndexWork.prepareLookup(retention, message.header().commandId());
+    }
+
+    boolean retainFundsOnLedger(TradingCoreRuntime owner) {
+        if (!fundsRetainPrepared) {
+            fundsIndexWork.prepareWrite(owner.terminalRetention, command.header().commandId(), fingerprint);
+            fundsRetainPrepared = true;
+        }
+        return fundsIndexWork.poll(owner);
+    }
+
+    private CoreResponse pollFundsCheck(TradingCoreRuntime owner) {
+        if (!fundsIndexWork.poll(owner)) return null;
+        CoreResponse replay = owner.commandIngress.fundsReplayResponse(command, fingerprint, fundsIndexWork.retained());
+        if (replay == null) replay = owner.commandIngress.checkSourceSequence(command, fundsLastSourceSequence);
+        CoreMessage checkedCommand = command;
+        CommandFingerprint checkedFingerprint = fingerprint;
+        TradingCoreRuntime.SourceKey checkedSource = sourceKey;
+        long timestamp = commitFenceTimestamp, position = commitFenceClusterPosition;
+        clear();
+        return replay != null ? replay : owner.directCommandFlow.apply(
+                checkedCommand, timestamp, position, checkedSource, checkedFingerprint);
+    }
     com.surprising.aeron.service.state.LaneCommitEvent commitEvent() { return commitEvent; }
     void commitEvent(com.surprising.aeron.service.state.LaneCommitEvent event) { commitEvent = event; }
     void clearCommitEvent() { commitEvent = null; }
@@ -263,6 +300,7 @@ final class DirectCommandSlot {
     CoreResponse poll(TradingCoreRuntime owner) {
         owner.assertOwner();
         if (!active) throw new IllegalStateException("no pending direct command");
+        if (fundsPreflight) return pollFundsCheck(owner);
         if (status == null) {
             try {
                 if (!controlWork.getAsBoolean()) return null;
@@ -305,6 +343,7 @@ final class DirectCommandSlot {
         liquidationResolutionControl.clear();
         accountControl.clear();
         triggerControl.clear();
+        fundsIndexWork.clear();
         active = false;
         command = null;
         fingerprint = null;
@@ -315,6 +354,8 @@ final class DirectCommandSlot {
         resultCode = null;
         commitEvent = null;
         finalizationPrepared = false;
+        publicationComplete = fundsPreflight = fundsRetainPrepared = false;
+        fundsLastSourceSequence = 0;
         commitFenceTimestamp = commitFenceClusterPosition = 0;
     }
 
