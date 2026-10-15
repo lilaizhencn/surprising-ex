@@ -290,3 +290,14 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 实时增量 metadata 在消费收据时立即编码，编码字节不会引用用户槽；公开查询及冷序列化边界仍返回独立值。142 个必要用例的功能验证见 [用户修订与收据复用](../../docs/validation/user-revision-reuse-20261015.json)，覆盖六产品线、并行在途收据、回滚与模式、批量拒绝、划转和实时输出。未执行 Cluster 快照/恢复或 wallet。两个旧拒绝夹具先由 Owner 路由索引证明没有待划转，再按相同 canonical 规则计算业务哈希，保留原资金、状态和拒绝断言。
 
 完整 Core 百字节目标和 Owner 迁移仍未完成：客户端身份及 UTF8/UUID 解码、业务收据与实时编码、资金幂等索引同步 I/O 以及生产 `stateHash()` 活跃 Lane 读取边界继续处理。当前阶段只在本地保存受影响路径的数值诊断，不做真实单节点压测，不提交数值压测记录。
+
+
+### 客户端订单身份归属 Account Lane（2026-10-15）
+
+`AccountLaneState.clientIdentities` 独占本 Lane 的客户端订单身份。`LaneClientIdentities` 使用 primitive 键到行号索引及用户、名称、引用计数列；最后一个订单或别名释放引用时清空名称，将行归还复用。容量只随实际同时存活的身份高水位增长，不缓存已经释放的名称。`RuntimeIdentityRegistry` 不再维护全局客户端身份 Map；Owner 只汇总 volatile 数量作诊断，不能访问活跃 Lane 的身份表。
+
+客户端身份仍由 `(userId, clientOrderId)` 确定，原 UTF8 确定性数值键保持不变，数值键在所属 Lane 内使用；不同 Lane 可以持有相同数值键且互不影响，同一 Lane 内用户或名称不符仍报碰撞。冷构造、绑定和重绑定先把完整引用计数转入未发布的目标 Lane，全部成功后才清除原表；活跃运行时禁止重绑定。这里没有新增全局碰撞表、队列或执行阶段。
+
+`OrderBookQueryService` 将客户端订单号原始输入送入现有账户查询任务，在用户所属 Lane 查身份和订单；预检同样在 Lane 查询客户端及持仓身份。重复准入回滚只撤销本次获取的引用，旧订单终态不能提前回收仍被新别名使用的身份。必要验证共 160 个唯一用例，最后移动预检持仓查找后补验其中 23 个，覆盖六产品线、并行 Lane、强制碰撞、回收周转、别名、查询、批量和资金/风险边界，见 [客户端身份验证](../../docs/validation/lane-client-identities-20261015.json)。
+
+完整 Owner 迁移和完整 Core 百字节目标仍未完成；任意 UTF8/UUID 解码、剩余业务收据及输出编码、资金幂等索引同步 I/O、活跃 `stateHash()` 的 Lane 读取仍继续处理。当前只运行受影响路径的必要测试及本地分配诊断，不执行 Cluster 快照/恢复、wallet 或真实单节点压测，不提交数值压测记录。

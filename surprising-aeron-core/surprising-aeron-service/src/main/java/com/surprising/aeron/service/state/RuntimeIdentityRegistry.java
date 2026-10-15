@@ -23,7 +23,6 @@ public final class RuntimeIdentityRegistry {
 
     static final class LookupScratch {
         private final PositionLookup position = new PositionLookup();
-        private final ClientLookup client = new ClientLookup();
         private final PositionMapLookup positionMap = new PositionMapLookup();
     }
 
@@ -56,74 +55,65 @@ public final class RuntimeIdentityRegistry {
     private LaneTopology clientTopology = LaneTopology.configured(false);
     private TradingRuntimeState clientRuntime;
 
+    /** Only cold standalone construction has unassigned identities; binding transfers and releases it. */
+    private org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<LaneClientIdentities> unboundClients;
+
     void bindClientLanes(TradingRuntimeState runtime) {
         assertOwner();
-        // A projector may create a short-lived runtime for parity/snapshot
-        // checks before the account workers are started. Rebind in that
-        // owner-confined phase; once workers are live, sharing client identity
-        // storage would route a mutation to the wrong runtime and is rejected.
-        if (clientRuntime != null && clientRuntime != runtime && clientRuntime.accountLanesStarted)
+        if (clientRuntime == runtime) return;
+        if (runtime.accountLanesStarted || clientRuntime != null && clientRuntime.accountLanesStarted)
             throw new IllegalStateException("client identities already belong to a runtime");
+        // Copy into the new, cold runtime before releasing any source authority. A failed import
+        // leaves the old runtime intact; the incomplete new runtime is never published.
+        if (clientRuntime != null) {
+            for (AccountLaneState lane : clientRuntime.accountLanes) lane.clientIdentities.copyTo(runtime);
+        } else if (unboundClients != null) unboundClients.forEachValue(table -> table.copyTo(runtime));
+        if (clientRuntime != null) {
+            for (AccountLaneState lane : clientRuntime.accountLanes) lane.clientIdentities.clear();
+        }
+        if (unboundClients != null) { unboundClients.clear(); unboundClients = null; }
         clientTopology = runtime.topology();
         clientRuntime = runtime;
     }
 
-    private <T> T mutateClient(long userId, java.util.function.Supplier<T> mutation) {
-        if (clientRuntime == null) { assertOwner(); return mutation.get(); }
-        return clientRuntime.onLane(userId, lane -> mutation.get());
+    private AccountLaneState clientLane(long userId) {
+        if (clientRuntime == null) throw new IllegalStateException("client identity requires a runtime");
+        AccountLaneState scoped = clientRuntime.currentLaneCommandScope();
+        int laneId = clientTopology.accountLaneId(userId);
+        if (scoped != null && scoped.laneId() != laneId)
+            throw new IllegalStateException("client identity crossed account Lane");
+        if (scoped == null && clientRuntime.accountLanesStarted && !clientRuntime.ownerLaneAccess)
+            throw new IllegalStateException("client identity access requires its Account Lane");
+        AccountLaneState lane = scoped == null ? clientRuntime.accountLanes[laneId] : scoped;
+        lane.assertOwner();
+        return lane;
     }
 
-    /** Reuse the current control task or fallback to owning Account Lane in single-writer mode. */
+    private LaneClientIdentities clientTable(long userId) {
+        if (clientRuntime != null) return clientLane(userId).clientIdentities;
+        assertOwner();
+        if (unboundClients == null)
+            unboundClients = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
+        LaneClientIdentities table = unboundClients.get(userId);
+        if (table == null) { table = new LaneClientIdentities(null); unboundClients.put(userId, table); }
+        return table;
+    }
+
+    private LaneClientIdentities clientTable(AccountLaneState lane, long userId) {
+        lane.assertOwner();
+        if (clientRuntime == null || lane.laneId() != clientTopology.accountLaneId(userId)
+                || clientRuntime.accountLanes[lane.laneId()] != lane)
+            throw new IllegalStateException("client identity crossed account Lane");
+        return lane.clientIdentities;
+    }
+
     public long prepareClientKeyInCurrentLane(long userId, String name) {
-        if (clientRuntime == null)
-            throw new IllegalStateException("client identity requires a runtime");
-        AccountLaneState lane = clientRuntime.currentLaneCommandScope();
-        if (lane == null) {
-            int laneId = clientRuntime.topology().accountLaneId(userId);
-            lane = clientRuntime.accountLanes[laneId];
-        }
-        return prepareClientKeyInLane(lane, userId, name);
+        return prepareClientKeyInLane(clientLane(userId), userId, name);
     }
 
     public void rollbackClientKeyInCurrentLane(long userId, String name, long key) {
-        if (clientRuntime == null)
-            throw new IllegalStateException("client identity requires a runtime");
-        AccountLaneState lane = clientRuntime.currentLaneCommandScope();
-        if (lane == null) {
-            int laneId = clientRuntime.topology().accountLaneId(userId);
-            lane = clientRuntime.accountLanes[laneId];
-        }
-        rollbackClientKeyInLane(lane, userId, name, key);
+        rollbackClientKeyInLane(clientLane(userId), userId, name, key);
     }
-    /** Lane 创建、回滚和回收；Owner 仅在撮合前校验/查询边界读取不可变 identity。
-     * 并发容器用于这些必要读者；引用计数仅由账户 Lane 修改。Fact 不再反查此表。 */
-    private final Map<ClientMapKey, ClientIdentityEntry> clients = new ConcurrentHashMap<>();
-    private static final class ClientLookup {
-        /** 当前查找的原始身份键，哈希与字典中的 Long 一致。 */
-        long value;
-        @Override public int hashCode() { return Long.hashCode(value); }
-        @Override public boolean equals(Object other) {
-            return other instanceof ClientMapKey key && key.value == value;
-        }
-    }
-
-    /** Stored client keys are immutable primitives; lookups borrow ClientLookup and never box. */
-    private static final class ClientMapKey {
-        final long value;
-        ClientMapKey(long value) { this.value = value; }
-        @Override public int hashCode() { return Long.hashCode(value); }
-        @Override public boolean equals(Object other) {
-            return other instanceof ClientMapKey key && key.value == value
-                    || other instanceof ClientLookup lookup && lookup.value == value;
-        }
-    }
-
-    private ClientLookup clientLookup(long key) {
-        ClientLookup lookup = lookupScratch().client;
-        lookup.value = key;
-        return lookup;
-    }
-
 
     /** Owner 按准入回执汇总身份分配次数，Lane 不争用全局版本写入。 */
     public void recordLaneClientAllocations(long count) {
@@ -249,87 +239,50 @@ public final class RuntimeIdentityRegistry {
         return instrumentId;
     }
 
+    /** Cold state projection is idempotent; it does not retain an existing order alias twice. */
     public long clientKey(long userId, String clientOrderId) {
         assertOwner();
-        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-        if (clientOrderId == null || clientOrderId.isBlank()) return 0;
-        long key = deterministicKey(userId, clientOrderId);
-        boolean created = mutateClient(userId, () -> {
-            ClientIdentityEntry collision = clients.putIfAbsent(new ClientMapKey(key), new ClientIdentityEntry(userId, clientOrderId));
-            if (collision != null && (collision.userId != userId || !collision.clientOrderId.equals(clientOrderId)))
-                throw new IllegalStateException("deterministic client identity collision");
-            return collision == null;
-        });
-        if (created) dictionaryVersion = Math.incrementExact(dictionaryVersion);
+        long key = clientKeyOrZero(userId, clientOrderId);
+        if (key == 0) return 0;
+        long prepared = clientTable(userId).prepare(key, userId, clientOrderId, false);
+        if (prepared < 0) dictionaryVersion = Math.incrementExact(dictionaryVersion);
         return key;
     }
 
     public long prepareClientKey(long userId, String clientOrderId) {
         assertOwner();
-        long prepared = mutateClient(userId, () -> prepareClientKey(userId, clientOrderId, null));
-        if (prepared < 0) {
-            recordLaneClientAllocations(1);
-            return -prepared;
-        }
-        return prepared;
+        long key = clientKeyOrZero(userId, clientOrderId);
+        if (key == 0) return 0;
+        long prepared = clientTable(userId).prepare(key, userId, clientOrderId, true);
+        if (prepared < 0) recordLaneClientAllocations(1);
+        return key;
     }
 
     long prepareClientKeyInLane(AccountLaneState lane, long userId, String clientOrderId) {
-        lane.assertOwner();
-        if (lane.laneId() != clientTopology.accountLaneId(userId)) throw new IllegalStateException("client identity crossed account Lane");
-        return prepareClientKey(userId, clientOrderId, lane);
+        LaneClientIdentities table = clientTable(lane, userId);
+        long key = clientKeyOrZero(userId, clientOrderId);
+        if (key == 0) return 0;
+        long prepared = table.prepare(key, userId, clientOrderId, true);
+        if (prepared < 0) lane.clientIdentityAllocations = Math.incrementExact(lane.clientIdentityAllocations);
+        // The allocation bit is returned in the sign; the key stored in Lane state stays positive.
+        return prepared;
     }
 
-    private long prepareClientKey(long userId, String clientOrderId, AccountLaneState lane) {
+    private static long clientKeyOrZero(long userId, String name) {
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-        if (clientOrderId == null || clientOrderId.isBlank()) return 0;
-        long key = deterministicKey(userId, clientOrderId);
-        ClientIdentityEntry existing = clients.get(clientLookup(key));
-        if (existing != null) {
-            if (existing.userId != userId || !existing.clientOrderId.equals(clientOrderId)) {
-                throw new IllegalStateException("deterministic client identity collision");
-            }
-            existing.references = Math.incrementExact(existing.references);
-            return key;
-        }
-        ClientIdentityEntry collision = clients.putIfAbsent(new ClientMapKey(key), new ClientIdentityEntry(userId, clientOrderId));
-        if (collision != null) {
-            if ((collision.userId != userId || !collision.clientOrderId.equals(clientOrderId))) {
-                throw new IllegalStateException("deterministic client identity collision");
-            }
-            collision.references = Math.incrementExact(collision.references);
-            return key;
-        }
-        if (lane != null) lane.clientIdentityAllocations = Math.incrementExact(lane.clientIdentityAllocations);
-        // The collector needs one allocation bit to advance the dictionary version.
-        // Deterministic keys are strictly positive, so the signed return carries that bit
-        // without allocating a wrapper; Lane callers account through clientIdentityAllocations.
-        return -key;
+        return name == null || name.isBlank() ? 0 : deterministicKey(userId, name);
     }
 
-    private void releaseClientKeyReference(long userId, String clientOrderId, long clientKey) {
-        ClientIdentityEntry existing = clients.get(clientLookup(clientKey));
-        if (existing == null || existing.userId != userId
-                || !existing.clientOrderId.equals(clientOrderId)) {
-            throw new IllegalStateException("deterministic client identity collision");
-        }
-        if (--existing.references == 0) clients.remove(clientLookup(clientKey), existing);
-    }
-
-    public void rollbackPreparedClientKey(
-            long userId, String clientOrderId, long preparedKey) {
+    public void rollbackPreparedClientKey(long userId, String clientOrderId, long preparedKey) {
         assertOwner();
-        if (userId <= 0 || clientOrderId == null || preparedKey == 0) {
+        if (userId <= 0 || clientOrderId == null || preparedKey == 0)
             throw new IllegalArgumentException("invalid prepared client key rollback");
-        }
-        long key = clientKeyValue(preparedKey);
-        mutateClient(userId, () -> { releaseClientKeyReference(userId, clientOrderId, key); return null; });
+        clientTable(userId).rollback(clientKeyValue(preparedKey), userId, clientOrderId);
     }
 
     void rollbackClientKeyInLane(AccountLaneState lane, long userId, String clientOrderId, long preparedKey) {
-        lane.assertOwner();
-        if (lane.laneId() != clientTopology.accountLaneId(userId)) throw new IllegalStateException("client identity crossed account Lane");
-        if (preparedKey != 0) releaseClientKeyReference(userId, clientOrderId, clientKeyValue(preparedKey));
+        LaneClientIdentities table = clientTable(lane, userId);
+        if (preparedKey != 0) table.rollback(clientKeyValue(preparedKey), userId, clientOrderId);
     }
 
     /** Prepared keys encode a newly allocated identity in the sign bit; map keys remain positive. */
@@ -350,7 +303,7 @@ public final class RuntimeIdentityRegistry {
         return value == null ? 0 : value;
     }
 
-    long findPositionKeyValueInLane(AccountLaneState lane, long userId,
+    public long findPositionKeyValueInLane(AccountLaneState lane, long userId,
                                     CoreInstrument instrument, CorePositionSide side) {
         lane.assertOwner();
         if (lane.laneId() != clientTopology.accountLaneId(userId)
@@ -361,57 +314,33 @@ public final class RuntimeIdentityRegistry {
     }
 
     public Long findClientKey(long userId, String clientOrderId) {
-        assertOwner();
         long key = findClientKeyValue(userId, clientOrderId);
         return key == 0 ? null : key;
     }
 
+    /** The caller must own the user's Lane, or hold the explicit cold read fence. */
     public long findClientKeyValue(long userId, String clientOrderId) {
-        assertOwner();
-        return findPreparedClientKeyValue(userId, clientOrderId);
+        long key = clientKeyOrZero(userId, clientOrderId);
+        return key == 0 ? 0 : clientTable(userId).find(key, userId, clientOrderId);
     }
 
     long findClientKeyValueInLane(AccountLaneState lane, long userId, String clientOrderId) {
-        lane.assertOwner();
-        if (lane.laneId() != clientTopology.accountLaneId(userId))
-            throw new IllegalStateException("client lookup crossed Account Lane");
-        return findPreparedClientKeyValue(userId, clientOrderId);
-    }
-
-    private long findPreparedClientKeyValue(long userId, String clientOrderId) {
-        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-        if (clientOrderId == null || clientOrderId.isBlank()) return 0;
-        long key = deterministicKey(userId, clientOrderId);
-        ClientIdentityEntry existing = clients.get(clientLookup(key));
-        return existing != null && existing.userId == userId
-                && existing.clientOrderId.equals(clientOrderId) ? key : 0;
+        LaneClientIdentities table = clientTable(lane, userId);
+        long key = clientKeyOrZero(userId, clientOrderId);
+        return key == 0 ? 0 : table.find(key, userId, clientOrderId);
     }
 
     public String clientOrderId(long userId, long clientKey) {
-        if (clientKey == 0) return "";
-        ClientIdentityEntry entry = clients.get(clientLookup(clientKey));
-        if (entry == null || entry.userId != userId) {
-            throw new IllegalArgumentException("unknown runtime client key: " + userId + '/' + clientKey);
-        }
-        return entry.clientOrderId;
+        return clientKey == 0 ? "" : clientTable(userId).name(clientKey, userId);
     }
 
     public void releaseClientKey(long userId, long clientKey) {
         assertOwner();
-        mutateClient(userId, () -> { releaseClientReference(userId, clientKey); return null; });
+        clientTable(userId).release(clientKey, userId);
     }
 
     void releaseClientKeyInLane(AccountLaneState lane, long userId, long clientKey) {
-        lane.assertOwner();
-        if (lane.laneId() != clientTopology.accountLaneId(userId))
-            throw new IllegalStateException("client identity crossed account Lane");
-        releaseClientReference(userId, clientKey);
-    }
-
-    private void releaseClientReference(long userId, long clientKey) {
-        ClientIdentityEntry entry = clients.get(clientLookup(clientKey));
-        if (entry == null || entry.userId != userId) return;
-        if (--entry.references == 0) clients.remove(clientLookup(clientKey), entry);
+        clientTable(lane, userId).release(clientKey, userId);
     }
 
     public long positionKey(long userId, String positionKey) {
@@ -673,7 +602,15 @@ public final class RuntimeIdentityRegistry {
 
     public int clientIdentityCount() {
         assertOwner();
-        return clients.size();
+        int count = 0;
+        if (clientRuntime != null) {
+            for (AccountLaneState lane : clientRuntime.accountLanes)
+                count = Math.addExact(count, lane.clientIdentities.publishedCount());
+        } else if (unboundClients != null) {
+            var iterator = unboundClients.values().iterator();
+            while (iterator.hasNext()) count = Math.addExact(count, iterator.next().publishedCount());
+        }
+        return count;
     }
 
 
@@ -691,7 +628,9 @@ public final class RuntimeIdentityRegistry {
     public Snapshot snapshot() {
         assertOwner();
         Map<ClientIdentity, Long> clientKeys = new HashMap<>(clientIdentityCount());
-        clients.forEach((key, entry) -> clientKeys.put(new ClientIdentity(entry.userId, entry.clientOrderId), key.value));
+        if (clientRuntime != null) {
+            for (AccountLaneState lane : clientRuntime.accountLanes) lane.clientIdentities.exportTo(clientKeys);
+        } else if (unboundClients != null) unboundClients.forEachValue(table -> table.exportTo(clientKeys));
         return new Snapshot(assetIds, symbolIds, clientKeys, positionKeys,
                 nextAssetId, nextSymbolId, clientKeys.size() + 1L, positionKeys.size() + 1L);
     }
@@ -776,7 +715,7 @@ public final class RuntimeIdentityRegistry {
             registry.symbols = storeIdentity(registry.symbols, id, name);
         });
         snapshot.clientKeys().forEach((identity, key) -> {
-            registry.clients.put(new ClientMapKey(key), new ClientIdentityEntry(identity.userId(), identity.clientOrderId()));
+            registry.clientTable(identity.userId()).importIdentity(key, identity.userId(), identity.clientOrderId());
         });
         snapshot.positionKeys().forEach((identity, key) -> {
             registry.positionKeys.put(identity, key);
@@ -811,18 +750,6 @@ public final class RuntimeIdentityRegistry {
         public int compareTo(ClientIdentity other) {
             int result = Long.compare(userId, other.userId);
             return result != 0 ? result : clientOrderId.compareTo(other.clientOrderId);
-        }
-    }
-
-    /** The dictionary key already carries the hash; no duplicate key or identity wrapper per order. */
-    private static final class ClientIdentityEntry {
-        private final long userId;
-        private final String clientOrderId;
-        private long references = 1; // Account Lane only; never read or decremented by Owner.
-
-        private ClientIdentityEntry(long userId, String clientOrderId) {
-            this.userId = userId;
-            this.clientOrderId = clientOrderId;
         }
     }
 

@@ -79,7 +79,7 @@ final class OrderBookQueryService {
         }
         long id = nextAsyncQueryId++;
         var query = new AccountQuery(id, owner.appliedCommandCount, CoreMessageType.PENDING_TRANSFER_QUERY,
-                0, 0, 0, page.laneMask(), null, null);
+                0, 0, null, page.laneMask(), null, null);
         query.transferPage = new PendingTransferQueryPage(page.ids(), page.users(),
                 new com.surprising.aeron.protocol.CorePendingTransferView[page.ids().length]);
         queryIds.put(message.header().commandId(), id);
@@ -105,12 +105,8 @@ final class OrderBookQueryService {
                 "DUPLICATE_ORDER_ID", "orderId already exists");
         var context = com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.queryContext(
                 owner.runtimeState, owner.identities, userId, command.instrumentId(), timestamp);
-        var identity = new com.surprising.aeron.service.state.admission.AdmissionIdentity(
-                owner.identities.findClientKeyValue(userId, command.clientOrderId()), context.symbolId(),
-                owner.identities.findPositionKeyValue(userId, context.instrument(), command.positionSide()),
-                context.settlementStatus());
         long id = nextAsyncQueryId++;
-        var query = new PreflightQuery(id, owner.appliedCommandCount, userId, command, context, identity);
+        var query = new PreflightQuery(id, owner.appliedCommandCount, userId, command, context);
         queryIds.put(message.header().commandId(), id);
         try {
             if (!query.accountReady() && !owner.runtimeState.dispatchLedgerQuery(query)) {
@@ -136,13 +132,11 @@ final class OrderBookQueryService {
         private volatile boolean inputReady;
         private final com.surprising.aeron.protocol.PlaceOrderCommand command;
         private final com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context context;
-        private final com.surprising.aeron.service.state.admission.AdmissionIdentity identity;
 
         private PreflightQuery(long id, long commandCount, long userId, com.surprising.aeron.protocol.PlaceOrderCommand command,
-                com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context context,
-                com.surprising.aeron.service.state.admission.AdmissionIdentity identity) {
+                com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context context) {
             this.id = id; this.commandCount = commandCount; this.userId = userId;
-            this.command = command; this.context = context; this.identity = identity;
+            this.command = command; this.context = context;
             inputReady = !context.instrument().usesOpenInterestForUserLimit() || command.reduceOnly();
         }
 
@@ -169,6 +163,10 @@ final class OrderBookQueryService {
 
         @Override public CoreResponse apply(AccountLaneState lane) {
             var order = com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.resolve(context, userId, command);
+            var identity = new com.surprising.aeron.service.state.admission.AdmissionIdentity(
+                    owner.identities.findClientKeyValue(userId, command.clientOrderId()), context.symbolId(),
+                    owner.identities.findPositionKeyValueInLane(lane, userId, context.instrument(), command.positionSide()),
+                    context.settlementStatus());
             long reserved = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationForQuery(
                     owner.runtimeState, userId, order, openInterest, identity);
             return new CoreResponse(ResponseStatus.OK, commandCount, com.surprising.aeron.protocol.CoreOrderPreflightCodec.encode(
@@ -204,8 +202,10 @@ final class OrderBookQueryService {
         long userId = message.header().userId();
         long orderId = type == CoreMessageType.ORDER_STATE_QUERY || type == CoreMessageType.ORDER_STATE_HASH_QUERY
                 ? TradingCommandCodec.decodeOrderStateQuery(message.payloadUnsafe()) : 0;
-        long clientKey = type == CoreMessageType.CLIENT_ORDER_STATE_QUERY
-                ? owner.identities.findClientKeyValue(userId, CoreStateQueryCodec.decodeClientOrderStateQuery(message.payloadUnsafe())) : 0;
+        String clientName = type == CoreMessageType.CLIENT_ORDER_STATE_QUERY
+                ? CoreStateQueryCodec.decodeClientOrderStateQuery(message.payloadUnsafe()) : null;
+        if (type == CoreMessageType.CLIENT_ORDER_STATE_QUERY && userId <= 0)
+            throw new IllegalArgumentException("userId must be positive");
         long[] openOrderIds = null;
         if (type == CoreMessageType.USER_OPEN_ORDERS_QUERY) {
             var pageQuery = CoreStateQueryCodec.decodeOpenOrdersQuery(message.payloadUnsafe());
@@ -234,7 +234,7 @@ final class OrderBookQueryService {
                     : count == Long.SIZE ? -1L : (1L << count) - 1;
         } else laneMask = owner.runtimeState.topology().accountLaneMask(userId);
         long id = nextAsyncQueryId++;
-        var query = new AccountQuery(id, owner.appliedCommandCount, type, userId, orderId, clientKey, laneMask, openOrderIds, null);
+        var query = new AccountQuery(id, owner.appliedCommandCount, type, userId, orderId, clientName, laneMask, openOrderIds, null);
         return dispatchAccountQuery(message, id, laneMask, query);
     }
 
@@ -269,7 +269,7 @@ final class OrderBookQueryService {
                 com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeList(List.of()));
         long queryId = nextAsyncQueryId++;
         var query = new AccountQuery(queryId, owner.appliedCommandCount, message.header().messageType(),
-                0, 0, 0, laneMask, null, null);
+                0, 0, null, laneMask, null, null);
         query.triggerPage = new TriggerQueryPage(selected.toArray(), users.toArray(),
                 new com.surprising.aeron.protocol.CoreTriggerOrderStateView[selected.size()]);
         return dispatchAccountQuery(message, queryId, laneMask, query);
@@ -296,7 +296,7 @@ final class OrderBookQueryService {
         var page = new AlgoQueryPage(selectedIds, users,
                 new com.surprising.aeron.protocol.CoreAlgoOrderView[selectedIds.length]);
         var query = new AccountQuery(id, owner.appliedCommandCount, CoreMessageType.ALGO_ORDER_QUERY,
-                0, 0, 0, laneMask, null, page);
+                0, 0, null, laneMask, null, page);
         return dispatchAccountQuery(message, id, laneMask, query);
     }
 
@@ -330,7 +330,8 @@ final class OrderBookQueryService {
     /** 每请求只保留本次响应和完成位，结果消费/关闭后整体释放，无账户镜像。 */
     private final class AccountQuery implements SettlementLaneWorker.Command,
             java.util.function.Function<AccountLaneState, CoreResponse> {
-        private final long id, commandCount, userId, orderId, clientKey, laneMask;
+        private final long id, commandCount, userId, orderId, laneMask;
+        private final String clientName;
         private final CoreMessageType type;
         private final CoreResponse[] responses;
         private final boolean[] found;
@@ -342,9 +343,9 @@ final class OrderBookQueryService {
         private final AtomicLong completedLaneMask = new AtomicLong();
 
         private AccountQuery(long id, long commandCount, CoreMessageType type, long userId,
-                             long orderId, long clientKey, long laneMask, long[] openOrderIds, AlgoQueryPage algoPage) {
+                             long orderId, String clientName, long laneMask, long[] openOrderIds, AlgoQueryPage algoPage) {
             this.id = id; this.commandCount = commandCount; this.type = type;
-            this.userId = userId; this.orderId = orderId; this.clientKey = clientKey; this.laneMask = laneMask;
+            this.userId = userId; this.orderId = orderId; this.clientName = clientName; this.laneMask = laneMask;
             int count = owner.runtimeState.topology().accountLaneCount();
             responses = new CoreResponse[count]; found = new boolean[count];
             this.openOrderIds = openOrderIds;
@@ -425,10 +426,9 @@ final class OrderBookQueryService {
                 return query.found() ? new CoreResponse(ResponseStatus.OK, commandCount, CoreStateQueryCodec.encodeUserState(query.view()))
                         : missingAccountResponse(type, commandCount);
             }
-            Long clientOrderId = type == CoreMessageType.CLIENT_ORDER_STATE_QUERY && clientKey != 0
-                    ? owner.runtimeState.orderIdByClient(userId, clientKey) : null;
-            long selectedOrder = type == CoreMessageType.CLIENT_ORDER_STATE_QUERY ? clientOrderId == null ? 0 : clientOrderId : orderId;
-            var query = selectedOrder == 0 ? null : RuntimeStateQueryService.orderState(owner.runtimeState, owner.identities, selectedOrder);
+            var query = type == CoreMessageType.CLIENT_ORDER_STATE_QUERY
+                    ? RuntimeStateQueryService.clientOrderState(owner.runtimeState, owner.identities, userId, clientName)
+                    : orderId == 0 ? null : RuntimeStateQueryService.orderState(owner.runtimeState, owner.identities, orderId);
             found[lane.laneId()] = query != null && query.found();
             if (!found[lane.laneId()]) return missingAccountResponse(type, commandCount);
             byte[] encoded = type == CoreMessageType.ORDER_STATE_HASH_QUERY

@@ -68,7 +68,9 @@ class CoreActiveLaneIngressTest {
                 if (line == ProductLine.SPOT) applied(core, message(core, CoreMessageType.ADJUST_BALANCE, 7,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 10))));
                 applied(core, place(core, 7, 101, CoreOrderSide.SELL));
+                assertThat(core.runtimeClientIdentityCount()).isOne();
                 applied(core, place(core, 1, 102, CoreOrderSide.BUY));
+                assertThat(core.runtimeClientIdentityCount()).isZero();
                 var failed = message(core, CoreMessageType.ADJUST_BALANCE, 1,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, -100_000)));
                 var rejection = complete(core, failed, core.apply(failed));

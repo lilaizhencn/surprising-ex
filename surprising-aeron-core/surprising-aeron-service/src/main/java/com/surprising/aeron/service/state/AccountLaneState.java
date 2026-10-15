@@ -70,6 +70,7 @@ public final class AccountLaneState {
             = new IntObjectHashMap<>();
     final LongObjectHashMap<Long2LongHashMap> clientOrderIndex =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LaneClientIdentities clientIdentities = new LaneClientIdentities(this);
     final OrderClientKeyIndex clientKeysByOrderId = new OrderClientKeyIndex();
     /** 风险、清算、杠杆、算法单和触发单等低频结构与热状态分离。 */
     final LaneColdState cold = new LaneColdState();

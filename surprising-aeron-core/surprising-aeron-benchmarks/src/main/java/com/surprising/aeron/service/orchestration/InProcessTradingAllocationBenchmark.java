@@ -30,6 +30,7 @@ import org.openjdk.jmh.infra.IterationParams;
  * symbols=2 interleaves the two books inside a batch; teardown checks each position.
  * Single requests include the production input-wrapper return queue and the leased response writer.
  * Terminal queries also check user revisions after resident user/receipt reuse, outside measurement.
+ * ASCII/UTF8 client prefixes exercise the same Lane identity lifecycle with unique names.
  * Aeron transport and Archive are excluded.
  */
 @State(Scope.Thread) @BenchmarkMode(Mode.Throughput) @OutputTimeUnit(TimeUnit.SECONDS)
@@ -45,6 +46,7 @@ public class InProcessTradingAllocationBenchmark {
     private static final long TIME = 1_700_000_000_000L, INITIAL_BALANCE = 1_000_000_000_000L;
     @Param({"1", "20"}) public int batchSize;
     @Param({"OPEN_ONLY", "REVERSE"}) public String streamMode;
+    @Param({"ASCII", "UTF8"}) public String clientIdMode;
     private final CoreMessageFlyweightDecoder decoder = new CoreMessageFlyweightDecoder();
     private final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
     private final UnsafeBuffer[][] frames = new UnsafeBuffer[2][WINDOW];
@@ -63,6 +65,8 @@ public class InProcessTradingAllocationBenchmark {
         if (!streamMode.equals("OPEN_ONLY") && !streamMode.equals("REVERSE"))
             throw new IllegalArgumentException("streamMode must be OPEN_ONLY or REVERSE");
         if (symbols != 1 && symbols != 2) throw new IllegalArgumentException("symbols must be 1 or 2");
+        if (!clientIdMode.equals("ASCII") && !clientIdMode.equals("UTF8"))
+            throw new IllegalArgumentException("clientIdMode must be ASCII or UTF8");
         var cluster = (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(), new Class<?>[]{Cluster.class},
                 (proxy, method, args) -> switch (method.getName()) {
                     case "role" -> Cluster.Role.LEADER;
@@ -101,7 +105,7 @@ public class InProcessTradingAllocationBenchmark {
                     Integer.toString((((index >>> 1) * batchSize) + item) % symbols + 1),
                     sell ? CoreOrderSide.SELL : CoreOrderSide.BUY, 100, 1, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
-                    false, "0000000000000000"));
+                    false, (clientIdMode.equals("UTF8") ? "客户😀-" : "") + "0000000000000000"));
             var type = batchSize == 1 ? CoreMessageType.PLACE_ORDER : CoreMessageType.PLACE_ORDER_BATCH;
             byte[] payload = batchSize == 1 ? TradingCommandCodec.encodePlaceOrder(orders.getFirst())
                     : TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders));
