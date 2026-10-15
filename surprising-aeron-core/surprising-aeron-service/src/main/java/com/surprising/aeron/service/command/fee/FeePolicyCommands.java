@@ -1,14 +1,16 @@
 package com.surprising.aeron.service.command.fee;
 
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 
 /** 费率策略配置命令。 */
 public final class FeePolicyCommands implements java.util.function.IntFunction<Object>, java.util.function.BooleanSupplier {
-    private final FeePolicyCommandContext owner;
+    private final TradingCoreRuntime owner;
     private com.surprising.aeron.protocol.UpsertFeePolicyCommand pending;
 
-    public FeePolicyCommands(FeePolicyCommandContext owner) {
+    public FeePolicyCommands(TradingCoreRuntime owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 

@@ -1,4 +1,6 @@
 package com.surprising.aeron.service.command.trigger;
+
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
@@ -17,8 +19,12 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 
 /** 触发单和算法单生命周期命令；各产品线使用所属运行时和订单规则。 */
 public final class TriggerOrderCommands {
+    public enum Mutation { CANCEL, CLAIM, COMPLETE, TRAILING, EXPIRE, RETRY }
+
+    public record OcoCancellationPage(boolean complete, long nextCursor, int workUnits) { }
+
     /** 唯一 owner；仅在其线程访问共享交易状态和提交边界。 */
-    private final TriggerCommandContext owner;
+    private final TradingCoreRuntime owner;
 
     /** Owner selection scratch, copied into the existing commit event before the next command. */
     private final PrimitiveLongChangeSet closingTriggerIds = new PrimitiveLongChangeSet();
@@ -43,7 +49,7 @@ public final class TriggerOrderCommands {
         return closingTriggerIds;
     }
 
-    public TriggerOrderCommands(TriggerCommandContext owner) {
+    public TriggerOrderCommands(TradingCoreRuntime owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 
@@ -382,9 +388,9 @@ public final class TriggerOrderCommands {
                 ? priceTicks >= trigger.triggerPriceTicks() : priceTicks <= trigger.triggerPriceTicks();
     }
 
-    public TriggerCommandContext.OcoCancellationPage cancelOcoSiblings(
+    public OcoCancellationPage cancelOcoSiblings(
             com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger, long cursor, int limit) {
-        if (limit <= 0) return new TriggerCommandContext.OcoCancellationPage(false, cursor, 0);
+        if (limit <= 0) return new OcoCancellationPage(false, cursor, 0);
         ocoSiblingPage.clear();
         boolean more = false;
         for (Long siblingId : owner.triggerOrderIndex().ocoSiblings(trigger).descendingSet()) {
@@ -406,7 +412,7 @@ public final class TriggerOrderCommands {
                 cancelTriggerOrderRuntime(sibling.userId(), siblingId);
             }
         }
-        return new TriggerCommandContext.OcoCancellationPage(!more, nextCursor, work);
+        return new OcoCancellationPage(!more, nextCursor, work);
     }
 
     public void executeTriggerOrder(CoreMessage message) {
@@ -651,7 +657,7 @@ public final class TriggerOrderCommands {
     public void executeCancelTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long triggerOrderId = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeId(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            owner.deferTriggerMutation(message.header().userId(), TriggerCommandContext.Mutation.CANCEL,
+            owner.deferTriggerMutation(message.header().userId(), Mutation.CANCEL,
                     triggerOrderId, 0, 0, 0, false, null);
             return;
         }
@@ -661,7 +667,7 @@ public final class TriggerOrderCommands {
     public void executeClaimTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long[] claim = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeClaim(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            owner.deferTriggerMutation(requireTriggerOwner(claim[0]), TriggerCommandContext.Mutation.CLAIM,
+            owner.deferTriggerMutation(requireTriggerOwner(claim[0]), Mutation.CLAIM,
                     claim[0], claim[1], claim[2], claim[3], false, null);
             return;
         }
@@ -671,7 +677,7 @@ public final class TriggerOrderCommands {
     public void executeCompleteTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long[] complete = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeComplete(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            owner.deferTriggerMutation(requireTriggerOwner(complete[0]), TriggerCommandContext.Mutation.COMPLETE,
+            owner.deferTriggerMutation(requireTriggerOwner(complete[0]), Mutation.COMPLETE,
                     complete[0], complete[2], complete[3], 0, complete[1] == 1, "");
             return;
         }
@@ -681,7 +687,7 @@ public final class TriggerOrderCommands {
     public void executeUpdateTriggerTrailing(CoreMessage message, long clusterTimestamp) {
         long[] trailing = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeTrailing(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            owner.deferTriggerMutation(requireTriggerOwner(trailing[0]), TriggerCommandContext.Mutation.TRAILING,
+            owner.deferTriggerMutation(requireTriggerOwner(trailing[0]), Mutation.TRAILING,
                     trailing[0], trailing[1], trailing[2], trailing[3], false, null);
             return;
         }
@@ -691,7 +697,7 @@ public final class TriggerOrderCommands {
     public void executeExpireTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            owner.deferTriggerMutation(requireTriggerOwner(lifecycle[0]), TriggerCommandContext.Mutation.EXPIRE,
+            owner.deferTriggerMutation(requireTriggerOwner(lifecycle[0]), Mutation.EXPIRE,
                     lifecycle[0], lifecycle[1], 0, 0, false, null);
             return;
         }
@@ -701,7 +707,7 @@ public final class TriggerOrderCommands {
     public void executeRetryTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            owner.deferTriggerMutation(requireTriggerOwner(lifecycle[0]), TriggerCommandContext.Mutation.RETRY,
+            owner.deferTriggerMutation(requireTriggerOwner(lifecycle[0]), Mutation.RETRY,
                     lifecycle[0], lifecycle[1], message.header().submittedAtEpochMillis(), 0, false, null);
             return;
         }

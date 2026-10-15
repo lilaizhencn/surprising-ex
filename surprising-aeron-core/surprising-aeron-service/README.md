@@ -414,3 +414,12 @@ D1 补充审查：`ClusterServiceEgress.TransportSession` 仍实现 `ClientSessi
 唯一待处理预算为 8192 槽 / 64 MiB，去掉了原第二 FIFO 叠加的积压。原 `surprising.aeron.owner-input-batch-size` 配置保留为每轮直接交易准入上限（1–64、默认 64）；完成推进预算、超时及响应背压仍沿用原流程。`transportToOwner` 每条输入记录一次，`ingressToAdmission` / `ingressToControl` 使用同一入队时刻，已没有中继 FIFO 的单独计时起点。
 
 85 项必要功能用例通过：服务端 83、基准夹具 2，覆盖满环/预算背压、两次完整绕回、中断、租约释放、边界前缀和六产品线命令，见 [D4 功能验证](../../docs/validation/d4-complete-20261015.json)。新增类只承担实际线程交接，没有新业务镜像、接口、worker 或额外 FIFO。未运行压测、JMH/JFR、快照/恢复或 wallet，不给出性能收益结论。
+
+
+### D5 命令直接依赖既有运行时（2026-10-15）
+
+`DirectCommandDispatcher` 将余额、配置、资金费、风险、强平、保险、ADL、持仓、杠杆、交割与触发命令交给原业务类；这 12 类命令现在直接持有同一个 `TradingCoreRuntime`。已删除 `CommandOwnerContext`、`CommandResultContext` 和七个业务 `CommandContext`，异步续步也直接绑定原运行时。账户变更仍由所属 Account Lane 执行，财务事实仍交给 SystemLedgerLane，有序提交和异常回滚沿用既有流程。
+
+触发变更枚举 `Mutation` 及 OCO 取消页 `OcoCancellationPage` 由 `TriggerOrderCommands` 定义。交割分页直接返回既有 `LifecycleOrderChunk`，移除接口专用页及重复包装；风险续扫由接收调用的运行时绑定续步，去掉多余的 owner 参数。本次没有新增类、接口、容器或线程。
+
+74 项必要功能用例通过，覆盖六产品线入口及非零手续费资金守恒、划转、资金费、触发/OCO/风险、强平/保险/ADL、到期结算和持仓控制，详见 [D5 功能验证](../../docs/validation/d5-complete-20261015.json)。未运行压测、JMH/JFR、快照/恢复或 wallet，未更新性能记录；其它审计项单独处理。

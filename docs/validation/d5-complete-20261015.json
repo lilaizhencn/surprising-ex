@@ -1,0 +1,125 @@
+{
+  "date": "2026-10-15",
+  "base_commit": "ff0b29aec74b3352d21cee43ffe4a3eee2a00059",
+  "kind": "D5 命令能力接口清理及必要功能验证，不是性能验收",
+  "result": "PASS",
+  "confirmed_structure": {
+    "deleted_interfaces": 9,
+    "production_implementation": "TradingCoreRuntime（唯一实现）；DirectCommandSlot 为使用方",
+    "command_handlers": 12,
+    "direct_continuation_kinds": 6
+  },
+  "changes": [
+    "删除 CommandOwnerContext、CommandResultContext 与七个业务 CommandContext，所有调用方直接依赖既有 TradingCoreRuntime",
+    "触发 Mutation/OcoCancellationPage 迁回 TriggerOrderCommands，不增加替代接口或状态容器",
+    "交割直接返回既有 LifecycleOrderChunk，移除接口专用分页类型和重复包装",
+    "风险续扫去掉 owner 自传参数，DirectCommandSlot 绑定实际接收调用的运行时",
+    "增加源码/类型边界测试；复用既有保证金断言提供无快照方法，补持仓模式成功/幂等/拒绝/撤单后重试功能验证"
+  ],
+  "ownership": "未增加状态或阶段；运行时引用是原同一对象。Account Lane、Matcher、Ledger 的执行线程、固定续步槽、完成发布及回收流程保留。",
+  "verification": {
+    "jdk": "HotSpot Corretto 27+33-FR",
+    "JAVA_HOME": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn",
+    "maven": "3.9.16",
+    "command": [
+      "/usr/local/bin/mvn",
+      "-pl",
+      "surprising-aeron-core/surprising-aeron-benchmarks",
+      "-am",
+      "-Dsurefire.failIfNoSpecifiedTests=false",
+      "-Dtest=ProductionSourceBoundaryTest,CoreActiveLaneIngressTest,CoreTransferLaneLifecycleTest,AsyncFundingCommandTest#fundingPagesUsePublishedProgressAndCompleteOnceWithoutOwnerLaneHandoff,CoreFinancialLedgerProductionTest,CoreMatchingStateTest#everyProductLineMatchConservesSettlementFundsWithNonzeroFees,TradingCoreOwnerTest#ownerMetadataCommandsDoNotHandoffAccountLanes+algoUpdatesStayOnAccountLaneAndPublishRevisions+controlCommandFencesLedgerPrefillAndTheFollowingTrade+terminalPreparationFailureRollsBackOnLaneAndRetainsRejection,ClusterCommandPipelineTest#atomicOcoPairWithoutSnapshot+triggerAdmissionFailureWithoutSnapshot+triggerNativeRejectionWithoutSnapshot+internalTriggerPagesWithoutSnapshot+isolatedMarginChangesWithoutSnapshot+positionModeChangesAndBlockedRejectionKeepAccountFundsWithoutSnapshot+leverageRejectionPreservesOpenOrderFundsAndCanBeRetriedAfterCancel,D1BenchmarkBoundaryTest",
+      "-Djava.io.tmpdir=/Users/atomex/Desktop/surprising/performance-artifacts/d5-complete-20261015/test-temp",
+      "test"
+    ],
+    "tests": 74,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "suites": {
+      "ProductionSourceBoundaryTest": {
+        "module": "surprising-aeron-service",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "CoreActiveLaneIngressTest": {
+        "module": "surprising-aeron-service",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "CoreTransferLaneLifecycleTest": {
+        "module": "surprising-aeron-service",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "AsyncFundingCommandTest": {
+        "module": "surprising-aeron-service",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "CoreFinancialLedgerProductionTest": {
+        "module": "surprising-aeron-service",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "CoreMatchingStateTest": {
+        "module": "surprising-aeron-service",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "TradingCoreOwnerTest": {
+        "module": "surprising-aeron-service",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "ClusterCommandPipelineTest": {
+        "module": "surprising-aeron-service",
+        "tests": 33,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "D1BenchmarkBoundaryTest": {
+        "module": "surprising-aeron-benchmarks",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "service_tests": 72,
+    "benchmark_fixture_tests": 2,
+    "coverage": [
+      "六产品线真实准入、非零手续费成交与资金守恒",
+      "余额/划转 Lane 所有权及终态、双向永续资金费分页与重复幂等",
+      "触发/OCO 原子性及拒绝回退、跨页 OCO/追踪/过期、风险续扫",
+      "强平撤单、保险及 ADL 原 Ledger 连续提交，交割及期权行权资金核对",
+      "五条衍生品持仓模式与保证金变更、四条合约杠杆拒绝后撤单重试",
+      "Owner 元数据/算法单/控制 fence/准备失败回滚，实际交易基准夹具有限功能调用",
+      "直接依赖与 benchmarks 模块编译通过，所有生产/测试 Java 已无删除接口引用"
+    ]
+  },
+  "limits": [
+    "仅运行受影响的必要用例，不是全量测试；未启动外部 API/Redis/WebSocket 端到端环境。协议、topic、网关和实时编码未改动。",
+    "未执行压测、JMH/JFR、快照/恢复或 wallet，不追加性能记录、不宣称分配或吞吐收益。",
+    "保留既有快照测试方法，但本轮只选择新无快照分支；其它 C/D/P/F/L 审计项不纳入 D5 完成结论。"
+  ],
+  "evidence": {
+    "summary_directory": "/Users/atomex/Desktop/surprising/performance-artifacts/d5-complete-20261015",
+    "archive": "/Users/atomex/Desktop/surprising/performance-artifacts/d5-complete-20261015-evidence.tar.gz",
+    "cleanup": "归档校验后清理本轮原始日志、所选 Surefire 报告及临时目录，保留摘要和归档；既有未提交内容不处理。"
+  }
+}

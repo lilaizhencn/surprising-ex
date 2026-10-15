@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.command.risk;
 
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreRiskScanControlCodec;
 import com.surprising.aeron.protocol.TradingCommandCodec;
@@ -10,10 +12,10 @@ import com.surprising.aeron.service.state.RuntimeDerivativeRiskProcessor;
 
 /** 衍生品标记价、风险续扫和风险扫描控制命令。 */
 public final class RiskCommands {
-    private final RiskCommandContext owner;
+    private final TradingCoreRuntime owner;
     private static final java.util.function.BooleanSupplier COMPLETE = () -> true;
 
-    public RiskCommands(RiskCommandContext owner) {
+    public RiskCommands(TradingCoreRuntime owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 
@@ -52,7 +54,7 @@ public final class RiskCommands {
             if (!activeScan.riskComplete() && riskBudget > 0) {
                 risk = owner.reusableRiskScanCoordinator(riskBudget);
             }
-            owner.deferRiskScanControl(owner, risk, activeScan.symbolId(), instrumentId, maxWork,
+            owner.deferRiskScanControl(risk, activeScan.symbolId(), instrumentId, maxWork,
                     pendingBefore, startedAt, beforeRevision);
             return;
         }

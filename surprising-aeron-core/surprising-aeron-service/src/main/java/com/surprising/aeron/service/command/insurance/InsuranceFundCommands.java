@@ -1,15 +1,16 @@
 package com.surprising.aeron.service.command.insurance;
 
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.command.CommandResultContext;
 import com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions;
 
 /** 保险基金调整命令。 */
 public final class InsuranceFundCommands {
-    private final CommandResultContext owner;
+    private final TradingCoreRuntime owner;
 
-    public InsuranceFundCommands(CommandResultContext owner) {
+    public InsuranceFundCommands(TradingCoreRuntime owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 

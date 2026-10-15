@@ -34,7 +34,8 @@
 | 已完成 | D2 / L8 | 已删除旧 Owner 直达派发、窗口扫描回调及 Lane 响应回退 | 已验证，见 D2 |
 | 已完成 | D3 / L7 | 交易统一 Direct，删除旧 Future/API、Owner 补结算与分区扫描 | 已验证，见 D3 |
 | 已完成 | D4 | Owner 直接消费唯一输入环，删除重复 FIFO 与回收队列 | 已验证，见 D4 |
-| 删除类 | D5–D9 | 空壳接口等 | 低到中 |
+| 已完成 | D5 | 删除命令能力接口，直接引用既有运行时 | 已验证，见 D5 |
+| 删除类 | D6–D9 | 死代码等 | 低到中 |
 | 最后做 | D10 | `TradingCoreRuntime` 状态枢纽、状态重复 | 中高 |
 
 建议执行顺序见第 9 节。
@@ -299,11 +300,12 @@
 - **再次复审（2026-10-15）**：检查实际入口到唯一输入环、窗口及控制命令的租约交接、边界前缀和失败退出清理，未发现 D4 范围内的生产逻辑遗漏。补充命令/边界混合输入并发绕回三轮，核对日志字段、指纹与观测标记不串用；本轮 26 项必要功能回归全部通过。生产逻辑未修改，详见 [D4 复审验证](validation/d4-review-20261015.json)。
 - **范围**：新增 `OwnerIngressRing` 只封装真实 SPSC 交接及其容量/槽生命周期，没有新增业务镜像、接口、线程、队列层或任务阶段。未执行快照/恢复、wallet、压测或 JMH/JFR；F8 其余缓存行问题及性能收益不在本次完成结论中。
 
-### D5【报告】空壳 Context 接口层
-- **位置**：`command/` 下 `BalanceCommandContext:6`、`FeePolicyCommandContext:6` 是空 marker；其余 6 个子接口都 `extends CommandResultContext`。
-- **证据**：grep 显示实际落地只有 `TradingCoreRuntime` 与 `DirectCommandSlot`，未逐一确认。
-- **违反**：禁止 Context 后缀；单一实现不建接口。
-- **方案**：删空接口，命令类直接依赖具体 owner 类型。
+### D5【已完成】删除命令能力接口，直接依赖现有运行时
+- **核对结果**：该层共 9 个接口：`CommandOwnerContext`、`CommandResultContext`，以及 Balance、FeePolicy、Funding、Risk、Liquidation、Settlement、Trigger 七个 `CommandContext`。唯一生产实现是 `TradingCoreRuntime`；`DirectCommandSlot` 仅使用这些接口，并非第二实现。原报告对接口数量及实现者的描述已修正。
+- **删除及调用链**：9 个接口及其继承、实现、导入、参数和字段引用均已删除。12 类业务命令直接持有原 `TradingCoreRuntime`；`DirectCommandSlot` 的六类异步续步直接保留同一运行时。命令校验、Lane 派发、原状态变更、结果登记及异常回滚仍沿原入口顺序执行，没有新增接口、代理或状态镜像。
+- **业务类型归属**：`Mutation` 与 `OcoCancellationPage` 迁到 `TriggerOrderCommands`。交割命令直接使用现有 `TradingCoreRuntime.LifecycleOrderChunk`，删除接口内的重复 `LifecycleOrderPage` 和逐页转换；风险续扫去掉多余的 `owner` 自传参数，续步绑定接收调用的运行时。
+- **验证**：HotSpot JDK 27，74 项必要功能用例通过（service 72、基准夹具 2），失败、错误、跳过均为 0；直接依赖及基准模块编译通过。结构测试核对 12 类命令及异步续步的实际依赖类型、运行时实现列表和接口源文件删除；业务覆盖六产品线资金守恒、余额/划转、双向永续资金费、触发/OCO/风险续扫、强平/保险/ADL、交割/行权、持仓模式、保证金和杠杆拒绝后重试。详见 [D5 功能验证](validation/d5-complete-20261015.json)。
+- **范围**：未运行压测、JMH/JFR、快照/恢复或 wallet，不更新性能记录、不宣称吞吐/分配收益。仅移除这组能力接口；D6–D10、C1 等仍独立待办。
 
 ### D6【报告】死代码与待清理项
 - `state/TradingRuntimeState.java:172-178`：`singleWriterInline` 常量、空实现 setter；`isPublishMirrorEnabled` 恒返回 false。
@@ -375,7 +377,7 @@
 
 1. **确认类**（先于一切性能优化）：C1（JCStress）、C2（决定溢出策略）。
 2. **局部低风险改动**（先写 JMH，再改，再测）：P1+F1+L1（unpark 标志与 HWM）、F2+L3（结算 ring 填充与 `setRelease`）、P2（Lane scope）。
-3. **删除类**（风险低）：D5、D6。D1 已于 `c2a7c5a6e` 完成；D2、L8 已于 2026-10-15 完成。
+3. **删除类**（风险低）：D6。D1 已于 `c2a7c5a6e` 完成；D2、L8、D5 已于 2026-10-15 完成。
 4. **中等改动**：P3（最优价）、P4（指纹）、P5（traceId）、P7（网关 mailbox）、P9–P11、F3–F7、F9、L2。
 5. **需要先补测试与对账**：C3、D8（D3、D4 已完成）。
 6. **最后**：D7、D9、D10（状态枢纽与重复状态），分步进行并跑恢复测试。

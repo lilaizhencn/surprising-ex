@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.command.settlement;
 
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
 
 import com.surprising.aeron.protocol.CoreMessage;
@@ -12,15 +14,15 @@ import java.util.UUID;
 
 /** 交割与期权等币对到期结算：沿用产品结算处理器，并登记受影响账户。 */
 public final class InstrumentSettlementCommands {
-    private final SettlementCommandContext owner;
+    private final TradingCoreRuntime owner;
 
-    public InstrumentSettlementCommands(SettlementCommandContext owner) {
+    public InstrumentSettlementCommands(TradingCoreRuntime owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 
     public void applySettlementChangedIds(com.surprising.aeron.protocol.SettleInstrumentCommand command) {
         var progress = owner.lifecycleProgress(command.instrumentId());
-        SettlementCommandContext.LifecycleOrderPage chunk = owner.settlementLifecycleOrders(
+        TradingCoreRuntime.LifecycleOrderChunk chunk = owner.settlementLifecycleOrders(
                 0, command.instrumentId(), command.cursorOrderId(), command.maxOrders());
         if (progress == null || !progress.ordersComplete()) {
             owner.setCommandChangedOrderIds(boxedOrderIds(chunk.orders()));

@@ -14,6 +14,42 @@ import org.junit.jupiter.api.Test;
 
 class ProductionSourceBoundaryTest {
     @Test
+    void d5CommandsUseTheConcreteRuntimeWithoutCapabilityInterfaces() throws Exception {
+        assertThat(TradingCoreRuntime.class.getInterfaces()).containsExactly(AutoCloseable.class);
+        for (Class<?> handler : java.util.List.of(
+                com.surprising.aeron.service.command.balance.BalanceTransferCommands.class,
+                com.surprising.aeron.service.command.instrument.InstrumentConfigurationCommands.class,
+                com.surprising.aeron.service.command.fee.FeePolicyCommands.class,
+                com.surprising.aeron.service.command.funding.PerpetualFundingCommands.class,
+                com.surprising.aeron.service.command.risk.RiskCommands.class,
+                com.surprising.aeron.service.command.liquidation.LiquidationCommands.class,
+                com.surprising.aeron.service.command.adl.AdlCommands.class,
+                com.surprising.aeron.service.command.insurance.InsuranceFundCommands.class,
+                com.surprising.aeron.service.command.position.PositionCommands.class,
+                com.surprising.aeron.service.command.leverage.LeverageCommands.class,
+                com.surprising.aeron.service.command.settlement.InstrumentSettlementCommands.class,
+                com.surprising.aeron.service.command.trigger.TriggerOrderCommands.class)) {
+            assertThat(handler.getDeclaredField("owner").getType()).isEqualTo(TradingCoreRuntime.class);
+            assertThat(handler.getConstructor(TradingCoreRuntime.class)).isNotNull();
+        }
+        assertThat(java.util.Arrays.stream(DirectCommandSlot.class.getDeclaredClasses())
+                .flatMap(type -> java.util.Arrays.stream(type.getDeclaredFields()))
+                .filter(field -> field.getName().equals("owner")))
+                .isNotEmpty().allSatisfy(field -> assertThat(field.getType()).isEqualTo(TradingCoreRuntime.class));
+        Path root = Path.of("").toAbsolutePath();
+        while (!Files.isDirectory(root.resolve("surprising-aeron-core"))) {
+            root = root.getParent();
+            if (root == null) throw new AssertionError("repository root unavailable");
+        }
+        Path commands = root.resolve("surprising-aeron-core/surprising-aeron-service/src/main/java/"
+                + "com/surprising/aeron/service/command");
+        try (var files = Files.walk(commands)) {
+            assertThat(files.filter(path -> path.getFileName().toString().endsWith("Context.java")))
+                    .isEmpty();
+        }
+    }
+
+    @Test
     void d4UsesOneInputRingWithoutAnOwnerRelayOrReturnQueue() throws Exception {
         assertThat(java.util.Arrays.stream(TradingOwnerLoop.class.getDeclaredFields())
                 .map(java.lang.reflect.Field::getName)).doesNotContain("availableInput", "unpublishedInput");

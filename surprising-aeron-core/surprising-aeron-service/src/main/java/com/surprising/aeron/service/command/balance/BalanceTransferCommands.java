@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.command.balance;
 
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
@@ -14,11 +16,11 @@ import com.surprising.aeron.service.state.RuntimeAccountStateTransitions;
  * @param owner 唯一 owner；仅在其线程访问共享交易状态和提交边界。
  */
 public final class BalanceTransferCommands {
-    private final BalanceCommandContext owner;
+    private final TradingCoreRuntime owner;
     private final com.surprising.aeron.service.state.AccountTransferCompletion completion =
             new com.surprising.aeron.service.state.AccountTransferCompletion();
 
-    public BalanceTransferCommands(BalanceCommandContext owner) {
+    public BalanceTransferCommands(TradingCoreRuntime owner) {
         if (owner == null) throw new IllegalArgumentException("owner context is required");
         this.owner = owner;
     }

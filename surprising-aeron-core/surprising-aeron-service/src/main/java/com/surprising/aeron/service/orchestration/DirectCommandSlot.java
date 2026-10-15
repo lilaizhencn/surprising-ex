@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.service.command.trigger.TriggerOrderCommands;
+
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreAlgoOrderView;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -7,9 +9,6 @@ import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.CoreResponse;
-import com.surprising.aeron.service.command.CommandResultContext;
-import com.surprising.aeron.service.command.risk.RiskCommandContext;
-import com.surprising.aeron.service.command.trigger.TriggerCommandContext;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.AccountBalanceAdjustment;
 import com.surprising.aeron.service.state.AccountLeverageChange;
@@ -151,7 +150,7 @@ final class DirectCommandSlot {
         controlWork = Objects.requireNonNull(work);
     }
 
-    void deferFundingControl(CommandResultContext owner,
+    void deferFundingControl(TradingCoreRuntime owner,
             RuntimePerpetualFundingProcessor.FundingWork work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         fundingControl.prepare(owner, work);
@@ -161,7 +160,7 @@ final class DirectCommandSlot {
 
     RuntimePerpetualFundingProcessor.FundingWork reusableFundingWork() { return reusableFundingWork; }
 
-    void deferRiskScanControl(RiskCommandContext owner, RiskScanCoordinator risk, int symbolId,
+    void deferRiskScanControl(TradingCoreRuntime owner, RiskScanCoordinator risk, int symbolId,
             String instrumentId, int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         riskScanControl.prepare(owner, risk, symbolId, instrumentId, maxUsers, pendingBefore, startedAt,
@@ -169,7 +168,7 @@ final class DirectCommandSlot {
         controlWork = riskScanControl;
     }
 
-    void deferAdlControl(CommandResultContext owner,
+    void deferAdlControl(TradingCoreRuntime owner,
             RuntimeAdlExecution.AdlWork work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         adlControl.prepare(owner, work);
@@ -179,7 +178,7 @@ final class DirectCommandSlot {
 
     RuntimeAdlExecution.AdlWork reusableAdlWork() { return reusableAdlWork; }
 
-    void deferLiquidationResolutionControl(CommandResultContext owner,
+    void deferLiquidationResolutionControl(TradingCoreRuntime owner,
             RuntimeLiquidationResolution.ResolutionWork work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         liquidationResolutionControl.prepare(owner, work);
@@ -217,21 +216,21 @@ final class DirectCommandSlot {
     AccountPositionModeChange reusablePositionModeChange() { return reusablePositionModeChange; }
     AccountPositionMarginAdjustment reusablePositionMarginAdjustment() { return reusablePositionMarginAdjustment; }
 
-    void deferBalanceAdjustmentControl(CommandResultContext owner, AccountBalanceAdjustment work) {
+    void deferBalanceAdjustmentControl(TradingCoreRuntime owner, AccountBalanceAdjustment work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         reusableBalanceAdjustment = Objects.requireNonNull(work);
         accountControl.prepareBalance(owner, work);
         controlWork = accountControl;
     }
 
-    void deferTransferOutControl(CommandResultContext owner, AccountTransferOut work) {
+    void deferTransferOutControl(TradingCoreRuntime owner, AccountTransferOut work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         reusableTransferOut = Objects.requireNonNull(work);
         accountControl.prepareTransfer(owner, work);
         controlWork = accountControl;
     }
 
-    void deferLeverageChangeControl(CommandResultContext owner, AccountLeverageChange work,
+    void deferLeverageChangeControl(TradingCoreRuntime owner, AccountLeverageChange work,
             long beforeRevision) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         reusableLeverageChange = Objects.requireNonNull(work);
@@ -239,7 +238,7 @@ final class DirectCommandSlot {
         controlWork = accountControl;
     }
 
-    void deferPositionModeChangeControl(CommandResultContext owner, AccountPositionModeChange work,
+    void deferPositionModeChangeControl(TradingCoreRuntime owner, AccountPositionModeChange work,
             long beforeRevision) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         reusablePositionModeChange = Objects.requireNonNull(work);
@@ -247,7 +246,7 @@ final class DirectCommandSlot {
         controlWork = accountControl;
     }
 
-    void deferPositionMarginAdjustmentControl(CommandResultContext owner,
+    void deferPositionMarginAdjustmentControl(TradingCoreRuntime owner,
             AccountPositionMarginAdjustment work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         reusablePositionMarginAdjustment = Objects.requireNonNull(work);
@@ -255,8 +254,8 @@ final class DirectCommandSlot {
         controlWork = accountControl;
     }
 
-    void deferTriggerMutationControl(TriggerCommandContext owner, long userId,
-            TriggerCommandContext.Mutation mutation, long triggerOrderId, long arg1, long arg2,
+    void deferTriggerMutationControl(TradingCoreRuntime owner, long userId,
+            TriggerOrderCommands.Mutation mutation, long triggerOrderId, long arg1, long arg2,
             long arg3, boolean flag, String text) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         triggerControl.prepareMutation(owner, userId, mutation, triggerOrderId, arg1, arg2, arg3,
@@ -266,7 +265,7 @@ final class DirectCommandSlot {
         controlWork = triggerControl;
     }
 
-    void deferTriggerUpsertControl(TriggerCommandContext owner, long userId,
+    void deferTriggerUpsertControl(TradingCoreRuntime owner, long userId,
             CoreTriggerOrderStateView trigger, int symbolId, long positionKey,
             boolean instrumentSettled) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -277,7 +276,7 @@ final class DirectCommandSlot {
         controlWork = triggerControl;
     }
 
-    void deferTriggerOcoPairControl(TriggerCommandContext owner, long userId,
+    void deferTriggerOcoPairControl(TradingCoreRuntime owner, long userId,
             CoreTriggerOrderStateView first, CoreTriggerOrderStateView second,
             int symbolId, long positionKey, boolean instrumentSettled) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -288,7 +287,7 @@ final class DirectCommandSlot {
         controlWork = triggerControl;
     }
 
-    void deferAlgoUpsertControl(TriggerCommandContext owner, long userId, CoreAlgoOrderView algo,
+    void deferAlgoUpsertControl(TradingCoreRuntime owner, long userId, CoreAlgoOrderView algo,
             int symbolId) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         triggerControl.prepareAlgoUpsert(owner, userId, algo, symbolId);
@@ -360,10 +359,10 @@ final class DirectCommandSlot {
     }
 
     private final class FundingControlContinuation implements BooleanSupplier {
-        private CommandResultContext owner;
+        private TradingCoreRuntime owner;
         private RuntimePerpetualFundingProcessor.FundingWork work;
 
-        void prepare(CommandResultContext owner, RuntimePerpetualFundingProcessor.FundingWork work) {
+        void prepare(TradingCoreRuntime owner, RuntimePerpetualFundingProcessor.FundingWork work) {
             this.owner = Objects.requireNonNull(owner);
             this.work = Objects.requireNonNull(work);
         }
@@ -383,7 +382,7 @@ final class DirectCommandSlot {
     }
 
     private final class RiskScanControlContinuation implements BooleanSupplier {
-        private RiskCommandContext owner;
+        private TradingCoreRuntime owner;
         private RiskScanCoordinator risk;
         private int symbolId;
         private String instrumentId;
@@ -393,7 +392,7 @@ final class DirectCommandSlot {
         private long beforeRevision;
         private BooleanSupplier triggers;
 
-        void prepare(RiskCommandContext owner, RiskScanCoordinator risk, int symbolId, String instrumentId,
+        void prepare(TradingCoreRuntime owner, RiskScanCoordinator risk, int symbolId, String instrumentId,
                 int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
             this.owner = Objects.requireNonNull(owner);
             this.risk = risk;
@@ -427,9 +426,9 @@ final class DirectCommandSlot {
     }
 
     private final class AdlControlContinuation implements BooleanSupplier {
-        private CommandResultContext owner;
+        private TradingCoreRuntime owner;
         private RuntimeAdlExecution.AdlWork work;
-        void prepare(CommandResultContext owner, RuntimeAdlExecution.AdlWork work) {
+        void prepare(TradingCoreRuntime owner, RuntimeAdlExecution.AdlWork work) {
             this.owner = Objects.requireNonNull(owner); this.work = Objects.requireNonNull(work);
         }
         void clear() { owner = null; work = null; }
@@ -441,9 +440,9 @@ final class DirectCommandSlot {
     }
 
     private final class LiquidationResolutionControlContinuation implements BooleanSupplier {
-        private CommandResultContext owner;
+        private TradingCoreRuntime owner;
         private RuntimeLiquidationResolution.ResolutionWork work;
-        void prepare(CommandResultContext owner, RuntimeLiquidationResolution.ResolutionWork work) {
+        void prepare(TradingCoreRuntime owner, RuntimeLiquidationResolution.ResolutionWork work) {
             this.owner = Objects.requireNonNull(owner); this.work = Objects.requireNonNull(work);
         }
         void clear() { owner = null; work = null; }
@@ -462,7 +461,7 @@ final class DirectCommandSlot {
         private static final byte POSITION_MODE = 4;
         private static final byte POSITION_MARGIN = 5;
         private byte kind;
-        private CommandResultContext owner;
+        private TradingCoreRuntime owner;
         private AccountBalanceAdjustment balance;
         private AccountTransferOut transfer;
         private AccountLeverageChange leverage;
@@ -470,23 +469,23 @@ final class DirectCommandSlot {
         private AccountPositionMarginAdjustment positionMargin;
         private long beforeRevision;
 
-        void prepareBalance(CommandResultContext owner, AccountBalanceAdjustment work) {
+        void prepareBalance(TradingCoreRuntime owner, AccountBalanceAdjustment work) {
             clear(); kind = BALANCE; balance = work; this.owner = Objects.requireNonNull(owner);
         }
-        void prepareTransfer(CommandResultContext owner, AccountTransferOut work) {
+        void prepareTransfer(TradingCoreRuntime owner, AccountTransferOut work) {
             clear(); kind = TRANSFER; transfer = work; this.owner = Objects.requireNonNull(owner);
         }
-        void prepareLeverage(CommandResultContext owner, AccountLeverageChange work,
+        void prepareLeverage(TradingCoreRuntime owner, AccountLeverageChange work,
                 long beforeRevision) {
             clear(); kind = LEVERAGE; leverage = work; this.owner = Objects.requireNonNull(owner);
             this.beforeRevision = beforeRevision;
         }
-        void preparePositionMode(CommandResultContext owner, AccountPositionModeChange work,
+        void preparePositionMode(TradingCoreRuntime owner, AccountPositionModeChange work,
                 long beforeRevision) {
             clear(); kind = POSITION_MODE; positionMode = work; this.owner = Objects.requireNonNull(owner);
             this.beforeRevision = beforeRevision;
         }
-        void preparePositionMargin(CommandResultContext owner,
+        void preparePositionMargin(TradingCoreRuntime owner,
                 AccountPositionMarginAdjustment work) {
             clear(); kind = POSITION_MARGIN; positionMargin = work; this.owner = Objects.requireNonNull(owner);
         }
@@ -536,32 +535,32 @@ final class DirectCommandSlot {
         private static final byte TRIGGER_UPSERT = 2;
         private static final byte ALGO_UPSERT = 3;
         private byte kind;
-        private TriggerCommandContext owner;
+        private TradingCoreRuntime owner;
         private long userId, triggerOrderId, arg1, arg2, arg3;
         private boolean flag;
         private String text;
-        private TriggerCommandContext.Mutation mutation;
+        private TriggerOrderCommands.Mutation mutation;
         private CoreTriggerOrderStateView trigger, secondTrigger;
         private CoreAlgoOrderView algo;
         private int symbolId;
         private long positionKey;
         private boolean instrumentSettled;
 
-        void prepareMutation(TriggerCommandContext owner, long userId,
-                TriggerCommandContext.Mutation mutation, long triggerOrderId, long arg1, long arg2,
+        void prepareMutation(TradingCoreRuntime owner, long userId,
+                TriggerOrderCommands.Mutation mutation, long triggerOrderId, long arg1, long arg2,
                 long arg3, boolean flag, String text) {
             clear(); kind = MUTATION; this.owner = Objects.requireNonNull(owner); this.userId = userId;
             this.mutation = Objects.requireNonNull(mutation); this.triggerOrderId = triggerOrderId;
             this.arg1 = arg1; this.arg2 = arg2; this.arg3 = arg3; this.flag = flag; this.text = text;
         }
-        void prepareTriggerUpsert(TriggerCommandContext owner, long userId,
+        void prepareTriggerUpsert(TradingCoreRuntime owner, long userId,
                 CoreTriggerOrderStateView trigger, int symbolId, long positionKey,
                 boolean instrumentSettled) {
             clear(); kind = TRIGGER_UPSERT; this.owner = Objects.requireNonNull(owner);
             this.userId = userId; this.trigger = Objects.requireNonNull(trigger); this.symbolId = symbolId;
             this.positionKey = positionKey; this.instrumentSettled = instrumentSettled;
         }
-        void prepareAlgoUpsert(TriggerCommandContext owner, long userId, CoreAlgoOrderView algo,
+        void prepareAlgoUpsert(TradingCoreRuntime owner, long userId, CoreAlgoOrderView algo,
                 int symbolId) {
             clear(); kind = ALGO_UPSERT; this.owner = Objects.requireNonNull(owner);
             this.userId = userId; this.algo = Objects.requireNonNull(algo); this.symbolId = symbolId;

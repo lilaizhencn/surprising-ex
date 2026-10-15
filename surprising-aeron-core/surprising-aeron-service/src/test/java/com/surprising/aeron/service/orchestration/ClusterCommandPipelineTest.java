@@ -620,6 +620,16 @@ class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(value = ProductLine.class, names = "SPOT", mode = EnumSource.Mode.EXCLUDE)
     void isolatedMarginChangesStayInTheAccountLane(ProductLine product) throws Exception {
+        verifyIsolatedMarginChanges(product, true);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ProductLine.class, names = "SPOT", mode = EnumSource.Mode.EXCLUDE)
+    void isolatedMarginChangesWithoutSnapshot(ProductLine product) throws Exception {
+        verifyIsolatedMarginChanges(product, false);
+    }
+
+    private void verifyIsolatedMarginChanges(ProductLine product, boolean recovery) throws Exception {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             serial.applyAll(live.setup());
             for (boolean buy : new boolean[]{false, true}) {
@@ -643,9 +653,40 @@ class ClusterCommandPipelineTest {
             assertThat(live.service.state().tradingState().user(11).balances()).isEqualTo(before.balances());
             assertThat(live.service.state().tradingState().user(11).positions()).isEqualTo(before.positions());
             assertThat(live.hash()).isEqualTo(serial.hash());
-            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
-                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            if (recovery) {
+                try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                    assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+                }
             }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ProductLine.class, names = "SPOT", mode = EnumSource.Mode.EXCLUDE)
+    void positionModeChangesAndBlockedRejectionKeepAccountFundsWithoutSnapshot(ProductLine product) {
+        try (Fixture live = new Fixture(product)) {
+            live.setup();
+            var balances = live.service.state().tradingState().user(11).balances();
+            for (var mode : new CorePositionMode[]{CorePositionMode.HEDGE, CorePositionMode.HEDGE,
+                    CorePositionMode.ONE_WAY}) {
+                live.apply(live.message(CoreMessageType.UPDATE_POSITION_MODE, 11,
+                        TradingCommandCodec.encodeUpdatePositionMode(new UpdatePositionModeCommand(mode))));
+                assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                assertThat(live.service.state().tradingState().user(11).positionMode()).isEqualTo(mode);
+                assertThat(live.service.state().tradingState().user(11).balances()).isEqualTo(balances);
+            }
+            live.apply(live.place(11, "1", 19002, 80, 1, CoreOrderSide.BUY));
+            long before = live.hash();
+            live.apply(live.message(CoreMessageType.UPDATE_POSITION_MODE, 11,
+                    TradingCommandCodec.encodeUpdatePositionMode(new UpdatePositionModeCommand(CorePositionMode.HEDGE))));
+            assertThat(live.responses.getLast().resultCode()).isEqualTo(CoreResultCode.POSITION_MODE_SWITCH_BLOCKED);
+            assertThat(live.hash()).isEqualTo(before);
+            live.apply(live.cancel(11, 19002));
+            live.apply(live.message(CoreMessageType.UPDATE_POSITION_MODE, 11,
+                    TradingCommandCodec.encodeUpdatePositionMode(new UpdatePositionModeCommand(CorePositionMode.HEDGE))));
+            assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(live.service.state().tradingState().user(11).positionMode()).isEqualTo(CorePositionMode.HEDGE);
+            assertThat(live.service.state().tradingState().user(11).balances()).isEqualTo(balances);
         }
     }
 

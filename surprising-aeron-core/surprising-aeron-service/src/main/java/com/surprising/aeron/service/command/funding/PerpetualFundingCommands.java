@@ -1,17 +1,19 @@
 package com.surprising.aeron.service.command.funding;
 
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
 
 /** 永续合约资金费命令；沿用 U 本位和币本位各自结算规则。 */
 public final class PerpetualFundingCommands {
-    private final FundingCommandContext owner;
+    private final TradingCoreRuntime owner;
     // Set only by the separate committed replay. Live asynchronous owner/Lane execution
     // has no export listener and does not acquire a database or publish history here.
     private java.util.function.Consumer<RuntimePerpetualFundingProcessor.FundingResult> replayObserver;
 
-    public PerpetualFundingCommands(FundingCommandContext owner) {
+    public PerpetualFundingCommands(TradingCoreRuntime owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 

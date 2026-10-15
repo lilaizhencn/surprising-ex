@@ -1,15 +1,16 @@
 package com.surprising.aeron.service.command.adl;
 
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.command.CommandResultContext;
 import com.surprising.aeron.service.state.RuntimeAdlExecution;
 
 /** 自动减仓（ADL）命令。 */
 public final class AdlCommands {
-    private final CommandResultContext owner;
+    private final TradingCoreRuntime owner;
 
-    public AdlCommands(CommandResultContext owner) {
+    public AdlCommands(TradingCoreRuntime owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 

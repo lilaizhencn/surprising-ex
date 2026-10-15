@@ -15,25 +15,17 @@ import com.surprising.aeron.service.orchestration.realtime.RealtimeReadCoordinat
 import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
-import com.surprising.aeron.service.command.CommandResultContext;
 import com.surprising.aeron.service.command.DirectCommandDispatcher;
-import com.surprising.aeron.service.command.balance.BalanceCommandContext;
 import com.surprising.aeron.service.command.balance.BalanceTransferCommands;
 import com.surprising.aeron.service.command.position.PositionCommands;
 import com.surprising.aeron.service.command.leverage.LeverageCommands;
-import com.surprising.aeron.service.command.risk.RiskCommandContext;
 import com.surprising.aeron.service.command.risk.RiskCommands;
-import com.surprising.aeron.service.command.liquidation.LiquidationCommandContext;
 import com.surprising.aeron.service.command.liquidation.LiquidationCommands;
 import com.surprising.aeron.service.command.adl.AdlCommands;
 import com.surprising.aeron.service.command.insurance.InsuranceFundCommands;
-import com.surprising.aeron.service.command.funding.FundingCommandContext;
 import com.surprising.aeron.service.command.funding.PerpetualFundingCommands;
 import com.surprising.aeron.service.command.settlement.InstrumentSettlementCommands;
-import com.surprising.aeron.service.command.settlement.SettlementCommandContext;
-import com.surprising.aeron.service.command.fee.FeePolicyCommandContext;
 import com.surprising.aeron.service.command.fee.FeePolicyCommands;
-import com.surprising.aeron.service.command.trigger.TriggerCommandContext;
 import com.surprising.aeron.service.command.trigger.TriggerCommandDispatcher;
 import com.surprising.aeron.service.command.trigger.TriggerOrderCommands;
 import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
@@ -97,10 +89,7 @@ import java.util.concurrent.CompletableFuture;
  * 产品命令、批量执行、结果账本、查询及快照由所属组件管理；不持有旧探测运行时副本。
  */
 @Slf4j
-public final class TradingCoreRuntime implements AutoCloseable,
-        CommandResultContext, BalanceCommandContext, FundingCommandContext,
-        RiskCommandContext, LiquidationCommandContext, SettlementCommandContext,
-        FeePolicyCommandContext, TriggerCommandContext {
+public final class TradingCoreRuntime implements AutoCloseable {
 
     final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
 
@@ -356,79 +345,78 @@ public final class TradingCoreRuntime implements AutoCloseable,
     /** 资源是否已释放，避免重复关闭。 */
     boolean closed;
 
-    @Override public TradingRuntimeState runtimeState() { return runtimeState; }
-    @Override public RuntimeIdentityRegistry identities() { return identities; }
-    @Override public void requestCommitPublication() { commits.requestCommitPublication(); }
-    @Override public boolean asynchronousCommands() { return runtimeState.asynchronousCommands(); }
-    @Override public void setSingleChangedUser(long userId) { resultBuilder.setSingleChangedUser(userId); }
-    @Override public void markUserChanged(long userId) { resultBuilder.markUserChanged(userId); }
-    @Override public void markOrderChanged(long orderId) { resultBuilder.markOrderChanged(orderId); }
-    @Override public void beginChangedUsers() { resultBuilder.beginChangedUsers(); }
-    @Override public void addChangedUser(long userId) { resultBuilder.addChangedUser(userId); }
-    @Override public void addChangedUsersFromOrders(Iterable<CancellationOrder> orders) {
+    public TradingRuntimeState runtimeState() { return runtimeState; }
+    public RuntimeIdentityRegistry identities() { return identities; }
+    public void requestCommitPublication() { commits.requestCommitPublication(); }
+    public boolean asynchronousCommands() { return runtimeState.asynchronousCommands(); }
+    public void setSingleChangedUser(long userId) { resultBuilder.setSingleChangedUser(userId); }
+    public void markUserChanged(long userId) { resultBuilder.markUserChanged(userId); }
+    public void markOrderChanged(long orderId) { resultBuilder.markOrderChanged(orderId); }
+    public void beginChangedUsers() { resultBuilder.beginChangedUsers(); }
+    public void addChangedUser(long userId) { resultBuilder.addChangedUser(userId); }
+    public void addChangedUsersFromOrders(Iterable<CancellationOrder> orders) {
         resultBuilder.addChangedUsersFromOrders(orders);
     }
-    @Override public void addChangedUsersFromFundingPayments(
+    public void addChangedUsersFromFundingPayments(
             Iterable<? extends com.surprising.aeron.protocol.CoreFundingPaymentView> payments) {
         resultBuilder.addChangedUsersFromFundingPayments(payments);
     }
-    @Override public void setCommandChangedOrderIds(List<Long> orderIds) {
+    public void setCommandChangedOrderIds(List<Long> orderIds) {
         resultBuilder.commandChangedOrderIds = orderIds;
     }
-    @Override public void setCommandFundingProgress(CoreFundingProgressView progress) {
+    public void setCommandFundingProgress(CoreFundingProgressView progress) {
         resultBuilder.commandFundingProgress = progress;
     }
-    @Override public void setCommandSettlementProgress(CoreSettlementProgressView progress) {
+    public void setCommandSettlementProgress(CoreSettlementProgressView progress) {
         resultBuilder.commandSettlementProgress = progress;
     }
-    @Override public void setCommandRiskScanControl(
+    public void setCommandRiskScanControl(
             com.surprising.aeron.protocol.CoreRiskScanControlView control) {
         resultBuilder.commandRiskScanControl = control;
     }
-    @Override public void setCommandTriggerOrderView(
+    public void setCommandTriggerOrderView(
             com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger) {
         resultBuilder.commandTriggerOrderViews = List.of(trigger);
     }
-    @Override public void setCommandTriggerOrderViews(List<com.surprising.aeron.protocol.CoreTriggerOrderStateView> triggers) {
+    public void setCommandTriggerOrderViews(List<com.surprising.aeron.protocol.CoreTriggerOrderStateView> triggers) {
         resultBuilder.commandTriggerOrderViews = List.copyOf(triggers);
     }
-    @Override public void deferTriggerOcoPair(long userId,
+    public void deferTriggerOcoPair(long userId,
             com.surprising.aeron.protocol.CoreTriggerOrderStateView takeProfit,
             com.surprising.aeron.protocol.CoreTriggerOrderStateView stopLoss,
             int symbolId, long positionKey, boolean instrumentSettled) {
         directCommand.deferTriggerOcoPairControl(this, userId, takeProfit, stopLoss,
                 symbolId, positionKey, instrumentSettled);
     }
-    @Override public PositionUserIndex positionUserIndex() { return positionUserIndex; }
-    @Override public TriggerOrderIndex triggerOrderIndex() { return triggerOrderIndex; }
-    @Override public ActiveOrderIndex activeOrderIndex() { return activeOrderIndex; }
-    @Override public Iterable<Long> activeLiquidationIds() { return liquidationIndex.activeIds(); }
-    @Override public void initializeTriggerScan(com.surprising.aeron.protocol.ApplyMarkPriceCommand command) {
+    public PositionUserIndex positionUserIndex() { return positionUserIndex; }
+    public TriggerOrderIndex triggerOrderIndex() { return triggerOrderIndex; }
+    public ActiveOrderIndex activeOrderIndex() { return activeOrderIndex; }
+    public Iterable<Long> activeLiquidationIds() { return liquidationIndex.activeIds(); }
+    public void initializeTriggerScan(com.surprising.aeron.protocol.ApplyMarkPriceCommand command) {
         triggers.initializeTriggerScan(command);
     }
-    @Override public java.util.function.BooleanSupplier pendingTriggerScan(String instrumentId, int maxWork) {
+    public java.util.function.BooleanSupplier pendingTriggerScan(String instrumentId, int maxWork) {
         return triggers.pendingTriggerScan(instrumentId, maxWork);
     }
-    @Override public void evaluatePendingTriggerScan(String instrumentId, int maxWork) {
+    public void evaluatePendingTriggerScan(String instrumentId, int maxWork) {
         triggers.evaluatePendingTriggerScan(instrumentId, maxWork);
     }
-    @Override public int queuedMatchingCount() { return admissions.queuedMatching.size(); }
-    @Override public int defaultTriggerScanBatchSize() { return DEFAULT_TRIGGER_SCAN_BATCH_SIZE; }
-    @Override public long currentClusterTimestamp() { return currentClusterTimestamp; }
-    @Override public boolean terminalAlgoRetained(long algoOrderId, long userId, String clientAlgoOrderId) {
+    public int queuedMatchingCount() { return admissions.queuedMatching.size(); }
+    public int defaultTriggerScanBatchSize() { return DEFAULT_TRIGGER_SCAN_BATCH_SIZE; }
+    public long currentClusterTimestamp() { return currentClusterTimestamp; }
+    public boolean terminalAlgoRetained(long algoOrderId, long userId, String clientAlgoOrderId) {
         return terminalRetention.containsAlgo(algoOrderId, userId, clientAlgoOrderId);
     }
-    @Override public boolean terminalTriggerRetained(long triggerOrderId, long userId, String clientTriggerOrderId) {
+    public boolean terminalTriggerRetained(long triggerOrderId, long userId, String clientTriggerOrderId) {
         return terminalRetention.containsTrigger(triggerOrderId, userId, clientTriggerOrderId);
     }
-    @Override public com.surprising.aeron.service.state.TreasuryRuntime.LifecycleProgressRuntime
+    public com.surprising.aeron.service.state.TreasuryRuntime.LifecycleProgressRuntime
             lifecycleProgress(String instrumentId) {
         return runtimeLifecycleProgress(instrumentId);
     }
-    @Override public SettlementCommandContext.LifecycleOrderPage settlementLifecycleOrders(
+    public LifecycleOrderChunk settlementLifecycleOrders(
             long userId, String instrumentId, long cursorOrderId, int maxOrders) {
-        LifecycleOrderChunk page = matchingFlow.lifecycleOrders(userId, instrumentId, cursorOrderId, maxOrders);
-        return new SettlementCommandContext.LifecycleOrderPage(page.orders(), page.nextCursorOrderId());
+        return matchingFlow.lifecycleOrders(userId, instrumentId, cursorOrderId, maxOrders);
     }
 
     public TradingCoreRuntime(ProductLine productLine) {
@@ -601,122 +589,121 @@ public final class TradingCoreRuntime implements AutoCloseable,
     /** 唯一直接控制命令的续步槽；与订单撮合序号槽分离。 */
     final DirectCommandSlot directCommand = new DirectCommandSlot();
 
-    @Override public com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment() {
+    public com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment() {
         return directCommand.reusableInsuranceAdjustment();
     }
 
-    @Override public void deferControl(java.util.function.BooleanSupplier continuation) {
+    public void deferControl(java.util.function.BooleanSupplier continuation) {
         if (continuation instanceof com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork work)
             directCommand.rememberInsuranceAdjustment(work);
         directCommand.deferControl(continuation);
     }
 
-    @Override public void deferFundingControl(
+    public void deferFundingControl(
             com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor.FundingWork work) {
         directCommand.deferFundingControl(this, work);
     }
 
-    @Override public com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor.FundingWork
+    public com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor.FundingWork
             reusableFundingWork() {
         return directCommand.reusableFundingWork();
     }
 
-    @Override public void deferRiskScanControl(
-            com.surprising.aeron.service.command.risk.RiskCommandContext owner,
+    public void deferRiskScanControl(
             com.surprising.aeron.service.state.RiskScanCoordinator risk, int symbolId, String instrumentId,
             int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
-        directCommand.deferRiskScanControl(owner, risk, symbolId, instrumentId, maxUsers, pendingBefore,
+        directCommand.deferRiskScanControl(this, risk, symbolId, instrumentId, maxUsers, pendingBefore,
                 startedAt, beforeRevision);
     }
 
-    @Override public void deferAdlControl(
+    public void deferAdlControl(
             com.surprising.aeron.service.state.RuntimeAdlExecution.AdlWork work) {
         directCommand.deferAdlControl(this, work);
     }
 
-    @Override public com.surprising.aeron.service.state.RuntimeAdlExecution.AdlWork
+    public com.surprising.aeron.service.state.RuntimeAdlExecution.AdlWork
             reusableAdlWork() {
         return directCommand.reusableAdlWork();
     }
 
-    @Override public void deferLiquidationResolutionControl(
+    public void deferLiquidationResolutionControl(
             com.surprising.aeron.service.state.RuntimeLiquidationResolution.ResolutionWork work) {
         directCommand.deferLiquidationResolutionControl(this, work);
     }
 
-    @Override public com.surprising.aeron.service.state.RuntimeLiquidationResolution.ResolutionWork
+    public com.surprising.aeron.service.state.RuntimeLiquidationResolution.ResolutionWork
             reusableLiquidationResolutionWork() {
         return directCommand.reusableLiquidationResolutionWork();
     }
 
-    @Override public com.surprising.aeron.service.state.RiskScanCoordinator
+    public com.surprising.aeron.service.state.RiskScanCoordinator
             reusableRiskScanCoordinator(int maxUsers) {
         return directCommand.reusableRiskScanCoordinator(maxUsers, positionUserIndex, runtimeState,
                 identities);
     }
 
-    @Override public com.surprising.aeron.service.state.AccountBalanceAdjustment
+    public com.surprising.aeron.service.state.AccountBalanceAdjustment
             reusableBalanceAdjustment() {
         return directCommand.reusableBalanceAdjustment();
     }
 
-    @Override public com.surprising.aeron.service.state.AccountTransferOut reusableTransferOut() {
+    public com.surprising.aeron.service.state.AccountTransferOut reusableTransferOut() {
         return directCommand.reusableTransferOut();
     }
 
-    @Override public com.surprising.aeron.service.state.AccountLeverageChange reusableLeverageChange() {
+    public com.surprising.aeron.service.state.AccountLeverageChange reusableLeverageChange() {
         return directCommand.reusableLeverageChange();
     }
 
-    @Override public com.surprising.aeron.service.state.AccountPositionModeChange reusablePositionModeChange() {
+    public com.surprising.aeron.service.state.AccountPositionModeChange reusablePositionModeChange() {
         return directCommand.reusablePositionModeChange();
     }
 
-    @Override public com.surprising.aeron.service.state.AccountPositionMarginAdjustment
+    public com.surprising.aeron.service.state.AccountPositionMarginAdjustment
             reusablePositionMarginAdjustment() {
         return directCommand.reusablePositionMarginAdjustment();
     }
 
-    @Override public void deferBalanceAdjustmentControl(
+    public void deferBalanceAdjustmentControl(
             com.surprising.aeron.service.state.AccountBalanceAdjustment work) {
         directCommand.deferBalanceAdjustmentControl(this, work);
     }
 
-    @Override public void deferTransferOutControl(
+    public void deferTransferOutControl(
             com.surprising.aeron.service.state.AccountTransferOut work) {
         directCommand.deferTransferOutControl(this, work);
     }
 
-    @Override public void deferLeverageChangeControl(
+    public void deferLeverageChangeControl(
             com.surprising.aeron.service.state.AccountLeverageChange work, long beforeRevision) {
         directCommand.deferLeverageChangeControl(this, work, beforeRevision);
     }
 
-    @Override public void deferPositionModeChangeControl(
+    public void deferPositionModeChangeControl(
             com.surprising.aeron.service.state.AccountPositionModeChange work, long beforeRevision) {
         directCommand.deferPositionModeChangeControl(this, work, beforeRevision);
     }
 
-    @Override public void deferPositionMarginAdjustmentControl(
+    public void deferPositionMarginAdjustmentControl(
             com.surprising.aeron.service.state.AccountPositionMarginAdjustment work) {
         directCommand.deferPositionMarginAdjustmentControl(this, work);
     }
 
-    @Override public void deferTriggerMutation(long userId,
-            com.surprising.aeron.service.command.trigger.TriggerCommandContext.Mutation mutation,
+    public void deferTriggerMutation(long userId,
+            TriggerOrderCommands.Mutation mutation,
             long triggerOrderId, long arg1, long arg2, long arg3, boolean flag, String text) {
         directCommand.deferTriggerMutationControl(this, userId, mutation, triggerOrderId, arg1, arg2,
                 arg3, flag, text);
     }
 
-    @Override public void deferTriggerUpsert(long userId,
+    public void deferTriggerUpsert(long userId,
             com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger, int symbolId,
             long positionKey, boolean instrumentSettled) {
         directCommand.deferTriggerUpsertControl(this, userId, trigger, symbolId, positionKey,
                 instrumentSettled);
     }
 
-    @Override public void deferAlgoUpsert(long userId,
+    public void deferAlgoUpsert(long userId,
             com.surprising.aeron.protocol.CoreAlgoOrderView algo, int symbolId) {
         directCommand.deferAlgoUpsertControl(this, userId, algo, symbolId);
     }
@@ -773,8 +760,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return rejected(resultCode);
     }
 
-    record LifecycleOrderChunk(List<CancellationOrder> orders, long nextCursorOrderId) {
-        boolean more() { return nextCursorOrderId != 0; }
+    public record LifecycleOrderChunk(List<CancellationOrder> orders, long nextCursorOrderId) {
+        public boolean more() { return nextCursorOrderId != 0; }
     }
 
     public com.surprising.aeron.service.matching.MatchingResult takeMatchingResult(long sequence) {
@@ -1131,10 +1118,10 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return ResponseStatus.APPLIED;
     }
 
-    @Override public void cancelAllOcoSiblings(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger) {
+    public void cancelAllOcoSiblings(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger) {
         long cursor = Long.MAX_VALUE;
         while (true) {
-            TriggerCommandContext.OcoCancellationPage page = triggers.cancelOcoSiblings(
+            TriggerOrderCommands.OcoCancellationPage page = triggers.cancelOcoSiblings(
                     trigger, cursor, DEFAULT_TRIGGER_SCAN_BATCH_SIZE);
             if (page.complete()) return;
             if (page.workUnits() == 0) throw new IllegalStateException("OCO cancellation made no progress");
@@ -1177,7 +1164,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 assetId, identities, timestamp, position);
     }
 
-    @Override public void reservePlaceOrderRuntime(long userId, PlaceOrderCommand command, UUID commandId,
+    public void reservePlaceOrderRuntime(long userId, PlaceOrderCommand command, UUID commandId,
                                   long pendingCoreSequence) {
         if (runtimeState.asynchronousCommands())
             throw new IllegalStateException("active trigger admission requires its Account Lane continuation");
@@ -1295,13 +1282,13 @@ public final class TradingCoreRuntime implements AutoCloseable,
         resultBuilder.commandRiskScanControl = null;
     }
 
-    @Override public void requireOrderIdentityAvailable(long userId, PlaceOrderCommand command) {
+    public void requireOrderIdentityAvailable(long userId, PlaceOrderCommand command) {
         if (command == null || terminalRetention.containsOrder(command.orderId(), userId, command.clientOrderId())) {
             throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "terminal order identity is retained");
         }
     }
 
-    @Override public boolean orderIdInUse(long orderId) {
+    public boolean orderIdInUse(long orderId) {
         return activeOrderIndex.activeOrderRoute(orderId) != null
                 || runtimeState.changedOrderValue(orderId) != null || terminalRetention.orderIdInUse(orderId);
     }
@@ -1315,7 +1302,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         identities.rollbackPositionKeys(positionIdentityCheckpoint);
     }
 
-    @Override public void queueTriggerMatching(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
+    public void queueTriggerMatching(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
                                       long triggerSequence, long triggeredPriceTicks,
                                       long triggeredAtEpochMillis, UUID parentCommandId, OrderRuntime childOrder) {
         if (childOrder == null || childOrder.userId() != trigger.userId())
@@ -1354,7 +1341,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         runtimeState.coldCommandFunds().requireConserved(externalAdjustment);
     }
 
-    @Override public void seedChangeAccumulators() {
+    public void seedChangeAccumulators() {
         if (resultBuilder.commandChangedUserIds != null) resultBuilder.changedUserIds.addAll(resultBuilder.commandChangedUserIds);
         if (resultBuilder.commandChangedOrderIds != null) resultBuilder.changedOrderIds.addAll(resultBuilder.commandChangedOrderIds);
     }
@@ -1383,11 +1370,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return ImmutableLongArrayList.takeOwnership(values);
     }
 
-    @Override public int pendingRiskScanCount() {
+    public int pendingRiskScanCount() {
         return runtimeState.incompleteRiskScanCount();
     }
 
-    @Override public void logRiskScan(String operation, String instrumentId, int batchSize, int pendingBefore, long startedAt) {
+    public void logRiskScan(String operation, String instrumentId, int batchSize, int pendingBefore, long startedAt) {
         long elapsedMicros = (System.nanoTime() - startedAt) / 1_000L;
         int pendingAfter = pendingRiskScanCount();
         if (!log.isDebugEnabled()) return;

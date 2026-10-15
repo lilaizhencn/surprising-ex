@@ -1,16 +1,17 @@
 package com.surprising.aeron.service.command.leverage;
 
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.command.CommandResultContext;
 import com.surprising.aeron.service.state.AccountLeverageChange;
 import com.surprising.aeron.service.state.DerivativeAccountCommandProcessor;
 
 /** 衍生品杠杆命令；只处理衍生品账户的杠杆变更。 */
 public final class LeverageCommands {
-    private final CommandResultContext owner;
+    private final TradingCoreRuntime owner;
 
-    public LeverageCommands(CommandResultContext owner) {
+    public LeverageCommands(TradingCoreRuntime owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 
