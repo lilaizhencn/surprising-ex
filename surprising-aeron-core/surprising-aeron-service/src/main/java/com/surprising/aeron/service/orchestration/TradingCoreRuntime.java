@@ -81,7 +81,6 @@ import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
-import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
@@ -1220,13 +1219,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return admission;
     }
 
-    CoreMatchingOrder matchingOrder(long orderId) {
-        com.surprising.aeron.service.state.OrderRuntime order = runtimeOrder(orderId);
-        if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "runtime order is missing");
-        return new CoreMatchingOrder(order.orderId(), identities.instrumentId(order.symbolId()),
-                order.side(), order.orderType(), order.timeInForce(), order.matchingPriceTicks(),
-                order.remainingQuantitySteps(), CoreMatchingOrder.slippagePpm(productLine));
-    }
+
 
     OrderRuntime runtimeOrder(long orderId) {
         return runtimeState.hasChangedOrder(orderId) ? runtimeState.changedOrderValue(orderId)
@@ -1248,13 +1241,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return symbolId == null ? null : runtimeState.treasury().lifecycleProgress(symbolId);
     }
 
-    CoreMatchingOrder matchingOrder(long userId, PlaceOrderCommand intent) {
-        ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimeState,
-                identities, userId, intent, currentClusterTimestamp);
-        return new CoreMatchingOrder(resolved.orderId(), resolved.instrumentId(), resolved.side(), resolved.orderType(),
-                resolved.timeInForce(), resolved.matchingPriceTicks(), resolved.quantitySteps(),
-                CoreMatchingOrder.slippagePpm(productLine));
-    }
+
 
     void stampOrderChangesRuntime(long timestamp, long clusterPosition,
                                           Iterable<Long> changedOrderIds) {
@@ -1265,37 +1252,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
         }
     }
 
-    com.surprising.aeron.service.state.RuntimeTreasuryDelta applyMatchesOnAccountLanes(
-            CommandSlot pending,
-            com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan,
-            long coreSequence,
-            com.surprising.aeron.service.matching.MatchingResult matchingResult,
-            long applyStartNanos) {
-        com.surprising.aeron.service.state.MatcherSettlementEvent event = pending.settlementEvent();
-        if (event == null) {
-            if (realtimeCapture != null && realtimeCapture.active() && pending.realtimeTakerOrder == null)
-                pending.realtimeTakerOrder = runtimeOrder(settlementPlan.takerOrderId());
-            event = runtimeState.dispatchMatcherSettlement(
-                    coreSequence, pending.expectedLaneMask(), coreSequence,
-                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), settlementPlan,
-                    matchingResult, identities);
-            pending.settlement(event, settlementPlan, applyStartNanos);
-        }
-        if (pending.isDispatchOnly()) return null;
-        if (!runtimeState.pollMatcherFinancialSettlement(event)) return null;
-        captureRealtimeTrades(pending);
-        com.surprising.aeron.service.state.RuntimeTreasuryDelta delta =
-                runtimeState.collectMatcherSettlement(
-                        event, runtimeState.coldCommandFunds(), terminalRetention,
-                        resultBuilder.changedUserIds, resultBuilder.changedOrderIds);
-        resultBuilder.markLaneCommitIdsSeeded();
-        pending.completeLanes(event.requiredLaneMask());
-        return delta;
-    }
+
 
     void suspendMatchingCommitContext(CommandSlot pending) {
         if (!commits.commitPublicationDeferred() || pending == null
-                || pending.settlementEvent() == null && pending.cancelEvent() == null
+                || pending.settlementEvent() == null
                 && pending.orderBatch == null
                 && !commits.controlPending(pending.sequence())) {
             throw new IllegalStateException("matching commit context cannot be suspended");

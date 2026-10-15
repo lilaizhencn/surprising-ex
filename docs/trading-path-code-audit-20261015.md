@@ -29,10 +29,11 @@
 | 高收益低风险 | P2 | Lane 线程每次线性查找自己的 lane（85 处调用） | 低 |
 | 高收益低风险 | P3 | 市价单为读最优价走完整引擎命令 | 低到中 |
 | 高收益低风险 | P4 | 每命令 SHA-256 指纹 | 低（未上线可直接改格式） |
-| 中 | P5–P13、F3–F9、L1–L7 | 见正文 | 中 |
+| 中 | P5–P13、F3–F9、L1–L6 | 见正文 | 中 |
 | 已完成 | D1 | 已移除假 `Cluster` / `ClientSession` 实现，Owner 按会话 ID 路由 | 已验证，见 D1 |
 | 已完成 | D2 / L8 | 已删除旧 Owner 直达派发、窗口扫描回调及 Lane 响应回退 | 已验证，见 D2 |
-| 删除类 | D3–D9 | 四套适配器 API、重复中继等 | 低到中 |
+| 已完成 | D3 / L7 | 交易统一 Direct，删除旧 Future/API、Owner 补结算与分区扫描 | 已验证，见 D3 |
+| 删除类 | D4–D9 | 重复中继等 | 低到中 |
 | 最后做 | D10 | `TradingCoreRuntime` 状态枢纽、状态重复 | 中高 |
 
 建议执行顺序见第 9 节。
@@ -248,10 +249,9 @@
 - **证据**：全模块 grep 无 CPU pinning；Lane、Matcher、Owner、SystemLedger、dispatcher 都在自旋。
 - **方案**：生产与压测环境对关键线程做 pin，并隔离核心；记录线程数与核数关系。
 
-### L7【报告】适配器同步引擎包装成 `CompletableFuture`
-- **位置**：`matching/DeterministicExchangeCoreAdapter.java:875-910`（`executeWithEvidence`）。
-- **证据**：把同步引擎包成 ≥4 个 `CompletableFuture` 加多个 lambda；main 中仅 control 路径使用，其余是测试；热路径 `place / placeInto` 本身是同步的。
-- **方案**：删除这层包装（与 D3 一并处理）。
+### L7【已完成，随 D3】删除交易指令的 `CompletableFuture` 包装
+- `executeWithEvidence*`、`executeControlWithEvidence*` 和交易 Async 家族已删除。普通交易使用预构建 Direct 事实，强平/交割控制撤单采用显式同步入口并在原 Matcher worker 执行；没有把同一包装改名保留。
+- 查询、注册及快照边界原有 Future 契约仍保留，未宣称所有异步机制均已删除。必要功能验证见 D3；本轮未采集动态分配数据。
 
 ### L8【已完成，随 D2】`ClusterCommandWindow` 兼容回调
 - 原 O(n) `complete()` 已删除。普通订单由有序队首直接接收响应；控制命令在交易窗口排空后按序号保存自身响应，内部触发子单独立提交，不再扫描窗口。验证见 D2。
@@ -276,14 +276,16 @@
 - **响应存储核查**：合并 `ResponseArena` 的重复申请实现，删除 `acquireExactSlot()`。大响应及所有池槽仍被传输/幂等结果持有时，独立存储是完成响应所需的容量机制，已确认必须保留；不得因池满丢失已提交交易的响应。新增用例验证其与池内租约、复用及数据内容相互隔离。C1 的引用计数并发审计仍独立待办。
 - **验证**：HotSpot JDK 27 下 153 项必要功能用例通过（service 151 项、受影响 benchmark 夹具 2 项），失败、错误、跳过均为 0；包含六产品线成交资金核对、跨 Lane IOC、改单/撤单、批量、触发/OCO、连续 Ledger 与槽位复用。详见 [D2 功能验证](validation/d2-complete-20261015.json)。未执行压测、快照、恢复或 wallet，不据此宣称其他 D 项或整体性能目标完成。
 - **复审补齐（2026-10-15，基于 `53f778a40`）**：上一轮仍漏掉直达事件的非 Matcher 发布开关、单笔编码异常转为空成功，以及批量无响应池构造分支。本次删除模式开关，直达发布统一要求已预留；单笔/批量编码成功后才公开结果，失败清理租约并上抛；批量必须使用实际响应池，测试也按真实租约转移和复用执行。同时修正裸数组独立存储路径额外创建 `Slot` 描述符的问题，仍共享唯一池槽申请逻辑。
-- **复审验证**：3 个新增回归用例在修复前均失败；修复后 158 项必要功能用例通过（service 156 项、基准夹具 2 项），失败、错误、跳过均为 0。额外覆盖批量重编码失败及真实四 Lane 延迟消费票据时的回收保护，详见 [D2 复审验证](validation/d2-review-20261015.json)。原 D2 清单内未再发现未处理项；C1、D3 等仍按各自范围待办，未执行压测、快照或恢复。
+- **复审验证**：3 个新增回归用例在修复前均失败；修复后 158 项必要功能用例通过（service 156 项、基准夹具 2 项），失败、错误、跳过均为 0。额外覆盖批量重编码失败及真实四 Lane 延迟消费票据时的回收保护，详见 [D2 复审验证](validation/d2-review-20261015.json)。原 D2 清单内未再发现未处理项；C1 等仍按各自范围待办（D3 后续完成见下节），未执行压测、快照或恢复。
 
-### D3【报告】适配器四套 API 与 `MatcherCommandSubmission` 双路径
-- **位置**：`matching/DeterministicExchangeCoreAdapter.java`（1992 行）；`orchestration/MatcherCommandSubmission.java:24-110, 184-215`。
-- **证据**：
-  - place / cancel / replace 各有 sync、Async、`*WithEvidence`、`*Direct` 四套。适配器外调用（下限，适配器内部是否仍在用没核实）：`executeWithEvidence` 生产 0 / 测试 11，`placeAsync` 生产 2 / 测试 20，`cancelBatchAsync`、`executeAfterCancellations*`、`replaceAsync` 适配器外无调用，`cancelBatchOrderedAsync` 仅 1 处测试。
-  - `prepareMatchingCommand` 同一操作写两套：`direct != null` 分支与下面的 switch 各自处理 PLACE / CANCEL / REPLACE / TRIGGER；PLACE 有三个订单来源（`admittedPlaceOrder`、`placeAdmission().matchingOrder()`、`owner.matchingOrder()`）；非 direct 分支每命令分配 `Supplier` 闭包与 `MatchingSubmission`，`withEvidence` 再包一层 lambda 加 `CoreMatchingResult`，direct 分支还有 `List.of()`。
-- **方案**：确认非 direct 与 `*WithEvidence` / Async 的生产调用点；能迁到 Direct 的迁移，其余删除，测试改用 Direct；订单来源收敛为一次解析。改后用 JMH 验证。风险中。
+### D3【已完成】交易统一 Direct，清除适配器与 Owner 双路径
+- **入口**：`MatcherCommandSubmission.prepareMatchingCommand` 只组装既有命令槽任务。普通 PLACE 必须持有同一次 Lane 准入输出；顺序批量持有冻结的 `OrderRuntime` 收据，触发单持有已冻结的子单输入；不再回读 Owner 重建订单。CANCEL 使用既有路由索引；REPLACE/AMEND 使用已解析准入。
+- **删除**：适配器的裸同步交易、Async、WithEvidence、通用 evidence/前置撤单 Supplier 包装及无调用的替换重载；`MatchingSubmission`、旧证据 DTO 工厂；批量结果数组、延后结算输入接口及对应派发入口；Owner 收到撮合结果后重建/补派发结算、旧 cancel continuation、分区扫描与缓存游标。两个已失去生产调用的 Owner `matchingOrder` 方法也已删除。
+- **前置撤单**：在复用的 `CommandSlot` 任务中按顺序执行并记录原 Direct 事实的 primitive 前缀，首次失败停止；保留 post-only 业务拒绝与致命部分变更的原区分。普通单和批量仍按 Lane、Ledger 完成条件有序退休。
+- **控制路径**：强平、批量强平及交割保留真实控制撤单业务，使用 `cancelControlOrders` / `cancelControlOrder` / `completeControlCancellations` 显式入口。每条原生序号在实际撮合分片校验；汇总只绑定控制序列，不比较不同订单簿的最大 native sequence。去掉旧通用 callback/Future 链和临时 `CancelBatchOutcome`。
+- **测试及基准**：测试迁到真实预留 Direct 槽；删除仅服务于旧 Future 与旧分区扫描的测试实现，保留真实分片并发、停机毒化、序号、部分撤单、资金与槽回收验证。移除多生产者直接调用旧适配器的 `ExchangeCoreConcurrentBenchmark`、裸 API 的 `MarketSlippageGuardBenchmark` 及容量入口的旧调用，保留使用实际交易流水线的基准。
+- **验证**：HotSpot JDK 27，195 项必要功能用例通过（service 193、基准夹具 2），失败、错误、跳过均为 0；直接依赖及基准模块编译通过。覆盖六产品线资金守恒、Direct 批量共享 maker、跨分片强平撤单、交割/行权及连续 Ledger。详见 [D3 功能验证](validation/d3-complete-20261015.json)。
+- **范围限制**：最终选择器不包含快照/恢复、wallet、JMH/JFR 或压测。首轮误选夹带快照的旧批量测试，产生的失败单独留存，不计入最终验收；没有据此宣称快照问题已修复。D3 为结构及功能验收，不宣称已达到百字节或吞吐目标；C1/C3、D4 等仍独立待办。
 
 ### D4【报告】重复的中继 FIFO
 - **位置**：`TradingOwnerLoop` 的 `Input` 队列（8192 槽，64MB 预算）→ `TradingCoreOwner:91-96` → `PendingClusterIngress`（同样 8192 槽，64MB 预算，:10-35）→ `ClusterCommandWindow`（256）。
@@ -368,7 +370,7 @@
 2. **局部低风险改动**（先写 JMH，再改，再测）：P1+F1+L1（unpark 标志与 HWM）、F2+L3（结算 ring 填充与 `setRelease`）、P2（Lane scope）。
 3. **删除类**（风险低）：D5、D6。D1 已于 `c2a7c5a6e` 完成；D2、L8 已于 2026-10-15 完成。
 4. **中等改动**：P3（最优价）、P4（指纹）、P5（traceId）、P7（网关 mailbox）、P9–P11、F3–F7、F9、L2。
-5. **需要先补测试与对账**：C3、D3、D4、D8。
+5. **需要先补测试与对账**：C3、D4、D8（D3 已完成）。
 6. **最后**：D7、D9、D10（状态枢纽与重复状态），分步进行并跑恢复测试。
 
 ## 10. 未覆盖与不确定项

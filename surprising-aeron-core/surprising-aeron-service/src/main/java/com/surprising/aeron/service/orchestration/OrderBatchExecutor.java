@@ -255,75 +255,52 @@ final class OrderBatchExecutor {
         pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
         long userId = pending.command().header().userId();
         int shard = owner.matchingAdapter.matcherShardId(batch.preparedSymbols.getFirst());
-        if (owner.runtimeState.asynchronousCommands()) {
-            batch.settlementEvent = owner.directMatcherSettlements.preparePipelinedPlaceBatch(
-                    pending, batch, shard);
-        }
+        batch.settlementEvent = owner.directMatcherSettlements.preparePipelinedPlaceBatch(pending, batch, shard);
         owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
             owner.matchingAdapter.prepareOrderRoutes(userId, batch.preparedSymbols);
             return submitPreparedPipelinedPlaceBatch(pending, batch, userId, shard);
         }, batch.settlementEvent);
-        if (batch.settlementEvent != null && batch.settlementEvent.direct()) {
-            // This is a logical partition handoff only; no Lane queue is touched by the Owner.
-            // The Lane merge gate orders the direct fact against any earlier control record.
-            owner.pendingMatching.completePartitionDispatchKnown(pending.sequence(), shard);
-            owner.pendingMatching.progressChanged();
-            batch.markPredispatched();
-            pending.countPipelinedSettlement();
-            owner.commits.dispatchedSettlementInFlight++;
-            owner.commits.dispatchedSettlementHighWaterMark = Math.max(
-                    owner.commits.dispatchedSettlementHighWaterMark,
-                    owner.commits.dispatchedSettlementInFlight);
-        }
+        owner.pendingMatching.progressChanged();
+        batch.markPredispatched();
+        pending.countPipelinedSettlement();
+        owner.commits.dispatchedSettlementInFlight++;
+        owner.commits.dispatchedSettlementHighWaterMark = Math.max(
+                owner.commits.dispatchedSettlementHighWaterMark,
+                owner.commits.dispatchedSettlementInFlight);
     }
 
-    Object
-            submitPreparedPipelinedPlaceBatch(
-                    CommandSlot pending, OrderBatchPending batch, long userId, int shard) {
-        batch.pipelinedMatchingResultCount = 0;
+    Object submitPreparedPipelinedPlaceBatch(
+            CommandSlot pending, OrderBatchPending batch, long userId, int shard) {
         try {
             exchange.core2.core.common.MatcherResult firstNative = null;
-            boolean directPublication = batch.settlementEvent != null && batch.settlementEvent.direct();
+            java.util.Objects.requireNonNull(batch.settlementEvent, "direct batch settlement");
             for (int index = 0; index < batch.items.size(); index++) {
                 OrderBatchItem item = batch.items.get(index);
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                 ResolvedPlaceOrder matchingOrder = batch.preparedOrders[index];
-                if (directPublication) {
-                    var result = owner.matchingAdapter.placeDirectBatchItem(
-                            shard, index, pending.sequence(), pending.command().header().commandId(),
-                            pending.command().header().submittedAtEpochMillis(), userId, matchingOrder,
-                            batch.settlementEvent);
-                    if (firstNative == null) firstNative = result;
-                    item.captureAdmittedOrder(batch.preparedAdmittedOrders[index]);
-                    item.realtimeTakerOrder = item.admittedOrder;
-                    item.captureExecutions(result.events());
-                    item.executionTakerUserId = userId;
-                    for (int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
-                        if (item.executionEvents.get(eventIndex).eventType() == MatcherEventType.TRADE) {
-                            item.executionCount++;
-                            batch.tradeCount = Math.incrementExact(batch.tradeCount);
-                        }
+                var result = owner.matchingAdapter.placeDirectBatchItem(
+                        shard, index, pending.sequence(), pending.command().header().commandId(),
+                        pending.command().header().submittedAtEpochMillis(), userId, matchingOrder,
+                        batch.settlementEvent);
+                if (firstNative == null) firstNative = result;
+                item.captureAdmittedOrder(batch.preparedAdmittedOrders[index]);
+                item.realtimeTakerOrder = item.admittedOrder;
+                item.captureExecutions(result.events());
+                item.executionTakerUserId = userId;
+                for (int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
+                    if (item.executionEvents.get(eventIndex).eventType() == MatcherEventType.TRADE) {
+                        item.executionCount++;
+                        batch.tradeCount = Math.incrementExact(batch.tradeCount);
                     }
-                    boolean accepted = result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
-                            || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
-                    item.status = accepted ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
-                    item.resultCode = accepted ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
-                    batch.collectChangedOrderIds(item, userId, result);
-                    continue;
                 }
-                if (batch.pipelinedMatchingResultCount == batch.pipelinedMatchingResults.length)
-                    throw new IllegalStateException("place batch result buffer is full");
-                batch.pipelinedMatchingResults[batch.pipelinedMatchingResultCount++] =
-                        owner.matchingAdapter.placeWithEvidence(
-                        shard, pending.sequence(), pending.command().header().commandId(),
-                        pending.command().header().submittedAtEpochMillis(),
-                        userId, matchingOrder);
+                boolean accepted = result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
+                        || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
+                item.status = accepted ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
+                item.resultCode = accepted ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
+                batch.collectChangedOrderIds(item, userId, result);
             }
-            if (directPublication) {
-                batch.lastMatchingResult = batch.settlementEvent;
-                return firstNative;
-            }
-            return batch.pipelinedMatchingResults[0];
+            batch.lastMatchingResult = batch.settlementEvent;
+            return firstNative;
         } catch (RuntimeException failure) {
             batch.pipelinedMatchingFailure = failure;
             throw failure;
@@ -542,7 +519,7 @@ final class OrderBatchExecutor {
         // before this method is called, so reserve its pooled event now and let Matcher publish
         // the fact directly into Lane.  The Owner still owns only the ordered terminal fence;
         // it no longer constructs a settlement event after the Matcher result arrives.
-        if (batch.kind == OrderBatchKind.PLACE && owner.runtimeState.asynchronousCommands()) {
+        if (batch.kind == OrderBatchKind.PLACE) {
             OrderBatchItem item = batch.items.get(batch.nextIndex);
             OrderRuntime admitted = item.admittedOrder;
             if (admitted == null) throw new IllegalStateException("batch item admission order is missing");
@@ -636,16 +613,13 @@ final class OrderBatchExecutor {
             throw failOrderBatch(batch, pending, detail, failure);
         }
         if (batch.pipelined) {
-            if (matchingResult instanceof com.surprising.aeron.service.state.MatcherSettlementEvent event
-                    && event.hasDirectNativeResult()) {
-                return finishOrderBatch(batch, pending, clusterTimestamp, clusterPosition);
-            }
-            return completePipelinedPlaceBatch(
-                    batch, pending, matchingResult, clusterTimestamp, clusterPosition);
+            if (matchingResult != batch.settlementEvent || !batch.settlementEvent.hasDirectNativeResult())
+                throw failOrderBatch(batch, pending, "pipelined batch requires its direct Matcher fact", null);
+            return finishOrderBatch(batch, pending, clusterTimestamp, clusterPosition);
         }
         if (batch.kind == OrderBatchKind.CANCEL) {
             if (matchingResult instanceof com.surprising.aeron.service.state.MatcherSettlementEvent event
-                    && event.hasDirectNativeResult() && batch.pipelinedMatchingResultCount == 0) {
+                    && event == batch.itemSettlementEvent && event.hasDirectNativeResult()) {
                 if (!event.complete()) throw new IllegalStateException("cancel chunk Lane is incomplete");
                 batch.mergeTreasuryDelta(owner.runtimeState.collectOrderBatchMatcherSettlement(
                         event, owner.runtimeState.coldCommandFunds(), owner.terminalRetention));
@@ -667,37 +641,7 @@ final class OrderBatchExecutor {
                 }
                 return startOrderBatchItem(batch, pending, clusterTimestamp, clusterPosition, false);
             }
-            if (batch.pipelinedMatchingResultCount == 0
-                    || batch.pipelinedMatchingResults[0] != matchingResult) {
-                throw failOrderBatch(batch, pending, "cancel chunk completion identity mismatch", null);
-            }
-            var event = batch.itemSettlementEvent;
-            if (event == null || !event.complete()) throw new IllegalStateException("cancel chunk Lane is incomplete");
-            batch.mergeTreasuryDelta(owner.runtimeState.collectOrderBatchMatcherSettlement(event, owner.runtimeState.coldCommandFunds(), owner.terminalRetention));
-            owner.commits.requestCommitPublication();
-            if (event.commitSequence() != 0) {
-                batch.laneCommitCompleted(true);
-            }
-            owner.runtimeState.releaseMatcherSettlement(event);
-            batch.itemSettlementEvent = null;
-            for (int index = 0; index < batch.pipelinedMatchingResultCount; index++) {
-                var result = batch.pipelinedMatchingResults[index];
-                if (owner.commits.matchingResultNeedsRecovery(pending, result)) {
-                    throw failOrderBatch(batch, pending, "cancel chunk matcher divergence", null);
-                }
-                if (result != matchingResult) {
-                    owner.commits.validateMatchingEvidence(pending, result);
-                    owner.commits.applyMatcherProgress(result);
-                }
-                batch.lastMatchingResult = result;
-                applyOrderBatchMatcherResult(batch, batch.items.get(batch.nextIndex), pending, result);
-                finishOrderBatchItem(batch, pending, result);
-            }
-            if (batch.nextIndex != batch.cancellationChunkEnd) {
-                throw failOrderBatch(batch, pending, "cancel chunk completion count mismatch", null);
-            }
-            java.util.Arrays.fill(batch.pipelinedMatchingResults, 0, batch.pipelinedMatchingResultCount, null);
-            batch.pipelinedMatchingResultCount = 0;
+            throw failOrderBatch(batch, pending, "cancel chunk requires its direct Matcher fact", null);
         } else {
             applyCompletedOrderBatchItem(batch, pending, matchingResult);
         }
@@ -770,52 +714,6 @@ final class OrderBatchExecutor {
         }
     }
 
-    CoreResponse completePipelinedPlaceBatch(
-            OrderBatchPending batch, CommandSlot pending,
-            MatchingResult firstMatchingResult,
-            long clusterTimestamp, long clusterPosition) {
-        applyPipelinedPlaceBatchResults(batch, pending, firstMatchingResult);
-        return finishOrderBatch(batch, pending, clusterTimestamp, clusterPosition);
-    }
-
-    void applyPipelinedPlaceBatchResults(
-            OrderBatchPending batch, CommandSlot pending,
-            MatchingResult firstMatchingResult) {
-        if (batch.pipelinedMatchingResultCount != batch.items.size()
-                || batch.pipelinedMatchingResultCount == 0
-                || batch.pipelinedMatchingResults[0].nativeMatcherSequence()
-                != firstMatchingResult.nativeMatcherSequence()) {
-            throw failOrderBatch(batch, pending, "pipelined matcher batch result is incomplete", null);
-        }
-        for (int index = 0; index < batch.pipelinedMatchingResultCount; index++) {
-            com.surprising.aeron.service.matching.CoreMatchingResult matchingResult =
-                    batch.pipelinedMatchingResults[index];
-            if (owner.commits.matchingResultNeedsRecovery(pending, matchingResult)) {
-                throw failOrderBatch(batch, pending,
-                        "matcher continuation returned " + matchingResult.resultCode(), null);
-            }
-            if (index > 0) {
-                owner.commits.validateMatchingEvidence(pending, matchingResult);
-                owner.commits.applyMatcherProgress(matchingResult);
-            }
-            batch.lastMatchingResult = matchingResult;
-                OrderBatchItem item = batch.items.get(batch.nextIndex);
-            ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
-            CoreResultCode resultCode = matchingResult.accepted()
-                    ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
-            try {
-                applyOrderBatchMatcherResult(batch, item, pending, matchingResult);
-                owner.runtimeState.publishObservedAdmission(item.admittedOrder);
-                batch.collectChangedOrderIds(item, pending.command().header().userId(), matchingResult);
-                appendOrderBatchResult(batch, item, status, resultCode);
-                batch.nextIndex++;
-            } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException exception) {
-                throw failOrderBatch(batch, pending, "Core and matcher state diverged", exception);
-            }
-        }
-        batch.matchingApplied(true);
-    }
-
     void rollbackOrderBatchMutations(OrderBatchPending batch, boolean endScope) {
         owner.commits.abortCommitPublicationBatch();
         owner.runtimeState.rollbackActiveCommand(batch.runtimeCheckpoint, batch.sequence);
@@ -844,7 +742,6 @@ final class OrderBatchExecutor {
     void applyOrderBatchMatcherResult(
             OrderBatchPending batch, OrderBatchItem item, CommandSlot pending,
             MatchingResult matchingResult) {
-        item.matchingResult = matchingResult;
         if (item.admittedOrder == null && batch.kind == OrderBatchKind.PLACE && batch.pipelined) {
             item.captureAdmittedOrder(batch.preparedAdmittedOrders[batch.nextIndex]);
         }
@@ -866,26 +763,15 @@ final class OrderBatchExecutor {
         }
         switch (batch.kind) {
             case PLACE -> {
-                PlaceOrderCommand command = (PlaceOrderCommand) item.command;
-                deferOrderBatchPreMatchingCancellations(batch, pending, matchingResult);
-                if (batch.itemSettlementEvent != null && batch.itemSettlementEvent.direct()) {
-                    // Matcher already published the preconstructed event.  Do not rebuild a
-                    // second settlement object on the Owner when the completion token arrives.
-                    batch.collectChangedOrderIds(item, pending.command().header().userId(), matchingResult);
-                } else if (batch.pipelined || matchingResult.accepted() && owner.productLine.isDerivative()) {
-                    batch.deferSettlement(batch.nextIndex,
-                            owner.commits.expectedLaneMask(pending, matchingResult));
-                } else {
-                    batch.itemSettlementEvent = owner.runtimeState.dispatchOrderBatchMatcherSettlement(
-                            pending.sequence(), owner.commits.expectedLaneMask(pending, matchingResult), command.orderId(),
-                            matchingResult, owner.identities);
-                }
+                if (batch.itemSettlementEvent != matchingResult || !batch.itemSettlementEvent.direct())
+                    throw new IllegalStateException("batch place requires its direct Lane event");
+                batch.collectChangedOrderIds(item, pending.command().header().userId(), matchingResult);
                 return;
             }
             case CANCEL -> { return; } // Chunk Lane changes were collected before its item results.
 
             case AMEND -> {
-                if (batch.itemSettlementEvent == null || !batch.itemSettlementEvent.direct())
+                if (batch.itemSettlementEvent != matchingResult || !batch.itemSettlementEvent.direct())
                     throw new IllegalStateException("batch amendment requires a direct Lane event");
                 batch.collectChangedOrderIds(item, pending.command().header().userId(), matchingResult);
                 return;
@@ -900,21 +786,6 @@ final class OrderBatchExecutor {
         item.resultCode = resultCode;
     }
 
-    boolean dispatchOrderBatchLaneWork(OrderBatchPending batch, CommandSlot pending,
-                                               long timestamp, long position) {
-        if (batch.cancelEvent == null && !batch.deferredCancellationOrderIds.isEmpty()) {
-            batch.cancelEvent = owner.runtimeState.dispatchCancelBatch(
-                    batch.sequence, pending.command().header().userId(),
-                    batch.deferredCancellationOrderIds.toPrimitiveArray(), timestamp, position,
-                    owner.identities, batch.kind == OrderBatchKind.CANCEL, batch);
-        }
-        if (batch.settlementEvent != null || batch.settlementCount() == 0) return false;
-        batch.settlementEvent = owner.runtimeState.dispatchMatcherSettlementBatch(
-                batch.sequence, batch,
-                owner.identities, timestamp, position);
-        return true;
-    }
-
     CoreResponse finishOrderBatch(OrderBatchPending batch, CommandSlot pending,
                                           long clusterTimestamp, long clusterPosition) {
         if (!batch.finishing()) {
@@ -922,25 +793,6 @@ final class OrderBatchExecutor {
             batch.finishing(true);
         }
         initializeOrderBatchLaneContext(batch, pending);
-        if (dispatchOrderBatchLaneWork(batch, pending, clusterTimestamp, clusterPosition)) {
-            owner.suspendMatchingCommitContext(pending);
-            return null;
-        }
-        if (batch.cancelEvent != null && !batch.cancellationsCollected()) {
-            if (!batch.cancelEvent.complete()) {
-                owner.suspendMatchingCommitContext(pending);
-                return null;
-            }
-            owner.runtimeState.collectCancel(
-                    batch.cancelEvent, owner.runtimeState.coldCommandFunds(), owner.terminalRetention);
-            if (batch.cancelEvent.commitsLane()) {
-                pending.completeLanes(batch.cancelEvent.requiredLaneMask());
-                batch.laneCommitCompleted(true);
-            }
-            owner.runtimeState.releaseCancel(batch.cancelEvent);
-            batch.cancellationsCollected(true);
-            owner.commits.requestCommitPublication();
-        }
         if (batch.settlementEvent != null && !batch.settlementsCollected()) {
             long settlementLaneMask = batch.settlementEvent.requiredLaneMask();
             boolean finalLaneCommit = batch.settlementEvent.commitSequence() != 0;
@@ -1131,26 +983,6 @@ final class OrderBatchExecutor {
         }
     }
 
-    void deferOrderBatchPreMatchingCancellations(
-            OrderBatchPending batch, CommandSlot pending,
-            MatchingResult result) {
-        List<Long> expected = pending.preMatchingCancellationOrderIds();
-        if (expected.isEmpty()) return;
-        var cancellations = result.cancellations();
-        for (int index = 0; index < cancellations.size(); index++) {
-            CoreCancellationResult cancellation = cancellations.get(index);
-            if (!cancellation.accepted() || !expected.contains(cancellation.orderId())) continue;
-            OrderRuntime order = owner.runtimeState.changedOrderValue(cancellation.orderId());
-            if (order == null) {
-                var route = owner.activeOrderIndex.activeOrderRoute(cancellation.orderId());
-                if (route != null) batch.deferredCancellationOrderIds.add(cancellation.orderId());
-            }
-            if (order != null && order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN) {
-                batch.deferredCancellationOrderIds.add(order.orderId());
-            }
-        }
-    }
-
     boolean conflictsWithEarlierPipelinedBatch(OrderBatchPending candidate) {
         if (activePipelinedOrderBatches != pendingBatchCount() - 1) return true;
         for (OrderBatchItem item : candidate.items) {
@@ -1266,63 +1098,18 @@ final class OrderBatchExecutor {
     java.util.function.Supplier<?> prepareOrderBatchMatchingCommand(
             CommandSlot pending, OrderBatchPending batch, OrderBatchItem item, int shard,
             com.surprising.aeron.service.state.MatcherSettlementEvent direct) {
-        List<DeterministicExchangeCoreAdapter.CancellationOrder> preMatchingCancellations =
-                owner.matcherCommands.preMatchingCancellationOrders(pending);
+        java.util.Objects.requireNonNull(direct, "batch item requires its direct settlement");
+        pending.matcherPreCancellations(owner.matcherCommands.preMatchingCancellationOrders(pending));
         long userId = pending.command().header().userId();
-        if (direct != null) {
-            java.util.function.Supplier<?> submission;
-            long orderId;
-            switch (batch.kind) {
-                case PLACE -> {
-                    orderId = item.orderId();
-                    submission = pending.prepareAdmittedPlaceMatching(owner, shard, userId,
-                            java.util.Objects.requireNonNull(item.admittedOrder, "batch admission receipt"), direct);
-                }
-                case AMEND -> {
-                    AmendOrderCommand command = (AmendOrderCommand) item.command;
-                    var admission = batch.replacementAdmission;
-                    orderId = admission.resolved().orderId();
-                    submission = pending.prepareReplaceMatching(owner, shard, orderId, userId,
-                            command.originalOrderId(), admission.command().instrumentId(), admission.resolved(), direct);
-                }
-                default -> throw new IllegalStateException("unsupported order batch kind");
-            }
-            return owner.matcherCommands.directWithCancellations(
-                    pending, direct, preMatchingCancellations, orderId, submission);
-        }
-        // Cold synchronous execution uses independent public values; live batches above borrow their frozen input.
-        long orderId;
-        java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> submission;
-        switch (batch.kind) {
-            case PLACE -> {
-                var admitted = java.util.Objects.requireNonNull(item.admittedOrder, "batch admission receipt");
-                var matchingOrder = new com.surprising.aeron.service.matching.CoreMatchingOrder(admitted.orderId(),
-                        admitted.instrument().instrumentId(), admitted.side(), admitted.orderType(), admitted.timeInForce(),
-                        admitted.matchingPriceTicks(), admitted.remainingQuantitySteps(),
-                        com.surprising.aeron.service.matching.CoreMatchingOrder.slippagePpm(owner.productLine));
-                orderId = item.orderId();
-                submission = () -> owner.matchingAdapter.place(userId, matchingOrder);
-            }
+        return switch (batch.kind) {
+            case PLACE -> pending.prepareAdmittedPlaceMatching(owner, shard, userId,
+                    java.util.Objects.requireNonNull(item.admittedOrder, "batch admission receipt"), direct);
             case AMEND -> {
-                AmendOrderCommand command = (AmendOrderCommand) item.command;
-                orderId = batch.replacementAdmission.resolved().orderId();
-                String instrumentId = batch.replacementAdmission.command().instrumentId();
-                var resolvedReplacement = batch.replacementAdmission.resolved();
-                submission = () -> owner.matchingAdapter.replaceOrder(
-                        userId, command.originalOrderId(), instrumentId, resolvedReplacement);
+                var admission = java.util.Objects.requireNonNull(batch.replacementAdmission, "batch amend admission");
+                yield pending.prepareReplaceMatching(owner, shard, admission.resolved().orderId(), userId,
+                        admission.originalOrderId(), admission.command().instrumentId(), admission.resolved(), direct);
             }
             default -> throw new IllegalStateException("unsupported order batch kind");
-        }
-        java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> guarded = () -> {
-            try {
-                return owner.matchingAdapter.executeAfterCancellationsSync(preMatchingCancellations, submission);
-            } catch (RuntimeException exception) {
-                return new com.surprising.aeron.service.matching.CoreMatchingResult(false, "EXCHANGE_CORE_FAILURE");
-            }
         };
-        return () -> owner.matchingAdapter.executeShardWithEvidenceSync(shard, pending.sequence(),
-                pending.command().header().commandId(), orderId,
-                pending.command().header().submittedAtEpochMillis(), guarded);
     }
-
 }

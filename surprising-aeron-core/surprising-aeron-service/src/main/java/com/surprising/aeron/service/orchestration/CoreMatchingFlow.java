@@ -134,10 +134,7 @@ final class CoreMatchingFlow {
             if (owner.commandIngress.clusterPipelineAdmission()
                     && owner.commandIngress.preparedRouteUserLaneBit() != 0
                     && owner.commandIngress.preparedRouteMatcherShard() >= 0) {
-                pending.partitionLaneMask = owner.commandIngress.preparedRouteUserLaneBit();
                 pending.cachedMatcherShard(owner.commandIngress.preparedRouteMatcherShard());
-            } else {
-                pending.partitionLaneMask = 0;
             }
             owner.pendingMatching.put(pending);
             CoreMessageType type = pending.command().header().messageType();
@@ -248,10 +245,6 @@ final class CoreMatchingFlow {
             return;
         }
         var direct = owner.directMatcherSettlements.prepareForMatching(pending);
-        if (owner.runtimeState.asynchronousCommands()
-                && pending.operation() == CommandSlot.Operation.PLACE && direct == null) {
-            throw new IllegalStateException("asynchronous PLACE requires direct pooled matcher settlement");
-        }
         var command = owner.matcherCommands.prepareMatchingCommand(pending, direct);
         java.util.function.Supplier<?> matcherSubmission = command;
         if (direct != null && pending.placeAdmission() != null) {

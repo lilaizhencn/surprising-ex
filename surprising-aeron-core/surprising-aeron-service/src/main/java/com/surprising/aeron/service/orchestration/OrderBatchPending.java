@@ -19,7 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** 批量命令上下文；owner 准备，matcher/Lane 按完成边界交接，终态回收后复用。 */
-final class OrderBatchPending implements com.surprising.aeron.service.state.LaneOrderResultTarget, com.surprising.aeron.service.state.PlaceBatchIntentSource, com.surprising.aeron.service.state.SettlementBatchInput, TradingOrderBatchCodec.ResultSource, com.surprising.aeron.protocol.CoreOrderStateSource {
+final class OrderBatchPending implements com.surprising.aeron.service.state.LaneOrderResultTarget, com.surprising.aeron.service.state.PlaceBatchIntentSource, TradingOrderBatchCodec.ResultSource, com.surprising.aeron.protocol.CoreOrderStateSource {
     public com.surprising.aeron.protocol.PlaceOrderCommand intent(int index) {
         return (com.surprising.aeron.protocol.PlaceOrderCommand) items.get(index).command;
     }
@@ -105,27 +105,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         return preparedResponseSlot != null;
     }
 
-    public int settlementCount() { return deferredSettlementCount; }
-    public long settlementOrderId(int index) { return items.get(deferredSettlementItemIndexes[index]).orderId; }
-    public OrderRuntime settlementOrder(int index) {
-        return items.get(deferredSettlementItemIndexes[index]).admittedOrder;
-    }
-    public long settlementLaneMask(int index) { return items.get(deferredSettlementItemIndexes[index]).settlementLaneMask; }
-    public MatchingResult settlementResult(int index) {
-        return items.get(deferredSettlementItemIndexes[index]).matchingResult;
-    }
-
-    void deferSettlement(int itemIndex, long laneMask) {
-        if (itemIndex < 0 || itemIndex >= items.size() || laneMask == 0
-                || deferredSettlementCount == deferredSettlementItemIndexes.length) {
-            throw new IllegalStateException("invalid deferred settlement item");
-        }
-        OrderBatchItem item = items.get(itemIndex);
-        if (item.matchingResult == null || item.settlementLaneMask != 0)
-            throw new IllegalStateException("deferred settlement result is missing or duplicated");
-        item.settlementLaneMask = laneMask;
-        deferredSettlementItemIndexes[deferredSettlementCount++] = itemIndex;
-    }
     public int size() { return items.size(); }
     public long orderId(int index) { return items.get(index).orderId; }
     public long originalOrderId(int index) { return items.get(index).originalOrderId; }
@@ -186,7 +165,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     final ArrayList<OrderBatchItem> items;
     /** 随批上下文复用的结果槽，生命周期覆盖所有 matcher/Lane 引用。 */
     private final OrderBatchItem[] itemSlots;
-    /** 本批开始前的完整提交点，用于失败恢复判断。 */
     /** 本批开始前的状态 revision，限定回滚范围。 */
     long runtimeCheckpoint;
     /** 本批新增持仓身份的回滚起点。 */
@@ -205,11 +183,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     final PrimitiveLongChangeSet runtimeChangedOrderIds;
     /** 当前批量项的变化 ID 临时集合，每项处理前清空。 */
     final PrimitiveLongChangeSet itemChangedOrderIds;
-    /** 需要在安全结算阶段撤销的订单 ID。 */
-    final PrimitiveLongChangeSet deferredCancellationOrderIds;
-    /** 待结算项在 items 中的索引；订单、Lane mask 和结果均由 OrderBatchItem 唯一持有。 */
-    final int[] deferredSettlementItemIndexes;
-    int deferredSettlementCount;
     /** 本批准入分配的客户单号，失败时按逆序回滚；数组槽位跨批复用，避免逐项 record 分配。 */
     final long[] preparedClientUsers;
     final String[] preparedClientIds;
@@ -237,7 +210,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     private static final int PIPELINE_REGISTERED = 1 << 2;
     private static final int LANE_COMMIT_COMPLETED = 1 << 3;
     private static final int SETTLEMENTS_COLLECTED = 1 << 4;
-    private static final int CANCELLATIONS_COLLECTED = 1 << 5;
     private static final int FINISHING = 1 << 6;
     private static final int LANE_CONTEXT_INITIALIZED = 1 << 7;
     /** 本批已取得执行上下文；与其它生命周期位统一存放，避免独立布尔状态漂移。 */
@@ -246,15 +218,10 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     boolean pipelined;
     /** 本批是否必须逐项准入，以保持批内资金或订单依赖。 */
     boolean sequentialAdmission;
-    /** Matcher 写入的批量结果；固定槽位在批上下文内复用，完成交接后 Owner 才读取。 */
-    final CoreMatchingResult[] pipelinedMatchingResults;
-    int pipelinedMatchingResultCount;
     /** matcher 报告的批量失败，随完成通知交给 owner。 */
     Throwable pipelinedMatchingFailure;
     /** 本批派发到各 Lane 的结算事件；收集完成前不得复用。 */
     com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent;
-    /** 本批撤单事件，完成通知后才能收集并回收。 */
-    com.surprising.aeron.service.state.LaneCancelEvent cancelEvent;
     /** 本批准入事件；Lane 完成后由 owner 收集。 */
     PlaceBatchAdmissionEvent placeBatchAdmissionEvent;
     /** 本批预备的 Orders 缓冲；派发后必须等待完成交接才能清空或复用。 */
@@ -324,8 +291,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     void laneCommitCompleted(boolean value) { set(LANE_COMMIT_COMPLETED, value); }
     boolean settlementsCollected() { return has(SETTLEMENTS_COLLECTED); }
     void settlementsCollected(boolean value) { set(SETTLEMENTS_COLLECTED, value); }
-    boolean cancellationsCollected() { return has(CANCELLATIONS_COLLECTED); }
-    void cancellationsCollected(boolean value) { set(CANCELLATIONS_COLLECTED, value); }
     boolean finishing() { return has(FINISHING); }
     void finishing(boolean value) { set(FINISHING, value); }
     boolean laneContextInitialized() { return has(LANE_CONTEXT_INITIALIZED); }
@@ -342,9 +307,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         changedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         runtimeChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         itemChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
-        deferredCancellationOrderIds = new PrimitiveLongChangeSet(capacity);
-        deferredSettlementItemIndexes = new int[capacity];
-        pipelinedMatchingResults = new CoreMatchingResult[capacity];
         preparedClientUsers = new long[capacity];
         preparedClientIds = new String[capacity];
         preparedClientKeys = new long[capacity];
@@ -403,9 +365,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         changedOrderIds.clear();
         runtimeChangedOrderIds.clear();
         itemChangedOrderIds.clear();
-        deferredCancellationOrderIds.clear();
-        java.util.Arrays.fill(deferredSettlementItemIndexes, 0, deferredSettlementCount, 0);
-        deferredSettlementCount = 0;
         java.util.Arrays.fill(preparedClientIds, 0, preparedClientKeyCount, null);
         java.util.Arrays.fill(preparedClientKeys, 0, preparedClientKeyCount, 0);
         preparedClientKeyCount = 0;
@@ -424,11 +383,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         commitState = COMMIT_WAITING;
         pipelined = false;
         sequentialAdmission = false;
-        java.util.Arrays.fill(pipelinedMatchingResults, 0, pipelinedMatchingResultCount, null);
-        pipelinedMatchingResultCount = 0;
         pipelinedMatchingFailure = null;
         settlementEvent = null;
-        cancelEvent = null;
         placeBatchAdmissionEvent = null;
         java.util.Arrays.fill(preparedOrders, 0, preparedCount, null);
         java.util.Arrays.fill(preparedDecisions, 0, preparedCount, null);
@@ -492,14 +448,13 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     }
 
     boolean hasPendingLaneWork() {
-        return laneCommitEvent != null || cancelEvent != null && !cancellationsCollected()
+        return laneCommitEvent != null
                 || settlementEvent != null && !settlementsCollected();
     }
 
     boolean laneWorkComplete() {
         if (itemSettlementEvent != null && !itemSettlementEvent.complete()) return false;
         if (laneCommitEvent != null && !laneCommitEvent.complete()) return false;
-        if (cancelEvent != null && !cancellationsCollected() && !cancelEvent.complete()) return false;
         if (settlementEvent != null && !settlementsCollected() && !settlementEvent.complete()) return false;
         return true;
     }

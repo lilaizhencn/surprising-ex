@@ -22,7 +22,6 @@ final class DirectMatcherSettlementPreparation {
                 || pending.operation() == CommandSlot.Operation.AMEND) {
             return prepareReplacement(pending);
         }
-        if (!owner.runtimeState.asynchronousCommands()) return null;
         return switch (pending.operation()) {
             case PLACE -> preparePlace(pending);
             case TRIGGER -> prepareTrigger(pending);
@@ -75,29 +74,13 @@ final class DirectMatcherSettlementPreparation {
     }
 
     private MatcherSettlementEvent preparePlace(CommandSlot pending) {
-        OrderRuntime directTaker = pending.placeAdmission() == null
-                ? pending.realtimeTakerOrder != null
-                        ? pending.realtimeTakerOrder
-                        : owner.runtimeOrder(pending.decodedCommand().placeOrder().orderId())
-                : null;
-        MatcherSettlementEvent direct = null;
-        if (pending.placeAdmission() != null) {
-            direct = owner.runtimeState.prepareDirectMatcherSettlement(
-                    pending.sequence(), directInitialLaneMask(pending.placeAdmission().userId()),
-                    pending.placeAdmission(), pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending),
-                    owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
-        } else if (directTaker != null) {
-            direct = owner.runtimeState.prepareDirectMatcherSettlement(
-                    pending.sequence(), directInitialLaneMask(directTaker.userId()), directTaker, null, 1,
-                    pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,
-                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
-        }
+        var admission = java.util.Objects.requireNonNull(pending.placeAdmission(), "place admission receipt");
+        MatcherSettlementEvent direct = owner.runtimeState.prepareDirectMatcherSettlement(
+                pending.sequence(), directInitialLaneMask(admission.userId()), admission,
+                pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending),
+                owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
         reserveMatcherPublication(pending, direct);
-        // A completed admission already placed its immutable receipt in the command slot.
-        // Do not erase it merely because the final Owner projection is intentionally deferred.
-        if (directTaker != null) pending.realtimeTakerOrder = directTaker;
         return direct;
     }
 

@@ -39,10 +39,6 @@ final class OrderBatchItem {
         executionSlot.captureEvents(events);
         executionEvents = executionSlot.events();
     }
-    /** 本项结果由批次项唯一持有，结算输入通过索引引用，避免第二个结果列表。 */
-    com.surprising.aeron.service.matching.MatchingResult matchingResult;
-    /** 延后批量结算的 Lane 路由；零表示尚未登记。 */
-    long settlementLaneMask;
     /** 本项需要编码的成交数量。 */
     int executionCount;
     /** 成交编码所需的主动方用户 ID。 */
@@ -55,7 +51,7 @@ final class OrderBatchItem {
     boolean laneResultPrepared;
     /** 成交推送的不可变主动单身份；结算可提前，推送只能在本批提交时消费。 */
     com.surprising.aeron.service.state.OrderRuntime realtimeTakerOrder;
-    /** Lane admission receipt retained until every deferred settlement has consumed the batch. */
+    /** Lane admission receipt retained until the batch retires. */
     com.surprising.aeron.service.state.OrderRuntime admittedOrder;
     /** Owner 一次解析的撤单身份；同分片批次任务读取，完成后清空。 */
     String cancelSymbol;
@@ -80,8 +76,6 @@ final class OrderBatchItem {
         resultCode = null;
         executionEvents = List.of();
         if (executionSlot != null) executionSlot.clearCommandSlot();
-        matchingResult = null;
-        settlementLaneMask = 0;
         executionCount = 0;
         executionTakerUserId = 0;
         resultOrder = null;

@@ -96,15 +96,6 @@ public final class CoreMatchingResult implements MatchingResult {
         return new CoreMatchingResult(result, 0, 0, 0, 0, 0, 0, 0, -1);
     }
 
-    static CoreMatchingResult fromNativeWithEvidence(
-            MatcherResult result, long coreSequence, long commandIdMostSignificantBits,
-            long commandIdLeastSignificantBits, long orderId,
-            long nativeSequence, long matcherSequence, long aeronTimestamp, int matcherShardId) {
-        return new CoreMatchingResult(result, coreSequence, commandIdMostSignificantBits,
-                commandIdLeastSignificantBits, orderId, nativeSequence,
-                matcherSequence, aeronTimestamp, matcherShardId);
-    }
-
     private CoreMatchingResult(MatcherResult result, long coreSequence,
                                 long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
                                 long orderId, long nativeSequence,

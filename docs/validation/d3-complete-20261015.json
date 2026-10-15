@@ -1,0 +1,243 @@
+{
+  "date": "2026-10-15",
+  "base_commit": "dfba405c4656870c7fb74d1930b22c93661d6c8e",
+  "kind": "D3 / L7 结构清理与必要功能验证，不是性能验收",
+  "result": "PASS",
+  "changes": [
+    "普通 PLACE/CANCEL/REPLACE/AMEND/TRIGGER 统一预构建 Direct 事实，冷/活跃执行不再走另一套交易 API",
+    "删除裸同步交易、Async、WithEvidence、通用证据和前置撤单 Supplier 包装、MatchingSubmission 及无调用的证据 DTO 工厂",
+    "PLACE 读取原 Lane 准入输出，顺序批量读取冻结收据，触发读取已冻结子单；删除 Owner 两个 matchingOrder 重建入口",
+    "前置撤单移入原命令槽任务，记录 primitive 前缀，保留 post-only 已知前缀与致命部分变更区分",
+    "删除批量结果数组、延后结算输入接口及派发 API、Owner 补结算和旧 cancel continuation",
+    "删除旧分区结算扫描、缓存候选、派发游标及其专用状态；保留真实 Matcher 提交顺序与 Ledger 连续派发游标",
+    "控制撤单改显式 API：各 Matcher 验证本分片 native sequence，汇总仅绑定控制序列，不能对无关订单簿取最大 native sequence",
+    "删除无效的旧多生产者适配器基准和裸撮合基准，容量入口同步移除旧调用，保留实际交易流水线基准"
+  ],
+  "state_ownership": "只复用现有命令/结算/批量槽，新增槽内控制任务及稳定前置撤单引用随退休清空；没有新增业务镜像、worker、队列或结算阶段",
+  "verification": {
+    "jdk": "HotSpot Corretto 27+33-FR",
+    "JAVA_HOME": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn",
+    "maven": "3.9.16",
+    "command": [
+      "/usr/local/bin/mvn",
+      "-pl",
+      "surprising-aeron-core/surprising-aeron-benchmarks",
+      "-am",
+      "-Dsurefire.failIfNoSpecifiedTests=false",
+      "-Dtest=MatcherSettlementPlanTest,MatcherTreasurySettlementTest,ActiveOrderIndexTest,RuntimeChangedIndexCommitTest,LaneCloseCapacityTest,CommandSlotTest,OwnerCommandPipelineStateTest,ResponseArenaTest,ClusterCommandWindowRoutingTest,ProductionSourceBoundaryTest,RuntimePerpetualFundingProcessorTest,MatcherTreasuryReceiptBenchmarkTest,CommandSlotRingTest,OrderBatchSlotReuseTest,LaneReplacementResponseTest,TradingCoreOwnerTest#ownerMetadataCommandsDoNotHandoffAccountLanes+preflightQueryWaitsForLaneOnLoggedCallbacksWithoutOwnerAccountReads+egressRetriesOnlyInsideLogCallbackAndBackgroundNeverOffersOrCloses+queriesAndFollowingCommandsObserveCompletedLogCallbacks+loggedTimerCompletesMatchingExactlyOnceWithoutBackgroundWork+logCallbackCommitsMatchingBeforeTheFollowingCommand+ledgerCompletionResumesOrderedHeadWithoutAnotherMatcherNotification+ledgerSettlesIndependentCommandsBeforeOwnerRetiresTheFirstResponse+controlCommandFencesLedgerPrefillAndTheFollowingTrade+fullLedgerMailboxKeepsItsDispatchCursorAndRetriesWithoutNewMatcherNotifications+batchLedgerCompletionResumesOrderedHeadWithoutAnotherMatcherNotification+terminalPreparationFailureRollsBackOnLaneAndRetainsRejection+algoUpdatesStayOnAccountLaneAndPublishRevisions,CoreMatchingStateTest#everyProductLineMatchConservesSettlementFundsWithNonzeroFees+amendPatchReadsOriginalInsideCoreAndReturnsReplacement+crossLaneIocPartialFillCommitsBothOwnersAndReleasesUnusedFunds+postOnlyRejectionLeavesNoOrderOrReservedFunds+finalMatcherFactCarriesTheRestingOrderWithoutExportingPendingState+nonOptionDerivativeLinesCreatePositionMarginFromMatchedReservations+optionFillTransfersPremiumAndCreatesBuyerSellerPositions+normalCloseCancelsNewestConflictingReduceOnlyOrderBeforeMatcherSubmission+laneCloseAndOwnerSelfTradeCancellationsAreAppliedOnce+postOnlyCloseFailureCommitsOnlyLaneAuthorizedCancellations,ClusterCommandPipelineTest#atomicOcoPairWithoutSnapshot+triggerAdmissionFailureWithoutSnapshot+triggerNativeRejectionWithoutSnapshot+cancelBatchSettlesOnLaneWithoutAnOwnerTurnAfterMatcherFinishes+cancelSettlesOnLaneWithoutAnOwnerTurnAfterMatcherFinishes,CoreOrderedOrderBatchTest#directSharedMakerBatchConservesFundsWithoutSnapshot+alternatingSingleOrdersAndBatchesReleaseContextsBeforeTheNextBatchResumes+asynchronousCancelBatchSubmitsLaterChunkAfterMissingOrder+executesCancelAndAmendBatchesWithOrderedPerItemOutcomes+finalAmendBatchResolvesChainedAndRejectedItemsWithoutOwnerOrderReads+sequentialPlaceLedgerReceiptDoesNotDuplicateEarlierProceeds+sequentialPlaceLedgerKeepsOwnerOffAccountAndFinancialTables+cancelIdentityAndPreparationNeverReadLaneOrderTables+sequentialNativeAndAdmissionRejectionsReleaseFundsWithoutRecovery,BatchDecisionCaptureTest,DeterministicExchangeCoreAdapterTest#directCommandRejectsMissingSettlementBeforeChangingTheBook+failedDirectPrefixRetainsEarlierCancellationAndNeverSubmitsThePlacement+depthQueriesDoNotDiscardRestingOrdersBeyondVisibleLevels+linearMarketOrderCannotSweepBeyondOneBasisPoint+marketSlippageRoundingDoesNotAllowAnExtraTick+nativeCancellationPreservesEvidenceForPartialFillsAndRepeatedCancellation+nativePlacementHonorsPoisonAndValidatesEvidenceBeforeMatching+directPlacementRetainsEvidenceWithoutChangingEarlierSlots+registeredSymbolLookupDoesNotAcquireRegistrationMonitor+controlEvidenceChecksNativeSequenceWithinItsActualOrderBookPartition+reusedCommandScopeDoesNotLeakTimestampIntoTheNextCommand+cancelBatchStopsAtFirstFailureAndReturnsSuccessfulPrefix+rejectedPostOnlyPlacementRetainsSuccessfulDirectCancellationPrefix+consumesImmutableMatcherResultWithoutPerCommandStateReports+matcherEvidenceAdvancesSequences+fixedMatcherShardRejectsOutOfNativeSequenceCompletion+poisonRejectsPreparedDirectCommandWithoutAdvancingEvidence+singleSymbolBookQueryAndBootstrapUseSeparateScopes,MatcherPipelineGroupTest,CoreFinancialLedgerProductionTest,CrossShardCancellationTest#liquidationCancellationPollsBlockedShardWithoutSnapshotOrOwnerAccountReads,PendingMatchingRingTest",
+      "-Djava.io.tmpdir=/Users/atomex/Desktop/surprising/performance-artifacts/d3-complete-20261015/test-temp",
+      "test"
+    ],
+    "unique_cases": 195,
+    "service_cases": 193,
+    "benchmark_fixture_cases": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "suites": {
+      "com.surprising.aeron.service.orchestration.LaneReplacementResponseTest": {
+        "module": "surprising-aeron-service",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest": {
+        "module": "surprising-aeron-service",
+        "tests": 19,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest": {
+        "module": "surprising-aeron-service",
+        "tests": 26,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.state.index.ActiveOrderIndexTest": {
+        "module": "surprising-aeron-service",
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.OwnerCommandPipelineStateTest": {
+        "module": "surprising-aeron-service",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.CommandSlotTest": {
+        "module": "surprising-aeron-service",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.state.RuntimeChangedIndexCommitTest": {
+        "module": "surprising-aeron-service",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.CoreMatchingStateTest": {
+        "module": "surprising-aeron-service",
+        "tests": 20,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.state.LaneCloseCapacityTest": {
+        "module": "surprising-aeron-service",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.state.MatcherSettlementPlanTest": {
+        "module": "surprising-aeron-service",
+        "tests": 16,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.ProductionSourceBoundaryTest": {
+        "module": "surprising-aeron-service",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest": {
+        "module": "surprising-aeron-service",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.CommandSlotRingTest": {
+        "module": "surprising-aeron-service",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest": {
+        "module": "surprising-aeron-service",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.state.RuntimePerpetualFundingProcessorTest": {
+        "module": "surprising-aeron-service",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.MatcherPipelineGroupTest": {
+        "module": "surprising-aeron-service",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.OrderBatchSlotReuseTest": {
+        "module": "surprising-aeron-service",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.ClusterCommandWindowRoutingTest": {
+        "module": "surprising-aeron-service",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.TradingCoreOwnerTest": {
+        "module": "surprising-aeron-service",
+        "tests": 24,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.BatchDecisionCaptureTest": {
+        "module": "surprising-aeron-service",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.state.MatcherTreasurySettlementTest": {
+        "module": "surprising-aeron-service",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.CrossShardCancellationTest": {
+        "module": "surprising-aeron-service",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.PendingMatchingRingTest": {
+        "module": "surprising-aeron-service",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.ResponseArenaTest": {
+        "module": "surprising-aeron-service",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.state.MatcherTreasuryReceiptBenchmarkTest": {
+        "module": "surprising-aeron-benchmarks",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "coverage": [
+      "六产品线非零手续费成交资金守恒，跨 Lane IOC，现货/衍生品冻结与持仓",
+      "单笔与顺序/并行批量下单、撤单、改单、共享 maker、拒绝项、复用槽及完成后响应",
+      "真实分片并发、证据单调、错误证据先拒绝、poison 停止、前置撤单失败及 post-only 成功前缀",
+      "触发/OCO 内部子单、跨分片强平撤单、保险/ADL、交割和行权连续 Ledger",
+      "结构边界禁止旧 API、结果数组、Owner 补结算及旧分区扫描",
+      "1/4 Lane 财务回执基准夹具仅有限功能调用；所有直接依赖及基准模块编译通过"
+    ],
+    "post_run_change": "通过后仅删除一条已失效的派发注释并更新文档；git diff --check 通过"
+  },
+  "test_migration": "原假 Future 适配器测试改为实际 Direct / MatcherEvidenceLedger 行为；移除已删除旧分区派发与命令槽自有计划的专用测试，真实并行、顺序与回收行为由流水线用例覆盖；旧快照用例只迁移编译调用，没有纳入最终选择器。",
+  "earlier_attempts": [
+    "首次扩选了含隐藏 snapshot() 的旧批量用例，触发账户线程边界异常；另有旧同步夹具空返回/查询 handoff 断言失败。该轮失败未计入 PASS，也未宣称这些范围外问题已修复；最终命令不再包含这些用例。",
+    "迁移中针对性用例发现控制聚合错误比较不同订单簿的 native sequence，已改为实际分片校验并通过回归。",
+    "跨分片旧夹具未等待异步初始化，现使用已有 CoreTestCompletion 完成真实初始化和查询，不放宽业务或线程校验。"
+  ],
+  "limits": [
+    "最终验收仅所选必要用例，不是全量测试",
+    "未运行压测、wallet、JMH/JFR；没有性能记录或收益/百字节目标结论",
+    "最终选择器不含快照/恢复；早期误选调用的失败已留存",
+    "C1/C3、D4 等独立待办，D3 完成不代表整体 Owner / 性能目标完成"
+  ],
+  "evidence": {
+    "archive": "/Users/atomex/Desktop/surprising/performance-artifacts/d3-complete-20261015-evidence.tar.gz",
+    "sha256": "eb36bdf3a1d1ee03cdb7b162c7ecd9fadf0d2d753649a58357a41878374e7094",
+    "archive_verified": true,
+    "summary_directory": "/Users/atomex/Desktop/surprising/performance-artifacts/d3-complete-20261015",
+    "cleanup": "已停止本轮 Maven/测试；核验归档后清理本轮原始日志、所选 XML/txt、临时目录。其他任务/既有工作区改动与运行数据未清理。"
+  }
+}

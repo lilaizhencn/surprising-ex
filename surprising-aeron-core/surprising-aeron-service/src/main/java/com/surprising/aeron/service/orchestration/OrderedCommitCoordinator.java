@@ -38,10 +38,6 @@ final class OrderedCommitCoordinator {
     /** 唯一 owner；仅在其线程访问共享交易状态和提交边界。 */
     final TradingCoreRuntime owner;
 
-    /** 上次派发检查的输入水位；只有外部完成、本地推进或依赖顺序变化才重扫。 */
-    private long checkedDispatchRevision = Long.MIN_VALUE;
-    private long checkedDispatchThrough = Long.MIN_VALUE;
-
     OrderedCommitCoordinator(TradingCoreRuntime owner) {
         this.owner = owner;
         this.publication = new CommitPublication(owner);
@@ -242,11 +238,6 @@ final class OrderedCommitCoordinator {
             if (!waitingBatch.commitStarted()) owner.batches.beginPipelinedOrderBatchCommit(waitingBatch, pending);
             return owner.batches.finishOrderBatch(waitingBatch, pending, clusterTimestamp, clusterPosition);
         }
-        if (pending.cancelEvent() != null) {
-            if (!pending.cancelEvent().complete()) return null;
-            if (pending.hasCommitContext()) owner.restoreMatchingCommitContext(pending);
-            return completeDispatchedCancel(pending, matchingResult);
-        }
         if (pending.settlementEvent() != null) {
             if (!pending.settlementEvent().complete()) return null;
             // 先收取账户准入结果；拒单没有结算变更，不能开启或恢复发布批次。
@@ -299,14 +290,7 @@ final class OrderedCommitCoordinator {
         if (owner.batches.batch(sequence) != null) {
             return owner.batches.completeOrderBatchMatching(sequence, matchingResult, clusterTimestamp, clusterPosition);
         }
-        com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan =
-                initialMatcherSettlementPlan(pending, matchingResult);
-        if (settlementPlan != null) {
-            pending.result(matchingResult, settlementPlan.requiredLaneMask(),
-                    validAccountLaneMask());
-        } else {
-            pending.result(matchingResult, expectedLaneMask(pending, matchingResult), validAccountLaneMask());
-        }
+        pending.result(matchingResult, expectedLaneMask(pending, matchingResult), validAccountLaneMask());
         owner.resultBuilder.clearOrderViews();
         owner.resultBuilder.commandChangedUserIds = List.of();
         owner.resultBuilder.commandChangedOrderIds = List.of();
@@ -321,45 +305,8 @@ final class OrderedCommitCoordinator {
         com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta = null;
         try {
             switch (pending.operation()) {
-                case PLACE -> {
-                    var command = pending.decodedCommand().placeOrder();
-                    boolean dispatchOnly = pending.isDispatchOnly();
-                    settlementTreasuryDelta = owner.applyMatchesOnAccountLanes(
-                            pending, settlementPlan, sequence, matchingResult, applyStartNanos);
-                    pending.takeDispatchOnly();
-                    if (settlementTreasuryDelta == null || dispatchOnly) {
-                        owner.suspendMatchingCommitContext(pending);
-                        return null;
-                    }
-                    owner.resultBuilder.markLaneCommitIdsSeeded();
-                    owner.resultBuilder.commandTradeCount = TradingCoreRuntime.tradeCount(settlementPlan);
-                }
-                case CANCEL -> {
-                    var command = pending.decodedCommand().cancelOrder();
-                    owner.resultBuilder.setSingleChangedUser(pending.command().header().userId());
-                    owner.resultBuilder.setSingleChangedOrder(command.orderId());
-                    if (matchingResult.accepted()) {
-                        var cancelEvent = owner.runtimeState.dispatchCancel(
-                                sequence, pending.command().header().userId(), command.orderId(),
-                                clusterTimestamp, clusterPosition, owner.identities);
-                        pending.cancel(cancelEvent, applyStartNanos);
-                        owner.suspendMatchingCommitContext(pending);
-                        return null;
-                    }
-                }
-                case REPLACE, AMEND -> throw new IllegalStateException("replacement requires a direct Lane event");
-                case TRIGGER -> {
-                    long[] execute = pending.decodedCommand().trigger();
-                    var trigger = pending.sourceTrigger();
-                    if (trigger == null) throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND",
-                            "trigger order not found");
-                    settlementTreasuryDelta = owner.applyMatchesOnAccountLanes(
-                            pending, settlementPlan, sequence, matchingResult, applyStartNanos);
-                    if (settlementTreasuryDelta == null) return null;
-                    requestCommitPublication();
-                    owner.resultBuilder.markLaneCommitIdsSeeded();
-                    owner.resultBuilder.commandTradeCount = TradingCoreRuntime.tradeCount(settlementPlan);
-                }
+                case PLACE, CANCEL, REPLACE, AMEND, TRIGGER ->
+                        throw new IllegalStateException("trading completion requires its direct Matcher fact");
                 case LIQUIDATION -> {
                     var command = pending.decodedCommand().liquidation();
                     var liquidation = pending.liquidationCheck().liquidation(0);
@@ -417,12 +364,6 @@ final class OrderedCommitCoordinator {
                 return null;
             }
             owner.runtimeState.completePendingReservations(pending.sequence());
-            if (pending.operation() == CommandSlot.Operation.PLACE
-                    || pending.operation() == CommandSlot.Operation.REPLACE
-                    || pending.operation() == CommandSlot.Operation.AMEND
-                    || pending.operation() == CommandSlot.Operation.TRIGGER) {
-                requestCommitPublication();
-            }
         } catch (CoreStateRejectedException exception) {
             throw owner.failMatching(pending, "Core rejected an accepted matcher result", exception);
         } catch (ArithmeticException | IllegalArgumentException exception) {
@@ -641,48 +582,7 @@ final class OrderedCommitCoordinator {
         return response;
     }
 
-    CoreResponse completeDispatchedCancel(
-            CommandSlot pending,
-            MatchingResult matchingResult) {
-        com.surprising.aeron.service.state.LaneCancelEvent event = pending.cancelEvent();
-        if (event == null || !event.complete()) return null;
-        try {
-            owner.runtimeState.collectCancel(event, owner.runtimeState.coldCommandFunds(), owner.terminalRetention,
-                    owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
-            owner.resultBuilder.markLaneCommitIdsSeeded();
-            pending.completeLanes(event.requiredLaneMask());
-            owner.runtimeState.setMetadata(owner.productLine,
-                    Math.addExact(owner.runtimeState.revision(), event.orderCount()));
-            requestCommitPublication();
-            owner.resultBuilder.materializeChangeAccumulators();
-            if (pending.completedLaneMask() != pending.expectedLaneMask()) {
-                throw owner.failMatching(pending, "account lane completion differs from cancel fact", null);
-            }
-            requireCompleteAccountLanes(pending);
-            if (!owner.resultBuilder.commandChangedOrderIds.isEmpty()) owner.resultBuilder.materializeCommandOrderViews(pending);
-            completeCommitPublicationBatch();
-            owner.validateFundsConservation(pending.command());
-        } catch (CoreStateRejectedException exception) {
-            throw owner.failMatching(pending, "Core rejected an accepted cancel result", exception);
-        } catch (ArithmeticException | IllegalArgumentException exception) {
-            throw owner.failMatching(pending, "Core and matcher cancel state diverged", exception);
-        } catch (RuntimeException exception) {
-            throw owner.failMatching(pending, "account lane cancel failed; snapshot/log recovery is required",
-                    exception);
-        }
-        recordMatchingCompletion(pending.settlementApplyStartNanos());
-        ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
-        CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
-        closeFinancialDispatch(pending);
-        CoreResponse response = storeTerminalResponse(
-                pending, matchingResult, status, resultCode);
-        owner.runtimeState.releaseCancel(pending.takeCancelEvent());
-        owner.matchingFlow.removePendingMatching(pending.sequence());
-        // Finish this command before restoring the next batch's suspended commit context.
-        owner.finishFactContext(response);
-        if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) owner.matchingProgress.submitDeferredMatchingAfterBatch();
-        return response;
-    }
+
 
     /** Owner-only statistics shared by normal settlement and cancellation completion. */
     private void recordMatchingCompletion(long applyStartNanos) {
@@ -735,57 +635,7 @@ final class OrderedCommitCoordinator {
         return count == Long.SIZE ? -1L : (1L << count) - 1L;
     }
 
-    com.surprising.aeron.service.state.MatcherSettlementPlan initialMatcherSettlementPlan(
-            CommandSlot pending,
-            MatchingResult result) {
-        long userId = pending.command().header().userId();
-        return switch (pending.operation()) {
-            case PLACE -> {
-                long orderId = pending.decodedCommand().placeOrder().orderId();
-                OrderRuntime admitted = pending.realtimeTakerOrder;
-                var resolved = pending.admittedPlaceOrder();
-                var plan = admitted != null
-                        ? com.surprising.aeron.service.state.MatcherSettlementPlan.buildAdmittedInto(
-                                pending.settlementPlanBuffer(), pending.sequence(), admitted,
-                                orderId, 0, result, owner.runtimeState, owner.identities)
-                        : resolved != null
-                        ? com.surprising.aeron.service.state.MatcherSettlementPlan.buildResolvedInto(
-                                pending.settlementPlanBuffer(), pending.sequence(), userId, resolved,
-                                orderId, 0, result, owner.runtimeState, owner.identities)
-                        : com.surprising.aeron.service.state.MatcherSettlementPlan.buildInto(
-                                pending.settlementPlanBuffer(), pending.sequence(), orderId, userId,
-                                orderId, 0, result, owner.runtimeState, owner.identities);
-                plan.preCancellationsFromExpected(pending.preMatchingCancellationOrderIds(), result.cancellations());
-                yield plan.rejectTaker(!result.accepted());
-            }
-            case REPLACE, AMEND -> {
-                ResolvedMatchingAdmission admission = owner.requireMatchingAdmission(pending);
-                if (result.accepted()) yield null;
-                yield com.surprising.aeron.service.state.MatcherSettlementPlan.emptyInto(
-                        pending.settlementPlanBuffer(), pending.sequence(), userId,
-                        admission.originalOrderId(), admission.command().orderId(),
-                        owner.runtimeState);
-            }
-            case TRIGGER -> {
-                long[] execute = pending.decodedCommand().trigger();
-                var trigger = pending.sourceTrigger();
-                if (trigger == null) yield null;
-                long orderId = java.util.Objects.requireNonNull(pending.admittedMatchingOrder(),
-                        "trigger admission is missing").orderId();
-                var plan = com.surprising.aeron.service.state.MatcherSettlementPlan.buildInto(
-                        pending.settlementPlanBuffer(), pending.sequence(), orderId, trigger.userId(), orderId, 0, result,
-                        owner.runtimeState, owner.identities);
-                plan.preCancellationsFromExpected(pending.preMatchingCancellationOrderIds(), result.cancellations());
-                plan.rejectTaker(!result.accepted()).completeTrigger(result.accepted()
-                        ? com.surprising.aeron.service.state.RuntimeTriggerOrderStateTransitions.prepareMatchedCompletion(
-                                trigger, orderId, execute[3])
-                        : com.surprising.aeron.service.state.RuntimeTriggerOrderStateTransitions.prepareRejectedCompletion(
-                                trigger, result.resultCode(), execute[3]));
-                yield plan;
-            }
-            default -> null;
-        };
-    }
+
 
     void requireCompleteAccountLanes(CommandSlot context) {
         if (!context.complete()) throw new IllegalStateException("account lane ACK barrier is incomplete");
@@ -1042,7 +892,6 @@ final class OrderedCommitCoordinator {
             owner.batches.activateOrderBatch(head, pending, true);
         }
         if (owner.hasMatchingDrainWork()) owner.drainMatchingCompletions();
-        dispatchReadyPlaceSettlements(clusterTimestamp, clusterPosition, throughSequence);
         dispatchReadyMatcherFinancialSettlements(throughSequence);
     }
 
@@ -1187,8 +1036,7 @@ final class OrderedCommitCoordinator {
                 && pending.orderBatch.itemSettlementEvent.direct()) {
             matching = pending.orderBatch.itemSettlementEvent.directResult();
         }
-        if (matching == null && (pending.settlementEvent() == null || pending.settlementEvent().direct())
-                && pending.cancelEvent() == null) {
+        if (matching == null && (pending.settlementEvent() == null || pending.settlementEvent().direct())) {
             matching = pending.takeMatchingCompletion();
         }
         return matching;
@@ -1293,107 +1141,6 @@ final class OrderedCommitCoordinator {
         MatchingResult matching = matchingResult(pending);
         return matching == null ? null
                 : tryMatchingCommit(pending, matching, clusterTimestamp, clusterPosition);
-    }
-
-    void dispatchReadyPlaceSettlements(long clusterTimestamp, long clusterPosition, long throughSequence) {
-        long revision = owner.pendingMatching.dispatchRevision();
-        if (checkedDispatchRevision == revision && checkedDispatchThrough == throughSequence) return;
-        // 保存检查前的输入；本次派发若释放了跨分区依赖，下次仍会继续推进。
-        checkedDispatchRevision = revision;
-        checkedDispatchThrough = throughSequence;
-        // The ring maintains one ready cursor per matcher shard and a primitive bitmask.  Owner
-        // only visits ready partitions; it does not scan the global dispatch prefix once per
-        // shard or build a candidate array.
-        long readyShards = owner.pendingMatching.readyPartitionMask(throughSequence);
-        while (readyShards != 0) {
-            int shard = Long.numberOfTrailingZeros(readyShards);
-            readyShards &= readyShards - 1;
-            CommandSlot candidate = owner.pendingMatching.readyPartitionHead(shard);
-            long beforeRevision = owner.pendingMatching.dispatchRevision();
-            if (candidate != null)
-                dispatchPartitionSettlements(shard, clusterTimestamp, clusterPosition, throughSequence, candidate);
-            if (owner.pendingMatching.dispatchRevision() == beforeRevision) break;
-            readyShards = owner.pendingMatching.readyPartitionMask(throughSequence);
-        }
-    }
-
-    private void dispatchPartitionSettlements(int shard, long clusterTimestamp, long clusterPosition,
-                                             long throughSequence, CommandSlot firstCandidate) {
-        CommandSlot first = firstCandidate;
-        while (true) {
-            if (first == null) owner.pendingMatching.readyPartitionMask(throughSequence);
-            CommandSlot pending = first == null
-                    ? owner.pendingMatching.readyPartitionHead(shard) : first;
-            first = null;
-            if (pending == null || pending.sequence() > throughSequence || pending.operation() != CommandSlot.Operation.PLACE
-                    || pending.settlementEvent() != null || owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) {
-                return;
-            }
-            OrderBatchPending batch = pending.orderBatch;
-            if (batch != null) {
-                // The ordinary commit loop can reach this batch after completing a cancel
-                // without another dispatch pass. Once it owns the commit, it also owns Lane
-                // dispatch; pumping while its event is pending must not submit it a second time.
-                if (!batch.pipelined || !batch.admissionCollected() || !batch.canPredispatch()) return;
-                if (!batch.matchingApplied()) {
-                    CommandSlot context = pending;
-                    com.surprising.aeron.service.matching.CoreMatchingResult matching = context.matchingCompletion();
-                    if (matching == null) return;
-                    // Rejections release provisional funds on the owner. Keep those mutations
-                    // in the ordered commit context instead of speculative batch dispatch.
-                    if (batch.pipelinedMatchingResultCount != batch.items.size()) return;
-                    for (int index = 0; index < batch.pipelinedMatchingResultCount; index++) {
-                        var result = batch.pipelinedMatchingResults[index];
-                        if (result == null || !result.accepted()) return;
-                    }
-                    matching = context.takeMatchingCompletion();
-                    pending.establishCommitFence(clusterTimestamp, clusterPosition);
-                    if (matchingResultNeedsRecovery(pending, matching)) {
-                        throw owner.batches.failOrderBatch(batch, pending,
-                                "matcher continuation returned " + matching.resultCode(),
-                                batch.pipelinedMatchingFailure);
-                    }
-                    validateMatchingEvidence(pending, matching);
-                    applyMatcherProgress(matching);
-                    owner.batches.applyPipelinedPlaceBatchResults(batch, pending, matching);
-                    owner.batches.initializeOrderBatchLaneContext(batch, pending);
-                }
-                owner.batches.dispatchOrderBatchLaneWork(batch, pending,
-                        pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
-                batch.markPredispatched();
-                owner.pendingMatching.progressChanged();
-                owner.pendingMatching.completePartitionDispatchKnown(pending.sequence(), shard);
-                pending.countPipelinedSettlement();
-                dispatchedSettlementInFlight++;
-                dispatchedSettlementHighWaterMark = Math.max(
-                        dispatchedSettlementHighWaterMark, dispatchedSettlementInFlight);
-                continue;
-            }
-            // A normal PLACE without a preconstructed direct settlement is completed strictly at
-            // the ordered head. Its Matcher result may already be ready, but applying it from
-            // this partition predispatch pass would advance exchange-core past earlier Core
-            // sequences whose Lane admission has not yet been collected.
-            if (pending.settlementEvent() == null || !pending.settlementEvent().direct()) return;
-            if (pending.placeAdmission() != null && !owner.matchingFlow.collectPlaceAdmissionIfReady(pending)) return;
-            if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) return;
-            com.surprising.aeron.service.matching.CoreMatchingResult matching = pending.matchingCompletion();
-            if (matching == null || !matching.accepted()) return;
-            matching = pending.takeMatchingCompletion();
-            pending.establishCommitFence(clusterTimestamp, clusterPosition);
-            pending.dispatchOnly();
-            CoreResponse response = completeMatching(
-                    pending.sequence(), matching, clusterTimestamp, clusterPosition);
-            if (response != null || pending.settlementEvent() == null
-                    || !pending.hasCommitContext()) {
-                throw new IllegalStateException("pipelined matcher settlement committed during dispatch");
-            }
-            owner.pendingMatching.completePartitionDispatchKnown(pending.sequence(), shard);
-            owner.pendingMatching.progressChanged();
-            pending.countPipelinedSettlement();
-            dispatchedSettlementInFlight++;
-            dispatchedSettlementHighWaterMark = Math.max(
-                    dispatchedSettlementHighWaterMark, dispatchedSettlementInFlight);
-        }
     }
 
     void requestCommitPublication() { publication.request(); }

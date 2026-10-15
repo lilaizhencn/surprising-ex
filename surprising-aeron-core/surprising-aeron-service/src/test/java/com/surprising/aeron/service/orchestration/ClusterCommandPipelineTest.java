@@ -1951,7 +1951,6 @@ class ClusterCommandPipelineTest {
                 // No pollCommands/tick: Matcher must wake Lane itself.
                 while (!event.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
                 assertThat(event.complete()).isTrue();
-                assertThat(pending.orderBatch.cancelEvent).isNull();
                 assertThat(pending.orderBatch.preparedResponse)
                         .as("Lane encodes the final batch result without an Owner turn").isNotNull();
                 assertThat(TradingOrderBatchCodec.decodeResult(pending.orderBatch.preparedResponse,
@@ -2001,7 +2000,6 @@ class ClusterCommandPipelineTest {
                 // No pollCommands/tick: Matcher must wake Lane itself.
                 while (!event.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
                 assertThat(event.complete()).isTrue();
-                assertThat(pending.cancelEvent()).isNull();
                 assertThat(state.pendingMatching(pending.sequence())).isSameAs(pending);
             } finally { release.countDown(); }
             assertThat(gate.join()).isOne();

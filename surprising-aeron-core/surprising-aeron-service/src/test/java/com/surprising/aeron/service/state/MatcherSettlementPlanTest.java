@@ -376,9 +376,12 @@ class MatcherSettlementPlanTest {
             storage.plans[1] = MatcherSettlementPlan.empty(99, userId, new long[]{12}, runtime);
             storage.instruments[0] = instrument;
             assertThat(event.batchStorage(1)).isSameAs(storage);
-            event.prepareBatch(1, laneMask, 1, 1, storage.plans, 1, runtime, identities,
-                    storage.instruments, storage.baseAssetIds, storage.quoteAssetIds,
-                    storage.settleAssetIds, runtime.topology().accountLaneCount());
+            storage.admittedOrders[0] = order(11, userId, instrumentId, CoreOrderSide.BUY, 1);
+            var commandId = new java.util.UUID(1, 2);
+            event.prepareDirect(1, laneMask, 1, 1, commandId, 0, runtime, identities, 1, List.of(), null);
+            event.reserveMatcherPublication();
+            event.publishDirectNativeResult(nativeResult(CommandResultCode.SUCCESS, instrumentId, 1, List.of()),
+                    1, 1, 2, 11, 1, 0);
             assertThat(event.planCount()).isOne();
             assertThat(event.plan(0).coreSequence()).isEqualTo(1);
             assertThatThrownBy(() -> event.plan(1)).isInstanceOf(IndexOutOfBoundsException.class);

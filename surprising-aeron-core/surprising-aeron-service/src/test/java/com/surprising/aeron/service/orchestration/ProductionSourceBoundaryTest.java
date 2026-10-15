@@ -14,6 +14,40 @@ import org.junit.jupiter.api.Test;
 
 class ProductionSourceBoundaryTest {
     @Test
+    void d3TradingHasOnlyDirectApisAndNoOwnerSettlementFallback() throws Exception {
+        var adapterMethods = java.util.Arrays.stream(
+                com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.class.getDeclaredMethods())
+                .map(java.lang.reflect.Method::getName).toList();
+        assertThat(adapterMethods).doesNotContain("place", "placeAsync", "placeWithEvidence",
+                "cancel", "cancelAsync", "cancelWithEvidence", "cancelForContinuation", "cancelBatchAsync",
+                "replaceOrder", "replaceOrderAsync", "replaceAsync", "replaceWithEvidence",
+                "executeWithEvidence", "executeWithEvidenceSync", "executeControlWithEvidenceSync",
+                "executeShardWithEvidenceSync", "executeAfterCancellations", "executeAfterCancellationsSync",
+                "cancelBatchOrderedAsync", "prepareOrderRoutesAsync");
+        assertThat(java.util.Arrays.stream(TradingCoreRuntime.class.getDeclaredMethods())
+                .map(java.lang.reflect.Method::getName)).doesNotContain("applyMatchesOnAccountLanes", "matchingOrder");
+        assertThat(java.util.Arrays.stream(OrderedCommitCoordinator.class.getDeclaredMethods())
+                .map(java.lang.reflect.Method::getName)).doesNotContain("initialMatcherSettlementPlan",
+                        "dispatchReadyPlaceSettlements", "dispatchPartitionSettlements", "completeDispatchedCancel");
+        assertThat(java.util.Arrays.stream(CommandSlot.class.getDeclaredMethods())
+                .map(java.lang.reflect.Method::getName)).doesNotContain("cancelEvent", "settlementPlanBuffer", "dispatchOnly");
+        assertThat(java.util.Arrays.stream(OrderBatchPending.class.getDeclaredFields())
+                .map(java.lang.reflect.Field::getName)).doesNotContain("pipelinedMatchingResults",
+                        "pipelinedMatchingResultCount", "deferredSettlementItemIndexes", "deferredCancellationOrderIds");
+        assertThat(java.util.Arrays.stream(PendingMatchingRing.class.getDeclaredMethods())
+                .map(java.lang.reflect.Method::getName)).doesNotContain("readyPartitionMask",
+                        "collectPartitionDispatchHeads", "completePartitionDispatchKnown", "dispatchHead");
+        Path root = Path.of("").toAbsolutePath();
+        while (!Files.isDirectory(root.resolve("surprising-aeron-core"))) {
+            root = root.getParent();
+            if (root == null) throw new AssertionError("repository root unavailable");
+        }
+        String submission = Files.readString(root.resolve("surprising-aeron-core/surprising-aeron-service/"
+                + "src/main/java/com/surprising/aeron/service/orchestration/MatcherCommandSubmission.java"));
+        assertThat(submission).doesNotContain("() ->", "MatchingSubmission", "owner.matchingOrder(");
+    }
+
+    @Test
     void d2HasNoOwnerDirectDispatchScanCallbackOrOptionalLaneResponse() throws Exception {
         assertThat(java.util.Arrays.stream(com.surprising.aeron.service.state.TradingRuntimeState.class
                 .getDeclaredMethods()).map(java.lang.reflect.Method::getName))

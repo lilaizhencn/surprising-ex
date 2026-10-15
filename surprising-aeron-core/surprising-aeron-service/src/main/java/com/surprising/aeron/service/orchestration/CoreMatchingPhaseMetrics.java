@@ -152,7 +152,6 @@ final class CoreMatchingPhaseMetrics {
             if (batch.itemAdmission != null) return "ITEM_ADMISSION_CONTINUATION";
             if (batch.itemSettlementEvent != null && !batch.itemSettlementEvent.complete()) return "ITEM_SETTLEMENT";
             if (batch.laneCommitEvent != null && !batch.laneCommitEvent.complete()) return "LANE_COMMIT";
-            if (batch.cancelEvent != null && !batch.cancelEvent.complete()) return "LANE_CANCEL";
         }
         if (pending.placeAdmission() != null && !pending.placeAdmission().complete()) return "PLACE_ADMISSION";
         var settlement = batch == null ? pending.settlementEvent() : batch.settlementEvent;

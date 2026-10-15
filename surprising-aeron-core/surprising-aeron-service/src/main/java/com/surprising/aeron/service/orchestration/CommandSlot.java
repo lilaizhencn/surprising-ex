@@ -8,10 +8,10 @@ import com.surprising.aeron.service.state.RuntimeFundsDelta;
 import com.surprising.aeron.service.state.RuntimeFundsAccumulator;
 import com.surprising.aeron.service.state.PlaceAdmissionEvent;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.LaneCancelEvent;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.MatcherSettlementEvent;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
 import java.util.List;
 import java.util.Objects;
 import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
@@ -38,10 +38,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private long commitFenceTimestamp;
     private long commitFenceClusterPosition;
     private boolean commitFenceEstablished;
-    /** Exactly one settlement/cancel continuation can own a command at a time. */
-    private ContinuationKind continuationKind;
+    /** The preconstructed Direct settlement belongs to this command until terminal retirement. */
     private com.surprising.aeron.service.state.MatcherSettlementEvent settlementContinuation;
-    private LaneCancelEvent cancelContinuation;
     /** Normal PLACE admission runs alongside the settlement continuation. */
     private PlaceAdmissionEvent placeAdmission;
     private boolean placeAdmissionOwnerCollected;
@@ -75,12 +73,10 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     /** This command cannot emit further money; response storage may remain leased. */
     boolean ledgerDispatchClosed;
     /** 准入时固定的潜在成交账户分区，整个命令终态前保持不变。 */
-    long partitionLaneMask;
     /** 派发前的不可变订单身份；仅实时推送启用时保留，提交后释放。 */
     com.surprising.aeron.service.state.OrderRuntime realtimeTakerOrder;
     /** Normal PLACE reuses its immutable resolved input for realtime trade identity. */
     ResolvedPlaceOrder realtimeResolvedTakerOrder;
-    private boolean dispatchOnly;
     private boolean pipelinedSettlementCounted;
     /** Cached matcher shard for a non-batch command; stable until this slot is recycled. */
     private int cachedMatcherShard = -1;
@@ -95,8 +91,12 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionCheck liquidationCheck;
     private final LiquidationExecutionContinuation liquidationExecutionControl =
             new LiquidationExecutionContinuation();
-    /** Fixed wrapper for the only admission-gated Matcher submission. */
+    /** Fixed task for the only admission-gated Matcher submission. */
     private final AdmissionMatchingContinuation admissionMatching = new AdmissionMatchingContinuation();
+    /** Stable Owner route inputs, consumed only by this slot's Matcher task and cleared on retirement. */
+    private List<CancellationOrder>
+            matcherPreCancellations = List.of();
+    private final ControlMatchingContinuation controlMatching = new ControlMatchingContinuation();
     /** Fixed wrapper for the ordinary PLACE Matcher submission. */
     private final PlaceMatchingContinuation placeMatching = new PlaceMatchingContinuation();
     /** Fixed wrapper for the ordinary CANCEL Matcher submission. */
@@ -196,20 +196,49 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     /** Reuses the command slot for a resolved replacement without intermediate submission objects. */
     java.util.function.Supplier<?> prepareReplaceMatching(TradingCoreRuntime owner,
             int matcherShard, long orderId, long userId,
-            long originalOrderId, String instrumentId, CoreMatchingOrder replacement,
+            long originalOrderId, String instrumentId, ResolvedPlaceOrder replacement,
             MatcherSettlementEvent direct) {
         replaceMatching.prepare(owner, matcherShard, orderId, userId,
                 originalOrderId, instrumentId, replacement, direct);
         return replaceMatching;
     }
 
-    java.util.function.Supplier<?> prepareReplaceMatching(TradingCoreRuntime owner,
-            int matcherShard, long orderId, long userId,
-            long originalOrderId, String instrumentId, ResolvedPlaceOrder replacement,
-            MatcherSettlementEvent direct) {
-        replaceMatching.prepare(owner, matcherShard, orderId, userId,
-                originalOrderId, instrumentId, replacement, direct);
-        return replaceMatching;
+    void matcherPreCancellations(List<CancellationOrder> orders) {
+        matcherPreCancellations = Objects.requireNonNull(orders);
+    }
+
+    java.util.function.Supplier<?> prepareControlMatching(TradingCoreRuntime owner, long orderId,
+            List<CancellationOrder> orders) {
+        controlMatching.owner = Objects.requireNonNull(owner);
+        controlMatching.orderId = orderId;
+        controlMatching.orders = Objects.requireNonNull(orders);
+        return controlMatching;
+    }
+
+    private exchange.core2.core.common.MatcherResult applyMatcherPreCancellations(
+            TradingCoreRuntime owner, int shard, long logicalOrderId, MatcherSettlementEvent target) {
+        for (int index = 0; index < matcherPreCancellations.size(); index++) {
+            var cancellation = matcherPreCancellations.get(index);
+            var result = owner.matchingAdapter.cancelDirectPrefix(command.header().submittedAtEpochMillis(),
+                    cancellation.userId(), cancellation.orderId(), cancellation.instrumentId());
+            boolean accepted = result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
+                    || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
+            if (accepted) target.recordDirectPreCancellation(cancellation.orderId());
+            else return owner.matchingAdapter.publishDirectPrefixFailure(shard, coreSequence,
+                    command.header().commandId(), logicalOrderId, command.header().submittedAtEpochMillis(), result, target);
+        }
+        return null;
+    }
+
+    private final class ControlMatchingContinuation implements java.util.function.Supplier<Object> {
+        private TradingCoreRuntime owner;
+        private long orderId;
+        private List<CancellationOrder> orders;
+        @Override public Object get() {
+            return owner.matchingAdapter.cancelControlOrders(coreSequence, command.header().commandId(),
+                    orderId, command.header().submittedAtEpochMillis(), orders);
+        }
+        void clear() { owner = null; orderId = 0; orders = null; }
     }
 
     void deferControl(java.util.function.BooleanSupplier work) {
@@ -334,9 +363,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         commitFenceTimestamp = 0;
         commitFenceClusterPosition = 0;
         commitFenceEstablished = false;
-        continuationKind = null;
         settlementContinuation = null;
-        cancelContinuation = null;
         placeAdmission = null;
         placeAdmissionOwnerCollected = false;
         replacementAdmission = null;
@@ -353,10 +380,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         crossShardCancellationStarted = false;
         clusterIndependent = false;
         ledgerDispatchClosed = false;
-        partitionLaneMask = 0;
         realtimeTakerOrder = null;
         realtimeResolvedTakerOrder = null;
-        dispatchOnly = false;
         pipelinedSettlementCounted = false;
         cachedMatcherShard = -1;
         return this;
@@ -392,7 +417,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         return this;
     }
 
-
     void establishCommitFence(long clusterTimestamp, long clusterPosition) {
         if (clusterTimestamp < 0 || clusterPosition < 0) {
             throw new IllegalArgumentException("matching commit fence cannot be negative");
@@ -421,19 +445,11 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         var value = replacementAdmission; replacementAdmission = null; return value;
     }
     com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent() {
-        return continuationKind == ContinuationKind.SETTLEMENT ? settlementContinuation : null;
+        return settlementContinuation;
     }
     com.surprising.aeron.service.state.MatcherSettlementEvent takeSettlementEvent() {
         var value = settlementEvent();
-        clearContinuation(ContinuationKind.SETTLEMENT);
-        return value;
-    }
-    LaneCancelEvent cancelEvent() {
-        return continuationKind == ContinuationKind.CANCEL ? cancelContinuation : null;
-    }
-    LaneCancelEvent takeCancelEvent() {
-        LaneCancelEvent value = cancelEvent();
-        clearContinuation(ContinuationKind.CANCEL);
+        settlementContinuation = null;
         return value;
     }
     com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan() { return settlementPlan; }
@@ -442,15 +458,11 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         return placeAdmission;
     }
     boolean hasLaneContinuation() {
-        return settlementContinuation != null || cancelContinuation != null;
+        return settlementContinuation != null;
     }
     boolean laneContinuationComplete() {
         if (!hasLaneContinuation()) return false;
-        return switch (continuationKind) {
-            case SETTLEMENT -> settlementEvent().complete();
-            case CANCEL -> cancelEvent().complete();
-            default -> false;
-        };
+        return settlementContinuation.complete();
     }
     PlaceAdmissionEvent takePlaceAdmission() {
         PlaceAdmissionEvent value = placeAdmission;
@@ -510,32 +522,16 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         if (isMatchingSubmitted()) throw new IllegalStateException("matching command was submitted twice");
         matchingLifecycle = MATCHING_SUBMITTED;
     }
-    void cancel(LaneCancelEvent event, long applyStartNanos) {
-        if (event == null || hasLaneContinuation()
-                || operation != Operation.CANCEL) {
-            throw new IllegalStateException("invalid cancel continuation");
-        }
-        continuationKind = ContinuationKind.CANCEL;
-        cancelContinuation = event;
-        settlementApplyStartNanos = applyStartNanos;
-    }
+
     void settlement(com.surprising.aeron.service.state.MatcherSettlementEvent event,
                     com.surprising.aeron.service.state.MatcherSettlementPlan plan,
                     long applyStartNanos) {
         if (event == null || plan == null || hasLaneContinuation()) {
             throw new IllegalStateException("invalid matcher settlement continuation");
         }
-        continuationKind = ContinuationKind.SETTLEMENT;
         settlementContinuation = event;
         settlementPlan = plan;
         settlementApplyStartNanos = applyStartNanos;
-    }
-
-    private void clearContinuation(ContinuationKind expected) {
-        if (continuationKind != expected) return;
-        continuationKind = null;
-        if (expected == ContinuationKind.SETTLEMENT) settlementContinuation = null;
-        else if (expected == ContinuationKind.CANCEL) cancelContinuation = null;
     }
 
     /** Clears the command-owned references when its fixed sequence slot is recycled. */
@@ -549,9 +545,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         fundsAccumulator.clear();
         decodedCommand = null;
         admission = null;
-        continuationKind = null;
         settlementContinuation = null;
-        cancelContinuation = null;
         placeAdmission = null;
         placeAdmissionOwnerCollected = false;
         replacementAdmission = null;
@@ -569,8 +563,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         cachedMatcherShard = -1;
         reusableResolvedOrder.clear();
     }
-    void dispatchOnly() { dispatchOnly = true; }
-    boolean isDispatchOnly() { return dispatchOnly; }
 
     void deferMatching(long clusterTimestamp, long clusterPosition, TradingCoreRuntime.SourceKey sourceKey) {
         if (matchingLifecycle != MATCHING_ADMITTED || sourceKey == null) {
@@ -613,11 +605,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         if (shard < 0) throw new IllegalArgumentException("matcher shard cannot be negative");
         cachedMatcherShard = shard;
     }
-    boolean takeDispatchOnly() {
-        boolean value = dispatchOnly;
-        dispatchOnly = false;
-        return value;
-    }
+
     void countPipelinedSettlement() { pipelinedSettlementCounted = true; }
     boolean takePipelinedSettlementCounted() {
         boolean value = pipelinedSettlementCounted;
@@ -646,12 +634,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         LIQUIDATION_BATCH,
         SETTLEMENT
     }
-
-    private enum ContinuationKind {
-        SETTLEMENT,
-        CANCEL
-    }
-
 
     long coreSequence;
     boolean claimed;
@@ -691,14 +673,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private boolean commitSnapshotDirty;
     private boolean commitSnapshotProvisionalOnly;
     private CoreResultCode matchingRejection;
-    /** 结算计划由序号槽独占；终态结果消费后清理引用并保留容量。 */
-    private com.surprising.aeron.service.state.MatcherSettlementPlan reusableSettlementPlan;
-    com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlanBuffer() {
-        if (!claimed) throw new IllegalStateException("unclaimed settlement slot");
-        if (reusableSettlementPlan == null)
-            reusableSettlementPlan = new com.surprising.aeron.service.state.MatcherSettlementPlan();
-        return reusableSettlementPlan;
-    }
+
     long coreSequence() { return claimed ? coreSequence : 0; }
     long expectedLaneMask() { return expectedLaneMask; }
     long completedLaneMask() { return completedLaneMask; }
@@ -800,7 +775,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
 
     boolean hasMatchingRejection() { return matchingRejection != null; }
 
-
     CoreResultCode matchingRejection() {
         if (matchingRejection == null) throw new IllegalStateException("matching rejection is missing");
         return matchingRejection;
@@ -845,7 +819,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     }
 
     void clear() {
-        if (reusableSettlementPlan != null) reusableSettlementPlan.clearReferences();
         // CommandSlot is overwritten by initialize() before the slot can be observed
         // again.  Clearing every reference here duplicates that work on the owner hot path
         // and only reduces retention during the short free interval.
@@ -893,6 +866,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         placeMatching.clear();
         cancelMatching.clear();
         replaceMatching.clear();
+        controlMatching.clear();
+        matcherPreCancellations = List.of();
     }
 
     private final class AdmissionMatchingContinuation implements java.util.function.Supplier<Object> {
@@ -985,7 +960,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             this.resolvedOrder = resolvedOrder;
             this.matchingOrder = matchingOrder;
             this.admittedOrder = admittedOrder;
-            this.direct = direct;
+            this.direct = Objects.requireNonNull(direct, "direct settlement");
         }
 
         void clear() {
@@ -998,33 +973,19 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             direct = null;
         }
 
-        @Override
-        public Object get() {
-            if (admittedOrder != null) {
-                // All input references become native-call arguments before its fact is published.
-                // Do not read these reusable continuation fields after that publication.
-                return owner.matchingAdapter.placeAdmittedDirect(
-                        matcherShard, coreSequence, command.header().commandId(),
+        @Override public Object get() {
+            long orderId = admittedOrder != null ? admittedOrder.orderId()
+                    : resolvedOrder != null ? resolvedOrder.orderId() : matchingOrder.orderId();
+            var failure = applyMatcherPreCancellations(owner, matcherShard, orderId, direct);
+            if (failure != null) return failure;
+            if (admittedOrder != null)
+                return owner.matchingAdapter.placeAdmittedDirect(matcherShard, coreSequence, command.header().commandId(),
                         command.header().submittedAtEpochMillis(), userId, admittedOrder, direct);
-            }
-            if (direct != null) {
-                if (resolvedOrder != null) {
-                    return owner.matchingAdapter.placeDirect(
-                            matcherShard, coreSequence, command.header().commandId(),
-                            command.header().submittedAtEpochMillis(), userId, resolvedOrder, direct);
-                }
-                return owner.matchingAdapter.placeDirect(
-                        matcherShard, coreSequence, command.header().commandId(),
-                        command.header().submittedAtEpochMillis(), userId, matchingOrder, direct);
-            }
-            if (resolvedOrder != null) {
-                return owner.matchingAdapter.placeWithEvidence(
-                        matcherShard, coreSequence, command.header().commandId(),
-                        command.header().submittedAtEpochMillis(), userId, resolvedOrder);
-            }
-            return owner.matchingAdapter.placeWithEvidence(
-                    matcherShard, coreSequence, command.header().commandId(),
-                    command.header().submittedAtEpochMillis(), userId, matchingOrder);
+            if (resolvedOrder != null)
+                return owner.matchingAdapter.placeDirect(matcherShard, coreSequence, command.header().commandId(),
+                        command.header().submittedAtEpochMillis(), userId, resolvedOrder, direct);
+            return owner.matchingAdapter.placeDirect(matcherShard, coreSequence, command.header().commandId(),
+                    command.header().submittedAtEpochMillis(), userId, matchingOrder, direct);
         }
     }
 
@@ -1043,7 +1004,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             this.orderId = orderId;
             this.userId = userId;
             this.instrumentId = Objects.requireNonNull(instrumentId);
-            this.direct = direct;
+            this.direct = Objects.requireNonNull(direct, "direct settlement");
         }
 
         void clear() {
@@ -1055,16 +1016,11 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             direct = null;
         }
 
-        @Override
-        public Object get() {
-            if (direct != null) {
-                return owner.matchingAdapter.cancelDirect(
-                        matcherShard, coreSequence, command.header().commandId(), orderId,
-                        command.header().submittedAtEpochMillis(), userId, instrumentId, direct);
-            }
-            return owner.matchingAdapter.cancelWithEvidence(
-                    matcherShard, coreSequence, command.header().commandId(), orderId,
-                    command.header().submittedAtEpochMillis(), userId, instrumentId);
+        @Override public Object get() {
+            var failure = applyMatcherPreCancellations(owner, matcherShard, orderId, direct);
+            if (failure != null) return failure;
+            return owner.matchingAdapter.cancelDirect(matcherShard, coreSequence, command.header().commandId(), orderId,
+                    command.header().submittedAtEpochMillis(), userId, instrumentId, direct);
         }
     }
 
@@ -1076,7 +1032,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         private long originalOrderId;
         private String instrumentId;
         private ResolvedPlaceOrder resolvedReplacement;
-        private CoreMatchingOrder replacement;
         private MatcherSettlementEvent direct;
 
         void prepare(TradingCoreRuntime owner, int matcherShard, long orderId,
@@ -1089,22 +1044,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             this.originalOrderId = originalOrderId;
             this.instrumentId = Objects.requireNonNull(instrumentId);
             this.resolvedReplacement = Objects.requireNonNull(replacement);
-            this.replacement = null;
-            this.direct = direct;
-        }
-
-        void prepare(TradingCoreRuntime owner, int matcherShard, long orderId,
-                     long userId, long originalOrderId, String instrumentId, CoreMatchingOrder replacement,
-                     MatcherSettlementEvent direct) {
-            this.owner = Objects.requireNonNull(owner);
-            this.matcherShard = matcherShard;
-            this.orderId = orderId;
-            this.userId = userId;
-            this.originalOrderId = originalOrderId;
-            this.instrumentId = Objects.requireNonNull(instrumentId);
-            this.replacement = Objects.requireNonNull(replacement);
-            this.resolvedReplacement = null;
-            this.direct = direct;
+            this.direct = Objects.requireNonNull(direct);
         }
 
         void clear() {
@@ -1115,34 +1055,14 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             originalOrderId = 0;
             instrumentId = null;
             resolvedReplacement = null;
-            replacement = null;
             direct = null;
         }
 
-        @Override
-        public Object get() {
-            if (resolvedReplacement != null) {
-                if (direct != null) {
-                    return owner.matchingAdapter.replaceDirect(
-                            matcherShard, coreSequence, command.header().commandId(), orderId,
-                            command.header().submittedAtEpochMillis(), userId,
-                            originalOrderId, instrumentId, resolvedReplacement, direct);
-                }
-                return owner.matchingAdapter.replaceWithEvidence(
-                        matcherShard, coreSequence, command.header().commandId(), orderId,
-                        command.header().submittedAtEpochMillis(), userId,
-                        originalOrderId, instrumentId, resolvedReplacement);
-            }
-            if (direct != null) {
-                return owner.matchingAdapter.replaceDirect(
-                        matcherShard, coreSequence, command.header().commandId(), orderId,
-                        command.header().submittedAtEpochMillis(), userId,
-                        originalOrderId, instrumentId, replacement, direct);
-            }
-            return owner.matchingAdapter.replaceWithEvidence(
-                    matcherShard, coreSequence, command.header().commandId(), orderId,
-                    command.header().submittedAtEpochMillis(), userId,
-                    originalOrderId, instrumentId, replacement);
+        @Override public Object get() {
+            var failure = applyMatcherPreCancellations(owner, matcherShard, orderId, direct);
+            if (failure != null) return failure;
+            return owner.matchingAdapter.replaceDirect(matcherShard, coreSequence, command.header().commandId(), orderId,
+                    command.header().submittedAtEpochMillis(), userId, originalOrderId, instrumentId, resolvedReplacement, direct);
         }
     }
 
@@ -1334,7 +1254,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             public String status() { return value().status().name(); }
             public long revision() { return value().revision(); }
         }
-
 
         @Override public byte[] preparedResponse() { return response; }
         @Override public int preparedResponseLength() { return responseLength; }

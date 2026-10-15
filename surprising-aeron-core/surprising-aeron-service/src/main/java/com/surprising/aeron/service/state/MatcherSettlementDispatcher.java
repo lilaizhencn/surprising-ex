@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
-import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.matching.MatchingResult;
 import java.util.List;
 
@@ -162,10 +161,6 @@ final class MatcherSettlementDispatcher {
     final java.util.ArrayDeque<MatcherSettlementEvent> matcherSettlementEventPool =
             new java.util.ArrayDeque<>();
 
-    /** 当前执行范围复用的 matcherBatchValidation 临时缓冲，不保存第二份业务状态。 */
-    final MatcherSettlementPlan.BatchValidationScratch matcherBatchValidationScratch =
-            new MatcherSettlementPlan.BatchValidationScratch();
-
     public MatcherSettlementEvent dispatchMatcherSettlement(
             long coreSequence, long expectedLaneMask, long commitSequence,
             long commitTimestamp, long commitClusterPosition,
@@ -242,26 +237,6 @@ final class MatcherSettlementDispatcher {
         matcherSettlementEventPool.addFirst(event);
     }
 
-    public MatcherSettlementEvent dispatchOrderBatchMatcherSettlement(
-            long coreSequence, long expectedLaneMask, long takerOrderId,
-            MatchingResult matchingResult, RuntimeIdentityRegistry identities) {
-        owner.assertOwner();
-        if (!owner.orderBatchMutationScope) {
-            throw new IllegalStateException("item settlement requires an order batch");
-        }
-        OrderRuntime taker = owner.order(takerOrderId);
-        if (taker == null) throw new IllegalStateException("taker order is missing");
-        MatcherSettlementPlan plan = MatcherSettlementPlan.buildSingleInto(
-                new MatcherSettlementPlan(), coreSequence, takerOrderId, taker.userId(),
-                matchingResult, owner, identities).rejectTaker(!matchingResult.accepted());
-        if (plan.requiredLaneMask() != expectedLaneMask) {
-            throw new IllegalStateException("matcher settlement lane mask mismatch");
-        }
-        owner.releaseOwnerLaneAccess();
-        return dispatchMatcherSettlement(coreSequence, expectedLaneMask,
-                0, -1, -1, plan, matchingResult, identities, true);
-    }
-
     public RuntimeTreasuryDelta collectOrderBatchMatcherSettlement(
             MatcherSettlementEvent event, RuntimeFundsAccumulator funds,
             TradingRuntimeState.TerminalOrderSink terminalOrderSink) {
@@ -277,111 +252,6 @@ final class MatcherSettlementDispatcher {
             owner.accountRollback.patchBalancesBeforeByLane[laneId].mergeSequential(event.changes().balancePatches[laneId]);
         }
         return owner.collectMatcherSettlement(event, event.hasLedgerSettlement() ? funds : null, terminalOrderSink);
-    }
-
-    public MatcherSettlementEvent dispatchMatcherSettlementBatch(
-            long coreSequence, long[] takerOrderIds, long[] expectedLaneMasks,
-            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities,
-            long commitTimestamp, long commitClusterPosition) {
-        owner.assertOwner();
-        if (coreSequence <= 0 || takerOrderIds == null
-                || expectedLaneMasks == null || matchingResults == null || takerOrderIds.length == 0
-                || takerOrderIds.length != expectedLaneMasks.length
-                || takerOrderIds.length != matchingResults.size() || identities == null
-                || commitTimestamp < 0 || commitClusterPosition < 0) {
-            throw new IllegalArgumentException("invalid matcher settlement batch");
-        }
-        return dispatchMatcherSettlementBatch(coreSequence, new SettlementBatchInput() {
-            public int settlementCount() { return takerOrderIds.length; }
-            public long settlementOrderId(int index) { return takerOrderIds[index]; }
-            public long settlementLaneMask(int index) { return expectedLaneMasks[index]; }
-            public com.surprising.aeron.service.matching.MatchingResult settlementResult(int index) {
-                return matchingResults.get(index);
-            }
-        }, identities, commitTimestamp, commitClusterPosition);
-    }
-
-    MatcherSettlementEvent dispatchMatcherSettlementBatch(long coreSequence, SettlementBatchInput batch,
-            RuntimeIdentityRegistry identities, long commitTimestamp, long commitClusterPosition) {
-        owner.assertOwner();
-        if (coreSequence <= 0 || batch == null || batch.settlementCount() <= 0 || identities == null
-                || commitTimestamp < 0 || commitClusterPosition < 0)
-            throw new IllegalArgumentException("invalid matcher settlement batch");
-        long validMask = owner.accountLanes.length == Long.SIZE ? -1L : (1L << owner.accountLanes.length) - 1L;
-        MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
-        if (event == null) event = new MatcherSettlementEvent();
-        MatcherSettlementEvent.BatchStorage storage = event.batchStorage(batch.settlementCount());
-        MatcherSettlementPlan[] plans = storage.plans;
-        CoreInstrument[] instruments = storage.instruments;
-        int[] baseAssetIds = storage.baseAssetIds;
-        int[] quoteAssetIds = storage.quoteAssetIds;
-        int[] settleAssetIds = storage.settleAssetIds;
-        matcherBatchValidationScratch.clear();
-        boolean prepared = false;
-        try {
-            long batchLaneMask = 0;
-            for (int index = 0; index < batch.settlementCount(); index++) {
-                long takerOrderId = batch.settlementOrderId(index);
-                long expectedLaneMask = batch.settlementLaneMask(index);
-                com.surprising.aeron.service.matching.MatchingResult matchingResult = batch.settlementResult(index);
-                if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
-                        || matchingResult == null || matchingResult.nativeCoreSequence() != coreSequence) {
-                    throw new IllegalArgumentException("invalid matcher settlement item");
-                }
-                OrderRuntime taker = batch.settlementOrder(index);
-                if (taker == null) taker = owner.order(takerOrderId);
-                if (taker == null) throw new IllegalStateException("taker order is missing");
-                int slot = storage.metadataSlots.get(taker.symbolId());
-                if (slot < 0) {
-                    CoreInstrument instrument = owner.instrument(identities.instrumentId(taker.symbolId()));
-                    if (instrument == null) throw new IllegalStateException("match instrument is missing");
-                    instruments[index] = instrument;
-                    baseAssetIds[index] = identities.assetId(instrument.baseAsset());
-                    quoteAssetIds[index] = identities.assetId(instrument.quoteAsset());
-                    settleAssetIds[index] = identities.assetId(instrument.settleAsset());
-                    storage.metadataSlots.put(taker.symbolId(), index);
-                } else {
-                    instruments[index] = instruments[slot];
-                    baseAssetIds[index] = baseAssetIds[slot];
-                    quoteAssetIds[index] = quoteAssetIds[slot];
-                    settleAssetIds[index] = settleAssetIds[slot];
-                }
-                MatcherSettlementPlan plan = MatcherSettlementPlan.buildBatchItem(coreSequence, taker,
-                        instruments[index], matchingResult, owner, identities, matcherBatchValidationScratch, plans[index])
-                        .rejectTaker(!matchingResult.accepted());
-                if (plan.requiredLaneMask() != expectedLaneMask)
-                    throw new IllegalStateException("matcher settlement lane mask mismatch");
-                plans[index] = plan;
-                batchLaneMask |= expectedLaneMask;
-            }
-            owner.ensureMatcherSettlementDispatchCapacity(batchLaneMask);
-            prepared = true; // Once preparation starts, failures are fatal; never recycle a partially prepared event.
-            event.prepareBatch(coreSequence, batchLaneMask, commitTimestamp, commitClusterPosition,
-                    plans, batch.settlementCount(), owner, identities, instruments,
-                    baseAssetIds, quoteAssetIds, settleAssetIds, owner.accountLanes.length);
-            event.resultTarget = batch instanceof LaneOrderResultTarget target ? target : null;
-            long lanes = batchLaneMask;
-            while (lanes != 0) {
-                int laneId = Long.numberOfTrailingZeros(lanes);
-                lanes &= lanes - 1;
-                if (!owner.accountLanesStarted) {
-                    event.execute(owner.accountLanes[laneId]);
-                }
-                else {
-                    owner.releaseOwnerLaneAccess();
-                    owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
-                            owner.accountLaneQueueHighWaterMarks[laneId], owner.laneWorkers[laneId].depth() + 1);
-                    owner.laneWorkers[laneId].submit(event);
-                }
-            }
-            return event;
-        } finally {
-            matcherBatchValidationScratch.clear();
-            if (!prepared) {
-                event.discardBatchStorage();
-                matcherSettlementEventPool.addFirst(event);
-            }
-        }
     }
 
 }

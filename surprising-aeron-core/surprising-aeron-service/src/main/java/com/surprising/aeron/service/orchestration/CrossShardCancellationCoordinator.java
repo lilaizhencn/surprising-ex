@@ -44,14 +44,14 @@ final class CrossShardCancellationCoordinator {
                 CancellationOrder order = progress.orders.get(progress.index);
                 progress.shard = owner.matchingAdapter.matcherShardId(order.instrumentId());
                 progress.token = owner.matcherPipeline.submitControl(progress.shard,
-                        () -> owner.matchingAdapter.cancelForContinuation(order.userId(), order.orderId(), order.instrumentId()));
+                        () -> owner.matchingAdapter.cancelControlOrder(progress.command.command().header().submittedAtEpochMillis(),
+                                order.userId(), order.orderId(), order.instrumentId()));
                 continue;
             }
             var command = progress.command;
-            var aggregate = owner.matchingAdapter.aggregateRoutedCancellationResults(progress.orders, progress.results);
-            var evidenced = owner.matchingAdapter.executeControlWithEvidenceSync(
+            var evidenced = owner.matchingAdapter.completeControlCancellations(
                     command.sequence(), command.command().header().commandId(), 0,
-                    command.command().header().submittedAtEpochMillis(), () -> aggregate);
+                    command.command().header().submittedAtEpochMillis(), progress.orders, progress.results);
             pending.removeFirst();
             command.crossShardCancellationStarted = false;
             owner.matchingFlow.publishMatchingCompletion(command.sequence(), evidenced);

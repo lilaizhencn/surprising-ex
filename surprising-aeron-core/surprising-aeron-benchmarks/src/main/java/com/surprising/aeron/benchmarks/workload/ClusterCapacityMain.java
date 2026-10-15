@@ -24,7 +24,6 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.orchestration.CoreAcceptFreezeBenchmark;
 import com.surprising.aeron.service.orchestration.CoreInMemoryBenchmark;
 import com.surprising.aeron.service.orchestration.CorePerpetualEndToEndBenchmark;
-import com.surprising.aeron.service.orchestration.ExchangeCoreConcurrentBenchmark;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.nio.charset.StandardCharsets;
@@ -727,7 +726,6 @@ public final class ClusterCapacityMain implements AutoCloseable {
         long seed = args.length > 1 ? Long.parseLong(args[1]) : 9901L;
         if (seed <= 0) throw new IllegalArgumentException("baseline seed must be positive");
         int makerDepth = args.length > 2 ? Integer.parseInt(args[2]) : 1;
-        ExchangeCoreConcurrentBenchmark.main(new String[]{"500", "100", "64", "2"});
         CoreAcceptFreezeBenchmark.main(new String[]{"25", "5"});
         CoreInMemoryBenchmark.main(new String[]{"25", "5"});
         CorePerpetualEndToEndBenchmark.BaselineResult perpetual =

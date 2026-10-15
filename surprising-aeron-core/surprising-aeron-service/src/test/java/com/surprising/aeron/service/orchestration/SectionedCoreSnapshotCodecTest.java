@@ -226,7 +226,7 @@ class SectionedCoreSnapshotCodecTest {
         TradingCoreState tradingState = stateWithOpenBid();
         MatcherSnapshot matcherSnapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            assertThat(adapter.placeAsync(7, bid()).join().accepted()).isTrue();
+            assertThat(com.surprising.aeron.service.state.DirectMatcherTestInputs.placeDirect(adapter, 7, bid()).accepted()).isTrue();
             matcherSnapshot = adapter.snapshotAsync(
                     43, 1, tradingState.businessStateHash(), tradingState,
                     tradingState.orders().values()).join();

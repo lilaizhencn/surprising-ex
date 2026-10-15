@@ -208,7 +208,7 @@ public final class TradingCoreOwner {
                 if (entry.sequence != 0) {
                     var pending = state.pendingMatching(entry.sequence);
                     pending.establishCommitFence(next.timestamp, next.position);
-                    state.pendingMatching.partitionDependenciesChanged();
+                    state.pendingMatching.progressChanged();
                 }
                 CoreMatchingPhaseMetrics.recordBoundary("admissionExecution", next.command.header(), admissionStart);
                 entry.response = entry.sequence == 0 ? result : null;

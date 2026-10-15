@@ -53,6 +53,11 @@ final class MatcherEvidenceLedger {
         return next;
     }
 
+    void recordControlNative(int shardId, long nativeSequence) {
+        advanceStrictly(shardNativeSequences, index(shardId), nativeSequence,
+                "matcher shard native sequence is not strictly increasing");
+    }
+
     CoreMatchingResult bind(
             long coreSequence,
             java.util.UUID commandId,
@@ -73,26 +78,6 @@ final class MatcherEvidenceLedger {
         return result.bindEvidenceInPlace(coreSequence, commandId.getMostSignificantBits(),
                 commandId.getLeastSignificantBits(), orderId, nativeSequence, sequence,
                 aeronTimestamp, matcherShardId);
-    }
-
-    CoreMatchingResult bindNative(
-            long coreSequence, java.util.UUID commandId, long orderId,
-            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
-            exchange.core2.core.common.MatcherResult result) {
-        if (commandId == null || result == null) throw new IllegalArgumentException("native evidence is required");
-        int matcherIndex = index(matcherShardId);
-        long nativeSequence = result.sequence();
-        if (nativeSequence > 0) {
-            advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
-                    "matcher shard native sequence is not strictly increasing");
-        }
-        advanceStrictly(shardSequences, matcherIndex, sequence,
-                "matcher shard sequence is not strictly increasing");
-        CoreMatchingResult bound = CoreMatchingResult.fromNativeWithEvidence(result,
-                coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
-                orderId, nativeSequence, sequence, aeronTimestamp,
-                matcherShardId);
-        return bound;
     }
 
     exchange.core2.core.common.MatcherResult publishNative(

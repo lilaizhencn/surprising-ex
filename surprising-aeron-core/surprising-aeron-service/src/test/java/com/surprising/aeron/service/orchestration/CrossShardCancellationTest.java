@@ -129,7 +129,7 @@ class CrossShardCancellationTest {
         var query = command(CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
                 CoreLiquidationWorkCodec.encodeQuery(ProductLine.LINEAR_PERPETUAL,
                         CoreLiquidationWorkView.Purpose.EXECUTION, 0, 100, 1_048_576));
-        return CoreLiquidationWorkCodec.decodeWork(state.apply(query).data());
+        return CoreLiquidationWorkCodec.decodeWork(CoreTestCompletion.querySynchronously(state, query).data());
     }
     private CoreMessage command(CoreMessageType type, long user, byte[] payload) {
         long next = ++sequence;
@@ -142,10 +142,7 @@ class CrossShardCancellationTest {
         return new CoreMessage(header, payload);
     }
     private static void applied(TradingCoreRuntime state, CoreMessage command) {
-        var response = state.apply(command);
-        if (response.resultCode() == CoreResultCode.MATCHING_PENDING)
-            response = CoreTestCompletion.completeMatchingSynchronously(state,
-                    state.matchingSequence(command.header().commandId()), TIME, command.header().sourceSequence());
+        var response = CoreTestCompletion.applyAsynchronously(state, command, TIME, command.header().sourceSequence());
         assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
     }
 }

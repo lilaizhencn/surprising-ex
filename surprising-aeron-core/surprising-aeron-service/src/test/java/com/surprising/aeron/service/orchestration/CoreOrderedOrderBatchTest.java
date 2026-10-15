@@ -275,6 +275,15 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void spotPipelinedBatchSettlesSharedMakerOncePerLaneAndReclaimsEveryTerminal() throws Exception {
+        verifySharedMakerBatch(true);
+    }
+
+    @Test
+    void directSharedMakerBatchConservesFundsWithoutSnapshot() throws Exception {
+        verifySharedMakerBatch(false);
+    }
+
+    private void verifySharedMakerBatch(boolean recovery) throws Exception {
         String priorLanes = System.getProperty("surprising.aeron.account-lanes");
         System.setProperty("surprising.aeron.account-lanes", "4");
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
@@ -303,7 +312,7 @@ class CoreOrderedOrderBatchTest {
                         assertThat(balance.lockedUnits()).isZero());
             }
             for (long orderId = 82_000; orderId <= 82_004; orderId++) assertThat(trading.order(orderId)).isNull();
-            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            if (recovery) try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(trading.businessStateHash());
             }
         } finally {

@@ -122,7 +122,7 @@ final class CoreSnapshotLifecycle {
                 long sequence = owner.firstPendingMatchingSequence();
                 CommandSlot pending = owner.pendingMatching.get(sequence);
                 MatchingResult result =
-                        pending != null && (pending.settlementEvent() != null || pending.cancelEvent() != null)
+                        pending != null && pending.settlementEvent() != null
                                 ? pending.matchingResult()
                                 : pending.takeMatchingCompletion();
                 if (result == null && pending != null && pending.settlementEvent() != null

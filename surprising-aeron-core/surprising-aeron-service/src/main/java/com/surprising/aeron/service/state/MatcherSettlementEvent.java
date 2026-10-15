@@ -188,10 +188,7 @@ public final class MatcherSettlementEvent implements
         batchStorage.activate(size);
         return batchStorage;
     }
-    void discardBatchStorage() {
-        if (plan != null) throw new IllegalStateException("cannot discard active settlement");
-        if (batchStorage != null) batchStorage.clear();
-    }
+
 
     MatcherSettlementEvent() {
     }
@@ -766,58 +763,7 @@ public final class MatcherSettlementEvent implements
         dispatched = true;
     }
 
-    MatcherSettlementEvent prepareBatch(
-            long commitSequence, long requiredLaneMask,
-            long commitTimestamp, long commitClusterPosition,
-            MatcherSettlementPlan[] plans, int planCount, TradingRuntimeState runtime,
-            RuntimeIdentityRegistry identities, CoreInstrument[] instruments,
-            int[] baseAssetIds, int[] quoteAssetIds, int[] settleAssetIds, int laneCount) {
-        if (commitSequence <= 0 || commitTimestamp < 0 || commitClusterPosition < 0
-                || requiredLaneMask == 0 || plans == null || planCount <= 0 || planCount > plans.length || runtime == null
-                || identities == null || instruments == null || instruments.length != plans.length
-                || baseAssetIds == null || baseAssetIds.length != plans.length
-                || quoteAssetIds == null || quoteAssetIds.length != plans.length
-                || settleAssetIds == null || settleAssetIds.length != plans.length || laneCount <= 0) {
-            throw new IllegalArgumentException("invalid matcher settlement batch event");
-        }
-        long coreSequence = plans[0].coreSequence();
-        int expectedOrders = 0;
-        for (int index = 0; index < planCount; index++) {
-            MatcherSettlementPlan value = plans[index];
-            if (value == null || value.coreSequence() != coreSequence
-                    || (value.requiredLaneMask() & ~requiredLaneMask) != 0) {
-                throw new IllegalArgumentException("invalid matcher settlement batch plan");
-            }
-            expectedOrders = Math.addExact(expectedOrders,
-                    Math.addExact(value.orderCount(), value.preCancellationCount()));
-        }
-        this.commitSequence = commitSequence;
-        this.requiredLaneMask = requiredLaneMask;
-        this.commitTimestamp = commitTimestamp;
-        this.commitClusterPosition = commitClusterPosition;
-        this.plan = plans[0];
-        this.batchPlans = plans;
-        this.batchPlanCount = planCount;
-        this.runtime = runtime;
-        this.identities = identities;
-        this.instrument = instruments[0];
-        this.batchInstruments = instruments;
-        this.baseAssetId = baseAssetIds[0];
-        this.quoteAssetId = quoteAssetIds[0];
-        this.settleAssetId = settleAssetIds[0];
-        this.batchBaseAssetIds = baseAssetIds;
-        this.batchQuoteAssetIds = quoteAssetIds;
-        this.batchSettleAssetIds = settleAssetIds;
-        this.isolatedChanges = true;
-        this.changes = runtime.acquireMatcherSettlementChanges(requiredLaneMask);
-        changes.ensureOrderCapacity(expectedOrders, requiredLaneMask);
-        treasuryTrades = hasTrade(plans, planCount);
-        prepareTreasuryDeltas(requiredLaneMask, treasuryTrades);
-        collected = false;
-        resetCompletions(laneCount);
-        runtime.expectMatcherSettlement(requiredLaneMask);
-        return this;
-    }
+
 
     void clear() {
         if (!complete() || changes != null) {

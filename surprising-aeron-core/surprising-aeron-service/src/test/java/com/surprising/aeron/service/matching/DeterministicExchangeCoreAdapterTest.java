@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.matching;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static com.surprising.aeron.service.state.DirectMatcherTestInputs.*;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -33,18 +34,48 @@ import org.junit.jupiter.api.Test;
 class DeterministicExchangeCoreAdapterTest {
 
     @Test
+    void directCommandRejectsMissingSettlementBeforeChangingTheBook() {
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            assertThatThrownBy(() -> adapter.placeDirect(adapter.matcherShardId("1"), 1,
+                    new java.util.UUID(7, 1), 1000, 7, bid(1, 90), null))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(adapter.orderBookLevelsAsync("1", 30).join()).isEmpty();
+        }
+    }
+
+    @Test
+    void failedDirectPrefixRetainsEarlierCancellationAndNeverSubmitsThePlacement() {
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            placeDirect(adapter, 7, bid(1, 90));
+            var order = bid(3, 80);
+            var id = new java.util.UUID(7, 3);
+            var target = preparePlace(adapter, 3, id, 1000, 7, order, List.of(1L, 2L));
+            adapter.cancelDirectPrefix(1000, 7, 1, "1");
+            target.recordDirectPreCancellation(1);
+            var failure = adapter.cancelDirectPrefix(1000, 7, 2, "1");
+            adapter.publishDirectPrefixFailure(adapter.matcherShardId("1"), 3, id, 3, 1000, failure, target);
+            assertThat(target.accepted()).isFalse();
+            assertThat(target.plan().preCancellationCount()).isEqualTo(1);
+            assertThat(target.outcome()).isEqualTo(MatchingResult.Outcome.FATAL_DIVERGENCE);
+            assertThat(target.nativeMatches(id)).isTrue();
+            assertThat(target.nativeOrderId()).isEqualTo(3);
+            assertThat(adapter.orderBookLevelsAsync("1", 30).join()).isEmpty();
+        }
+    }
+
+    @Test
     void depthQueriesDoNotDiscardRestingOrdersBeyondVisibleLevels() {
         try (var adapter = new DeterministicExchangeCoreAdapter()) {
             for (int level = 0; level < 151; level++) {
-                assertThat(adapter.placeAsync(11, new CoreMatchingOrder(1000 + level, "21",
+                assertThat(placeDirect(adapter, 11, new CoreMatchingOrder(1000 + level, "21",
                         CoreOrderSide.SELL, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
-                        100_000 + level, 1)).join().accepted()).isTrue();
+                        100_000 + level, 1)).accepted()).isTrue();
             }
             assertThat(adapter.orderBookLevelsAsync("21", 50).join()).hasSize(50);
             assertThat(adapter.orderBookLevelsAsync("21", 100).join()).hasSize(100);
-            var result = adapter.placeAsync(22, new CoreMatchingOrder(2000, "21",
+            var result = placeDirect(adapter, 22, new CoreMatchingOrder(2000, "21",
                     CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.IOC,
-                    100_150, 151)).join();
+                    100_150, 151));
             var trades = result.matcherEvents().stream()
                     .filter(e -> e.eventType() == exchange.core2.core.common.MatcherEventType.TRADE)
                     .toList();
@@ -62,14 +93,13 @@ class DeterministicExchangeCoreAdapterTest {
             boolean buy = side == CoreOrderSide.BUY;
             CoreOrderSide makerSide = buy ? CoreOrderSide.SELL : CoreOrderSide.BUY;
             for (int level = 0; level < 3; level++) {
-                adapter.place(11, new CoreMatchingOrder(101 + level, "21", makerSide,
+                placeDirect(adapter, 11, new CoreMatchingOrder(101 + level, "21", makerSide,
                         CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                         100_000 + (buy ? 1 : -1) * level * 10, 2));
             }
             var order = new CoreMatchingOrder(201, "21", side, CoreOrderType.MARKET,
                     CoreTimeInForce.IOC, buy ? 110_000 : 90_000, 6, 100);
-            var result = adapter.placeWithEvidence(adapter.matcherShardId("21"), 4,
-                    new java.util.UUID(22, 4), 1000, 22, order);
+            var result = placeDirect(adapter, 4, new java.util.UUID(22, 4), 1000, 22, order);
             var trades = result.matcherEvents().stream()
                     .filter(e -> e.eventType() == exchange.core2.core.common.MatcherEventType.TRADE).toList();
             assertThat(trades).extracting(MatcherResult.MatcherEvent::price)
@@ -81,10 +111,10 @@ class DeterministicExchangeCoreAdapterTest {
     @Test
     void marketSlippageRoundingDoesNotAllowAnExtraTick() {
         try (var adapter = new DeterministicExchangeCoreAdapter()) {
-            adapter.place(11, ask(101, 99));
-            adapter.place(11, ask(102, 100));
-            var result = adapter.placeAsync(22, new CoreMatchingOrder(201, "1", CoreOrderSide.BUY,
-                    CoreOrderType.MARKET, CoreTimeInForce.IOC, 110, 100, 100)).join();
+            placeDirect(adapter, 11, ask(101, 99));
+            placeDirect(adapter, 11, ask(102, 100));
+            var result = placeDirect(adapter, 22, new CoreMatchingOrder(201, "1", CoreOrderSide.BUY,
+                    CoreOrderType.MARKET, CoreTimeInForce.IOC, 110, 100, 100));
             assertThat(result.matcherEvents().stream()
                     .filter(e -> e.eventType() == exchange.core2.core.common.MatcherEventType.TRADE))
                     .extracting(MatcherResult.MatcherEvent::price).containsExactly(99L);
@@ -93,35 +123,23 @@ class DeterministicExchangeCoreAdapterTest {
 
     @Test
     void nativeCancellationPreservesEvidenceForPartialFillsAndRepeatedCancellation() {
-        try (var direct = new DeterministicExchangeCoreAdapter();
-             var composed = new DeterministicExchangeCoreAdapter()) {
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
             var order = new CoreMatchingOrder(901, "31", CoreOrderSide.BUY,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 10);
-            int shard = direct.matcherShardId(order.instrumentId());
-            int otherShard = composed.matcherShardId(order.instrumentId());
-            var placement = new java.util.UUID(7, 1);
-            direct.placeWithEvidence(shard, 1, placement, 1000, 7, order);
-            composed.executeShardWithEvidenceSync(otherShard, 1, placement, 901, 1000,
-                    () -> composed.place(7, order));
-            var taker = new CoreMatchingOrder(902, order.instrumentId(), CoreOrderSide.SELL,
-                    CoreOrderType.LIMIT, CoreTimeInForce.IOC, 90, 4);
-            direct.placeWithEvidence(shard, 2, new java.util.UUID(8, 2), 2000, 8, taker);
-            composed.executeShardWithEvidenceSync(otherShard, 2, new java.util.UUID(8, 2), 902, 2000,
-                    () -> composed.place(8, taker));
-            for (int sequence = 3; sequence <= 4; sequence++) {
-                var id = new java.util.UUID(7, sequence);
-                var actual = direct.cancelWithEvidence(shard, sequence, id, 901, sequence * 1000L, 7, order.instrumentId());
-                var expected = composed.executeShardWithEvidenceSync(otherShard, sequence, id, 901, sequence * 1000L,
-                        () -> composed.cancelForContinuation(7, 901, order.instrumentId()));
-                assertThat(actual.accepted()).isEqualTo(sequence == 3);
-                assertThat(actual.accepted()).isEqualTo(expected.accepted());
-                assertThat(actual.resultCode()).isEqualTo(expected.resultCode());
-                assertThat(actual.outcome()).isEqualTo(expected.outcome());
-                assertEvidenceEqual(actual, expected);
-                assertThat(actual.matcherEvents()).isEqualTo(expected.matcherEvents());
-            }
-            assertThat(direct.place(7, new CoreMatchingOrder(903, order.instrumentId(), CoreOrderSide.BUY,
-                    CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1)).nativeMatcherResult().timestamp()).isZero();
+            placeDirect(adapter, 7, order);
+            placeDirect(adapter, 8, new CoreMatchingOrder(902, "31", CoreOrderSide.SELL,
+                    CoreOrderType.LIMIT, CoreTimeInForce.IOC, 90, 4));
+            var accepted = cancelDirect(adapter, 3, new java.util.UUID(7, 3), 3000, 7, 901, "31");
+            assertThat(accepted.accepted()).isTrue();
+            assertThat(accepted.matcherEvents()).extracting(MatcherResult.MatcherEvent::size).containsExactly(6L);
+            var rejected = cancelDirect(adapter, 4, new java.util.UUID(7, 4), 4000, 7, 901, "31");
+            assertThat(rejected.accepted()).isFalse();
+            assertThat(rejected.outcome()).isEqualTo(MatchingResult.Outcome.REJECTED_UNCHANGED);
+            assertThat(rejected.nativeCoreSequence()).isEqualTo(4);
+            assertThat(rejected.nativeMatches(new java.util.UUID(7, 4))).isTrue();
+            assertThat(rejected.nativeOrderId()).isEqualTo(901);
+            assertThat(rejected.nativeMatcherSequence()).isGreaterThan(accepted.nativeMatcherSequence());
+            assertThat(accepted.matcherEvents()).extracting(MatcherResult.MatcherEvent::size).containsExactly(6L);
         }
     }
 
@@ -129,47 +147,40 @@ class DeterministicExchangeCoreAdapterTest {
     void nativePlacementHonorsPoisonAndValidatesEvidenceBeforeMatching() {
         try (var adapter = new DeterministicExchangeCoreAdapter()) {
             var order = bid(901, 90);
-            int shard = adapter.matcherShardId(order.instrumentId());
-            assertThatThrownBy(() -> adapter.placeWithEvidence(shard, 0, new java.util.UUID(0, 1),
-                    1000, 7, order)).isInstanceOf(IllegalArgumentException.class);
-            var placed = adapter.placeWithEvidence(shard, 1, new java.util.UUID(0, 1), 1000, 7, order);
-            assertThat(placed.accepted()).isTrue();
-            assertThat(placed.nativeMatcherSequence()).isEqualTo(1);
+            var id = new java.util.UUID(0, 1);
+            var target = preparePlace(adapter, 1, id, 1000, 7, order);
+            assertThatThrownBy(() -> adapter.placeDirect(adapter.matcherShardId("1"), 0, id,
+                    1000, 7, order, target)).isInstanceOf(IllegalArgumentException.class);
+            assertThat(adapter.orderBookLevelsAsync("1", 30).join()).isEmpty();
+            adapter.placeDirect(adapter.matcherShardId("1"), 1, id, 1000, 7, order, target);
+            assertThat(target.accepted()).isTrue();
+            assertThat(target.nativeMatcherSequence()).isEqualTo(1);
             adapter.poisonFromOwner("test divergence");
-            assertThatThrownBy(() -> adapter.placeWithEvidence(shard, 2, new java.util.UUID(0, 2),
-                    2000, 7, bid(902, 90))).isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("matcher is poisoned");
+            assertThatThrownBy(() -> placeDirect(adapter, 7, bid(902, 90)))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("matcher is poisoned");
         }
     }
 
     @Test
-    void nativePlacementEvidenceMatchesComposedPathWithoutChangingEarlierResults() {
-        try (var direct = new DeterministicExchangeCoreAdapter();
-             var composed = new DeterministicExchangeCoreAdapter()) {
-            CoreMatchingResult first = null;
+    void directPlacementRetainsEvidenceWithoutChangingEarlierSlots() {
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            MatchingResult first = null;
             for (int i = 1; i <= 4; i++) {
-                var order = new CoreMatchingOrder(i, "21",
-                        i == 2 ? CoreOrderSide.SELL : CoreOrderSide.BUY,
+                var order = new CoreMatchingOrder(i, "21", i == 2 ? CoreOrderSide.SELL : CoreOrderSide.BUY,
                         CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1);
                 var id = new java.util.UUID(7, i);
-                int shard = direct.matcherShardId(order.instrumentId());
-                int otherShard = composed.matcherShardId(order.instrumentId());
-                long user = i == 2 ? 8 : 7;
-                var actual = direct.placeWithEvidence(shard, i, id, 1000 + i, user, order);
-                var expected = composed.executeShardWithEvidenceSync(otherShard, i, id, i, 1000 + i,
-                        () -> composed.place(user, order));
-                assertThat(actual.accepted()).isEqualTo(expected.accepted());
-                assertThat(actual.resultCode()).isEqualTo(expected.resultCode());
-                assertThat(actual.outcome()).isEqualTo(expected.outcome());
-                assertEvidenceEqual(actual, expected);
-                assertThat(actual.matcherEvents()).isEqualTo(expected.matcherEvents());
+                var actual = placeDirect(adapter, i, id, 1000 + i, i == 2 ? 8 : 7, order);
+                assertThat(actual.accepted()).isTrue();
+                assertThat(actual.nativeCoreSequence()).isEqualTo(i);
+                assertThat(actual.nativeMatches(id)).isTrue();
+                assertThat(actual.nativeOrderId()).isEqualTo(i);
+                assertThat(actual.nativeMatcherSequence()).isEqualTo(i);
+                assertThat(actual.nativeMatcherShardId()).isEqualTo(adapter.matcherShardId("21"));
                 assertThat(actual.nativeMatcherResult().timestamp()).isEqualTo(1000 + i);
                 if (first == null) first = actual;
             }
             assertThat(first.nativeCoreSequence()).isEqualTo(1);
             assertThat(first.matcherEvents()).isEmpty();
-            assertThat(direct.place(7, new CoreMatchingOrder(5, "21", CoreOrderSide.BUY,
-                    CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1)).nativeMatcherResult().timestamp()).isZero();
         }
     }
 
@@ -194,25 +205,23 @@ class DeterministicExchangeCoreAdapterTest {
         String previous = System.getProperty("surprising.aeron.matching-engines");
         System.setProperty("surprising.aeron.matching-engines", "2");
         try (var adapter = new DeterministicExchangeCoreAdapter()) {
-            String first = "25", candidate = "26";
-            for (int attempt = 0; adapter.matcherShardId(first) == adapter.matcherShardId(candidate); attempt++) {
+            String first = "25", second = "26";
+            for (int attempt = 0; adapter.matcherShardId(first) == adapter.matcherShardId(second); attempt++) {
                 if (attempt == 128) throw new AssertionError("could not select a second partition");
-                candidate = Integer.toString(100+attempt);
+                second = Integer.toString(100 + attempt);
             }
-            String second = candidate;
-            CoreMatchingResult previousResult = null;
-            for (long id = 1; id <= 16; id++) {
-                long orderId = id;
-                previousResult = adapter.executeControlWithEvidenceSync(id, new java.util.UUID(7, id), id, 1000,
-                        () -> adapter.place(7, new CoreMatchingOrder(orderId, first, CoreOrderSide.BUY,
-                                CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1)));
-            }
-            var result = adapter.executeControlWithEvidenceSync(17, new java.util.UUID(7, 17), 17, 1000,
-                    () -> adapter.place(8, new CoreMatchingOrder(17, second, CoreOrderSide.BUY,
-                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1)));
-            assertThat(result.accepted()).isTrue();
-            assertThat(result.nativeSequence()).isLessThan(previousResult.nativeSequence());
-            assertThat(result.nativeMatcherSequence()).isGreaterThan(previousResult.nativeMatcherSequence());
+            for (long id = 1; id <= 16; id++) placeDirect(adapter, 7, bid(id, first, 90));
+            placeDirect(adapter, 8, bid(17, second, 90));
+            var firstNative = adapter.cancelControlOrder(1000, 7, 16, first);
+            var a = adapter.completeControlCancellations(18, new java.util.UUID(7, 18), 16, 1000,
+                    List.of(new DeterministicExchangeCoreAdapter.CancellationOrder(16, 7, first)), List.of(firstNative));
+            var secondNative = adapter.cancelControlOrder(1000, 8, 17, second);
+            var b = adapter.completeControlCancellations(19, new java.util.UUID(8, 19), 17, 1000,
+                    List.of(new DeterministicExchangeCoreAdapter.CancellationOrder(17, 8, second)), List.of(secondNative));
+            assertThat(a.accepted()).isTrue();
+            assertThat(b.accepted()).isTrue();
+            assertThat(secondNative.nativeSequence()).isLessThan(firstNative.nativeSequence());
+            assertThat(b.nativeMatcherSequence()).isGreaterThan(a.nativeMatcherSequence());
         } finally {
             if (previous == null) System.clearProperty("surprising.aeron.matching-engines");
             else System.setProperty("surprising.aeron.matching-engines", previous);
@@ -221,187 +230,112 @@ class DeterministicExchangeCoreAdapterTest {
 
     @Test
     void reusedCommandScopeDoesNotLeakTimestampIntoTheNextCommand() {
-        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            var first = adapter.executeWithEvidenceSync(1, new java.util.UUID(0, 1), 901, 1234,
-                    () -> adapter.place(7, bid(901, 90)));
-            var second = adapter.executeWithEvidenceSync(2, new java.util.UUID(0, 2), 902, 5678,
-                    () -> adapter.place(7, bid(902, 90)));
-            var unscoped = adapter.place(7, bid(903, 90));
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            var first = placeDirect(adapter, 1, new java.util.UUID(0, 1), 1234, 7, bid(901, 90));
+            var second = placeDirect(adapter, 2, new java.util.UUID(0, 2), 5678, 7, bid(902, 90));
+            var third = placeDirect(adapter, 3, new java.util.UUID(0, 3), 0, 7, bid(903, 90));
             assertThat(first.nativeMatcherResult().timestamp()).isEqualTo(1234);
             assertThat(second.nativeMatcherResult().timestamp()).isEqualTo(5678);
-            assertThat(unscoped.nativeMatcherResult().timestamp()).isZero();
-            var async = adapter.executeWithEvidence(3, new java.util.UUID(0, 3), 904, 9876,
-                    () -> adapter.placeAsync(7, bid(904, 90))).join();
-            assertThat(async.nativeMatcherResult().timestamp()).isEqualTo(9876);
-            assertThat(adapter.place(7, bid(905, 90)).nativeMatcherResult().timestamp()).isZero();
+            assertThat(third.nativeMatcherResult().timestamp()).isZero();
         }
     }
 
     @Test
     void cancelBatchStopsAtFirstFailureAndReturnsSuccessfulPrefix() {
-        List<CoreOrderState> orders = List.of(order(1), order(2), order(3));
-        List<Long> submissions = new ArrayList<>();
-        CompletableFuture<CoreMatchingResult> first = new CompletableFuture<>();
-        CompletableFuture<CoreMatchingResult> second = new CompletableFuture<>();
-
-        CompletableFuture<DeterministicExchangeCoreAdapter.CancelBatchOutcome> outcomeFuture =
-                DeterministicExchangeCoreAdapter.cancelBatchOrderedAsync(orders, order -> {
-                    submissions.add(order.orderId());
-                    return order.orderId() == 1 ? first : second;
-                });
-
-        assertThat(submissions).containsExactly(1L);
-        first.complete(result(true, "SUCCESS"));
-        assertThat(submissions).containsExactly(1L, 2L);
-        second.complete(result(false, "MATCHING_INVALID_ORDER_ID"));
-
-        DeterministicExchangeCoreAdapter.CancelBatchOutcome outcome = outcomeFuture.join();
-        assertThat(submissions).containsExactly(1L, 2L);
-        assertThat(outcome.successfulPrefix()).extracting(CoreMatchingResult::resultCode)
-                .containsExactly("SUCCESS");
-        assertThat(outcome.failedResult().resultCode()).isEqualTo("MATCHING_INVALID_ORDER_ID");
-        assertThat(outcome.exception()).isNull();
-        assertThat(outcome.results()).extracting(CoreMatchingResult::resultCode)
-                .containsExactly("SUCCESS", "MATCHING_INVALID_ORDER_ID", "NOT_SUBMITTED");
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            placeDirect(adapter, 7, bid(1, 90));
+            placeDirect(adapter, 7, bid(3, 80));
+            var result = adapter.cancelControlOrders(4, new java.util.UUID(7, 4), 0, 1000, List.of(
+                    new DeterministicExchangeCoreAdapter.CancellationOrder(1, 7, "1"),
+                    new DeterministicExchangeCoreAdapter.CancellationOrder(2, 7, "1"),
+                    new DeterministicExchangeCoreAdapter.CancellationOrder(3, 7, "1")));
+            assertThat(result.accepted()).isFalse();
+            assertThat(result.successfulPrefixCount()).isEqualTo(1);
+            assertThat(result.matcherStateChanged()).isTrue();
+            assertThat(result.cancellations()).extracting(CoreCancellationResult::resultCode)
+                    .containsExactly("SUCCESS", "MATCHING_UNKNOWN_ORDER_ID", "NOT_SUBMITTED");
+            assertThat(cancelDirect(adapter, 5, new java.util.UUID(7, 5), 1000, 7, 3, "1").accepted()).isTrue();
+        }
     }
 
     @Test
-    void marksRejectedReplacementAfterSuccessfulCancelAsMatcherStateChanged() {
-        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            assertThat(adapter.placeAsync(7, bid(1, 100)).join().accepted()).isTrue();
-            assertThat(adapter.placeAsync(7, ask(2, 110)).join().accepted()).isTrue();
-
-            CoreMatchingResult result = adapter.replaceOrderAsync(7, 1, "1", postOnlyBid(3, 120)).join();
-
-            assertThat(result.accepted()).isFalse();
-            assertThat(result.resultCode()).isNotEqualTo("SUCCESS");
-            assertThat(result.matcherStateChanged()).isTrue();
+    void rejectedPostOnlyPlacementRetainsSuccessfulDirectCancellationPrefix() {
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            placeDirect(adapter, 7, bid(1, 100));
+            placeDirect(adapter, 8, ask(2, 110));
+            var command = postOnlyBid(3, 120);
+            var id = new java.util.UUID(7, 3);
+            var target = preparePlace(adapter, 3, id, 1000, 7, command, List.of(1L));
+            assertThat(adapter.cancelDirectPrefix(1000, 7, 1, "1").resultCode())
+                    .isEqualTo(CommandResultCode.SUCCESS);
+            target.recordDirectPreCancellation(1);
+            adapter.placeDirect(adapter.matcherShardId("1"), 3, id, 1000, 7, command, target);
+            assertThat(target.accepted()).isFalse();
+            assertThat(target.matcherStateChanged()).isTrue();
+            assertThat(target.plan().preCancellationCount()).isEqualTo(1);
+            assertThat(target.outcome()).isEqualTo(MatchingResult.Outcome.KNOWN_PREFIX_APPLIED);
         }
     }
 
     @Test
     void consumesImmutableMatcherResultWithoutPerCommandStateReports() {
-        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            assertThat(adapter.placeAsync(11, ask(101, 100)).join().accepted()).isTrue();
-            assertThat(adapter.placeAsync(12, ask(102, 100)).join().accepted()).isTrue();
-
-            CoreMatchingOrder command = new CoreMatchingOrder(201, "1", CoreOrderSide.BUY,
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            placeDirect(adapter, 11, ask(101, 100));
+            placeDirect(adapter, 12, ask(102, 100));
+            var command = new CoreMatchingOrder(201, "1", CoreOrderSide.BUY,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, 4);
-            CoreMatchingResult result = adapter.executeWithEvidence(
-                    3,
-                    java.util.UUID.fromString("00000000-0000-0000-0000-000000000201"),
-                    command.orderId(),
-                    1_000,
-                    () -> adapter.placeAsync(22, command)).join();
-
+            var result = placeDirect(adapter, 22, command);
             assertThat(result.matcherEvents()).extracting(MatcherResult.MatcherEvent::matchedOrderId)
                     .containsExactly(101L, 102L);
-            assertThat(result.nativeOrderId()).isEqualTo(201L);
-            assertThat(result.nativeSequence()).isPositive();
-            assertThat(result.nativeMatcherResult()).isNotNull();
+            assertThat(result.nativeOrderId()).isEqualTo(201);
+            assertThat(result.nativeMatcherResult().sequence()).isPositive();
             assertThat(result.matcherEvents()).isSameAs(result.nativeMatcherResult().events());
             assertThat(result.marketData()).isSameAs(result.nativeMatcherResult().marketData());
         }
     }
 
     @Test
-    void pipelinesMatcherCommandsAndAdvancesSequences() {
-        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter(false)) {
-            CompletableFuture<CoreMatchingResult> firstNative = new CompletableFuture<>();
-            CompletableFuture<CoreMatchingResult> secondNative = new CompletableFuture<>();
-            AtomicInteger submissions = new AtomicInteger();
-
-            CompletableFuture<CoreMatchingResult> first = adapter.executeWithEvidence(
-                    1, java.util.UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                    101, 1_000, () -> {
-                        submissions.incrementAndGet();
-                        return firstNative;
-                    });
-            CompletableFuture<CoreMatchingResult> second = adapter.executeWithEvidence(
-                    2, java.util.UUID.fromString("00000000-0000-0000-0000-000000000002"),
-                    102, 1_001, () -> {
-                        submissions.incrementAndGet();
-                        return secondNative;
-                    });
-
-            assertThat(submissions).hasValue(2);
-            firstNative.complete(result(true, "SUCCESS"));
-            CoreMatchingResult firstResult = first.join();
-
-            secondNative.complete(result(false, "MATCHING_INVALID_ORDER_ID"));
-            CoreMatchingResult secondResult = second.join();
-            assertThat(firstResult.nativeMatcherSequence()).isEqualTo(1);
-            assertThat(secondResult.nativeMatcherSequence()).isEqualTo(2);
-        }
+    void matcherEvidenceAdvancesSequences() {
+        var ledger = new MatcherEvidenceLedger(com.surprising.aeron.service.state.LaneTopology.productionDefault());
+        var first = ledger.bind(1, new java.util.UUID(0, 1), 101, 1000,
+                ledger.nextSequence(0), 0, 0, nativeResult(2, 1));
+        var second = ledger.bind(2, new java.util.UUID(0, 2), 102, 1001,
+                ledger.nextSequence(0), 0, 0, nativeResult(2, 2));
+        assertThat(first.nativeMatcherSequence()).isEqualTo(1);
+        assertThat(second.nativeMatcherSequence()).isEqualTo(2);
     }
 
     @Test
     void fixedMatcherShardRejectsOutOfNativeSequenceCompletion() {
-        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter(false)) {
-            CompletableFuture<CoreMatchingResult> firstNative = new CompletableFuture<>();
-            CompletableFuture<CoreMatchingResult> secondNative = new CompletableFuture<>();
-            CompletableFuture<CoreMatchingResult> first = adapter.executeWithEvidence(
-                    1, java.util.UUID.fromString("00000000-0000-0000-0000-000000000021"),
-                    201, 1_000, () -> firstNative);
-            CompletableFuture<CoreMatchingResult> second = adapter.executeWithEvidence(
-                    2, java.util.UUID.fromString("00000000-0000-0000-0000-000000000022"),
-                    202, 1_001, () -> secondNative);
-
-            secondNative.complete(nativeResult(2, 2));
-            CoreMatchingResult secondResult = second.join();
-            firstNative.complete(nativeResult(2, 1));
-
-            assertThat(secondResult.nativeMatcherShardId())
-                    .isEqualTo(adapter.topology().matcherShardId(2));
-            assertThatThrownBy(first::join)
-                    .hasRootCauseInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("native sequence is not strictly increasing");
-        }
+        var ledger = new MatcherEvidenceLedger(com.surprising.aeron.service.state.LaneTopology.productionDefault());
+        ledger.bind(2, new java.util.UUID(0, 2), 202, 1001,
+                ledger.nextSequence(0), 0, 0, nativeResult(2, 2));
+        assertThatThrownBy(() -> ledger.bind(1, new java.util.UUID(0, 1), 201, 1000,
+                ledger.nextSequence(0), 0, 0, nativeResult(2, 1)))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("native sequence is not strictly increasing");
     }
 
     @Test
-    void poisonedMatcherDiscardsAlreadySubmittedCompletionAndRejectsFutureSupplier() throws Exception {
-        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter(false)) {
-            CompletableFuture<CoreMatchingResult> firstNative = new CompletableFuture<>();
-            CompletableFuture<CoreMatchingResult> secondNative = new CompletableFuture<>();
-            AtomicInteger submissions = new AtomicInteger();
-            CompletableFuture<CoreMatchingResult> first = adapter.executeWithEvidence(
-                    1, java.util.UUID.fromString("00000000-0000-0000-0000-000000000011"),
-                    101, 1_000, () -> {
-                        submissions.incrementAndGet();
-                        return firstNative;
-                    });
-            CompletableFuture<CoreMatchingResult> second = adapter.executeWithEvidence(
-                    2, java.util.UUID.fromString("00000000-0000-0000-0000-000000000012"),
-                    102, 1_001, () -> {
-                        submissions.incrementAndGet();
-                        return secondNative;
-                    });
-
-            firstNative.complete(result(false, "EXCHANGE_CORE_FAILURE"));
-            CompletableFuture<CoreMatchingResult> third = adapter.executeWithEvidence(
-                    3, java.util.UUID.fromString("00000000-0000-0000-0000-000000000013"),
-                    103, 1_002, () -> {
-                        submissions.incrementAndGet();
-                        return CompletableFuture.completedFuture(result(true, "SUCCESS"));
-                    });
-            assertThat(first.join().resultCode()).isEqualTo("EXCHANGE_CORE_FAILURE");
-            var progressAfterFatal = matcherProgress(adapter);
-            secondNative.complete(result(true, "SUCCESS"));
-            assertThatThrownBy(second::join).hasCauseInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("completion discarded after fatal divergence");
-            assertThatThrownBy(third::join).hasCauseInstanceOf(IllegalStateException.class)
+    void poisonRejectsPreparedDirectCommandWithoutAdvancingEvidence() throws Exception {
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            var command = bid(1, 90);
+            var id = new java.util.UUID(0, 1);
+            var prepared = preparePlace(adapter, 1, id, 1000, 7, command);
+            adapter.poisonFromOwner("fatal divergence");
+            var progress = matcherProgress(adapter);
+            assertThatThrownBy(() -> adapter.placeDirect(adapter.matcherShardId("1"), 1, id, 1000,
+                    7, command, prepared)).isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("matcher is poisoned");
-            assertThat(matcherProgress(adapter)).isEqualTo(progressAfterFatal);
-            assertThat(submissions).hasValue(2);
+            assertThat(prepared.resultPrepared()).isFalse();
+            assertThat(matcherProgress(adapter)).isEqualTo(progress);
         }
     }
 
     @Test
     void singleSymbolBookQueryAndBootstrapUseSeparateScopes() {
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            assertThat(adapter.placeAsync(7, bid(1, 100)).join().accepted()).isTrue();
-            assertThat(adapter.placeAsync(8, bid(2, "2", 200)).join().accepted()).isTrue();
+            assertThat(placeDirect(adapter, 7, bid(1, 100)).accepted()).isTrue();
+            assertThat(placeDirect(adapter, 8, bid(2, "2", 200)).accepted()).isTrue();
 
             assertThat(adapter.orderBookLevelsAsync("1", 30).join())
                     .extracting(value -> value.instrumentId()).containsOnly("1");
@@ -419,11 +353,9 @@ class DeterministicExchangeCoreAdapterTest {
         TradingCoreState state = stateWithOpenBid(100);
         MatcherSnapshot snapshot;
         int bookHash;
-        CoreMatchingResult beforeSnapshot;
+        MatchingResult beforeSnapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            beforeSnapshot = adapter.executeWithEvidence(
-                    1, java.util.UUID.fromString("00000000-0000-0000-0000-000000000100"),
-                    100, 1_000, () -> adapter.placeAsync(7, bid(100))).join();
+            beforeSnapshot = placeDirect(adapter, 1, new java.util.UUID(0, 100), 1000, 7, bid(100));
             assertThat(beforeSnapshot.accepted()).isTrue();
             snapshot = adapter.snapshotAsync(
                     91, 1, state.businessStateHash(), state, activeOrders(state)).join();
@@ -452,9 +384,7 @@ class DeterministicExchangeCoreAdapterTest {
         try (DeterministicExchangeCoreAdapter restored =
                      new DeterministicExchangeCoreAdapter(state, activeOrders(state), 1, decoded)) {
             assertThat(restored.orderBooksStateHashAsync().join()).isEqualTo(bookHash);
-            CoreMatchingResult afterRestore = restored.executeWithEvidence(
-                    2, java.util.UUID.fromString("00000000-0000-0000-0000-000000000101"),
-                    101, 1_001, () -> restored.placeAsync(8, bid(101, 90))).join();
+            var afterRestore = placeDirect(restored, 2, new java.util.UUID(0, 101), 1001, 8, bid(101, 90));
             assertThat(afterRestore.nativeMatcherSequence()).isGreaterThan(
                     snapshot.progress(afterRestore.nativeMatcherShardId()).matcherSequence());
         }
@@ -471,7 +401,7 @@ class DeterministicExchangeCoreAdapterTest {
             persistEntered.complete(null);
             return releasePersist.thenCompose(ignored -> nativePersist.get());
         })) {
-            assertThat(adapter.placeAsync(7, bid(100)).join().accepted()).isTrue();
+            assertThat(placeDirect(adapter, 7, bid(100)).accepted()).isTrue();
             CompletableFuture<MatcherSnapshot> first =
                     adapter.snapshotAsync(94, 1, state.businessStateHash(), state, activeOrders(state));
 
@@ -503,7 +433,7 @@ class DeterministicExchangeCoreAdapterTest {
         TradingCoreState original = stateWithOpenBid(100);
         MatcherSnapshot snapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            assertThat(adapter.placeAsync(7, bid(100)).join().accepted()).isTrue();
+            assertThat(placeDirect(adapter, 7, bid(100)).accepted()).isTrue();
             snapshot = adapter.snapshotAsync(
                     92, 1, original.businessStateHash(), original, activeOrders(original)).join();
         }
@@ -526,7 +456,7 @@ class DeterministicExchangeCoreAdapterTest {
         TradingCoreState state = stateWithOpenBid(100);
         byte[] encoded;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            assertThat(adapter.placeAsync(7, bid(100)).join().accepted()).isTrue();
+            assertThat(placeDirect(adapter, 7, bid(100)).accepted()).isTrue();
             encoded = MatcherSnapshotCodec.encode(adapter.snapshotAsync(
                     93, 1, state.businessStateHash(), state, activeOrders(state)).join());
         }
@@ -583,19 +513,6 @@ class DeterministicExchangeCoreAdapterTest {
 
     private static CoreMatchingResult result(boolean accepted, String resultCode) {
         return new CoreMatchingResult(accepted, resultCode);
-    }
-
-    private static void assertEvidenceEqual(CoreMatchingResult actual, CoreMatchingResult expected) {
-        assertThat(actual.nativeCoreSequence()).isEqualTo(expected.nativeCoreSequence());
-        assertThat(actual.nativeCommandIdMostSignificantBits())
-                .isEqualTo(expected.nativeCommandIdMostSignificantBits());
-        assertThat(actual.nativeCommandIdLeastSignificantBits())
-                .isEqualTo(expected.nativeCommandIdLeastSignificantBits());
-        assertThat(actual.nativeOrderId()).isEqualTo(expected.nativeOrderId());
-        assertThat(actual.nativeSequence()).isEqualTo(expected.nativeSequence());
-        assertThat(actual.nativeMatcherSequence()).isEqualTo(expected.nativeMatcherSequence());
-        assertThat(actual.nativeAeronTimestamp()).isEqualTo(expected.nativeAeronTimestamp());
-        assertThat(actual.nativeMatcherShardId()).isEqualTo(expected.nativeMatcherShardId());
     }
 
     private static CoreMatchingResult nativeResult(int symbolId, long sequence) {

@@ -30,23 +30,6 @@ class CommandSlotRingTest {
     }
 
     @Test
-    void settlementBufferBelongsToOneSlotAndIsReusedOnlyAfterRelease() {
-        var ring = new CommandSlotRing(2, 1);
-        var first = ring.claim(1);
-        var buffer = first.settlementPlanBuffer();
-        var other = ring.claim(2).settlementPlanBuffer();
-        assertThat(other).isNotSameAs(buffer);
-        buffer.preCancellations(new long[]{7});
-        first.result(new CoreMatchingResult(true, "ACCEPTED").withCoreSequenceInPlace(1), 1, 1);
-        assertThatThrownBy(() -> ring.release(1)).isInstanceOf(IllegalStateException.class);
-        assertThat(buffer.preCancellationCount()).isOne();
-        first.completeLanes(1);
-        ring.release(1);
-        assertThat(buffer.preCancellationCount()).isZero();
-        assertThat(ring.claim(3).settlementPlanBuffer()).isSameAs(buffer);
-    }
-
-    @Test
     void suspendedSequencesTransferFundsWithoutSharingTheActiveBuffer() {
         var ring = new CommandSlotRing(4, 4);
         var first = ring.claim(1);

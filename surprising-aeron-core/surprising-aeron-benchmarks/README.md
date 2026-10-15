@@ -94,3 +94,10 @@ Owner 的输入及响应接口现在只携带 `sessionId`。`ReplySlotAllocation
 `MatcherTreasuryReceiptBenchmark` 改为预留 Matcher 发布槽并使用实际 Matcher→Lane 邮箱，删除旧 Owner 派发调用；`ActiveOrderIndexBenchmark` 的清理检查改用现有 primitive API。新增 `MatcherTreasuryReceiptBenchmarkTest`，以 1/4 个 Lane 各执行有限次结算、复用事件并在关闭时核对 Treasury；2 项功能用例通过，详见 [D2 功能验证](../../docs/validation/d2-complete-20261015.json)。本轮未运行 JMH 计时、真实节点压测、快照或恢复，不给出性能结论。
 
 D2 复审中，`MatcherTreasuryReceiptBenchmark` 移除发布模式标记，统一调用 `reserveMatcherPublication()` 后发布。1/4 Lane 的 2 项有限功能用例通过，纳入 [D2 复审的 158 项必要用例](../../docs/validation/d2-review-20261015.json)，没有运行计时压测。
+
+
+### D3 交易 API 清理（2026-10-15）
+
+移除多生产者直接调用同步适配器的 `ExchangeCoreConcurrentBenchmark` 和使用裸撮合 API 的 `MarketSlippageGuardBenchmark`，`ClusterCapacityMain` 本地基线不再调用已删除入口。它们的旧调用方式不能代表当前单写者 Matcher / Direct 结算路径；滑点功能由迁到真实 Direct 槽的适配器用例覆盖。
+
+`InProcessTradingAllocationBenchmark` 等现有入口继续走实际 Owner→Matcher→Lane→Ledger 流水线。基准模块及其直接依赖编译通过，财务回执夹具以 1/4 Lane 各做有限功能验证，合计服务端 193 项、基准夹具 2 项通过，见 [D3 功能验证](../../docs/validation/d3-complete-20261015.json)。本次没有运行 JMH 计时、JFR 或压测，不追加性能记录。

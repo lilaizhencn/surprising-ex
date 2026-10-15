@@ -264,7 +264,7 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 
 顺序PLACE通过原 `PlaceBatchIntentSource.captureAdmittedOrder` 在Lane直接填写批次自有的冻结输入槽。`BatchPlaceReservation` 只轮询原控制任务，Owner完成后绑定引用，不再把该输入复制到另一订单对象；它的下一项准备不会清空先前项的批次槽。资产选择在Lane执行，Owner只提供已解析的资产身份。这个配置捕获和输入租约不形成新的账户表、全局镜像、worker或队列。
 
-`CommandSlot.PlaceMatchingContinuation` 复用现有撮合任务，Matcher通过 `DeterministicExchangeCoreAdapter.placeAdmittedDirect` 读取冻结输入，直接调用原生 `placeInto`，保留剩余数量、产品线滑点、订单类型和撮合证据。Owner的普通活跃顺序提交不再创建 `CoreMatchingOrder` 或本项提交lambda；前置撤单仍沿用原wrapper，后续继续迁移。适配入口拒绝Lane活权威对象、错误用户、已释放槽及无剩余数量。原生事实发布前所有输入已经成为调用参数，continuation发布后不再读取这些可复用字段；输入值本身保留至批次退休。冷同步接口仍使用独立公开值。
+`CommandSlot.PlaceMatchingContinuation` 复用现有撮合任务，Matcher通过 `DeterministicExchangeCoreAdapter.placeAdmittedDirect` 读取冻结输入，直接调用原生 `placeInto`，保留剩余数量、产品线滑点、订单类型和撮合证据。Owner的普通活跃顺序提交不再创建 `CoreMatchingOrder` 或本项提交lambda；前置撤单已在后续 D3 清理中移入同一复用任务。适配入口拒绝Lane活权威对象、错误用户、已释放槽及无剩余数量。原生事实发布前所有输入已经成为调用参数，continuation发布后不再读取这些可复用字段；输入值本身保留至批次退休。普通交易的冷/活跃执行均使用预构建 Direct 事实，旧裸同步接口已在 D3 删除。
 
 必要验证见 [批量输入功能验证](../../docs/validation/sequential-matcher-input-20261015.json)，覆盖六产品线的双币对市价/限价、重复项拒绝和转顺序执行、配置版本、独立输入、改单、触发、Ledger和异常退出。异常退出夹具按生产方式推进Ledger，并在等待时保留已提供的撮合结果；关闭前后比较真实致命边界已观察的撮合序号，仍保留精确相等断言。按要求没有执行Cluster快照/恢复或wallet。
 
@@ -392,3 +392,14 @@ D1 补充审查：`ClusterServiceEgress.TransportSession` 仍实现 `ClientSessi
 对 `53f778a40` 复审后，删除直达事件剩余的非 Matcher 发布模式开关，开始及结果/失败发布统一要求已预留的 Matcher 槽。单笔响应编码异常不再转换为空成功；单笔和批量都在编码完成后公开结果，异常归还槽并上抛、清除旧 payload/长度。`OrderBatchPending` 删除无池构造和 null 分支，测试使用真实响应池并明确转移租约。响应池两种 API 共用槽申请，裸数组的大响应/池满路径直接分配数组，不额外创建描述符；必要的独立存储继续保留。
 
 3 个回归用例在修复前失败；最终 158 项必要用例通过，含真实四 Lane 保留票据延迟消费时的回收保护、响应编码失败及重编码后的租约释放，见 [D2 复审验证](../../docs/validation/d2-review-20261015.json)。未执行压测、快照、恢复或 wallet；C1 引用计数并发及其他 D 项独立待办。
+
+
+### D3 撮合指令及结算入口收敛（2026-10-15）
+
+普通下单、撤单、改单和触发单统一由 `DirectMatcherSettlementPreparation` 先准备事实槽，再交给 `MatcherCommandSubmission` 选择既有 `CommandSlot` 任务。PLACE 读取同一次 Lane 准入输出，顺序批量读取冻结订单收据，触发单读取已冻结子单；Owner 不再重新解析或回读账户构造 Matcher 输入。前置撤单直接在复用任务内按序执行，把成功前缀记入同一事实。
+
+`DeterministicExchangeCoreAdapter` 已删除裸交易、Async、WithEvidence 及通用证据包装。Matcher 把原生结果写入既有 Direct 槽，Account Lane 执行业务，Ledger 完成资金事实，Owner 按序收取完成条件与发布响应。`OrderedCommitCoordinator` 的结果后补结算、旧撤单续步、批量结果数组及分区扫描已删除；`SettlementBatchInput` 和无调用的 Owner 订单重建方法一起移除。
+
+强平/交割保留实际控制撤单：在原 Matcher worker 执行显式撤单，原生序号按实际分片校验，Owner 只绑定已完成控制结果。新增的槽内控制任务和前置撤单引用只承担线程交接，随槽退休清空；没有新增账户镜像、worker、队列或阶段。
+
+195 项必要用例通过，覆盖六产品线成交、部分成交与拒单、批量共享 maker、改单/触发、跨分片强平撤单和 Ledger，见 [D3 功能验证](../../docs/validation/d3-complete-20261015.json)。最终验收不运行快照/恢复或 wallet；首轮误选旧快照夹具的失败另行保留。未执行压测、JMH/JFR，不给出分配或吞吐收益结论。

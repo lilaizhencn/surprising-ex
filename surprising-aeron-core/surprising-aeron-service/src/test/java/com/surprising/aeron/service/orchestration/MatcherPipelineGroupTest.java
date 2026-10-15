@@ -118,23 +118,30 @@ class MatcherPipelineGroupTest {
             CoreMatchingOrder first = order(1, firstSymbol);
             CoreMatchingOrder second = order(2, secondSymbol);
 
-            pipelines.submit(firstShard, 1, () -> adapter.executeWithEvidenceSync(
-                    1, UUID.randomUUID(), 1, 1_000, () -> {
-                        // Keep this shard's command scope active while another shard completes.
-                        firstStarted.countDown();
-                        await(releaseFirst);
-                        return adapter.place(101, first);
-                    }));
+            var firstId = UUID.randomUUID();
+            var secondId = UUID.randomUUID();
+            var firstTarget = com.surprising.aeron.service.state.DirectMatcherTestInputs.preparePlace(
+                    adapter, 1, firstId, 1000, 101, first);
+            var secondTarget = com.surprising.aeron.service.state.DirectMatcherTestInputs.preparePlace(
+                    adapter, 2, secondId, 1001, 102, second);
+            pipelines.submit(firstShard, 1, () -> {
+                firstStarted.countDown();
+                await(releaseFirst);
+                return adapter.placeDirect(firstShard, 1, firstId, 1000, 101, first, firstTarget);
+            }, firstTarget);
             assertThat(firstStarted.await(5, TimeUnit.SECONDS)).isTrue();
-            pipelines.submit(secondShard, 2, () -> adapter.executeWithEvidenceSync(
-                    2, UUID.randomUUID(), 2, 1_001, () -> adapter.place(102, second)));
+            int readyShard = secondShard;
+            pipelines.submit(secondShard, 2, () -> adapter.placeDirect(
+                    readyShard, 2, secondId, 1001, 102, second, secondTarget), secondTarget);
 
-            var secondResult = await(pipelines, 2, TimeUnit.SECONDS.toNanos(5));
+            awaitDirect(secondTarget);
+            var secondResult = secondTarget;
             assertThat(secondResult.accepted()).isTrue();
             assertThat(secondResult.nativeMatcherResult().timestamp()).isEqualTo(1_001);
-            assertThat(pipelines.poll(1)).isNull();
+            assertThat(firstTarget.ready()).isFalse();
             releaseFirst.countDown();
-            var firstResult = await(pipelines, 1, TimeUnit.SECONDS.toNanos(5));
+            awaitDirect(firstTarget);
+            var firstResult = firstTarget;
             assertThat(firstResult.accepted()).isTrue();
             assertThat(firstResult.nativeMatcherResult().timestamp()).isEqualTo(1_000);
         } finally {
@@ -142,6 +149,14 @@ class MatcherPipelineGroupTest {
             pipelines.closeShards(adapter::closeShard);
             if (previous == null) System.clearProperty("surprising.aeron.matching-engines");
             else System.setProperty("surprising.aeron.matching-engines", previous);
+        }
+    }
+
+    private static void awaitDirect(com.surprising.aeron.service.state.MatcherSettlementEvent event) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!event.ready()) {
+            if (System.nanoTime() >= deadline) throw new AssertionError("Direct Matcher result timed out");
+            Thread.onSpinWait();
         }
     }
 

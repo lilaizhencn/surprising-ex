@@ -5356,12 +5356,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             RuntimeIdentityRegistry identities) { return settlements.dispatchMatcherSettlement(coreSequence, expectedLaneMask, commitSequence, commitTimestamp, commitClusterPosition, plan, matchingResult, identities); }
     public void releaseMatcherSettlement(MatcherSettlementEvent event) { settlements.releaseMatcherSettlement(event); }
     public void discardMatcherSettlement(MatcherSettlementEvent event) { settlements.discardMatcherSettlement(event); }
-    public MatcherSettlementEvent dispatchOrderBatchMatcherSettlement(
-            long sequence, long laneMask, long orderId,
-            com.surprising.aeron.service.matching.MatchingResult result,
-            RuntimeIdentityRegistry identities) {
-        return settlements.dispatchOrderBatchMatcherSettlement(sequence, laneMask, orderId, result, identities);
-    }
     public RuntimeTreasuryDelta collectOrderBatchMatcherSettlement(
             MatcherSettlementEvent event, TerminalOrderSink terminalOrderSink) {
         return collectOrderBatchMatcherSettlement(event, null, terminalOrderSink);
@@ -5371,16 +5365,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             MatcherSettlementEvent event, RuntimeFundsAccumulator funds, TerminalOrderSink terminalOrderSink) {
         return settlements.collectOrderBatchMatcherSettlement(event, funds, terminalOrderSink);
     }
-
-    public MatcherSettlementEvent dispatchMatcherSettlementBatch(long sequence, SettlementBatchInput batch,
-            RuntimeIdentityRegistry identities, long timestamp, long position) {
-        return settlements.dispatchMatcherSettlementBatch(sequence, batch, identities, timestamp, position);
-    }
-
-    public MatcherSettlementEvent dispatchMatcherSettlementBatch(
-            long coreSequence, long[] takerOrderIds, long[] expectedLaneMasks,
-            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities,
-            long commitTimestamp, long commitClusterPosition) { return settlements.dispatchMatcherSettlementBatch(coreSequence, takerOrderIds, expectedLaneMasks, matchingResults, identities, commitTimestamp, commitClusterPosition); }
 
     boolean pendingReservation(long orderId, long userId) { return pendingReservations.pendingReservation(orderId, userId); }
     long pendingReservedUnits(long userId, int assetId) { return pendingReservations.pendingReservedUnits(userId, assetId); }
