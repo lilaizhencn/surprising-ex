@@ -91,7 +91,8 @@ class ClusterMixedCapacityTest {
     @Test void baselinePopulationFor256SymbolsCoversFourLanesAndHftPairsCrossLanes() {
         var users=ClusterMixedCapacityMain.users();var topology=LaneTopology.configured(false);
         assertThat(users).hasSize(1769).doesNotHaveDuplicates();
-        for(int i=0;i<users.size();i++)assertThat(topology.accountLaneId(users.get(i))).isEqualTo(i&3);
+        int laneMask = topology.accountLaneCount() - 1;
+        for(int i=0;i<users.size();i++)assertThat(topology.accountLaneId(users.get(i))).isEqualTo(i & laneMask);
         for(int i=0;i<256;i++)assertThat(topology.accountLaneId(users.get(1257+i)))
                 .isNotEqualTo(topology.accountLaneId(users.get(1513+(i+1)%256)));
     }

@@ -138,8 +138,9 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         var topology=LaneTopology.configured(false);
         var result=new ArrayList<Long>(USERS+3*SYMBOLS+1);
         long candidate=100_000;
+        int laneMask = topology.accountLaneCount() - 1;
         for(int i=0;i<USERS+3*SYMBOLS+1;i++) {
-            while(topology.accountLaneId(candidate)!=(i&3))candidate++;
+            while(topology.accountLaneId(candidate)!=(i & laneMask))candidate++;
             result.add(candidate++);
         }
         return List.copyOf(result);
