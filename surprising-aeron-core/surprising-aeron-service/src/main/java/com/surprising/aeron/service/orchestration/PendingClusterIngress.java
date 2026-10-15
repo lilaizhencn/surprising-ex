@@ -2,7 +2,7 @@ package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CommandFingerprint;
-import io.aeron.cluster.service.ClientSession;
+import static com.surprising.aeron.service.orchestration.ClusterServiceEgress.NO_SESSION_ID;
 
 /** 已复制但尚未进入业务阶段的命令 FIFO；保留原日志时间和位置，重试不重新执行命令。 */
 public final class PendingClusterIngress {
@@ -10,7 +10,7 @@ public final class PendingClusterIngress {
     private static final int CAPACITY = 8192;
     /** 复用槽位，命令进入时不额外分配任务对象。 */
     private final Entry[] entries = new Entry[CAPACITY];
-    /** 队首与有效条数，均只由集群服务线程更新。 */
+    /** 队首与有效条数，均只由 Owner 线程更新。 */
     private int head, size;
     /** 保留 payload 的总字节预算，避免大批量命令耗尽堆。 */
     private int bytes;
@@ -22,17 +22,17 @@ public final class PendingClusterIngress {
         if (length > MAX_BYTES) throw new IllegalStateException("replicated command exceeds backlog byte capacity");
         return size < CAPACITY && length <= MAX_BYTES - bytes;
     }
-    public void add(ClientSession session, CoreMessage command, long timestamp, long position) {
-        add(session, command, timestamp, position, null);
+    public void add(long sessionId, CoreMessage command, long timestamp, long position) {
+        add(sessionId, command, timestamp, position, null);
     }
-    public void add(ClientSession session, CoreMessage command, long timestamp, long position,
+    public void add(long sessionId, CoreMessage command, long timestamp, long position,
              CommandFingerprint fingerprint) {
         int length = command == null ? 0 : command.payloadUnsafe().length;
         if (length > MAX_BYTES - bytes || size == CAPACITY) throw new IllegalStateException("replicated command backlog capacity exhausted");
         bytes += length;
         Entry entry = entries[(head + size++) & (CAPACITY - 1)];
         entry.queuedNanos = command == null ? 0 : CoreMatchingPhaseMetrics.sampleStart(command.header());
-        entry.session = session; entry.command = command; entry.timestamp = timestamp; entry.position = position; entry.fingerprint = fingerprint;
+        entry.sessionId = sessionId; entry.command = command; entry.timestamp = timestamp; entry.position = position; entry.fingerprint = fingerprint;
     }
     public Entry first() { return size == 0 ? null : entries[head]; }
     public int size() { return size; }
@@ -40,15 +40,15 @@ public final class PendingClusterIngress {
         if (size == 0) throw new IllegalStateException("empty replicated command backlog");
         Entry entry = entries[head];
         if (entry.command != null) bytes -= entry.command.payloadUnsafe().length;
-        entry.session = null; entry.command = null; entry.fingerprint = null;
+        entry.sessionId = NO_SESSION_ID; entry.command = null; entry.fingerprint = null;
         entry.timestamp = entry.position = entry.queuedNanos = 0;
         head = (head + 1) & (CAPACITY - 1); size--;
     }
     public void clear() { while (size != 0) remove(); }
     /** 原始日志记录上下文；出队前不会复用。 */
     public static final class Entry {
-        /** 响应对应的集群会话；重放时可能为空。 */
-        public ClientSession session;
+        /** 响应会话 ID；无客户端的日志输入使用 NO_SESSION_ID。 */
+        public long sessionId = NO_SESSION_ID;
         /** 已拥有 payload 的不可变命令。 */
         public CoreMessage command;
         /** 输入线程对当前不可变日志命令计算的指纹，随槽位一起释放。 */

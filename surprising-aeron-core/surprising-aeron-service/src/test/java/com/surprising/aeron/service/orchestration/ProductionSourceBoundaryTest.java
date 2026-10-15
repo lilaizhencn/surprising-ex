@@ -14,6 +14,31 @@ import org.junit.jupiter.api.Test;
 
 class ProductionSourceBoundaryTest {
     @Test
+    void ownerCarriesSessionIdsAndNeitherD1HelperImplementsAnAeronInterface() throws IOException {
+        Path root = Path.of("").toAbsolutePath();
+        while (!Files.isDirectory(root.resolve("surprising-aeron-core"))) {
+            root = root.getParent();
+            if (root == null) throw new AssertionError("repository root unavailable");
+        }
+        Path orchestration = root.resolve("surprising-aeron-core/surprising-aeron-service/src/main/java/"
+                + "com/surprising/aeron/service/orchestration");
+        for (String name : java.util.List.of("TradingCoreOwner", "TradingOwnerLoop", "PendingClusterIngress",
+                "ClusterCommandWindow", "OwnerResponsePublisher")) {
+            String source = Files.readString(orchestration.resolve(name + ".java"));
+            assertThat(source).as("Owner session boundary in %s", name)
+                    .doesNotContain("ClientSession", "TransportSession");
+            assertThat(source).contains("long sessionId");
+        }
+        assertThat(io.aeron.cluster.service.Cluster.class.isAssignableFrom(OwnerLogContext.class)).isFalse();
+        assertThat(io.aeron.cluster.service.ClientSession.class.isAssignableFrom(
+                ClusterServiceEgress.TransportSession.class)).isFalse();
+        assertThat(Files.readString(orchestration.resolve("OwnerLogContext.java")))
+                .doesNotContain("UnsupportedOperationException");
+        assertThat(Files.readString(orchestration.resolve("ClusterServiceEgress.java")))
+                .doesNotContain("UnsupportedOperationException", "tryClaim(", "DirectBufferVector");
+    }
+
+    @Test
     void accountQueryProjectionReadsOnlyItsExplicitLane() throws IOException {
         Path root = Path.of("").toAbsolutePath();
         while (!Files.isDirectory(root.resolve("surprising-aeron-core"))) {

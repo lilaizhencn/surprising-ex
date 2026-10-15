@@ -52,8 +52,9 @@ public class InProcessTradingAllocationBenchmark {
     private final UnsafeBuffer[][] frames = new UnsafeBuffer[2][WINDOW];
     private final int[][][] orderOffsets = new int[2][WINDOW][];
     private final int[][][] clientOffsets = new int[2][WINDOW][];
-    private final ClusterServiceEgress egress = new ClusterServiceEgress();
     private final Sink session = new Sink();
+    private final ClusterServiceEgress egress = new ClusterServiceEgress((cluster, target) -> session);
+    private long sessionId;
     private TradingOwnerLoop owner;
     private long sequence, orderId = 1_000_000, submitted;
     private Interval interval;
@@ -84,6 +85,14 @@ public class InProcessTradingAllocationBenchmark {
                     default -> null;
                 });
         egress.start(cluster);
+        var actual = (ClientSession) Proxy.newProxyInstance(ClientSession.class.getClassLoader(),
+                new Class<?>[]{ClientSession.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "id" -> 1L;
+                    case "isClosing" -> false;
+                    case "close" -> null;
+                    default -> throw new AssertionError(method.getName());
+                });
+        sessionId = egress.transportSession(actual).id();
         owner = new TradingOwnerLoop(ProductLine.LINEAR_PERPETUAL, egress);
         owner.start(cluster, null);
         if (!oiLimitMode.equals("FIXED") && !oiLimitMode.equals("PROPORTIONAL"))
@@ -270,7 +279,7 @@ public class InProcessTradingAllocationBenchmark {
             if (actual != orderId - batchSize + 1)
                 throw new IllegalStateException("source payload ID differs from its encoded template: " + actual + " != " + (orderId - batchSize + 1));
         }
-        owner.enqueue(message, session, TIME, position, command ? fingerprints.ofBorrowed(message) : null);
+        owner.enqueue(message, sessionId, TIME, position, command ? fingerprints.ofBorrowed(message) : null);
     }
 
     private void await(long expected) {
@@ -293,18 +302,13 @@ public class InProcessTradingAllocationBenchmark {
         public long startedAtEpochMillis, finishedAtEpochMillis;
     }
 
-    private static final class Sink implements ClientSession {
+    private static final class Sink implements ClusterServiceEgress.SessionEgress {
         private long received, tradingMessages;
         private int batchSize;
         private boolean trading, readUser;
         private byte[] userData;
-        public long id() { return 1; }
-        public int responseStreamId() { return 1; }
-        public String responseChannel() { return ""; }
-        public byte[] encodedPrincipal() { return CoreMessage.EMPTY_PAYLOAD; }
-        public boolean isClosing() { return false; }
         public void close() { }
-        public long offer(DirectBuffer buffer, int offset, int length) {
+        public long offer(long term, long timestamp, DirectBuffer buffer, int offset, int length) {
             int body = offset + Short.toUnsignedInt(buffer.getShort(offset + 12, ByteOrder.LITTLE_ENDIAN));
             int status = buffer.getInt(body + 4, ByteOrder.LITTLE_ENDIAN);
             if (status != (readUser ? ResponseStatus.OK : ResponseStatus.APPLIED).wireCode())
@@ -339,7 +343,5 @@ public class InProcessTradingAllocationBenchmark {
             received++;
             return length;
         }
-        public long offer(io.aeron.DirectBufferVector[] vectors) { throw new UnsupportedOperationException(); }
-        public long tryClaim(int length, io.aeron.logbuffer.BufferClaim claim) { throw new UnsupportedOperationException(); }
     }
 }

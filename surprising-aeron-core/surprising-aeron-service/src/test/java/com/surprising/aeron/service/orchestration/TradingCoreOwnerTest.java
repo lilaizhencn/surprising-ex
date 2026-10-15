@@ -605,9 +605,9 @@ class TradingCoreOwnerTest {
         var owner = service.state();
         var runtime = owner.runtimeState;
         try {
-            owner.apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
-                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10000))));
-            int assetId = owner.identities.assetId("USDT");
+            assertThat(CoreTestCompletion.applyAsynchronously(owner, command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10000))))
+                    .status()).isEqualTo(ResponseStatus.APPLIED);
             var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
             epoch.setAccessible(true);
             long before = epoch.getLong(runtime);
@@ -617,6 +617,15 @@ class TradingCoreOwnerTest {
             runtime.enterAsynchronousCommandScope();
             try {
                 assertThat(owner.applyDecodedCommand(request, 2000, 2000, null, false)).isNull();
+                // The retained funds-identity lookup precedes Account Lane work.
+                // Inject only after that lookup has installed the actual continuation.
+                long preparationDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (!owner.directCommand.hasControlWork()) {
+                    assertThat(owner.pollDirectCommand()).isNull();
+                    if (System.nanoTime() >= preparationDeadline)
+                        throw new AssertionError("funds preflight did not reach Account Lane work");
+                    Thread.onSpinWait();
+                }
                 var business = owner.directCommand.controlWork();
                 owner.directCommand.replaceControlWork(() -> {
                     if (!business.getAsBoolean()) return false;
@@ -647,11 +656,14 @@ class TradingCoreOwnerTest {
             assertThat(result.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(result.resultCode()).isEqualTo(capacityFailure
                     ? CoreResultCode.MATCHING_BACKPRESSURE : CoreResultCode.INVALID_COMMAND);
-            assertThat(runtime.balance(1001, assetId).availableUnits()).isEqualTo(10000);
-            assertThat(runtime.balance(1001, assetId).lockedUnits()).isZero();
+            assertThat(CoreTestCompletion.userState(owner, 1001).balances())
+                    .filteredOn(balance -> balance.asset().equals("USDT")).singleElement().satisfies(balance -> {
+                        assertThat(balance.availableUnits()).isEqualTo(10000);
+                        assertThat(balance.lockedUnits()).isZero();
+                    });
             assertThat(epoch.getLong(runtime)).isEqualTo(before);
             assertThat(owner.admissions.queuedMatching).isEmpty();
-            var duplicate = owner.apply(request);
+            var duplicate = CoreTestCompletion.applyAsynchronously(owner, request);
             assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
             assertThat(duplicate.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(duplicate.resultCode()).isEqualTo(result.resultCode());

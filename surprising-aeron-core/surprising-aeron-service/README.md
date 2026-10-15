@@ -370,3 +370,9 @@ visitor 仅在同步遍历期间借用身份注册表、用户、映射和订单
 受影响测试改为等待实际异步初始化，待撮合场景只完成准入，账户及身份断言经真实 Lane 查询；测试回调适配器同步更新元数据。没有放宽业务或线程归属校验。67 个必要用例通过，包含六产品线真实 Owner 的 Cluster API 访问隔离；基准模块及直接依赖编译通过。按要求未执行快照、恢复或压测，也不据此宣称全量测试或整体 Owner 迁移完成。见 [D1 功能验证](../../docs/validation/owner-log-metadata-tests-20261015.json)。
 
 D1 补充审查：`ClusterServiceEgress.TransportSession` 仍实现 `ClientSession`，两个未使用的接口方法仍抛 `UnsupportedOperationException`，因此完整 D1 尚未关闭。补充六产品线实际 Owner/会话出口贯通后，79 个必要用例通过，涵盖背压顺序、角色切换、旧任期丢弃、会话关闭和响应租约。该贯通用例仅模拟发布器，不代表真实网络集群或压测验收；见 [D1 复验及未完成项](../../docs/validation/d1-review-rerun-20261015.json)。
+
+### D1 完成：Owner 只传会话 ID（2026-10-15）
+
+`OwnerLogContext` 与 `ClusterServiceEgress.TransportSession` 均不再实现 Aeron 接口；后者删除两处未实现方法和无调用的元数据转发，仅承担服务线程的具体响应出口。`TradingOwnerLoop.Input`、`PendingClusterIngress`、`ClusterCommandWindow`、响应 sink 和出口槽只传 `long sessionId`。真实 `ClientSession` 留在服务线程，响应消费时按 ID 查原会话表；无客户端日志使用 `NO_SESSION_ID=-1`，合法会话 ID 0 保留原语义。没有新增接口、线程、队列、账户镜像或逐命令对象。
+
+已关闭/移除会话及旧任期的响应直接丢弃，同时归还响应与 Header 租约；原背压 FIFO、容量、关闭回调及有序提交规则保留。111 个必要用例通过（服务 109、受影响基准夹具功能用例 2），包括六产品线真实 Owner 线程隔离、关闭后丢弃、池复用、资金及控制流水线。未启动真实网络集群、执行快照恢复或压测。此前 D1 补充审查记录中的会话伪实现未完成项已关闭，见 [D1 完成验证](../../docs/validation/d1-complete-20261015.json)。其他 Owner 迁移及性能验收仍是独立未完成事项。

@@ -26,13 +26,13 @@ class TradingOwnerInputReuseTest {
         var input = queue(loop, "input");
         var available = queue(loop, "availableInput");
         CoreMessage first = probe(1);
-        for (int i = 0; i < 8192; i++) loop.enqueue(first, null, i, i + 10, null);
+        for (int i = 0; i < 8192; i++) loop.enqueue(first, ClusterServiceEgress.NO_SESSION_ID, i, i + 10, null);
         Object owned = input.poll();
         assertThat(available).isEmpty();
         CoreMessage successor = probe(2);
         var failure = new AtomicReference<Throwable>();
         Thread producer = new Thread(() -> {
-            try { loop.enqueue(successor, null, 99, 199, null); }
+            try { loop.enqueue(successor, ClusterServiceEgress.NO_SESSION_ID, 99, 199, null); }
             catch (Throwable fatal) { failure.set(fatal); }
         });
         producer.start();
@@ -72,7 +72,7 @@ class TradingOwnerInputReuseTest {
         var failure = new AtomicReference<Throwable>();
         Thread producer = new Thread(() -> {
             Thread.currentThread().interrupt();
-            try { loop.enqueue(probe(1), null, 1, 10, null); }
+            try { loop.enqueue(probe(1), ClusterServiceEgress.NO_SESSION_ID, 1, 10, null); }
             catch (Throwable fatal) { failure.set(fatal); }
         });
         producer.start(); producer.join(5_000);
@@ -83,7 +83,7 @@ class TradingOwnerInputReuseTest {
         assertThat(field(retained, "command")).isNull();
         assertThat(queue(loop, "availableInput").size()).isEqualTo(8191);
         set(loop, "inputProduced", 0L);
-        loop.enqueue(probe(2), null, 2, 20, null);
+        loop.enqueue(probe(2), ClusterServiceEgress.NO_SESSION_ID, 2, 20, null);
         Object next = queue(loop, "input").poll();
         assertThat(next).isSameAs(retained);
         assertThat(field(loop, "unpublishedInput")).isNull();
@@ -94,7 +94,12 @@ class TradingOwnerInputReuseTest {
 
     @Test void actualOwnerPreservesResponsesAcrossTwoCompleteInputPoolWraps() throws Exception {
         var cluster = cluster(new CountDownLatch(1));
-        var egress = new ClusterServiceEgress(); egress.start(cluster);
+        var egress = new ClusterServiceEgress((ignored, target) -> new ClusterServiceEgress.SessionEgress() {
+            public long offer(long term, long timestamp, DirectBuffer source, int offset, int length) {
+                return target.offer(source, offset, length);
+            }
+            public void close() { }
+        }); egress.start(cluster);
         var loop = new TradingOwnerLoop(ProductLine.SPOT, egress);
         long[] received = {0};
         var session = (ClientSession) Proxy.newProxyInstance(ClientSession.class.getClassLoader(),
@@ -116,7 +121,7 @@ class TradingOwnerInputReuseTest {
         try {
             loop.start(cluster, null);
             for (long id = 1; id <= 16_384; id++) {
-                loop.enqueue(probe(id), session, id, id + 10, null);
+                loop.enqueue(probe(id), egress.transportSession(session).id(), id, id + 10, null);
                 if ((id & 255) == 0) {
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
                     while (received[0] < id) {

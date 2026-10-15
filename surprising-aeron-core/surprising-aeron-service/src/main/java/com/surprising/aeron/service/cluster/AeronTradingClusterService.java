@@ -101,7 +101,7 @@ public final class AeronTradingClusterService implements ClusteredService {
 
         // 把已提交消息交给专属 Owner 线程：保留来源会话（服务消息可能没有 session）、
         // Cluster 时间和日志位置；只有业务命令才计算指纹，用于命令幂等/冲突识别。
-        owner.enqueue(command, session == null ? null : egress.transportSession(session), timestamp,
+        owner.enqueue(command, session == null ? ClusterServiceEgress.NO_SESSION_ID : egress.transportSession(session).id(), timestamp,
                 header.position(), command.header().kind() == WireMessageKind.COMMAND
                         ? fingerprints.ofBorrowed(command) : null);
 

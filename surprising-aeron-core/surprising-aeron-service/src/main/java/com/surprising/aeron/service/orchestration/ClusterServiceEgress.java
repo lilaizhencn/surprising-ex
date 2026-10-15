@@ -14,6 +14,8 @@ import org.springframework.stereotype.Component;
 /** Owns Cluster-session state and the Owner-to-Aeron response handoff. */
 @Component
 public final class ClusterServiceEgress {
+    /** Replicated messages without a client session never produce a client response. */
+    public static final long NO_SESSION_ID = -1L;
     private static final byte[] EMPTY = new byte[0];
     private static final long OUTPUT_BYTES = 16L * 1024 * 1024;
     private static final int OUTPUT_SLOTS = 8192;
@@ -63,8 +65,8 @@ public final class ClusterServiceEgress {
         leadershipTermId = 0;
     }
 
-    /** Returns the Owner-safe session facade for a Cluster callback session. */
-    public ClientSession transportSession(ClientSession session) {
+    /** Registers a service-thread session; only its primitive ID crosses to the Owner. */
+    public TransportSession transportSession(ClientSession session) {
         TransportSession transport = sessions.get(session.id());
         if (transport == null) {
             transport = new TransportSession(session);
@@ -103,7 +105,7 @@ public final class ClusterServiceEgress {
         leadershipTermId = termId;
     }
 
-    void publishResponse(TradingCoreOwner processor, ClientSession session, CoreMessageHeader header, CoreResponse response,
+    void publishResponse(TradingCoreOwner processor, long sessionId, CoreMessageHeader header, CoreResponse response,
                          long committedSequence, long ownerEpoch) {
         int length = CoreMessageCodec.encodedResponseLength(header, response);
         if (length > OUTPUT_BYTES - (outputProduced - outputConsumed) || output.remainingCapacity() == 0) {
@@ -120,7 +122,7 @@ public final class ClusterServiceEgress {
             return;
         }
         header.retainForEgress();
-        slot.prepare(processor, session, header, response, committedSequence, length,
+        slot.prepare(processor, sessionId, header, response, committedSequence, length,
                 ownerEpoch, CoreMatchingPhaseMetrics.sampleStart(header));
         if (!output.offer(slot)) {
             outputOverflow = true;
@@ -146,13 +148,15 @@ public final class ClusterServiceEgress {
             outputConsumed += next.length;
             try {
                 if (next.epoch != epoch || cluster.role() != Cluster.Role.LEADER) continue;
+                TransportSession session = sessions.get(next.sessionId);
+                if (session == null || session.isClosing()) continue;
                 if (sendScratch.length < next.length) {
                     sendScratch = new byte[next.length];
                     sendBuffer.wrap(sendScratch);
                 }
                 CoreMatchingPhaseMetrics.recordBoundary("ownerToEgress", next.header, next.publishedNanos);
                 CoreMessageCodec.encodeResponse(next.header, next.response, next.committedSequence, sendScratch);
-                deferred.offer(next.session, sendBuffer, next.length, System.nanoTime());
+                deferred.offer(session, sendBuffer, next.length, System.nanoTime());
             } finally {
                 try { processor.releaseResponse(next.response); }
                 finally {
@@ -178,13 +182,16 @@ public final class ClusterServiceEgress {
         sessions.clear();
     }
 
-    private final class TransportSession implements ClientSession {
+    /** Concrete service-thread response channel; never sent to or invoked by the Owner. */
+    public final class TransportSession {
         private final ClientSession actual;
+        private final long id;
         private boolean closeRequested;
         private SessionEgress egress;
 
         private TransportSession(ClientSession actual) {
             this.actual = actual;
+            this.id = actual.id();
         }
 
         private void connect() {
@@ -198,28 +205,17 @@ public final class ClusterServiceEgress {
             }
         }
 
-        public long id() { return actual.id(); }
-        public int responseStreamId() { return actual.responseStreamId(); }
-        public String responseChannel() { return actual.responseChannel(); }
-        public byte[] encodedPrincipal() { return actual.encodedPrincipal(); }
-        public boolean isClosing() { return closeRequested || actual.isClosing(); }
+        public long id() { return id; }
+        boolean isClosing() { return closeRequested || actual.isClosing(); }
 
-        public void close() {
+        void close() {
             closeRequested = true;
             closeRequests = true;
         }
 
-        public long offer(DirectBuffer buffer, int offset, int length) {
+        long offer(DirectBuffer buffer, int offset, int length) {
             return egress == null ? io.aeron.Publication.NOT_CONNECTED
                     : egress.offer(leadershipTermId, cluster.time(), buffer, offset, length);
-        }
-
-        public long offer(io.aeron.DirectBufferVector[] vectors) {
-            throw new UnsupportedOperationException();
-        }
-
-        public long tryClaim(int length, io.aeron.logbuffer.BufferClaim claim) {
-            throw new UnsupportedOperationException();
         }
     }
 
@@ -231,16 +227,16 @@ public final class ClusterServiceEgress {
     /** Slot is immutable between output publication and the Aeron consumer's final release. */
     private static final class Output {
         private TradingCoreOwner processor;
-        private ClientSession session;
+        private long sessionId = NO_SESSION_ID;
         private CoreMessageHeader header;
         private CoreResponse response;
         private long committedSequence, epoch, publishedNanos;
         private int length;
 
-        void prepare(TradingCoreOwner processor, ClientSession session, CoreMessageHeader header,
+        void prepare(TradingCoreOwner processor, long sessionId, CoreMessageHeader header,
                 CoreResponse response, long committedSequence, int length, long epoch, long publishedNanos) {
             this.processor = processor;
-            this.session = session;
+            this.sessionId = sessionId;
             this.header = header;
             this.response = response;
             this.committedSequence = committedSequence;
@@ -251,7 +247,7 @@ public final class ClusterServiceEgress {
 
         void clear() {
             processor = null;
-            session = null;
+            sessionId = NO_SESSION_ID;
             header = null;
             response = null;
         }

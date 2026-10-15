@@ -31,8 +31,8 @@ class OwnerLogContextTest {
         var loop = new TradingOwnerLoop(product, egress);
         try {
             loop.start(cluster, null);
-            loop.enqueue(probe(product, 1), null, 70, 700, null);
-            loop.enqueue(probe(product, 2), null, 80, 800, null);
+            loop.enqueue(probe(product, 1), ClusterServiceEgress.NO_SESSION_ID, 70, 700, null);
+            loop.enqueue(probe(product, 2), ClusterServiceEgress.NO_SESSION_ID, 80, 800, null);
             // Existing control boundary waits for preceding inputs and publishes the Owner's writes.
             loop.onRoleChange(Cluster.Role.FOLLOWER, 1);
             var field = TradingOwnerLoop.class.getDeclaredField("logContext");

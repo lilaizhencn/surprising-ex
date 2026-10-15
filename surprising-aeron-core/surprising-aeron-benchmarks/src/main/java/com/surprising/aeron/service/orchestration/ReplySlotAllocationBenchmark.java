@@ -26,8 +26,9 @@ public class ReplySlotAllocationBenchmark {
     private static final byte[] RESULT = CoreCommandResultCodec.encode(java.util.List.of(), java.util.List.of());
     private final UnsafeBuffer[] frames = new UnsafeBuffer[WINDOW];
     private final CoreMessageFlyweightDecoder decoder = new CoreMessageFlyweightDecoder();
-    private final ClusterServiceEgress egress = new ClusterServiceEgress();
     private final SinkSession session = new SinkSession();
+    private final ClusterServiceEgress egress = new ClusterServiceEgress((cluster, target) -> session);
+    private long sessionId;
     private TradingCoreRuntime runtime;
     private TradingCoreOwner processor;
     private OwnerResponsePublisher publisher;
@@ -42,6 +43,14 @@ public class ReplySlotAllocationBenchmark {
                     default -> null;
                 });
         egress.start(cluster);
+        var actual = (ClientSession) Proxy.newProxyInstance(ClientSession.class.getClassLoader(),
+                new Class<?>[]{ClientSession.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "id" -> 1L;
+                    case "isClosing" -> false;
+                    case "close" -> null;
+                    default -> throw new AssertionError(method.getName());
+                });
+        sessionId = egress.transportSession(actual).id();
         publisher = new OwnerResponsePublisher((s, h, r, sequence) ->
                 egress.publishResponse(processor, s, h, r, sequence, 0));
         int[] counts = {1, 2, 4, 8, 20};
@@ -65,7 +74,7 @@ public class ReplySlotAllocationBenchmark {
             var message = decoder.decodeBorrowed(frame, 0, frame.capacity());
             var response = message.ownedResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
                     CoreResultCode.NONE, i + 1, RESULT, 0, RESULT.length);
-            publisher.publish(session, message, response, runtime);
+            publisher.publish(sessionId, message, response, runtime);
             message.releaseDecoderSlot();
         }
         if (egress.drainResponses(processor) != WINDOW) throw new IllegalStateException("response handoff did not drain");
@@ -74,19 +83,12 @@ public class ReplySlotAllocationBenchmark {
 
     @TearDown public void close() { egress.clear(); runtime.close(); }
 
-    private static final class SinkSession implements ClientSession {
+    private static final class SinkSession implements ClusterServiceEgress.SessionEgress {
         private long checksum;
-        public long id() { return 1; }
-        public int responseStreamId() { return 1; }
-        public String responseChannel() { return ""; }
-        public byte[] encodedPrincipal() { return CoreMessage.EMPTY_PAYLOAD; }
-        public boolean isClosing() { return false; }
         public void close() { }
-        public long offer(DirectBuffer buffer, int offset, int length) {
+        public long offer(long term, long timestamp, DirectBuffer buffer, int offset, int length) {
             checksum += buffer.getLong(offset + 24);
             return length;
         }
-        public long offer(io.aeron.DirectBufferVector[] vectors) { throw new UnsupportedOperationException(); }
-        public long tryClaim(int length, io.aeron.logbuffer.BufferClaim claim) { throw new UnsupportedOperationException(); }
     }
 }

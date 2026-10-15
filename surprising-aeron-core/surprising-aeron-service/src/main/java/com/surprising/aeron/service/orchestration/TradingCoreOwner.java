@@ -11,7 +11,7 @@ import com.surprising.aeron.service.state.realtime.RealtimeStateCapture;
 import com.surprising.aeron.service.orchestration.realtime.TradingRealtimeBoundary;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.product.api.ProductLine;
-import io.aeron.cluster.service.ClientSession;
+import static com.surprising.aeron.service.orchestration.ClusterServiceEgress.NO_SESSION_ID;
 import io.aeron.cluster.service.Cluster;
 import io.aeron.cluster.service.ClusteredService;
 import io.aeron.logbuffer.FragmentHandler;
@@ -46,7 +46,7 @@ public final class TradingCoreOwner {
     @FunctionalInterface
     interface ResponseSink {
         /** 接收已提交的只读响应；异步出口须保留 Header 租约直到编码完成。 */
-        void offer(ClientSession session, CoreMessageHeader header, CoreResponse response, long committedSequence);
+        void offer(long sessionId, CoreMessageHeader header, CoreResponse response, long committedSequence);
     }
 
     /** 所属产品线；它决定命令、账户、撮合器和快照的隔离边界。 */
@@ -88,12 +88,12 @@ public final class TradingCoreOwner {
     }
 
     /** 独立 Owner 连续收取入口后统一推进；容量不足仍立即推进，日志上下文逐条保留。 */
-    void enqueueCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
+    void enqueueCommittedCommand(long sessionId, CoreMessage request, long timestamp, long position,
                                  CommandFingerprint fingerprint) {
         try {
             processingLogCallback = true;
             awaitIngressCapacity(request);
-            commandPipeline.pendingIngress().add(session, request, timestamp, position, fingerprint);
+            commandPipeline.pendingIngress().add(sessionId, request, timestamp, position, fingerprint);
         } catch (org.agrona.concurrent.AgentTerminationException failure) {
             throw failure;
         } catch (RuntimeException failure) {
@@ -201,7 +201,7 @@ public final class TradingCoreOwner {
                 if (window.size() == 0) state.assertClusterCallbackComplete();
                 CoreMatchingPhaseMetrics.recordBoundary("ingressToAdmission", next.command.header(), next.queuedNanos);
                 long admissionStart = CoreMatchingPhaseMetrics.sampleStart(next.command.header());
-                var entry = window.add(next.session, next.command, next.timestamp, next.position);
+                var entry = window.add(next.sessionId, next.command, next.timestamp, next.position);
                 CoreResponse result = state.applyDecodedCommand(next.command, next.timestamp, next.position,
                         window.decoded(next.command), true, next.fingerprint);
                 window.bindSequence(entry, state.matchingSequence(next.command.header().commandId()));
@@ -300,7 +300,7 @@ public final class TradingCoreOwner {
         CoreMatchingPhaseMetrics.recordBoundary("ownerRealtimePublication", timingHeader, publicationStart);
         long retirementStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         if (last.response == null) throw new IllegalStateException("missing pipeline terminal response");
-        if (last.session != null) offerResponse(last.session, last.request, last.response);
+        if (last.sessionId != NO_SESSION_ID) offerResponse(last.sessionId, last.request, last.response);
         CoreMatchingPhaseMetrics.finishHeadAttempt(headTiming, headAttemptStarted, null);
         // Diagnostic samples can retain their header across decoder-slot retirement.
         if (retirementStart != 0) timingHeader = timingHeader.immutableValue();
@@ -336,8 +336,8 @@ public final class TradingCoreOwner {
         }
         state.assertClusterCallbackComplete();
         realtimeBoundary.commit(state, activeControl.position);
-        if (activeControl.session != null) {
-            offerResponse(activeControl.session, request, commandPipeline.controlResponse());
+        if (activeControl.sessionId != NO_SESSION_ID) {
+            offerResponse(activeControl.sessionId, request, commandPipeline.controlResponse());
         }
         state.runtimeState.releaseOwnerLaneAccess();
         commandPipeline.finishControl();
@@ -648,7 +648,7 @@ public final class TradingCoreOwner {
     }
 
     /** 将已经提交的命令响应交给响应出口，不在交易 Owner 中编码网络协议。 */
-    private void offerResponse(ClientSession session, CoreMessage request, CoreResponse response) {
-        responsePublisher.publish(session, request, response, state);
+    private void offerResponse(long sessionId, CoreMessage request, CoreResponse response) {
+        responsePublisher.publish(sessionId, request, response, state);
     }
 }

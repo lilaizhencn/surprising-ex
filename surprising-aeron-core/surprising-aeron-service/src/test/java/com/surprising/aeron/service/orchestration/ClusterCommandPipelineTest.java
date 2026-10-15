@@ -1358,7 +1358,7 @@ class ClusterCommandPipelineTest {
             var window = new ClusterCommandWindow();
             var state = live.service.state();
             assertThat(state.prepareClusterPipelineScope(cancel, window)).isTrue();
-            window.add(null, cancel, TIME, 1);
+            window.add(ClusterServiceEgress.NO_SESSION_ID, cancel, TIME, 1);
             assertThat(state.prepareClusterPipelineScope(independent, window)).isTrue();
             assertThat(window.conflicts()).as("same-side different-account order").isFalse();
             assertThat(state.prepareClusterPipelineScope(

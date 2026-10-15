@@ -1277,7 +1277,7 @@ final class LinearPerpetualBenchmarkSupport {
                         || clusterCommandWindow.conflictingPrefixSize() != 0) {
                     throw new IllegalStateException("saturation command is not independently pipelineable");
                 }
-                windowEntry = clusterCommandWindow.add(null, command,
+                windowEntry = clusterCommandWindow.add(ClusterServiceEgress.NO_SESSION_ID, command,
                         command.header().submittedAtEpochMillis(), command.header().correlationId());
                 response = state.applyClusterCommand(command, command.header().submittedAtEpochMillis(),
                         command.header().correlationId(), clusterCommandWindow.decoded(command));

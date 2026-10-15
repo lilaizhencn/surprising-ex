@@ -6,7 +6,7 @@ import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
-import io.aeron.cluster.service.ClientSession;
+import static com.surprising.aeron.service.orchestration.ClusterServiceEgress.NO_SESSION_ID;
 
 /**
  * Owner-only bounded FIFO for in-flight command responses.
@@ -178,11 +178,11 @@ public final class ClusterCommandWindow {
 
     public long lastMatchingSequence() { return lastMatchingSequence; }
 
-    public Entry add(ClientSession session, CoreMessage request, long timestamp, long position) {
+    public Entry add(long sessionId, CoreMessage request, long timestamp, long position) {
         if (size == entries.length) throw new IllegalStateException("cluster command window is full");
         if (!candidateRouted) throw new IllegalStateException("ingress route is missing");
         Entry entry = get(size++);
-        entry.session = session;
+        entry.sessionId = sessionId;
         entry.request = request;
         entry.timestamp = timestamp;
         entry.position = position;
@@ -291,7 +291,7 @@ public final class ClusterCommandWindow {
             }
             entry.decodedSlot.clearCommandSlot();
             entry.orderCount = 0;
-            entry.session = null;
+            entry.sessionId = NO_SESSION_ID;
             if (decodedSource == entry.request) releaseDecoded();
             if (entry.request != null) entry.request.releaseDecoderSlot();
             entry.request = null;
@@ -331,7 +331,7 @@ public final class ClusterCommandWindow {
         public long routeUserLaneBit;
         public int routeMatcherShard = -1;
         public boolean routePresent;
-        public ClientSession session;
+        public long sessionId = NO_SESSION_ID;
         public CoreMessage request;
         public CoreResponse response;
         public long sequence, timestamp, position;

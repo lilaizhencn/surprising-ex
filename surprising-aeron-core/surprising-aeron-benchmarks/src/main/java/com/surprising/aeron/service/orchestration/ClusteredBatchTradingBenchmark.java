@@ -427,17 +427,17 @@ public class ClusteredBatchTradingBenchmark {
         private static final long BALANCE = 1_000_000_000L;
 
         /** Local benchmark consumes encoded responses immediately; real-cluster runs use ClusterServiceEgress. */
-        private void publishResponse(ClientSession target, CoreMessageHeader responseHeader,
+        private void publishResponse(long targetId, CoreMessageHeader responseHeader,
                                      CoreResponse response, long committedSequence) {
             try {
-                if (target == null || target.isClosing()) return;
+                if (targetId == ClusterServiceEgress.NO_SESSION_ID || session.isClosing()) return;
                 int length = CoreMessageCodec.encodedResponseLength(responseHeader, response);
                 if (responseScratch.length < length) {
                     responseScratch = new byte[length];
                     responseBuffer.wrap(responseScratch);
                 }
                 CoreMessageCodec.encodeResponse(responseHeader, response, committedSequence, responseScratch);
-                if (target.offer(responseBuffer, 0, length) < 0)
+                if (session.offer(responseBuffer, 0, length) < 0)
                     throw new IllegalStateException("local benchmark response was not consumed");
             } finally {
                 service.releaseResponse(response);
@@ -563,7 +563,7 @@ public class ClusteredBatchTradingBenchmark {
             CoreMessage maker = command(CoreMessageType.PLACE_ORDER, 1_256,
                     TradingCommandCodec.encodePlaceOrder(order(1, CoreOrderSide.SELL, 120)));
             byte[] makerBytes = CoreMessageCodec.encode(maker);
-            service.enqueueCommittedCommand(null, messageDecoder.decode(
+            service.enqueueCommittedCommand(ClusterServiceEgress.NO_SESSION_ID, messageDecoder.decode(
                             new UnsafeBuffer(makerBytes), 0, makerBytes.length),
                     1_700_000_000_000L, header.position(), null);
             drain();
@@ -1055,7 +1055,7 @@ public class ClusteredBatchTradingBenchmark {
                     || message.header().messageType() == CoreMessageType.AMEND_ORDER_BATCH)
                 batchRequestSizes.put(message.header().correlationId(), responseBatchSize);
             byte[] bytes = CoreMessageCodec.encode(message);
-            service.enqueueCommittedCommand(session, messageDecoder.decode(
+            service.enqueueCommittedCommand(session.id(), messageDecoder.decode(
                             new UnsafeBuffer(bytes), 0, bytes.length),
                     1_700_000_000_000L, header.position(), null);
             maxBacklog = Math.max(maxBacklog, service.state().pendingMatchingCount());

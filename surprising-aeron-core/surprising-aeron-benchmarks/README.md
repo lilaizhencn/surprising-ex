@@ -83,3 +83,7 @@ JDK 27/G1，1 fork/1 thread，3×1s 预热、5×1s 测量的独立 `-prof gc` �
 
 
 `InProcessTradingAllocationBenchmark` 新增 `accountLanes` 参数，默认仍为 4，可显式选择 2 作独立诊断。初始化前固定实际拓扑，终止 worker 后恢复原属性；每个正式区间同时记录 Lane 数。该入口覆盖显式 Lane 参数贯穿的真实准入、撮合结算和终态响应，窗口保持 256、Matcher 为 1。它使用同 JVM 的 ClientSession 消费桩，不代表真实 Aeron 网络、Archive 或完整 Core 容量；不同 Lane 配置的结果必须分别报告。
+
+### D1 会话边界适配（2026-10-15）
+
+Owner 的输入及响应接口现在只携带 `sessionId`。`ReplySlotAllocationBenchmark`、`InProcessTradingAllocationBenchmark` 的本地消费器实现已有 `SessionEgress`，去掉完整 `ClientSession` 的伪实现；会话注册和真实服务使用同一 ID 路由与出口环。批量及线性夹具同步更新无客户端哨兵值和响应参数。新增 `D1BenchmarkBoundaryTest` 只做有限功能调用及终态资金核对，没有执行 JMH 计时、JFR 或压测。连同服务的必要回归共 111 项通过，见 [D1 完成验证](../../docs/validation/d1-complete-20261015.json)。

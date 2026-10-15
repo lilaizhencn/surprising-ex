@@ -25,28 +25,29 @@ final class TradingOwnerTestSupport implements ClusteredService {
     private final CoreMessageFlyweightDecoder messageDecoder = new CoreMessageFlyweightDecoder();
     private Cluster cluster;
     private OwnerLogContext logContext;
-    private final DeferredSessionResponses responses = new DeferredSessionResponses();
+    private final ClusterServiceEgress egress = new ClusterServiceEgress((ignored, session) ->
+            new ClusterServiceEgress.SessionEgress() {
+                public long offer(long term, long timestamp, DirectBuffer source, int offset, int length) {
+                    return session.offer(source, offset, length);
+                }
+                public void close() { }
+            });
+    private long epoch;
 
     TradingOwnerTestSupport(ProductLine productLine) {
         owner = new TradingCoreOwner(productLine, this::respond);
     }
 
-    private void respond(ClientSession session, com.surprising.aeron.protocol.CoreMessageHeader header,
+    private void respond(long sessionId, com.surprising.aeron.protocol.CoreMessageHeader header,
                          CoreResponse response, long sequence) {
-        try {
-            if (session == null || session.isClosing()) return;
-            byte[] bytes = new byte[com.surprising.aeron.protocol.CoreMessageCodec.encodedResponseLength(header, response)];
-            com.surprising.aeron.protocol.CoreMessageCodec.encodeResponse(header, response, sequence, bytes);
-            responses.offer(session, new UnsafeBuffer(bytes), bytes.length, System.nanoTime());
-        } finally {
-            owner.releaseResponse(response);
-        }
+        egress.publishResponse(owner, sessionId, header, response, sequence, epoch);
     }
 
     @Override
     public void onStart(Cluster cluster, Image snapshotImage) {
         this.cluster = cluster;
-        responses.clear();
+        egress.start(cluster);
+        epoch = 0;
         logContext = new OwnerLogContext(cluster.role(), cluster.time(), cluster.logPosition(),
                 cluster.idleStrategy());
         owner.start(logContext);
@@ -87,7 +88,8 @@ final class TradingOwnerTestSupport implements ClusteredService {
                                  CommandFingerprint fingerprint) {
         logContext.timestamp = timestamp;
         logContext.position = position;
-        owner.enqueueCommittedCommand(session, request, timestamp, position, fingerprint);
+        owner.enqueueCommittedCommand(session == null ? ClusterServiceEgress.NO_SESSION_ID
+                : egress.transportSession(session).id(), request, timestamp, position, fingerprint);
     }
 
     @Override
@@ -119,7 +121,7 @@ final class TradingOwnerTestSupport implements ClusteredService {
 
     @Override
     public void onRoleChange(Cluster.Role newRole) {
-        responses.clear();
+        epoch = egress.onRoleChange(newRole);
         logContext.role = newRole;
         owner.roleChange(newRole);
     }
@@ -131,8 +133,8 @@ final class TradingOwnerTestSupport implements ClusteredService {
 
     @Override
     public void onTerminate(Cluster ignored) {
-        responses.clear();
-        owner.terminate();
+        try { owner.terminate(); }
+        finally { egress.clear(); }
         cluster = null;
         logContext = null;
     }
@@ -144,7 +146,7 @@ final class TradingOwnerTestSupport implements ClusteredService {
 
     @Override
     public void onSessionClose(ClientSession session, long timestamp, CloseReason reason) {
-        if (session != null) { responses.remove(session.id()); owner.sessionClosed(session.id()); }
+        if (session != null) { egress.closeSession(session); owner.sessionClosed(session.id()); }
     }
 
     @Override
@@ -158,10 +160,10 @@ final class TradingOwnerTestSupport implements ClusteredService {
     boolean ownerCompletionAvailable() { return owner.ownerCompletionAvailable(); }
     void ownerCompletionSignal(Runnable signal) { owner.ownerCompletionSignal(signal); }
     int pollCommands() {
-        int sent = responses.poll(System.nanoTime(), OwnerCommandPipelineState.COMPLETION_BATCH_SIZE);
-        return owner.pollCommands() + sent;
+        int work = owner.pollCommands();
+        return work + egress.drainResponses(owner);
     }
-    void finishCommands() { owner.finishCommands(); }
+    void finishCommands() { owner.finishCommands(); egress.drainResponses(owner); }
     int commandWindowSize() { return owner.commandWindowSize(); }
     int commandWindowHighWaterMark() { return owner.commandWindowHighWaterMark(); }
     ClusterCommandWindow commandWindow() { return owner.commandWindow(); }

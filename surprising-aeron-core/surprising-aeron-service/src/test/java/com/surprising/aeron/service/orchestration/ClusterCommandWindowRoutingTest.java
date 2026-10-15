@@ -12,7 +12,7 @@ class ClusterCommandWindowRoutingTest {
 
         window.resetCandidate(101);
         window.route(0, 1L);
-        window.add(null, null, 0, 0);
+        window.add(ClusterServiceEgress.NO_SESSION_ID, null, 0, 0);
 
         window.resetCandidate(202);
         window.route(0, 1L);
@@ -27,10 +27,10 @@ class ClusterCommandWindowRoutingTest {
         var first = request(1, 101);
         var second = request(2, 202);
         var decodedFirst = window.decoded(first);
-        window.resetCandidate(101); window.route(0, 1); window.add(null, first, 0, 0);
+        window.resetCandidate(101); window.route(0, 1); window.add(ClusterServiceEgress.NO_SESSION_ID, first, 0, 0);
         window.releaseDecoded();
         var decodedSecond = window.decoded(second);
-        window.resetCandidate(202); window.route(0, 1); window.add(null, second, 0, 0);
+        window.resetCandidate(202); window.route(0, 1); window.add(ClusterServiceEgress.NO_SESSION_ID, second, 0, 0);
         window.releaseDecoded();
         assertThat(decodedFirst.placeOrder().orderId()).isEqualTo(1);
         assertThat(decodedSecond.placeOrder().orderId()).isEqualTo(2);
@@ -41,7 +41,7 @@ class ClusterCommandWindowRoutingTest {
             if (window.size() > 0) window.removePrefix(1);
             var next = request(index, index + 1000);
             var decoded = window.decoded(next);
-            window.resetCandidate(index + 1000); window.route(0, 1); window.add(null, next, 0, 0);
+            window.resetCandidate(index + 1000); window.route(0, 1); window.add(ClusterServiceEgress.NO_SESSION_ID, next, 0, 0);
             assertThat(window.decoded(next)).isSameAs(decoded);
             assertThat(decoded.placeOrder().orderId()).isEqualTo(index);
             window.releaseDecoded();

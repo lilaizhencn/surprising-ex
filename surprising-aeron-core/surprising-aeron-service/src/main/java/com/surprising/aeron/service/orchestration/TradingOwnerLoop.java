@@ -8,7 +8,7 @@ import com.surprising.aeron.service.cluster.ClusterTopology;
 import com.surprising.aeron.service.orchestration.cluster.OwnerIdleStrategy;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.product.api.ProductLine;
-import io.aeron.cluster.service.ClientSession;
+import static com.surprising.aeron.service.orchestration.ClusterServiceEgress.NO_SESSION_ID;
 import io.aeron.cluster.service.Cluster;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -82,14 +82,14 @@ public final class TradingOwnerLoop implements Runnable {
     }
 
     /** Transfers one replicated command from the Aeron callback thread to the Owner thread. */
-    public void enqueue(CoreMessage command, ClientSession session, long timestamp, long position,
+    public void enqueue(CoreMessage command, long sessionId, long timestamp, long position,
                         CommandFingerprint fingerprint) {
-        enqueue(command, session, timestamp, position, CoreMatchingPhaseMetrics.sampleStart(command.header()), fingerprint);
+        enqueue(command, sessionId, timestamp, position, CoreMatchingPhaseMetrics.sampleStart(command.header()), fingerprint);
     }
 
-    void enqueue(CoreMessage command, ClientSession session, long timestamp, long position,
+    void enqueue(CoreMessage command, long sessionId, long timestamp, long position,
                  long enqueuedNanos, CommandFingerprint fingerprint) {
-        enqueue(command, session, timestamp, position, null, enqueuedNanos, fingerprint, DEADLINE_NS);
+        enqueue(command, sessionId, timestamp, position, null, enqueuedNanos, fingerprint, DEADLINE_NS);
     }
 
     public int drainResponses() {
@@ -181,7 +181,7 @@ public final class TradingOwnerLoop implements Runnable {
                             logContext.position = next.position;
                             CoreMatchingPhaseMetrics.recordBoundary(
                                     "transportToOwner", next.command.header(), next.enqueuedNanos);
-                            processor.enqueueCommittedCommand(next.session, next.command, next.timestamp,
+                            processor.enqueueCommittedCommand(next.sessionId, next.command, next.timestamp,
                                     next.position, next.fingerprint);
                             inputConsumed += next.command.payloadLength();
                         }
@@ -207,7 +207,7 @@ public final class TradingOwnerLoop implements Runnable {
         }
     }
 
-    private void enqueue(CoreMessage command, ClientSession session, long timestamp, long position,
+    private void enqueue(CoreMessage command, long sessionId, long timestamp, long position,
                          Runnable action, long enqueuedNanos, CommandFingerprint fingerprint, long timeoutNanos) {
         int bytes = command == null ? 0 : command.payloadLength();
         if (bytes > INPUT_BYTES) throw new IllegalStateException("command exceeds ingress byte budget");
@@ -228,7 +228,7 @@ public final class TradingOwnerLoop implements Runnable {
                 }
                 awaitProgress(deadline);
             }
-            event.prepare(command, session, timestamp, position, action, enqueuedNanos, fingerprint);
+            event.prepare(command, sessionId, timestamp, position, action, enqueuedNanos, fingerprint);
             // A claimed wrapper consumes one of the same fixed number of queue positions.
             if (!input.offer(event)) throw new IllegalStateException("claimed owner input has no queue position");
             published = true;
@@ -257,7 +257,7 @@ public final class TradingOwnerLoop implements Runnable {
 
     private <T> T boundary(Supplier<T> action, boolean finish, long timeoutNanos) {
         var completion = new CompletableFuture<T>();
-        enqueue(null, null, 0, 0, () -> {
+        enqueue(null, NO_SESSION_ID, 0, 0, () -> {
             try {
                 if (finish) processor.finishCommands();
                 completion.complete(action.get());
@@ -281,9 +281,9 @@ public final class TradingOwnerLoop implements Runnable {
         return java.util.concurrent.TimeUnit.SECONDS.toNanos(seconds);
     }
 
-    private void publishResponse(ClientSession session, CoreMessageHeader header, CoreResponse response,
+    private void publishResponse(long sessionId, CoreMessageHeader header, CoreResponse response,
                                  long committedSequence) {
-        egress.publishResponse(processor, session, header, response, committedSequence, ownerEpoch);
+        egress.publishResponse(processor, sessionId, header, response, committedSequence, ownerEpoch);
     }
 
     private void awaitProgress(long deadline) {
@@ -297,15 +297,15 @@ public final class TradingOwnerLoop implements Runnable {
 
     private static final class Input {
         CoreMessage command;
-        ClientSession session;
+        long sessionId = NO_SESSION_ID;
         long timestamp, position, enqueuedNanos;
         Runnable action;
         CommandFingerprint fingerprint;
 
-        void prepare(CoreMessage command, ClientSession session, long timestamp, long position,
+        void prepare(CoreMessage command, long sessionId, long timestamp, long position,
                      Runnable action, long enqueuedNanos, CommandFingerprint fingerprint) {
             this.command = command;
-            this.session = session;
+            this.sessionId = sessionId;
             this.timestamp = timestamp;
             this.position = position;
             this.action = action;
@@ -315,7 +315,7 @@ public final class TradingOwnerLoop implements Runnable {
 
         void clear() {
             command = null;
-            session = null;
+            sessionId = NO_SESSION_ID;
             action = null;
             fingerprint = null;
             timestamp = position = enqueuedNanos = 0;

@@ -74,8 +74,8 @@ class OwnerSessionBoundaryTest {
         try {
             loop.start(cluster, null);
             var transport = egress.transportSession(session);
-            loop.enqueue(probe(product, 1), transport, 70, 700, null);
-            loop.enqueue(probe(product, 2), transport, 80, 800, null);
+            loop.enqueue(probe(product, 1), transport.id(), 70, 700, null);
+            loop.enqueue(probe(product, 2), transport.id(), 80, 800, null);
             loop.onRoleChange(Cluster.Role.LEADER, 0);
             assertThat(received).isEmpty();
             result.set(1);
@@ -85,7 +85,7 @@ class OwnerSessionBoundaryTest {
                     .containsExactly(new UUID(72, 1), new UUID(72, 2));
 
             result.set(Publication.BACK_PRESSURED);
-            loop.enqueue(probe(product, 3), transport, 90, 900, null);
+            loop.enqueue(probe(product, 3), transport.id(), 90, 900, null);
             role.set(Cluster.Role.FOLLOWER);
             loop.onRoleChange(role.get(), egress.onRoleChange(role.get()));
             loop.drainResponses();
@@ -95,7 +95,7 @@ class OwnerSessionBoundaryTest {
             result.set(1);
             role.set(Cluster.Role.LEADER);
             loop.onRoleChange(role.get(), egress.onRoleChange(role.get()));
-            loop.enqueue(probe(product, 4), transport, 100, 1000, null);
+            loop.enqueue(probe(product, 4), transport.id(), 100, 1000, null);
             loop.onRoleChange(Cluster.Role.LEADER, 2);
             loop.drainResponses();
             assertThat(received).hasSize(3);

@@ -1,13 +1,13 @@
 package com.surprising.aeron.service.orchestration;
 
 import io.aeron.Publication;
-import io.aeron.cluster.service.ClientSession;
+import com.surprising.aeron.service.orchestration.ClusterServiceEgress.TransportSession;
 import java.util.ArrayDeque;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
 
-/** 已提交响应的有界重试队列；仅集群日志回调访问，不参与资金状态或命令重放。 */
+/** 已提交响应的有界重试队列；仅 Cluster 服务线程访问，不参与资金状态或命令重放。 */
 final class DeferredSessionResponses {
     /** 慢出口最多占用的编码字节数，避免把客户端背压转成无限堆增长。 */
     private static final int MAX_BYTES = 16 * 1024 * 1024;
@@ -19,12 +19,12 @@ final class DeferredSessionResponses {
     private final LongObjectHashMap<SessionQueue> sessions = new LongObjectHashMap<>();
     /** 循环链表的下一会话，实现有界公平轮询，不扫描已关闭会话。 */
     private SessionQueue cursor;
-    /** 当前保留的编码字节数与消息数，仅 owner 修改。 */
+    /** 当前保留的编码字节数与消息数，仅 Cluster 服务线程修改。 */
     private int bytes, size;
     /** 复用的发送包装器，只在一次 offer 调用期间引用消息。 */
     private final UnsafeBuffer buffer = new UnsafeBuffer(new byte[0]);
 
-    void offer(ClientSession session, DirectBuffer source, int length, long nowNs) {
+    void offer(TransportSession session, DirectBuffer source, int length, long nowNs) {
         if (session.isClosing()) { remove(session.id()); return; }
         SessionQueue queue = sessions.get(session.id());
         if (queue == null) {
@@ -117,13 +117,13 @@ final class DeferredSessionResponses {
     private static final byte[] EMPTY = new byte[0];
     /** 一个慢会话的 FIFO；会话关闭、期限到达或发送完毕后释放。 */
     private static final class SessionQueue {
-        /** 会话句柄只能在允许调用 ClientSession 的集群回调内使用。 */
-        final ClientSession session;
-        /** 活跃会话的循环链表，由同一 owner 维护。 */
+        /** 具体出口句柄仅由 Cluster 服务线程使用。 */
+        final TransportSession session;
+        /** 活跃会话的循环链表，由同一 Cluster 服务线程维护。 */
         SessionQueue previous, next;
         /** 仅保存尚未发送的终态响应，头部完成前不会发送同会话后续结果。 */
         final ArrayDeque<Response> responses = new ArrayDeque<>();
-        SessionQueue(ClientSession session) { this.session = session; }
+        SessionQueue(TransportSession session) { this.session = session; }
     }
     /** 不可变已编码结果及本地发送期限；不携带可变交易对象。 */
     private record Response(byte[] encoded, long deadlineNs) {}

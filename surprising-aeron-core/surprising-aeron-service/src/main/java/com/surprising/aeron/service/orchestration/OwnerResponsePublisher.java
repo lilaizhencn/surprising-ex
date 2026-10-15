@@ -5,7 +5,6 @@ import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.WireMessageKind;
-import io.aeron.cluster.service.ClientSession;
 
 /**
  * Owner 的终态响应出口。
@@ -20,10 +19,10 @@ final class OwnerResponsePublisher {
         this.sink = java.util.Objects.requireNonNull(sink, "response sink");
     }
 
-    void publish(ClientSession session, CoreMessage request, CoreResponse response,
+    void publish(long sessionId, CoreMessage request, CoreResponse response,
                  TradingCoreRuntime state) {
         CoreMessageHeader header = request.responseHeader(responseType(request.header()));
-        sink.offer(session, header, response, state.committedCoreSequence());
+        sink.offer(sessionId, header, response, state.committedCoreSequence());
     }
 
     /** 按请求类型计算协议层的响应消息类型。 */

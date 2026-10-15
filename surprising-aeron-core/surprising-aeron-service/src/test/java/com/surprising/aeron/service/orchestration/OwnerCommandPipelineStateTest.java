@@ -88,7 +88,7 @@ class OwnerCommandPipelineStateTest {
         var window = state.commandWindow();
         window.resetCandidate(id);
         window.route(0, 1L);
-        window.add(null, request(id), id, id);
+        window.add(ClusterServiceEgress.NO_SESSION_ID, request(id), id, id);
     }
 
     private static CoreMessage request(long id) {
