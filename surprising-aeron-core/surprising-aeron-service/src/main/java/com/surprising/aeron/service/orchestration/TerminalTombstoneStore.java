@@ -10,22 +10,48 @@ final class TerminalTombstoneStore {
     private static final int ENTITY_TYPE_COUNT = 4;
     /** 每类已插入 ID 的保守上界：大于它一定不存在；乱序 ID 仍走精确索引，淘汰不降低上界。 */
     private final long[] maximumIndexedIds = new long[ENTITY_TYPE_COUNT];
+    static final int DEFAULT_INITIAL_CAPACITY = 8192;
     /** 实体索引直接链接 FIFO 槽，避免复制订单 ID 或删除时移动哈希探测链。 */
-    private int[] entityBuckets = new int[256], entityNext = new int[128], entityPrevious = new int[128];
+    private int[] entityBuckets, entityNext, entityPrevious;
     /** 已索引实体槽的桶号；FIFO退窗直接解链，避免再次计算实体哈希。 */
-    private int[] entityBucketBySlot = new int[128];
+    private int[] entityBucketBySlot;
     /** FIFO有效区间；容量不足仅在高水位增长，完成序号后由调用方裁剪保留窗口。 */
     private int head, size;
-    private long[] ids = new long[128], users = new long[128], sequences = new long[128];
-    private int[] types = new int[128];
+    private long[] ids, users, sequences;
+    private int[] types;
     /** 原始客户号引用；淘汰即释放，快照复制不与运行实例共享数组。 */
-    private String[] clients = new String[128];
+    private String[] clients;
     /** 客户号哈希桶及槽位链，下标加一为链接值，零为空。 */
-    private int[] buckets = new int[256], next = new int[128];
+    private int[] buckets, next;
     /** 已索引槽位的客户号桶和前驱；FIFO退窗可直接解链，不再重复计算哈希和遍历桶链。 */
-    private int[] clientBucketBySlot = new int[128], clientPrevious = new int[128];
+    private int[] clientBucketBySlot, clientPrevious;
     /** 同客户号覆盖时只索引最后一项，保持原Map put/remove语义。 */
-    private boolean[] indexed = new boolean[128];
+    private boolean[] indexed;
+
+    TerminalTombstoneStore() {
+        this(DEFAULT_INITIAL_CAPACITY);
+    }
+
+    TerminalTombstoneStore(int initialCapacity) {
+        int capacity = 128;
+        while (capacity < initialCapacity) capacity = Math.multiplyExact(capacity, 2);
+        entityBuckets = new int[capacity * 2];
+        entityNext = new int[capacity];
+        entityPrevious = new int[capacity];
+        entityBucketBySlot = new int[capacity];
+        java.util.Arrays.fill(entityBucketBySlot, -1);
+        ids = new long[capacity];
+        users = new long[capacity];
+        sequences = new long[capacity];
+        types = new int[capacity];
+        clients = new String[capacity];
+        buckets = new int[capacity * 2];
+        next = new int[capacity];
+        clientBucketBySlot = new int[capacity];
+        java.util.Arrays.fill(clientBucketBySlot, -1);
+        clientPrevious = new int[capacity];
+        indexed = new boolean[capacity];
+    }
 
     int size() { return size; }
     boolean contains(int type, long id) { return entitySlot(type, id) >= 0; }
@@ -182,7 +208,7 @@ final class TerminalTombstoneStore {
         }
     }
     TerminalTombstoneStore copy() {
-        TerminalTombstoneStore copy = new TerminalTombstoneStore();
+        TerminalTombstoneStore copy = new TerminalTombstoneStore(Math.max(DEFAULT_INITIAL_CAPACITY, size));
         for (int i = 0; i < size; i++) {
             int slot = (head + i) & (ids.length - 1);
             copy.put(types[slot], ids[slot], users[slot], clients[slot], sequences[slot]);

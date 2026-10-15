@@ -367,6 +367,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         return lane;
     }
 
+    public AccountLaneState accountLaneForUserReadOnly(long userId) {
+        return accountLanes[topology.accountLaneId(userId)];
+    }
+
     void requireLaneAccess(AccountLaneState lane, long userId) {
         if (lane == null || lane.laneId() != topology.accountLaneId(userId)
                 || accountLanes[lane.laneId()] != lane)
@@ -668,6 +672,13 @@ public final class TradingRuntimeState implements AutoCloseable {
             return operation.apply(scoped);
         }
         return inLaneCommandScope(accountLanes[laneId], operation);
+    }
+
+    <T> T onLaneReadOnly(int laneId, LaneOperation<T> operation) {
+        if (operation == null) {
+            throw new IllegalStateException("invalid account lane read operation");
+        }
+        return operation.apply(accountLanes[laneId]);
     }
 
     <T> T inLaneCommandScope(AccountLaneState lane, LaneOperation<T> operation) {
@@ -2123,29 +2134,39 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalArgumentException("global snapshot state is required");
         }
         pendingReservations.assertPendingReservationCounts();
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            onLane(laneId, lane -> {
-                lane.requireSnapshot(fenceSequence);
-                return null;
-            });
-        }
-        java.util.List<AccountLaneSnapshot> snapshots = new java.util.ArrayList<>(accountLanes.length);
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            int currentLaneId = laneId;
-            snapshots.add(onLane(currentLaneId, lane -> lane.snapshot(fenceSequence)));
-        }
-        for (AccountLaneSnapshot snapshot : snapshots) {
-            boolean unchanged = onLane(snapshot.laneId(), lane ->
-                    lane.revision() == snapshot.revision()
-                            && lane.appliedSequence() == snapshot.appliedSequence()
-                            && lane.committedSequence() == snapshot.committedSequence()
-                            && lane.localStateHash() == snapshot.localStateHash()
-                            && lane.localFundsHash() == snapshot.localFundsHash());
-            if (!unchanged) {
-                throw new IllegalStateException("account lane changed during snapshot capture");
+        boolean acquired = (accountLanesStarted || systemLedgerStarted()) && !ownerLaneAccess;
+        try {
+            if (acquired) {
+                while (!tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
+            }
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+                onLane(laneId, lane -> {
+                    lane.requireSnapshot(fenceSequence);
+                    return null;
+                });
+            }
+            java.util.List<AccountLaneSnapshot> snapshots = new java.util.ArrayList<>(accountLanes.length);
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+                int currentLaneId = laneId;
+                snapshots.add(onLane(currentLaneId, lane -> lane.snapshot(fenceSequence)));
+            }
+            for (AccountLaneSnapshot snapshot : snapshots) {
+                boolean unchanged = onLane(snapshot.laneId(), lane ->
+                        lane.revision() == snapshot.revision()
+                                && lane.appliedSequence() == snapshot.appliedSequence()
+                                && lane.committedSequence() == snapshot.committedSequence()
+                                && lane.localStateHash() == snapshot.localStateHash()
+                                && lane.localFundsHash() == snapshot.localFundsHash());
+                if (!unchanged) {
+                    throw new IllegalStateException("account lane changed during snapshot capture");
+                }
+            }
+            return java.util.List.copyOf(snapshots);
+        } finally {
+            if (acquired) {
+                releaseOwnerLaneAccess();
             }
         }
-        return java.util.List.copyOf(snapshots);
     }
 
     public void requireSnapshotFenceReady() {
@@ -3356,7 +3377,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         TreeMap<CoreLeverageKey, Long> values = new TreeMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLane(laneId, lane -> new TreeMap<>(lane.cold.leverages)));
+            values.putAll(onLaneReadOnly(laneId, lane -> new TreeMap<>(lane.cold.leverages)));
         }
         return values;
     }
@@ -3365,7 +3386,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         TreeMap<Long, CoreAlgoOrderState> values = new TreeMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++)
-            onLane(laneId, lane -> { lane.cold.algoOrders.forEachKeyValue(values::put); return null; });
+            onLaneReadOnly(laneId, lane -> { lane.cold.algoOrders.forEachKeyValue(values::put); return null; });
         return values;
     }
 
@@ -3419,7 +3440,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         TreeMap<Long, CoreTriggerOrderState> values = new TreeMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            onLane(laneId, lane -> {
+            onLaneReadOnly(laneId, lane -> {
                 lane.cold.triggerOrders.forEachKeyValue(values::put);
                 return null;
             });
@@ -3446,7 +3467,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         TreeMap<Long, TransferRuntime> values = new TreeMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            onLane(laneId, lane -> { lane.cold.pendingTransfers.forEachKeyValue(values::put); return null; });
+            onLaneReadOnly(laneId, lane -> { lane.cold.pendingTransfers.forEachKeyValue(values::put); return null; });
         }
         return Collections.unmodifiableMap(values);
     }
@@ -4935,7 +4956,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     LongObjectHashMap<UserRuntime> usersForSnapshot() {
         LongObjectHashMap<UserRuntime> values = new LongObjectHashMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLane(laneId, lane -> {
+            values.putAll(onLaneReadOnly(laneId, lane -> {
                 LongObjectHashMap<UserRuntime> copy = new LongObjectHashMap<>(lane.users.size());
                 lane.users.forEachKeyValue((userId, user) -> copy.put(userId, user.publicationValue()));
                 return copy;
@@ -4947,7 +4968,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> balancesForSnapshot() {
         LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> values = new LongObjectHashMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLane(laneId, lane -> copyAllBalances(lane.balances)));
+            values.putAll(onLaneReadOnly(laneId, lane -> copyAllBalances(lane.balances)));
         }
         return values;
     }
@@ -4955,7 +4976,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     LongObjectHashMap<OrderRuntime> ordersForSnapshot() {
         LongObjectHashMap<OrderRuntime> values = new LongObjectHashMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            onLane(laneId, lane -> {
+            onLaneReadOnly(laneId, lane -> {
                 lane.orders.longForEach(values::put);
                 return null;
             });
@@ -4973,7 +4994,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     LongObjectHashMap<ReservationRuntime> reservationsForSnapshot() {
         LongObjectHashMap<ReservationRuntime> values = new LongObjectHashMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            onLane(laneId, lane -> {
+            onLaneReadOnly(laneId, lane -> {
                 lane.reservations.longForEach(values::put);
                 return null;
             });
@@ -4984,7 +5005,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     LongObjectHashMap<LongLongHashMap> clientOrderIndexForSnapshot() {
         LongObjectHashMap<LongLongHashMap> values = new LongObjectHashMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLane(laneId, lane -> copyClientOrderIndex(lane.clientOrderIndex)));
+            values.putAll(onLaneReadOnly(laneId, lane -> copyClientOrderIndex(lane.clientOrderIndex)));
         }
         return values;
     }
@@ -4992,7 +5013,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     LongObjectHashMap<PositionRuntime> positionsForSnapshot() {
         LongObjectHashMap<PositionRuntime> values = new LongObjectHashMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLane(laneId, lane -> new LongObjectHashMap<>(lane.positions)));
+            values.putAll(onLaneReadOnly(laneId, lane -> new LongObjectHashMap<>(lane.positions)));
         }
         return values;
     }
@@ -5000,7 +5021,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     LongObjectHashMap<LiquidationRuntime> liquidationsForSnapshot() {
         LongObjectHashMap<LiquidationRuntime> values = new LongObjectHashMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLane(laneId, lane -> new LongObjectHashMap<>(lane.cold.liquidations)));
+            values.putAll(onLaneReadOnly(laneId, lane -> new LongObjectHashMap<>(lane.cold.liquidations)));
         }
         return values;
     }
@@ -5012,7 +5033,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     public LongObjectHashMap<RiskSnapshotRuntime> riskSnapshotsForSnapshot() {
         LongObjectHashMap<RiskSnapshotRuntime> values = new LongObjectHashMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLane(laneId, lane -> new LongObjectHashMap<>(lane.cold.riskSnapshots)));
+            values.putAll(onLaneReadOnly(laneId, lane -> new LongObjectHashMap<>(lane.cold.riskSnapshots)));
         }
         return values;
     }
@@ -5247,7 +5268,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     static void addUserEntity(LongObjectHashMap<LongHashSet> index, long userId, long entityId) {
         LongHashSet entities = index.get(userId);
         if (entities == null) {
-            entities = new LongHashSet(2);
+            entities = new LongHashSet(16);
             index.put(userId, entities);
         }
         entities.add(entityId);

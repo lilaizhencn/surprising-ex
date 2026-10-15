@@ -4,7 +4,7 @@ import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import org.junit.jupiter.api.Test;
 import org.agrona.collections.Long2ObjectHashMap;
-import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
+import org.agrona.collections.Int2ObjectHashMap;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LaneAdmissionAggregateTest {
@@ -49,7 +49,7 @@ class LaneAdmissionAggregateTest {
                 var field = index.getClass().getDeclaredField("summariesByUser");
                 field.setAccessible(true);
                 var users = (Long2ObjectHashMap<?>) field.get(index);
-                var symbols = (IntObjectHashMap<?>) users.get(7);
+                var symbols = (Int2ObjectHashMap<?>) users.get(7);
                 Object aggregate = symbols.get(3);
                 lane.putOrder(order.withCommitMetadata(10, 20));
                 lane.putOrder(order.withExecution(60, 40, CoreOrderStatus.OPEN, 2));

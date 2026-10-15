@@ -204,13 +204,15 @@ public final class CoreUserState {
 
     private static Map<String, Long> calculateExplainedLocks(Map<Long, OrderReservation> reservations,
                                                               Map<String, CorePositionState> positions) {
-        if (reservations == null || positions == null) return Map.of();
+        if (reservations == null || positions == null || (reservations.isEmpty() && positions.isEmpty())) {
+            return Map.of();
+        }
         Map<String, Long> result = new HashMap<>();
         reservations.values().forEach(reservation ->
                 adjustExplainedLock(result, reservation.asset(), reservation.remainingUnits()));
         positions.values().forEach(position ->
                 adjustExplainedLock(result, position.marginAsset(), position.positionMarginUnits()));
-        return result;
+        return result.isEmpty() ? Map.of() : result;
     }
 
     private static void adjustExplainedLock(Map<String, Long> locks, String asset, long delta) {

@@ -66,10 +66,12 @@ public final class RuntimeAdlExecution {
                 throw new CoreStateRejectedException("STALE_MARK_PRICE", "ADL mark price changed");
             long positionKey = identities.positionKey(command.targetUserId(), instrument, command.positionSide());
             AdlWork work = reuse == null || !reuse.reusable() ? new AdlWork() : reuse;
+            work.sourceUserId = route.userId();
             work.prepare(command, runtime, null, instrument, mark, positionKey,
                     identities.assetId(instrument.settleAsset()), runtime.topology().accountLaneId(command.targetUserId()));
             work.fundingInProgress = runtime.treasury().fundingProgress(symbolId) != null;
-            work.sourceUserId = route.userId(); work.capturingLiquidation = true;
+            work.sourceLane = runtime.topology().accountLaneId(route.userId());
+            work.capturingLiquidation = true;
             runtime.dispatchControlLanes(runtime.topology().accountLaneMask(route.userId()), work);
             return work;
         }
@@ -98,13 +100,20 @@ public final class RuntimeAdlExecution {
                 command.targetUserId(), instrument, command.positionSide());
         int settleAssetId = identities.assetId(instrument.settleAsset());
         int targetLane = runtime.topology().accountLaneId(command.targetUserId());
-        long mask = (1L << targetLane) | runtime.topology().accountLaneMask(liquidation.userId());
+        int sourceLane = runtime.topology().accountLaneId(liquidation.userId());
         AdlWork work = reuse == null || !reuse.reusable() ? new AdlWork() : reuse;
+        work.sourceUserId = liquidation.userId();
         work.prepare(command, runtime, liquidation, instrument, mark, positionKey,
                 settleAssetId, targetLane);
+        work.sourceLane = sourceLane;
         runtime.releaseOwnerLaneAccess();
-        Object[] results = runtime.executeLaneMutations(mask, Long.bitCount(mask), work);
-        work.finish(results[targetLane]);
+        Object[] results = runtime.executeLaneMutations(1L << targetLane, 1, work);
+        Object targetResult = results[targetLane];
+        if (targetLane != sourceLane) {
+            work.liquidationLaneDispatched = true;
+            runtime.executeLaneMutations(1L << sourceLane, 1, work);
+        }
+        work.finish(targetResult);
         return null;
     }
 
@@ -119,10 +128,13 @@ public final class RuntimeAdlExecution {
         private long positionKey;
         private int settleAssetId;
         private int targetLane;
+        private int sourceLane;
         private final RuntimeTreasuryDelta targetDelta = new RuntimeTreasuryDelta();
         private boolean done, accountsCollected, ledgerDispatched;
         private long sourceUserId;
         private boolean capturingLiquidation;
+        private boolean targetLaneDispatched;
+        private boolean liquidationLaneDispatched;
         private boolean fundingInProgress;
 
         private void prepare(ExecuteAdlCommand command, TradingRuntimeState runtime,
@@ -137,8 +149,10 @@ public final class RuntimeAdlExecution {
             this.positionKey = positionKey;
             this.settleAssetId = settleAssetId;
             this.targetLane = targetLane;
+            this.sourceLane = runtime.topology().accountLaneId(liquidation != null ? liquidation.userId() : sourceUserId);
             this.targetDelta.clear();
             this.done = accountsCollected = ledgerDispatched = capturingLiquidation = false;
+            this.targetLaneDispatched = liquidationLaneDispatched = false;
         }
 
         @Override
@@ -156,11 +170,11 @@ public final class RuntimeAdlExecution {
                 return null;
             }
             RuntimeTreasuryDelta delta = null;
-            if (runtime.currentLaneOwns(command.targetUserId())) {
+            if (runtime.currentLaneOwns(command.targetUserId()) && !liquidationLaneDispatched) {
                 delta = applyAdlTarget(command, runtime, liquidation, instrument, mark,
                         positionKey, settleAssetId, targetDelta);
             }
-            if (runtime.currentLaneOwns(liquidation.userId())) {
+            if (runtime.currentLaneOwns(liquidation.userId()) && (targetLane == sourceLane || liquidationLaneDispatched)) {
                 completeAdlLiquidation(command, runtime);
             }
             return delta;
@@ -172,11 +186,24 @@ public final class RuntimeAdlExecution {
             if (capturingLiquidation) {
                 if (!runtime.pollControlLanes()) return false;
                 capturingLiquidation = false;
-                runtime.dispatchControlLanes((1L << targetLane) | runtime.topology().accountLaneMask(sourceUserId), this);
+                targetLaneDispatched = true;
+                runtime.dispatchControlLanes(1L << targetLane, this);
                 return false;
             }
-            if (!accountsCollected) {
+            if (targetLaneDispatched) {
                 if (!runtime.pollControlLanes()) return false;
+                targetLaneDispatched = false;
+                if (targetLane != sourceLane) {
+                    liquidationLaneDispatched = true;
+                    runtime.dispatchControlLanes(1L << sourceLane, this);
+                    return false;
+                }
+            }
+            if (liquidationLaneDispatched) {
+                if (!runtime.pollControlLanes()) return false;
+                liquidationLaneDispatched = false;
+            }
+            if (!accountsCollected) {
                 runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
                 runtime.requireRevisionCapacity();
                 accountsCollected = true;

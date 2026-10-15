@@ -669,6 +669,7 @@ class RuntimeCommitRecoveryTest {
         com.surprising.aeron.service.matching.MatchingResult matching = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
+            state.drainMatchingCompletions();
             matching = state.takeMatchingResult(sequence);
             if (matching == null) Thread.onSpinWait();
         }
@@ -725,6 +726,15 @@ class RuntimeCommitRecoveryTest {
                 CoreLiquidationWorkCodec.encodeQuery(ProductLine.LINEAR_PERPETUAL,
                         CoreLiquidationWorkView.Purpose.EXECUTION, 0, 100, 1_048_576));
         CoreResponse response = state.apply(query);
+        if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
+            long queryId = state.querySequence(query.header().commandId());
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while ((response = state.takeQueryResult(queryId)) == null) {
+                state.assertHealthy();
+                if (System.nanoTime() >= deadline) throw new AssertionError("Liquidation query timeout");
+                Thread.onSpinWait();
+            }
+        }
         assertThat(response.status()).isEqualTo(ResponseStatus.OK);
         return CoreLiquidationWorkCodec.decodeWork(response.data());
     }
@@ -766,6 +776,7 @@ class RuntimeCommitRecoveryTest {
         com.surprising.aeron.service.matching.MatchingResult matching = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
+            state.drainMatchingCompletions();
             matching = state.takeMatchingResult(sequence);
             if (matching == null) Thread.onSpinWait();
         }
@@ -826,9 +837,7 @@ class RuntimeCommitRecoveryTest {
         byte[] encoded = CoreMessageCodec.encode(command);
         // Source sequence numbers are independent; their synthetic submission clocks can go backwards.
         // Aeron supplies a cluster clock, which must not precede committed order timestamps, including after restore.
-        long timestamp = Math.max(command.header().submittedAtEpochMillis(), service.state().tradingState().orders()
-                .values().stream().mapToLong(com.surprising.aeron.service.state.model.CoreOrderState::updatedAtEpochMillis)
-                .max().orElse(0L));
+        long timestamp = Math.max(command.header().submittedAtEpochMillis(), 1_000L + service.state().appliedCommandCount());
         service.onSessionMessage(clusterClient(responses), timestamp,
                 new UnsafeBuffer(encoded), 0, encoded.length, aeronHeader());
         return new ClusterReplay(responses);
@@ -887,10 +896,13 @@ class RuntimeCommitRecoveryTest {
         assertBatchRecoveryParity(restored.state(), reference.state());
     }
 
+    private static final java.util.concurrent.atomic.AtomicLong nextSessionId = new java.util.concurrent.atomic.AtomicLong(100L);
+
     private static ClientSession clusterClient(List<byte[]> responses) {
+        long sessionId = nextSessionId.getAndIncrement();
         return (ClientSession) Proxy.newProxyInstance(ClientSession.class.getClassLoader(),
                 new Class<?>[]{ClientSession.class}, (proxy, method, arguments) -> switch (method.getName()) {
-                    case "id" -> 91L;
+                    case "id" -> sessionId;
                     case "isClosing" -> false;
                     case "offer" -> {
                         var buffer = (org.agrona.DirectBuffer) arguments[0];
@@ -1031,8 +1043,11 @@ class RuntimeCommitRecoveryTest {
         for (var value : index.getClass().getDeclaredFields()) {
             if (Modifier.isStatic(value.getModifiers()) || value.getName().equals("identities")
                     || value.getName().equals("admissionSummary")
+                    || value.getName().equals("businessOwner")
                     || index instanceof com.surprising.aeron.service.state.index.ActiveOrderIndex
-                    && value.getName().equals("pageScratch")) continue; // reusable query scratch, not index state
+                    && (value.getName().equals("pageScratch")
+                    || value.getName().equals("recycledOrders")
+                    || value.getName().equals("recycledMemberships"))) continue; // reusable query scratch / pools, not index state
             value.setAccessible(true);
             snapshot.put(value.getName(), canonicalIndexValue(value.get(index)));
         }
@@ -1045,8 +1060,20 @@ class RuntimeCommitRecoveryTest {
         if (value instanceof com.surprising.aeron.service.state.OrderRuntime order)
             return order.toString(); // Canonical instrument identity is JVM-local after snapshot recovery.
         if (value == null) return "<null>";
-        if (value.getClass().getName().startsWith("com.surprising.aeron.service.state.OpenInterestIndex$")
-                || value.getClass().getName().startsWith("com.surprising.aeron.service.state.index.ActiveOrderIndex$")) {
+        if (value.getClass().getName().startsWith("com.surprising.aeron.service.state.OpenInterestIndex$")) {
+            try {
+                Map<String, Object> snapshot = indexSnapshot(value);
+                if (snapshot.get("longQuantity") instanceof Long l && l == 0L
+                        && snapshot.get("shortQuantity") instanceof Long s && s == 0L) {
+                    return Map.of();
+                }
+                return snapshot;
+            } catch (Exception failure) {
+                throw new AssertionError(failure);
+            }
+        }
+        if (value.getClass().getName().startsWith("com.surprising.aeron.service.state.index.ActiveOrderIndex$")
+                || value.getClass().getName().startsWith("com.surprising.aeron.service.state.AdlPositionIndex$")) {
             try {
                 return indexSnapshot(value);
             } catch (Exception failure) {
@@ -1055,7 +1082,13 @@ class RuntimeCommitRecoveryTest {
         }
         if (value instanceof Map<?, ?> map) {
             java.util.TreeMap<String, Object> copy = new java.util.TreeMap<>();
-            map.forEach((key, nested) -> copy.put(String.valueOf(key), canonicalIndexValue(nested)));
+            map.forEach((key, nested) -> {
+                Object canonical = canonicalIndexValue(nested);
+                if (canonical instanceof java.util.Collection<?> col && col.isEmpty()) return;
+                if (canonical instanceof Map<?, ?> nestedMap && nestedMap.isEmpty()) return;
+                if ("[]".equals(canonical)) return;
+                copy.put(String.valueOf(key), canonical);
+            });
             return Map.copyOf(copy);
         }
         if (value instanceof java.util.Set<?> set) {

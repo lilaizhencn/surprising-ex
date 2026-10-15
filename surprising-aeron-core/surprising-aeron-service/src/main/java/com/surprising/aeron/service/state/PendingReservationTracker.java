@@ -323,7 +323,7 @@ final class PendingReservationTracker {
 
     long pendingReservedUnits(long userId, int assetId) {
         owner.assertOwner();
-        return owner.onLane(userId, lane -> lane.pendingReservedUnits(userId, assetId));
+        return owner.onLaneReadOnly(owner.topology.accountLaneId(userId), lane -> lane.pendingReservedUnits(userId, assetId));
     }
 
     int pendingReservationCount(long userId) {

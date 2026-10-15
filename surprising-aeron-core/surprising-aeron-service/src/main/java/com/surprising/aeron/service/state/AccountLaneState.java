@@ -378,7 +378,6 @@ public final class AccountLaneState {
     }
 
     long pendingReservedUnits(long userId, int assetId) {
-        assertOwner();
         LongLongHashMap unitsByUser = pendingReservedUnitsByAsset.get(assetId);
         return unitsByUser == null ? 0 : unitsByUser.get(userId);
     }

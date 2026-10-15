@@ -78,7 +78,7 @@ public final class RuntimeIdentityRegistry {
 
     private AccountLaneState clientLane(long userId) {
         if (clientRuntime == null) throw new IllegalStateException("client identity requires a runtime");
-        return clientRuntime.accountLaneForUser(userId);
+        return clientRuntime.accountLaneForUserReadOnly(userId);
     }
 
     private LaneClientIdentities clientTable(long userId) {
