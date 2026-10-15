@@ -368,3 +368,5 @@ visitor 仅在同步遍历期间借用身份注册表、用户、映射和订单
 `OwnerLogContext` 不再实现 Aeron `Cluster`。`TradingOwnerLoop` 在服务线程复制初始角色、日志时间和位置，Owner 按既有输入 FIFO 更新这些值；`TradingCoreOwner` 和实时边界只接收所需元数据，Owner 的等待策略仍由自己持有。真实会话、发布器及定时器 API 留在 Cluster 服务边界。
 
 受影响测试改为等待实际异步初始化，待撮合场景只完成准入，账户及身份断言经真实 Lane 查询；测试回调适配器同步更新元数据。没有放宽业务或线程归属校验。67 个必要用例通过，包含六产品线真实 Owner 的 Cluster API 访问隔离；基准模块及直接依赖编译通过。按要求未执行快照、恢复或压测，也不据此宣称全量测试或整体 Owner 迁移完成。见 [D1 功能验证](../../docs/validation/owner-log-metadata-tests-20261015.json)。
+
+D1 补充审查：`ClusterServiceEgress.TransportSession` 仍实现 `ClientSession`，两个未使用的接口方法仍抛 `UnsupportedOperationException`，因此完整 D1 尚未关闭。补充六产品线实际 Owner/会话出口贯通后，79 个必要用例通过，涵盖背压顺序、角色切换、旧任期丢弃、会话关闭和响应租约。该贯通用例仅模拟发布器，不代表真实网络集群或压测验收；见 [D1 复验及未完成项](../../docs/validation/d1-review-rerun-20261015.json)。
