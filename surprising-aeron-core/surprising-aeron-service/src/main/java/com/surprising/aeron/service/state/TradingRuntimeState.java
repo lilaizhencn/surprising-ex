@@ -677,16 +677,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private static final ThreadLocal<AccountLaneState> CURRENT_LANE_SCOPE = new ThreadLocal<>();
-
     public AccountLaneState currentLaneCommandScope() {
         Thread current = Thread.currentThread();
         if (current == owner) {
             return ownerLaneScope;
-        }
-        AccountLaneState scoped = CURRENT_LANE_SCOPE.get();
-        if (scoped != null) {
-            return scoped.commandScopeActive ? scoped : null;
         }
         if (laneWorkers != null) {
             for (int i = 0; i < laneWorkers.length; i++) {
@@ -755,11 +749,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (current == owner && accountLanesStarted && !ownerLaneAccess)
             throw new IllegalStateException("active account access must run on its owning Lane thread");
         lane.assertOwner();
-        if (current == owner) {
-            ownerLaneScope = lane;
-        } else {
-            CURRENT_LANE_SCOPE.set(lane);
-        }
+        if (current == owner) ownerLaneScope = lane;
         lane.commandScopeActive = true;
     }
 
@@ -785,11 +775,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         lane.assertOwner();
         if (captureRetirementProof) laneDeltas[lane.laneId()].preparePositionRetirement(lane);
-        if (Thread.currentThread() == owner) {
-            ownerLaneScope = null;
-        } else {
-            CURRENT_LANE_SCOPE.set(null);
-        }
+        if (Thread.currentThread() == owner) ownerLaneScope = null;
         lane.commandScopeActive = false;
         if (Thread.currentThread() == owner) flushPublishedChanges(lane.laneId());
     }

@@ -236,7 +236,7 @@
 | **P5** | 级联快照堆分配 | `PlaceBatchAdmissionEvent.java` | 废除准入收集阶段调用 `publicationValue()` 触发全量 `snapshot()` 的行为，直接通过预分配的 `copyIntoCommandSlot` 收集订单准入快照。 | 批次下单（如 20 笔）时单次消除 20 个大对象的级联深拷贝堆分配，维持零分配对象池契约。 |
 | **P6** | 集合物化与装箱分配 | `TradingRuntimeState.java`<br>`DerivativeAccountCommandProcessor.java` | 优化 `positionKeysForUserAndSymbolPrimitive`：在衍生品杠杆调减等热路径上直接以原始 `long` 数组列表原地迭代，并在空集合时直接复用全局单例 `emptyNavigableSet`。 | 彻底消除了每次遍历用户持仓时 new `TreeSet<Long>`、逐个包装 Long 节点及 `unmodifiableNavigableSet` 的垃圾产生。 |
 | **P7** | 内置监视器锁竞争 | `RuntimeIdentityRegistry.java` | 移除 `ensurePositionIdentityRegistered` 中的 `synchronized (entry)` 监视器锁，直接依赖 `ConcurrentHashMap.putIfAbsent` 原语保证唯一性，结合 volatile 标志发布。 | 彻底消除了多 Lane 并发保留持仓身份时 Java Monitor 锁膨胀引发的线程挂起与上下文切换毛刺。 |
-| **P8** | 线程线性扫描开销 | `TradingRuntimeState.java` | 引入 `ThreadLocal<AccountLaneState> CURRENT_LANE_SCOPE`，在 `enterLaneCommandScope` 与 `exitLaneCommandScope` 中维护，提供 $O(1)$ 极速线程定位，并保留原有 fallback。 | 消除热路径上每次调用 `currentLaneCommandScope()` 时对 `laneWorkers` 数组的循环遍历比对。 |
+| **P8** | 拒绝隐式上下文污染 | `TradingRuntimeState.java` | 严禁并彻底移除任何 `ThreadLocal` 隐式状态，坚持权威线程显式比对与业务上下文显式传参；在 `currentLaneCommandScope()` 中保持直接、透明的权威所有权校验。 | 杜绝隐式全局上下文污染、内存泄漏隐患与 ThreadLocalMap 哈希探测开销，确保状态生命周期严格确定且无黑盒魔法。 |
 | **P9** | 架构冗余与历史死代码 | `TradingRuntimeState.java` | 彻底移除 `SINGLE_WRITER_INLINE`、`singleWriterInline` 及其 getter/setter 等历史遗留存根代码。 | 消除概念混乱，代码意图单一清晰，完全契合 KISS 极简设计原则。 |
 
 ---
