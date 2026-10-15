@@ -1,0 +1,145 @@
+{
+  "classification": "resident Lane revision visitor functionality passed; runtime allocation validation remains incomplete due host throttling",
+  "base_commit": "46b31b5e203da97db7cbf98dfdf9018c3dac7d48",
+  "unique_cases": 167,
+  "rows": [
+    {
+      "test_class": "com.surprising.aeron.service.state.RuntimePerpetualFundingProcessorTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.LaneClientIdentitiesTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.RuntimeIdentityRegistryTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.UserRevisionReuseTest",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreAccountLaneQueryTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreUserRevisionTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreSelfTradePrefixTest",
+      "tests": 42,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.AsyncFundingCommandTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreActiveLaneIngressTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest",
+      "tests": 33,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreBusinessStateHashTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreRiskLaneQueryTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreTransferLaneLifecycleTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.RealtimeTerminalEmissionTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CorePreflightLaneQueryTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "selector": "UserRevisionReuseTest,CoreSelfTradePrefixTest,CoreActiveLaneIngressTest,CoreFinancialLedgerProductionTest,CoreRiskLaneQueryTest,RealtimeTerminalEmissionTest,CoreAccountLaneQueryTest,CoreTransferLaneLifecycleTest,ClusterCommandPipelineTest#atomicOcoPairWithoutSnapshot+blockedBatchRetainsDecodeUntilItsDependencyCommits+rejectedBatchAndIndependentOrdinaryOrderKeepProgressAndFunds+proportionalOiAdmissionUsesTheCompletedGlobalAndSequentialBatchPrefix+internalTriggerPagesWithoutSnapshot+selectedTriggerPriceStreamsWithoutSnapshot,CoreOrderedOrderBatchTest#cancelIdentityAndPreparationNeverReadLaneOrderTables+rejectsMixedUserCancelBatchBeforeAnyMutation+rejectsProductLineMismatchBeforeAnyBatchMutation+sequentialNativeAndAdmissionRejectionsReleaseFundsWithoutRecovery,LaneClientIdentitiesTest,RuntimeIdentityRegistryTest#laneOwnsPreparationAndDuplicateRollbackPreservesLiveIdentity+streamedIdentityHashExactlyMatchesJavaUtf8IncludingMalformedSurrogates+clientIdentityReferenceProtectsAReusedKeyFromAnOlderTerminalRelease,CorePreflightLaneQueryTest,CoreUserRevisionTest,AsyncFundingCommandTest#fundingPagesUsePublishedProgressAndCompleteOnceWithoutOwnerLaneHandoff,RuntimePerpetualFundingProcessorTest,CoreBusinessStateHashTest",
+  "business_flow": [
+    "Each AccountLaneState constructs its primitive user-revision visitor once",
+    "Same coalesced map traversal preserves missing-user failure, addExact, authority update and independent command receipt",
+    "Target receipt exists only during the synchronous traversal and clears in finally, including arithmetic overflow",
+    "Caller clears coalesced increments only after success, unchanged from prior behavior"
+  ],
+  "coverage": [
+    "new overflow leaves failed receipt/authority/increments unchanged and next command uses its own receipt",
+    "six-product receipt and value independence, selftrade/reverse/exact revision and active worker paths",
+    "funding, batch/trigger, financial/risk, transfer/query/preflight and realtime regression"
+  ],
+  "performance_scope": "Initial JFR exposed a capturing callback; source now uses a resident method reference. Followup runtime recording was environmentally invalid; no zero-allocation or numerical performance acceptance claim. Main objective remains open.",
+  "excluded": [
+    "actual snapshot/restore/recovery",
+    "wallet",
+    "real-node pressure",
+    "whole-Core<100 and capacity acceptance"
+  ]
+}

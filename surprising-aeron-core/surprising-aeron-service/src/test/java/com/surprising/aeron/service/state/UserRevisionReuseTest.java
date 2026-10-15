@@ -99,6 +99,30 @@ class UserRevisionReuseTest {
         assertThat(before.isEmpty()).isTrue();
     }
 
+    @Test void failedRevisionTraversalReleasesItsReceiptBeforeTheNextCommand() {
+        var lane = new AccountLaneState(0, 256);
+        lane.bindOwner();
+        var overflowing = new UserRuntime(ProductLine.LINEAR_PERPETUAL, 7,
+                Long.MAX_VALUE, CorePositionMode.ONE_WAY).laneValue();
+        lane.users.put(7, overflowing);
+        var failed = new MatcherSettlementChanges(1);
+        failed.ensureActiveLanes(1); failed.addUserRevision(0, 7, 1);
+        assertThatThrownBy(() -> failed.applyUserRevisions(0, lane)).isInstanceOf(ArithmeticException.class);
+        assertThat(lane.users.get(7)).isSameAs(overflowing);
+        assertThat(overflowing.revision()).isEqualTo(Long.MAX_VALUE);
+        assertThat(failed.laneDeltas[0].users.isEmpty()).isTrue();
+        assertThat(failed.userRevisionDeltas[0].get(7)).isEqualTo(1);
+
+        lane.users.put(8, new UserRuntime(8).laneValue());
+        var next = new MatcherSettlementChanges(1);
+        next.ensureActiveLanes(1); next.addUserRevision(0, 8, 3);
+        next.applyUserRevisions(0, lane);
+        assertThat(lane.users.get(8).revision()).isEqualTo(3);
+        assertThat(next.laneDeltas[0].users.get(8).revision()).isEqualTo(3);
+        assertThat(next.userRevisionDeltas[0].isEmpty()).isTrue();
+        assertThat(failed.laneDeltas[0].users.isEmpty()).isTrue();
+    }
+
     @Test void rejectedUserArithmeticAndModeLeaveTheAuthorityUnchanged() {
         var user = new UserRuntime(ProductLine.LINEAR_PERPETUAL, 7, Long.MAX_VALUE, CorePositionMode.HEDGE).laneValue();
         assertThatThrownBy(() -> user.withState(Math.incrementExact(user.revision()), CorePositionMode.ONE_WAY))

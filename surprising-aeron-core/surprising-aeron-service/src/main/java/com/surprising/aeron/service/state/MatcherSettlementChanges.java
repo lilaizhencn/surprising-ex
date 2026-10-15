@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.state;
 
-import com.surprising.aeron.service.state.account.UserRuntime;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
@@ -63,17 +62,7 @@ final class MatcherSettlementChanges {
     void applyUserRevisions(int laneId, AccountLaneState lane) {
         LongLongHashMap deltas = userRevisionDeltas[laneId];
         if (deltas.isEmpty()) return;
-        LaneCommitDelta changes = laneDeltas[laneId];
-        deltas.forEachKeyValue((userId, count) -> {
-            UserRuntime current = lane.users.get(userId);
-            if (current == null) {
-                throw new IllegalStateException("runtime user disappeared during matcher settlement: " + userId);
-            }
-            long revision = Math.addExact(current.revision(), count);
-            UserRuntime advanced = current.laneValue().withState(revision, current.positionMode());
-            lane.users.put(userId, advanced);
-            changes.putUser(userId, advanced);
-        });
+        lane.applyUserRevisions(deltas, laneDeltas[laneId]);
         deltas.clear();
     }
 

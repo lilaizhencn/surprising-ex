@@ -308,3 +308,10 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 `TradingCoreRuntime.stateHash()` 经 `RuntimeStateMaterializationCache.businessStateHash()` 在同一个现有冷读取屏障内物化交易状态，并读取手续费策略和各 Lane 的完整待划转字段，然后按原 canonical 规则计算哈希。查询结束或异常时，只归还本次取得的 Lane 所有权；外层已经持有的屏障不被内层查询释放。Owner 在普通活跃路径直接读取 Lane 待划转表仍被拒绝，没有放宽热路径的单写者检查。
 
 14 个必要用例覆盖六产品线、跨 Lane 待划转、手续费、重复及完成、外层屏障和查询后 worker 写入；两个批量拒绝夹具重新使用生产 `stateHash()`，见 [活跃业务哈希验证](../../docs/validation/active-business-hash-20261015.json)。本次是冷查询正确性修复，不执行快照/恢复、wallet 或压测。Owner 其余迁移及完整 Core 分配目标继续处理。
+
+
+### 成交用户修订回调由 Lane 常驻（2026-10-15）
+
+`MatcherSettlementChanges.applyUserRevisions` 把当前命令合并后的 primitive 修订增量与对应 `LaneCommitDelta` 交给所属 `AccountLaneState`。Lane 构造一次原语 visitor，并按原规则校验用户、精确累加修订号、更新权威用户和独立收据；不再逐次创建捕获 Lane 及收据的 lambda。收据引用只在同步遍历期间借用，正常和异常返回均在 `finally` 清空；源增量仍只在成功后清空。没有新增线程、队列或账户镜像。
+
+167 个必要用例通过，新增用例验证算术溢出不改写用户或失败收据，后续命令不会沿用失败收据；同时覆盖六产品线、独立输出、实际 worker、成交及资金/风险路径，见 [Lane 修订回调验证](../../docs/validation/lane-revision-visitor-20261015.json)。本次运行时分配复验受宿主降频影响，尚未验收其动态成本；不据此宣称零分配或完整 Core 达标。未执行快照/恢复、wallet 或真实节点压测，数值记录仅留本地。

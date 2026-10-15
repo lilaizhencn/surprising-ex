@@ -76,6 +76,10 @@ public final class AccountLaneState {
     final LaneColdState cold = new LaneColdState();
     final TradingRuntimeState.LeverageLookup leverageLookup = new TradingRuntimeState.LeverageLookup();
     final RuntimeIdentityRegistry.LookupScratch identityLookupScratch = new RuntimeIdentityRegistry.LookupScratch();
+    /** The worker borrows exactly one command receipt while advancing its users. */
+    private LaneCommitDelta userRevisionChanges;
+    private final org.eclipse.collections.api.block.procedure.primitive.LongLongProcedure advanceUserRevision =
+            this::advanceUserRevision;
     final RuntimeDerivativeMatchProcessor.DerivativeSettlementAccumulator derivativeSettlementAccumulator =
             new RuntimeDerivativeMatchProcessor.DerivativeSettlementAccumulator();
     final RuntimeSpotMatchProcessor.SpotSettlementAccumulator spotSettlementAccumulator =
@@ -168,6 +172,24 @@ public final class AccountLaneState {
     }
 
     public void bindOwner() { assertOwner(); }
+
+    void applyUserRevisions(LongLongHashMap revisions, LaneCommitDelta changes) {
+        assertOwner();
+        if (userRevisionChanges != null) throw new IllegalStateException("nested Lane user revision traversal");
+        userRevisionChanges = java.util.Objects.requireNonNull(changes, "user revision receipt");
+        try { revisions.forEachKeyValue(advanceUserRevision); }
+        finally { userRevisionChanges = null; }
+    }
+
+    private void advanceUserRevision(long userId, long count) {
+        UserRuntime current = users.get(userId);
+        if (current == null)
+            throw new IllegalStateException("runtime user disappeared during matcher settlement: " + userId);
+        long revision = Math.addExact(current.revision(), count);
+        UserRuntime advanced = current.laneValue().withState(revision, current.positionMode());
+        users.put(userId, advanced);
+        userRevisionChanges.putUser(userId, advanced);
+    }
 
     /** Bind the actual worker before it starts; no unowned startup window is exposed. */
     public void bindWorker(Thread worker) {
