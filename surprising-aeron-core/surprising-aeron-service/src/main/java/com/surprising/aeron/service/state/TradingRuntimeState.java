@@ -154,6 +154,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     final long[][] accountLaneMaxLatencyNanos;
     /** owner 可见的各 Lane 已提交序号。 */
     final long[] publishedLaneCommittedSequences;
+    /** 缓存行隔离的已提交序号槽位，防止多 Lane worker 并发写触发 CPU 伪共享。 */
+    final PaddedCommittedSequenceSlot[] publishedLaneCommittedSlots;
     /** Owner-only committed metadata, updated from existing Lane receipts; no position copies. */
     private final int[] publishedLanePositionCounts;
     private int publishedPositions;
@@ -161,6 +163,20 @@ public final class TradingRuntimeState implements AutoCloseable {
     final long[] dispatchedLaneCommitSequences;
     /** 可复用的 laneCommitEvent 对象池；仅在消费者完成后回收。 */
     final java.util.ArrayDeque<LaneCommitEvent> laneCommitEventPool = new java.util.ArrayDeque<>();
+
+    private static class PaddedCommittedSequenceLhsPadding {
+        @SuppressWarnings("unused")
+        private long p00, p01, p02, p03, p04, p05, p06, p07;
+    }
+
+    private static class PaddedCommittedSequenceValue extends PaddedCommittedSequenceLhsPadding {
+        protected volatile long sequence;
+    }
+
+    private static final class PaddedCommittedSequenceSlot extends PaddedCommittedSequenceValue {
+        @SuppressWarnings("unused")
+        private long p10, p11, p12, p13, p14, p15, p16, p17;
+    }
 
     /** 可复用的 placeAdmissionEvent 对象池；仅在消费者完成后回收。 */
     final java.util.ArrayDeque<PlaceAdmissionEvent> placeAdmissionEventPool =
@@ -170,15 +186,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 可复用的 placeBatchAdmissionEvent 对象池；仅在消费者完成后回收。 */
     final java.util.ArrayDeque<PlaceBatchAdmissionEvent> placeBatchAdmissionEventPool =
             new java.util.ArrayDeque<>();
-    /** 账户 Lane 是否已初始化。在单写者内联模型下，无需后台工作线程。 */
+    /** 账户 Lane 是否已初始化。 */
     boolean accountLanesStarted;
-    public static final boolean SINGLE_WRITER_INLINE = true;
-    public boolean singleWriterInline = true;
-    public boolean isSingleWriterInline() { return true; }
-    public boolean singleWriterInline() { return true; }
-    public void singleWriterInline(boolean inline) {}
-    public boolean isPublishMirrorEnabled() { return false; }
-    public void publishMirrorEnabled(boolean enabled) {}
 
     /** 各币对当前标记价，由所属产品运行时独立维护。 */
     final IntObjectHashMap<MarkPriceRuntime> markPrices = new IntObjectHashMap<>();
@@ -323,6 +332,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.accountLaneTotalLatencyNanos = laneMetricValues(topology.accountLaneCount());
         this.accountLaneMaxLatencyNanos = laneMetricValues(topology.accountLaneCount());
         this.publishedLaneCommittedSequences = new long[topology.accountLaneCount()];
+        this.publishedLaneCommittedSlots = new PaddedCommittedSequenceSlot[topology.accountLaneCount()];
+        for (int i = 0; i < topology.accountLaneCount(); i++) {
+            this.publishedLaneCommittedSlots[i] = new PaddedCommittedSequenceSlot();
+        }
         this.publishedLanePositionCounts = new int[topology.accountLaneCount()];
         this.dispatchedLaneCommitSequences = new long[topology.accountLaneCount()];
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
@@ -664,10 +677,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
+    private static final ThreadLocal<AccountLaneState> CURRENT_LANE_SCOPE = new ThreadLocal<>();
+
     public AccountLaneState currentLaneCommandScope() {
         Thread current = Thread.currentThread();
         if (current == owner) {
             return ownerLaneScope;
+        }
+        AccountLaneState scoped = CURRENT_LANE_SCOPE.get();
+        if (scoped != null) {
+            return scoped.commandScopeActive ? scoped : null;
         }
         if (laneWorkers != null) {
             for (int i = 0; i < laneWorkers.length; i++) {
@@ -736,7 +755,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (current == owner && accountLanesStarted && !ownerLaneAccess)
             throw new IllegalStateException("active account access must run on its owning Lane thread");
         lane.assertOwner();
-        if (current == owner) ownerLaneScope = lane;
+        if (current == owner) {
+            ownerLaneScope = lane;
+        } else {
+            CURRENT_LANE_SCOPE.set(lane);
+        }
         lane.commandScopeActive = true;
     }
 
@@ -762,7 +785,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         lane.assertOwner();
         if (captureRetirementProof) laneDeltas[lane.laneId()].preparePositionRetirement(lane);
-        if (Thread.currentThread() == owner) ownerLaneScope = null;
+        if (Thread.currentThread() == owner) {
+            ownerLaneScope = null;
+        } else {
+            CURRENT_LANE_SCOPE.set(null);
+        }
         lane.commandScopeActive = false;
         if (Thread.currentThread() == owner) flushPublishedChanges(lane.laneId());
     }
@@ -964,7 +991,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void publishLaneCommittedSequence(AccountLaneState lane) {
         int laneId = lane.laneId();
-        publishedLaneCommittedSequences[laneId] = lane.committedSequence();
+        long committed = lane.committedSequence();
+        publishedLaneCommittedSlots[laneId].sequence = committed;
+        publishedLaneCommittedSequences[laneId] = committed;
     }
 
     static BalanceRuntime copyBalance(IntObjectHashMap<BalanceRuntime> balances, int assetId) {
@@ -1329,7 +1358,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users = laneUserScratch[laneId];
             if (users.isEmpty()) continue;
             if (coreSequence <= Math.max(
-                    publishedLaneCommittedSequences[laneId], dispatchedLaneCommitSequences[laneId])) {
+                    publishedLaneCommittedSlots[laneId].sequence, dispatchedLaneCommitSequences[laneId])) {
                 throw new IllegalStateException("account lane apply is out of order");
             }
             laneMask |= 1L << laneId;
@@ -2696,6 +2725,26 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (scoped != null) {
             return scoped.orders.get(orderId);
         }
+        if (factIndexes != null) {
+            var route = factIndexes.activeOrderRoute(orderId);
+            if (route != null) {
+                AccountLaneState lane = accountLanes[topology.accountLaneId(route.userId())];
+                lane.assertOwner();
+                OrderRuntime order = lane.orders.get(orderId);
+                if (order != null) {
+                    if (lane.pendingReservation(orderId)) {
+                        if (changedOrders.get(orderId) != null || orderBatchMutationScope) {
+                            return order;
+                        }
+                        if (order.clientOrderId() != null && order.clientOrderId().startsWith("TRIGGER:")) {
+                            return order;
+                        }
+                        return null;
+                    }
+                    return order;
+                }
+            }
+        }
         for (int i = 0; i < accountLanes.length; i++) {
             accountLanes[i].assertOwner();
             OrderRuntime order = accountLanes[i].orders.get(orderId);
@@ -2722,6 +2771,23 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (scoped != null) {
             return scoped.reservations.get(orderId);
         }
+        if (factIndexes != null) {
+            var route = factIndexes.activeOrderRoute(orderId);
+            if (route != null) {
+                AccountLaneState lane = accountLanes[topology.accountLaneId(route.userId())];
+                lane.assertOwner();
+                ReservationRuntime reservation = lane.reservations.get(orderId);
+                if (reservation != null) {
+                    if (lane.pendingReservation(orderId)) {
+                        if (changedReservations.contains(orderId) || orderBatchMutationScope) {
+                            return reservation;
+                        }
+                        return null;
+                    }
+                    return reservation;
+                }
+            }
+        }
         for (int i = 0; i < accountLanes.length; i++) {
             accountLanes[i].assertOwner();
             ReservationRuntime reservation = accountLanes[i].reservations.get(orderId);
@@ -2745,6 +2811,15 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (scoped != null) {
             return scoped.orders.get(orderId);
         }
+        if (factIndexes != null) {
+            var route = factIndexes.activeOrderRoute(orderId);
+            if (route != null) {
+                AccountLaneState lane = accountLanes[topology.accountLaneId(route.userId())];
+                lane.assertOwner();
+                OrderRuntime order = lane.orders.get(orderId);
+                if (order != null) return order;
+            }
+        }
         for (int i = 0; i < accountLanes.length; i++) {
             accountLanes[i].assertOwner();
             OrderRuntime order = accountLanes[i].orders.get(orderId);
@@ -2760,6 +2835,15 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (scoped != null) {
             return scoped.positions.get(positionKey);
         }
+        if (indexIdentities != null) {
+            var identity = indexIdentities.positionIdentity(positionKey);
+            if (identity != null) {
+                AccountLaneState lane = accountLanes[topology.accountLaneId(identity.userId())];
+                lane.assertOwner();
+                PositionRuntime position = lane.positions.get(positionKey);
+                if (position != null) return position;
+            }
+        }
         for (int i = 0; i < accountLanes.length; i++) {
             accountLanes[i].assertOwner();
             PositionRuntime position = accountLanes[i].positions.get(positionKey);
@@ -2774,7 +2858,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             LongObjectHashMap<org.eclipse.collections.impl.list.mutable.primitive.LongArrayList> byUser =
                     lane.positionKeysBySymbolAndUser.get(symbolId);
             org.eclipse.collections.impl.list.mutable.primitive.LongArrayList keys = byUser == null ? null : byUser.get(userId);
-            return keys == null ? Collections.emptyNavigableSet()
+            return (keys == null || keys.isEmpty()) ? Collections.emptyNavigableSet()
                     : Collections.unmodifiableNavigableSet(toSortedSet(keys));
         });
     }

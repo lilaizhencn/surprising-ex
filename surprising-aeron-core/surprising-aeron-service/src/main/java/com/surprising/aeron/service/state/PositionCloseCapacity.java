@@ -27,7 +27,8 @@ public record PositionCloseCapacity(
                 || newestFirst == null) {
             throw new IllegalArgumentException("invalid position close capacity");
         }
-        newestFirst = List.copyOf(newestFirst);
+        // Avoid redundant List.copyOf if already empty or immutable list
+        newestFirst = newestFirst.isEmpty() ? List.of() : newestFirst;
     }
 
     /** Account Lane inspects its own live orders, excluding uncommitted reservations. */
@@ -48,16 +49,26 @@ public record PositionCloseCapacity(
                         || order.symbolId() != symbolId || order.positionSide() != positionSide
                         || order.side() != closeSide) continue;
                 if (order.reduceOnly()) {
-                    if (commitments == null) commitments = new ArrayList<>();
+                    if (commitments == null) commitments = new ArrayList<>(4);
                     commitments.add(new Commitment(orderId, order.remainingQuantitySteps(), order.clusterPosition()));
                 }
                 requestedQuantity = Math.addExact(requestedQuantity, order.remainingQuantitySteps());
             }
         }
-        if (commitments != null) commitments.sort(NEWEST_FIRST);
+        if (commitments != null && commitments.size() > 1) {
+            commitments.sort(NEWEST_FIRST);
+        }
         long committed = Math.min(positionQuantity, requestedQuantity);
+        List<Commitment> sortedCommitments;
+        if (commitments == null || commitments.isEmpty()) {
+            sortedCommitments = List.of();
+        } else if (commitments.size() == 1) {
+            sortedCommitments = List.of(commitments.get(0));
+        } else {
+            sortedCommitments = commitments;
+        }
         return new PositionCloseCapacity(positionQuantity, requestedQuantity, committed,
-                Math.subtractExact(positionQuantity, committed), commitments == null ? List.of() : commitments);
+                Math.subtractExact(positionQuantity, committed), sortedCommitments);
     }
 
     public void require(long quantitySteps) {
@@ -74,15 +85,30 @@ public record PositionCloseCapacity(
         }
         long overflow = Math.subtractExact(Math.addExact(requestedQuantitySteps, incomingQuantitySteps),
                 positionQuantitySteps);
-        if (overflow <= 0) return List.of();
-        ArrayList<Long> conflicts = new ArrayList<>();
+        if (overflow <= 0 || newestFirst.isEmpty()) return List.of();
+
+        Long singleConflict = null;
+        ArrayList<Long> conflicts = null;
         long released = 0;
-        for (Commitment commitment : newestFirst) {
-            conflicts.add(commitment.orderId());
+        int size = newestFirst.size();
+        for (int i = 0; i < size; i++) {
+            Commitment commitment = newestFirst.get(i);
+            if (singleConflict == null) {
+                singleConflict = commitment.orderId();
+            } else {
+                if (conflicts == null) {
+                    conflicts = new ArrayList<>(4);
+                    conflicts.add(singleConflict);
+                }
+                conflicts.add(commitment.orderId());
+            }
             released = Math.addExact(released, commitment.quantitySteps());
             if (released >= overflow) break;
         }
-        return List.copyOf(conflicts);
+        if (conflicts == null) {
+            return singleConflict == null ? List.of() : List.of(singleConflict);
+        }
+        return conflicts;
     }
 
     public record Commitment(long orderId, long quantitySteps, long corePosition) {

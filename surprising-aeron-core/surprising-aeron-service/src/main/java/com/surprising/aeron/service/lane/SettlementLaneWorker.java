@@ -579,20 +579,47 @@ public final class SettlementLaneWorker implements AutoCloseable {
      */
     public enum WaitStrategy { BUSY_SPIN, YIELDING, BLOCKING }
 
-    private static final class PaddedSequence {
+    private static class PaddedSequenceLhsPadding {
         @SuppressWarnings("unused")
-        private long p01, p02, p03, p04, p05, p06, p07;
-        private volatile long value;
-        @SuppressWarnings("unused")
-        private long p11, p12, p13, p14, p15, p16, p17;
+        private long p00, p01, p02, p03, p04, p05, p06, p07;
     }
 
-    /** Fixed reference ring with one producer and one consumer; no CAS or node allocation. */
-    private static final class MatcherSettlementRing {
+    private static class PaddedSequenceValue extends PaddedSequenceLhsPadding {
+        protected volatile long value;
+    }
+
+    private static final class PaddedSequence extends PaddedSequenceValue {
+        @SuppressWarnings("unused")
+        private long p10, p11, p12, p13, p14, p15, p16, p17;
+    }
+
+    private static class MatcherSettlementRingLhsPadding {
+        @SuppressWarnings("unused")
+        private long p00, p01, p02, p03, p04, p05, p06, p07;
+    }
+
+    private static class MatcherSettlementRingProducerPosition extends MatcherSettlementRingLhsPadding {
+        protected volatile long producerPosition;
+    }
+
+    private static class MatcherSettlementRingMidPadding extends MatcherSettlementRingProducerPosition {
+        @SuppressWarnings("unused")
+        private long p10, p11, p12, p13, p14, p15, p16, p17;
+    }
+
+    private static class MatcherSettlementRingConsumerPosition extends MatcherSettlementRingMidPadding {
+        protected volatile long consumerPosition;
+    }
+
+    private static class MatcherSettlementRingRhsPadding extends MatcherSettlementRingConsumerPosition {
+        @SuppressWarnings("unused")
+        private long p20, p21, p22, p23, p24, p25, p26, p27;
+    }
+
+    /** Fixed reference ring with one producer and one consumer; cache lines are padded to prevent false sharing. */
+    private static final class MatcherSettlementRing extends MatcherSettlementRingRhsPadding {
         private final MatcherSettlementEvent[] events;
         private final int mask;
-        private volatile long producerPosition;
-        private volatile long consumerPosition;
 
         MatcherSettlementRing(int capacity) {
             events = new MatcherSettlementEvent[capacity];
@@ -628,9 +655,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
         }
 
         long depth() {
-            // Owner samples this Matcher->Lane ring as a third observer. The consumer can
-            // pass the sampled producer cursor before the second volatile read; a negative
-            // estimate must not become the admission probe's "full" sentinel.
             return Math.max(0L, producerPosition - consumerPosition);
         }
     }

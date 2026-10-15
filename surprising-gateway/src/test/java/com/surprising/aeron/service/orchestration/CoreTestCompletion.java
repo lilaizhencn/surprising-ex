@@ -36,7 +36,7 @@ final class CoreTestCompletion {
                             : pending != null
                             && (pending.settlementEvent() != null || pending.cancelEvent() != null
                             || pending.orderBatch != null && pending.orderBatch.laneCommitEvent != null)
-                            ? owner.laneCommandContexts.required(sequence).matchingResult()
+                            ? owner.pendingMatching.required(sequence).matchingResult()
                             : awaitMatchingResult(owner, sequence);
                     if (matching == null && owner.matchingFlow.hasPendingMatchingRejection(sequence)) {
                         response = owner.commits.completeRejectedMatching(sequence);
@@ -75,7 +75,7 @@ final class CoreTestCompletion {
             }
             owner.drainMatchingCompletions();
             if (owner.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
-            CommandSlot context = owner.laneCommandContexts.required(sequence);
+            CommandSlot context = owner.pendingMatching.required(sequence);
             MatchingResult result = context.matchingResult();
             if (result == null) result = context.takeMatchingCompletion();
             if (result != null) return result;

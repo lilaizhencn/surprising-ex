@@ -52,11 +52,17 @@ final class LaneSequenceQueue {
     int capacity() { return sequences.length; }
 
     /** Producer and consumer write different cache lines on the hot SPSC path. */
-    private static final class PaddedSequence {
+    private static class PaddedSequenceLhsPadding {
         @SuppressWarnings("unused")
-        private long p01, p02, p03, p04, p05, p06, p07;
-        private volatile long value;
+        private long p00, p01, p02, p03, p04, p05, p06, p07;
+    }
+
+    private static class PaddedSequenceValue extends PaddedSequenceLhsPadding {
+        protected volatile long value;
+    }
+
+    private static final class PaddedSequence extends PaddedSequenceValue {
         @SuppressWarnings("unused")
-        private long p11, p12, p13, p14, p15, p16, p17;
+        private long p10, p11, p12, p13, p14, p15, p16, p17;
     }
 }

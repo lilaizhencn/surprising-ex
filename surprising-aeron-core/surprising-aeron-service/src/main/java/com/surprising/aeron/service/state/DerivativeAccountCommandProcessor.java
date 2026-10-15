@@ -129,8 +129,10 @@ public final class DerivativeAccountCommandProcessor {
         var positions = new java.util.ArrayList<java.util.Map.Entry<Long, PositionRuntime>>();
         long additional = 0;
         int assetId = -1;
-        for (long positionKey : runtime.positionKeysForUserAndSymbol(key.userId(), symbolId)) {
-            PositionRuntime position = runtime.position(positionKey);
+        var positionKeys = runtime.positionKeysForUserAndSymbolPrimitive(key.userId(), symbolId);
+        for (int i = 0; i < positionKeys.size(); i++) {
+            long positionKey = positionKeys.get(i);
+            PositionRuntime position = lane.positions.get(positionKey);
             if (position == null || position.marginMode() != key.marginMode() || position.signedQuantitySteps() == 0) continue;
             if (runtime.activeLiquidation(key.userId(), symbolId, position.positionSide()) != null)
                 throw new CoreStateRejectedException("LEVERAGE_UPDATE_BLOCKED", "liquidation is in progress");

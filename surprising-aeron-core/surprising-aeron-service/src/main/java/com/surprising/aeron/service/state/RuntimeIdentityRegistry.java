@@ -405,11 +405,8 @@ public final class RuntimeIdentityRegistry {
     /** Register each position identity once; repeated Lane retains only observe the flag. */
     private void ensurePositionIdentityRegistered(PositionEntry entry, long key) {
         if (entry.identityRegistered) return;
-        synchronized (entry) {
-            if (entry.identityRegistered) return;
-            positionKeys.putIfAbsent(entry.identity, key);
-            entry.identityRegistered = true;
-        }
+        positionKeys.putIfAbsent(entry.identity, key);
+        entry.identityRegistered = true;
     }
 
     /** Called once per position in a Lane's existing settlement delta, never per fill. */

@@ -45,6 +45,8 @@ public final class RuntimeFactIndexes implements TradingRuntimeState.ChangedInde
 
     public TriggerOrderIndex.TriggerRoute triggerRoute(long id) { return triggers.route(id); }
 
+    public ActiveOrderIndex.IndexedOrder activeOrderRoute(long id) { return activeOrders.activeOrderRoute(id); }
+
     void bindBusinessOwner(Thread thread) {
         positionUsers.bindBusinessOwner(thread); openInterest.bindBusinessOwner(thread); adlPositions.bindBusinessOwner(thread);
     }
