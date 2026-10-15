@@ -1475,9 +1475,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     long currentBusinessStateHash() {
-        TradingCoreState state = materializedState.current();
-        return canonicalBusinessStateHash(state.businessStateHash(),
-                runtimeState.feePoliciesSnapshot(), runtimeState.pendingTransfersSnapshot());
+        return materializedState.businessStateHash();
     }
 
     static long canonicalBusinessStateHash(

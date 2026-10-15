@@ -1589,7 +1589,7 @@ class CoreOrderedOrderBatchTest {
 
             TradingCoreState before = state.tradingState();
             long appliedBefore = state.appliedCommandCount();
-            long stateHashBefore = businessHashWithNoPendingTransfers(state);
+            long stateHashBefore = state.stateHash();
             UUID commandId = UUID.randomUUID();
             CoreMessage mixed = command(CoreMessageType.CANCEL_ORDER_BATCH, commandId, 5,
                     TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
@@ -1601,7 +1601,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(response.resultCode()).isEqualTo(CoreResultCode.ORDER_OWNER_MISMATCH);
             assertThat(state.tradingState()).isEqualTo(before);
             assertThat(state.appliedCommandCount()).isEqualTo(appliedBefore);
-            assertThat(businessHashWithNoPendingTransfers(state)).isEqualTo(stateHashBefore);
+            assertThat(state.stateHash()).isEqualTo(stateHashBefore);
             assertThat(state.pendingMatchingCount()).isZero();
             assertThat(state.commandResults()).doesNotContainKey(commandId);
             assertThat(state.tradingState().order(13_001).status())
@@ -1836,7 +1836,7 @@ class CoreOrderedOrderBatchTest {
             applySpotInstrument(state);
             TradingCoreState before = state.tradingState();
             long appliedBefore = state.appliedCommandCount();
-            long stateHashBefore = businessHashWithNoPendingTransfers(state);
+            long stateHashBefore = state.stateHash();
             UUID commandId = UUID.randomUUID();
             CoreMessage crossLine = command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.PLACE_ORDER_BATCH,
                     commandId, 2, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
@@ -1848,17 +1848,10 @@ class CoreOrderedOrderBatchTest {
             assertThat(response.resultCode()).isEqualTo(CoreResultCode.PRODUCT_LINE_MISMATCH);
             assertThat(state.tradingState()).isEqualTo(before);
             assertThat(state.appliedCommandCount()).isEqualTo(appliedBefore);
-            assertThat(businessHashWithNoPendingTransfers(state)).isEqualTo(stateHashBefore);
+            assertThat(state.stateHash()).isEqualTo(stateHashBefore);
             assertThat(state.pendingMatchingCount()).isZero();
             assertThat(state.commandResults()).doesNotContainKey(commandId);
         }
-    }
-
-    /** These rejection fixtures contain no transfers; prove that from Owner routing before hashing. */
-    private long businessHashWithNoPendingTransfers(TradingCoreRuntime state) {
-        assertThat(state.runtimeState.pendingTransferRoutes(1).ids()).isEmpty();
-        return TradingCoreRuntime.canonicalBusinessStateHash(state.tradingState().businessStateHash(),
-                state.runtimeState.feePoliciesSnapshot(), Map.of());
     }
 
     @Test

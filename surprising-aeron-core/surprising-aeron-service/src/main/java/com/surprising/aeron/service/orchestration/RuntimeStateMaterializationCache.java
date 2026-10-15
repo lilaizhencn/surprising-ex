@@ -42,4 +42,18 @@ final class RuntimeStateMaterializationCache {
         CoreSnapshotLifecycle.SnapshotFence fence = owner.snapshots.snapshotFence;
         return fence != null && fence.snapshotState != null ? fence.snapshotState : current();
     }
+
+    /** Hash all business facts under one cold read fence, including pending Account Lane transfers. */
+    long businessStateHash() {
+        owner.runtimeState.requireSnapshotFenceReady();
+        boolean acquired = owner.runtimeState.systemLedgerStarted() && !owner.runtimeState.ownerLaneAccess;
+        try {
+            if (acquired) {
+                while (!owner.runtimeState.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
+            }
+            TradingCoreState current = current();
+            return TradingCoreRuntime.canonicalBusinessStateHash(current.businessStateHash(),
+                    owner.runtimeState.feePoliciesSnapshot(), owner.runtimeState.pendingTransfersSnapshot());
+        } finally { if (acquired) owner.runtimeState.releaseOwnerLaneAccess(); }
+    }
 }
