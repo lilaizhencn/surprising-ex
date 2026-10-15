@@ -154,6 +154,9 @@ public final class TradingRuntimeState implements AutoCloseable {
     final long[][] accountLaneMaxLatencyNanos;
     /** owner 可见的各 Lane 已提交序号。 */
     final long[] publishedLaneCommittedSequences;
+    /** Owner-only committed metadata, updated from existing Lane receipts; no position copies. */
+    private final int[] publishedLanePositionCounts;
+    private int publishedPositions;
     /** 已派发到各 Lane 的提交序号，防止重复派发。 */
     final long[] dispatchedLaneCommitSequences;
     /** 可复用的 laneCommitEvent 对象池；仅在消费者完成后回收。 */
@@ -320,6 +323,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.accountLaneTotalLatencyNanos = laneMetricValues(topology.accountLaneCount());
         this.accountLaneMaxLatencyNanos = laneMetricValues(topology.accountLaneCount());
         this.publishedLaneCommittedSequences = new long[topology.accountLaneCount()];
+        this.publishedLanePositionCounts = new int[topology.accountLaneCount()];
         this.dispatchedLaneCommitSequences = new long[topology.accountLaneCount()];
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
@@ -2855,13 +2859,18 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public int publishedPositionCount() {
-        assertOwner();
-        requireAccountReadOwnership();
-        int count = 0;
-        for (int i = 0; i < accountLanes.length; i++) {
-            count += accountLanes[i].positions.size();
-        }
-        return count;
+        bindOwner();
+        return publishedPositions;
+    }
+
+    void publishLanePositionCount(int laneId, int count) {
+        bindOwner();
+        if (laneId < 0 || laneId >= publishedLanePositionCounts.length || count < 0)
+            throw new IllegalArgumentException("invalid Lane position count receipt");
+        int total = Math.addExact(publishedPositions,
+                Math.subtractExact(count, publishedLanePositionCounts[laneId]));
+        publishedLanePositionCounts[laneId] = count;
+        publishedPositions = total;
     }
 
     public RiskScanRuntime firstIncompleteRiskScan() {

@@ -47,6 +47,7 @@ public class OwnerPublicationBenchmark {
     private long coreSequence;
     private MatcherSettlementChanges settlement;
     private AccountLaneState settlementLane;
+    private PositionRuntime countPosition;
     private final RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
     private final OrderRuntime[] settlementOrders = new OrderRuntime[20];
     private final ReservationRuntime[] settlementReservations = new ReservationRuntime[20];
@@ -63,6 +64,8 @@ public class OwnerPublicationBenchmark {
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
                 new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+        countPosition = new PositionRuntime(7, 0, 0, CoreMarginMode.CROSS, CorePositionSide.NET,
+                instrument, 1, 100, 100, 0, 10);
         for (int i = 0; i < settlementOrders.length; i++) {
             boolean terminal = i % 4 == 0;
             settlementOrders[i] = new OrderRuntime(i + 1, ProductLine.LINEAR_PERPETUAL,
@@ -74,6 +77,18 @@ public class OwnerPublicationBenchmark {
             settlementReservations[i] = new ReservationRuntime(i + 1, 7, 0,
                     ReservationKind.DERIVATIVE_MARGIN, 0, 100, 0, terminal ? 100 : 0, 1);
         }
+    }
+
+    /** Lane count capture and existing receipt handoff/query only; no trading or transport. */
+    @Benchmark public int publishAndReadPositionCount() {
+        boolean present = (++coreSequence & 1) != 0;
+        if (present) settlementLane.positions.put(1, countPosition);
+        else settlementLane.positions.remove(1);
+        delta.preparePositionRetirement(settlementLane);
+        delta.recordControlChanges(runtime, settlementLane.laneId());
+        int count = runtime.publishedPositionCount();
+        if (count != (present ? 1 : 0)) throw new IllegalStateException("position count receipt differs");
+        return count;
     }
 
     /** One actual preparation of 20 already-applied order/reservation changes; no trading or transport. */

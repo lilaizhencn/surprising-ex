@@ -37,6 +37,7 @@ class LedgerPositionPublicationTest {
             runtime.bindFactIndexes(indexes(initial, ids, users, oi, adl), ids);
             long key = ids.findPositionKeyValue(7, instrument, CorePositionSide.NET);
             int symbol = ids.symbolId("1");
+            assertThat(runtime.publishedPositionCount()).isOne();
             runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
             try {
                 for (int round = 0; round < 2; round++) {
@@ -52,10 +53,12 @@ class LedgerPositionPublicationTest {
                         runtime.removePosition(key, 7); return null;
                     });
                     LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
+                    assertThat(runtime.publishedPositionCount()).isZero();
                     // No money patch exists: position-only controls must still reach Ledger validation.
                     LedgerControlTestSupport.awaitFunds(runtime, false);
                     assertThat(adl.count()).isZero();
                     LedgerControlTestSupport.await(runtime, runtime.beginCommandRollback(1, 2 + round));
+                    assertThat(runtime.publishedPositionCount()).isOne();
                     onLedger(runtime, () -> {
                         assertThat(oi.openInterestSteps("1")).isEqualTo(10);
                         assertThat(users.users("1")).containsExactly(7L);

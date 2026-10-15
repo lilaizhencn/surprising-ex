@@ -14,6 +14,8 @@ public final class LaneCommitDelta {
     private long[] terminalOrderUsers = new long[4];
     private String[] terminalOrderClients = new String[4];
     private int terminalOrderCount;
+    /** Lane-owned count captured at this receipt's boundary, never read from a later command. */
+    private int positionCount = -1;
 
     private OrderRuntime[] retiredOrders = new OrderRuntime[4];
     private int retiredOrderCount;
@@ -133,6 +135,8 @@ public final class LaneCommitDelta {
 
     /** 只在所属Lane结束命令时采集删除证明，不传输账户状态。 */
     void preparePositionRetirement(AccountLaneState lane) {
+        lane.assertOwner();
+        positionCount = lane.positions.size();
         for (int index = 0; index < riskSnapshots.size(); index++) {
             if (riskSnapshots.valueAt(index) != null) continue;
             long key = riskSnapshots.keyAt(index);
@@ -188,6 +192,7 @@ public final class LaneCommitDelta {
             closedTriggerCount = 0;
         }
         if (!publicationPrepared) throw new IllegalStateException("Lane terminal publication is not prepared");
+        publishPositionCountToOwner(state, laneId);
         publishPreparedToOwner(state, changedUsers, changedOrders);
         if (terminalOrderSink != null && terminalOrderCount != 0)
             terminalOrderSink.acceptBatch(this, coreSequence);
@@ -250,6 +255,7 @@ public final class LaneCommitDelta {
         if (state == null || laneId < 0 || laneId >= state.accountLanes.length) {
             throw new IllegalArgumentException("invalid batch admission owner handoff");
         }
+        publishPositionCountToOwner(state, laneId);
         publishTriggersToOwner(state);
         if (closedTriggerCount != 0) {
             state.revision = Math.addExact(state.revision, closedTriggerCount);
@@ -288,6 +294,7 @@ public final class LaneCommitDelta {
     }
 
     void recordControlChanges(TradingRuntimeState state, int laneId) {
+        publishPositionCountToOwner(state, laneId);
         for (int index = 0; index < users.size(); index++) {
             state.changedUsers.add(users.keyAt(index));
             state.captureUserMetadata(users.valueAt(index));
@@ -305,7 +312,14 @@ public final class LaneCommitDelta {
                     riskSnapshots.hasPreparedAt(index), riskSnapshots.preparedAt(index));
     }
 
+    private void publishPositionCountToOwner(TradingRuntimeState state, int laneId) {
+        if (positionCount < 0) return;
+        state.publishLanePositionCount(laneId, positionCount);
+        positionCount = -1;
+    }
+
     void clear() {
+        positionCount = -1;
         closedTriggerCount = 0;
         java.util.Arrays.fill(retiredOrders, 0, retiredOrderCount, null);
         retiredOrderCount = 0;

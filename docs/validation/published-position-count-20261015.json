@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-15",
+  "kind": "持仓记录计数功能验证；整体 Owner 迁移与性能验收仍未完成",
+  "business_flow": [
+    "Lane 在既有完成回执中采集命令边界上的持仓表大小",
+    "Owner 收集该回执，按该 Lane 的上次已提交计数更新总数",
+    "Owner 查询直接读总数，不读取 Lane 表、不申请账户栅栏",
+    "初始化、删除、成交与控制回执、回滚及槽位清理使用相同交接"
+  ],
+  "state_ownership": {
+    "authoritative": "持仓对象仍只属于对应 Account Lane",
+    "receipt": "每个现有 LaneCommitDelta 只携带一个原语计数；回收重置",
+    "owner": "固定长度 int[] 保存各 Lane 上次已提交计数，另存一个总数；仅 Core Owner 可读写",
+    "reason": "避免全 Lane 扫描和读取后续命令的表大小，不新增线程、队列或持仓镜像"
+  },
+  "tests": {
+    "jdk": "HotSpot27",
+    "unique_cases": 32,
+    "final_followup_overlapping_cases": 16,
+    "result": "PASS",
+    "classes": [
+      "PublishedPositionCountTest",
+      "ControlLaneDispatcherTest",
+      "ExplicitLaneAccessTest",
+      "PositionPublicationReuseTest",
+      "LedgerPositionPublicationTest",
+      "OwnerPositionRetirementTest",
+      "OwnerPublicationBenchmarkTest"
+    ],
+    "coverage": [
+      "六产品状态隔离",
+      "冷初始化与删除",
+      "实际 Lane worker 完成前、Owner 收集前的计数可见性",
+      "先后命令的回执独立性",
+      "控制、成交终态和批量三种交接入口",
+      "回收旧回执不能重发旧计数",
+      "Lane 不得读 Owner 计数",
+      "资金校验失败后的持仓删除回滚，两种 Treasury scope",
+      "更新后的计数 JMH 正反复用校验"
+    ],
+    "scope_note": "PositionPublicationReuseTest 的 snapshot() 仅复制一个 PositionRuntime 值；没有执行 Cluster 快照、序列化、恢复或 wallet"
+  },
+  "performance_scope": "OwnerPublicationBenchmark 增加真实计数交接和查询；现有 InProcessTradingAllocationBenchmark 执行受影响的普通订单/成交交接。数值与 JFR 证据只保留在工作区外；不将组件采样作为完整单节点吞吐或全 Core 分配验收。",
+  "remaining": [
+    "按 ID 的订单、预留和持仓路由迁移，保留拒绝与待处理记录语义",
+    "其他控制、风险、查询显式 Lane 参数",
+    "服务端残留锁场景确认及必要修复",
+    "全 Core 分配、真实传输、分段尾延迟及长期稳定性验收"
+  ]
+}

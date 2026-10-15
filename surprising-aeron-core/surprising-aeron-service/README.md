@@ -9,6 +9,14 @@ HotSpot JDK 27 下 `CommittedFundingReplayTest` 覆盖 U 本位及币本位永�
 
 ## Matcher 结果与账户结算交接
 
+`publishedPositionCount()` 只读取 Owner 已提交的持仓记录计数，不再扫描 Lane 权威表或申请账户读取栅栏。
+所属 Lane 在既有 `LaneCommitDelta.preparePositionRetirement` 中记录当前表大小；Owner 收集控制、批量准入、
+成交终态回执时，以每 Lane 上一次计数的差值更新总数。每个回执保存自己的命令边界，Lane 后续命令
+不能改变较早回执的计数；回收时清空标记。初始化及命令回滚也通过相同交接更新。
+计数沿用持仓记录数语义，包含权威表保留的零仓位记录，不代表未平仓量。
+这只增加固定长度的 Owner 计数元数据，没有持仓对象副本；按 ID 查找等其他迁移仍需继续。
+功能范围见 [验证清单](../../docs/validation/published-position-count-20261015.json)。
+
 账户分区按 `LaneTopology` 隔离，由对应的 `SettlementLaneWorker` 多线程消费。主线采用实验目录已修复的实现：Owner 定序并准备命令，Matcher 产生确定性撮合结果，`MatcherSettlementDispatcher.publishMatcherOwned` 通过每个 Lane 的分片 SPSC 队列直接发布成交及撤单结果，所属 Lane 串行应用账户结算；完成回执到达后，Owner 按提交顺序发布终态响应。
 
 Matcher 在 `MatcherSettlementEvent.notifyDirectPublication()` 中校验结果并完成 Lane 投递，再发布就绪位。池化事件必须等实际消费者完成后才能复用。工作线程异常传给 Owner，避免命令在消费者退出后继续等待。全局控制命令沿用该实现已有的 Lane 所有权交接边界。
