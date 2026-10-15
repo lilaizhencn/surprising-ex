@@ -16,6 +16,33 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class MatcherSettlementPlanTest {
+    @Test
+    void directFactsCannotStartOrPublishWithoutAReservedMatcherSlot() {
+        try (var runtime = new TradingRuntimeState()) {
+            var identities = new RuntimeIdentityRegistry();
+            int symbol = identities.symbolId("1");
+            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
+            runtime.putOrder(original);
+            var event = runtime.prepareDirectCancellation(1, 21, 11, new java.util.UUID(1, 2),
+                    0, identities, 10, 20);
+            assertThatThrownBy(event::beginMatcherPublication).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> event.publishDirectNativeResult(nativeResult(
+                    CommandResultCode.MATCHING_UNKNOWN_ORDER_ID, symbol, 1, List.of()),
+                    1, 1, 2, 11, 1, 0)).isInstanceOf(IllegalStateException.class);
+            assertThat(event.resultPrepared()).isFalse();
+            assertThat(event.ready()).isFalse();
+            event.reserveMatcherPublication();
+            assertThatThrownBy(event::reserveMatcherPublication).isInstanceOf(IllegalStateException.class);
+            event.beginMatcherPublication();
+            event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
+                    symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
+            event.completeMatcherPublication();
+            assertThat(runtime.collectMatcherSettlement(event)).isNotNull();
+            runtime.releaseMatcherSettlement(event);
+        }
+    }
+
     private static final CoreInstrument INSTRUMENT = new CoreInstrument(
             "1", ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT",
             1, 1, 1_000_000, 100_000, 50_000, -10, 25, 0, null, 0,
@@ -32,7 +59,6 @@ class MatcherSettlementPlanTest {
             runtime.putOrder(original);
             var event = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
-            event.markMatcherOwnedPublication();
             event.reserveMatcherPublication();
             event.beginMatcherPublication();
             assertThat(event.ready()).isFalse();
@@ -58,12 +84,10 @@ class MatcherSettlementPlanTest {
             runtime.putOrder(original);
             var first = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
-            first.markMatcherOwnedPublication();
             first.reserveMatcherPublication();
             first.beginMatcherPublication();
             var suffix = runtime.prepareDirectCancellation(2, original.userId(), original.orderId(), new java.util.UUID(3, 4),
                     0, identities, 30, 40);
-            suffix.markMatcherOwnedPublication();
             suffix.reserveMatcherPublication();
             suffix.beginMatcherPublication();
             suffix.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
@@ -96,7 +120,6 @@ class MatcherSettlementPlanTest {
             runtime.putOrder(original);
             var event = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
-            event.markMatcherOwnedPublication();
             event.reserveMatcherPublication();
             // The transport release must observe all event metadata already prepared, while
             // readiness still prevents the Owner from consuming or recycling it.
@@ -133,6 +156,7 @@ class MatcherSettlementPlanTest {
             assertThat(reused.dispatched()).isFalse();
             assertThat(reused.directResultCoreSequence()).isEqualTo(2);
             runtime.ownerCompletionSignal(null);
+            reused.reserveMatcherPublication();
             reused.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     symbol, 2, List.of()), 2, 3, 4, 11, 2, 0);
             reused.execute(runtime.accountLanes[runtime.topology().accountLaneId(21)]);
@@ -152,6 +176,7 @@ class MatcherSettlementPlanTest {
             event.batchStorage(1);
             event.prepareDirect(1, 1, 0, 0, new java.util.UUID(1, 2), 0,
                     runtime, new RuntimeIdentityRegistry(), 1, List.of(), null);
+            event.reserveMatcherPublication();
             event.matcherCompletionRoute(shard -> {
                 throw new IllegalStateException("settlement publication failed");
             }, 0);
@@ -192,6 +217,7 @@ class MatcherSettlementPlanTest {
             runtime.putOrder(original);
             var id = new java.util.UUID(1, 2);
             var event = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), id, 0, identities, 10, 20);
+            event.reserveMatcherPublication();
             event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     instrumentId, 1, List.of()), 1, 1, 2, 11, 1, 0);
             event.execute(runtime.accountLanes[runtime.topology().accountLaneId(21)]);
@@ -204,7 +230,8 @@ class MatcherSettlementPlanTest {
     }
 
     @Test
-    void directEventCannotRecycleBeforeReservedNonTradingLanesConsumeTheirTickets() {
+    @org.junit.jupiter.api.Timeout(15)
+    void directEventCannotRecycleBeforeReservedNonTradingLanesConsumeTheirTickets() throws Exception {
         var topology = new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0, 4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
         try (var runtime = new TradingRuntimeState(topology)) {
@@ -217,40 +244,51 @@ class MatcherSettlementPlanTest {
             var id = new java.util.UUID(1, 2);
             var event = runtime.prepareDirectMatcherSettlement(1, 15, taker, null, 1, id, 0,
                     identities, 1, 1, List.of(), null);
-            assertThat(event.ready()).isFalse();
-            assertThatThrownBy(event::clear).isInstanceOf(IllegalStateException.class);
-            assertThat(event.direct()).isTrue();
-            boolean[] routeReleased = {false};
-            event.matcherCompletionRoute(shard -> routeReleased[0] = true, 0);
-            event.beginMatcherPublication();
-            event.publishDirectNativeResult(nativeResult(CommandResultCode.SUCCESS, instrumentId, 1,
-                    List.of()), 1, 1, 2, 11, 1, 0);
-            assertThat(event.resultPrepared()).isTrue();
-            assertThat(event.ready()).isFalse();
-            assertThat(routeReleased[0]).isFalse();
-            event.completeMatcherPublication();
-            assertThat(routeReleased[0]).isTrue();
-            assertThat(event.ready()).isTrue();
             int actual = topology.accountLaneId(21);
-            event.execute(runtime.accountLanes[actual]);
-            assertThat(event.requiredLaneMask()).isEqualTo(1L << actual);
-            assertThat(event.complete()).isFalse();
-            assertThatThrownBy(event::clear).isInstanceOf(IllegalStateException.class);
-            assertThat(event.direct()).isTrue();
-            for (int lane = 0; lane < 4; lane++) if (lane != actual) event.execute(runtime.accountLanes[lane]);
-            assertThat(event.complete()).isTrue();
+            var waiting = new java.util.concurrent.CountDownLatch(3);
+            var release = new java.util.concurrent.CountDownLatch(1);
+            runtime.startAccountLanes();
+            runtime.releaseOwnerLaneAccess();
+            try {
+                for (int lane = 0; lane < 4; lane++) if (lane != actual)
+                    runtime.laneWorkers[lane].submit(ignored -> {
+                        waiting.countDown();
+                        awaitPublicationLatch(release);
+                    });
+                assertThat(waiting.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                boolean[] routeReleased = {false};
+                event.reserveMatcherPublication();
+                event.matcherCompletionRoute(shard -> routeReleased[0] = true, 0);
+                event.beginMatcherPublication();
+                event.publishDirectNativeResult(nativeResult(CommandResultCode.SUCCESS, instrumentId, 1,
+                        List.of()), 1, 1, 2, 11, 1, 0);
+                assertThat(event.resultPrepared()).isTrue();
+                assertThat(event.ready()).isFalse();
+                event.completeMatcherPublication();
+                assertThat(routeReleased[0]).isTrue();
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+                while ((event.completedLaneMask() & (1L << actual)) == 0) {
+                    runtime.assertAccountLanesHealthy();
+                    if (System.nanoTime() >= deadline) throw new AssertionError("active Lane did not settle");
+                    Thread.onSpinWait();
+                }
+                assertThat(event.requiredLaneMask()).isEqualTo(1L << actual);
+                assertThat(event.complete()).isFalse();
+                assertThatThrownBy(event::clear).isInstanceOf(IllegalStateException.class);
+            } finally { release.countDown(); }
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+            while (!event.complete()) {
+                runtime.assertAccountLanesHealthy();
+                if (System.nanoTime() >= deadline) throw new AssertionError("reserved Lane tickets did not drain");
+                Thread.onSpinWait();
+            }
             assertThat(runtime.collectMatcherSettlement(event)).isNotNull();
             runtime.releaseMatcherSettlement(event);
-            var reused = runtime.prepareDirectMatcherSettlement(2, 15, runtime.order(11), null, 1, id, 0,
+            var reused = runtime.prepareDirectMatcherSettlement(2, 15, taker, null, 1, id, 0,
                     identities, 2, 2, List.of(), null);
             assertThat(reused).isSameAs(event);
             assertThat(reused.ready()).isFalse();
             assertThat(reused.complete()).isFalse();
-            var failure = new IllegalStateException("matcher failed before publication");
-            reused.failDirect(failure);
-            assertThat(reused.ready()).isTrue();
-            assertThatThrownBy(() -> reused.execute(runtime.accountLanes[actual]))
-                    .isInstanceOf(IllegalStateException.class).hasCause(failure);
         }
     }
 

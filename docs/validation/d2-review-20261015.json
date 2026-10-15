@@ -1,0 +1,198 @@
+{
+  "date": "2026-10-15",
+  "base_commit": "53f778a40",
+  "kind": "D2 复审、遗漏修复与必要功能验证；不是性能验收",
+  "result": "PASS",
+  "review_findings": [
+    {
+      "id": "R1",
+      "issue": "MatcherSettlementEvent 仍有非 Matcher 发布模式及未预留事件开始发布的路径",
+      "fix": "删除 matcherOwnedPublication 字段、标记方法和条件发布；直达事件统一 reserveMatcherPublication，开始、逐项、改单、拒绝和失败发布均要求已预留",
+      "regression": "directFactsCannotStartOrPublishWithoutAReservedMatcherSlot 修改前失败，修改后通过"
+    },
+    {
+      "id": "R2",
+      "issue": "单笔 Lane 响应编码异常被吞并，且提前标记 prepared；批量重编码失败可留下旧 payload/长度",
+      "fix": "编码完整成功后才发布 payload、长度与 prepared；异常归还租约并上抛，旧响应引用清零；真实无结果才使用空数组",
+      "regression": "encodingFailureDoesNotPublishAnEmptySuccessfulResponse 修改前失败，修改后通过；新增 failedBatchReencodingDropsOldPayloadAndReturnsItsLease"
+    },
+    {
+      "id": "R3",
+      "issue": "OrderBatchPending 的无 arena 构造及 null 分支仍为旧测试路径",
+      "fix": "删除单参数构造，要求非空 ResponseArena；测试使用真实池并明确移交租约后复用",
+      "regression": "batchRequiresAnExplicitResponseArena 修改前失败，修改后通过"
+    },
+    {
+      "id": "R4",
+      "issue": "上一轮合并申请后，裸数组的独立存储路径会额外分配并立即丢弃 Slot 描述符",
+      "fix": "两种 API 共享 claimPooledSlot；裸数组申请直接返回数组，不创建 Slot。大响应/池满的必要独立存储继续保留",
+      "validation": "受影响 ResponseArenaTest 功能用例通过；无 JMH/JFR 动态成本验收"
+    }
+  ],
+  "original_checklist_review": [
+    "旧 Owner 直达派发及后补 fence API 无生产定义/调用",
+    "ActiveOrderIndex boxed ids 和旧平仓查询入口已删除，生产平仓检查使用显式 Lane",
+    "ImmutableLongArrayList 保留实际协议契约；旧三种兼容工厂仍无残留",
+    "窗口 O(n) complete 回调不存在，有序队首与控制响应分开完成",
+    "Lane 响应不以编码失败假装空成功，批量与单笔均清理失败租约",
+    "大响应及池满独立存储必要，保留原租约与幂等/传输边界"
+  ],
+  "state_ownership": "无新增生产类、接口、业务镜像、worker 或队列；保留既有事件及命令/响应槽生命周期",
+  "verification": {
+    "jdk": "HotSpot Corretto 27+33-FR",
+    "unique_cases": 158,
+    "service_cases": 156,
+    "benchmark_fixture_cases": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "suites": {
+      "com.surprising.aeron.service.state.RuntimePerpetualFundingProcessorTest": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.state.RuntimeChangedIndexCommitTest": {
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.state.LaneCloseCapacityTest": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.state.MatcherTreasurySettlementTest": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.state.index.ActiveOrderIndexTest": {
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.state.MatcherSettlementPlanTest": {
+        "tests": 16,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.CommandSlotTest": {
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.LaneReplacementResponseTest": {
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.OwnerCommandPipelineStateTest": {
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.ResponseArenaTest": {
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.BatchDecisionCaptureTest": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest": {
+        "tests": 26,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest": {
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.TradingCoreOwnerTest": {
+        "tests": 24,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.ClusterCommandWindowRoutingTest": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.CommandSlotRingTest": {
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.ProductionSourceBoundaryTest": {
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.OrderBatchSlotReuseTest": {
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.orchestration.CoreMatchingStateTest": {
+        "tests": 20,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "com.surprising.aeron.service.state.MatcherTreasuryReceiptBenchmarkTest": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "command": [
+      "/usr/local/bin/mvn",
+      "-pl",
+      "surprising-aeron-core/surprising-aeron-benchmarks",
+      "-am",
+      "-Dsurefire.failIfNoSpecifiedTests=false",
+      "-Dtest=MatcherSettlementPlanTest,MatcherTreasurySettlementTest,ActiveOrderIndexTest,RuntimeChangedIndexCommitTest,LaneCloseCapacityTest,CommandSlotTest,OwnerCommandPipelineStateTest,ResponseArenaTest,ClusterCommandWindowRoutingTest,ProductionSourceBoundaryTest,RuntimePerpetualFundingProcessorTest,MatcherTreasuryReceiptBenchmarkTest,CommandSlotRingTest,OrderBatchSlotReuseTest,LaneReplacementResponseTest,TradingCoreOwnerTest#ownerMetadataCommandsDoNotHandoffAccountLanes+preflightQueryWaitsForLaneOnLoggedCallbacksWithoutOwnerAccountReads+egressRetriesOnlyInsideLogCallbackAndBackgroundNeverOffersOrCloses+queriesAndFollowingCommandsObserveCompletedLogCallbacks+loggedTimerCompletesMatchingExactlyOnceWithoutBackgroundWork+logCallbackCommitsMatchingBeforeTheFollowingCommand+ledgerCompletionResumesOrderedHeadWithoutAnotherMatcherNotification+ledgerSettlesIndependentCommandsBeforeOwnerRetiresTheFirstResponse+controlCommandFencesLedgerPrefillAndTheFollowingTrade+fullLedgerMailboxKeepsItsDispatchCursorAndRetriesWithoutNewMatcherNotifications+batchLedgerCompletionResumesOrderedHeadWithoutAnotherMatcherNotification+terminalPreparationFailureRollsBackOnLaneAndRetainsRejection+algoUpdatesStayOnAccountLaneAndPublishRevisions,CoreMatchingStateTest#everyProductLineMatchConservesSettlementFundsWithNonzeroFees+amendPatchReadsOriginalInsideCoreAndReturnsReplacement+crossLaneIocPartialFillCommitsBothOwnersAndReleasesUnusedFunds+postOnlyRejectionLeavesNoOrderOrReservedFunds+finalMatcherFactCarriesTheRestingOrderWithoutExportingPendingState+nonOptionDerivativeLinesCreatePositionMarginFromMatchedReservations+optionFillTransfersPremiumAndCreatesBuyerSellerPositions+normalCloseCancelsNewestConflictingReduceOnlyOrderBeforeMatcherSubmission+laneCloseAndOwnerSelfTradeCancellationsAreAppliedOnce+postOnlyCloseFailureCommitsOnlyLaneAuthorizedCancellations,ClusterCommandPipelineTest#atomicOcoPairWithoutSnapshot+triggerAdmissionFailureWithoutSnapshot+triggerNativeRejectionWithoutSnapshot+cancelBatchSettlesOnLaneWithoutAnOwnerTurnAfterMatcherFinishes+cancelSettlesOnLaneWithoutAnOwnerTurnAfterMatcherFinishes,CoreOrderedOrderBatchTest#alternatingSingleOrdersAndBatchesReleaseContextsBeforeTheNextBatchResumes+asynchronousCancelBatchSubmitsLaterChunkAfterMissingOrder+executesCancelAndAmendBatchesWithOrderedPerItemOutcomes+finalAmendBatchResolvesChainedAndRejectedItemsWithoutOwnerOrderReads+sequentialPlaceLedgerReceiptDoesNotDuplicateEarlierProceeds+sequentialPlaceLedgerKeepsOwnerOffAccountAndFinancialTables+cancelIdentityAndPreparationNeverReadLaneOrderTables+sequentialNativeAndAdmissionRejectionsReleaseFundsWithoutRecovery,BatchDecisionCaptureTest",
+      "-Djava.io.tmpdir=/Users/atomex/Desktop/surprising/performance-artifacts/d2-review-20261015/test-temp",
+      "test"
+    ],
+    "JAVA_HOME": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn",
+    "coverage": [
+      "六产品线成交资金守恒、跨 Lane IOC、单笔/批量改单撤单",
+      "触发/OCO 内部子单、Ledger 连续投递与邮箱满重试",
+      "响应编码异常、重编码失败、池租约转移及复用",
+      "真实 Lane worker 延迟消费保留票据时，事件不得提前回收",
+      "源码边界禁止旧发布模式、无池批量构造及扫描回调",
+      "1/4 Lane 的受影响基准夹具有限功能验证"
+    ],
+    "fixture_update": "原冷执行测试按 complete() 主动执行未启动 Lane 的行为无法验证 worker 积压，现改为真实四 Lane 并阻塞三个无交易 Lane，验证剩余票据消费前不可回收"
+  },
+  "limits": [
+    "仅所选必要用例，不是全量测试",
+    "未执行压测、快照、恢复、wallet 或 JMH/JFR 性能采集",
+    "C1 响应引用计数并发、其他 D 项及整体 Owner/性能目标独立待办"
+  ],
+  "evidence": "本地 /Users/atomex/Desktop/surprising/performance-artifacts/d2-review-20261015，保留命令、源码指纹、修改前失败及最终通过证据；归档核验后清理本轮原始日志、XML 和临时数据。"
+}

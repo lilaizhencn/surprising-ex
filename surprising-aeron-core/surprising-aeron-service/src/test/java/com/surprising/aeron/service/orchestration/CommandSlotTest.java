@@ -97,7 +97,7 @@ class CommandSlotTest {
         CoreMessage command = command(1000);
         var pending = new CommandSlot(1000, CommandSlot.Operation.PLACE, command,
                 RuntimeFundsDelta.empty());
-        var batch = new OrderBatchPending(1);
+        var batch = new OrderBatchPending(1, new ResponseArena(1, 4096));
         pending.orderBatch = batch;
         pending.initialize(2000, CommandSlot.Operation.PLACE, command,
                 CommandFingerprint.of(command), List.of(),
@@ -116,7 +116,7 @@ class CommandSlotTest {
                     pending[i] = owner.admissions.newPendingMatching(first + i,
                             CommandSlot.Operation.PLACE, command(first + i));
                     owner.pendingMatching.put(pending[i]);
-                    batches[i] = new OrderBatchPending(1);
+                    batches[i] = new OrderBatchPending(1, owner.responseArena);
                     batches[i].sequence = first + i;
                     owner.batches.registerBatch(pending[i], batches[i]);
                     assertThat(owner.batches.batch(first + i)).isSameAs(pending[i].orderBatch).isSameAs(batches[i]);

@@ -140,7 +140,7 @@ final class MatcherSettlementDispatcher {
 
     /** Publish a completed Matcher fact directly into each routed Lane's shard SPSC mailbox. */
     void publishMatcherOwned(MatcherSettlementEvent event) {
-        if (event == null || event.runtime() != owner || !event.direct() || !event.matcherOwnedPublication()
+        if (event == null || event.runtime() != owner || !event.direct()
                 || !event.dispatched() || !event.resultPrepared())
             throw new IllegalStateException("invalid Matcher-owned settlement publication");
         if (event.dispatched() && event.queuedLaneMask() != 0)

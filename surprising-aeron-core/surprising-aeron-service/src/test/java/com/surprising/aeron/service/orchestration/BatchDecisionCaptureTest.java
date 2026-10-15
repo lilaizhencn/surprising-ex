@@ -19,7 +19,7 @@ class BatchDecisionCaptureTest {
                                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
                 mark(core, symbol, 100, 1);
             }
-            var batch = new OrderBatchPending(2);
+            var batch = new OrderBatchPending(2, core.responseArena);
             batch.clusterTimestamp = TIME;
             var first = core.batches.prepareBatchDecision(batch, 7, "1");
             var second = core.batches.prepareBatchDecision(batch, 7, "2");

@@ -146,7 +146,6 @@ final class DirectMatcherSettlementPreparation {
     }
 
     private void reserveMatcherPublication(MatcherSettlementEvent direct) {
-        direct.markMatcherOwnedPublication();
         direct.reserveMatcherPublication();
     }
 

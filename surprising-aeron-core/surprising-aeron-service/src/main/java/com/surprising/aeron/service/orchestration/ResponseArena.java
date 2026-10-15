@@ -72,7 +72,9 @@ final class ResponseArena {
      * must carry the explicit length to the response and ledger descriptors.
      */
     byte[] acquire(int requiredLength) {
-        return acquireSlot(requiredLength).storage;
+        if (requiredLength == 0) return TradingCoreRuntime.EMPTY_RESPONSE_DATA;
+        int index = claimPooledSlot(requiredLength);
+        return index < 0 ? new byte[requiredLength] : slots[index];
     }
 
     /**
@@ -81,21 +83,27 @@ final class ResponseArena {
      * while transport or idempotency retention delays the return of pooled leases.
      */
     Slot acquireSlot(int requiredLength) {
-        if (requiredLength < 0) throw new IllegalArgumentException("negative response length");
         if (requiredLength == 0) return EMPTY_SLOT;
+        int index = claimPooledSlot(requiredLength);
+        if (index < 0) return new Slot(new byte[requiredLength], false);
+        Slot descriptor = slotDescriptors[index];
+        descriptor.storage = slots[index];
+        descriptor.length = 0;
+        return descriptor;
+    }
+
+    /** Both APIs share the claim; byte-array callers never allocate a discarded Slot descriptor. */
+    private int claimPooledSlot(int requiredLength) {
+        if (requiredLength < 0) throw new IllegalArgumentException("negative response length");
+        if (requiredLength > slotBytes) return -1;
         for (int index = 0; index < slots.length; index++) {
-            if (requiredLength > slotBytes) break;
             if (!leaseStates.compareAndSet(index, 0, 1)) continue;
-            byte[] slot = slots[index];
-            if (slot == null || slot.length < requiredLength) slots[index] = slot = new byte[slotBytes];
+            if (slots[index] == null) slots[index] = new byte[slotBytes];
             transportReferences[index] = 1;
             ledgerReferences[index] = 0;
-            Slot descriptor = slotDescriptors[index];
-            descriptor.storage = slot;
-            descriptor.length = 0;
-            return descriptor;
+            return index;
         }
-        return new Slot(new byte[requiredLength], false);
+        return -1;
     }
 
     void release(Slot slot) {

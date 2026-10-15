@@ -92,3 +92,5 @@ Owner 的输入及响应接口现在只携带 `sessionId`。`ReplySlotAllocation
 ### D2 基准夹具接线清理（2026-10-15）
 
 `MatcherTreasuryReceiptBenchmark` 改为预留 Matcher 发布槽并使用实际 Matcher→Lane 邮箱，删除旧 Owner 派发调用；`ActiveOrderIndexBenchmark` 的清理检查改用现有 primitive API。新增 `MatcherTreasuryReceiptBenchmarkTest`，以 1/4 个 Lane 各执行有限次结算、复用事件并在关闭时核对 Treasury；2 项功能用例通过，详见 [D2 功能验证](../../docs/validation/d2-complete-20261015.json)。本轮未运行 JMH 计时、真实节点压测、快照或恢复，不给出性能结论。
+
+D2 复审中，`MatcherTreasuryReceiptBenchmark` 移除发布模式标记，统一调用 `reserveMatcherPublication()` 后发布。1/4 Lane 的 2 项有限功能用例通过，纳入 [D2 复审的 158 项必要用例](../../docs/validation/d2-review-20261015.json)，没有运行计时压测。

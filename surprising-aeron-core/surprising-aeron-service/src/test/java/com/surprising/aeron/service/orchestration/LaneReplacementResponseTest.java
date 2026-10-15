@@ -11,6 +11,33 @@ import static org.assertj.core.api.Assertions.*;
 
 class LaneReplacementResponseTest {
     @Test
+    void encodingFailureDoesNotPublishAnEmptySuccessfulResponse() {
+        var target = new CommandSlot.LaneResultTarget();
+        var arena = new ResponseArena(1, 4096);
+        target.bind(11, 0, arena);
+        target.resultOrder(0, order(11, false), null);
+        assertThatThrownBy(target::prepareResponse).isInstanceOf(IllegalArgumentException.class);
+        assertThat(target.prepared()).isFalse();
+        assertThat(target.preparedResponse()).isNull();
+        assertThat(target.preparedResponseLength()).isZero();
+        target.resultOrder(0, order(11, false), "1");
+        target.prepareResponse();
+        assertThat(target.prepared()).isTrue();
+        assertThat(target.preparedResponseLength()).isPositive();
+        byte[] encoded = target.preparedResponse();
+        target.resultOrder(0, order(11, false), null);
+        assertThatThrownBy(target::prepareResponse).isInstanceOf(IllegalArgumentException.class);
+        assertThat(target.prepared()).isFalse();
+        assertThat(target.preparedResponse()).isNull();
+        assertThat(target.preparedResponseLength()).isZero();
+        target.clear();
+        var reused = arena.acquireSlot(16);
+        assertThat(reused.arenaBacked).isTrue();
+        assertThat(reused.storage).isSameAs(encoded);
+        arena.release(reused);
+    }
+
+    @Test
     void laneCapturesUnchangedOrdersAndKeepsAlreadyCapturedTerminalImages() {
         var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
         assertThat(identities.symbolId("1")).isZero();

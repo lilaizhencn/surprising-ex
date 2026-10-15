@@ -177,7 +177,6 @@ class MatcherTreasurySettlementTest {
                         secondId, 0, identities, 30, 40);
                 assertThat(reused).isSameAs(event);
                 assertThat(reused.submitTreasurySettlement(ledger)).isTrue();
-                reused.markMatcherOwnedPublication();
                 reused.reserveMatcherPublication();
                 reused.beginMatcherPublication();
                 reused.publishDirectNativeResult(new MatcherResult(2,

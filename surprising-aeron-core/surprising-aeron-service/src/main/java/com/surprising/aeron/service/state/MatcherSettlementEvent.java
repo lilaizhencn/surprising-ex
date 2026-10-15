@@ -65,8 +65,6 @@ public final class MatcherSettlementEvent implements
     /** 本代有效项数；缓冲容量不决定业务执行范围。 */
     private int batchPlanCount;
     private boolean direct;
-    /** True when the Matcher publishes this event into the Lane shard mailboxes. */
-    private boolean matcherOwnedPublication;
     private boolean cancellation;
     private long cancellationUserId;
     private com.surprising.aeron.service.command.order.ResolvedMatchingAdmission replacement;
@@ -220,7 +218,6 @@ public final class MatcherSettlementEvent implements
                 || count <= 0 || batchStorage == null || count > batchStorage.plans.length)
             throw new IllegalArgumentException("invalid direct settlement reservation");
         direct = true; cancellation = false; directPublished = false; matcherPublicationDeferred = false;
-        matcherOwnedPublication = false;
         dispatched = false; queuedLaneMask = 0;
         expandLaneRoute = runtime.asynchronousCommands() && Long.bitCount(laneMask) == 1;
         directFailure = null;
@@ -285,7 +282,6 @@ public final class MatcherSettlementEvent implements
     }
 
     public boolean direct() { return direct; }
-    public boolean matcherOwnedPublication() { return matcherOwnedPublication; }
     /** Core sequence used by the Lane merge gate. */
     public long coreSequence() { return direct ? directCoreSequence : plan == null ? 0 : plan.coreSequence(); }
     int directShard() { return directShard; }
@@ -351,7 +347,7 @@ public final class MatcherSettlementEvent implements
 
     /** Defer Owner wake-up while the Matcher still owns the slot and event reference. */
     public void beginMatcherPublication() {
-        if (!direct || directPublished || matcherPublicationDeferred) {
+        if (!direct || !dispatched || directPublished || matcherPublicationDeferred) {
             throw new IllegalStateException("invalid matcher publication start");
         }
         matcherPublicationDeferred = true;
@@ -368,7 +364,7 @@ public final class MatcherSettlementEvent implements
     public void publishDirectNativeResult(exchange.core2.core.common.MatcherResult result,
             long coreSequence, long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
             long orderId, long matcherSequence, int matcherShard) {
-        if (!direct || directPublished || batchPlanCount != 1 || result == null
+        if (!direct || !dispatched || directPublished || batchPlanCount != 1 || result == null
                 || coreSequence != directCoreSequence || directCommandId == null
                 || commandIdMostSignificantBits != directCommandId.getMostSignificantBits()
                 || commandIdLeastSignificantBits != directCommandId.getLeastSignificantBits()
@@ -420,7 +416,7 @@ public final class MatcherSettlementEvent implements
             int index, long coreSequence,
             long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
             long orderId, long matcherSequence, int matcherShard) {
-        if (!direct || directPublished || result == null || batchPlanCount <= 0
+        if (!direct || !dispatched || directPublished || result == null || batchPlanCount <= 0
                 || index != directNativeItemCount || index < 0 || index >= batchPlanCount
                 || coreSequence != directCoreSequence || directCommandId == null
                 || commandIdMostSignificantBits != directCommandId.getMostSignificantBits()
@@ -460,7 +456,7 @@ public final class MatcherSettlementEvent implements
             exchange.core2.core.common.MatcherResult result,
             long coreSequence, long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
             long orderId, long matcherSequence, int matcherShard) {
-        if (!direct || directPublished || replacement == null || batchPlanCount != 1
+        if (!direct || !dispatched || directPublished || replacement == null || batchPlanCount != 1
                 || cancellation == null || result == null || coreSequence != directCoreSequence
                 || directCommandId == null
                 || commandIdMostSignificantBits != directCommandId.getMostSignificantBits()
@@ -497,7 +493,7 @@ public final class MatcherSettlementEvent implements
     public void publishDirectRejection(String resultCode, long coreSequence,
             long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
             long orderId, long matcherSequence, int matcherShard) {
-        if (!direct || directPublished || !admissionRequired || admissionAccepted
+        if (!direct || !dispatched || directPublished || !admissionRequired || admissionAccepted
                 || resultCode == null || resultCode.isBlank() || coreSequence != directCoreSequence
                 || directCommandId == null
                 || commandIdMostSignificantBits != directCommandId.getMostSignificantBits()
@@ -608,6 +604,7 @@ public final class MatcherSettlementEvent implements
 
     public void failDirect(Throwable failure) {
         if (!direct || directPublished) return;
+        if (!dispatched) throw new IllegalStateException("Matcher publication was not reserved");
         directFailure = java.util.Objects.requireNonNull(failure);
         if (!matcherPublicationDeferred) notifyDirectPublication();
     }
@@ -617,7 +614,7 @@ public final class MatcherSettlementEvent implements
         long completionLanes = routedLaneMask;
         // Complete every producer access before the readiness release. The Owner polls this
         // flag and may apply, clear and reuse the pooled event without waiting for our signal.
-        if (matcherOwnedPublication) completionRuntime.publishMatcherSettlementDirect(this);
+        completionRuntime.publishMatcherSettlementDirect(this);
         releaseMatcherCompletionBeforeSignal();
         if (LATENCY_DIAGNOSTICS && (Long.hashCode(directCoreSequence * 0x9e3779b97f4a7c15L) & 63) == 0)
             matcherPublishedNanos = System.nanoTime();
@@ -761,16 +758,9 @@ public final class MatcherSettlementEvent implements
         admissionLaneId = laneId;
     }
 
-    public void markMatcherOwnedPublication() {
-        if (!direct || dispatched || directPublished) {
-            throw new IllegalStateException("invalid Matcher-owned settlement mode");
-        }
-        matcherOwnedPublication = true;
-    }
-
     /** Reserve the logical dispatch state before Matcher publication; no Lane queue is touched. */
     public void reserveMatcherPublication() {
-        if (!direct || !matcherOwnedPublication || dispatched || directPublished) {
+        if (!direct || dispatched || directPublished) {
             throw new IllegalStateException("invalid Matcher publication reservation");
         }
         dispatched = true;
@@ -835,7 +825,6 @@ public final class MatcherSettlementEvent implements
         }
         if (treasurySettlement != null) treasurySettlement.clear();
         direct = false; cancellation = false; directPublished = false; directFailure = null; dispatched = false;
-        matcherOwnedPublication = false;
         queuedLaneMask = 0;
         expandLaneRoute = false;
         matcherPublicationDeferred = false;

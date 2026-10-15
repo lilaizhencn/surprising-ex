@@ -1253,10 +1253,14 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         @Override public void prepareResponse() {
             if (responseSlot != null) responseArena.release(responseSlot);
             responseSlot = null;
-            prepared = true;
-            response = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
+            prepared = false;
+            response = null;
             responseLength = 0;
-            if (responseOrders.isEmpty()) return;
+            if (responseOrders.isEmpty()) {
+                response = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
+                prepared = true;
+                return;
+            }
             try {
                 boolean single = responseOrders.size() == 1;
                 var first = responseOrders.get(0);
@@ -1264,16 +1268,18 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                         ? com.surprising.aeron.protocol.CoreCommandResultCodec.encodedSingleOrderLength(first)
                         : com.surprising.aeron.protocol.CoreCommandResultCodec.encodedLength(responseOrders, java.util.List.of());
                 responseSlot = responseArena.acquireSlot(length);
-                response = responseSlot.storage;
-                responseLength = single
+                int encodedLength = single
                         ? com.surprising.aeron.protocol.CoreCommandResultCodec.encodeSingleOrderInto(first, responseSlot.writer())
-                        : com.surprising.aeron.protocol.CoreCommandResultCodec.encodeInto(responseOrders, java.util.List.of(), response, 0);
-                responseSlot.length = responseLength;
-            } catch (IllegalArgumentException ignored) {
+                        : com.surprising.aeron.protocol.CoreCommandResultCodec.encodeInto(
+                                responseOrders, java.util.List.of(), responseSlot.storage, 0);
+                responseSlot.length = encodedLength;
+                responseLength = encodedLength;
+                response = responseSlot.storage;
+                prepared = true;
+            } catch (RuntimeException | Error failure) {
                 if (responseSlot != null) responseArena.release(responseSlot);
                 responseSlot = null;
-                response = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
-                responseLength = 0;
+                throw failure;
             }
         }
 

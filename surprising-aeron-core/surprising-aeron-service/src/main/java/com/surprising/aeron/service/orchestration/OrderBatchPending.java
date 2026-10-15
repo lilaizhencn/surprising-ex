@@ -79,17 +79,22 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
             responseArena.release(preparedResponseSlot);
             preparedResponseSlot = null;
         }
-        if (responseArena == null) {
-            preparedResponse = TradingOrderBatchCodec.encodeResultSource(this);
-            preparedResponseLength = preparedResponse.length;
-        } else {
+        preparedResponse = null;
+        preparedResponseLength = 0;
+        try {
             int length = TradingOrderBatchCodec.encodedResultSourceLength(this);
             preparedResponseSlot = responseArena.acquireSlot(length);
+            int encodedLength = TradingOrderBatchCodec.encodeResultSourceInto(
+                    this, preparedResponseSlot.storage, 0);
             preparedResponse = preparedResponseSlot.storage;
-            preparedResponseLength = TradingOrderBatchCodec.encodeResultSourceInto(
-                    this, preparedResponse, 0);
+            preparedResponseLength = encodedLength;
+        } catch (RuntimeException | Error failure) {
+            if (preparedResponseSlot != null) responseArena.release(preparedResponseSlot);
+            preparedResponseSlot = null;
+            throw failure;
+        } finally {
+            responseItem = null;
         }
-        responseItem = null;
     }
 
     void transferPreparedResponseOwnership() {
@@ -328,13 +333,9 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     boolean activated() { return has(ACTIVATED); }
     void activated(boolean value) { set(ACTIVATED, value); }
 
-    OrderBatchPending(int requestedCapacity) {
-        this(requestedCapacity, null);
-    }
-
     OrderBatchPending(int requestedCapacity, ResponseArena responseArena) {
         int capacity = Math.max(1, requestedCapacity);
-        this.responseArena = responseArena;
+        this.responseArena = java.util.Objects.requireNonNull(responseArena, "response arena");
         items = new ArrayList<>(capacity);
         itemSlots = new OrderBatchItem[capacity];
         changedUserIds = new PrimitiveLongChangeSet(capacity * 2);

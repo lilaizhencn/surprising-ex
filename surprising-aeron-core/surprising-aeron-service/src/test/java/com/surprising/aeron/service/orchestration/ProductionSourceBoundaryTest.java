@@ -20,6 +20,11 @@ class ProductionSourceBoundaryTest {
                 .doesNotContain("dispatchOwnerControlledSettlement");
         assertThat(java.util.Arrays.stream(ClusterCommandWindow.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName)).doesNotContain("complete");
+        assertThat(java.util.Arrays.stream(com.surprising.aeron.service.state.MatcherSettlementEvent.class
+                .getDeclaredMethods()).map(java.lang.reflect.Method::getName))
+                .doesNotContain("markMatcherOwnedPublication", "matcherOwnedPublication");
+        assertThat(java.util.Arrays.stream(OrderBatchPending.class.getDeclaredConstructors())
+                .mapToInt(java.lang.reflect.Constructor::getParameterCount)).containsOnly(2);
         assertThat(java.util.Arrays.stream(com.surprising.aeron.service.state.index.ActiveOrderIndex.class
                 .getDeclaredMethods()).map(java.lang.reflect.Method::getName)).doesNotContain("ids");
         for (String name : java.util.List.of("preparedResponse", "preparedResponseLength")) {
