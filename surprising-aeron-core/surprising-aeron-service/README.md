@@ -423,3 +423,10 @@ D1 补充审查：`ClusterServiceEgress.TransportSession` 仍实现 `ClientSessi
 触发变更枚举 `Mutation` 及 OCO 取消页 `OcoCancellationPage` 由 `TriggerOrderCommands` 定义。交割分页直接返回既有 `LifecycleOrderChunk`，移除接口专用页及重复包装；风险续扫由接收调用的运行时绑定续步，去掉多余的 owner 参数。本次没有新增类、接口、容器或线程。
 
 74 项必要功能用例通过，覆盖六产品线入口及非零手续费资金守恒、划转、资金费、触发/OCO/风险、强平/保险/ADL、到期结算和持仓控制，详见 [D5 功能验证](../../docs/validation/d5-complete-20261015.json)。未运行压测、JMH/JFR、快照/恢复或 wallet，未更新性能记录；其它审计项单独处理。
+
+
+### D6 无调用终态观察链清理（2026-10-15）
+
+`TerminalStateRetention` 已删除无调用的旧 `observe` / `observeAcknowledgedOrders` 及其专用观察、排序、候选更新方法，共 12 个方法，并移除排序缓冲。实际终态仍从 Lane 提交事实进入 `TerminalOrderSink`；去重标记、候选裁剪、资金幂等及编解码方法保持原实现，没有增加替代流程。
+
+21 项必要功能回归通过，覆盖六产品线资金幂等与手续费资金守恒、跨 Lane IOC 和终态发布，见 [D6 功能验证](../../docs/validation/d6-complete-20261015.json)。本轮不执行快照/恢复、压测、JMH/JFR 或 wallet。审计文档 D2–D6 已标记完成；D6 原报告中的序号冗余和“仅测试使用”判断已按实际用途纠正。

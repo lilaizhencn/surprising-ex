@@ -19,10 +19,8 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderSink, AutoCloseable {
@@ -38,7 +36,6 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
     private final FundsCommandIndex fundsCommands;
     /** Owner-confined lookup key; candidate keys themselves remain stable Map keys. */
     private final EntityKey candidateLookupKey = new EntityKey(EntityType.ORDER, 1);
-    private final ArrayList<Long> sortedScratch = new ArrayList<>();
 
     TerminalStateRetention() {
         this(new LinkedHashMap<>(), new TerminalTombstoneStore(), new FundsCommandIndex());
@@ -50,27 +47,6 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
         this.candidates = candidates;
         this.tombstones = tombstones;
         this.fundsCommands = fundsCommands;
-    }
-
-    void observe(TradingCoreState after, long exportSequence,
-                 Iterable<Long> orderIds, Iterable<Long> liquidationIds, Iterable<Long> triggerOrderIds) {
-        if (after == null || exportSequence <= 0) {
-            throw new IllegalArgumentException("invalid terminal retention observation");
-        }
-        forEachSorted(orderIds, id -> observeOrder(after.orders().get(id), exportSequence));
-        forEachSorted(after.changedAlgoOrderIds(), id -> observeAlgo(after.algoOrders().get(id), exportSequence));
-        forEachSorted(triggerOrderIds, id ->
-                observeTrigger(after.triggerOrders().get(id), exportSequence));
-        forEachSorted(liquidationIds, id ->
-                observeLiquidation(after.riskState().liquidations().get(id), exportSequence));
-    }
-
-    void observeAcknowledgedOrders(
-            TradingCoreState state, long acknowledgedSequence, Iterable<Long> orderIds) {
-        if (state == null || acknowledgedSequence <= 0 || orderIds == null) {
-            throw new IllegalArgumentException("invalid acknowledged terminal orders");
-        }
-        forEachSorted(orderIds, id -> observeOrder(state.orders().get(id), acknowledgedSequence));
     }
 
     @Override
@@ -308,72 +284,6 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
         }
     }
 
-    private void observeOrder(CoreOrderState order, long exportSequence) {
-        if (order == null) return;
-        if (order.status().terminal()) retain(EntityType.ORDER, order.orderId(), order.userId(), order.clientOrderId(), exportSequence);
-        else removeCandidate(EntityType.ORDER, order.orderId());
-    }
-
-    private void observeOrder(OrderRuntime order, long exportSequence) {
-        if (order == null) return;
-        if (order.status().terminal()) retain(EntityType.ORDER, order.orderId(), order.userId(), order.clientOrderId(), exportSequence);
-        else removeCandidate(EntityType.ORDER, order.orderId());
-    }
-
-    private void observeAlgo(CoreAlgoOrderState algo, long exportSequence) {
-        if (algo == null) return;
-        if (algo.terminal()) retain(EntityType.ALGO, algo.algoOrderId(), algo.userId(), algo.clientAlgoOrderId(), exportSequence);
-        else removeCandidate(EntityType.ALGO, algo.algoOrderId());
-    }
-
-    private void observeTrigger(CoreTriggerOrderState trigger, long exportSequence) {
-        if (trigger == null) return;
-        if (!trigger.status().open()) retain(EntityType.TRIGGER, trigger.triggerOrderId(), trigger.userId(), trigger.clientTriggerOrderId(), exportSequence);
-        else removeCandidate(EntityType.TRIGGER, trigger.triggerOrderId());
-    }
-
-    private void observeLiquidation(CoreLiquidationState liquidation, long exportSequence) {
-        if (liquidation == null) return;
-        if (liquidation.terminal()) retain(EntityType.LIQUIDATION, liquidation.liquidationId(), liquidation.userId(), "", exportSequence);
-        else removeCandidate(EntityType.LIQUIDATION, liquidation.liquidationId());
-    }
-
-    private void observeLiquidation(LiquidationRuntime liquidation, long exportSequence) {
-        if (liquidation == null) return;
-        if (liquidation.status() == CoreLiquidationState.Status.CANCELED
-                || liquidation.status() == CoreLiquidationState.Status.COMPLETED
-                && liquidation.deficitUnits() == 0) {
-            retain(EntityType.LIQUIDATION, liquidation.liquidationId(), liquidation.userId(), "", exportSequence);
-        } else {
-            removeCandidate(EntityType.LIQUIDATION, liquidation.liquidationId());
-        }
-    }
-
-    private void retain(EntityType type, long id, long userId, String clientId, long exportSequence) {
-        if (tombstones.contains(type.code, id)) return;
-        String normalized = normalizeClientId(clientId);
-        candidateLookupKey.reset(type, id);
-        RetainedEntity existing = candidates.get(candidateLookupKey);
-        if (existing != null && existing.userId() == userId
-                && existing.exportSequence() == exportSequence
-                && existing.clientId().equals(normalized)) return;
-        // Reuse the stable key already held by the map. This removes one short-lived
-        // EntityKey allocation from every terminal observation while preserving map identity.
-        if (existing == null) {
-            EntityKey stableKey = new EntityKey(type, id);
-            candidates.put(stableKey, new RetainedEntity(stableKey, userId, normalized, exportSequence));
-        } else {
-            // Candidates are Owner-confined. Reuse the value on every terminal
-            // observation instead of allocating a replacement record.
-            existing.update(userId, normalized, exportSequence);
-        }
-    }
-
-    private void removeCandidate(EntityType type, long id) {
-        candidateLookupKey.reset(type, id);
-        candidates.remove(candidateLookupKey);
-    }
-
     private boolean isStillPrunable(TradingCoreState state, RetainedEntity candidate) {
         return switch (candidate.key().type()) {
             case ORDER -> {
@@ -440,14 +350,6 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
         String normalized = normalizeClientId(clientId);
         if (normalized.isEmpty()) return false;
         return tombstones.containsClient(type.code, userId, normalized);
-    }
-
-    private void forEachSorted(Iterable<Long> values, java.util.function.LongConsumer consumer) {
-        sortedScratch.clear();
-        values.forEach(value -> { if (value != null) sortedScratch.add(value); });
-        sortedScratch.sort(Comparator.naturalOrder());
-        for (long value : sortedScratch) consumer.accept(value);
-        sortedScratch.clear();
     }
 
     private static void write(DataOutputStream output, LinkedHashMap<EntityKey, RetainedEntity> values)
@@ -531,24 +433,15 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
 
     private static final class RetainedEntity {
         private final EntityKey key;
-        private long userId;
-        private String clientId;
-        private long exportSequence;
+        private final long userId;
+        private final String clientId;
+        private final long exportSequence;
 
         private RetainedEntity(EntityKey key, long userId, String clientId, long exportSequence) {
             if (key == null || userId <= 0 || clientId == null || exportSequence <= 0) {
                 throw new IllegalArgumentException("invalid retained terminal entity");
             }
             this.key = key;
-            this.userId = userId;
-            this.clientId = clientId;
-            this.exportSequence = exportSequence;
-        }
-
-        private void update(long userId, String clientId, long exportSequence) {
-            if (userId <= 0 || clientId == null || exportSequence <= 0) {
-                throw new IllegalArgumentException("invalid retained terminal entity");
-            }
             this.userId = userId;
             this.clientId = clientId;
             this.exportSequence = exportSequence;

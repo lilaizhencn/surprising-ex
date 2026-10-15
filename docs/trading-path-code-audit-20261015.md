@@ -35,10 +35,11 @@
 | 已完成 | D3 / L7 | 交易统一 Direct，删除旧 Future/API、Owner 补结算与分区扫描 | 已验证，见 D3 |
 | 已完成 | D4 | Owner 直接消费唯一输入环，删除重复 FIFO 与回收队列 | 已验证，见 D4 |
 | 已完成 | D5 | 删除命令能力接口，直接引用既有运行时 | 已验证，见 D5 |
-| 删除类 | D6–D9 | 死代码等 | 低到中 |
+| 已完成 | D6 | 已删除无调用旧观察链，核实并纠正原报告误判 | 已验证，见 D6 |
+| 待处理 | D7–D9 | 职责、收尾重复及层级问题 | 中到高 |
 | 最后做 | D10 | `TradingCoreRuntime` 状态枢纽、状态重复 | 中高 |
 
-建议执行顺序见第 9 节。
+D2–D6 均已完成，具体变更、核查结论与验证证据见各节。建议执行顺序见第 9 节。
 
 ## 2. 正确性与可用性风险（C）
 
@@ -305,13 +306,15 @@
 - **删除及调用链**：9 个接口及其继承、实现、导入、参数和字段引用均已删除。12 类业务命令直接持有原 `TradingCoreRuntime`；`DirectCommandSlot` 的六类异步续步直接保留同一运行时。命令校验、Lane 派发、原状态变更、结果登记及异常回滚仍沿原入口顺序执行，没有新增接口、代理或状态镜像。
 - **业务类型归属**：`Mutation` 与 `OcoCancellationPage` 迁到 `TriggerOrderCommands`。交割命令直接使用现有 `TradingCoreRuntime.LifecycleOrderChunk`，删除接口内的重复 `LifecycleOrderPage` 和逐页转换；风险续扫去掉多余的 `owner` 自传参数，续步绑定接收调用的运行时。
 - **验证**：HotSpot JDK 27，74 项必要功能用例通过（service 72、基准夹具 2），失败、错误、跳过均为 0；直接依赖及基准模块编译通过。结构测试核对 12 类命令及异步续步的实际依赖类型、运行时实现列表和接口源文件删除；业务覆盖六产品线资金守恒、余额/划转、双向永续资金费、触发/OCO/风险续扫、强平/保险/ADL、交割/行权、持仓模式、保证金和杠杆拒绝后重试。详见 [D5 功能验证](validation/d5-complete-20261015.json)。
-- **范围**：未运行压测、JMH/JFR、快照/恢复或 wallet，不更新性能记录、不宣称吞吐/分配收益。仅移除这组能力接口；D6–D10、C1 等仍独立待办。
+- **范围**：未运行压测、JMH/JFR、快照/恢复或 wallet，不更新性能记录、不宣称吞吐/分配收益。仅移除这组能力接口；D6 后续完成见下节，D7–D10、C1 等仍独立待办。
 
-### D6【报告】死代码与待清理项
-- `state/TradingRuntimeState.java:172-178`：`singleWriterInline` 常量、空实现 setter；`isPublishMirrorEnabled` 恒返回 false。
-- `orchestration/TerminalStateRetention.java:52-75`：`observe / observeAcknowledgedOrders`，及装箱排序的 `forEachSorted`（:445）：CodeGraph 查不到调用方，应删除（删前再查一次）。
-- `matching/MatcherEvidenceLedger.java:49-54`：`issuedSequences` 与 `shardSequences` 单线程下同步前进，有两份冗余。
-- 基准污染 main：`TradingCoreRuntime.probeValue` 只被测试使用；`TradingRuntimeState:4955` 注释写明为基准提供 detached 值；`CoreMatchingPhaseMetrics` 在主流程有 43 处探针。基准类本身已隔离在 benchmarks 模块（这点是好的）。
+### D6【已完成】删除无调用旧观察链，纠正原报告误判
+- **已删除**：重新核查生产、测试及基准调用后，删除 `TerminalStateRetention.observe`、`observeAcknowledgedOrders`、6 个专用 `observe*` 私有重载，以及只被该链调用的 `retain`、`removeCandidate`、`forEachSorted`、`RetainedEntity.update`，共 12 个方法；一并删除 `sortedScratch` 和无用导入。候选条目只在构造时赋值，相关字段改为 final。
+- **有效入口**：终态事实仍经 `TerminalOrderSink.accept/acceptBatch/completeSequence` 保留去重标记；有效候选裁剪、身份查询、Ledger 资金幂等和编解码路径保留。已静态比对这些方法体与清理前一致，没有新增状态或替代层。
+- **此前已清理**：`TradingRuntimeState` 中 `SINGLE_WRITER_INLINE`、`singleWriterInline`、空 setter 和镜像开关已在 `a1fd681ba` 删除，本次不重复修改。
+- **序号误判纠正**：`MatcherEvidenceLedger.issuedSequences` 是已分配序号，`shardSequences` 是已验证发布进度；`nextSequence` 与证据发布分别推进它们，后者还用于导出进度。二者不能仅因常见成功路径同步增长而当作冗余删除。
+- **测试/诊断误判纠正**：`probeValue` 由生产协议命令 `PROBE_INCREMENT` 修改，生产快照写入也读取它；`preparedOrder` 仍服务未启动 Lane 的构建路径；`CoreMatchingPhaseMetrics` 有实际阶段统计和受开关/采样/JFR 控制的诊断用途。这些代码经核实保留，撤销原“仅测试使用/可直接清理”的笼统判断。
+- **验证及范围**：HotSpot JDK 27，21 项必要功能用例通过，失败、错误、跳过均为 0，覆盖终态标记淘汰/客户身份、Lane 终态发布、六产品线资金命令幂等、满 Ledger 邮箱续步、跨 Lane IOC 及非零手续费资金守恒；受影响模块及依赖编译通过。见 [D6 功能验证](validation/d6-complete-20261015.json)。本轮仅清理确认的死代码，不运行压测、JMH/JFR、快照/恢复或 wallet；不更新性能记录、不宣称吞吐收益。
 
 ### D7【报告】超大类与职责混杂
 - `state/TradingRuntimeState.java`：5332 行、约 350 到 390 个方法，混有 lane 拓扑、指标、对象池、变更缓冲、控制任务、转账、触发、算法单、物化，以及 `TreeMap<Long,Long> pendingTransferUsers`（:198）。
@@ -377,7 +380,7 @@
 
 1. **确认类**（先于一切性能优化）：C1（JCStress）、C2（决定溢出策略）。
 2. **局部低风险改动**（先写 JMH，再改，再测）：P1+F1+L1（unpark 标志与 HWM）、F2+L3（结算 ring 填充与 `setRelease`）、P2（Lane scope）。
-3. **删除类**（风险低）：D6。D1 已于 `c2a7c5a6e` 完成；D2、L8、D5 已于 2026-10-15 完成。
+3. **已完成的删除项**：D1–D6 已完成；D6 仅删除确认的死代码，其余原疑点已核实并纠正。L7/L8 的相关完成范围见 D3/D2。
 4. **中等改动**：P3（最优价）、P4（指纹）、P5（traceId）、P7（网关 mailbox）、P9–P11、F3–F7、F9、L2。
 5. **需要先补测试与对账**：C3、D8（D3、D4 已完成）。
 6. **最后**：D7、D9、D10（状态枢纽与重复状态），分步进行并跑恢复测试。
