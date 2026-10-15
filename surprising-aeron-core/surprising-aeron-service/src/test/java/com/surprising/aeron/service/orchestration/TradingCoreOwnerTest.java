@@ -743,7 +743,8 @@ class TradingCoreOwnerTest {
         var release = new java.util.concurrent.CountDownLatch(1);
         service.onStart(cluster(), null);
         try {
-            service.state().apply(timerInstrument());
+            assertThat(CoreTestCompletion.applyAsynchronously(service.state(), timerInstrument()).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
             var runtime = service.state().runtimeState;
             var entered = new java.util.concurrent.CountDownLatch(1);
             long mask = runtime.topology().accountLaneMask(1001);
@@ -789,7 +790,8 @@ class TradingCoreOwnerTest {
         var release = new java.util.concurrent.CountDownLatch(1);
         service.onStart(cluster(), null);
         try {
-            service.state().apply(timerInstrument());
+            assertThat(CoreTestCompletion.applyAsynchronously(service.state(), timerInstrument()).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
             var entered = new java.util.concurrent.CountDownLatch(1);
             long token = service.state().matcherPipeline.submitControl(0, () -> {
                 entered.countDown();
@@ -836,7 +838,8 @@ class TradingCoreOwnerTest {
         @SuppressWarnings("unchecked")
         var failureSlot = (AtomicReference<RuntimeException>) field.get(state.snapshots);
         try {
-            state.apply(timerInstrument());
+            assertThat(CoreTestCompletion.applyAsynchronously(state, timerInstrument()).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
             long now = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
             assertThat(state.hasMatchingNotifications(now)).isFalse();
             var failure = new IllegalStateException("silent snapshot audit failure");
@@ -1128,8 +1131,9 @@ class TradingCoreOwnerTest {
         service.onStart(cluster(), null);
         try {
             TradingCoreRuntime state = service.state();
-            assertThat(state.apply(timerInstrument()).status()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+            assertThat(CoreTestCompletion.applyAsynchronously(state, timerInstrument()).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+            assertThat(CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
                     .status()).isEqualTo(ResponseStatus.APPLIED);
             var metrics = new CoreMessage(CoreMessageHeader.query(CoreMessageType.LANE_METRICS_QUERY,
@@ -1164,7 +1168,7 @@ class TradingCoreOwnerTest {
         Thread serviceThread = new Thread(() -> {
             try {
                 service.onStart(cluster(), null);
-                response.set(service.state().apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
+                response.set(CoreTestCompletion.applyAsynchronously(service.state(), command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
                         CoreProtocol.probePayload(1))));
             } catch (Throwable throwable) {
                 failure.set(throwable);
@@ -1187,8 +1191,9 @@ class TradingCoreOwnerTest {
         List<byte[]> responses = new CopyOnWriteArrayList<>();
         service.onStart(cluster(), null);
         try {
-            assertThat(service.state().apply(timerInstrument()).status()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(service.state().apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+            assertThat(CoreTestCompletion.applyAsynchronously(service.state(), timerInstrument()).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+            assertThat(CoreTestCompletion.applyAsynchronously(service.state(), command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
                     .status()).isEqualTo(ResponseStatus.APPLIED);
             CoreMessage place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
@@ -1203,8 +1208,8 @@ class TradingCoreOwnerTest {
 
             assertThat(service.state().pendingMatchingCount()).isZero();
             assertThat(responses).hasSize(1);
-            assertThat(service.state().tradingState().order(904).status())
-                    .isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN);
+            assertThat(CoreTestCompletion.orderState(service.state(), 1001, 904).status())
+                    .isEqualTo("OPEN");
         } finally {
             service.onTerminate(null);
         }
@@ -1217,8 +1222,8 @@ class TradingCoreOwnerTest {
         service.onStart(cluster(), null);
         try {
             TradingCoreRuntime state = service.state();
-            assertThat(state.apply(timerInstrument()).status()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+            assertThat(CoreTestCompletion.applyAsynchronously(state, timerInstrument()).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)),
                     UUID.fromString("00000000-0000-0000-0000-000000000012"))).status())
                     .isEqualTo(ResponseStatus.APPLIED);
@@ -1235,8 +1240,8 @@ class TradingCoreOwnerTest {
             assertThat(service.doBackgroundWork(0)).isZero();
 
             assertThat(state.pendingMatchingCount()).isZero();
-            assertThat(state.tradingState().order(906).status())
-                    .isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN);
+            assertThat(CoreTestCompletion.orderState(state, 1001, 906).status())
+                    .isEqualTo("OPEN");
             assertThat(responses).hasSize(2);
         } finally {
             service.onTerminate(null);
@@ -1400,7 +1405,8 @@ class TradingCoreOwnerTest {
         service.onStart(cluster(Cluster.Role.FOLLOWER), null);
         try {
             long sequence = preparePendingPlace(service.state(), 905);
-            assertThat(awaitMatching(service.state(), sequence)).isNotNull();
+            assertThat(CoreTestCompletion.awaitMatchingResult(service.state(), sequence,
+                    TimeUnit.SECONDS.toNanos(5))).isNotNull();
 
             service.onTimerEvent(Long.MAX_VALUE - 1, 31_000);
 
@@ -1486,15 +1492,27 @@ class TradingCoreOwnerTest {
     }
 
     private static long preparePendingPlace(TradingCoreRuntime state, long orderId) {
-        assertThat(state.apply(instrument()).status()).isEqualTo(ResponseStatus.APPLIED);
-        assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+        assertThat(CoreTestCompletion.applyAsynchronously(state, instrument()).status()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
                 .status()).isEqualTo(ResponseStatus.APPLIED);
         UUID commandId = UUID.randomUUID();
         CoreMessage place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
                 TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "1", CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "service-" + orderId)), commandId);
-        assertThat(state.apply(place).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-        return state.matchingSequence(commandId);
+        CoreResponse response = state.apply(place);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        // Finish admission only: these tests deliberately leave matching uncommitted.
+        while (state.hasPendingDirectCommand()) {
+            response = state.pollDirectCommand();
+            state.assertHealthy();
+            if (System.nanoTime() >= deadline) throw new AssertionError("place admission timeout");
+            Thread.onSpinWait();
+        }
+        assertThat(response).isNotNull();
+        assertThat(response.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+        long sequence = state.matchingSequence(commandId);
+        assertThat(sequence).isPositive();
+        return sequence;
     }
 
 

@@ -1147,7 +1147,11 @@ class ClusterCommandPipelineTest {
             assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9102).status())
                     .isEqualTo(overflow ? CoreTriggerOrderStatus.PENDING : CoreTriggerOrderStatus.CANCELED);
             assertThat(CoreTestCompletion.orderState(live.service.state(), user, 18203)).isNull();
-            assertThat(live.service.state().identities.findClientKey(user, "TRIGGER:9101")).isNull();
+            var clientIdentity = new java.util.concurrent.CompletableFuture<Long>();
+            assertThat(runtime.dispatchAccountQuery(runtime.topology().accountLaneMask(user), lane ->
+                    clientIdentity.complete(live.service.state().identities.findClientKeyValueInLane(
+                            lane, user, "TRIGGER:9101")))).isTrue();
+            assertThat(clientIdentity.get(3, TimeUnit.SECONDS)).isZero();
             assertThat(live.service.state().tradingState().users()).isEqualTo(accountsBefore);
             if (recovery) try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, live.service.captureSnapshot(101))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());

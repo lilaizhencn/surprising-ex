@@ -1,0 +1,54 @@
+{
+  "date": "2026-10-15",
+  "kind": "D1 Owner 日志元数据边界与受影响测试修复；整体性能任务仍未完成",
+  "business_flow": [
+    "Cluster 服务线程读取初始角色、日志时间和位置，创建现有 OwnerLogContext 值对象",
+    "Owner 在输入 FIFO 中更新这些值；交易和实时边界不再接收 Cluster 对象",
+    "角色变更沿用既有控制边界，日志时间和位置随实际输入更新",
+    "测试初始化等待实际异步控制完成；故意保留待撮合的场景只等待准入，不提前提交撮合"
+  ],
+  "diagnosis": [
+    "顺序重跑首先复现 7 个旧同步测试假设失败，不能将报错直接归因于移除假 Cluster",
+    "补充回归修复查询 DTO 字符串状态断言，以及仍只识别旧 CoreMatchingResult 的等待方式",
+    "客户订单号身份检查必须在实际账户 Lane 执行；测试不得借用 Owner 读取活动 Lane",
+    "旧全量报告还包含测试启动 JAR 和匿名类缺失，构建产物完整性异常不能作为业务回归证据",
+    "D1 的测试适配器也须保留并更新日志元数据，不能只在启动时复制一次"
+  ],
+  "architecture": "保留用户 D1 的值对象改动；没有新增生产接口、线程、队列、账户镜像或执行阶段，没有放宽资金、身份或 Lane 所有权校验。真实 Aeron 会话出口仍由原 ClusterServiceEgress 承担。",
+  "tests": {
+    "jdk": "HotSpot 27",
+    "unique_cases": 67,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "result": "PASS",
+    "suites": {
+      "OwnerLogContextTest": 6,
+      "TradingCoreOwnerTest (14 selected methods)": 14,
+      "TradingRuntimeOwnershipTest": 6,
+      "RealtimeTerminalEmissionTest": 6,
+      "TradingOwnerInputReuseTest": 3,
+      "TradingOwnerLoopTimeoutConfigurationTest": 3,
+      "ClusterCommandPipelineTest (6 selected methods)": 29
+    },
+    "coverage": [
+      "六产品线真实 Owner 线程禁止调用 Cluster API，输入日志元数据顺序及角色切换",
+      "初始化、线程归属、查询与命令完成、阻塞 Lane/Matcher 时返回、空闲故障传播",
+      "有界响应重试、实时终态输出和关闭",
+      "触发 OCO、准入失败/溢出回滚、原位身份退休、触发扫描和价格来源",
+      "全局 OI 与批量顺序前缀准入"
+    ],
+    "compilation": "包含 surprising-aeron-benchmarks 及其直接依赖的 testCompile 通过；未执行具有快照恢复 teardown 的 ClusteredBatchTradingBenchmarkTest。",
+    "excluded": [
+      "Cluster 快照、序列化及恢复场景",
+      "wallet",
+      "真实节点压测与性能数值验收"
+    ],
+    "limits": "仅证明上述必要用例通过；没有重跑旧全量报告中的全部用例，不宣称全量测试通过。"
+  },
+  "remaining": [
+    "风险/ADL 与其他控制路径的显式 Lane 参数迁移",
+    "服务端残留锁的热路径确认与处理",
+    "完整 Core 分配、分段尾延迟与稳定性验收"
+  ]
+}

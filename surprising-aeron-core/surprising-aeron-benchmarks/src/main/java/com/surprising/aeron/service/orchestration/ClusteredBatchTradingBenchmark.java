@@ -480,7 +480,8 @@ public class ClusteredBatchTradingBenchmark {
                         case "time", "logPosition" -> 1_700_000_000_000L;
                         default -> defaultValue(method.getReturnType());
                     });
-            service.start(cluster);
+            service.start(new OwnerLogContext(cluster.role(), cluster.time(), cluster.logPosition(),
+                    cluster.idleStrategy()));
             if(realtime) {
                 realtimeOutbox=new com.surprising.aeron.client.RealtimeOutbox(8192,8*1024*1024);
                 service.attachRealtime(realtimeOutbox, null);consuming=true;

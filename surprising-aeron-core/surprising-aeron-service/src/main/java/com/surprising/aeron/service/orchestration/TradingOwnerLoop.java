@@ -13,6 +13,7 @@ import io.aeron.cluster.service.Cluster;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import org.agrona.concurrent.AgentTerminationException;
+import org.agrona.concurrent.BusySpinIdleStrategy;
 import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -68,8 +69,8 @@ public final class TradingOwnerLoop implements Runnable {
         failure = null;
         stopping = false;
         ownerEpoch = 0;
-        logContext = new OwnerLogContext(cluster.memberId(), cluster.timeUnit(), cluster.role(),
-                cluster.time(), cluster.logPosition());
+        logContext = new OwnerLogContext(cluster.role(), cluster.time(), cluster.logPosition(),
+                new BusySpinIdleStrategy());
         ownerThread = new Thread(this, "trading-owner-" + cluster.memberId());
         ownerThread.start();
         boundary(() -> {

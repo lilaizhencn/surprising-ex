@@ -53,8 +53,8 @@ public final class TradingCoreOwner {
     private final ProductLine productLine;
     /** 当前产品线的权威交易运行时；Owner 只在自己的线程访问它。 */
     private TradingCoreRuntime state;
-    /** Aeron 集群对象，Owner 只用于时间、角色和日志位置边界。 */
-    private Cluster cluster;
+    /** Owner 线程可见的角色、日志时间和日志位置；不提供任何 Aeron 会话或发布器访问。 */
+    private OwnerLogContext logContext;
     /** 集群等待策略，所有者是当前 Owner 线程。 */
     private IdleStrategy idleStrategy;
     /** Aeron 回调可能重入背景工作，使用该标记保护交易推进边界。 */
@@ -77,14 +77,14 @@ public final class TradingCoreOwner {
      *
      * <p>这里只初始化运行时资源，不执行任何业务命令；业务命令必须来自已复制的 Cluster 日志。</p>
      */
-    void start(Cluster cluster) {
-        this.cluster = cluster;
+    void start(OwnerLogContext logContext) {
+        this.logContext = logContext;
         if (state == null) state = new TradingCoreRuntime(productLine);
         processingLogCallback = false;
         commandPipeline.reset();
-        idleStrategy = cluster.idleStrategy();
-        log.info("Aeron core role productLine={} role={}", productLine, cluster.role());
-        realtimeBoundary.start(cluster, state);
+        idleStrategy = logContext.idle;
+        log.info("Aeron core role productLine={} role={}", productLine, logContext.role);
+        realtimeBoundary.start(logContext.role, logContext.position, state);
     }
 
     /** 独立 Owner 连续收取入口后统一推进；容量不足仍立即推进，日志上下文逐条保留。 */
@@ -486,8 +486,8 @@ public final class TradingCoreOwner {
             idleStrategy.reset();
             while (true) {
                 SectionedCoreSnapshotCodec.SectionedSnapshot snapshot = state.pollSnapshotSections(
-                        cluster == null ? 0 : cluster.time(),
-                        cluster == null ? 0 : cluster.logPosition(),
+                        logContext == null ? 0 : logContext.timestamp,
+                        logContext == null ? 0 : logContext.position,
                         System.nanoTime());
                 if (snapshot != null) return snapshot;
                 idleStrategy.idle();
@@ -513,14 +513,14 @@ public final class TradingCoreOwner {
 
     /** 从实时请求队列取出一个请求，并在已提交位置上生成快照或盘口。 */
     private int progressRealtimeReads(long nowNs) {
-        return realtimeBoundary.poll(state, cluster, nowNs);
+        return realtimeBoundary.poll(state, logContext.timestamp, nowNs);
     }
 
     /** 输出命令流水线诊断并释放 Owner、实时出口和交易运行时资源。 */
     void terminate() {
         log.info("Aeron core command-window productLine={} {}",
                 productLine, commandPipeline.terminationSummary());
-        this.cluster = null;
+        this.logContext = null;
         realtimeBoundary.close();
         try {
             if (state != null) state.close();

@@ -55,9 +55,9 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
      *
      * <p>没有配置实时通道时保持禁用，不影响交易主流程。</p>
      */
-    public void start(Cluster cluster, TradingCoreRuntime state) {
-        leader = cluster.role() == Cluster.Role.LEADER;
-        committedPosition = Math.max(0, cluster.logPosition());
+    public void start(Cluster.Role role, long logPosition, TradingCoreRuntime state) {
+        leader = role == Cluster.Role.LEADER;
+        committedPosition = Math.max(0, logPosition);
         nextSnapshotNanos = 0;
         String channel = System.getProperty("surprising.realtime.channel", "");
         if (channel.isBlank() || outbox != null) return;
@@ -115,7 +115,7 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
      *
      * @return 本轮完成的实时工作数量
      */
-    public int poll(TradingCoreRuntime state, Cluster cluster, long nowNanos) {
+    public int poll(TradingCoreRuntime state, long clusterTime, long nowNanos) {
         if (capture == null || !leader) return 0;
         int work = state.pollRealtimeSnapshot() + state.pollRealtimeBook();
         if (state.realtimeSnapshotPending() || state.realtimeBookPending()
@@ -125,10 +125,10 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
 
         nextSnapshotNanos = nowNanos + SNAPSHOT_INTERVAL_NANOS;
         if (request.kind() == RealtimeFrame.Kind.BOOK_REQUEST) {
-            state.captureRealtimeBook(request.instrumentId(), committedPosition, cluster.time());
+            state.captureRealtimeBook(request.instrumentId(), committedPosition, clusterTime);
         } else {
             state.captureRealtimeSnapshot(request.userId(), request.snapshotId(),
-                    committedPosition, cluster.time());
+                    committedPosition, clusterTime);
         }
         return work + 1;
     }

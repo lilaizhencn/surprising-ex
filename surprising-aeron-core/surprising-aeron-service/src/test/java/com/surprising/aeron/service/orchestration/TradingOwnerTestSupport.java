@@ -24,6 +24,7 @@ final class TradingOwnerTestSupport implements ClusteredService {
     private final TradingCoreOwner owner;
     private final CoreMessageFlyweightDecoder messageDecoder = new CoreMessageFlyweightDecoder();
     private Cluster cluster;
+    private OwnerLogContext logContext;
     private final DeferredSessionResponses responses = new DeferredSessionResponses();
 
     TradingOwnerTestSupport(ProductLine productLine) {
@@ -46,7 +47,9 @@ final class TradingOwnerTestSupport implements ClusteredService {
     public void onStart(Cluster cluster, Image snapshotImage) {
         this.cluster = cluster;
         responses.clear();
-        owner.start(cluster);
+        logContext = new OwnerLogContext(cluster.role(), cluster.time(), cluster.logPosition(),
+                cluster.idleStrategy());
+        owner.start(logContext);
         if (snapshotImage != null) {
             owner.loadSnapshot(snapshotImage::poll, snapshotImage::isEndOfStream);
         }
@@ -70,18 +73,20 @@ final class TradingOwnerTestSupport implements ClusteredService {
     }
 
     void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position) {
-        owner.enqueueCommittedCommand(session, request, timestamp, position, null);
+        enqueueCommittedCommand(session, request, timestamp, position, null);
         owner.pollCommands();
     }
 
     void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
                                 CommandFingerprint fingerprint) {
-        owner.enqueueCommittedCommand(session, request, timestamp, position, fingerprint);
+        enqueueCommittedCommand(session, request, timestamp, position, fingerprint);
         owner.pollCommands();
     }
 
     void enqueueCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
                                  CommandFingerprint fingerprint) {
+        logContext.timestamp = timestamp;
+        logContext.position = position;
         owner.enqueueCommittedCommand(session, request, timestamp, position, fingerprint);
     }
 
@@ -115,6 +120,7 @@ final class TradingOwnerTestSupport implements ClusteredService {
     @Override
     public void onRoleChange(Cluster.Role newRole) {
         responses.clear();
+        logContext.role = newRole;
         owner.roleChange(newRole);
     }
 
@@ -128,6 +134,7 @@ final class TradingOwnerTestSupport implements ClusteredService {
         responses.clear();
         owner.terminate();
         cluster = null;
+        logContext = null;
     }
 
     @Override
