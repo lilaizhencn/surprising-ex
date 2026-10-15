@@ -122,8 +122,7 @@ public final class ClusterServiceEgress {
             return;
         }
         header.retainForEgress();
-        slot.prepare(processor, sessionId, header, response, committedSequence, length,
-                ownerEpoch, CoreMatchingPhaseMetrics.sampleStart(header));
+        slot.prepare(processor, sessionId, header, response, committedSequence, length, ownerEpoch);
         if (!output.offer(slot)) {
             outputOverflow = true;
             header.releaseFromEgress();
@@ -154,7 +153,6 @@ public final class ClusterServiceEgress {
                     sendScratch = new byte[next.length];
                     sendBuffer.wrap(sendScratch);
                 }
-                CoreMatchingPhaseMetrics.recordBoundary("ownerToEgress", next.header, next.publishedNanos);
                 CoreMessageCodec.encodeResponse(next.header, next.response, next.committedSequence, sendScratch);
                 deferred.offer(session, sendBuffer, next.length, System.nanoTime());
             } finally {
@@ -230,11 +228,11 @@ public final class ClusterServiceEgress {
         private long sessionId = NO_SESSION_ID;
         private CoreMessageHeader header;
         private CoreResponse response;
-        private long committedSequence, epoch, publishedNanos;
+        private long committedSequence, epoch;
         private int length;
 
         void prepare(TradingCoreOwner processor, long sessionId, CoreMessageHeader header,
-                CoreResponse response, long committedSequence, int length, long epoch, long publishedNanos) {
+                CoreResponse response, long committedSequence, int length, long epoch) {
             this.processor = processor;
             this.sessionId = sessionId;
             this.header = header;
@@ -242,7 +240,6 @@ public final class ClusterServiceEgress {
             this.committedSequence = committedSequence;
             this.length = length;
             this.epoch = epoch;
-            this.publishedNanos = publishedNanos;
         }
 
         void clear() {

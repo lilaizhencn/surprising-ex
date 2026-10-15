@@ -98,31 +98,21 @@ final class CommitPublication {
     void publish() {
         if (active) throw new IllegalStateException("owner commit publisher is already active");
         active = true;
-        CoreMatchingPhaseMetrics.OwnerPublication timing = null;
-        long timingStart = 0;
         try {
             assertHealthy();
             long sequence = Math.incrementExact(publishedSequence);
-            timing = CoreMatchingPhaseMetrics.sampleOwnerPublication(sequence);
-            timingStart = timing == null ? 0 : System.nanoTime();
-            long stepStart = timingStart;
             try {
                 if (!owner.factContextActive) {
                     throw new IllegalStateException("runtime commit requires an active command scope");
                 }
                 owner.runtimeState.appendFundsDelta(owner.runtimeState.coldCommandFunds());
-                if (timing != null) { timing.fundsNanos = System.nanoTime() - stepStart; stepStart = System.nanoTime(); }
                 if (owner.realtimeCapture != null) owner.runtimeState.captureRealtimeChanges(owner.realtimeCapture);
-                if (timing != null) { timing.realtimeCaptureNanos = System.nanoTime() - stepStart; stepStart = System.nanoTime(); }
                 if (owner.runtimeState.committedRevision() < runtimePatchRevision)
                     throw new IllegalStateException("runtime changed-index commit is out of order");
                 owner.factIndexes.applyCurrent(owner.runtimeState, owner.identities);
-                if (timing != null) { timing.indexesNanos = System.nanoTime() - stepStart; stepStart = System.nanoTime(); }
                 publishedSequence = sequence;
                 runtimePatchRevision = owner.runtimeState.committedRevision();
-                if (timing != null) { timing.journalNanos = System.nanoTime() - stepStart; stepStart = System.nanoTime(); }
                 owner.runtimeState.clearCommittedChanges(owner.identities);
-                if (timing != null) { timing.clearNanos = System.nanoTime() - stepStart; timing.completed = true; }
             } catch (RuntimeException failure) {
                 owner.commitPublicationFailure = new IllegalStateException(
                         "owner commit failed after deterministic mutation; restart from snapshot and log is required",
@@ -131,11 +121,6 @@ final class CommitPublication {
             }
         } finally {
             active = false;
-            if (timing != null) {
-                timing.totalNanos = System.nanoTime() - timingStart;
-                timing.end();
-                timing.commit();
-            }
         }
     }
 

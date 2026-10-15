@@ -487,6 +487,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         return true;
     }
 
+    public void acquireOwnerLaneAccess() {
+        while (!tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
+    }
+
     public void releaseOwnerLaneAccess() {
         assertOwner();
         if (ownerLaneAccess && accountLanesStarted)
@@ -585,6 +589,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** 启动worker后的所有入口都派发真实Lane；显式作用域只用于尚未启动的命令边界。 */
     public boolean asynchronousCommands() { assertOwner(); return accountLanesStarted || asynchronousCommandScope; }
+    public boolean accountLanesStarted() { return accountLanesStarted; }
 
     /** 控制账户任务的唯一派发/收集入口，与账户业务处理器分离。 */
     private final ControlLaneDispatcher controlLanes = new ControlLaneDispatcher(this);

@@ -236,11 +236,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     static final int MAX_BOOK_BOOTSTRAP_SNAPSHOTS = 4;
     /** 未显式指定时，每轮触发扫描处理的条数。 */
     static final int DEFAULT_TRIGGER_SCAN_BATCH_SIZE = 2;
-    /** 撮合阶段指标日志的输出间隔配置；零表示关闭。 */
-    static final int MATCHING_PHASE_LOG_INTERVAL = Integer.getInteger(
-            "surprising.aeron.matching-phase-log-interval", 0);
-    /** 是否收集撮合阶段耗时；关闭时不创建时间戳登记表。 */
-    static final boolean MATCHING_PHASE_METRICS_ENABLED = MATCHING_PHASE_LOG_INTERVAL > 0;
     /** 无订单结果共用的空数组，不得写入。 */
     static final long[] EMPTY_ORDER_IDS = new long[0];
     /** 独立快照调用等待完成的超时时间，单位为秒。 */
@@ -291,13 +286,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     final ActiveOrderIndex activeOrderIndex;
     /** Ledger 单写者的 ADL 持仓索引；可变索引单元不交给 Owner 或 Account Lane。 */
     final AdlPositionIndex adlPositionIndex;
-    /** 撮合各阶段的运行观测指标，不参与确定性业务判断。 */
-    final CoreMatchingPhaseMetrics matchingPhaseMetrics = new CoreMatchingPhaseMetrics();
-    /** 采样开启时记录的提交时间，完成后移除；关闭时不分配此表。 */
-    final Map<Long, Long> matchingSubmitNanos = MATCHING_PHASE_METRICS_ENABLED
-            ? new HashMap<>() : null;
-    /** 已完成撮合处理计数；用于运行观测，不作为资金依据。 */
-    long completedMatchingCount;
 
     /** 已提交成交数量；不能与订单业务操作数混用。 */
     long terminalTradeCount;
@@ -544,7 +532,16 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
-        return commandIngress.apply(message, clusterTimestamp, clusterPosition);
+        CoreResponse response = commandIngress.apply(message, clusterTimestamp, clusterPosition);
+        if (response == null && hasPendingDirectCommand()) {
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while (hasPendingDirectCommand() && System.nanoTime() < deadline) {
+                response = pollDirectCommand();
+                if (response != null) return response;
+                Thread.onSpinWait();
+            }
+        }
+        return response;
     }
 
     boolean requiresOwnerLaneAccessForPreparation(CoreMessage message) {

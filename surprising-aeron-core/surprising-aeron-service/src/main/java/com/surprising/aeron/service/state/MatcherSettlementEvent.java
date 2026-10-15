@@ -16,15 +16,6 @@ import com.surprising.aeron.service.lane.SettlementLaneWorker;
 public final class MatcherSettlementEvent implements
         SettlementLaneWorker.Command,
         com.surprising.aeron.service.matching.MatchingResult {
-    /** Diagnostic only: no clocks or additional objects on the default trading path. */
-    public static final boolean LATENCY_DIAGNOSTICS = Boolean.getBoolean("core.settlementLatencyDiagnostics");
-    private long matcherPublishedNanos;
-
-    public long matcherPublishedNanos() { return matcherPublishedNanos; }
-    // Read only after complete(): the Lane completion acquire protects these padding slots.
-    public long laneStartedNanos(int laneId) { return completedLanes[laneId * CACHE_LINE_LONGS + 1]; }
-    public long laneFinishedNanos(int laneId) { return completedLanes[laneId * CACHE_LINE_LONGS + 2]; }
-
     public interface MatcherCompletionRoute {
         void releaseMatcherSubmission(int matcherShard);
     }
@@ -613,8 +604,6 @@ public final class MatcherSettlementEvent implements
         // flag and may apply, clear and reuse the pooled event without waiting for our signal.
         completionRuntime.publishMatcherSettlementDirect(this);
         releaseMatcherCompletionBeforeSignal();
-        if (LATENCY_DIAGNOSTICS && (Long.hashCode(directCoreSequence * 0x9e3779b97f4a7c15L) & 63) == 0)
-            matcherPublishedNanos = System.nanoTime();
         directPublished = true;
         // Only captured values may be used after the release; even failure handling must not
         // write back to an event which may now belong to the next command.
@@ -896,10 +885,6 @@ public final class MatcherSettlementEvent implements
         }
         boolean directCompletion = direct;
         SystemLedgerLane ledgerToWake = treasurySettlement == null ? null : treasurySettlement.ledger;
-        if (LATENCY_DIAGNOSTICS && matcherPublishedNanos != 0) {
-            completedLanes[completionOffset + 1] = startedNanos;
-            completedLanes[completionOffset + 2] = finishedNanos;
-        }
         LONGS.setRelease(completedLanes, completionOffset, 1L);
         if (ledgerToWake != null) ledgerToWake.signalWork();
         if (directCompletion) completionRuntime.publishDirectMatcherSettlementReady(laneId);
@@ -1180,7 +1165,6 @@ public final class MatcherSettlementEvent implements
     }
 
     private void resetCompletions(int laneCount) {
-        matcherPublishedNanos = 0;
         observedCompletedLaneMask = 0;
         int length = Math.multiplyExact(laneCount, CACHE_LINE_LONGS);
         if (completedLanes == null || completedLanes.length != length) completedLanes = new long[length];

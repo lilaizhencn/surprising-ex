@@ -24,9 +24,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private static final long IDLE_PARK_NANOS = 1_000L;
     private static final int WORKER_IDLE_SPINS = 64;
     private static final long WORKER_IDLE_PARK_NANOS = 100_000L;
-    private static final boolean WAIT_DIAGNOSTICS =
-            Boolean.getBoolean("surprising.matcher.wait-diagnostics");
-    private static final long DIAGNOSTIC_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(5);
 
     private final Slot[] slots;
     private final int mask;
@@ -47,13 +44,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private Runnable shutdownAction;
     private volatile Throwable shutdownFailure;
     private final int workerId;
-    private long idleWaitNanos;
-    private long executeNanos;
-    private long idleEntries;
-    private long executeCount;
-    private long parkCount;
-    private long idleStartedNanos;
-    private long nextDiagnosticNanos;
     /** Owner enqueues query requests; matcher consumes them at their submission fence.
      * Bounded by the command window; requests own no copy of trading state. */
     private final OneToOneConcurrentArrayQueue<BackgroundRead<?>> backgroundReads;
@@ -322,10 +312,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         if (startupFailure != null) return;
         long position = workerPosition.value;
         int idle = 0;
-        if (WAIT_DIAGNOSTICS) nextDiagnosticNanos = System.nanoTime() + DIAGNOSTIC_INTERVAL_NANOS;
         try {
             while (accepting || position < submittedPosition.value) {
-                diagnosticSample();
                 // Observe the submission cursor before the read mailbox. A later command publication
                 // therefore cannot overtake a read published by the same owner at an earlier fence.
                 long submitted=submittedPosition.value;
@@ -334,22 +322,18 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                     backgroundReads.poll();read.execute();continue;
                 }
                 if (position >= submitted) {
-                    enterIdle();
                     if (waitStrategy == WaitStrategy.BUSY_SPIN) Thread.onSpinWait();
                     else if (idle++ < WORKER_IDLE_SPINS) Thread.onSpinWait();
                     else {
                         if (accepting && position >= submittedPosition.value && backgroundReads.isEmpty()) {
-                            if (WAIT_DIAGNOSTICS) parkCount++;
                             LockSupport.parkNanos(this, WORKER_IDLE_PARK_NANOS);
                         }
                     }
                     continue;
                 }
-                leaveIdle();
                 idle = 0;
                 Slot slot = slots[(int) position & mask];
                 Supplier<?> command = slot.command;
-                long executeStarted = WAIT_DIAGNOSTICS ? System.nanoTime() : 0;
                 if (command == null || slot.token == 0) {
                     slot.failure = new IllegalStateException("matcher command publication gap");
                 } else {
@@ -370,10 +354,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                     } finally {
                         if (settlement != null && settlement.direct()) settlement.completeMatcherPublication();
                     }
-                }
-                if (WAIT_DIAGNOSTICS) {
-                    executeNanos += Math.max(0, System.nanoTime() - executeStarted);
-                    executeCount++;
                 }
                 // Retire transport before exposing the command result. Owner may immediately reuse
                 // its command slot after this publication; only local references are used below.
@@ -404,14 +384,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             Runnable signal = completionSignal;
             if (signal != null) signal.run();
         }
-        leaveIdle();
-        diagnosticSample();
-        if (WAIT_DIAGNOSTICS) {
-            log.info("matcher-worker final worker={} idleWaitNanos={} executeNanos={} idleEntries={} "
-                            + "executeCount={} parkCount={} submissionDepth={} completionDepth={}",
-                    workerId, idleWaitNanos, executeNanos, idleEntries, executeCount, parkCount,
-                    submissionDepth(), completionDepth());
-        }
         BackgroundRead<?> unfinishedRead;
         while ((unfinishedRead = backgroundReads.poll()) != null) {
             unfinishedRead.future().completeExceptionally(new RejectedExecutionException("matcher stopped"));
@@ -437,30 +409,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
 
     private enum WaitStrategy { BUSY_SPIN, ADAPTIVE }
 
-    private void enterIdle() {
-        if (!WAIT_DIAGNOSTICS || idleStartedNanos != 0) return;
-        idleStartedNanos = System.nanoTime();
-        idleEntries++;
-    }
 
-    private void leaveIdle() {
-        if (!WAIT_DIAGNOSTICS || idleStartedNanos == 0) return;
-        idleWaitNanos += Math.max(0, System.nanoTime() - idleStartedNanos);
-        idleStartedNanos = 0;
-    }
-
-    private void diagnosticSample() {
-        if (!WAIT_DIAGNOSTICS) return;
-        long now = System.nanoTime();
-        if (now < nextDiagnosticNanos) return;
-        long currentIdle = idleWaitNanos;
-        if (idleStartedNanos != 0) currentIdle += Math.max(0, now - idleStartedNanos);
-        log.info("matcher-worker sample worker={} idleWaitNanos={} executeNanos={} idleEntries={} "
-                        + "executeCount={} parkCount={} submissionDepth={} completionDepth={} inFlight={}",
-                workerId, currentIdle, executeNanos, idleEntries, executeCount, parkCount,
-                submissionDepth(), completionDepth(), inFlight());
-        nextDiagnosticNanos = now + DIAGNOSTIC_INTERVAL_NANOS;
-    }
 
     private void rethrowPublicationFailure() {
         Throwable failure = publicationFailure;

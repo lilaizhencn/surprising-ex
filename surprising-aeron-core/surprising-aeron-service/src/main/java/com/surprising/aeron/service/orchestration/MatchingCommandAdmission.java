@@ -136,7 +136,6 @@ final class MatchingCommandAdmission {
     CoreResponse prepareMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
                                          TradingCoreRuntime.SourceKey sourceKey, CommandSlot.Operation operation,
                                          CommandFingerprint fingerprint, CommandSlot deferredPending) {
-        long matchingStartNanos = TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED ? System.nanoTime() : 0;
         DecodedMatchingCommand decodedCommand;
         try {
             decodedCommand = deferredPending == null
@@ -247,9 +246,6 @@ final class MatchingCommandAdmission {
             owner.appliedCommandCount = sequence;
             owner.matchingFlow.refreshCommittedCoreSequence();
             owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
-        }
-        if (TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED) {
-            owner.matchingPhaseMetrics.recordPrepare(System.nanoTime() - matchingStartNanos);
         }
         // 当前准入已结束；推进其他序号的异步续接前先释放 owner 的事实上下文。
         owner.clearFactContext();

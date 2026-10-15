@@ -34,7 +34,7 @@ final class CoreTestCompletion {
                             || pending.orderBatch.itemAdmission != null && pending.orderBatch.activated())
                             ? pending.orderBatch.lastMatchingResult
                             : pending != null
-                            && (pending.settlementEvent() != null || pending.cancelEvent() != null
+                            && (pending.settlementEvent() != null
                             || pending.orderBatch != null && pending.orderBatch.laneCommitEvent != null)
                             ? owner.pendingMatching.required(sequence).matchingResult()
                             : awaitMatchingResult(owner, sequence);

@@ -88,14 +88,10 @@ class CoreOrderedOrderBatchTest {
                     command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 2,
                             TradingCommandCodec.encodePlaceOrder(place(86_101, "metrics-cancel", 1_000))))
                     .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            long completedBefore = state.completedMatchingCount;
             assertThat(CoreTestCompletion.applyAsynchronously(state,
                     command(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 3,
                             TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(86_101))))
                     .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.completedMatchingCount).isEqualTo(completedBefore + 1);
-            assertThat(state.matchingPhaseMetrics.reportAndReset())
-                    .contains("apply=avgMicros=0,maxMicros=0,count=0");
             assertThat(state.tradingState().user(1001).reservations()).isEmpty();
             assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits())
                     .isEqualTo(10_000);

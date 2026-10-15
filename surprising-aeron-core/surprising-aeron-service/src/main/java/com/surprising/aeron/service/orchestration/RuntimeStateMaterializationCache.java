@@ -18,7 +18,7 @@ final class RuntimeStateMaterializationCache {
     /** Full state exists only at an explicit cold read fence, outside the trading mutation path. */
     TradingCoreState current() {
         owner.runtimeState.requireSnapshotFenceReady();
-        boolean acquired = owner.runtimeState.systemLedgerStarted() && !owner.runtimeState.ownerLaneAccess;
+        boolean acquired = (owner.runtimeState.accountLanesStarted() || owner.runtimeState.systemLedgerStarted()) && !owner.runtimeState.ownerLaneAccess;
         try {
             if (acquired) {
                 while (!owner.runtimeState.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
@@ -46,7 +46,7 @@ final class RuntimeStateMaterializationCache {
     /** Hash all business facts under one cold read fence, including pending Account Lane transfers. */
     long businessStateHash() {
         owner.runtimeState.requireSnapshotFenceReady();
-        boolean acquired = owner.runtimeState.systemLedgerStarted() && !owner.runtimeState.ownerLaneAccess;
+        boolean acquired = (owner.runtimeState.accountLanesStarted() || owner.runtimeState.systemLedgerStarted()) && !owner.runtimeState.ownerLaneAccess;
         try {
             if (acquired) {
                 while (!owner.runtimeState.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();

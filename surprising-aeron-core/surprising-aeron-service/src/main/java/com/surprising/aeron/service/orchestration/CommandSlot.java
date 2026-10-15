@@ -45,7 +45,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private boolean placeAdmissionOwnerCollected;
     private com.surprising.aeron.service.state.ReplacementAdmissionEvent replacementAdmission;
     private com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan;
-    private long settlementApplyStartNanos;
     /** 普通 PLACE 已在 Owner 解析，Lane 完成后直接复用该值，避免撮合命令副本。 */
     private ResolvedPlaceOrder admittedPlaceOrder;
     private CoreMatchingOrder admittedMatchingOrder;
@@ -114,7 +113,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     boolean controlPending;
     /** The Ledger validation poll must not submit the already committed account task again. */
     boolean controlAccountsCommitted;
-    long controlStartedNanos;
     byte[] resultData;
 
     /**
@@ -368,7 +366,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         placeAdmissionOwnerCollected = false;
         replacementAdmission = null;
         settlementPlan = null;
-        settlementApplyStartNanos = 0;
         admittedMatchingOrder = null;
         triggerAdmissionOrder = null;
         sourceTrigger = null;
@@ -453,7 +450,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         return value;
     }
     com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan() { return settlementPlan; }
-    long settlementApplyStartNanos() { return settlementApplyStartNanos; }
     PlaceAdmissionEvent placeAdmission() {
         return placeAdmission;
     }
@@ -524,14 +520,12 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     }
 
     void settlement(com.surprising.aeron.service.state.MatcherSettlementEvent event,
-                    com.surprising.aeron.service.state.MatcherSettlementPlan plan,
-                    long applyStartNanos) {
+                    com.surprising.aeron.service.state.MatcherSettlementPlan plan) {
         if (event == null || plan == null || hasLaneContinuation()) {
             throw new IllegalStateException("invalid matcher settlement continuation");
         }
         settlementContinuation = event;
         settlementPlan = plan;
-        settlementApplyStartNanos = applyStartNanos;
     }
 
     /** Clears the command-owned references when its fixed sequence slot is recycled. */
@@ -833,7 +827,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         controlWork = null;
         controlPending = false;
         controlAccountsCommitted = false;
-        controlStartedNanos = 0;
         commitEvent = null;
         resultData = null;
         claimed = false;

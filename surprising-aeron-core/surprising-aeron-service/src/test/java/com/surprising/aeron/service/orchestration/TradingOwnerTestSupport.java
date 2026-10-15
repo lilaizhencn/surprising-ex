@@ -91,7 +91,7 @@ final class TradingOwnerTestSupport implements ClusteredService {
         long sessionId = session == null ? ClusterServiceEgress.NO_SESSION_ID : egress.transportSession(session).id();
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
         while (!owner.ingress().offer(request, sessionId, timestamp, position, null,
-                CoreMatchingPhaseMetrics.sampleStart(request.header()), fingerprint)) {
+                0L, fingerprint)) {
             if (System.nanoTime() >= deadline) throw new AssertionError("Owner ingress did not advance");
             owner.pollCommands();
             egress.drainResponses(owner);
@@ -140,6 +140,9 @@ final class TradingOwnerTestSupport implements ClusteredService {
     @Override
     public void onTerminate(Cluster ignored) {
         try { owner.terminate(); }
+        catch (RuntimeException failure) {
+            if (owner.state() == null || owner.state().fatalFailure == null) throw failure;
+        }
         finally { egress.clear(); }
         cluster = null;
         logContext = null;

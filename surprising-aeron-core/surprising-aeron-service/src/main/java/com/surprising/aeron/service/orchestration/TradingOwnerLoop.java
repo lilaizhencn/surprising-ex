@@ -69,7 +69,7 @@ public final class TradingOwnerLoop implements Runnable {
     /** Transfers one replicated command from the Aeron callback thread to the Owner thread. */
     public void enqueue(CoreMessage command, long sessionId, long timestamp, long position,
                         CommandFingerprint fingerprint) {
-        enqueue(command, sessionId, timestamp, position, CoreMatchingPhaseMetrics.sampleStart(command.header()), fingerprint);
+        enqueue(command, sessionId, timestamp, position, 0L, fingerprint);
     }
 
     void enqueue(CoreMessage command, long sessionId, long timestamp, long position,

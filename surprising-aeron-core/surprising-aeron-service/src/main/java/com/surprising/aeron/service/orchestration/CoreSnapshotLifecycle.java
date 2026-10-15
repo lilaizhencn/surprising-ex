@@ -140,48 +140,55 @@ final class CoreSnapshotLifecycle {
                 throw new IllegalStateException("snapshot fence contains unfinished commands or patch work");
             }
             owner.runtimeState.requireSnapshotFenceReady();
-            if (fence.projectionSequence < 0) {
-                fence.projectionSequence = owner.commits.publication.publishedSequence();
-                fence.snapshotState = com.surprising.aeron.service.state.RuntimeStateMaterializer.materialize(
-                        owner.runtimeState, owner.identities);
-                long businessStateHash = TradingCoreRuntime.canonicalBusinessStateHash(
-                        fence.snapshotState.businessStateHash(), owner.runtimeState.feePoliciesSnapshot(),
-                        owner.runtimeState.pendingTransfersSnapshot());
-                fence.businessStateHash = businessStateHash;
-            }
-            if (fence.matcherSnapshot == null) {
-                fence.coreSequence = owner.appliedCommandCount;
-                CompletableFuture<MatcherSnapshot> matcherSnapshot = matcherSnapshotCapture.capture(
-                        fence.snapshotId, fence.coreSequence, fence.businessStateHash,
-                        fence.snapshotState, fence.snapshotState.orders().values().stream().filter(order -> order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN).toList());
-                if (!inFlightMatcherSnapshot.compareAndSet(null, matcherSnapshot)) {
-                    throw new TradingCoreRuntime.SnapshotNotReadyException();
+            boolean acquired = (owner.runtimeState.accountLanesStarted() || owner.runtimeState.systemLedgerStarted()) && !owner.runtimeState.ownerLaneAccess;
+            try {
+                if (acquired) {
+                    while (!owner.runtimeState.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
                 }
-                fence.matcherSnapshot = matcherSnapshot;
-                matcherSnapshot.whenComplete((ignored, failure) ->
-                        inFlightMatcherSnapshot.compareAndSet(matcherSnapshot, null));
+                if (fence.projectionSequence < 0) {
+                    fence.projectionSequence = owner.commits.publication.publishedSequence();
+                    fence.snapshotState = owner.materializedState.current();
+                    long businessStateHash = TradingCoreRuntime.canonicalBusinessStateHash(
+                            fence.snapshotState.businessStateHash(), owner.runtimeState.feePoliciesSnapshot(),
+                            owner.runtimeState.pendingTransfersSnapshot());
+                    fence.businessStateHash = businessStateHash;
+                }
+                if (fence.matcherSnapshot == null) {
+                    fence.coreSequence = owner.appliedCommandCount;
+                    CompletableFuture<MatcherSnapshot> matcherSnapshot = matcherSnapshotCapture.capture(
+                            fence.snapshotId, fence.coreSequence, fence.businessStateHash,
+                            fence.snapshotState, fence.snapshotState.orders().values().stream().filter(order -> order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN).toList());
+                    if (!inFlightMatcherSnapshot.compareAndSet(null, matcherSnapshot)) {
+                        throw new TradingCoreRuntime.SnapshotNotReadyException();
+                    }
+                    fence.matcherSnapshot = matcherSnapshot;
+                    matcherSnapshot.whenComplete((ignored, failure) ->
+                            inFlightMatcherSnapshot.compareAndSet(matcherSnapshot, null));
+                }
+                if (!fence.matcherSnapshot.isDone()) return null;
+                MatcherSnapshot matcherSnapshot = fence.matcherSnapshot.getNow(null);
+                if (matcherSnapshot == null || owner.appliedCommandCount != fence.coreSequence || !owner.pendingMatching.isEmpty()) {
+                    throw new IllegalStateException("snapshot fence state changed during capture");
+                }
+                CoreSnapshotImage image = SectionedCoreSnapshotWriter.capture(owner, matcherSnapshot, fence.snapshotId,
+                        fence.coreSequence, clusterTimestamp, clusterPosition);
+                image.verifyFullState();
+                fence.encodedSnapshot = snapshotEncoder.encode(image);
+                if (fence.encodedSnapshot == null) {
+                    throw new IllegalStateException("snapshot encoder returned no completion");
+                }
+                fence.encodedSnapshot.whenComplete((ignored, failure) -> {
+                    if (failure == null) return;
+                    Throwable cause = failure instanceof java.util.concurrent.CompletionException
+                            ? failure.getCause() : failure;
+                    RuntimeException auditFailure = cause instanceof RuntimeException runtimeFailure
+                            ? runtimeFailure : new IllegalStateException("snapshot audit failed", cause);
+                    snapshotAuditFailure.compareAndSet(null, auditFailure);
+                });
+                return null;
+            } finally {
+                if (acquired) owner.runtimeState.releaseOwnerLaneAccess();
             }
-            if (!fence.matcherSnapshot.isDone()) return null;
-            MatcherSnapshot matcherSnapshot = fence.matcherSnapshot.getNow(null);
-            if (matcherSnapshot == null || owner.appliedCommandCount != fence.coreSequence || !owner.pendingMatching.isEmpty()) {
-                throw new IllegalStateException("snapshot fence state changed during capture");
-            }
-            CoreSnapshotImage image = SectionedCoreSnapshotWriter.capture(owner, matcherSnapshot, fence.snapshotId,
-                    fence.coreSequence, clusterTimestamp, clusterPosition);
-            image.verifyFullState();
-            fence.encodedSnapshot = snapshotEncoder.encode(image);
-            if (fence.encodedSnapshot == null) {
-                throw new IllegalStateException("snapshot encoder returned no completion");
-            }
-            fence.encodedSnapshot.whenComplete((ignored, failure) -> {
-                if (failure == null) return;
-                Throwable cause = failure instanceof java.util.concurrent.CompletionException
-                        ? failure.getCause() : failure;
-                RuntimeException auditFailure = cause instanceof RuntimeException runtimeFailure
-                        ? runtimeFailure : new IllegalStateException("snapshot audit failed", cause);
-                snapshotAuditFailure.compareAndSet(null, auditFailure);
-            });
-            return null;
         } catch (RuntimeException failure) {
             releaseSnapshotFence();
             throw failure;

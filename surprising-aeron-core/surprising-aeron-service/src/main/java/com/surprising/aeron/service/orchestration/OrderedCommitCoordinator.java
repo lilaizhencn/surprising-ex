@@ -109,20 +109,19 @@ final class OrderedCommitCoordinator {
     public CoreResponse completeMatching(long sequence,
                                   MatchingResult matchingResult,
                                   long clusterTimestamp, long clusterPosition) {
-        if (!com.surprising.aeron.service.state.MatcherSettlementEvent.LATENCY_DIAGNOSTICS)
-            return completeMatchingCommand(sequence, matchingResult, clusterTimestamp, clusterPosition);
-        owner.assertOwner();
-        var timing = CoreMatchingPhaseMetrics.beginSettlement(owner.pendingMatching.get(sequence), sequence);
-        CoreResponse response = completeMatchingCommand(sequence, matchingResult, clusterTimestamp, clusterPosition);
-        if (timing != null && response != null) { timing.end(); timing.commit(); }
-        return response;
-    }
-
-    private CoreResponse completeMatchingCommand(long sequence, MatchingResult matchingResult,
-                                                long clusterTimestamp, long clusterPosition) {
         owner.assertOwner();
         CommandSlot pending = owner.pendingMatching.get(sequence);
         if (pending == null || matchingResult == null) return null;
+        if (matchingResultNeedsRecovery(pending, matchingResult)) {
+            OrderBatchPending failedBatch = owner.batches.batch(sequence);
+            Throwable failure = failedBatch == null ? null : failedBatch.pipelinedMatchingFailure;
+            String detail = "matcher continuation returned " + matchingResult.resultCode()
+                    + (failure == null || failure.getMessage() == null ? "" : ": " + failure.getMessage());
+            if (failedBatch != null) throw owner.batches.failOrderBatch(failedBatch, pending, detail, failure);
+            owner.matchingAdapter.poisonFromOwner("unreconciled matcher outcome sequence=" + sequence
+                    + " result=" + matchingResult.resultCode());
+            throw owner.failMatching(pending, detail, failure);
+        }
         if (!financialHeadReady(pending)) return null;
         pending.establishCommitFence(clusterTimestamp, clusterPosition);
         clusterTimestamp = pending.commitFenceTimestamp();
@@ -168,7 +167,7 @@ final class OrderedCommitCoordinator {
                 }
                 pending.controlWork = null;
                 pending.controlPending = false;
-                return finishAppliedMatching(pending, matchingResult, null, pending.controlStartedNanos, true);
+                return finishAppliedMatching(pending, matchingResult, null, true);
             } catch (RuntimeException failure) {
                 throw owner.failMatching(pending, "control Lane continuation failed", failure);
             }
@@ -270,11 +269,6 @@ final class OrderedCommitCoordinator {
         if (waitingBatch != null && waitingBatch.pipelined && !waitingBatch.commitStarted()) {
             owner.batches.beginPipelinedOrderBatchCommit(waitingBatch, pending);
         }
-        if (TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED) {
-            Long submitNanos = owner.matchingSubmitNanos.remove(sequence);
-            if (submitNanos != null) owner.matchingPhaseMetrics.recordExchange(System.nanoTime() - submitNanos);
-        }
-        long applyStartNanos = TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED ? System.nanoTime() : 0;
         if (matchingResultNeedsRecovery(pending, matchingResult)) {
             OrderBatchPending failedBatch = owner.batches.batch(sequence);
             Throwable failure = failedBatch == null ? null : failedBatch.pipelinedMatchingFailure;
@@ -359,7 +353,6 @@ final class OrderedCommitCoordinator {
             }
             if (pending.controlWork != null) {
                 pending.controlPending = true;
-                pending.controlStartedNanos = applyStartNanos;
                 owner.suspendMatchingCommitContext(pending);
                 return null;
             }
@@ -369,15 +362,13 @@ final class OrderedCommitCoordinator {
         } catch (ArithmeticException | IllegalArgumentException exception) {
             throw owner.failMatching(pending, "Core and matcher state diverged", exception);
         }
-        return finishAppliedMatching(pending, matchingResult, settlementTreasuryDelta, applyStartNanos);
+        return finishAppliedMatching(pending, matchingResult, settlementTreasuryDelta, false);
     }
 
     /** 已校验撮合证据，账户阶段完成后只进入一次终态提交。 */
     private CoreResponse finishAppliedMatching(CommandSlot pending, MatchingResult matchingResult,
-            RuntimeTreasuryDelta settlementTreasuryDelta,
-            long applyStartNanos) {
-        return finishAppliedMatching(pending, matchingResult, settlementTreasuryDelta,
-                applyStartNanos, false);
+            RuntimeTreasuryDelta settlementTreasuryDelta) {
+        return finishAppliedMatching(pending, matchingResult, settlementTreasuryDelta, false);
     }
 
     /**
@@ -413,7 +404,7 @@ final class OrderedCommitCoordinator {
 
     private CoreResponse finishAppliedMatching(CommandSlot pending, MatchingResult matchingResult,
             RuntimeTreasuryDelta settlementTreasuryDelta,
-            long applyStartNanos, boolean lanesCommitted) {
+            boolean lanesCommitted) {
         long sequence = pending.sequence();
         long clusterTimestamp = pending.commitFenceTimestamp();
         long clusterPosition = pending.commitFenceClusterPosition();
@@ -436,7 +427,6 @@ final class OrderedCommitCoordinator {
             if (pending.commitEvent != null) {
                 if (!owner.runtimeState.laneCommitComplete(pending.commitEvent)) {
                     pending.controlPending = true;
-                    pending.controlStartedNanos = applyStartNanos;
                     retainControlResponse(pending, matchingResult);
                     owner.suspendMatchingCommitContext(pending);
                     return null;
@@ -463,19 +453,13 @@ final class OrderedCommitCoordinator {
             pending.controlAccountsCommitted = true;
             if (!owner.runtimeState.pollControlFundsValidation(false)) {
                 pending.controlPending = true;
-                pending.controlStartedNanos = applyStartNanos;
                 retainControlResponse(pending, matchingResult);
                 owner.suspendMatchingCommitContext(pending);
                 return null;
             }
         }
-        var timingHeader = pending.command().header();
-        long publicationStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         completeCommitPublicationBatch();
-        CoreMatchingPhaseMetrics.recordBoundary("ownerFactPublication", timingHeader, publicationStart);
-        long terminalStart = CoreMatchingPhaseMetrics.sampleStart(timingHeader);
         owner.validateFundsConservation(pending.command());
-        recordMatchingCompletion(applyStartNanos);
         closeFinancialDispatch(pending);
         CoreResponse response = storeTerminalResponse(
                 pending, matchingResult, status, resultCode);
@@ -485,7 +469,6 @@ final class OrderedCommitCoordinator {
         if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) {
             owner.matchingProgress.submitDeferredMatchingAfterBatch();
         }
-        CoreMatchingPhaseMetrics.recordBoundary("ownerTerminalBookkeeping", timingHeader, terminalStart);
         return response;
     }
 
@@ -562,7 +545,6 @@ final class OrderedCommitCoordinator {
             throw owner.failMatching(pending, "account lane settlement failed; snapshot/log recovery is required",
                     exception);
         }
-        recordMatchingCompletion(pending.settlementApplyStartNanos());
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
         closeFinancialDispatch(pending);
@@ -580,19 +562,6 @@ final class OrderedCommitCoordinator {
         owner.finishFactContext(response);
         if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) owner.matchingProgress.submitDeferredMatchingAfterBatch();
         return response;
-    }
-
-
-
-    /** Owner-only statistics shared by normal settlement and cancellation completion. */
-    private void recordMatchingCompletion(long applyStartNanos) {
-        if (!TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED) return;
-        owner.matchingPhaseMetrics.recordApply(System.nanoTime() - applyStartNanos);
-        owner.completedMatchingCount++;
-        if (owner.completedMatchingCount % TradingCoreRuntime.MATCHING_PHASE_LOG_INTERVAL == 0) {
-            log.debug("matching phases count={} {}", owner.completedMatchingCount,
-                    owner.matchingPhaseMetrics.reportAndReset());
-        }
     }
 
     long expectedLaneMask(

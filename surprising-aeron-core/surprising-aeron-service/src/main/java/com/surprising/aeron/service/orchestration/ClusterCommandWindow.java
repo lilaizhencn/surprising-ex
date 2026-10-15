@@ -240,7 +240,6 @@ public final class ClusterCommandWindow {
         if (sequence == 0) return;
         lastMatchingSequence = sequence;
         lastMatchingPhysical = entry.physicalSlot;
-        if (entry == get(0)) CoreMatchingPhaseMetrics.recordOwnerHead(entry, false);
     }
 
     public int size() { return size; }
@@ -260,7 +259,6 @@ public final class ClusterCommandWindow {
         boolean removedLastMatching = false;
         for (int i = 0; i < count; i++) {
             Entry entry = get(i);
-            CoreMatchingPhaseMetrics.finishOwnerHead(entry);
             int physical = (head + i) & indexMask;
             for (int k = 0; k < entry.orderCount; k++) {
                 long id = entry.orders[k];
@@ -293,7 +291,6 @@ public final class ClusterCommandWindow {
         head = (head + count) & indexMask;
         size -= count;
         if (removedLastMatching) recomputeLastMatching();
-        if (count != 0 && size != 0) CoreMatchingPhaseMetrics.recordOwnerHead(get(0), true);
     }
 
     private void recomputeLastMatching() {
@@ -310,8 +307,6 @@ public final class ClusterCommandWindow {
 
     public static final class Entry {
         private DecodedMatchingCommand decodedSlot = DecodedMatchingCommand.commandSlot();
-        /** Optional JFR state for the current sampled head; never read by business logic. */
-        CoreMatchingPhaseMetrics.OwnerHead headTiming;
         /** Only exact identities needed for cancellation/retry fencing. */
         public final long[] orders = new long[MAX_TRACKED_ORDER_IDS];
         public int orderCount;

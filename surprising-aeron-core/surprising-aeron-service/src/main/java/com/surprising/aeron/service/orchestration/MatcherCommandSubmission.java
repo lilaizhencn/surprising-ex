@@ -19,8 +19,6 @@ final class MatcherCommandSubmission {
 
     Supplier<?> prepareMatchingCommand(CommandSlot pending,
             com.surprising.aeron.service.state.MatcherSettlementEvent direct) {
-        if (TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED)
-            owner.matchingSubmitNanos.put(pending.sequence(), System.nanoTime());
         if (isControlCommand(pending)) return prepareControlCancellations(pending);
         java.util.Objects.requireNonNull(direct, "trading command requires its direct settlement slot");
         pending.matcherPreCancellations(pending.operation() == CommandSlot.Operation.PLACE

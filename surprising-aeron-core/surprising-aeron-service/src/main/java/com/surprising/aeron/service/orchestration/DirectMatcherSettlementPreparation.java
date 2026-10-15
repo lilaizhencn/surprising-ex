@@ -91,7 +91,7 @@ final class DirectMatcherSettlementPreparation {
                 pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,
                 pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                 pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
-        pending.settlement(direct, direct.plan(), System.nanoTime());
+        pending.settlement(direct, direct.plan());
         reserveMatcherPublication(direct);
         if (owner.realtimeCapture != null) pending.realtimeTakerOrder = direct.admittedOrder();
         return direct;
@@ -124,7 +124,7 @@ final class DirectMatcherSettlementPreparation {
     }
 
     private void reserveMatcherPublication(CommandSlot pending, MatcherSettlementEvent direct) {
-        pending.settlement(direct, direct.plan(), System.nanoTime());
+        pending.settlement(direct, direct.plan());
         reserveMatcherPublication(direct);
     }
 

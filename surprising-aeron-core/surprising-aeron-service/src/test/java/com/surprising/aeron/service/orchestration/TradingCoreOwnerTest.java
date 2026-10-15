@@ -1464,7 +1464,9 @@ class TradingCoreOwnerTest {
             long pendingSequence = preparePendingPlace(service.state(), 903);
             var matchingResult = awaitMatching(service.state(), pendingSequence);
             assertThat(matchingResult).isNotNull();
-            service.state().matchingFlow.publishMatchingCompletion(pendingSequence, matchingResult);
+            if (matchingResult instanceof com.surprising.aeron.service.matching.CoreMatchingResult core) {
+                service.state().matchingFlow.publishMatchingCompletion(pendingSequence, core);
+            }
 
             // When
             assertThat(service.doBackgroundWork(0)).isZero();
@@ -1627,13 +1629,12 @@ class TradingCoreOwnerTest {
                 });
     }
 
-    private static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatching(
+    private static com.surprising.aeron.service.matching.MatchingResult awaitMatching(
             TradingCoreRuntime state, long sequence) {
-        com.surprising.aeron.service.matching.CoreMatchingResult result = null;
+        com.surprising.aeron.service.matching.MatchingResult result = null;
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (result == null && System.nanoTime() < deadline) {
-            var matching = state.takeMatchingResult(sequence);
-            if (matching instanceof com.surprising.aeron.service.matching.CoreMatchingResult core) result = core;
+            result = state.takeMatchingResult(sequence);
             if (result == null) Thread.onSpinWait();
         }
         return result;

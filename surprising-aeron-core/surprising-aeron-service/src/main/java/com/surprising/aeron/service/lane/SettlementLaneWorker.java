@@ -15,9 +15,6 @@ import java.util.concurrent.locks.LockSupport;
 public final class SettlementLaneWorker implements AutoCloseable {
     private static final String WAIT_STRATEGY_PROPERTY = "surprising.aeron.settlement-wait-strategy";
     private static final String SPIN_LIMIT_PROPERTY = "surprising.aeron.settlement-spin-limit";
-    private static final boolean WAIT_DIAGNOSTICS =
-            Boolean.getBoolean("surprising.settlement.wait-diagnostics");
-    private static final long DIAGNOSTIC_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(5);
     /**
      * A direct matcher event may be queued before its payload is published.  Keep a short
      * low-latency spin for that dependency, then park until the matcher signals publication.
@@ -57,18 +54,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
     private volatile Throwable failure;
     /** Announced before every park and before rechecking all publication sources. */
     private volatile boolean parked;
-    private long idleWaitNanos;
-    private long notReadyWaitNanos;
-    private long handoffWaitNanos;
-    private long executeNanos;
-    private long idleEntries;
-    private long notReadyEntries;
-    private long handoffEntries;
-    private long executeCount;
-    private long parkCount;
-    private WaitPhase waitPhase = WaitPhase.NONE;
-    private long waitPhaseStartedNanos;
-    private long nextDiagnosticNanos;
     public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity) {
         this(role, lane, requestedCapacity, ignored -> { });
     }
@@ -245,17 +230,14 @@ public final class SettlementLaneWorker implements AutoCloseable {
         try {
             lane.bindOwner();
             started = true;
-            if (WAIT_DIAGNOSTICS) nextDiagnosticNanos = System.nanoTime() + DIAGNOSTIC_INTERVAL_NANOS;
             long reboundHandoff = 0;
             int directReadySpins = 0;
             while (running || next < producerSequence.value
                     || admissionNext < admissionProducerSequence.value
                     || hasMatcherSettlementWork()) {
-                diagnosticSample();
                 if (completedHandoff > reboundHandoff) {
                     if (resumedHandoff < completedHandoff) {
                         if (!running) break;
-                        enterWaitPhase(WaitPhase.HANDOFF);
                         switch (waitStrategy) {
                             case BUSY_SPIN -> Thread.onSpinWait();
                             case YIELDING -> Thread.yield();
@@ -296,7 +278,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
                         continue;
                     }
                     if (!running) throw new IllegalStateException("Lane stopped before its matcher payload arrived");
-                    enterWaitPhase(WaitPhase.NOT_READY);
                     if (directReadySpins++ >= DIRECT_READY_SPIN_LIMIT) {
                         parkUntilWork(false);
                         directReadySpins = 0;
@@ -328,7 +309,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     // Spinning forever here burns a whole core without doing settlement work and
                     // can starve the Owner/Matcher that will make the event executable. After a
                     // short hand-tuned spin, park until the Matcher signals publication.
-                    enterWaitPhase(WaitPhase.NOT_READY);
                     if (waitStrategy == WaitStrategy.BUSY_SPIN) {
                         if (directReadySpins++ >= DIRECT_READY_SPIN_LIMIT) {
                             parkUntilWork(false);
@@ -339,7 +319,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
                         continue;
                     }
                 }
-                enterWaitPhase(WaitPhase.IDLE);
                 switch (waitStrategy) {
                     case BUSY_SPIN -> Thread.onSpinWait();
                     case YIELDING -> Thread.yield();
@@ -362,7 +341,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
                 if (reportingFailure != laneFailure) laneFailure.addSuppressed(reportingFailure);
             }
         } finally {
-            finishWaitPhase();
             lane.releaseOwnerForHandoff();
         }
     }
@@ -389,7 +367,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     return;
                 }
             }
-            if (WAIT_DIAGNOSTICS) parkCount++;
             LockSupport.parkNanos(this, 100_000L);
         } finally {
             parked = false;
@@ -397,81 +374,8 @@ public final class SettlementLaneWorker implements AutoCloseable {
     }
 
     private void execute(Command command) {
-        if (!WAIT_DIAGNOSTICS) {
-            command.execute(lane);
-            return;
-        }
-        enterWaitPhase(WaitPhase.EXECUTE);
         command.execute(lane);
-        executeCount++;
     }
-
-    private void enterWaitPhase(WaitPhase nextPhase) {
-        if (!WAIT_DIAGNOSTICS || waitPhase == nextPhase) return;
-        long now = System.nanoTime();
-        accumulateWaitPhase(now);
-        waitPhase = nextPhase;
-        waitPhaseStartedNanos = now;
-        switch (nextPhase) {
-            case IDLE -> idleEntries++;
-            case NOT_READY -> notReadyEntries++;
-            case HANDOFF -> handoffEntries++;
-            case EXECUTE, NONE -> { }
-        }
-    }
-
-    private void accumulateWaitPhase(long now) {
-        if (waitPhase == WaitPhase.NONE) return;
-        long elapsed = Math.max(0, now - waitPhaseStartedNanos);
-        switch (waitPhase) {
-            case IDLE -> idleWaitNanos += elapsed;
-            case NOT_READY -> notReadyWaitNanos += elapsed;
-            case HANDOFF -> handoffWaitNanos += elapsed;
-            case EXECUTE -> executeNanos += elapsed;
-            case NONE -> { }
-        }
-        waitPhaseStartedNanos = now;
-    }
-
-    private void finishWaitPhase() {
-        if (!WAIT_DIAGNOSTICS) return;
-        accumulateWaitPhase(System.nanoTime());
-        waitPhase = WaitPhase.NONE;
-    }
-
-    private void diagnosticSample() {
-        if (!WAIT_DIAGNOSTICS) return;
-        long now = System.nanoTime();
-        if (now < nextDiagnosticNanos) return;
-        log.info("settlement-lane wait lane={} phase={} idleWaitNanos={} notReadyWaitNanos={} "
-                        + "handoffWaitNanos={} executeNanos={} idleEntries={} notReadyEntries={} "
-                        + "handoffEntries={} executeCount={} parkCount={} mainDepth={} admissionDepth={} directDepth={}",
-                lane.laneId(), waitPhase, phaseNanos(WaitPhase.IDLE, now),
-                phaseNanos(WaitPhase.NOT_READY, now), phaseNanos(WaitPhase.HANDOFF, now),
-                phaseNanos(WaitPhase.EXECUTE, now), idleEntries, notReadyEntries, handoffEntries,
-                executeCount, parkCount, producerSequence.value - consumerSequence.value,
-                admissionProducerSequence.value - admissionConsumerSequence.value, matcherDepth());
-        nextDiagnosticNanos = now + DIAGNOSTIC_INTERVAL_NANOS;
-    }
-
-    private long phaseNanos(WaitPhase phase, long now) {
-        long total = switch (phase) {
-            case IDLE -> idleWaitNanos;
-            case NOT_READY -> notReadyWaitNanos;
-            case HANDOFF -> handoffWaitNanos;
-            case EXECUTE -> executeNanos;
-            case NONE -> 0;
-        };
-        return waitPhase == phase ? total + Math.max(0, now - waitPhaseStartedNanos) : total;
-    }
-
-    private long matcherDepth() {
-        long depth = 0;
-        for (MatcherSettlementRing ring : matcherSettlementRings) depth += ring.depth();
-        return depth;
-    }
-
-    private enum WaitPhase { NONE, IDLE, NOT_READY, HANDOFF, EXECUTE }
 
     private void rethrowFailure() {
         Throwable laneFailure = failure;
