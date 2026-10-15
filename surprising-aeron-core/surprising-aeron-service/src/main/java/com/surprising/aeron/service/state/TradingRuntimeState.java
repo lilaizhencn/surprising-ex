@@ -5154,14 +5154,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         lane.clientKeysByOrderId.remove(orderId, clientKey);
     }
 
-    static void removeClientOrdersForOrder(AccountLaneState lane, long userId, long orderId) {
-        Long2LongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
-        if (userClientOrders != null) {
-            lane.clientKeysByOrderId.forEach(orderId, userClientOrders::remove);
-        }
-        lane.clientKeysByOrderId.remove(orderId);
-    }
-
     static void indexActiveLiquidation(AccountLaneState lane, LiquidationRuntime liquidation) {
         if (!active(liquidation)) return;
         IntObjectHashMap<LongObjectHashMap<Long>> bySymbol = lane.cold.activeLiquidationIndex.get(liquidation.userId());

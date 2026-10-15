@@ -91,28 +91,30 @@ final class MatcherSettlementChanges {
         // The Owner applies and commits these changes serially. Keep terminal identity
         // receipts for the bounded tombstone window; order and reservation counters
         // already live in the authoritative runtime values.
-        changes.orders.forEach((orderId, order) -> {
-            if (order == null || !order.status().terminal()) return;
+        for (int index = 0; index < changes.orders.size(); index++) {
+            long orderId = changes.orders.keyAt(index);
+            OrderRuntime order = changes.orders.valueAt(index);
+            if (order == null || !order.status().terminal()) continue;
             changes.recordTerminalOrder(order);
             ReservationRuntime reservation = lane.reservations.get(orderId);
-            if (reservation != null && reservation.reservedUnits() != 0) return;
+            if (reservation != null && reservation.reservedUnits() != 0) continue;
             if (reservation != null) {
                 lane.reservations.remove(orderId);
                 lane.removeReservationId(order.userId(), orderId);
                 changes.removeReservationRoute(orderId);
             }
             // 原生拒单保留已有的 REJECTED 查询记录，但不再持有冻结或 reservation。
-            if (order.status() == CoreOrderStatus.REJECTED) return;
+            if (order.status() == CoreOrderStatus.REJECTED) continue;
             OrderRuntime removed = lane.removeOrder(orderId);
             if (removed != null) {
                 changes.removeOrderRoute(orderId);
                 if (removed.retireForReuse(sequence)) changes.retiredOrder(removed);
             }
-            lane.clientKeysByOrderId.forEach(orderId,
-                    clientKey -> identities.releaseClientKeyInLane(lane, order.userId(), clientKey));
-            TradingRuntimeState.removeClientOrdersForOrder(lane, order.userId(), orderId);
-        });
-        changes.positions.forEach((positionKey, position) -> {
+            lane.releaseOrderClientIdentities(identities, orderId, order.userId());
+            lane.removeClientOrdersForOrder(order.userId(), orderId);
+        }
+        for (int positionIndex = 0; positionIndex < changes.positions.size(); positionIndex++) {
+            PositionRuntime position = changes.positions.valueAt(positionIndex);
             if (position != null && position.signedQuantitySteps() == 0) {
                 LongHashSet ids = lane.cold.triggerIdsByUser.get(position.userId());
                 if (ids != null && !ids.isEmpty()) {
@@ -132,7 +134,7 @@ final class MatcherSettlementChanges {
                     }
                 }
             }
-        });
+        }
         changes.preparePositionRetirement(lane);
         changes.preparePublication();
         TradingRuntimeState.prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);

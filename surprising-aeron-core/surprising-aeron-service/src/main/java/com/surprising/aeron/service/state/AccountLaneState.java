@@ -80,6 +80,15 @@ public final class AccountLaneState {
     private LaneCommitDelta userRevisionChanges;
     private final org.eclipse.collections.api.block.procedure.primitive.LongLongProcedure advanceUserRevision =
             this::advanceUserRevision;
+    /** Borrowed only while this Lane releases a terminal order's client aliases. */
+    private RuntimeIdentityRegistry releasingClientIdentities;
+    private long releasingClientUser;
+    private final org.eclipse.collections.api.block.procedure.primitive.LongProcedure releaseClientIdentity =
+            this::releaseClientIdentity;
+    private Long2LongHashMap unlinkingClientOrders;
+    private long unlinkingOrderId;
+    private final org.eclipse.collections.api.block.procedure.primitive.LongProcedure unlinkClientOrder =
+            this::unlinkClientOrder;
     final RuntimeDerivativeMatchProcessor.DerivativeSettlementAccumulator derivativeSettlementAccumulator =
             new RuntimeDerivativeMatchProcessor.DerivativeSettlementAccumulator();
     final RuntimeSpotMatchProcessor.SpotSettlementAccumulator spotSettlementAccumulator =
@@ -189,6 +198,37 @@ public final class AccountLaneState {
         UserRuntime advanced = current.laneValue().withState(revision, current.positionMode());
         users.put(userId, advanced);
         userRevisionChanges.putUser(userId, advanced);
+    }
+
+    void releaseOrderClientIdentities(RuntimeIdentityRegistry identities, long orderId, long userId) {
+        assertOwner();
+        if (releasingClientIdentities != null)
+            throw new IllegalStateException("nested terminal client identity release");
+        releasingClientIdentities = java.util.Objects.requireNonNull(identities);
+        releasingClientUser = userId;
+        try { clientKeysByOrderId.forEach(orderId, releaseClientIdentity); }
+        finally { releasingClientIdentities = null; releasingClientUser = 0; }
+    }
+
+    private void releaseClientIdentity(long clientKey) {
+        releasingClientIdentities.releaseClientKeyInLane(this, releasingClientUser, clientKey);
+    }
+
+    void removeClientOrdersForOrder(long userId, long orderId) {
+        assertOwner();
+        if (unlinkingClientOrders != null) throw new IllegalStateException("nested client order unlink");
+        Long2LongHashMap ordersByClient = clientOrderIndex.get(userId);
+        if (ordersByClient != null) {
+            unlinkingClientOrders = ordersByClient;
+            unlinkingOrderId = orderId;
+            try { clientKeysByOrderId.forEach(orderId, unlinkClientOrder); }
+            finally { unlinkingClientOrders = null; unlinkingOrderId = 0; }
+        }
+        clientKeysByOrderId.remove(orderId);
+    }
+
+    private void unlinkClientOrder(long clientKey) {
+        if (unlinkingClientOrders.get(clientKey) == unlinkingOrderId) unlinkingClientOrders.remove(clientKey);
     }
 
     /** Bind the actual worker before it starts; no unowned startup window is exposed. */
