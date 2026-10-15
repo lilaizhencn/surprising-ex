@@ -457,10 +457,15 @@ public final class TradingOrderBatchCodec {
                 || (long) executionCount * RESULT_EXECUTION_LENGTH != buffer.remaining()) {
             throw new ProtocolException("invalid result execution count: " + executionCount);
         }
-        List<CoreExecutionView> executions = new ArrayList<>(executionCount);
-        for (int item = 0; item < executionCount; item++) {
-            executions.add(new CoreExecutionView(buffer.getLong(), buffer.getLong(), buffer.getLong(),
-                    buffer.getLong(), buffer.getLong(), buffer.getLong()));
+        List<CoreExecutionView> executions;
+        if (executionCount == 0) {
+            executions = List.of();
+        } else {
+            executions = new ArrayList<>(executionCount);
+            for (int item = 0; item < executionCount; item++) {
+                executions.add(new CoreExecutionView(buffer.getLong(), buffer.getLong(), buffer.getLong(),
+                        buffer.getLong(), buffer.getLong(), buffer.getLong()));
+            }
         }
         requireConsumed(buffer, "result item");
         try {

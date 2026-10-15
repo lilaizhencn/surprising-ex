@@ -886,6 +886,9 @@ public final class CoreStateQueryCodec {
             if (length > MAX_TEXT_BYTES) {
                 throw new ProtocolException("invalid optional query text length: " + length);
             }
+            if (length == 0) {
+                return "";
+            }
             require(length);
             String value = new String(input, offset, length, StandardCharsets.UTF_8);
             offset += length;

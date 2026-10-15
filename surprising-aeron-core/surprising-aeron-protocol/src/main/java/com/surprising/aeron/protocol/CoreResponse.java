@@ -13,7 +13,7 @@ public final class CoreResponse {
 
     private final boolean commandSlot;
 
-    private static final byte[] EMPTY_DATA = new byte[0];
+    static final byte[] EMPTY_DATA = new byte[0];
 
     public CoreResponse(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
                         int routeVersion, long committedCoreSequence, long appliedCommandCount,

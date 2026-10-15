@@ -89,8 +89,10 @@ public final class CoreProtocol {
         if (dataLength < 0 || dataLength != buffer.remaining()) {
             throw new ProtocolException("invalid response data length: " + dataLength);
         }
-        byte[] data = new byte[dataLength];
-        buffer.get(data);
+        byte[] data = dataLength == 0 ? CoreResponse.EMPTY_DATA : new byte[dataLength];
+        if (dataLength > 0) {
+            buffer.get(data);
+        }
         return CoreResponse.decoded(status, commandStatus, resultCode, routeVersion, committedCoreSequence,
                 appliedCommandCount, data);
     }

@@ -137,8 +137,10 @@ public final class CoreMessageCodec {
             traceId = TraceIds.validate(new String(trace, java.nio.charset.StandardCharsets.US_ASCII));
         }
         buffer.position(headerLength);
-        byte[] payload = new byte[payloadLength];
-        buffer.get(payload);
+        byte[] payload = payloadLength == 0 ? CoreMessage.EMPTY_PAYLOAD : new byte[payloadLength];
+        if (payloadLength > 0) {
+            buffer.get(payload);
+        }
         CoreMessageHeader header = new CoreMessageHeader(schemaVersion, kind, messageType, commandId,
                 productLine, route, source, sourceId, sourceSequence, userId,
                 submittedAtEpochMillis, correlationId, traceId);
