@@ -22,6 +22,8 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * change the configured strategy for executable Lane work.
      */
     private static final int DIRECT_READY_SPIN_LIMIT = 256;
+    private static final int BUSY_SPIN_YIELD_THRESHOLD = 1024;
+    private static final int BUSY_SPIN_PARK_THRESHOLD = 4096;
 
     public interface Command {
         void execute(AccountLaneState lane);
@@ -239,11 +241,16 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     if (resumedHandoff < completedHandoff) {
                         if (!running) break;
                         switch (waitStrategy) {
-                            case BUSY_SPIN -> Thread.onSpinWait();
-                            case YIELDING -> Thread.yield();
-                            case BLOCKING -> {
-                                parkUntilWork(true);
+                            case BUSY_SPIN -> {
+                                if (idleSpins < BUSY_SPIN_YIELD_THRESHOLD) {
+                                    idleSpins++;
+                                    Thread.onSpinWait();
+                                } else {
+                                    Thread.yield();
+                                }
                             }
+                            case YIELDING -> Thread.yield();
+                            case BLOCKING -> parkUntilWork(true);
                         }
                         continue;
                     }
@@ -320,7 +327,17 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     }
                 }
                 switch (waitStrategy) {
-                    case BUSY_SPIN -> Thread.onSpinWait();
+                    case BUSY_SPIN -> {
+                        if (idleSpins < BUSY_SPIN_YIELD_THRESHOLD) {
+                            idleSpins++;
+                            Thread.onSpinWait();
+                        } else if (idleSpins < BUSY_SPIN_PARK_THRESHOLD) {
+                            idleSpins++;
+                            Thread.yield();
+                        } else {
+                            parkUntilWork(false);
+                        }
+                    }
                     case YIELDING -> Thread.yield();
                     case BLOCKING -> {
                         if (idleSpins < spinLimit) {
