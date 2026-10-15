@@ -39,6 +39,9 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     private final MediaDriver mediaDriver;
     private final boolean closeMediaDriver;
     private final ClusterOperations cluster;
+    /** Pool sessions are confined to their existing dispatcher; standalone sessions serialize shared callers. */
+    private final Thread ioOwner;
+    private final IntSupplier egressPoller;
     private final ScheduledExecutorService keepAliveExecutor;
     private final IdleStrategy idleStrategy = new BackoffIdleStrategy();
     private final Map<Long, CoreResponse> responses = new ConcurrentHashMap<>();
@@ -57,9 +60,11 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         this.responseTimeout = Objects.requireNonNull(responseTimeout, "responseTimeout");
         this.mediaDriver = Objects.requireNonNull(mediaDriver, "mediaDriver");
         this.closeMediaDriver = closeMediaDriver;
+        this.ioOwner = null;
         try {
             cluster = new AeronClusterOperations(AeronCluster.connect(clusterContext(productLine, hostnames,
                     egressHostname, responseTimeout, mediaDriver, this)));
+            egressPoller = cluster::pollEgress;
             keepAliveExecutor = closeMediaDriver ? startKeepAlive() : null;
         } catch (RuntimeException exception) {
             if (closeMediaDriver) {
@@ -74,12 +79,14 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             Duration responseTimeout,
             MediaDriver mediaDriver,
             boolean closeMediaDriver,
-            AeronCluster cluster) {
+            AeronCluster cluster, Thread ioOwner) {
         this.productLine = Objects.requireNonNull(productLine, "productLine");
         this.responseTimeout = Objects.requireNonNull(responseTimeout, "responseTimeout");
         this.mediaDriver = Objects.requireNonNull(mediaDriver, "mediaDriver");
         this.closeMediaDriver = closeMediaDriver;
         this.cluster = new AeronClusterOperations(Objects.requireNonNull(cluster, "cluster"));
+        this.ioOwner = ioOwner;
+        this.egressPoller = this.cluster::pollEgress;
         this.keepAliveExecutor = closeMediaDriver ? startKeepAlive() : null;
     }
 
@@ -87,11 +94,18 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             ProductLine productLine,
             Duration responseTimeout,
             ClusterOperations cluster) {
+        this(productLine, responseTimeout, cluster, null);
+    }
+
+    SurprisingAeronClient(ProductLine productLine, Duration responseTimeout,
+                          ClusterOperations cluster, Thread ioOwner) {
         this.productLine = Objects.requireNonNull(productLine, "productLine");
         this.responseTimeout = Objects.requireNonNull(responseTimeout, "responseTimeout");
         this.mediaDriver = null;
         this.closeMediaDriver = false;
         this.cluster = Objects.requireNonNull(cluster, "cluster");
+        this.ioOwner = ioOwner;
+        this.egressPoller = this.cluster::pollEgress;
         this.keepAliveExecutor = null;
     }
 
@@ -243,7 +257,12 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     }
 
     @Override
-    public synchronized long offer(CoreMessage message) {
+    public long offer(CoreMessage message) {
+        if (ioOwner != null) { requireIoOwner(); return offerToCluster(message); }
+        synchronized (this) { return offerToCluster(message); }
+    }
+
+    private long offerToCluster(CoreMessage message) {
         ensureOpen();
         if (message.header().productLine() != productLine) {
             throw new IllegalArgumentException("client and message product line differ");
@@ -265,9 +284,14 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     }
 
     @Override
-    public synchronized int pollEgress(int fragmentLimit) {
+    public int pollEgress(int fragmentLimit) {
+        if (ioOwner != null) { requireIoOwner(); return pollClusterEgress(fragmentLimit); }
+        synchronized (this) { return pollClusterEgress(fragmentLimit); }
+    }
+
+    private int pollClusterEgress(int fragmentLimit) {
         ensureOpen();
-        return pollEgressBounded(fragmentLimit, cluster::pollEgress);
+        return pollEgressBounded(fragmentLimit, egressPoller);
     }
 
     static int pollEgressBounded(int fragmentLimit, IntSupplier poller) {
@@ -302,7 +326,12 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     }
 
     @Override
-    public synchronized boolean keepAlive() {
+    public boolean keepAlive() {
+        if (ioOwner != null) { requireIoOwner(); return keepClusterAlive(); }
+        synchronized (this) { return keepClusterAlive(); }
+    }
+
+    private boolean keepClusterAlive() {
         ensureOpen();
         return cluster.sendKeepAlive();
     }
@@ -357,7 +386,12 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     }
 
     @Override
-    public synchronized void close() {
+    public void close() {
+        if (ioOwner != null) { requireIoOwner(); closeCluster(); return; }
+        synchronized (this) { closeCluster(); }
+    }
+
+    private void closeCluster() {
         if (closed) return;
         closed = true;
         try {
@@ -387,9 +421,8 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         return executor;
     }
 
-    private synchronized void pollAndCheckSession() {
-        ensureOpen();
-        cluster.pollEgress();
+    private void pollAndCheckSession() {
+        pollEgress(AERON_EGRESS_POLL_LIMIT);
         if (sessionFailure != null) {
             throw sessionFailure;
         }
@@ -398,6 +431,11 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     private ResultUnknownException resultUnknown(CoreMessage message, String detail) {
         return new ResultUnknownException(message.header().commandId(), detail
                 + "; retry or query with the same commandId=" + message.header().commandId());
+    }
+
+    private void requireIoOwner() {
+        if (Thread.currentThread() != ioOwner)
+            throw new IllegalStateException("pooled Aeron client I/O belongs to its dispatcher");
     }
 
     private void ensureOpen() {
@@ -482,7 +520,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
                 return null;
             }
             current = new SurprisingAeronClient(productLine, responseTimeout, mediaDriver,
-                    closeMediaDriver, connected);
+                    closeMediaDriver, connected, closeMediaDriver ? null : Thread.currentThread());
             client = current;
             return current;
         }

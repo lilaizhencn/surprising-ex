@@ -1223,11 +1223,16 @@ public final class AeronClientPool implements AutoCloseable {
         private CompletableFuture<CoreResponse> responseFuture;
         private CompletableFuture<Long> admissionFuture;
         private CommandAdmissionCallback admissionCallback;
-        private boolean offering;
-        private boolean cancelled;
-        private boolean completed;
+        private static final long PHASE_MASK = 3, QUEUED = 0, OFFERING = 1, CANCELLED = 2, COMPLETED = 3;
+        private static final java.lang.invoke.VarHandle LIFECYCLE;
+        static {
+            try { LIFECYCLE = java.lang.invoke.MethodHandles.lookup().findVarHandle(Request.class, "lifecycle", long.class); }
+            catch (ReflectiveOperationException failure) { throw new ExceptionInInitializerError(failure); }
+        }
+        // Generation and phase share one CAS: an old timeout cannot cancel a recycled slot.
+        // Only the current slot lease writes payload fields; the mailbox publishes them.
+        private volatile long lifecycle = COMPLETED;
         private boolean correlationClaimed;
-        private long generation;
         private long queueDeadlineNanos;
         private long deadlineNanos;
 
@@ -1235,7 +1240,7 @@ public final class AeronClientPool implements AutoCloseable {
             this.owner = owner;
         }
 
-        private synchronized void reset(CoreMessage message, UUID operationId, RequestMode mode,
+        private void reset(CoreMessage message, UUID operationId, RequestMode mode,
                                         CommandAdmissionCallback admissionCallback) {
             String currentTrace = org.slf4j.MDC.get("traceId");
             this.traceId = message != null && !message.header().traceId().isEmpty() ? message.header().traceId()
@@ -1252,55 +1257,61 @@ public final class AeronClientPool implements AutoCloseable {
                     ? new CompletableFuture<>() : null;
             this.admissionFuture = mode == RequestMode.ONE_WAY_FUTURE ? new CompletableFuture<>() : null;
             this.admissionCallback = admissionCallback;
-            this.offering = false;
-            this.cancelled = false;
-            this.completed = false;
             this.correlationClaimed = false;
             this.queueDeadlineNanos = 0;
             this.deadlineNanos = 0;
-            this.generation++;
+            long nextGeneration = Math.incrementExact(lifecycle >>> 2);
+            if (nextGeneration > (Long.MAX_VALUE >>> 1))
+                throw new IllegalStateException("Aeron request generation exhausted");
+            // Last reset write: all previous-generation cancellation attempts now fail.
+            lifecycle = nextGeneration << 2;
         }
 
-        private synchronized long generation() {
-            return generation;
+        private long generation() {
+            return lifecycle >>> 2;
         }
 
         private boolean oneWay() {
             return mode.oneWay;
         }
 
-        private synchronized boolean beginOffer() {
-            if (cancelled) {
-                return false;
-            }
-            offering = true;
-            return true;
+        private boolean beginOffer() {
+            long current = lifecycle;
+            return (current & PHASE_MASK) == QUEUED
+                    && LIFECYCLE.compareAndSet(this, current, current | OFFERING);
         }
 
-        private synchronized void prepareForRetry() {
-            offering = false;
+        private void prepareForRetry() {
+            long current = lifecycle;
+            if ((current & PHASE_MASK) != OFFERING
+                    || !LIFECYCLE.compareAndSet(this, current, current & ~PHASE_MASK))
+                throw new IllegalStateException("query retry lost its request lease");
         }
 
-        private synchronized void startQueueTimeout(long timeoutNanos) {
+        private void startQueueTimeout(long timeoutNanos) {
             if (queueDeadlineNanos == 0) {
                 queueDeadlineNanos = Math.addExact(System.nanoTime(), timeoutNanos);
             }
         }
 
-        private synchronized boolean queueExpired(long now) {
-            return !offering && (cancelled || queueDeadlineNanos != 0 && now >= queueDeadlineNanos);
+        private boolean queueExpired(long now) {
+            long phase = lifecycle & PHASE_MASK;
+            return phase != OFFERING && (phase == CANCELLED || queueDeadlineNanos != 0 && now >= queueDeadlineNanos);
         }
 
         private boolean isQuery() {
             return mode == RequestMode.QUERY;
         }
 
-        private synchronized boolean cancelBeforeOffer(long expectedGeneration) {
-            if (generation != expectedGeneration || offering || completed) {
-                return false;
+        private boolean cancelBeforeOffer(long expectedGeneration) {
+            long current = lifecycle;
+            while ((current >>> 2) == expectedGeneration) {
+                long phase = current & PHASE_MASK;
+                if (phase == OFFERING || phase == COMPLETED) return false;
+                if (LIFECYCLE.compareAndSet(this, current, (current & ~PHASE_MASK) | CANCELLED)) return true;
+                current = lifecycle;
             }
-            cancelled = true;
-            return true;
+            return false;
         }
 
         private void acceptedOneWay(long offerResult) {
@@ -1415,15 +1426,16 @@ public final class AeronClientPool implements AutoCloseable {
             }
         }
 
-        private synchronized boolean claimCompletion() {
-            if (completed) {
-                return false;
+        private boolean claimCompletion() {
+            long current = lifecycle;
+            while ((current & PHASE_MASK) != COMPLETED) {
+                if (LIFECYCLE.compareAndSet(this, current, current | COMPLETED)) return true;
+                current = lifecycle;
             }
-            completed = true;
-            return true;
+            return false;
         }
 
-        private synchronized void clear() {
+        private void clear() {
             message = null;
             traceId = null;
             commandType = null;
@@ -1435,13 +1447,11 @@ public final class AeronClientPool implements AutoCloseable {
             responseFuture = null;
             admissionFuture = null;
             admissionCallback = null;
-            offering = false;
-            cancelled = false;
             queueDeadlineNanos = 0;
             deadlineNanos = 0;
         }
 
-        private synchronized void releaseCorrelation() {
+        private void releaseCorrelation() {
             if (correlationClaimed) {
                 correlationClaimed = false;
                 owner.releaseCorrelation(correlationId);

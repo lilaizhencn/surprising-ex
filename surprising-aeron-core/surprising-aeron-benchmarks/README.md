@@ -1,5 +1,10 @@
 # Aeron 本机压测诊断
 
+`ClientSourceOrderingBenchmark` 覆盖实际命令池请求槽、单 Dispatcher 归属、客户端编码与响应解码；
+即时回送的模拟对端替代网络和交易 Core。四个生产者各持有最多 64 个请求，全局窗口为 256，
+每个测量区间及排空后检查 accepted 与 terminal 一致。JDK 27 fork 包含 Agrona 所需的模块导出。
+该组件基准包含模拟对端分配，不能作为 Core 分配或真实单节点吞吐的验收结果。
+
 执行前遵循仓库根目录的 [AGENTS-performance.md](../../AGENTS-performance.md)，采集前锁定条件并追加到 [PERFORMANCE_VALIDATION.md](../../PERFORMANCE_VALIDATION.md)。正式吞吐与 JFR 诊断分别采集。
 
 ## 饱和判定的证据边界

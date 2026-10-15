@@ -31,6 +31,25 @@ Cluster log position、回调内 ordinal、事件时间、快照标识和实体�
 跨线程可见性，以及真实 Media Driver 上的大消息分片重组和目标 stream 隔离。
 当前测试不构成完整交易主链路性能验收。
 
+### 命令池线程归属与请求槽复用（2026-10-15）
+
+池化连接在既有 `EgressDispatcher` 完成异步握手时绑定 I/O 线程。该线程顺序执行
+`offer`、egress 轮询、心跳和关闭，直接复用客户端编码缓冲区；其他线程调用这些操作立即失败。
+独立客户端允许共享调用及定时心跳，继续在同一监视器内串行访问 Aeron Cluster。
+egress 的轮询回调在连接创建时保留，不在每次轮询时重新创建方法引用。
+
+`AeronClientPool.Request` 将复用代数和排队、发送、取消、完成状态合在一个原子字中。
+发送与发送前取消通过 CAS 决定唯一结果；旧代数的超时不能取消复用后的请求。
+完成者清理关联号和引用，再通过既有空闲槽队列归还槽位。`ADMIN_ACTION` 保留发送状态与原序号，
+只有查询在重新建连后才能返回排队状态；资金命令结果未知时仍不得自动重发。
+邮箱、额度、Dispatcher 数量和产品线隔离沿用现有实现。
+
+验证入口为 `AeronRequestLeaseTest`、`SurprisingAeronClientConcurrencyTest` 及既有命令池测试。
+`ClientSourceOrderingBenchmark` 使用实际命令池和客户端编解码，四个生产者各保留最多 64 个请求，
+全局窗口固定 256；对端即时回送确定性响应，排除真实网络、Cluster、Archive 和交易 Core。
+该基准的分配包含模拟对端开销，不能作为 Core 的 bytes/business op 或吞吐验收结果。
+功能范围见 [验证清单](../../docs/validation/client-request-lease-20261015.json)。
+
 ### 行情订阅异常恢复
 
 `AeronRealtimeReceiver` 收到传输错误后标记不可用，当前轮询必须退出并关闭旧订阅，再重新连接。

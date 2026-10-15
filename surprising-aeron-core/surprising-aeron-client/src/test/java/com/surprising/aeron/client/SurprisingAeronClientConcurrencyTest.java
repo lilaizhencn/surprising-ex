@@ -24,6 +24,64 @@ import org.junit.jupiter.api.Test;
 class SurprisingAeronClientConcurrencyTest {
 
     @Test
+    void dispatcherOwnedSessionDoesNotAcquireTheClientMonitor() throws Exception {
+        var boundary = new CountingClusterOperations();
+        var client = new SurprisingAeronClient(ProductLine.SPOT, Duration.ofSeconds(1), boundary,
+                Thread.currentThread());
+        var held = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var holderTimedOut = new AtomicBoolean();
+        try (var threads = Executors.newSingleThreadExecutor()) {
+            var holder = threads.submit(() -> {
+                synchronized (client) {
+                    held.countDown();
+                    try {
+                        holderTimedOut.set(!release.await(3, TimeUnit.SECONDS));
+                    } catch (InterruptedException failure) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(failure);
+                    }
+                }
+            });
+            try {
+                assertThat(held.await(1, TimeUnit.SECONDS)).isTrue();
+                assertThat(client.offer(message(1))).isPositive();
+                assertThat(client.pollEgress(10)).isZero();
+                assertThat(client.keepAlive()).isTrue();
+                client.close();
+                assertThat(holderTimedOut).isFalse();
+                assertThat(boundary.operations).hasValue(4);
+            } finally {
+                release.countDown();
+                holder.get(1, TimeUnit.SECONDS);
+                client.close();
+            }
+        }
+    }
+
+    @Test
+    void dispatcherOwnedSessionRejectsForeignIoWithoutClosingOrTouchingCluster() throws Exception {
+        var boundary = new CountingClusterOperations();
+        var client = new SurprisingAeronClient(ProductLine.SPOT, Duration.ofSeconds(1), boundary,
+                Thread.currentThread());
+        try (var threads = Executors.newSingleThreadExecutor()) {
+            threads.submit(() -> {
+                assertThatIllegalStateException().isThrownBy(() -> client.offer(message(1)));
+                assertThatIllegalStateException().isThrownBy(() -> client.pollEgress(10));
+                assertThatIllegalStateException().isThrownBy(client::keepAlive);
+                assertThatIllegalStateException().isThrownBy(client::close);
+            }).get(1, TimeUnit.SECONDS);
+            assertThat(boundary.operations).hasValue(0);
+            assertThat(client.offer(message(2))).isPositive();
+            assertThat(client.pollEgress(10)).isZero();
+            assertThat(client.keepAlive()).isTrue();
+            assertThat(boundary.concurrentEntry).isFalse();
+        } finally {
+            client.close();
+        }
+    }
+
+    @Test
     void serializesAeronOperationsAndRejectsWorkAfterCloseWithinBounds() throws Exception {
         BlockingClusterOperations boundary = new BlockingClusterOperations();
         SurprisingAeronClient client = new SurprisingAeronClient(
