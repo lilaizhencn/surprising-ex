@@ -329,7 +329,7 @@ public final class RuntimeIdentityRegistry {
         return key == 0 ? 0 : clientTable(userId).find(key, userId, clientOrderId);
     }
 
-    long findClientKeyValueInLane(AccountLaneState lane, long userId, String clientOrderId) {
+    public long findClientKeyValueInLane(AccountLaneState lane, long userId, String clientOrderId) {
         LaneClientIdentities table = clientTable(lane, userId);
         long key = clientKeyOrZero(userId, clientOrderId);
         return key == 0 ? 0 : table.find(key, userId, clientOrderId);

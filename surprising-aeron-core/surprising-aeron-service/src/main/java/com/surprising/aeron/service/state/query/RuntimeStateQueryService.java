@@ -25,21 +25,22 @@ public final class RuntimeStateQueryService {
 
     public static UserQueryResult userState(
             TradingRuntimeState runtime,
+            AccountLaneState lane,
             RuntimeIdentityRegistry identities,
             long userId) {
-        UserRuntime user = runtime.user(userId);
+        UserRuntime user = runtime.user(lane, userId);
         if (user == null) return UserQueryResult.notFound();
 
-        var balancesByAsset = runtime.balancesForUser(userId);
+        var balancesByAsset = runtime.balancesForUser(lane, userId);
         int balanceCount = balancesByAsset == null ? 0 : balancesByAsset.size();
-        int reservationCount = runtime.reservationCountForUser(userId);
-        int positionCount = runtime.positionCountForUser(userId);
-        var leverageKeys = runtime.leverageKeysForUser(userId);
+        int reservationCount = runtime.reservationCountForUser(lane, userId);
+        int positionCount = runtime.positionCountForUser(lane, userId);
+        var leverageKeys = runtime.leverageKeysForUser(lane, userId);
         int entityCount = Math.addExact(balanceCount,
                 Math.addExact(reservationCount, Math.addExact(positionCount, leverageKeys.size())));
         if (entityCount > MAX_USER_QUERY_ENTITIES) return UserQueryResult.oversized();
-        long[] reservationIds = runtime.reservationIdsForUser(userId).toArray();
-        long[] positionKeys = runtime.positionKeysForUser(userId).toArray();
+        long[] reservationIds = runtime.reservationIdsForUser(lane, userId).toArray();
+        long[] positionKeys = runtime.positionKeysForUser(lane, userId).toArray();
 
         ArrayList<CoreBalanceView> balances = new ArrayList<>(balanceCount);
         if (balancesByAsset != null) {
@@ -51,7 +52,7 @@ public final class RuntimeStateQueryService {
         Arrays.sort(reservationIds);
         ArrayList<CoreReservationView> reservations = new ArrayList<>(reservationIds.length);
         for (long orderId : reservationIds) {
-            ReservationRuntime reservation = runtime.reservation(orderId);
+            ReservationRuntime reservation = runtime.reservation(lane, orderId);
             if (reservation == null) continue;
             reservations.add(new CoreReservationView(reservation.orderId(),
                     identities.instrumentId(reservation.symbolId()), reservation.kind(),
@@ -61,7 +62,7 @@ public final class RuntimeStateQueryService {
 
         ArrayList<PositionEntry> positionEntries = new ArrayList<>(positionKeys.length);
         for (long positionKey : positionKeys) {
-            PositionRuntime position = runtime.position(positionKey);
+            PositionRuntime position = runtime.position(lane, positionKey);
             if (position == null) continue;
             String instrumentId = identities.instrumentId(position.symbolId());
             CorePositionView view = new CorePositionView(instrumentId, identities.asset(position.assetId()),
@@ -77,7 +78,7 @@ public final class RuntimeStateQueryService {
 
         ArrayList<CoreLeverageView> leverages = new ArrayList<>(leverageKeys.size());
         for (CoreLeverageKey key : leverageKeys) {
-            leverages.add(new CoreLeverageView(key.instrumentId(), key.marginMode(), runtime.leverage(key)));
+            leverages.add(new CoreLeverageView(key.instrumentId(), key.marginMode(), runtime.leverage(lane, key)));
         }
         CoreUserStateView view = new CoreUserStateView(user.productLine(), user.userId(), user.revision(),
                 user.positionMode(), balances, reservations, positions, leverages);
@@ -86,9 +87,10 @@ public final class RuntimeStateQueryService {
 
     public static OrderQueryResult orderState(
             TradingRuntimeState runtime,
+            AccountLaneState lane,
             RuntimeIdentityRegistry identities,
             long orderId) {
-        OrderRuntime order = runtime.order(orderId);
+        OrderRuntime order = runtime.order(lane, orderId);
         if (order == null) return OrderQueryResult.notFound();
         CoreOrderStateView view = new CoreOrderStateView(order.orderId(), order.productLine(), order.userId(),
                 identities.instrumentId(order.symbolId()), order.side(), order.priceTicks(),
@@ -102,13 +104,14 @@ public final class RuntimeStateQueryService {
 
     public static OrderQueryResult clientOrderState(
             TradingRuntimeState runtime,
+            AccountLaneState lane,
             RuntimeIdentityRegistry identities,
             long userId,
             String clientOrderId) {
-        Long clientKey = identities.findClientKey(userId, clientOrderId);
-        if (clientKey == null) return OrderQueryResult.notFound();
-        Long orderId = runtime.orderIdByClient(userId, clientKey);
-        return orderId == null ? OrderQueryResult.notFound() : orderState(runtime, identities, orderId);
+        long clientKey = identities.findClientKeyValueInLane(lane, userId, clientOrderId);
+        if (clientKey == 0) return OrderQueryResult.notFound();
+        long orderId = runtime.orderIdByClientValue(lane, userId, clientKey);
+        return orderId == 0 ? OrderQueryResult.notFound() : orderState(runtime, lane, identities, orderId);
     }
 
     private static long userStateHash(CoreUserStateView user) {

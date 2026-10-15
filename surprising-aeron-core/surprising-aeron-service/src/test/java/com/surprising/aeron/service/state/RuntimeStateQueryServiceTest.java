@@ -27,6 +27,7 @@ class RuntimeStateQueryServiceTest {
     void buildsUserOrderAndClientQueriesFromRuntimeIndexes() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = new TradingRuntimeState();
+        identities.bindClientLanes(runtime);
         runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 7);
         int symbolId = identities.symbolId("1");
         int assetId = identities.assetId("USDT");
@@ -49,9 +50,9 @@ class RuntimeStateQueryServiceTest {
         runtime.putClientOrder(1001, clientKey, 71);
 
         TradingCoreState snapshot = RuntimeStateMaterializer.materialize(runtime, identities);
-        var user = RuntimeStateQueryService.userState(runtime, identities, 1001);
-        var order = RuntimeStateQueryService.orderState(runtime, identities, 71);
-        var clientOrder = RuntimeStateQueryService.clientOrderState(runtime, identities, 1001, "client-71");
+        var user = RuntimeStateQueryService.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001);
+        var order = RuntimeStateQueryService.orderState(runtime, runtime.accountLaneForUser(1001), identities, 71);
+        var clientOrder = RuntimeStateQueryService.clientOrderState(runtime, runtime.accountLaneForUser(1001), identities, 1001, "client-71");
 
         assertThat(user.found()).isTrue();
         assertThat(user.stateHash()).isEqualTo(snapshot.userStateHash(1001));
@@ -68,18 +69,20 @@ class RuntimeStateQueryServiceTest {
     void missingClientLookupDoesNotAllocateAnIdentity() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = new TradingRuntimeState();
-        long before = identities.snapshot().nextClientKey();
+        identities.bindClientLanes(runtime);
+        long before = identities.clientIdentityCount();
 
-        var result = RuntimeStateQueryService.clientOrderState(runtime, identities, 1001, "missing");
+        var result = RuntimeStateQueryService.clientOrderState(runtime, runtime.accountLaneForUser(1001), identities, 1001, "missing");
 
         assertThat(result.found()).isFalse();
-        assertThat(identities.snapshot().nextClientKey()).isEqualTo(before);
+        assertThat(identities.clientIdentityCount()).isEqualTo(before);
     }
 
     @Test
     void rejectsAnUnboundedUserProjection() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = new TradingRuntimeState();
+        identities.bindClientLanes(runtime);
         runtime.setMetadata(ProductLine.SPOT, 1);
         runtime.putUser(new UserRuntime(ProductLine.SPOT, 1001, 1, CorePositionMode.ONE_WAY));
         for (int index = 0; index <= RuntimeStateQueryService.MAX_USER_QUERY_ENTITIES; index++) {
@@ -87,6 +90,6 @@ class RuntimeStateQueryServiceTest {
             runtime.putBalance(new BalanceRuntime(1001, assetId, 1, 0));
         }
 
-        assertThat(RuntimeStateQueryService.userState(runtime, identities, 1001).tooLarge()).isTrue();
+        assertThat(RuntimeStateQueryService.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001).tooLarge()).isTrue();
     }
 }

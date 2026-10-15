@@ -1,5 +1,10 @@
 # Aeron 本机压测诊断
 
+`AccountQueryProjectionBenchmark` 单独测量显式 Lane 上的用户、订单和 clientOrderId 投影、哈希与编码。
+它使用由 JMH 线程持有的冷 Lane 和真实权威表，排除邮箱、并行 worker、网络与交易负载；
+不能用其分数推导实际 Lane 线程反查的收益、Core 交易吞吐或百字节目标。
+查询 DTO 分配与交易业务项分开报告，实际工作线程及协议兼容性由对应功能测试验证。
+
 `ClientSourceOrderingBenchmark` 覆盖实际命令池请求槽、单 Dispatcher 归属、客户端编码与响应解码；
 即时回送的模拟对端替代网络和交易 Core。四个生产者各持有最多 64 个请求，全局窗口为 256，
 每个测量区间及排空后检查 accepted 与 terminal 一致。JDK 27 fork 包含 Agrona 所需的模块导出。

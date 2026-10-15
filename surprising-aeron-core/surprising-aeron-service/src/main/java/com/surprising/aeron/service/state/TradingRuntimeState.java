@@ -361,6 +361,13 @@ public final class TradingRuntimeState implements AutoCloseable {
         lane.assertOwner();
     }
 
+    private void requireLaneAccess(AccountLaneState lane) {
+        if (lane == null || lane.laneId() < 0 || lane.laneId() >= accountLanes.length
+                || accountLanes[lane.laneId()] != lane)
+            throw new IllegalStateException("account access crossed its owning Lane");
+        lane.assertOwner();
+    }
+
     public int laneWorkerDepth(int laneId) {
         assertOwner();
         if (laneId < 0 || laneId >= laneWorkers.length) throw new IllegalArgumentException("invalid Lane id");
@@ -2454,6 +2461,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         return user;
     }
 
+    public UserRuntime user(AccountLaneState lane, long userId) {
+        requireLaneAccess(lane, userId);
+        return lane.users.get(userId);
+    }
+
     public BalanceRuntime balance(long userId, int assetId) {
         assertOwner();
         AccountLaneState scoped = currentLaneCommandScope();
@@ -2482,7 +2494,12 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** Read-only query access to the owning lane's balance table. */
     public IntObjectHashMap<BalanceRuntime> balancesForUser(long userId) {
         assertOwner();
-        return onLane(userId, lane -> copyBalances(lane.balances.get(userId)));
+        return onLane(userId, lane -> balancesForUser(lane, userId));
+    }
+
+    public IntObjectHashMap<BalanceRuntime> balancesForUser(AccountLaneState lane, long userId) {
+        requireLaneAccess(lane, userId);
+        return copyBalances(lane.balances.get(userId));
     }
 
     long nextRiskReservationId(long userId, long cursor) {
@@ -2595,46 +2612,81 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** Read-only query access to the owning lane's reservation ids. */
     public LongHashSet reservationIdsForUser(long userId) {
         assertOwner();
-        return onLane(userId, lane -> {
-            var orderIds = lane.reservationIdsByUser.get(userId);
-            LongHashSet result = new LongHashSet(orderIds == null ? 0 : orderIds.size());
-            if (orderIds != null) orderIds.forEachLong(result::add);
-            return result;
-        });
+        return onLane(userId, lane -> reservationIdsForUser(lane, userId));
     }
 
     public int reservationCountForUser(long userId) {
         assertOwner();
-        return onLane(userId, lane -> {
-            var orderIds = lane.reservationIdsByUser.get(userId);
-            return orderIds == null ? 0 : orderIds.size();
-        });
+        return onLane(userId, lane -> reservationCountForUser(lane, userId));
+    }
+
+    public LongHashSet reservationIdsForUser(AccountLaneState lane, long userId) {
+        requireLaneAccess(lane, userId);
+        var ids = lane.reservationIdsByUser.get(userId);
+        LongHashSet result = new LongHashSet(ids == null ? 0 : ids.size());
+        if (ids != null) ids.forEachLong(result::add);
+        return result;
+    }
+
+    public int reservationCountForUser(AccountLaneState lane, long userId) {
+        requireLaneAccess(lane, userId);
+        var ids = lane.reservationIdsByUser.get(userId);
+        return ids == null ? 0 : ids.size();
     }
 
     /** Read-only query access to the owning lane's position keys. */
     public LongHashSet positionKeysForUser(long userId) {
         assertOwner();
-        return onLane(userId, lane -> {
-            LongHashSet positionKeys = lane.positionKeysByUser.get(userId);
-            return positionKeys == null ? new LongHashSet() : new LongHashSet(positionKeys);
-        });
+        return onLane(userId, lane -> positionKeysForUser(lane, userId));
     }
 
     public int positionCountForUser(long userId) {
         assertOwner();
-        return onLane(userId, lane -> {
-            LongHashSet positionKeys = lane.positionKeysByUser.get(userId);
-            return positionKeys == null ? 0 : positionKeys.size();
-        });
+        return onLane(userId, lane -> positionCountForUser(lane, userId));
+    }
+
+    public LongHashSet positionKeysForUser(AccountLaneState lane, long userId) {
+        requireLaneAccess(lane, userId);
+        LongHashSet keys = lane.positionKeysByUser.get(userId);
+        return keys == null ? new LongHashSet() : new LongHashSet(keys);
+    }
+
+    public int positionCountForUser(AccountLaneState lane, long userId) {
+        requireLaneAccess(lane, userId);
+        LongHashSet keys = lane.positionKeysByUser.get(userId);
+        return keys == null ? 0 : keys.size();
     }
 
     public NavigableSet<CoreLeverageKey> leverageKeysForUser(long userId) {
         assertOwner();
-        return onLane(userId, lane -> {
-            Set<CoreLeverageKey> keys = lane.cold.leverageKeysByUser.get(userId);
-            return keys == null ? Collections.emptyNavigableSet()
-                    : Collections.unmodifiableNavigableSet(new TreeSet<>(keys));
-        });
+        return onLane(userId, lane -> leverageKeysForUser(lane, userId));
+    }
+
+    public NavigableSet<CoreLeverageKey> leverageKeysForUser(AccountLaneState lane, long userId) {
+        requireLaneAccess(lane, userId);
+        Set<CoreLeverageKey> keys = lane.cold.leverageKeysByUser.get(userId);
+        return keys == null ? Collections.emptyNavigableSet()
+                : Collections.unmodifiableNavigableSet(new TreeSet<>(keys));
+    }
+
+    public Long leverage(AccountLaneState lane, CoreLeverageKey key) {
+        requireLaneAccess(lane, key.userId());
+        return lane.cold.leverages.get(key);
+    }
+
+    public OrderRuntime order(AccountLaneState lane, long orderId) {
+        requireLaneAccess(lane);
+        return lane.orders.get(orderId);
+    }
+
+    public ReservationRuntime reservation(AccountLaneState lane, long orderId) {
+        requireLaneAccess(lane);
+        return lane.reservations.get(orderId);
+    }
+
+    public PositionRuntime position(AccountLaneState lane, long positionKey) {
+        requireLaneAccess(lane);
+        return lane.positions.get(positionKey);
     }
 
     public OrderRuntime order(long orderId) {
@@ -3511,7 +3563,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
     }
 
-    private static long orderIdByClientValue(AccountLaneState lane, long userId, long clientKey) {
+    public long orderIdByClientValue(AccountLaneState lane, long userId, long clientKey) {
+        requireLaneAccess(lane, userId);
         Long2LongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
         return userClientOrders == null ? 0L : userClientOrders.get(clientKey);
     }

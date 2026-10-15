@@ -17,6 +17,14 @@ HotSpot JDK 27 下 `CommittedFundingReplayTest` 覆盖 U 本位及币本位永�
 这只增加固定长度的 Owner 计数元数据，没有持仓对象副本；按 ID 查找等其他迁移仍需继续。
 功能范围见 [验证清单](../../docs/validation/published-position-count-20261015.json)。
 
+用户、订单及 clientOrderId 内部查询由 `OrderBookQueryService.AccountQuery` 将已选定的
+`AccountLaneState` 传入 `RuntimeStateQueryService`。投影中的用户、余额、预留、持仓、杠杆与订单读取
+均使用显式 Lane 参数，校验该 Lane 属于当前运行时且由当前线程持有；不再通过查询门面反查 worker。
+排序、临时余额副本、DTO 和状态哈希仍只在查询边界构建。Owner 只使用既有路由并消费已编码结果，
+保留终态订单没有活跃路由时仍由各 Lane 原位查询，不引入全局订单镜像。
+风险及其他控制路径的显式参数迁移仍未完成。
+功能范围见 [验证清单](../../docs/validation/explicit-account-query-lane-20261015.json)。
+
 账户分区按 `LaneTopology` 隔离，由对应的 `SettlementLaneWorker` 多线程消费。主线采用实验目录已修复的实现：Owner 定序并准备命令，Matcher 产生确定性撮合结果，`MatcherSettlementDispatcher.publishMatcherOwned` 通过每个 Lane 的分片 SPSC 队列直接发布成交及撤单结果，所属 Lane 串行应用账户结算；完成回执到达后，Owner 按提交顺序发布终态响应。
 
 Matcher 在 `MatcherSettlementEvent.notifyDirectPublication()` 中校验结果并完成 Lane 投递，再发布就绪位。池化事件必须等实际消费者完成后才能复用。工作线程异常传给 Owner，避免命令在消费者退出后继续等待。全局控制命令沿用该实现已有的 Lane 所有权交接边界。

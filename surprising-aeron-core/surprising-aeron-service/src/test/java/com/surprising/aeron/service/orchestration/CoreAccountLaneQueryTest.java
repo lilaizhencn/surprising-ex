@@ -27,8 +27,9 @@ class CoreAccountLaneQueryTest {
         try (var core = prepared()) {
             var identities = new RuntimeIdentityRegistry();
             try (var expected = RuntimeStateProjector.project(core.tradingState(), identities)) {
-                var user = RuntimeStateQueryService.userState(expected, identities, 1);
-                var order = RuntimeStateQueryService.orderState(expected, identities, 200);
+                var user = RuntimeStateQueryService.userState(expected, expected.accountLaneForUser(1), identities, 1);
+                var order = RuntimeStateQueryService.orderState(expected,
+                        expected.accountLaneForUser(7), identities, 200);
                 long handoff = core.runtimeState.laneHandoffEpoch();
                 try (var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                     assertThat(query(core, CoreMessageType.USER_STATE_QUERY, 1, new byte[0]).data())

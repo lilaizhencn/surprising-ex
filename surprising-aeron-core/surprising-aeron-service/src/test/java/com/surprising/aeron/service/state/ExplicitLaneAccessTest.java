@@ -18,11 +18,16 @@ class ExplicitLaneAccessTest {
             var foreign = other.accountLaneForUser(7);
             assertThatThrownBy(() -> runtime.requireLaneAccess(foreign, 7)).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> runtime.enterLaneCommandScope(foreign)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> runtime.order(foreign, 1)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> runtime.reservation(foreign, 1)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> runtime.position(foreign, 1)).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> runtime.requireLaneAccess(lane, 8)).isInstanceOf(IllegalStateException.class);
             runtime.putBalance(new BalanceRuntime(7, 0, 100, 0));
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
             assertThatThrownBy(() -> runtime.accountLaneForUser(7)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> runtime.order(lane, 1)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> runtime.position(lane, 1)).isInstanceOf(IllegalStateException.class);
             var done = new CountDownLatch(1);
             var failure = new AtomicReference<Throwable>();
             assertThat(runtime.dispatchAccountQuery(1L << lane.laneId(), actual -> {

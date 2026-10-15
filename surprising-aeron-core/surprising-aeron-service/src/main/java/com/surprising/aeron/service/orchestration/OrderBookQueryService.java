@@ -411,13 +411,13 @@ final class OrderBookQueryService {
             }
             if (openOrderIds != null) {
                 for (int index = 0; index < openOrderIds.length; index++) {
-                    var query = RuntimeStateQueryService.orderState(owner.runtimeState, owner.identities, openOrderIds[index]);
+                    var query = RuntimeStateQueryService.orderState(owner.runtimeState, lane, owner.identities, openOrderIds[index]);
                     if (query.found() && "OPEN".equals(query.view().status())) openOrders[index] = query.view();
                 }
                 return null;
             }
             if (type == CoreMessageType.USER_STATE_QUERY || type == CoreMessageType.USER_STATE_HASH_QUERY) {
-                var query = RuntimeStateQueryService.userState(owner.runtimeState, owner.identities, userId);
+                var query = RuntimeStateQueryService.userState(owner.runtimeState, lane, owner.identities, userId);
                 if (query.tooLarge()) return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                         CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
                 found[lane.laneId()] = query.found();
@@ -427,8 +427,8 @@ final class OrderBookQueryService {
                         : missingAccountResponse(type, commandCount);
             }
             var query = type == CoreMessageType.CLIENT_ORDER_STATE_QUERY
-                    ? RuntimeStateQueryService.clientOrderState(owner.runtimeState, owner.identities, userId, clientName)
-                    : orderId == 0 ? null : RuntimeStateQueryService.orderState(owner.runtimeState, owner.identities, orderId);
+                    ? RuntimeStateQueryService.clientOrderState(owner.runtimeState, lane, owner.identities, userId, clientName)
+                    : orderId == 0 ? null : RuntimeStateQueryService.orderState(owner.runtimeState, lane, owner.identities, orderId);
             found[lane.laneId()] = query != null && query.found();
             if (!found[lane.laneId()]) return missingAccountResponse(type, commandCount);
             byte[] encoded = type == CoreMessageType.ORDER_STATE_HASH_QUERY

@@ -14,6 +14,27 @@ import org.junit.jupiter.api.Test;
 
 class ProductionSourceBoundaryTest {
     @Test
+    void accountQueryProjectionReadsOnlyItsExplicitLane() throws IOException {
+        Path root = Path.of("").toAbsolutePath();
+        while (!Files.isDirectory(root.resolve("surprising-aeron-core"))) {
+            root = root.getParent();
+            if (root == null) throw new AssertionError("repository root unavailable");
+        }
+        var source = Files.readString(root.resolve("surprising-aeron-core/surprising-aeron-service/src/main/java/"
+                + "com/surprising/aeron/service/state/query/RuntimeStateQueryService.java"));
+        assertThat(source).doesNotContain("currentLaneCommandScope", "accountLaneForUser", "onLane(");
+        var reads = Pattern.compile("runtime\\.(?:user|order|reservation|position|balancesForUser|"
+                + "reservationCountForUser|positionCountForUser|leverageKeysForUser|reservationIdsForUser|"
+                + "positionKeysForUser|leverage|orderIdByClientValue)\\(\\s*([^,)]*)").matcher(source);
+        int count = 0;
+        while (reads.find()) {
+            assertThat(reads.group(1)).as("explicit Lane on %s", reads.group()).isEqualTo("lane");
+            count++;
+        }
+        assertThat(count).isGreaterThan(10);
+    }
+
+    @Test
     void ownerRetainsNoPersistentLaneBusinessViews() {
         var fields = java.util.Arrays.stream(com.surprising.aeron.service.state.TradingRuntimeState.class.getDeclaredFields());
         assertThat(fields.map(java.lang.reflect.Field::getName)).doesNotContain(
