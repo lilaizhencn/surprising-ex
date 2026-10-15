@@ -273,7 +273,7 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 
 ### 单笔入口包装、生命周期判断及响应writer复用（2026-10-15）
 
-`TradingOwnerLoop` 沿用原入口SPSC队列，固定预分配8192个 `Input` 包装。Aeron回调从 `availableInput` 取得空槽，填写原命令、日志时间、位置、会话和指纹后发布；Owner把命令接入已有 `PendingClusterIngress` 后，才清空并通过归还队列发布该包装。原命令和响应仍遵循各自租约，包装归还不释放它们。等待字节预算被中断时，未发布包装清空后留在回调线程，下次直接重用；不能由两个线程向同一SPSC归还队列写入。容量、字节预算、截止时间和原等待策略保留，没有新的业务状态表、worker或执行阶段。
+入口包装已在 D4 收敛为唯一 `OwnerIngressRing`：Cluster 回调写固定槽，`TradingCoreOwner` 直接消费原队首，不再经过 `PendingClusterIngress` 或 `availableInput` 回收队列。槽位只在命令进入原交易窗口、或控制/边界任务完成后清空并发布消费进度；消息与响应租约各自保留到实际消费者完成。环满或字节预算耗尽时等待，未成功发布的输入不占用槽位。详见下方 D4 说明。
 
 普通订单在 `MatchingCommandAdmission` 直接用用户及币对路由检查已有生命周期范围，不再逐请求创建 `LifecycleScope` 或stream；强平/交割需要保留的范围仍是独立值，用户隔离、整币对交割及退休后放行语义保留。`PendingReservationTracker` 的首个预约成员改用Agrona primitive表，清除后保留数组；多成员提升及其他在途序号不会被清空。`TradingRealtimeBoundary.beginCapture` 在确认实时捕获已启用且当前为Leader后才生成缺省追踪字符串。
 
@@ -373,7 +373,7 @@ D1 补充审查：`ClusterServiceEgress.TransportSession` 仍实现 `ClientSessi
 
 ### D1 完成：Owner 只传会话 ID（2026-10-15）
 
-`OwnerLogContext` 与 `ClusterServiceEgress.TransportSession` 均不再实现 Aeron 接口；后者删除两处未实现方法和无调用的元数据转发，仅承担服务线程的具体响应出口。`TradingOwnerLoop.Input`、`PendingClusterIngress`、`ClusterCommandWindow`、响应 sink 和出口槽只传 `long sessionId`。真实 `ClientSession` 留在服务线程，响应消费时按 ID 查原会话表；无客户端日志使用 `NO_SESSION_ID=-1`，合法会话 ID 0 保留原语义。没有新增接口、线程、队列、账户镜像或逐命令对象。
+`OwnerLogContext` 与 `ClusterServiceEgress.TransportSession` 均不再实现 Aeron 接口；后者删除两处未实现方法和无调用的元数据转发，仅承担服务线程的具体响应出口。`OwnerIngressRing.Entry`、`ClusterCommandWindow`、响应 sink 和出口槽只传 `long sessionId`。真实 `ClientSession` 留在服务线程，响应消费时按 ID 查原会话表；无客户端日志使用 `NO_SESSION_ID=-1`，合法会话 ID 0 保留原语义。没有新增接口、线程、队列、账户镜像或逐命令对象。
 
 已关闭/移除会话及旧任期的响应直接丢弃，同时归还响应与 Header 租约；原背压 FIFO、容量、关闭回调及有序提交规则保留。111 个必要用例通过（服务 109、受影响基准夹具功能用例 2），包括六产品线真实 Owner 线程隔离、关闭后丢弃、池复用、资金及控制流水线。未启动真实网络集群、执行快照恢复或压测。此前 D1 补充审查记录中的会话伪实现未完成项已关闭，见 [D1 完成验证](../../docs/validation/d1-complete-20261015.json)。其他 Owner 迁移及性能验收仍是独立未完成事项。
 
@@ -403,3 +403,14 @@ D1 补充审查：`ClusterServiceEgress.TransportSession` 仍实现 `ClientSessi
 强平/交割保留实际控制撤单：在原 Matcher worker 执行显式撤单，原生序号按实际分片校验，Owner 只绑定已完成控制结果。新增的槽内控制任务和前置撤单引用只承担线程交接，随槽退休清空；没有新增账户镜像、worker、队列或阶段。
 
 195 项必要用例通过，覆盖六产品线成交、部分成交与拒单、批量共享 maker、改单/触发、跨分片强平撤单和 Ledger，见 [D3 功能验证](../../docs/validation/d3-complete-20261015.json)。最终验收不运行快照/恢复或 wallet；首轮误选旧快照夹具的失败另行保留。未执行压测、JMH/JFR，不给出分配或吞吐收益结论。
+
+
+### D4 唯一输入环与 Owner 原位消费（2026-10-15）
+
+`TradingOwnerLoop` 的生产者和 `TradingCoreOwner` 的消费者共用同一个 `OwnerIngressRing`。该类仅持有原 Agrona SPSC 交接、8192 个常驻输入槽和 64 MiB 字节预算；`PendingClusterIngress`、输入回收队列及 Owner 中继方法已经删除。前一条消息尚未离开队首时，生产者不能复用其记录；清空字段先于 SPSC 消费进度发布。
+
+交易准入时原 `ClusterCommandWindow` 接管消息租约，然后释放输入槽。控制命令直接保留原环头，异步完成及响应交接后才前进。退出时先停止交易 workers 并清理已准入窗口，再归还环内未准入消息；服务输入发布失败也归还其 decoder 租约。角色和终止边界保留顺序，只等待动作前面的命令，不把自身或后续输入纳入等待条件。
+
+唯一待处理预算为 8192 槽 / 64 MiB，去掉了原第二 FIFO 叠加的积压。原 `surprising.aeron.owner-input-batch-size` 配置保留为每轮直接交易准入上限（1–64、默认 64）；完成推进预算、超时及响应背压仍沿用原流程。`transportToOwner` 每条输入记录一次，`ingressToAdmission` / `ingressToControl` 使用同一入队时刻，已没有中继 FIFO 的单独计时起点。
+
+85 项必要功能用例通过：服务端 83、基准夹具 2，覆盖满环/预算背压、两次完整绕回、中断、租约释放、边界前缀和六产品线命令，见 [D4 功能验证](../../docs/validation/d4-complete-20261015.json)。新增类只承担实际线程交接，没有新业务镜像、接口、worker 或额外 FIFO。未运行压测、JMH/JFR、快照/恢复或 wallet，不给出性能收益结论。

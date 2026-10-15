@@ -11,24 +11,21 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.IdleStrategy;
-import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 class TradingOwnerInputReuseTest {
-    @Test void fullQueueCannotReuseAWrapperUntilOwnerFinishesItsHandoff() throws Exception {
+    @Test void fullQueueKeepsHeadStableUntilOwnerAdvancesTheActualRing() throws Exception {
         var waiting = new CountDownLatch(1);
         var egress = new ClusterServiceEgress();
         var loop = new TradingOwnerLoop(ProductLine.SPOT, egress);
         Cluster cluster = cluster(waiting);
-        egress.start(cluster);
-        set(loop, "cluster", cluster);
-        var input = queue(loop, "input");
-        var available = queue(loop, "availableInput");
+        egress.start(cluster); set(loop, "cluster", cluster);
+        var input = input(loop);
         CoreMessage first = probe(1);
-        for (int i = 0; i < 8192; i++) loop.enqueue(first, ClusterServiceEgress.NO_SESSION_ID, i, i + 10, null);
-        Object owned = input.poll();
-        assertThat(available).isEmpty();
+        for (int i = 0; i < OwnerIngressRing.CAPACITY; i++)
+            loop.enqueue(first, ClusterServiceEgress.NO_SESSION_ID, i, i + 10, null);
+        var owned = input.first();
         CoreMessage successor = probe(2);
         var failure = new AtomicReference<Throwable>();
         Thread producer = new Thread(() -> {
@@ -38,58 +35,97 @@ class TradingOwnerInputReuseTest {
         producer.start();
         try {
             assertThat(waiting.await(5, TimeUnit.SECONDS)).isTrue();
-            assertThat(field(owned, "command")).isSameAs(first);
-            assertThat(field(owned, "position")).isEqualTo(10L);
-            assertThat(input.size()).isEqualTo(8191);
-            returnInput(loop, owned);
+            assertThat(input.first()).isSameAs(owned);
+            assertThat(owned.command).isSameAs(first);
+            assertThat(owned.position).isEqualTo(10);
+            assertThat(input.size()).isEqualTo(OwnerIngressRing.CAPACITY);
+            input.remove();
             producer.join(5_000);
             assertThat(producer.isAlive()).isFalse();
             assertThat(failure.get()).isNull();
-            for (int i = 1; i < 8192; i++) returnInput(loop, input.poll());
-            Object reused = input.poll();
+            for (int i = 1; i < OwnerIngressRing.CAPACITY; i++) input.remove();
+            var reused = input.first();
             assertThat(reused).isSameAs(owned);
-            assertThat(field(reused, "command")).isSameAs(successor);
-            assertThat(field(reused, "timestamp")).isEqualTo(99L);
-            assertThat(field(reused, "position")).isEqualTo(199L);
-            returnInput(loop, reused);
-            assertThat(available.size()).isEqualTo(8192);
-            assertThat(field(owned, "command")).isNull();
-            assertThat(field(owned, "action")).isNull();
+            assertThat(reused.command).isSameAs(successor);
+            assertThat(reused.timestamp).isEqualTo(99);
+            assertThat(reused.position).isEqualTo(199);
+            input.remove();
+            assertThat(input.size()).isZero();
+            assertThat(input.retainedBytes()).isZero();
+            assertThat(owned.command).isNull();
+            assertThat(owned.action).isNull();
         } finally {
             producer.interrupt(); producer.join(5_000);
-            Object pending;
-            while ((pending = input.poll()) != null) returnInput(loop, pending);
-            egress.clear();
+            input.discard(); egress.clear();
         }
     }
 
-    @Test void interruptedByteBudgetWaitKeepsItsUnpublishedWrapperForTheNextAttempt() throws Exception {
+    @Test void interruptedByteBudgetWaitDoesNotClaimOrLoseAnInputSlot() throws Exception {
         var egress = new ClusterServiceEgress();
         var loop = new TradingOwnerLoop(ProductLine.SPOT, egress);
         Cluster cluster = cluster(new CountDownLatch(1));
         egress.start(cluster); set(loop, "cluster", cluster);
-        set(loop, "inputProduced", 64L * 1024 * 1024);
+        var input = input(loop);
+        var megabyte = CoreMessage.owned(probe(1).header(), new byte[1024 * 1024]);
+        for (int i = 0; i < 64; i++) loop.enqueue(megabyte, -1, i, i, null);
+        assertThat(input.retainedBytes()).isEqualTo(OwnerIngressRing.MAX_BYTES);
         var failure = new AtomicReference<Throwable>();
         Thread producer = new Thread(() -> {
             Thread.currentThread().interrupt();
-            try { loop.enqueue(probe(1), ClusterServiceEgress.NO_SESSION_ID, 1, 10, null); }
+            try { loop.enqueue(probe(1), -1, 1, 10, null); }
             catch (Throwable fatal) { failure.set(fatal); }
         });
         producer.start(); producer.join(5_000);
         assertThat(producer.isAlive()).isFalse();
         assertThat(failure.get()).isInstanceOf(org.agrona.concurrent.AgentTerminationException.class);
-        Object retained = field(loop, "unpublishedInput");
-        assertThat(retained).isNotNull();
-        assertThat(field(retained, "command")).isNull();
-        assertThat(queue(loop, "availableInput").size()).isEqualTo(8191);
-        set(loop, "inputProduced", 0L);
-        loop.enqueue(probe(2), ClusterServiceEgress.NO_SESSION_ID, 2, 20, null);
-        Object next = queue(loop, "input").poll();
-        assertThat(next).isSameAs(retained);
-        assertThat(field(loop, "unpublishedInput")).isNull();
-        returnInput(loop, next);
-        assertThat(queue(loop, "availableInput").size()).isEqualTo(8192);
-        egress.clear();
+        assertThat(input.size()).isEqualTo(64);
+        assertThat(input.retainedBytes()).isEqualTo(OwnerIngressRing.MAX_BYTES);
+        input.discard();
+        for (int i = 0; i < OwnerIngressRing.CAPACITY; i++)
+            assertThat(input.offer(probe(i + 2), -1, i, i, null, 0, null)).isTrue();
+        assertThat(input.offer(probe(99_999), -1, 0, 0, null, 0, null)).isFalse();
+        input.discard(); egress.clear();
+    }
+
+    @Test void failedServiceEnqueueReturnsTheBorrowedDecoderLease() throws Exception {
+        var egress = new ClusterServiceEgress();
+        var loop = new TradingOwnerLoop(ProductLine.SPOT, egress);
+        set(loop, "failure", new IllegalStateException("stopped Owner"));
+        var service = new com.surprising.aeron.service.cluster.AeronTradingClusterService(loop, egress);
+        byte[] bytes = CoreMessageCodec.encode(probe(1));
+        var buffer = new org.agrona.concurrent.UnsafeBuffer(bytes);
+        var header = new io.aeron.logbuffer.Header(0, 0)
+                .buffer(new org.agrona.concurrent.UnsafeBuffer(new byte[64])).offset(0);
+        for (int attempt = 0; attempt < 2; attempt++) {
+            assertThatThrownBy(() -> service.onSessionMessage(null, 1, buffer, 0, bytes.length, header))
+                    .isInstanceOf(org.agrona.concurrent.AgentTerminationException.class);
+            var decoder = field(service, "messageDecoder");
+            var slots = (CoreMessage[]) field(decoder, "commandSlots");
+            assertThat(slots[0]).isNotNull();
+            assertThat(slots[0].acquireDecoderSlot()).as("failed handoff retains no reader").isTrue();
+            slots[0].releaseDecoderSlot();
+            assertThat(input(loop).size()).isZero();
+        }
+    }
+
+    @Test void terminationAlsoReleasesInputPublishedAfterTheWorkerExit() throws Exception {
+        var cluster = cluster(new CountDownLatch(1));
+        var egress = new ClusterServiceEgress();
+        egress.start(cluster);
+        var loop = new TradingOwnerLoop(ProductLine.SPOT, egress);
+        try {
+            loop.start(cluster, null);
+            loop.terminate();
+            // Simulate the producer's last offer becoming visible after the worker's final discard.
+            var command = CoreMessage.decoderSlot();
+            assertThat(command.acquireDecoderSlot()).isTrue();
+            command.decoderPayloadBuffer(8);
+            assertThat(input(loop).offer(command, -1, 1, 2, null, 0, null)).isTrue();
+            loop.terminate();
+            assertThat(input(loop).size()).isZero();
+            assertThat(command.acquireDecoderSlot()).isTrue();
+            command.releaseDecoderSlot();
+        } finally { loop.terminate(); egress.clear(); }
     }
 
     @Test void actualOwnerPreservesResponsesAcrossTwoCompleteInputPoolWraps() throws Exception {
@@ -122,6 +158,7 @@ class TradingOwnerInputReuseTest {
             loop.start(cluster, null);
             for (long id = 1; id <= 16_384; id++) {
                 loop.enqueue(probe(id), egress.transportSession(session).id(), id, id + 10, null);
+                if ((id & 8191) == 0) loop.onRoleChange(Cluster.Role.LEADER, 0);
                 if ((id & 255) == 0) {
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
                     while (received[0] < id) {
@@ -133,7 +170,8 @@ class TradingOwnerInputReuseTest {
             }
             assertThat(received[0]).isEqualTo(16_384);
         } finally { loop.terminate(); egress.clear(); }
-        assertThat(queue(loop, "availableInput").size()).isEqualTo(8192);
+        assertThat(input(loop).size()).isZero();
+        assertThat(input(loop).retainedBytes()).isZero();
     }
 
     private static CoreMessage probe(long id) {
@@ -159,18 +197,13 @@ class TradingOwnerInputReuseTest {
                 });
     }
 
-    @SuppressWarnings("unchecked")
-    private static OneToOneConcurrentArrayQueue<Object> queue(Object owner, String name) throws Exception {
-        return (OneToOneConcurrentArrayQueue<Object>) field(owner, name);
+    private static OwnerIngressRing input(TradingOwnerLoop loop) throws Exception {
+        return (OwnerIngressRing) field(loop, "input");
     }
     private static Object field(Object owner, String name) throws Exception {
         var field = owner.getClass().getDeclaredField(name); field.setAccessible(true); return field.get(owner);
     }
     private static void set(Object owner, String name, Object value) throws Exception {
         var field = owner.getClass().getDeclaredField(name); field.setAccessible(true); field.set(owner, value);
-    }
-    private static void returnInput(TradingOwnerLoop loop, Object input) throws Exception {
-        var method = TradingOwnerLoop.class.getDeclaredMethod("returnInput", input.getClass());
-        method.setAccessible(true); method.invoke(loop, input);
     }
 }

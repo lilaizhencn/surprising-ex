@@ -563,7 +563,7 @@ public class ClusteredBatchTradingBenchmark {
             CoreMessage maker = command(CoreMessageType.PLACE_ORDER, 1_256,
                     TradingCommandCodec.encodePlaceOrder(order(1, CoreOrderSide.SELL, 120)));
             byte[] makerBytes = CoreMessageCodec.encode(maker);
-            service.enqueueCommittedCommand(ClusterServiceEgress.NO_SESSION_ID, messageDecoder.decode(
+            enqueueCommittedCommand(ClusterServiceEgress.NO_SESSION_ID, messageDecoder.decode(
                             new UnsafeBuffer(makerBytes), 0, makerBytes.length),
                     1_700_000_000_000L, header.position(), null);
             drain();
@@ -1055,10 +1055,19 @@ public class ClusteredBatchTradingBenchmark {
                     || message.header().messageType() == CoreMessageType.AMEND_ORDER_BATCH)
                 batchRequestSizes.put(message.header().correlationId(), responseBatchSize);
             byte[] bytes = CoreMessageCodec.encode(message);
-            service.enqueueCommittedCommand(session.id(), messageDecoder.decode(
+            enqueueCommittedCommand(session.id(), messageDecoder.decode(
                             new UnsafeBuffer(bytes), 0, bytes.length),
                     1_700_000_000_000L, header.position(), null);
             maxBacklog = Math.max(maxBacklog, service.state().pendingMatchingCount());
+        }
+
+        private void enqueueCommittedCommand(long sessionId, CoreMessage command, long timestamp, long position,
+                                             com.surprising.aeron.protocol.CommandFingerprint fingerprint) {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            while (!service.ingress().offer(command, sessionId, timestamp, position, null, 0, fingerprint)) {
+                if (System.nanoTime() >= deadline) throw new IllegalStateException("owner input did not advance");
+                service.pollCommands();
+            }
         }
 
         private void drain() {

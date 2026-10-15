@@ -17,11 +17,8 @@ final class OwnerCommandPipelineState {
 
     /** 已准入但尚未提交的撮合命令窗口，所有者是当前 Owner 线程。 */
     private final ClusterCommandWindow commandWindow = new ClusterCommandWindow();
-    /** 已复制但尚未进入业务执行阶段的命令队列，所有者是当前 Owner 线程。 */
-    private final PendingClusterIngress pendingIngress = new PendingClusterIngress();
-
     /** 当前正在等待直接控制流程或查询结果的命令。 */
-    private PendingClusterIngress.Entry activeControl;
+    private OwnerIngressRing.Entry activeControl;
     /** 当前控制命令已经产生、但异步子任务尚未全部完成的响应候选值。 */
     private CoreResponse controlResponse;
     /** 当前控制命令等待的 Matcher 序号；零表示没有等待 Matcher 回调。 */
@@ -67,7 +64,6 @@ final class OwnerCommandPipelineState {
      */
     void reset() {
         commandWindow.clear();
-        pendingIngress.clear();
         activeControl = null;
         controlResponse = null;
         matchingResponseSequence = 0;
@@ -94,7 +90,6 @@ final class OwnerCommandPipelineState {
      */
     void clearCommandContainers() {
         commandWindow.clear();
-        pendingIngress.clear();
         activeControl = null;
         controlResponse = null;
         matchingResponseSequence = 0;
@@ -106,23 +101,18 @@ final class OwnerCommandPipelineState {
         waitingMatchingNotification = false;
     }
 
-    /** 返回尚未进入提交完成边界的命令数量。 */
-    int pendingCommandCount() {
-        return pendingIngress.size() + commandWindow.size();
-    }
-
     /** 返回 Owner 是否已经开始处理一个控制命令。 */
     boolean hasActiveControl() {
         return activeControl != null;
     }
 
     /** 返回当前控制命令。 */
-    PendingClusterIngress.Entry activeControl() {
+    OwnerIngressRing.Entry activeControl() {
         return activeControl;
     }
 
     /** 设置当前控制命令，并清除上一条控制命令的响应候选值。 */
-    void beginControl(PendingClusterIngress.Entry entry) {
+    void beginControl(OwnerIngressRing.Entry entry) {
         activeControl = entry;
         controlResponse = null;
         matchingResponseSequence = 0;
@@ -168,11 +158,6 @@ final class OwnerCommandPipelineState {
         return commandWindow;
     }
 
-    /** 返回待处理命令队列。 */
-    PendingClusterIngress pendingIngress() {
-        return pendingIngress;
-    }
-
     /** 记录实际依赖前缀的末项；无关队首退休不触发重新准备。 */
     void rememberBlockedIngress(CoreMessage request, int prefixSize) {
         if (prefixSize <= 0 || prefixSize > commandWindow.size())
@@ -193,9 +178,7 @@ final class OwnerCommandPipelineState {
     }
 
     /** 保留被阻塞命令的解码结果，并在命令离开队首时释放临时解码对象。 */
-    void retainPendingPreparation() {
-        var next = pendingIngress.first();
-        CoreMessage pending = next == null ? null : next.command;
+    void retainPendingPreparation(CoreMessage pending) {
         commandWindow.retainDecoded(pending);
         if (pending != blockedIngress || pending == null) clearBlockedIngress();
     }

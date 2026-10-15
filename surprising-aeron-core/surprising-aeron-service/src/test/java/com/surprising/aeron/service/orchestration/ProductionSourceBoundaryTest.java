@@ -14,6 +14,20 @@ import org.junit.jupiter.api.Test;
 
 class ProductionSourceBoundaryTest {
     @Test
+    void d4UsesOneInputRingWithoutAnOwnerRelayOrReturnQueue() throws Exception {
+        assertThat(java.util.Arrays.stream(TradingOwnerLoop.class.getDeclaredFields())
+                .map(java.lang.reflect.Field::getName)).doesNotContain("availableInput", "unpublishedInput");
+        assertThat(java.util.Arrays.stream(OwnerCommandPipelineState.class.getDeclaredFields())
+                .map(java.lang.reflect.Field::getName)).doesNotContain("pendingIngress");
+        assertThat(java.util.Arrays.stream(TradingCoreOwner.class.getDeclaredMethods())
+                .map(java.lang.reflect.Method::getName)).doesNotContain("enqueueCommittedCommand", "awaitIngressCapacity");
+        assertThat(TradingCoreOwner.class.getDeclaredField("ingress").getType()).isEqualTo(OwnerIngressRing.class);
+        assertThat(TradingOwnerLoop.class.getDeclaredField("input").getType()).isEqualTo(OwnerIngressRing.class);
+        assertThat(OwnerCommandPipelineState.class.getDeclaredField("activeControl").getType())
+                .isEqualTo(OwnerIngressRing.Entry.class);
+    }
+
+    @Test
     void d3TradingHasOnlyDirectApisAndNoOwnerSettlementFallback() throws Exception {
         var adapterMethods = java.util.Arrays.stream(
                 com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.class.getDeclaredMethods())
@@ -76,7 +90,7 @@ class ProductionSourceBoundaryTest {
         }
         Path orchestration = root.resolve("surprising-aeron-core/surprising-aeron-service/src/main/java/"
                 + "com/surprising/aeron/service/orchestration");
-        for (String name : java.util.List.of("TradingCoreOwner", "TradingOwnerLoop", "PendingClusterIngress",
+        for (String name : java.util.List.of("TradingCoreOwner", "TradingOwnerLoop", "OwnerIngressRing",
                 "ClusterCommandWindow", "OwnerResponsePublisher")) {
             String source = Files.readString(orchestration.resolve(name + ".java"));
             assertThat(source).as("Owner session boundary in %s", name)

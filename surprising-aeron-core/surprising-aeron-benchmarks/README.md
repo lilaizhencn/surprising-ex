@@ -101,3 +101,10 @@ D2 复审中，`MatcherTreasuryReceiptBenchmark` 移除发布模式标记，统�
 移除多生产者直接调用同步适配器的 `ExchangeCoreConcurrentBenchmark` 和使用裸撮合 API 的 `MarketSlippageGuardBenchmark`，`ClusterCapacityMain` 本地基线不再调用已删除入口。它们的旧调用方式不能代表当前单写者 Matcher / Direct 结算路径；滑点功能由迁到真实 Direct 槽的适配器用例覆盖。
 
 `InProcessTradingAllocationBenchmark` 等现有入口继续走实际 Owner→Matcher→Lane→Ledger 流水线。基准模块及其直接依赖编译通过，财务回执夹具以 1/4 Lane 各做有限功能验证，合计服务端 193 项、基准夹具 2 项通过，见 [D3 功能验证](../../docs/validation/d3-complete-20261015.json)。本次没有运行 JMH 计时、JFR 或压测，不追加性能记录。
+
+
+### D4 输入边界收敛（2026-10-15）
+
+`ClusteredBatchTradingBenchmark.Workload` 改为向 Owner 共用的实际输入环发布；环满时推进原 Owner 后重试，不再调用已删除的中继方法。基准源码及直接依赖编译通过，该夹具自身包含快照的场景本轮未执行。
+
+`D1BenchmarkBoundaryTest` 的两项有限检查通过，包含真实 `TradingOwnerLoop` 连续交易及终态资金核对；服务端满环、绕回、字节预算、中断和角色边界等必要用例合计 83 项通过。详见 [D4 功能验证](../../docs/validation/d4-complete-20261015.json)。本次不执行 JMH 计时、JFR 或压测，不追加性能记录。

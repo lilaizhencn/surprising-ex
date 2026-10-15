@@ -14,7 +14,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import org.agrona.concurrent.AgentTerminationException;
 import org.agrona.concurrent.BusySpinIdleStrategy;
-import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -28,22 +27,10 @@ public final class TradingOwnerLoop implements Runnable {
     private static final long DEFAULT_ROLE_CHANGE_TIMEOUT_SECONDS = 600;
     private static final long ROLE_CHANGE_DEADLINE_NS = configuredRoleChangeDeadlineNanos(
             System.getProperty(ROLE_CHANGE_TIMEOUT_SECONDS_PROPERTY));
-    private static final long INPUT_BYTES = 64L * 1024 * 1024;
-    private static final String INPUT_BATCH_SIZE_PROPERTY =
-            "surprising.aeron.owner-input-batch-size";
-    private static final int INPUT_BATCH_SIZE = configuredInputBatchSize();
-
-    private static final int INPUT_SLOTS = 8192;
-    private final OneToOneConcurrentArrayQueue<Input> input = new OneToOneConcurrentArrayQueue<>(INPUT_SLOTS);
-    /** Owner returns wrappers only after the command has entered its existing ingress FIFO. */
-    private final OneToOneConcurrentArrayQueue<Input> availableInput = new OneToOneConcurrentArrayQueue<>(INPUT_SLOTS);
-    /** Callback-thread slot retained if publication fails before ownership transfers. */
-    private Input unpublishedInput;
+    private final OwnerIngressRing input;
     private final ClusterServiceEgress egress;
     private final TradingCoreOwner processor;
     private final OwnerIdleStrategy ownerIdle = new OwnerIdleStrategy(this::ownerWorkAvailable);
-    private long inputProduced;
-    private volatile long inputConsumed;
     private volatile Throwable failure;
     private boolean stopping;
     private Thread ownerThread;
@@ -58,14 +45,12 @@ public final class TradingOwnerLoop implements Runnable {
     public TradingOwnerLoop(ProductLine productLine, ClusterServiceEgress egress) {
         this.egress = egress;
         processor = new TradingCoreOwner(productLine, this::publishResponse);
-        for (int i = 0; i < INPUT_SLOTS; i++) availableInput.add(new Input());
+        input = processor.ingress();
     }
 
     /** Starts the Owner thread after the Aeron Cluster service has started. */
     public void start(Cluster cluster, SectionedCoreSnapshotCodec.RecoveryBuffer restored) {
         this.cluster = cluster;
-        inputProduced = 0;
-        inputConsumed = 0;
         failure = null;
         stopping = false;
         ownerEpoch = 0;
@@ -141,25 +126,13 @@ public final class TradingOwnerLoop implements Runnable {
                 ownerThread.interrupt();
                 throw new IllegalStateException("trading owner did not terminate");
             }
-            Input pending;
-            while ((pending = input.poll()) != null) returnInput(pending);
+            // The callback producer now owns cleanup. Cover a final offer racing Owner failure.
+            input.discard();
         }
     }
 
     public void checkFailure() {
         if (failure != null) throw new AgentTerminationException(failure);
-    }
-
-    private static int configuredInputBatchSize() {
-        String configured = System.getProperty(INPUT_BATCH_SIZE_PROPERTY, "64");
-        try {
-            int value = Integer.parseInt(configured.trim());
-            if (value < 1 || value > 64) throw new IllegalArgumentException();
-            return value;
-        } catch (RuntimeException failure) {
-            throw new IllegalArgumentException(
-                    INPUT_BATCH_SIZE_PROPERTY + " must be an integer in [1,64]", failure);
-        }
     }
 
     @Override
@@ -169,30 +142,15 @@ public final class TradingOwnerLoop implements Runnable {
         try {
             while (!stopping) {
                 int work = 0;
-                for (int i = 0; i < INPUT_BATCH_SIZE && !stopping; i++) {
-                    Input next = input.poll();
-                    if (next == null) break;
+                var next = input.first();
+                if (next != null && next.action != null) {
                     try {
-                        if (next.action != null) {
-                            next.action.run();
-                            initialized = true;
-                        } else {
-                            logContext.timestamp = next.timestamp;
-                            logContext.position = next.position;
-                            CoreMatchingPhaseMetrics.recordBoundary(
-                                    "transportToOwner", next.command.header(), next.enqueuedNanos);
-                            processor.enqueueCommittedCommand(next.sessionId, next.command, next.timestamp,
-                                    next.position, next.fingerprint);
-                            inputConsumed += next.command.payloadLength();
-                        }
-                    } finally { returnInput(next); }
+                        next.action.run();
+                        initialized = true;
+                    } finally { input.remove(); }
                     work++;
-                }
-                if (initialized && !stopping) {
-                    boolean ownerWorkAvailable = processor.ownerWorkAvailable();
-                    if (ownerWorkAvailable) {
-                        work += processor.pollCommands();
-                    }
+                } else if (initialized && !stopping && processor.ownerWorkAvailable()) {
+                    work += processor.pollCommands();
                 }
                 ownerIdle.idle(work, processor.pendingCommandCount() != 0);
             }
@@ -209,46 +167,27 @@ public final class TradingOwnerLoop implements Runnable {
 
     private void enqueue(CoreMessage command, long sessionId, long timestamp, long position,
                          Runnable action, long enqueuedNanos, CommandFingerprint fingerprint, long timeoutNanos) {
-        int bytes = command == null ? 0 : command.payloadLength();
-        if (bytes > INPUT_BYTES) throw new IllegalStateException("command exceeds ingress byte budget");
         long started = System.nanoTime();
         long deadline = started + timeoutNanos;
         boolean reported = false;
-        Input event = unpublishedInput;
-        unpublishedInput = null;
-        boolean published = false;
-        try {
-            while (true) {
-                if (event == null) event = availableInput.poll();
-                if (event != null && bytes <= INPUT_BYTES - (inputProduced - inputConsumed)) break;
-                if (!reported && System.nanoTime() - started >= java.util.concurrent.TimeUnit.SECONDS.toNanos(5)) {
-                    LOG.error("Core owner input has made no capacity for 5 seconds queued={} bytes={} ownerFailure={}",
-                            input.size(), inputProduced - inputConsumed, failure);
-                    reported = true;
-                }
-                awaitProgress(deadline);
+        while (true) {
+            checkFailure();
+            if (input.offer(command, sessionId, timestamp, position, action, enqueuedNanos, fingerprint)) {
+                ownerIdle.signal();
+                return;
             }
-            event.prepare(command, sessionId, timestamp, position, action, enqueuedNanos, fingerprint);
-            // A claimed wrapper consumes one of the same fixed number of queue positions.
-            if (!input.offer(event)) throw new IllegalStateException("claimed owner input has no queue position");
-            published = true;
-            inputProduced += bytes;
-            ownerIdle.signal();
-        } finally {
-            if (!published && event != null) {
-                event.clear();
-                unpublishedInput = event;
+            if (!reported && System.nanoTime() - started >= java.util.concurrent.TimeUnit.SECONDS.toNanos(5)) {
+                LOG.error("Core owner input has made no capacity for 5 seconds queued={} bytes={} ownerFailure={}",
+                        input.size(), input.retainedBytes(), failure);
+                reported = true;
             }
+            awaitProgress(deadline);
         }
     }
 
-    private void returnInput(Input event) {
-        event.clear();
-        if (!availableInput.offer(event)) throw new IllegalStateException("owner input returned twice");
-    }
-
     private boolean ownerWorkAvailable() {
-        return !input.isEmpty() || processor.ownerCompletionAvailable();
+        var next = input.first();
+        return next != null && next.action != null || processor.ownerWorkAvailable();
     }
 
     private <T> T boundary(Supplier<T> action, boolean finish) {
@@ -295,30 +234,4 @@ public final class TradingOwnerLoop implements Runnable {
         cluster.idleStrategy().idle();
     }
 
-    private static final class Input {
-        CoreMessage command;
-        long sessionId = NO_SESSION_ID;
-        long timestamp, position, enqueuedNanos;
-        Runnable action;
-        CommandFingerprint fingerprint;
-
-        void prepare(CoreMessage command, long sessionId, long timestamp, long position,
-                     Runnable action, long enqueuedNanos, CommandFingerprint fingerprint) {
-            this.command = command;
-            this.sessionId = sessionId;
-            this.timestamp = timestamp;
-            this.position = position;
-            this.action = action;
-            this.enqueuedNanos = enqueuedNanos;
-            this.fingerprint = fingerprint;
-        }
-
-        void clear() {
-            command = null;
-            sessionId = NO_SESSION_ID;
-            action = null;
-            fingerprint = null;
-            timestamp = position = enqueuedNanos = 0;
-        }
-    }
 }

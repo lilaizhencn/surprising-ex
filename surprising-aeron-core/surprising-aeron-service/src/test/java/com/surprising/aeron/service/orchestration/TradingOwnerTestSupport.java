@@ -88,8 +88,14 @@ final class TradingOwnerTestSupport implements ClusteredService {
                                  CommandFingerprint fingerprint) {
         logContext.timestamp = timestamp;
         logContext.position = position;
-        owner.enqueueCommittedCommand(session == null ? ClusterServiceEgress.NO_SESSION_ID
-                : egress.transportSession(session).id(), request, timestamp, position, fingerprint);
+        long sessionId = session == null ? ClusterServiceEgress.NO_SESSION_ID : egress.transportSession(session).id();
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+        while (!owner.ingress().offer(request, sessionId, timestamp, position, null,
+                CoreMatchingPhaseMetrics.sampleStart(request.header()), fingerprint)) {
+            if (System.nanoTime() >= deadline) throw new AssertionError("Owner ingress did not advance");
+            owner.pollCommands();
+            egress.drainResponses(owner);
+        }
     }
 
     @Override

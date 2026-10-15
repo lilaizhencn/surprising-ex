@@ -33,7 +33,8 @@
 | 已完成 | D1 | 已移除假 `Cluster` / `ClientSession` 实现，Owner 按会话 ID 路由 | 已验证，见 D1 |
 | 已完成 | D2 / L8 | 已删除旧 Owner 直达派发、窗口扫描回调及 Lane 响应回退 | 已验证，见 D2 |
 | 已完成 | D3 / L7 | 交易统一 Direct，删除旧 Future/API、Owner 补结算与分区扫描 | 已验证，见 D3 |
-| 删除类 | D4–D9 | 重复中继等 | 低到中 |
+| 已完成 | D4 | Owner 直接消费唯一输入环，删除重复 FIFO 与回收队列 | 已验证，见 D4 |
+| 删除类 | D5–D9 | 空壳接口等 | 低到中 |
 | 最后做 | D10 | `TradingCoreRuntime` 状态枢纽、状态重复 | 中高 |
 
 建议执行顺序见第 9 节。
@@ -180,6 +181,7 @@
 - **证据**：
   - `inputProduced`（回调线程写）与 volatile `inputConsumed`（Owner 每命令写，带 StoreLoad）相邻。
   - 8192 个约 56B 的 `Input` 连续分配；生产者 `prepare()` 与 Owner `clear()` 写相邻对象，伪共享；每条命令还要走一次 `availableInput` 回收往返。
+  - **D4 后续修复**：旧 `Input` 与 `availableInput` 已删除，改为唯一 `OwnerIngressRing`；固定 Entry 的缓存行布局及本条其它伪共享假设仍未验收。
   - 出口：`outputProduced`（Owner 写）、`volatile outputConsumed`（Cluster 线程逐响应 `+=`）、`outputOverflow` 同对象，被两个线程逐响应写，伪共享加全 fence；`Output` 槽同一模式。
 - **方案**：单个 2 的幂环，字段拆成数组，计数器各自填充，用 ordered 写发布；去掉回收队列（见 D4）；消费端 `setRelease`，各计数放独立 padded 单元。
 - **验证**：`perf c2c`；`OwnerPublicationBenchmark -prof perfnorm`。
@@ -285,12 +287,16 @@
 - **控制路径**：强平、批量强平及交割保留真实控制撤单业务，使用 `cancelControlOrders` / `cancelControlOrder` / `completeControlCancellations` 显式入口。每条原生序号在实际撮合分片校验；汇总只绑定控制序列，不比较不同订单簿的最大 native sequence。去掉旧通用 callback/Future 链和临时 `CancelBatchOutcome`。
 - **测试及基准**：测试迁到真实预留 Direct 槽；删除仅服务于旧 Future 与旧分区扫描的测试实现，保留真实分片并发、停机毒化、序号、部分撤单、资金与槽回收验证。移除多生产者直接调用旧适配器的 `ExchangeCoreConcurrentBenchmark`、裸 API 的 `MarketSlippageGuardBenchmark` 及容量入口的旧调用，保留使用实际交易流水线的基准。
 - **验证**：HotSpot JDK 27，195 项必要功能用例通过（service 193、基准夹具 2），失败、错误、跳过均为 0；直接依赖及基准模块编译通过。覆盖六产品线资金守恒、Direct 批量共享 maker、跨分片强平撤单、交割/行权及连续 Ledger。详见 [D3 功能验证](validation/d3-complete-20261015.json)。
-- **范围限制**：最终选择器不包含快照/恢复、wallet、JMH/JFR 或压测。首轮误选夹带快照的旧批量测试，产生的失败单独留存，不计入最终验收；没有据此宣称快照问题已修复。D3 为结构及功能验收，不宣称已达到百字节或吞吐目标；C1/C3、D4 等仍独立待办。
+- **范围限制**：最终选择器不包含快照/恢复、wallet、JMH/JFR 或压测。首轮误选夹带快照的旧批量测试，产生的失败单独留存，不计入最终验收；没有据此宣称快照问题已修复。D3 为结构及功能验收，不宣称已达到百字节或吞吐目标；C1/C3 等仍独立待办（D4 后续完成见下节）。
 
-### D4【报告】重复的中继 FIFO
-- **位置**：`TradingOwnerLoop` 的 `Input` 队列（8192 槽，64MB 预算）→ `TradingCoreOwner:91-96` → `PendingClusterIngress`（同样 8192 槽，64MB 预算，:10-35）→ `ClusterCommandWindow`（256）。
-- **证据**：前两层搬运同样 5 个字段，没有业务含义。`TradingOwnerLoop` 的队列交接本身是真线程边界，应保留。
-- **方案**：Owner 直接在环头部 peek 并推进，删除 `PendingClusterIngress` 与 `availableInput`。
+### D4【已完成】删除重复中继，Owner 直接消费唯一输入环
+- **唯一入口**：`TradingOwnerLoop.input` 与 `TradingCoreOwner.ingress` 引用同一个 `OwnerIngressRing`。它沿用 Agrona SPSC 队列和固定预分配槽，承担 Cluster→Owner 的真实线程交接；Owner 直接 peek 原始日志记录，不再搬运到另一 FIFO。
+- **删除**：`PendingClusterIngress`、Owner `enqueueCommittedCommand` / `awaitIngressCapacity`、`availableInput`、`unpublishedInput`、`TradingOwnerLoop.Input` 及回收往返。`OwnerCommandPipelineState` 只持有已准入窗口与控制阶段引用，不再拥有待处理队列。
+- **顺序及租约**：交易进入原 `ClusterCommandWindow` 后释放输入槽，窗口继续持有消息租约；控制命令完成前保留原环头。槽先清空，再由 SPSC poll 发布消费进度，生产者才能绕回重用。失败退出先停止 workers、清理窗口，再释放环内未准入消息；服务端入队失败归还未交接的 decoder 租约。
+- **边界任务**：初始化、角色切换和终止动作继续使用同一个有序输入环；等待前缀只推进其前面的业务及窗口，不能等待当前动作自身或越过它执行后缀。入口阻塞不靠“队列非空”重复唤醒完整 Owner 流程。
+- **容量及配置**：唯一输入环为 8192 槽 / 64 MiB，完整队列或字节预算耗尽时由 Cluster 入口等待进展，不产生业务拒绝。删除第二 FIFO 后总积压预算相应收敛，不再叠加两份 64 MiB。`surprising.aeron.owner-input-batch-size` 仍接受 1–64、默认 64，改为约束每轮直接交易准入数量；原完成工作预算及截止时间保留。输入诊断以同一环的入队时刻计时，不再存在中继阶段驻留。
+- **验证**：HotSpot JDK 27，85 项必要功能用例通过（service 83、基准夹具 2），失败、错误和跳过均为 0；直接依赖及基准模块编译通过。覆盖 8192 槽满环稳定性、两次完整绕回、64 MiB 背压、中断后重试、消息租约、角色边界、六产品线交易/查询及实际 Owner 流水线。见 [D4 功能验证](validation/d4-complete-20261015.json)。
+- **范围**：新增 `OwnerIngressRing` 只封装真实 SPSC 交接及其容量/槽生命周期，没有新增业务镜像、接口、线程、队列层或任务阶段。未执行快照/恢复、wallet、压测或 JMH/JFR；F8 其余缓存行问题及性能收益不在本次完成结论中。
 
 ### D5【报告】空壳 Context 接口层
 - **位置**：`command/` 下 `BalanceCommandContext:6`、`FeePolicyCommandContext:6` 是空 marker；其余 6 个子接口都 `extends CommandResultContext`。
@@ -370,7 +376,7 @@
 2. **局部低风险改动**（先写 JMH，再改，再测）：P1+F1+L1（unpark 标志与 HWM）、F2+L3（结算 ring 填充与 `setRelease`）、P2（Lane scope）。
 3. **删除类**（风险低）：D5、D6。D1 已于 `c2a7c5a6e` 完成；D2、L8 已于 2026-10-15 完成。
 4. **中等改动**：P3（最优价）、P4（指纹）、P5（traceId）、P7（网关 mailbox）、P9–P11、F3–F7、F9、L2。
-5. **需要先补测试与对账**：C3、D4、D8（D3 已完成）。
+5. **需要先补测试与对账**：C3、D8（D3、D4 已完成）。
 6. **最后**：D7、D9、D10（状态枢纽与重复状态），分步进行并跑恢复测试。
 
 ## 10. 未覆盖与不确定项
