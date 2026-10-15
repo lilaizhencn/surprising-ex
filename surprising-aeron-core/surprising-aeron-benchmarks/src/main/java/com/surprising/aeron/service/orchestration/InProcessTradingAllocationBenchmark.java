@@ -60,6 +60,8 @@ public class InProcessTradingAllocationBenchmark {
 
     @Param({"FIXED", "PROPORTIONAL"}) public String oiLimitMode;
     @Param({"1"}) public int symbols;
+    @Param({"4"}) public int accountLanes;
+    private String previousAccountLanes;
 
     @Setup public void setup() {
         if (!streamMode.equals("OPEN_ONLY") && !streamMode.equals("REVERSE"))
@@ -67,6 +69,9 @@ public class InProcessTradingAllocationBenchmark {
         if (symbols != 1 && symbols != 2) throw new IllegalArgumentException("symbols must be 1 or 2");
         if (!clientIdMode.equals("ASCII") && !clientIdMode.equals("UTF8"))
             throw new IllegalArgumentException("clientIdMode must be ASCII or UTF8");
+        if (accountLanes != 2 && accountLanes != 4)
+            throw new IllegalArgumentException("accountLanes must be 2 or 4");
+        previousAccountLanes = System.setProperty("surprising.aeron.account-lanes", Integer.toString(accountLanes));
         var cluster = (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(), new Class<?>[]{Cluster.class},
                 (proxy, method, args) -> switch (method.getName()) {
                     case "role" -> Cluster.Role.LEADER;
@@ -190,7 +195,8 @@ public class InProcessTradingAllocationBenchmark {
         System.out.println("pipelineInterval phase=" + interval.phase + " batchSize=" + batchSize
                 + " startEpochMillis=" + interval.startedAtEpochMillis + " endEpochMillis=" + interval.finishedAtEpochMillis
                 + " terminalMessages=" + interval.terminalMessages + " terminalBusinessOperations=" + interval.terminalBusinessOperations
-                + " streamMode=" + streamMode + " oiLimitMode=" + oiLimitMode + " symbols=" + symbols);
+                + " streamMode=" + streamMode + " oiLimitMode=" + oiLimitMode + " symbols=" + symbols
+                + " accountLanes=" + accountLanes);
     }
 
     @TearDown public void close() {
@@ -227,7 +233,13 @@ public class InProcessTradingAllocationBenchmark {
             }
             System.out.println("pipelineValidation=PASS messages=" + submitted + " businessOperations=" + submitted * batchSize
                     + " unfinished=0 fundsDiff=0 batchSize=" + batchSize);
-        } finally { if (owner != null) owner.terminate(); egress.clear(); }
+        } finally {
+            try { if (owner != null) owner.terminate(); egress.clear(); }
+            finally {
+                if (previousAccountLanes == null) System.clearProperty("surprising.aeron.account-lanes");
+                else System.setProperty("surprising.aeron.account-lanes", previousAccountLanes);
+            }
+        }
     }
 
     private CoreUserStateView userState(long user) {

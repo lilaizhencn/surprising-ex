@@ -79,7 +79,7 @@ final class RuntimeTestStateTransitions {
         return mutate(before, (runtime, identities) -> {
             ActiveOrderIndex activeOrders = new ActiveOrderIndex(before);
             long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
-                    command, 0, runtime.admissionOrders(userId, command.symbolId()));
+                    command, 0, runtime.admissionOrders(userId, identities.symbolId(command.instrumentId())));
             RuntimeOrderStateTransitions.place(runtime, identities, userId, command, UUID.randomUUID(), required);
         });
     }
@@ -89,7 +89,7 @@ final class RuntimeTestStateTransitions {
         return mutate(before, (runtime, identities) -> {
             ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(before, command);
             long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
-                    resolved, openInterestSteps, runtime.admissionOrders(userId, resolved.symbolId()));
+                    resolved, openInterestSteps, runtime.admissionOrders(userId, identities.symbolId(resolved.instrumentId())));
             RuntimeOrderStateTransitions.place(runtime, identities, userId, resolved, commandId, required);
         });
     }

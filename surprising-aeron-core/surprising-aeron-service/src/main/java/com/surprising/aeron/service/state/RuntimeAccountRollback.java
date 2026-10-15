@@ -226,8 +226,15 @@ final class RuntimeAccountRollback {
         captured.add(userId, assetId, balance, lane.pendingReservedUnits(userId, assetId));
     }
 
+    void captureBalanceBefore(AccountLaneState lane, long userId, int assetId) {
+        MatcherSettlementChanges changes = lane.matcherSettlementChanges;
+        LaneBalancePatches captured = changes == null ? patchBalancesBeforeByLane[lane.laneId()]
+                : changes.balancePatches[lane.laneId()];
+        if (!captured.contains(userId, assetId)) captureBalanceBefore(lane, captured, userId, assetId);
+    }
+
     void captureBalanceAfter(AccountLaneState lane, long userId, int assetId) {
-        MatcherSettlementChanges changes = state.currentMatcherSettlementChangesScope();
+        MatcherSettlementChanges changes = lane.matcherSettlementChanges;
         LaneBalancePatches captured = changes == null
                 ? patchBalancesBeforeByLane[lane.laneId()]
                 : changes.balancePatches[lane.laneId()];

@@ -1,0 +1,243 @@
+{
+  "classification": "Explicit Lane arguments for admission and production Matcher plan execution functionally verified; complete Lane/Owner migration remains open",
+  "base_commit": "322e88671",
+  "unique_cases": 209,
+  "rows": [
+    {
+      "test_class": "com.surprising.aeron.service.state.AdmissionSettlementFactTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.RuntimePerpetualFundingProcessorTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.LaneClientIdentitiesTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-followup.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.RuntimeDerivativeMatchProcessorTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-followup.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.ReplacementAdmissionEventTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.RuntimeIdentityRegistryTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.UserRevisionReuseTest",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.LaneAdmissionReuseTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.RuntimeDerivativeFillCalculatorTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.state.ExplicitLaneAccessTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-final.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreAccountLaneQueryTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreUserRevisionTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreSelfTradePrefixTest",
+      "tests": 42,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-final.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreFundsLedgerIndexTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.AsyncFundingCommandTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreActiveLaneIngressTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-final.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest",
+      "tests": 33,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log",
+      "followup_subset": {
+        "tests": 16,
+        "failures": 0,
+        "errors": 0,
+        "log": "tests-final.log"
+      }
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreBusinessStateHashTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreRiskLaneQueryTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CoreTransferLaneLifecycleTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.RealtimeTerminalEmissionTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.ProductionSourceBoundaryTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-first.log"
+    },
+    {
+      "test_class": "com.surprising.aeron.service.orchestration.CorePreflightLaneQueryTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "last_log": "tests-followup.log"
+    }
+  ],
+  "selector": "UserRevisionReuseTest,CoreSelfTradePrefixTest,CoreActiveLaneIngressTest,CoreFinancialLedgerProductionTest,CoreRiskLaneQueryTest,RealtimeTerminalEmissionTest,CoreAccountLaneQueryTest,CoreTransferLaneLifecycleTest,ClusterCommandPipelineTest#atomicOcoPairWithoutSnapshot+blockedBatchRetainsDecodeUntilItsDependencyCommits+rejectedBatchAndIndependentOrdinaryOrderKeepProgressAndFunds+proportionalOiAdmissionUsesTheCompletedGlobalAndSequentialBatchPrefix+internalTriggerPagesWithoutSnapshot+selectedTriggerPriceStreamsWithoutSnapshot,CoreOrderedOrderBatchTest#cancelIdentityAndPreparationNeverReadLaneOrderTables+rejectsMixedUserCancelBatchBeforeAnyMutation+rejectsProductLineMismatchBeforeAnyBatchMutation+sequentialNativeAndAdmissionRejectionsReleaseFundsWithoutRecovery,LaneClientIdentitiesTest,RuntimeIdentityRegistryTest#laneOwnsPreparationAndDuplicateRollbackPreservesLiveIdentity+streamedIdentityHashExactlyMatchesJavaUtf8IncludingMalformedSurrogates+clientIdentityReferenceProtectsAReusedKeyFromAnOlderTerminalRelease,CorePreflightLaneQueryTest,CoreUserRevisionTest,AsyncFundingCommandTest#fundingPagesUsePublishedProgressAndCompleteOnceWithoutOwnerLaneHandoff,RuntimePerpetualFundingProcessorTest,CoreBusinessStateHashTest,CoreFundsLedgerIndexTest,ExplicitLaneAccessTest,RuntimeDerivativeMatchProcessorTest,RuntimeDerivativeFillCalculatorTest,ReplacementAdmissionEventTest,AdmissionSettlementFactTest,LaneAdmissionReuseTest,ProductionSourceBoundaryTest",
+  "followup": "First matrix had 2 failures; adjusted ownership diagnostic assertion and fixed canonical symbol lookup in cold reducer fixture/admission identity. Followup 71 overlapping cases passed. Final 70 overlapping cases passed after foreign-runtime scope guard and explicit trigger completion. Do not add these counts together.",
+  "business_flow": [
+    "Actual worker execute(AccountLaneState lane) passes its Lane through admission, native Matcher plan settlement and derivative/spot scalar fill accumulators",
+    "Order/reservation/position reads use the supplied authority; leverage and balance captures use Lane resident scratch and existing command deltas",
+    "Terminal cancellation/rejection and reservation release update the same Lane balances/orders and independent output buffers; exact user revision and funds checks preserved",
+    "Lane scope entry/exit validate the supplied Lane directly, including foreign runtime rejection; direct cold construction APIs retain their separate value semantics",
+    "Lane identity probes use supplied scratch; known user client identity selection uses existing routing instead of worker thread traversal"
+  ],
+  "coverage": [
+    "Six-product active account ownership and rejection of other runtime/user/Owner",
+    "Existing six-product selftrade, reverse and exact revision, active trading and rejection",
+    "Batch, amend, replace, trigger/OCO and funding/risk/funds/transfer/query/realtime regressions",
+    "Cold scalar cursor rounding/reversal/abort and value parity; in-memory value captures only, no actual snapshot or recovery operation"
+  ],
+  "residual_work": [
+    "currentLaneCommandScope still exists for control/risk/funding/query and cold facades; not fully removed",
+    "Owner by-id Lane table scans and publishedPositionCount",
+    "Client request/session and server lock work plus aligned runtime attribution",
+    "UTF8/UUID/terminal callback allocation and complete Core allocation acceptance",
+    "Remaining Owner business receipts/control/output migration"
+  ],
+  "new_mechanisms": "No new worker, queue, state mirror or generic execution interface. Explicit parameters carry existing authority; existing command buffers and Lane scratch retain their established lifetimes.",
+  "performance_scope": "Affected in-process JMH now accepts accountLanes=2/4 (default4), preserves256inflight/1Matcher and records actual Lane count. Runtime evidence remains local; this is not real-node or whole-Core acceptance.",
+  "excluded": [
+    "actual snapshot/restore/recovery",
+    "wallet",
+    "real-node pressure",
+    "full goal acceptance"
+  ]
+}

@@ -93,47 +93,7 @@ public final class RuntimeDerivativeMatchProcessor {
         }
     }
 
-    static void applyLane(long takerOrderId, List<MatcherEvent> matches,
-                          TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                          CoreInstrument instrument, int settleAssetId,
-                          RuntimeTreasuryDelta treasuryDelta) {
-        if (treasuryDelta == null) throw new IllegalArgumentException("treasury delta is required");
-        OrderRuntime localTaker = runtime.order(takerOrderId);
-        for (int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
-            MatcherEvent match = matches.get(matchIndex);
-            if (match.eventType() != MatcherEventType.TRADE) continue;
-            if (localTaker != null) {
-                localTaker = requireOpen(runtime, takerOrderId);
-                applyFill(runtime, identities, instrument, localTaker, match.price(), match.size(), true,
-                        settleAssetId, treasuryDelta);
-            }
-            OrderRuntime maker = runtime.order(match.matchedOrderId());
-            if (maker != null) {
-                maker = requireOpen(runtime, maker.orderId());
-                applyFill(runtime, identities, instrument, maker, match.price(), match.size(), false,
-                        settleAssetId, treasuryDelta);
-                if (runtime.order(maker.orderId()).canceled()) {
-                    long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
-                    runtime.releaseTerminalReservation(maker.orderId());
-                    if (releaseUnits > 0) runtime.advanceUserRevision(maker.userId());
-                }
-            }
-        }
-        localTaker = runtime.order(takerOrderId);
-        if (localTaker != null) {
-            if (!localTaker.canceled() && (localTaker.timeInForce().immediate()
-                    || localTaker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
-                runtime.replaceOrder(terminal(localTaker));
-            }
-            if (runtime.order(takerOrderId).canceled()) {
-                long releaseUnits = runtime.reservation(takerOrderId).reservedUnits();
-                runtime.releaseTerminalReservation(takerOrderId);
-                if (releaseUnits > 0) runtime.advanceUserRevision(localTaker.userId());
-            }
-        }
-    }
-
-    static void applyLane(long takerOrderId, MatcherSettlementPlan plan, int laneId,
+    static void applyLane(long takerOrderId, MatcherSettlementPlan plan, AccountLaneState lane, int laneId,
                           TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                           CoreInstrument instrument, int settleAssetId,
                           RuntimeTreasuryDelta treasuryDelta,
@@ -142,69 +102,69 @@ public final class RuntimeDerivativeMatchProcessor {
                 || laneId >= runtime.topology().accountLaneCount()) {
             throw new IllegalArgumentException("invalid perpetual matcher settlement plan");
         }
-        OrderRuntime localTaker = runtime.order(takerOrderId);
+        OrderRuntime localTaker = lane.orders.get(takerOrderId);
         if (plan.tradeCount() <= 1) {
-            applyLaneDirect(takerOrderId, plan, laneId, runtime, identities, instrument,
+            applyLaneDirect(takerOrderId, plan, lane, laneId, runtime, identities, instrument,
                     settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
         } else {
-            applyLaneAccumulated(takerOrderId, plan, laneId, runtime, identities, instrument,
+            applyLaneAccumulated(takerOrderId, plan, lane, laneId, runtime, identities, instrument,
                     settleAssetId, treasuryDelta, commitTimestamp, commitPosition, localTaker);
         }
-        localTaker = runtime.order(takerOrderId);
+        localTaker = lane.orders.get(takerOrderId);
         if (localTaker != null) {
             if (!localTaker.canceled() && (localTaker.timeInForce().immediate()
                     || localTaker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
-                runtime.updateOrderStatusInLane(localTaker.orderId(), CoreOrderStatus.CANCELED,
+                runtime.updateOrderStatusInLane(lane, localTaker.orderId(), CoreOrderStatus.CANCELED,
                         Math.incrementExact(localTaker.revision()), commitTimestamp, commitPosition);
             }
-            if (runtime.order(takerOrderId).canceled()) {
-                long releaseUnits = runtime.reservation(takerOrderId).reservedUnits();
-                runtime.releaseTerminalReservationInLane(takerOrderId);
-                if (releaseUnits > 0) runtime.advanceUserRevision(localTaker.userId());
+            if (lane.orders.get(takerOrderId).canceled()) {
+                long releaseUnits = lane.reservations.get(takerOrderId).reservedUnits();
+                runtime.releaseTerminalReservationInLane(lane, takerOrderId);
+                if (releaseUnits > 0) runtime.advanceUserRevision(lane, localTaker.userId());
             }
         }
     }
 
-    private static void applyLaneDirect(long takerOrderId, MatcherSettlementPlan plan, int laneId,
+    private static void applyLaneDirect(long takerOrderId, MatcherSettlementPlan plan, AccountLaneState lane, int laneId,
                                         TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                         CoreInstrument instrument, int settleAssetId,
                                         RuntimeTreasuryDelta treasuryDelta,
                                         long commitTimestamp, long commitPosition) {
-        OrderRuntime localTaker = runtime.order(takerOrderId);
+        OrderRuntime localTaker = lane.orders.get(takerOrderId);
         for (int index = plan.firstMatcherEvent(laneId); index >= 0;
                 index = plan.nextMatcherEvent(index, laneId)) {
             MatcherEvent match = plan.matcherEvent(index);
             if (match.eventType() != MatcherEventType.TRADE
                     || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;
             if (localTaker != null) {
-                localTaker = requireOpen(runtime, takerOrderId);
-                applyFill(runtime, identities, instrument, localTaker, match.price(), match.size(), true,
+                localTaker = requireOpen(lane, takerOrderId);
+                applyFill(runtime, lane, identities, instrument, localTaker, match.price(), match.size(), true,
                         settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
             }
-            OrderRuntime maker = runtime.order(match.matchedOrderId());
+            OrderRuntime maker = lane.orders.get(match.matchedOrderId());
             if (maker != null) {
-                maker = requireOpen(runtime, maker.orderId());
+                maker = requireOpen(lane, maker.orderId());
                 boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
-                applyFill(runtime, identities, instrument, maker, match.price(), match.size(), false,
+                applyFill(runtime, lane, identities, instrument, maker, match.price(), match.size(), false,
                         settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
                 if (makerTerminal) {
-                    long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
-                    runtime.releaseTerminalReservationInLane(maker.orderId());
-                    if (releaseUnits > 0) runtime.advanceUserRevision(maker.userId());
+                    long releaseUnits = lane.reservations.get(maker.orderId()).reservedUnits();
+                    runtime.releaseTerminalReservationInLane(lane, maker.orderId());
+                    if (releaseUnits > 0) runtime.advanceUserRevision(lane, maker.userId());
                 }
             }
         }
     }
 
-    private static void applyLaneAccumulated(long takerOrderId, MatcherSettlementPlan plan, int laneId,
+    private static void applyLaneAccumulated(long takerOrderId, MatcherSettlementPlan plan, AccountLaneState lane, int laneId,
                                              TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                              CoreInstrument instrument, int settleAssetId,
                                              RuntimeTreasuryDelta treasuryDelta,
                                              long commitTimestamp, long commitPosition,
                                              OrderRuntime localTaker) {
         DerivativeSettlementAccumulator accumulator =
-                runtime.accountLanes[laneId].derivativeSettlementAccumulator;
-        accumulator.reset(runtime, identities, instrument, settleAssetId, commitTimestamp, commitPosition);
+                lane.derivativeSettlementAccumulator;
+        accumulator.reset(runtime, lane, identities, instrument, settleAssetId, commitTimestamp, commitPosition);
         try {
             for (int index = plan.firstMatcherEvent(laneId); index >= 0;
                     index = plan.nextMatcherEvent(index, laneId)) {
@@ -214,7 +174,7 @@ public final class RuntimeDerivativeMatchProcessor {
                 if (localTaker != null) {
                     accumulator.apply(takerOrderId, true, match.price(), match.size(), treasuryDelta);
                 }
-                OrderRuntime maker = runtime.order(match.matchedOrderId());
+                OrderRuntime maker = lane.orders.get(match.matchedOrderId());
                 if (maker != null) {
                     accumulator.apply(maker.orderId(), false, match.price(), match.size(), treasuryDelta);
                 }
@@ -234,16 +194,18 @@ public final class RuntimeDerivativeMatchProcessor {
         private final java.util.ArrayDeque<RuntimeDerivativeFillCalculator.FillCursor> free =
                 new java.util.ArrayDeque<>();
         private TradingRuntimeState runtime;
+        private AccountLaneState lane;
         private RuntimeIdentityRegistry identities;
         private CoreInstrument instrument;
         private int settleAssetId;
         private long commitTimestamp;
         private long commitPosition;
 
-        void reset(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+        void reset(TradingRuntimeState runtime, AccountLaneState lane, RuntimeIdentityRegistry identities,
                    CoreInstrument instrument, int settleAssetId,
                    long commitTimestamp, long commitPosition) {
             this.runtime = runtime;
+            this.lane = lane;
             this.identities = identities;
             this.instrument = instrument;
             this.settleAssetId = settleAssetId;
@@ -255,7 +217,7 @@ public final class RuntimeDerivativeMatchProcessor {
                    RuntimeTreasuryDelta treasury) {
             RuntimeDerivativeFillCalculator.FillCursor cursor = cursors.get(orderId);
             if (cursor == null) {
-                OrderRuntime order = requireOpen(runtime, orderId);
+                OrderRuntime order = requireOpen(lane, orderId);
                 long activeOrder = activeOrderByUser.get(order.userId());
                 if (activeOrder != 0 && activeOrder != orderId) flush(activeOrder);
                 LongLongHashMap leverageByUser = order.marginMode()
@@ -265,14 +227,14 @@ public final class RuntimeDerivativeMatchProcessor {
                 if (leverageByUser.containsKey(order.userId())) {
                     leverage = leverageByUser.get(order.userId());
                 } else {
-                    Long configured = runtime.leverage(order.userId(), instrument.instrumentId(), order.marginMode());
+                    Long configured = runtime.leverage(lane, order.userId(), instrument.instrumentId(), order.marginMode());
                     leverage = configured == null ? instrument.maxLeveragePpm() : configured;
                     leverageByUser.put(order.userId(), leverage);
                 }
-                long key = identities.preparedPositionKey(order.userId(), instrument.instrumentId(), order.positionSide());
+                long key = identities.preparedPositionKey(lane, order.userId(), instrument.instrumentId(), order.positionSide());
                 cursor = free.pollFirst();
                 if (cursor == null) cursor = new RuntimeDerivativeFillCalculator.FillCursor();
-                RuntimeDerivativeFillCalculator.begin(cursor, runtime, instrument, order, key,
+                RuntimeDerivativeFillCalculator.begin(cursor, runtime, lane, instrument, order, key,
                         leverage, settleAssetId, commitTimestamp, commitPosition);
                 cursors.put(orderId, cursor);
                 activeOrderByUser.put(order.userId(), orderId);
@@ -294,6 +256,7 @@ public final class RuntimeDerivativeMatchProcessor {
             crossLeverageByUser.clear();
             isolatedLeverageByUser.clear();
             runtime = null;
+            lane = null;
             identities = null;
             instrument = null;
         }
@@ -307,11 +270,11 @@ public final class RuntimeDerivativeMatchProcessor {
         }
 
         private void publishCursor(RuntimeDerivativeFillCalculator.FillCursor cursor) {
-            OrderRuntime order = cursor.publish(runtime, cursor.positionKey(), null);
+            OrderRuntime order = cursor.publish(runtime, lane, cursor.positionKey(), null);
             if (order != null && order.canceled()) {
-                long releaseUnits = runtime.reservation(order.orderId()).reservedUnits();
-                runtime.releaseTerminalReservationInLane(order.orderId());
-                if (releaseUnits > 0) runtime.advanceUserRevision(order.userId());
+                long releaseUnits = lane.reservations.get(order.orderId()).reservedUnits();
+                runtime.releaseTerminalReservationInLane(lane, order.orderId());
+                if (releaseUnits > 0) runtime.advanceUserRevision(lane, order.userId());
             }
         }
     }
@@ -356,20 +319,27 @@ public final class RuntimeDerivativeMatchProcessor {
                                   RuntimeIdentityRegistry identities, CoreInstrument instrument,
                                   OrderRuntime order, long priceTicks, long quantitySteps,
                                   boolean taker, int settleAssetId, RuntimeTreasuryDelta treasuryDelta) {
-        applyFill(runtime, identities, instrument, order, priceTicks, quantitySteps, taker,
+        applyFill(runtime, runtime.accountLaneForUser(order.userId()), identities, instrument, order, priceTicks, quantitySteps, taker,
                 settleAssetId, treasuryDelta, -1, -1);
     }
 
-    private static void applyFill(TradingRuntimeState runtime,
+    private static void applyFill(TradingRuntimeState runtime, AccountLaneState lane,
                                   RuntimeIdentityRegistry identities, CoreInstrument instrument,
                                   OrderRuntime order, long priceTicks, long quantitySteps,
                                   boolean taker, int settleAssetId, RuntimeTreasuryDelta treasuryDelta,
                                        long commitTimestamp, long commitPosition) {
-        Long configuredLeverage = runtime.leverage(order.userId(), instrument.instrumentId(), order.marginMode());
+        Long configuredLeverage = runtime.leverage(lane, order.userId(), instrument.instrumentId(), order.marginMode());
         long leverage = configuredLeverage == null ? instrument.maxLeveragePpm() : configuredLeverage;
-        RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument, order,
-                identities.preparedPositionKey(order.userId(), instrument.instrumentId(), order.positionSide()),
+        RuntimeDerivativeFillCalculator.apply(runtime, lane, identities, instrument, order,
+                identities.preparedPositionKey(lane, order.userId(), instrument.instrumentId(), order.positionSide()),
                 priceTicks, quantitySteps, taker, leverage, settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
+    }
+
+    private static OrderRuntime requireOpen(AccountLaneState lane, long orderId) {
+        OrderRuntime order = lane.orders.get(orderId);
+        if (order == null || order.canceled() || order.remainingQuantitySteps() == 0)
+            throw new IllegalStateException("runtime matched order is not open: " + orderId);
+        return order;
     }
 
     private static OrderRuntime requireOpen(TradingRuntimeState runtime, long orderId) {

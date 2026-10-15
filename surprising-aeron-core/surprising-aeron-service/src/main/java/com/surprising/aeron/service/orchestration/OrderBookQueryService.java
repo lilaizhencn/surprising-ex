@@ -168,7 +168,7 @@ final class OrderBookQueryService {
                     owner.identities.findPositionKeyValueInLane(lane, userId, context.instrument(), command.positionSide()),
                     context.settlementStatus());
             long reserved = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationForQuery(
-                    owner.runtimeState, userId, order, openInterest, identity);
+                    owner.runtimeState, lane, userId, order, openInterest, identity);
             return new CoreResponse(ResponseStatus.OK, commandCount, com.surprising.aeron.protocol.CoreOrderPreflightCodec.encode(
                     new com.surprising.aeron.protocol.CoreOrderPreflightView(order.reservationAsset(), reserved)));
         }

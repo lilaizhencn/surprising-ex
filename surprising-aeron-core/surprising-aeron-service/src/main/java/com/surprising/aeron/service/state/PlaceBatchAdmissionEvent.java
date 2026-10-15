@@ -128,7 +128,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                         }
                     }
                     long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
-                            runtime, userId, order, openInterestSteps[index],
+                            runtime, lane, userId, order, openInterestSteps[index],
                             lane.admissionOrderIndex(symbolIds[index]), key, symbolIds[index], positionKey,
                             lifecycleSettled[index], fundingInProgress[index]);
                     runtime.placeOrderInLane(lane, userId, order, commandId,

@@ -20,7 +20,7 @@ HotSpot JDK 27 的干净构建及 167 项撮合、资金、并发顺序、撤单
 
 ### 2026-10-11 Lane 活动上下文与停车唤醒
 
-`DeterministicExchangeCoreAdapter` 的命令时间戳/scope 和 primitive 用户注册表分别归每个 Matcher 分片线程，不再以一个共享字段替代 ThreadLocal。`TradingRuntimeState.currentLaneCommandScope()` 根据实际工作线程取得所属 Lane，Owner 使用独立的控制 scope；无关查询线程不能借 Owner 的活动 scope 获得写权限。Scope 进入、完成和回收不新增业务镜像。
+`DeterministicExchangeCoreAdapter` 的命令时间戳/scope 和 primitive 用户注册表分别归每个 Matcher 分片线程，不再以一个共享字段替代 ThreadLocal。`TradingRuntimeState.currentLaneCommandScope()` 根据实际工作线程取得所属 Lane，Owner 使用独立的控制 scope；无关查询线程不能借 Owner 的活动 scope 获得写权限。Scope 进入、完成和回收不新增业务镜像。 这是当时移除 ThreadLocal 后的实现，仍有线程身份比较和 worker 线性遍历成本，不能视为 Lane 上下文开销已根除；2026-10-15 的显式 Lane 参数改造继续消除实际业务路径上的反查。
 
 `SettlementLaneWorker` 先公布停车标记，再复查准入邮箱、控制队列、直接 Matcher 事件和所有权交接；生产者在停车标记为 true 时才 unpark，忙时不逐任务调用。仍保留 100µs 定时兜底和关闭唤醒。226项回归及50项边界/微基准测试执行全部通过（含Owner/Lane并发隔离）。固定256窗口的最新真实单节点观测408,903.948业务项/s、资金差/未完成0；CPU限频使容量证据无效，不宣称50万或完整Owner迁移完成。JMH提交边界约1472B/次，整链路仍有对象分配。
 
@@ -324,3 +324,16 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 `FundsCommandIndex` 继续保留全历史资金幂等和原磁盘格式，活跃读写绑定到 Ledger，Owner 直接 get/put 会失败。原单个 DirectCommandSlot 复用 I/O 请求，完成写入先发布结果再唤醒 Owner；没有增加线程、队列或账户镜像。冷构造、序列化及关闭边界保持原职责。
 
 177 个唯一必要用例通过，最后 16 个重叠用例验证完成通知的收尾修改，见 [资金索引 Ledger 验证](../../docs/validation/funds-index-ledger-20261015.json)。覆盖六产品线、结果缓存淘汰后的重复与冲突、四类资金命令、邮箱满、数据库故障及连续请求复用。没有执行快照/恢复、wallet 或真实节点压测。完整 Owner 迁移、显式 Lane 参数、锁归因和完整 Core 分配目标继续处理，不据功能测试宣称性能达标。
+
+
+### 准入与成交结算显式传递 Account Lane（2026-10-15）
+
+`PlaceAdmissionEvent`、批量及替换准入把实际 worker 收到的 `AccountLaneState lane` 传入 `RuntimeOrderAdmission`。校验直接读取该 Lane 的订单、客户端订单号、用户、持仓和杠杆，保留原资金、模式、生命周期和风险检查。配置校验也使用显式 Lane 入口，不再为每次查状态调用 `currentLaneCommandScope()`。
+
+`MatcherSettlementEvent` 把同一个 Lane 交给现货/衍生品的 plan 执行、逐笔及累计成交计算。余额前后值、订单/预留/持仓原位更新、用户修订合并、终态冻结释放及触发完成均使用传入的 Lane 与既有独立收据；不重新按线程寻找业务状态。取消/拒绝直接更新原权威对象与收据，去掉这条生产路径的中间取消结果对象。已无调用者的两种旧 List 版 Lane 执行入口删除。
+
+Scope 进入和退出仍验证真实线程所有权与当前命令边界，但只检查传入的 Lane；另一个 Runtime 的 Lane 不能进入。客户端身份按已知用户路由，Lane 持仓身份查询直接使用该 Lane 的探针。没有新增 worker、队列、账户镜像或通用执行层。冷构造入口继续使用独立值；这不代表所有控制及查询已经迁移。
+
+209 个唯一必要用例覆盖六产品线、成交/反向/自成交、精确修订、拒绝、批量、改单、触发、资金/风险、查询及输出。首轮两项失败分别为所有权提示断言和旧冷夹具未绑定的 symbolId，修正后 71 项相关复验通过；最后的触发完成与外来 Lane guard 再验 70 项，均为重叠用例，见 [显式 Lane 功能验证](../../docs/validation/explicit-lane-20261015.json)。未执行实际快照/恢复、wallet 或真实节点压测。
+
+`currentLaneCommandScope()` 仍存在于尚未迁移的控制、风险、资金费和查询/冷门面；Owner 按 ID 扫表和持仓计数、客户端/服务端锁归因及剩余分配也继续处理。不能把本节理解为上下文成本全部消除、Owner 迁移完成或完整 Core 百字节目标达标。数值诊断仅保留本地。

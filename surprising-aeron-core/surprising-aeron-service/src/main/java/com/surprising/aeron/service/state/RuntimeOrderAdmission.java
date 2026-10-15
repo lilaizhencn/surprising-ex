@@ -39,13 +39,14 @@ public final class RuntimeOrderAdmission {
         if (runtime == null || identities == null || order == null || activeOrders == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime order admission input");
         }
+        AccountLaneState lane = runtime.accountLaneForUser(userId);
         AdmissionIdentity identity = admissionIdentity(runtime, identities, userId, order);
         String excludedSymbol = null;
         if (excludedOrderId != 0) {
-            OrderRuntime excluded = runtime.order(excludedOrderId);
+            OrderRuntime excluded = lane.orders.get(excludedOrderId);
             if (excluded != null) excludedSymbol = identities.instrumentId(excluded.symbolId());
         }
-        return requiredReservation(runtime, userId, order, openInterestSteps, activeOrders,
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
                 excludedOrderId, identity.clientKey(), identity.symbolId(), identity.positionKey(),
                 identity.lifecycleSettled(), identity.fundingInProgress(), excludedSymbol);
     }
@@ -56,7 +57,7 @@ public final class RuntimeOrderAdmission {
         if (runtime == null || identities == null || order == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime order admission identity");
         }
-        int symbolId = order.symbolId();
+        int symbolId = identities.symbolId(order.instrumentId());
         return new AdmissionIdentity(identities.findClientKeyValue(userId, order.clientOrderId()),
                 symbolId,
                 identities.findPositionKeyValue(userId, order.instrument(), order.positionSide()),
@@ -64,74 +65,75 @@ public final class RuntimeOrderAdmission {
     }
 
     public static long requiredReservationPrepared(
-            TradingRuntimeState runtime, long userId, ResolvedPlaceOrder order,
+            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders, AdmissionIdentity identity) {
         if (runtime == null || order == null || activeOrders == null || identity == null || userId <= 0) {
             throw new IllegalArgumentException("invalid prepared runtime order admission input");
         }
-        return requiredReservation(runtime, userId, order, openInterestSteps, activeOrders,
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
                 0, identity.clientKey(), identity.symbolId(), identity.positionKey(),
                 identity.lifecycleSettled(), identity.fundingInProgress(), null);
     }
 
     public static long requiredReservationPrepared(
-            TradingRuntimeState runtime, long userId, ResolvedPlaceOrder order,
+            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders,
             long clientKey, int symbolId, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress) {
         if (runtime == null || order == null || activeOrders == null || userId <= 0) {
             throw new IllegalArgumentException("invalid primitive prepared runtime order admission input");
         }
-        return requiredReservation(runtime, userId, order, openInterestSteps, activeOrders,
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
                 0, clientKey, symbolId, positionKey, lifecycleSettled, fundingInProgress, null);
     }
 
     static long requiredReplacementReservationPrepared(
-            TradingRuntimeState runtime, long userId, ResolvedPlaceOrder order,
+            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
             long clientKey, long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
-        OrderRuntime original = runtime.order(excludedOrderId);
+        OrderRuntime original = lane.orders.get(excludedOrderId);
         String originalSymbol = original != null && original.symbolId() == order.symbolId()
                 ? order.instrumentId() : null;
-        return requiredReservation(runtime, userId, order, openInterestSteps, activeOrders,
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
                 excludedOrderId, clientKey, order.symbolId(), positionKey,
                 lifecycleSettled, fundingInProgress, originalSymbol);
     }
 
     private static long requiredReservation(
-            TradingRuntimeState runtime, long userId, ResolvedPlaceOrder order,
+            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
             long clientKey, int symbolId, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol) {
-        return requiredReservation(runtime, userId, order, openInterestSteps, activeOrders, excludedOrderId,
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders, excludedOrderId,
                 clientKey, symbolId, positionKey, lifecycleSettled, fundingInProgress, excludedSymbol, null);
     }
 
     /** 预检只读所属Lane及Owner已固定的市场输入，不分配身份、创建订单或冻结资金。 */
-    public static long requiredReservationForQuery(TradingRuntimeState runtime, long userId,
+    public static long requiredReservationForQuery(TradingRuntimeState runtime, AccountLaneState lane, long userId,
             ResolvedPlaceOrder order, long openInterestSteps, AdmissionIdentity identity) {
-        AccountLaneState lane = runtime.currentLaneCommandScope();
         if (lane == null || runtime.topology().accountLaneId(userId) != lane.laneId()
                 || order == null || identity == null)
             throw new IllegalStateException("preflight query requires its owning Lane scope");
-        return requiredReservation(runtime, userId, order, openInterestSteps,
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps,
                 lane.admissionOrderIndex(identity.symbolId()), 0, identity.clientKey(), identity.symbolId(),
                 identity.positionKey(), identity.lifecycleSettled(), identity.fundingInProgress(), null, order.instrument());
     }
 
     private static long requiredReservation(
-            TradingRuntimeState runtime, long userId, ResolvedPlaceOrder order,
+            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
             long clientKey, int symbolId, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol, CoreInstrument queryInstrument) {
-        if (runtime.order(order.orderId()) != null && order.orderId() != excludedOrderId) {
+        runtime.requireLaneAccess(lane, userId);
+        if (lane.orders.get(order.orderId()) != null && order.orderId() != excludedOrderId) {
             throw rejected("DUPLICATE_ORDER_ID", "orderId already exists");
         }
-        long clientOrderId = clientKey == 0 ? 0 : runtime.orderIdByClientValue(userId, clientKey);
+        var clientOrders = lane.clientOrderIndex.get(userId);
+        long clientOrderId = clientKey == 0 || clientOrders == null ? 0 : clientOrders.get(clientKey);
         if (clientOrderId != 0 && clientOrderId != excludedOrderId) {
             throw rejected("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
         }
-        CoreInstrument instrument = queryInstrument == null ? runtime.instrument(order.instrumentId()) : queryInstrument;
+        CoreInstrument instrument = queryInstrument == null ? runtime.instrument(lane, order.instrumentId()) : queryInstrument;
         if (instrument == null || instrument != order.instrument()) {
             throw rejected("INSTRUMENT_ORDER_MISMATCH", "order instrument differs from Runtime");
         }
@@ -141,11 +143,11 @@ public final class RuntimeOrderAdmission {
         if (fundingInProgress) {
             throw rejected("LIFECYCLE_IN_PROGRESS", "funding position cut is in progress");
         }
-        validateReservation(runtime.productLine().isDerivative(), instrument, order);
-        UserRuntime user = runtime.user(userId);
+        validateReservation(instrument.contractType().productLine().isDerivative(), instrument, order);
+        UserRuntime user = lane.users.get(userId);
         CorePositionMode positionMode = user == null ? CorePositionMode.ONE_WAY : user.positionMode();
-        PositionRuntime position = positionKey == 0 ? null : runtime.position(positionKey);
-        OrderRuntime excluded = excludedOrderId == 0 ? null : runtime.order(excludedOrderId);
+        PositionRuntime position = positionKey == 0 ? null : lane.positions.get(positionKey);
+        OrderRuntime excluded = excludedOrderId == 0 ? null : lane.orders.get(excludedOrderId);
         if (excludedOrderId != 0 && (excluded == null || excluded.userId() != userId
                 || !order.instrumentId().equals(excludedSymbol))) {
             throw rejected("ORDER_NOT_FOUND", "excluded replacement order is invalid");
@@ -156,9 +158,9 @@ public final class RuntimeOrderAdmission {
                 userId, order.instrumentId(), order.positionSide(), order.side(), conflictingMode);
         validatePositionIdentity(
                 positionMode, position, order, admissionSummary, conflictingMode, excluded);
-        validateReduceOnly(runtime.productLine().isDerivative(), position, order,
+        validateReduceOnly(instrument.contractType().productLine().isDerivative(), position, order,
                 admissionSummary, userId, excluded);
-        long leverage = effectiveLeverage(runtime, instrument, order, userId);
+        long leverage = effectiveLeverage(lane, instrument, order, userId);
         validateRiskLimits(runtime, instrument, position, order, admissionSummary, userId,
                 openInterestSteps, excluded, leverage);
         return ProductTradingRulesRegistry.forProductLine(instrument.contractType().productLine())
@@ -245,7 +247,7 @@ public final class RuntimeOrderAdmission {
             TradingRuntimeState runtime, CoreInstrument instrument, PositionRuntime position,
             ResolvedPlaceOrder order, AdmissionSummary admissionSummary, long userId, long openInterestSteps,
             OrderRuntime excluded, long leverage) {
-        if (!runtime.productLine().isDerivative() || order.reduceOnly()) return;
+        if (!instrument.contractType().productLine().isDerivative() || order.reduceOnly()) return;
         long current = position == null ? 0 : position.signedQuantitySteps();
         long pending = admissionSummary.pendingQuantity();
         if (excluded != null && excluded.status() == CoreOrderStatus.OPEN && !excluded.reduceOnly()
@@ -285,10 +287,14 @@ public final class RuntimeOrderAdmission {
     }
 
     private static long effectiveLeverage(
-            TradingRuntimeState runtime, CoreInstrument instrument,
+            AccountLaneState lane, CoreInstrument instrument,
             ResolvedPlaceOrder order, long userId) {
-        if (!runtime.productLine().isDerivative()) return instrument.maxLeveragePpm();
-        Long configured = runtime.leverage(userId, instrument.instrumentId(), order.marginMode());
+        if (!instrument.contractType().productLine().isDerivative()) return instrument.maxLeveragePpm();
+        var lookup = lane.leverageLookup;
+        lookup.set(userId, instrument.instrumentId(), order.marginMode());
+        Long configured;
+        try { configured = lane.cold.leverages.get(lookup); }
+        finally { lookup.clear(); }
         return configured == null ? instrument.maxLeveragePpm() : configured;
     }
 

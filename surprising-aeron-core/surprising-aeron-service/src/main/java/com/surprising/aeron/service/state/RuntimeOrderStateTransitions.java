@@ -65,7 +65,7 @@ public final class RuntimeOrderStateTransitions {
             throw new IllegalStateException("trigger child requires its Account Lane");
         long positionKey = identities.findPositionKeyValueInLane(lane, userId,
                 command.instrument(), command.positionSide());
-        long required = RuntimeOrderAdmission.requiredReservationPrepared(runtime, userId, command,
+        long required = RuntimeOrderAdmission.requiredReservationPrepared(runtime, lane, userId, command,
                 openInterestSteps, lane.admissionOrderIndex(command.symbolId()), clientKey,
                 command.symbolId(), positionKey, lifecycleSettled, fundingInProgress);
         placePrepared(runtime, userId, command, commandId, required, clientKey, command.symbolId(), assetId);

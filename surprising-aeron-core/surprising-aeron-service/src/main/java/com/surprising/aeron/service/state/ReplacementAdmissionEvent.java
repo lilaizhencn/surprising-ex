@@ -65,7 +65,7 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
             CoreOrderDecisionResolver.resolveInto(this, decision, userId, command);
             long positionKey = identities.findPositionKeyValueInLane(lane, userId, instrument(), positionSide());
             long required = RuntimeOrderAdmission.requiredReplacementReservationPrepared(
-                    runtime, userId, this, openInterestSteps, lane.admissionOrderIndex(symbolId()),
+                    runtime, lane, userId, this, openInterestSteps, lane.admissionOrderIndex(symbolId()),
                     originalOrderId, identities.findClientKeyValueInLane(lane, userId, clientOrderId()), positionKey,
                     decision.lifecycleSettled(), decision.fundingInProgress());
             if (amend != null && runtime.productLine() == com.surprising.product.api.ProductLine.SPOT) {

@@ -87,7 +87,7 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
             preparedClientKey = identity;
             long clientKey = RuntimeIdentityRegistry.clientKeyValue(identity);
             long positionKey = identities.findPositionKeyValueInLane(lane, userId, instrument(), positionSide());
-            long required = RuntimeOrderAdmission.requiredReservationPrepared(runtime, userId, this,
+            long required = RuntimeOrderAdmission.requiredReservationPrepared(runtime, lane, userId, this,
                     openInterestSteps, lane.admissionOrderIndex(symbolId()), clientKey, symbolId(), positionKey,
                     decision.context().lifecycleSettled(), decision.context().fundingInProgress());
             PositionRuntime position = positionKey == 0 ? null : lane.positions.get(positionKey);

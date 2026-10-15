@@ -88,7 +88,7 @@ class LaneClientIdentitiesTest {
             long key = identities.prepareClientKey(7, "retained-name");
             runtime.startAccountLanes();
             assertThatThrownBy(() -> identities.findClientKeyValue(7, "retained-name"))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("Account Lane");
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("bound to another thread");
             assertThatThrownBy(() -> identities.clientOrderId(7, key)).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> identities.prepareClientKey(7, "foreign-write")).isInstanceOf(IllegalStateException.class);
             String name = AccountLaneQueryTestSupport.read(runtime, 7, () -> identities.clientOrderId(7, key));

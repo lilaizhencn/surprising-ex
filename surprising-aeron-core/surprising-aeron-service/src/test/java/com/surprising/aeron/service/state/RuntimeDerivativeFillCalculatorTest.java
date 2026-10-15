@@ -39,7 +39,7 @@ class RuntimeDerivativeFillCalculatorTest {
             var before = RuntimeSnapshotBuilder.capture(batched, 1);
             try {
                 for (long price : new long[]{111, 109, 113, 107}) {
-                    RuntimeDerivativeFillCalculator.apply(sequential, identities, instrument, sequential.order(11),
+                    RuntimeDerivativeFillCalculator.apply(sequential, sequential.accountLaneForUser(7), identities, instrument, sequential.order(11),
                             key, price, 1, true, 10_000_000, asset, expectedTreasury, 555, 999);
                     cursor.applyNext(price, 1, actualTreasury);
                 }

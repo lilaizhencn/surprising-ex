@@ -149,7 +149,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
                         lane, userId, instrument(), positionSide());
                 int symbolId = symbolId();
                 long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
-                        runtime, userId, this, openInterestSteps,
+                        runtime, lane, userId, this, openInterestSteps,
                         lane.admissionOrderIndex(symbolId), preparedClientKey, symbolId, positionKey,
                         lifecycleSettled, fundingInProgress);
                 reservedAmount = requiredReservation;

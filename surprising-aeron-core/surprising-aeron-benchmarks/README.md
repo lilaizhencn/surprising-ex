@@ -70,3 +70,6 @@ JDK 27/G1，1 fork/1 thread，3×1s 预热、5×1s 测量的独立 `-prof gc` �
 基准内嵌HotSpot 27所需访问参数、1GiB固定G1和BUSY_SPIN设置。JMH `gc.alloc.rate.norm` 单位为字节/Core消息，除以batchSize才是字节/业务订单。自定义 `surprising.InProcessAllocationInterval` 记录每个预热/测量窗口的终态计数，JFR归因应只选择MEASUREMENT窗口。它不包含实际Aeron网络、consensus、Archive和realtime输出，不能作为真实单节点容量或完整Core分配验收。
 
 分配诊断在每个迭代结束后输出一次 `pipelineInterval`，包含epoch起止时间及终态计数，便于与同机CPU/swap采样对齐。该输出位于交易循环之外，JFR事件也保留相同边界；仅使用正式窗口及其前后系统采样判断环境有效性，启动/预热单独列出。
+
+
+`InProcessTradingAllocationBenchmark` 新增 `accountLanes` 参数，默认仍为 4，可显式选择 2 作独立诊断。初始化前固定实际拓扑，终止 worker 后恢复原属性；每个正式区间同时记录 Lane 数。该入口覆盖显式 Lane 参数贯穿的真实准入、撮合结算和终态响应，窗口保持 256、Matcher 为 1。它使用同 JVM 的 ClientSession 消费桩，不代表真实 Aeron 网络、Archive 或完整 Core 容量；不同 Lane 配置的结果必须分别报告。

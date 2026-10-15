@@ -36,11 +36,11 @@ public final class RuntimeDerivativeFillCalculator {
                       long positionKey, long fillPriceTicks, long fillQuantitySteps,
                       boolean taker, long leveragePpm, int settleAssetId,
                       RuntimeTreasuryDelta treasuryDelta) {
-        apply(runtime, identities, instrument, order, positionKey, fillPriceTicks, fillQuantitySteps,
+        apply(runtime, runtime.accountLaneForUser(order.userId()), identities, instrument, order, positionKey, fillPriceTicks, fillQuantitySteps,
                 taker, leveragePpm, settleAssetId, treasuryDelta, -1, -1);
     }
 
-    static void apply(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    static void apply(TradingRuntimeState runtime, AccountLaneState lane, RuntimeIdentityRegistry identities,
                       CoreInstrument instrument, OrderRuntime order,
                       long positionKey, long fillPriceTicks, long fillQuantitySteps,
                       boolean taker, long leveragePpm, int settleAssetId,
@@ -61,26 +61,26 @@ public final class RuntimeDerivativeFillCalculator {
         if (fillQuantitySteps > order.remainingQuantitySteps()) {
             throw new IllegalStateException("fill exceeds runtime order remaining quantity");
         }
-        ReservationRuntime reservation = runtime.reservation(order.orderId());
-        BalanceRuntime balance = runtime.balance(order.userId(), settleAssetId);
+        ReservationRuntime reservation = lane.reservations.get(order.orderId());
+        BalanceRuntime balance = runtime.balance(lane, order.userId(), settleAssetId);
         if (reservation == null || balance == null || reservation.userId() != order.userId()
                 || reservation.assetId() != settleAssetId) {
             throw new IllegalStateException("runtime fill entities are missing: " + order.orderId());
         }
-        PositionRuntime current = runtime.position(positionKey);
+        PositionRuntime current = lane.positions.get(positionKey);
         if (current != null && current.userId() != order.userId()) {
             throw new IllegalStateException("runtime position owner mismatch: " + positionKey);
         }
 
-        MarkPriceRuntime riskMark = runtime.markPrice(order.symbolId());
+        MarkPriceRuntime riskMark = runtime.markPrice(lane, order.symbolId());
         if (instrument.contractType().isOption()) OptionFillCalculator.requireRiskMark(riskMark);
-        int laneId = runtime.accountLaneId(order.userId());
-        FillCursor cursor = runtime.accountLanes[laneId].singleFillCursor;
+        runtime.requireLaneAccess(lane, order.userId());
+        FillCursor cursor = lane.singleFillCursor;
         try {
             cursor.reset(instrument, order, reservation, current, balance.availableUnits(),
                     balance.lockedUnits(), settleAssetId, riskMark);
             cursor.step(fillPriceTicks, fillQuantitySteps, taker, leveragePpm, commitTimestamp, commitPosition);
-            cursor.publish(runtime, positionKey, treasuryDelta);
+            cursor.publish(runtime, lane, positionKey, treasuryDelta);
         } finally { cursor.clear(); }
     }
 
@@ -158,25 +158,25 @@ public final class RuntimeDerivativeFillCalculator {
             return new PositionRuntime(o.userId(), o.symbolId(), settleAssetId, o.marginMode(), o.positionSide(),
                     o.instrument(), quantity, entryPrice, entryValue, realizedPnl, margin);
         }
-        OrderRuntime publish(TradingRuntimeState runtime, long positionKey, RuntimeTreasuryDelta treasury) {
+        OrderRuntime publish(TradingRuntimeState runtime, AccountLaneState lane, long positionKey, RuntimeTreasuryDelta treasury) {
             if (fills == 0) return null;
             CoreOrderStatus nextStatus = remaining == 0 ? CoreOrderStatus.FILLED : originalOrder.status();
             long feeDelta = Math.subtractExact(cumulativeFee, originalOrder.cumulativeFeeUnits());
-            if (runtime.currentLaneCommandScope() != null && runtime.currentMatcherSettlementChangesScope() != null) {
+            if (lane.matcherSettlementChanges != null) {
                 // Lane-owned settlement mutates the existing primitive state. The helper methods
                 // append one immutable after-image to LaneCommitDelta; no replacement chain is built.
-                runtime.updateReservationInLane(originalOrder.orderId(), consumed, originalReservation.releasedUnits(), remaining != 0);
-                runtime.replaceBalance(originalOrder.userId(), settleAssetId, available, locked);
-                runtime.updatePositionInLane(positionKey, originalOrder.userId(), originalOrder.symbolId(), settleAssetId,
+                runtime.updateReservationInLane(lane, originalOrder.orderId(), consumed, originalReservation.releasedUnits(), remaining != 0);
+                runtime.replaceBalance(lane, originalOrder.userId(), settleAssetId, available, locked);
+                runtime.updatePositionInLane(lane, positionKey, originalOrder.userId(), originalOrder.symbolId(), settleAssetId,
                         originalOrder.instrument(), quantity, entryPrice, entryValue,
                         realizedPnl, margin, originalOrder.marginMode(), originalOrder.positionSide());
-                OrderRuntime nextOrder = runtime.updateOrderInLane(originalOrder.orderId(), executed, remaining,
+                OrderRuntime nextOrder = runtime.updateOrderInLane(lane, originalOrder.orderId(), executed, remaining,
                         feeDelta, executedValueHigh, executedValueLow, nextStatus, orderRevision, timestamp, clusterPosition);
                 if (treasury != null) {
                     treasury.addFee(settleAssetId, feeTreasuryUnits);
                     treasury.addClearing(settleAssetId, clearingTreasuryUnits);
                 }
-                runtime.advanceUserRevision(originalOrder.userId(), fills);
+                runtime.advanceUserRevision(lane, originalOrder.userId(), fills);
                 return nextOrder;
             }
             // Synchronous/recovery path retains value semantics and is outside the Lane hot path.
@@ -192,7 +192,7 @@ public final class RuntimeDerivativeFillCalculator {
             runtime.advanceUserRevision(originalOrder.userId(), fills);
             return nextOrder;
         }
-        OrderRuntime publish(TradingRuntimeState runtime) { return publish(runtime, positionKey, null); }
+        OrderRuntime publish(TradingRuntimeState runtime) { return publish(runtime, runtime.accountLaneForUser(originalOrder.userId()), positionKey, null); }
         void clear() {
             instrument = null; originalOrder = null; originalReservation = null; riskMark = null;
             fills = 0; positionKey = 0; leveragePpm = 0;
@@ -215,6 +215,13 @@ public final class RuntimeDerivativeFillCalculator {
     static void begin(FillCursor cursor, TradingRuntimeState runtime, CoreInstrument instrument,
                       OrderRuntime order, long positionKey, long leverage, int assetId,
                       long timestamp, long position) {
+        begin(cursor, runtime, runtime.accountLaneForUser(order.userId()), instrument, order,
+                positionKey, leverage, assetId, timestamp, position);
+    }
+
+    static void begin(FillCursor cursor, TradingRuntimeState runtime, AccountLaneState lane, CoreInstrument instrument,
+                      OrderRuntime order, long positionKey, long leverage, int assetId,
+                      long timestamp, long position) {
         if (cursor == null || runtime == null || instrument == null || order == null
                 || order.symbolId() < 0 || leverage <= 0 || assetId < 0
                 || instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
@@ -222,15 +229,15 @@ public final class RuntimeDerivativeFillCalculator {
             throw new IllegalArgumentException("invalid perpetual fill cursor");
         }
         if (cursor.originalOrder != null) throw new IllegalStateException("perpetual fill cursor is still active");
-        BalanceRuntime balance = runtime.balance(order.userId(), assetId);
-        ReservationRuntime reservation = runtime.reservation(order.orderId());
+        BalanceRuntime balance = runtime.balance(lane, order.userId(), assetId);
+        ReservationRuntime reservation = lane.reservations.get(order.orderId());
         if (balance == null || reservation == null || reservation.userId() != order.userId()
                 || reservation.assetId() != assetId) {
             throw new IllegalStateException("runtime fill entities are missing: " + order.orderId());
         }
-        MarkPriceRuntime mark = runtime.markPrice(order.symbolId());
+        MarkPriceRuntime mark = runtime.markPrice(lane, order.symbolId());
         if (instrument.contractType().isOption()) OptionFillCalculator.requireRiskMark(mark);
-        cursor.reset(instrument, order, reservation, runtime.position(positionKey),
+        cursor.reset(instrument, order, reservation, lane.positions.get(positionKey),
                 balance.availableUnits(), balance.lockedUnits(), assetId, mark);
         cursor.positionKey = positionKey;
         cursor.leveragePpm = leverage;

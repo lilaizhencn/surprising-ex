@@ -77,16 +77,17 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
                 OrderRuntime order = lane.orders.get(orderId);
                 // A sequential SPOT amend releases the original in its reservation task.
                 // This batch event still owns its commit metadata and terminal retirement.
-                if (!commitLane && runtime.productLine() == com.surprising.product.api.ProductLine.SPOT
-                        && order != null && order.userId() == userId && order.status() == CoreOrderStatus.CANCELED) {
+                if (!commitLane && order != null && order.productLine() == com.surprising.product.api.ProductLine.SPOT
+                        && order.userId() == userId && order.status() == CoreOrderStatus.CANCELED) {
                     ReservationRuntime reservation = lane.reservations.get(orderId);
                     if (reservation == null || reservation.reservedUnits() != 0) {
                         throw new IllegalStateException("canceled spot batch order retained locked funds");
                     }
                     // Include the terminal in this event even when timestamp/position are unchanged.
-                    runtime.replaceOrder(order.withCommitMetadata(commitTimestamp, commitClusterPosition));
+                    runtime.updateOrderStatusInLane(lane, orderId, order.status(), order.revision(),
+                            commitTimestamp, commitClusterPosition);
                 } else {
-                    runtime.cancelOrderInLane(userId, orderId, commitTimestamp, commitClusterPosition);
+                    runtime.cancelOrderInLane(lane, userId, orderId, commitTimestamp, commitClusterPosition);
                 }
                 // 两条分支均已在构造终态时写入本次提交元数据，无需再查订单补写。
             }

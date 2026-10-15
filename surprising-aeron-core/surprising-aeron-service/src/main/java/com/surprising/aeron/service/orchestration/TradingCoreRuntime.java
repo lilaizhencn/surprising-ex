@@ -1195,7 +1195,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     userId, resolved.clientOrderId());
             try {
                 long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationPrepared(
-                        runtimeState, userId, resolved, openInterestSteps, runtimeState.admissionOrders(userId, resolved.symbolId()), admissionIdentity);
+                        runtimeState, runtimeState.accountLaneForUser(userId), userId, resolved, openInterestSteps, runtimeState.admissionOrders(userId, resolved.symbolId()), admissionIdentity);
                 RuntimeOrderStateTransitions.placePrepared(runtimeState, userId, resolved,
                         commandId, requiredReservation,
                         com.surprising.aeron.service.state.RuntimeIdentityRegistry.clientKeyValue(preparedClientKey),

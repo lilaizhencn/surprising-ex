@@ -990,7 +990,7 @@ public final class MatcherSettlementEvent implements
                            OrderRuntime admissionVersion) {
         if (cancellation) {
             if (!value.rejectedTaker())
-                runtime.cancelOrderInLane(value.activeUserId(), value.takerOrderId(),
+                runtime.cancelOrderInLane(lane, value.activeUserId(), value.takerOrderId(),
                         commitTimestamp, commitClusterPosition);
             return;
         }
@@ -1003,23 +1003,23 @@ public final class MatcherSettlementEvent implements
             long orderId = value.preCancellationOrderId(index);
             OrderRuntime order = lane.orders.get(orderId);
             if (order != null && order.status() == CoreOrderStatus.OPEN) {
-                runtime.cancelOrderInLane(order.userId(), orderId);
+                runtime.cancelOrderInLane(lane, order.userId(), orderId);
             }
         }
         if (value.rejectedTaker()) {
-            if (runtime.currentLaneOwns(value.activeUserId()))
-                runtime.rejectOrderInLane(value.activeUserId(), value.takerOrderId(), commitTimestamp, commitClusterPosition);
-        } else if (runtime.productLine().isDerivative()) {
-            RuntimeDerivativeMatchProcessor.applyLane(value.takerOrderId(), value, laneId,
+            if (lane.laneId() == runtime.accountLaneId(value.activeUserId()))
+                runtime.rejectOrderInLane(lane, value.activeUserId(), value.takerOrderId(), commitTimestamp, commitClusterPosition);
+        } else if (valueInstrument.contractType().productLine().isDerivative()) {
+            RuntimeDerivativeMatchProcessor.applyLane(value.takerOrderId(), value, lane, laneId,
                     runtime, identities, valueInstrument, valueSettleAssetId, delta, commitTimestamp, commitClusterPosition);
         } else {
-            RuntimeSpotMatchProcessor.applyLane(value.takerOrderId(), value, laneId,
+            RuntimeSpotMatchProcessor.applyLane(value.takerOrderId(), value, lane, laneId,
                     runtime, valueInstrument, valueBaseAssetId, valueQuoteAssetId, delta, commitTimestamp, commitClusterPosition);
         }
         runtime.completeMatcherPendingReservations(lane, value, admissionVersion);
         publishAdmittedState(lane, value, admissionVersion);
         var trigger = value.completedTrigger();
-        if (trigger != null && runtime.currentLaneOwns(trigger.userId())) runtime.putTriggerOrder(trigger);
+        if (trigger != null && lane.laneId() == runtime.accountLaneId(trigger.userId())) runtime.putTriggerOrder(lane, trigger);
     }
 
     /**
@@ -1036,14 +1036,14 @@ public final class MatcherSettlementEvent implements
         long orderId = admitted != null ? admitted.orderId()
                 : eventAdmission ? admissionOrderId : value.takerOrderId();
         if ((admitted == null && value.resolvedTaker() == null && !eventAdmission)
-                || !runtime.currentLaneOwns(userId)) return;
-        runtime.publishUser(userId, lane.users.get(userId));
-        runtime.publishOrder(orderId, lane.orders.get(orderId));
-        runtime.publishReservation(orderId, lane.reservations.get(orderId));
+                || lane.laneId() != runtime.accountLaneId(userId)) return;
+        runtime.publishUser(lane, userId, lane.users.get(userId));
+        runtime.publishOrder(lane, orderId, lane.orders.get(orderId));
+        runtime.publishReservation(lane, orderId, lane.reservations.get(orderId));
     }
 
     private void applyReplacement(AccountLaneState lane, MatcherSettlementPlan value) {
-        if (!runtime.currentLaneOwns(replacement.userId())) return;
+        if (lane.laneId() != runtime.accountLaneId(replacement.userId())) return;
         long userId = replacement.userId();
         OrderRuntime original = lane.orders.get(replacement.originalOrderId());
         UserRuntime user = lane.users.get(userId);
@@ -1054,7 +1054,7 @@ public final class MatcherSettlementEvent implements
                     + replacement.originalOrderRevision() + " user="
                     + (user == null ? "missing" : user.revision()) + '/' + replacement.userRevision());
         for (int index = 0; index < value.preCancellationCount(); index++)
-            runtime.cancelOrderInLane(userId, value.preCancellationOrderId(index),
+            runtime.cancelOrderInLane(lane, userId, value.preCancellationOrderId(index),
                     commitTimestamp, commitClusterPosition);
         if (!accepted()) return;
         OrderRuntime prepared = batchStorage.admittedOrders[0];
@@ -1064,13 +1064,13 @@ public final class MatcherSettlementEvent implements
         long clientKey = RuntimeIdentityRegistry.clientKeyValue(
                 identities.prepareClientKeyInLane(lane, userId, prepared.clientOrderId()));
         replacementIdentityAllocations = lane.clientIdentityAllocations - allocationsBefore;
-        runtime.accountRollback.captureBalanceBefore(userId, replacementAssetId);
+        runtime.accountRollback.captureBalanceBefore(lane, userId, replacementAssetId);
         runtime.placeOrderInLane(lane, userId, replacement.resolved(), directCommandId,
                 replacement.requiredReservationUnits(), clientKey, prepared.symbolId(), replacementAssetId,
                 directCoreSequence, prepared, commitTimestamp, commitClusterPosition);
-        runtime.publishUser(userId, lane.users.get(userId));
-        runtime.publishOrder(prepared.orderId(), lane.orders.get(prepared.orderId()));
-        runtime.publishReservation(prepared.orderId(), lane.reservations.get(prepared.orderId()));
+        runtime.publishUser(lane, userId, lane.users.get(userId));
+        runtime.publishOrder(lane, prepared.orderId(), lane.orders.get(prepared.orderId()));
+        runtime.publishReservation(lane, prepared.orderId(), lane.reservations.get(prepared.orderId()));
         runtime.accountRollback.captureBalanceAfter(lane, userId, replacementAssetId);
     }
 

@@ -78,15 +78,7 @@ public final class RuntimeIdentityRegistry {
 
     private AccountLaneState clientLane(long userId) {
         if (clientRuntime == null) throw new IllegalStateException("client identity requires a runtime");
-        AccountLaneState scoped = clientRuntime.currentLaneCommandScope();
-        int laneId = clientTopology.accountLaneId(userId);
-        if (scoped != null && scoped.laneId() != laneId)
-            throw new IllegalStateException("client identity crossed account Lane");
-        if (scoped == null && clientRuntime.accountLanesStarted && !clientRuntime.ownerLaneAccess)
-            throw new IllegalStateException("client identity access requires its Account Lane");
-        AccountLaneState lane = scoped == null ? clientRuntime.accountLanes[laneId] : scoped;
-        lane.assertOwner();
-        return lane;
+        return clientRuntime.accountLaneForUser(userId);
     }
 
     private LaneClientIdentities clientTable(long userId) {
@@ -146,6 +138,12 @@ public final class RuntimeIdentityRegistry {
 
     private PositionEntry positionEntry(long key) {
         PositionMapLookup lookup = lookupScratch().positionMap;
+        lookup.value = key;
+        return positions.get(lookup);
+    }
+
+    private PositionEntry positionEntry(AccountLaneState lane, long key) {
+        PositionMapLookup lookup = lane.identityLookupScratch.positionMap;
         lookup.value = key;
         return positions.get(lookup);
     }
@@ -295,7 +293,11 @@ public final class RuntimeIdentityRegistry {
     Long findPositionKeyInLane(AccountLaneState lane, long userId, String key) {
         lane.assertOwner();
         if (lane.laneId() != clientTopology.accountLaneId(userId)) throw new IllegalStateException("position identity crossed account Lane");
-        return findPositionIdentity(userId, key);
+        PositionLookup lookup = lane.identityLookupScratch.position;
+        lookup.userId = userId;
+        lookup.key = key;
+        try { return positionKeys.get(lookup); }
+        finally { lookup.key = null; }
     }
 
     long findPositionKeyValueInLane(AccountLaneState lane, long userId, String key) {
@@ -310,7 +312,10 @@ public final class RuntimeIdentityRegistry {
                 || instrument == null || side == null) {
             throw new IllegalStateException("position identity crossed account Lane");
         }
-        return findPositionKeyValue(userId, instrument.instrumentId(), side);
+        long key = positionIdentityKey(userId, instrument.instrumentId(), side);
+        PositionEntry entry = positionEntry(lane, key);
+        return entry != null && entry.identity.userId() == userId
+                && positionNameEquals(entry.identity.positionKey(), instrument.instrumentId(), side) ? key : 0;
     }
 
     public Long findClientKey(long userId, String clientOrderId) {
@@ -414,7 +419,7 @@ public final class RuntimeIdentityRegistry {
             throw new IllegalArgumentException("position identity belongs to another Lane");
         long key = deterministicKey(userId, name);
         while (true) {
-            PositionEntry entry = positionEntry(key);
+            PositionEntry entry = positionEntry(lane, key);
             if (entry == null) {
                 PositionEntry created = new PositionEntry(new PositionIdentity(userId, name), false);
                 entry = positions.putIfAbsent(new PositionMapKey(key), created);
@@ -445,7 +450,7 @@ public final class RuntimeIdentityRegistry {
         }
         long key = positionIdentityKey(userId, instrumentId, side);
         while (true) {
-            PositionEntry entry = positionEntry(key);
+            PositionEntry entry = positionEntry(lane, key);
             if (entry == null) {
                 String name = side == CorePositionSide.NET ? instrumentId : instrumentId + ':' + side.name();
                 PositionEntry created = new PositionEntry(new PositionIdentity(userId, name), false);
@@ -565,6 +570,18 @@ public final class RuntimeIdentityRegistry {
                 || !positionNameEquals(entry.identity.positionKey(), instrumentId, side)) {
             throw new IllegalStateException("position identity was not prepared by the Sequencer");
         }
+        return key;
+    }
+
+    long preparedPositionKey(AccountLaneState lane, long userId, String instrumentId, CorePositionSide side) {
+        lane.assertOwner();
+        if (lane.laneId() != clientTopology.accountLaneId(userId))
+            throw new IllegalStateException("position identity crossed account Lane");
+        long key = positionIdentityKey(userId, instrumentId, side);
+        PositionEntry entry = positionEntry(lane, key);
+        if (entry == null || entry.identity.userId() != userId
+                || !positionNameEquals(entry.identity.positionKey(), instrumentId, side))
+            throw new IllegalStateException("position identity was not prepared by the Sequencer");
         return key;
     }
 
