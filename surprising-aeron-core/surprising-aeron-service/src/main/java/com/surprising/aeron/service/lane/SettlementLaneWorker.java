@@ -164,15 +164,10 @@ public final class SettlementLaneWorker implements AutoCloseable {
         rethrowFailure();
         if (!running) throw new RejectedExecutionException("settlement lane is closed");
         MatcherSettlementRing ring = matcherSettlementRings[matcherShard];
-        int spins = 0;
         while (ring.isFull()) {
             rethrowFailure();
             if (!running) throw new RejectedExecutionException("settlement lane is closed");
-            // The Matcher is the only producer.  A full ring means the Lane is catching up;
-            // apply the configured low-overhead spin policy rather than allocating or failing
-            // a valid settlement merely because a burst crossed the ring capacity.
-            if (spins++ < DIRECT_READY_SPIN_LIMIT) Thread.onSpinWait();
-            else LockSupport.parkNanos(1L);
+            Thread.onSpinWait();
         }
         long position = ring.publish(event);
         signalWork();
@@ -241,14 +236,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     if (resumedHandoff < completedHandoff) {
                         if (!running) break;
                         switch (waitStrategy) {
-                            case BUSY_SPIN -> {
-                                if (idleSpins < BUSY_SPIN_YIELD_THRESHOLD) {
-                                    idleSpins++;
-                                    Thread.onSpinWait();
-                                } else {
-                                    Thread.yield();
-                                }
-                            }
+                            case BUSY_SPIN -> Thread.onSpinWait();
                             case YIELDING -> Thread.yield();
                             case BLOCKING -> parkUntilWork(true);
                         }
@@ -284,8 +272,9 @@ public final class SettlementLaneWorker implements AutoCloseable {
                         directReadySpins = 0;
                         continue;
                     }
-                    if (!running) throw new IllegalStateException("Lane stopped before its matcher payload arrived");
-                    if (directReadySpins++ >= DIRECT_READY_SPIN_LIMIT) {
+                    if (waitStrategy == WaitStrategy.BUSY_SPIN) {
+                        Thread.onSpinWait();
+                    } else if (directReadySpins++ >= DIRECT_READY_SPIN_LIMIT) {
                         parkUntilWork(false);
                         directReadySpins = 0;
                     } else {
@@ -317,27 +306,12 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     // can starve the Owner/Matcher that will make the event executable. After a
                     // short hand-tuned spin, park until the Matcher signals publication.
                     if (waitStrategy == WaitStrategy.BUSY_SPIN) {
-                        if (directReadySpins++ >= DIRECT_READY_SPIN_LIMIT) {
-                            parkUntilWork(false);
-                            directReadySpins = 0;
-                        } else {
-                            Thread.onSpinWait();
-                        }
+                        Thread.onSpinWait();
                         continue;
                     }
                 }
                 switch (waitStrategy) {
-                    case BUSY_SPIN -> {
-                        if (idleSpins < BUSY_SPIN_YIELD_THRESHOLD) {
-                            idleSpins++;
-                            Thread.onSpinWait();
-                        } else if (idleSpins < BUSY_SPIN_PARK_THRESHOLD) {
-                            idleSpins++;
-                            Thread.yield();
-                        } else {
-                            parkUntilWork(false);
-                        }
-                    }
+                    case BUSY_SPIN -> Thread.onSpinWait();
                     case YIELDING -> Thread.yield();
                     case BLOCKING -> {
                         if (idleSpins < spinLimit) {
@@ -484,7 +458,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
     }
 
     private static WaitStrategy configuredWaitStrategy() {
-        String configured = System.getProperty(WAIT_STRATEGY_PROPERTY, WaitStrategy.BLOCKING.name());
+        String configured = System.getProperty(WAIT_STRATEGY_PROPERTY, WaitStrategy.BUSY_SPIN.name());
         try {
             return WaitStrategy.valueOf(configured.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException | NullPointerException exception) {

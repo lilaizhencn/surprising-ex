@@ -19,6 +19,21 @@ class LaneTopologyTest {
     }
 
     @Test
+    void accountLaneCountIsConfigurable() {
+        String key = "surprising.aeron.account-lanes";
+        String previous = System.getProperty(key);
+        try {
+            System.setProperty(key, "2");
+            assertThat(LaneTopology.configured(false).accountLaneCount()).isEqualTo(2);
+            System.setProperty(key, "8");
+            assertThat(LaneTopology.configured(false).accountLaneCount()).isEqualTo(8);
+        } finally {
+            if (previous == null) System.clearProperty(key);
+            else System.setProperty(key, previous);
+        }
+    }
+
+    @Test
     void stableIdsRouteDeterministically() {
         LaneTopology topology = LaneTopology.productionDefault();
 

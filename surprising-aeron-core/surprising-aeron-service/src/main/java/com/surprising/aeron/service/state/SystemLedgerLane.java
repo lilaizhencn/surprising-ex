@@ -15,11 +15,15 @@ public final class SystemLedgerLane implements AutoCloseable {
         default boolean ready() { return true; }
     }
 
+    private static final String WAIT_STRATEGY_PROPERTY = "surprising.aeron.system-ledger-wait-strategy";
+    public enum WaitStrategy { BUSY_SPIN, BLOCKING }
+
     private final TreasuryRuntime ledger;
     private final OneToOneConcurrentArrayQueue<Entry> entries;
     private final Thread producer;
     private final Thread thread;
     private final Consumer<Throwable> failurePublisher;
+    private final WaitStrategy waitStrategy;
     private volatile boolean running = true;
     private volatile boolean started;
     private volatile boolean parked;
@@ -30,6 +34,7 @@ public final class SystemLedgerLane implements AutoCloseable {
             throw new IllegalArgumentException("system ledger, capacity and failure publisher are required");
         this.ledger = ledger;
         this.failurePublisher = failurePublisher;
+        this.waitStrategy = configuredWaitStrategy();
         entries = new OneToOneConcurrentArrayQueue<>(capacity);
         producer = Thread.currentThread();
         thread = new Thread(this::run, "core-system-ledger-lane");
@@ -91,11 +96,13 @@ public final class SystemLedgerLane implements AutoCloseable {
                 }
                 if (!running && entry != null)
                     throw new IllegalStateException("system ledger stopped before settlement was ready");
+                if (waitStrategy == WaitStrategy.BUSY_SPIN) {
+                    Thread.onSpinWait();
+                    continue;
+                }
                 if (spins++ < 256) { Thread.onSpinWait(); continue; }
                 parked = true;
                 try {
-                    // Announce parking before rechecking the same readiness/queue predicate.
-                    // A producer or Lane completion then either prevents park or leaves a permit.
                     Entry next = entries.peek();
                     if (running && (next == null || !next.ready()))
                         LockSupport.parkNanos(this, 100_000L);
@@ -110,6 +117,16 @@ public final class SystemLedgerLane implements AutoCloseable {
         } finally {
             ledger.releaseOwnerForHandoff();
             started = true;
+        }
+    }
+
+    private static WaitStrategy configuredWaitStrategy() {
+        String configured = System.getProperty(WAIT_STRATEGY_PROPERTY, WaitStrategy.BUSY_SPIN.name());
+        try {
+            return WaitStrategy.valueOf(configured.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (RuntimeException failure) {
+            throw new IllegalArgumentException(
+                    WAIT_STRATEGY_PROPERTY + " must be BUSY_SPIN or BLOCKING", failure);
         }
     }
 

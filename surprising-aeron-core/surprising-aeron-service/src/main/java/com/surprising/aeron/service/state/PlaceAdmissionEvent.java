@@ -245,13 +245,9 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
                 throw new IllegalStateException("timed out waiting for place admission sequence="
                         + coreSequence + " lane=" + laneId);
             }
-            if (spins++ < 1_024) Thread.onSpinWait();
-            else {
-                LockSupport.parkNanos(this, 1_000L);
-                spins = 0;
-                if (Thread.currentThread().isInterrupted()) {
-                    throw new IllegalStateException("place admission wait was interrupted");
-                }
+            Thread.onSpinWait();
+            if (Thread.currentThread().isInterrupted()) {
+                throw new IllegalStateException("place admission wait was interrupted");
             }
         }
         CoreResultCode resultCode = rejection == null ? CoreResultCode.NONE

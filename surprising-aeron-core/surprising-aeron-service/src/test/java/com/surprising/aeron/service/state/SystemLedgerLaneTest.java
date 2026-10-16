@@ -170,9 +170,13 @@ class SystemLedgerLaneTest {
 
     @Test
     void accountReceiptPublishedInsideParkingWindowCannotLoseWakeup() throws Exception {
-        TreasuryRuntime ledger = new TreasuryRuntime();
-        AtomicReference<Throwable> failure = new AtomicReference<>();
-        try (var lane = new SystemLedgerLane(ledger, 256, failure::set)) {
+        String key = "surprising.aeron.system-ledger-wait-strategy";
+        String previous = System.getProperty(key);
+        System.setProperty(key, "BLOCKING");
+        try {
+            TreasuryRuntime ledger = new TreasuryRuntime();
+            AtomicReference<Throwable> failure = new AtomicReference<>();
+            try (var lane = new SystemLedgerLane(ledger, 256, failure::set)) {
             for (int iteration = 0; iteration < 512; iteration++) {
                 AtomicBoolean ready = new AtomicBoolean();
                 CountDownLatch parkedWindow = new CountDownLatch(1), releaseCheck = new CountDownLatch(1);
@@ -210,6 +214,10 @@ class SystemLedgerLaneTest {
         }
         assertThat(failure).hasValue(null);
         assertThat(ledger.fee(1)).isEqualTo(1_024);
+        } finally {
+            if (previous == null) System.clearProperty(key);
+            else System.setProperty(key, previous);
+        }
     }
 
     @Test

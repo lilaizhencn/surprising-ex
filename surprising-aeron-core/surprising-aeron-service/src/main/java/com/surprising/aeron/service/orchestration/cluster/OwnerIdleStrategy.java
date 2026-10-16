@@ -60,7 +60,7 @@ public final class OwnerIdleStrategy {
     }
 
     private static WaitStrategy configuredWaitStrategy() {
-        String configured = System.getProperty(WAIT_STRATEGY_PROPERTY, WaitStrategy.ADAPTIVE.name());
+        String configured = System.getProperty(WAIT_STRATEGY_PROPERTY, WaitStrategy.BUSY_SPIN.name());
         try {
             return WaitStrategy.valueOf(configured.trim().toUpperCase(java.util.Locale.ROOT));
         } catch (RuntimeException failure) {

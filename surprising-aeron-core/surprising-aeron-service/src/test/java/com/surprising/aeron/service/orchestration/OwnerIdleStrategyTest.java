@@ -8,20 +8,28 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class OwnerIdleStrategyTest {
+    private static final String PROPERTY = "surprising.aeron.owner-wait-strategy";
+    private String previous;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        previous = System.getProperty(PROPERTY);
+        System.setProperty(PROPERTY, "ADAPTIVE");
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        if (previous == null) System.clearProperty(PROPERTY);
+        else System.setProperty(PROPERTY, previous);
+    }
+
     @Test void busySpinStrategyDoesNotEnterCompletionProbe() {
-        String property = "surprising.aeron.owner-wait-strategy";
-        String previous = System.getProperty(property);
-        try {
-            System.setProperty(property, "BUSY_SPIN");
-            var probes = new java.util.concurrent.atomic.AtomicInteger();
-            var idle = new OwnerIdleStrategy(() -> { probes.incrementAndGet(); return false; });
-            idle.bindOwner();
-            for (int i = 0; i < 10_000; i++) idle.idle(0, true);
-            assertThat(probes.get()).isZero();
-        } finally {
-            if (previous == null) System.clearProperty(property);
-            else System.setProperty(property, previous);
-        }
+        System.setProperty(PROPERTY, "BUSY_SPIN");
+        var probes = new java.util.concurrent.atomic.AtomicInteger();
+        var idle = new OwnerIdleStrategy(() -> { probes.incrementAndGet(); return false; });
+        idle.bindOwner();
+        for (int i = 0; i < 10_000; i++) idle.idle(0, true);
+        assertThat(probes.get()).isZero();
     }
 
     @Test void publicationDuringTheFinalEmptyProbeDoesNotLoseTheWakeup() throws Exception {

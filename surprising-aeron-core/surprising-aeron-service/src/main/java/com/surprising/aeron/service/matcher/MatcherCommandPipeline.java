@@ -53,7 +53,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         var future = new java.util.concurrent.CompletableFuture<T>();
         if (!accepting || !backgroundReads.offer(new BackgroundRead<>(submittedPosition.value, read, future))) {
             future.completeExceptionally(new RejectedExecutionException("matcher read mailbox unavailable"));
-        } else {
+        } else if (waitStrategy != WaitStrategy.BUSY_SPIN) {
             LockSupport.unpark(worker);
         }
         return future;
@@ -172,9 +172,9 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         submittedPosition.value = position + 1;
         int depth = Math.toIntExact(position + 1 - consumedPosition.value);
         submissionHighWaterMark = Math.max(submissionHighWaterMark, depth);
-        // An unpark token is sticky, so publishing unconditionally closes the
-        // publish/park race without another state flag or reflective VarHandle.
-        LockSupport.unpark(worker);
+        if (waitStrategy != WaitStrategy.BUSY_SPIN) {
+            LockSupport.unpark(worker);
+        }
     }
 
     public CoreMatchingResult poll(long expectedCoreSequence) {
@@ -398,7 +398,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     private static WaitStrategy configuredWaitStrategy() {
-        String configured = System.getProperty(WAIT_STRATEGY_PROPERTY, WaitStrategy.ADAPTIVE.name());
+        String configured = System.getProperty(WAIT_STRATEGY_PROPERTY, WaitStrategy.BUSY_SPIN.name());
         try {
             return WaitStrategy.valueOf(configured.trim().toUpperCase(java.util.Locale.ROOT));
         } catch (RuntimeException failure) {
