@@ -56,7 +56,7 @@ class CoreLifecycleWorkTest {
         byte[] payload = CoreLiquidationWorkCodec.encodeQuery(ProductLine.INVERSE_PERPETUAL,
                 CoreLiquidationWorkView.Purpose.INSURANCE, 0, 1, 1_024);
 
-        var response = state.apply(query(CoreMessageType.LIQUIDATION_WORK_QUERY, payload));
+        var response = CoreTestCompletion.querySynchronously(state, query(CoreMessageType.LIQUIDATION_WORK_QUERY, payload));
 
         assertThat(response.status()).isEqualTo(ResponseStatus.REJECTED);
         assertThat(response.resultCode()).isEqualTo(CoreResultCode.PRODUCT_LINE_MISMATCH);
@@ -65,7 +65,7 @@ class CoreLifecycleWorkTest {
     private static void assertBoundedExactlyOnce(TradingCoreRuntime state,
                                                   CoreLiquidationWorkView.Purpose purpose,
                                                   long expectedLiquidationId) {
-        var firstResponse = state.apply(query(CoreMessageType.LIQUIDATION_WORK_QUERY,
+        var firstResponse = CoreTestCompletion.querySynchronously(state, query(CoreMessageType.LIQUIDATION_WORK_QUERY,
                 CoreLiquidationWorkCodec.encodeQuery(ProductLine.LINEAR_PERPETUAL, purpose, 0, 1, 1_024)));
         CoreLiquidationWorkView first = CoreLiquidationWorkCodec.decodeWork(firstResponse.data());
         assertThat(firstResponse.data().length).isLessThanOrEqualTo(1_024);
@@ -78,7 +78,7 @@ class CoreLifecycleWorkTest {
             assertThat(first.resolutions().getFirst().liquidationId()).isEqualTo(expectedLiquidationId);
         }
 
-        var resumedResponse = state.apply(query(CoreMessageType.LIQUIDATION_WORK_QUERY,
+        var resumedResponse = CoreTestCompletion.querySynchronously(state, query(CoreMessageType.LIQUIDATION_WORK_QUERY,
                 CoreLiquidationWorkCodec.encodeQuery(ProductLine.LINEAR_PERPETUAL, purpose,
                         first.nextCursorLiquidationId(), 1, 1_024)));
         CoreLiquidationWorkView resumed = CoreLiquidationWorkCodec.decodeWork(resumedResponse.data());

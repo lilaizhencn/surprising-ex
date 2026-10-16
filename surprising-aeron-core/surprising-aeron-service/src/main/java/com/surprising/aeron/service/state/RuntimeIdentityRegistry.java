@@ -91,12 +91,19 @@ public final class RuntimeIdentityRegistry {
         return table;
     }
 
+    private LaneClientIdentities clientTableReadOnly(long userId) {
+        if (clientRuntime != null) return clientLane(userId).clientIdentities;
+        var clients = unboundClients;
+        return clients == null ? null : clients.get(userId);
+    }
+
     private LaneClientIdentities clientTable(AccountLaneState lane, long userId) {
         lane.assertOwner();
-        if (clientRuntime == null || lane.laneId() != clientTopology.accountLaneId(userId)
-                || clientRuntime.accountLanes[lane.laneId()] != lane)
+        if (lane.laneId() != clientTopology.accountLaneId(userId)
+                || (clientRuntime != null && clientRuntime.accountLanes[lane.laneId()] != lane))
             throw new IllegalStateException("client identity crossed account Lane");
-        return lane.clientIdentities;
+        if (clientRuntime != null) return lane.clientIdentities;
+        return clientTable(userId);
     }
 
     public long prepareClientKeyInCurrentLane(long userId, String name) {
@@ -326,7 +333,9 @@ public final class RuntimeIdentityRegistry {
     /** The caller must own the user's Lane, or hold the explicit cold read fence. */
     public long findClientKeyValue(long userId, String clientOrderId) {
         long key = clientKeyOrZero(userId, clientOrderId);
-        return key == 0 ? 0 : clientTable(userId).find(key, userId, clientOrderId);
+        if (key == 0) return 0;
+        LaneClientIdentities table = clientTableReadOnly(userId);
+        return table == null ? 0 : table.find(key, userId, clientOrderId);
     }
 
     public long findClientKeyValueInLane(AccountLaneState lane, long userId, String clientOrderId) {
@@ -336,7 +345,9 @@ public final class RuntimeIdentityRegistry {
     }
 
     public String clientOrderId(long userId, long clientKey) {
-        return clientKey == 0 ? "" : clientTable(userId).name(clientKey, userId);
+        if (clientKey == 0) return "";
+        LaneClientIdentities table = clientTableReadOnly(userId);
+        return table == null ? null : table.name(clientKey, userId);
     }
 
     public void releaseClientKey(long userId, long clientKey) {

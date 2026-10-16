@@ -698,7 +698,13 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             return operation.apply(scoped);
         }
-        return inLaneCommandScope(accountLanes[laneId], operation);
+        boolean acquired = Thread.currentThread() == owner && accountLanesStarted && !ownerLaneAccess;
+        try {
+            if (acquired) acquireOwnerLaneAccess();
+            return inLaneCommandScope(accountLanes[laneId], operation);
+        } finally {
+            if (acquired) releaseOwnerLaneAccess();
+        }
     }
 
     <T> T onLaneReadOnly(int laneId, LaneOperation<T> operation) {
@@ -872,10 +878,13 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (laneId < 0 || laneId >= accountLanes.length || operation == null) {
             throw new IllegalArgumentException("invalid risk lane command");
         }
-        if (accountLanesStarted) {
-            throw new IllegalStateException("active Account Lane risk must be dispatched to its worker");
+        boolean acquired = accountLanesStarted && !ownerLaneAccess;
+        try {
+            if (acquired) acquireOwnerLaneAccess();
+            return onLane(laneId, ignored -> operation.get());
+        } finally {
+            if (acquired) releaseOwnerLaneAccess();
         }
-        return onLane(laneId, ignored -> operation.get());
     }
 
     public Object[] executeOwnerSettlements(Iterable<Long> userIds,
@@ -939,28 +948,31 @@ public final class TradingRuntimeState implements AutoCloseable {
         if ((selectedLaneMask & ~validMask) != 0 || workItems < 0 || operation == null) {
             throw new IllegalArgumentException("invalid account lane mutation");
         }
-        if (accountLanesStarted) {
-            throw new IllegalStateException("active Account Lane mutations must be dispatched to their workers");
-        }
-        Object[] results = laneMutationResultsScratch;
-        long staleResults = laneMutationResultsMask;
-        while (staleResults != 0) {
-            int laneId = Long.numberOfTrailingZeros(staleResults);
-            results[laneId] = null;
-            staleResults &= staleResults - 1;
-        }
-        laneMutationResultsMask = selectedLaneMask;
-        if (selectedLaneMask == 0) {
+        boolean acquired = accountLanesStarted && !ownerLaneAccess;
+        try {
+            if (acquired) acquireOwnerLaneAccess();
+            Object[] results = laneMutationResultsScratch;
+            long staleResults = laneMutationResultsMask;
+            while (staleResults != 0) {
+                int laneId = Long.numberOfTrailingZeros(staleResults);
+                results[laneId] = null;
+                staleResults &= staleResults - 1;
+            }
+            laneMutationResultsMask = selectedLaneMask;
+            if (selectedLaneMask == 0) {
+                return results;
+            }
+            if (workItems == 0) throw new IllegalArgumentException("account lane mutation has no work");
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+                if ((selectedLaneMask & 1L << laneId) == 0) continue;
+                int currentLaneId = laneId;
+                results[laneId] = inLaneCommandScope(accountLanes[currentLaneId],
+                        ignored -> operation.apply(currentLaneId));
+            }
             return results;
+        } finally {
+            if (acquired) releaseOwnerLaneAccess();
         }
-        if (workItems == 0) throw new IllegalArgumentException("account lane mutation has no work");
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if ((selectedLaneMask & 1L << laneId) == 0) continue;
-            int currentLaneId = laneId;
-            results[laneId] = inLaneCommandScope(accountLanes[currentLaneId],
-                    ignored -> operation.apply(currentLaneId));
-        }
-        return results;
     }
 
     /** Preflight all owner-to-Lane submissions before changing task or control state. */
@@ -2477,17 +2489,11 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public UserRuntime user(long userId) {
         assertOwner();
-        requireAccountReadOwnership();
         AccountLaneState scoped = currentLaneCommandScope();
         if (scoped != null) {
             return scoped.laneId() == topology.accountLaneId(userId) ? scoped.users.get(userId) : null;
         }
-        int laneId = topology.accountLaneId(userId);
-        if (laneId >= 0 && laneId < accountLanes.length) {
-            accountLanes[laneId].assertOwner();
-            return accountLanes[laneId].users.get(userId);
-        }
-        return null;
+        return onLane(userId, lane -> lane.users.get(userId));
     }
 
     public UserRuntime requireUser(long userId) {
@@ -3873,16 +3879,31 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
+    private ReservationRuntime findReservation(long orderId) {
+        if (factIndexes != null) {
+            var route = factIndexes.activeOrderRoute(orderId);
+            if (route != null) {
+                return onLane(route.userId(), lane -> lane.reservations.get(orderId));
+            }
+        }
+        for (AccountLaneState lane : accountLanes) {
+            ReservationRuntime res = onLane(lane.laneId(), l -> l.reservations.get(orderId));
+            if (res != null) return res;
+        }
+        return null;
+    }
+
     public void replaceReservation(ReservationRuntime reservation) {
         assertOwner();
+        ReservationRuntime existing = findReservation(reservation.orderId());
+        if (existing != null && existing.userId() != reservation.userId()) {
+            throw new IllegalArgumentException("runtime reservation owner cannot change");
+        }
         ReservationRuntime[] previousHolder = new ReservationRuntime[1];
         onLane(reservation.userId(), lane -> {
             accountRollback.captureUserBefore(reservation.userId());
             accountRollback.captureReservationBefore(reservation.orderId(), reservation.userId());
             ReservationRuntime previous = lane.reservations.get(reservation.orderId());
-            if (previous != null && previous.userId() != reservation.userId()) {
-                throw new IllegalArgumentException("runtime reservation owner cannot change");
-            }
             previousHolder[0] = previous;
             boolean pending = previous != null && lane.pendingReservation(previous.orderId());
             if (pending) {
@@ -4126,6 +4147,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("risk snapshot");
         accountRollback.captureUserBefore(snapshot.userId());
+        accountRollback.captureRiskSnapshotBefore(positionKey, snapshot.userId());
         onLane(snapshot.userId(), lane -> {
             lane.cold.riskSnapshots.put(positionKey, snapshot);
             publishRiskSnapshot(positionKey, snapshot);
@@ -4233,6 +4255,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         rejectUnsupportedOrderBatchMutation("risk snapshot");
         RiskSnapshotRuntime previous = riskSnapshot(positionKey);
         if (previous != null) {
+            accountRollback.captureUserBefore(previous.userId());
+            accountRollback.captureRiskSnapshotBefore(positionKey, previous.userId());
             boolean positionAbsent = onLane(previous.userId(), lane -> {
                 lane.cold.riskSnapshots.remove(positionKey);
                 publishRiskSnapshot(positionKey, null);

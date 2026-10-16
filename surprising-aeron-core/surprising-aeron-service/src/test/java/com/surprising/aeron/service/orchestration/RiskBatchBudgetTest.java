@@ -322,7 +322,7 @@ class RiskBatchBudgetTest {
     }
 
     private CoreLiquidationWorkView work(TradingCoreRuntime state,ProductLine line) {
-        var response=apply(state,command(line,CoreMessageType.LIQUIDATION_WORK_QUERY,
+        var response=CoreTestCompletion.querySynchronously(state,command(line,CoreMessageType.LIQUIDATION_WORK_QUERY,
                 CoreLiquidationWorkCodec.encodeQuery(line,CoreLiquidationWorkView.Purpose.EXECUTION,0,1000,1_048_576)));
         assertThat(response.status()).isEqualTo(ResponseStatus.OK);
         return CoreLiquidationWorkCodec.decodeWork(response.data());

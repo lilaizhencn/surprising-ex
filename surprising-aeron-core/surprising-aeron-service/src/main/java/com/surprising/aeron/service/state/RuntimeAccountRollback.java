@@ -3,6 +3,7 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.state.account.UserRuntime;
+import com.surprising.aeron.service.state.risk.RiskSnapshotRuntime;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 
 /** Account Lane before-images and their two-phase rollback restoration. */
@@ -15,6 +16,7 @@ final class RuntimeAccountRollback {
     final LaneLongCaptures<PositionRuntime>[] patchPositionsBeforeByLane;
     final LaneClientOrderCaptures[] patchClientOrdersBeforeByLane;
     final LaneLongCaptures<CoreTriggerOrderState>[] patchTriggersBeforeByLane;
+    final LaneLongCaptures<RiskSnapshotRuntime>[] patchRiskSnapshotsBeforeByLane;
 
     @SuppressWarnings("unchecked")
     RuntimeAccountRollback(TradingRuntimeState state, int laneCount) {
@@ -26,6 +28,7 @@ final class RuntimeAccountRollback {
         patchPositionsBeforeByLane = (LaneLongCaptures<PositionRuntime>[]) new LaneLongCaptures<?>[laneCount];
         patchClientOrdersBeforeByLane = new LaneClientOrderCaptures[laneCount];
         patchTriggersBeforeByLane = (LaneLongCaptures<CoreTriggerOrderState>[]) new LaneLongCaptures<?>[laneCount];
+        patchRiskSnapshotsBeforeByLane = (LaneLongCaptures<RiskSnapshotRuntime>[]) new LaneLongCaptures<?>[laneCount];
         for (int laneId = 0; laneId < laneCount; laneId++) {
             patchUsersBeforeByLane[laneId] = new RuntimeUserChangeBuffer();
             patchBalancesBeforeByLane[laneId] = new LaneBalancePatches();
@@ -34,6 +37,7 @@ final class RuntimeAccountRollback {
             patchPositionsBeforeByLane[laneId] = new LaneLongCaptures<>();
             patchClientOrdersBeforeByLane[laneId] = new LaneClientOrderCaptures();
             patchTriggersBeforeByLane[laneId] = new LaneLongCaptures<>();
+            patchRiskSnapshotsBeforeByLane[laneId] = new LaneLongCaptures<>();
         }
     }
 
@@ -180,6 +184,16 @@ final class RuntimeAccountRollback {
                 lane.putTrigger(before);
             }
         }
+        LaneLongCaptures<RiskSnapshotRuntime> snapshots = patchRiskSnapshotsBeforeByLane[laneId];
+        for (int index = 0; index < snapshots.size(); index++) {
+            long positionKey = snapshots.key(index);
+            RiskSnapshotRuntime before = snapshots.value(index);
+            if (before == null) {
+                lane.cold.riskSnapshots.remove(positionKey);
+            } else {
+                lane.cold.riskSnapshots.put(positionKey, before);
+            }
+        }
     }
 
     /** Restore published references only after every Lane has restored its own account state. */
@@ -200,6 +214,9 @@ final class RuntimeAccountRollback {
         for (LaneLongCaptures<CoreTriggerOrderState> triggers : patchTriggersBeforeByLane)
             for (int index = 0; index < triggers.size(); index++)
                 state.publishTriggerOrder(triggers.key(index), triggers.value(index));
+        for (LaneLongCaptures<RiskSnapshotRuntime> snapshots : patchRiskSnapshotsBeforeByLane)
+            for (int index = 0; index < snapshots.size(); index++)
+                state.publishRiskSnapshot(snapshots.key(index), snapshots.value(index));
     }
 
     void captureBalanceBefore(long userId, int assetId) {
@@ -343,6 +360,16 @@ final class RuntimeAccountRollback {
         }
     }
 
+    void captureRiskSnapshotBefore(long positionKey, long userId) {
+        if (state.currentMatcherSettlementChangesScope() != null) return;
+        LaneLongCaptures<RiskSnapshotRuntime> captured =
+                patchRiskSnapshotsBeforeByLane[state.topology.accountLaneId(userId)];
+        if (!captured.containsKey(positionKey)) {
+            RiskSnapshotRuntime before = state.onLane(userId, lane -> lane.cold.riskSnapshots.get(positionKey));
+            captured.put(positionKey, before);
+        }
+    }
+
     boolean hasCaptured() {
         for (RuntimeUserChangeBuffer captured : patchUsersBeforeByLane)
             if (!captured.isEmpty()) return true;
@@ -356,6 +383,8 @@ final class RuntimeAccountRollback {
             if (captured.size() != 0) return true;
         for (LaneLongCaptures<CoreTriggerOrderState> captured : patchTriggersBeforeByLane)
             if (!captured.isEmpty()) return true;
+        for (LaneLongCaptures<RiskSnapshotRuntime> captured : patchRiskSnapshotsBeforeByLane)
+            if (!captured.isEmpty()) return true;
         return false;
     }
 
@@ -367,6 +396,7 @@ final class RuntimeAccountRollback {
             patchPositionsBeforeByLane[laneId].clear();
             patchClientOrdersBeforeByLane[laneId].clear();
             patchTriggersBeforeByLane[laneId].clear();
+            patchRiskSnapshotsBeforeByLane[laneId].clear();
         }
     }
 

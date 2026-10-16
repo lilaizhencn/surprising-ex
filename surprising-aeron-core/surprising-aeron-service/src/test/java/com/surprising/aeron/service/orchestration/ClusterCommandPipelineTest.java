@@ -2170,7 +2170,12 @@ class ClusterCommandPipelineTest {
                 if (recovery && !resumed && scan.triggerOcoOrderId() != 0) {
                     try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(501))) {
                         live.apply(command);
-                        assertThat(restored.apply(command).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                        var restoredResponse = restored.apply(command);
+                        while (restoredResponse == null && restored.hasPendingDirectCommand()) {
+                            restoredResponse = restored.pollDirectCommand();
+                            if (restoredResponse == null) Thread.onSpinWait();
+                        }
+                        assertThat(restoredResponse.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                         assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                     }
                     resumed = true;

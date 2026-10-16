@@ -471,9 +471,9 @@ class RuntimeCommitRecoveryTest {
                         var rejected = CoreTestCompletion.applyAsynchronously(rejectedState, invalid);
                         assertThat(rejected.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
                         assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.ADL_POSITION_CONFLICT);
+                        assertThat((long) field(rejectedState.runtimeState, "laneHandoffEpoch")).isEqualTo(handoff);
                         assertThat(rejectedState.tradingState()).as("all participating Lanes roll back on target rejection")
                                 .isEqualTo(beforeRejected);
-                        assertThat((long) field(rejectedState.runtimeState, "laneHandoffEpoch")).isEqualTo(handoff);
                         try (var again = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, rejectedState.snapshot())) {
                             assertThat(again.tradingState()).isEqualTo(beforeRejected);
                             var resumed = CoreTestCompletion.applyAsynchronously(again,
@@ -660,7 +660,11 @@ class RuntimeCommitRecoveryTest {
 
     private static CoreResponse apply(TradingCoreRuntime state, CoreMessage command) {
         CoreResponse response = state.apply(command);
-        if (response.resultCode() != CoreResultCode.MATCHING_PENDING) {
+        while (response == null && state.hasPendingDirectCommand()) {
+            response = state.pollDirectCommand();
+            if (response == null) Thread.onSpinWait();
+        }
+        if (response != null && response.resultCode() != CoreResultCode.MATCHING_PENDING) {
             assertThat(response.status()).as(response.resultCode().name())
                     .isIn(ResponseStatus.APPLIED, ResponseStatus.DUPLICATE);
             return response;

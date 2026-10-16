@@ -838,10 +838,15 @@ class CoreOrderedOrderBatchTest {
                     UUID.randomUUID(), 2, TradingCommandCodec.encodeApplyMarkPrice(
                             new ApplyMarkPriceCommand("1", 1_000, 1, 1_000)))).status())
                     .isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.apply(command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.ADJUST_BALANCE,
+            var adjust = command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.ADJUST_BALANCE,
                     UUID.randomUUID(), 3, TradingCommandCodec.encodeBalanceAdjustment(
-                            new BalanceAdjustmentCommand("USDT", 1_000_000)))).status())
-                    .isEqualTo(ResponseStatus.APPLIED);
+                            new BalanceAdjustmentCommand("USDT", 1_000_000)));
+            var adjustResponse = state.apply(adjust);
+            while (adjustResponse == null && state.hasPendingDirectCommand()) {
+                adjustResponse = state.pollDirectCommand();
+                if (adjustResponse == null) Thread.onSpinWait();
+            }
+            assertThat(adjustResponse.status()).isEqualTo(ResponseStatus.APPLIED);
             PlaceOrderCommand first = new PlaceOrderCommand(10_601, "1",
                     CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "risk-first");
