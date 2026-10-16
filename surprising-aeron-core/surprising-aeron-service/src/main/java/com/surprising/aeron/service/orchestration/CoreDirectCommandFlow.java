@@ -168,10 +168,8 @@ final class CoreDirectCommandFlow {
                 return null;
             }
         }
-        runtime.appliedCommandCount = nextAppliedCommandCount;
-        runtime.matchingFlow.refreshCommittedCoreSequence();
+        runtime.recordAppliedSequence(nextAppliedCommandCount, sourceKey, message.header().sourceSequence());
         runtime.admissions.appendQueuedMatching(clusterTimestamp, clusterPosition);
-        runtime.lastSourceSequences.put(sourceKey, message.header().sourceSequence());
         byte[] responseData = runtime.resultBuilder.commandResultData();
         int responseOffset = runtime.resultBuilder.responseDataOffset();
         int responseLength = runtime.resultBuilder.responseDataLength();

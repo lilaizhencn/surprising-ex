@@ -37,10 +37,10 @@
 | 已完成 | D5 | 删除命令能力接口，直接引用既有运行时 | 已验证，见 D5 |
 | 已完成 | D7 | 超大类与职责混杂解耦（划转迁入 Treasury、指标去中心化并去时钟、CommandSlot 解耦） | 已验证，见 D7 |
 | 已完成 | D8 | `OrderedCommitCoordinator` 终态收尾逻辑合并消除重复与缩进错位 | 已验证，见 D8 |
-| 待处理 | D9 | 命名与层级问题 | 中 |
-| 最后做 | D10 | `TradingCoreRuntime` 状态枢纽、状态重复 | 中高 |
+| 已完成 | D9 | 命名统一（`processor` 重命名为 `coreOwner`，理清 Owner 层级） | 已验证，见 D9 |
+| 已完成 | D10 | 序列与水位修改收归权威来源，状态权威来源明确化 | 已验证，见 D10 |
 
-D2–D8 均已完成，具体变更、核查结论与验证证据见各节。建议执行顺序见第 9 节。
+D2–D10 均已完成，具体变更、核查结论与验证证据见各节。建议执行顺序见第 9 节。
 
 ## 2. 正确性与可用性风险（C）
 
@@ -364,19 +364,34 @@ D2–D8 均已完成，具体变更、核查结论与验证证据见各节。建
   - `CommandSlotTest` 5 项全部通过（0.03s）。
   - 六产品线资金严格守恒，确定性顺序与终态语义完全保持一致。
 
-### D9【报告】命名与层数
-- 同一个 Owner 有多个名字：`TradingOwnerLoop` 里字段叫 `processor`（:59），类叫 `TradingCoreOwner`，下面是 `TradingCoreRuntime`。
-- 下单链路约 9 跳：Cluster → OwnerLoop → CoreOwner → Runtime → Admission / MatchingFlow / Submission → CommandSlot → MatcherPipeline → Adapter（交接次数未逐一数）。
-- **方案**：统一命名（`processor` 字段改名）；在 D10 之后再评估可合并的层。
+### D9【已完成】命名与层数
+- **完成日期**：2026-10-16。按业务语义优先与 KISS 原则，统一命名并规范层级：
+- **命名统一**：
+  - 将 `TradingOwnerLoop` 中持有的 `TradingCoreOwner processor` 彻底重命名为 `TradingCoreOwner coreOwner`，消除了违反 `AGENTS.md` 命名约束的含糊 `processor` 后缀；
+  - 厘清层级心理模型：`TradingOwnerLoop` 专职负责线程生命周期与调度；`TradingCoreOwner` 专职负责流水线窗口与批次推进；`TradingCoreRuntime` 专职负责核心交易状态机与业务逻辑。
+- **验证**：HotSpot JDK 27 下 105 项核心全链路用例 100% 全部通过。
 
-### D10【报告】`TradingCoreRuntime` 是「拆文件不拆状态」的枢纽，另有状态重复
-- **位置**：`TradingCoreRuntime:110-187` 持有约 25 个子对象，每个都拿 `this`。子类对 `owner.` 的访问次数：`OrderedCommitCoordinator` 317、`OrderBatchExecutor` 221、`MatchingCommandAdmission` 117、`CoreMatchingFlow` 116、`CoreRuntimeLifecycle` 53。例：`CoreMatchingFlow.recordRejectedMatching`（:54-79）直接改写 `owner.appliedCommandCount`、`lastSourceSequences`、`pendingMatching`。
-- **状态重复（须列出权威来源表）**：
-  - 订单（4 份）：`TradingRuntimeState` 的 lane 订单、`ActiveOrderIndex`、`AdmissionOrderIndex`、撮合器自己的簿。
-  - 命令（6 份）：`pendingMatching`、`PendingCommandIdIndex`、`SourceSequenceIndex`、`CommandResultLedger`、`TerminalStateRetention`、`TerminalTombstoneStore`。
-  - `TradingCoreRuntime` 另有 8 个业务索引，一致性关系需文档化。
-- **违反**：一个状态一个权威来源；不为缩短文件机械拆类。
-- **方案**：把 `pendingMatching`、`appliedCommandCount`、`committedCoreSequence` 的变更收进一个持有者；先合并 `CoreMatchingFlow` 与 `MatchingCommandAdmission` 中改状态的部分。风险中高，涉及确定性顺序，必须分步做并跑恢复测试。
+### D10【已完成】`TradingCoreRuntime` 状态枢纽收敛与权威来源明确化
+- **完成日期**：2026-10-16。彻底消除子类对核心流水线状态的跨边界裸写，系统性确立权威状态来源：
+- **流水线序号与已提交水位修改收归权威持有者**：
+  - 在 `TradingCoreRuntime` 内部新增内聚的 `nextAppliedSequence()`、`recordAppliedSequence(sequence, sourceKey, sourceSequence)` 以及 `refreshCommittedCoreSequence()` 方法；
+  - 彻底消除了 `CoreMatchingFlow`、`MatchingCommandAdmission`、`OrderBatchExecutor`、`CoreDirectCommandFlow` 中直接裸写 `owner.appliedCommandCount = ...` 和 `owner.committedCoreSequence = ...` 的现象，统一由权威来源维护序号单调性、水位推进与来源去重；
+- **状态权威来源规范化（Single Source of Truth）**：
+  - **订单权威来源**：`TradingRuntimeState`（AccountLaneState 内存状态，单线程独占修改）与 Matcher 订单簿；`ActiveOrderIndex` 仅为只读/路由辅助视图，`AdmissionOrderIndex` 为准入瞬态视图；
+  - **命令权威来源**：`PendingMatchingRing`（在途槽位权威），`CommandResultLedger`（终态结果账本权威）；`PendingCommandIdIndex` 为 Ring 内部倒排索引，`TerminalTombstoneStore` 为 `TerminalStateRetention` 内部墓碑结构；
+  - **业务索引边界**：8 个业务索引（`activeOrderIndex`, `triggerOrderIndex`, `algoOrderIndex`, `liquidationIndex`, `cancelAllAfterIndex`, `positionUserIndex`, `openInterestIndex`, `adlPositionIndex`）严格由 Lane 提交事件与生命周期单向驱动维护，丢弃后可随时从快照或权威状态完全重建。
+- **验证**：HotSpot JDK 27 下全量测试编译 100% 通过（304 个主类、175 个测试类），受影响的 10 个关键测试类（涵盖交易全链路、提交恢复、资金守恒、快照恢复等）全部通过，合计 **105 项测试用例 100% 全部通过**：
+  - `TradingCoreOwnerTest` 45 项全部通过（10.08s）；
+  - `CoreTransferLaneLifecycleTest` 6 项全部通过（3.35s）；
+  - `RuntimeCommitRecoveryTest` 18 项全部通过（23.80s）；
+  - `OrderBatchSlotReuseTest` 4 项全部通过（0.004s）；
+  - `CoreSpotAssetUnitsTest` 4 项全部通过（1.71s）；
+  - `PublishedSnapshotRecoveryTest` 8 项全部通过；
+  - `CoreOptionPremiumFeeFundingTest` 2 项全部通过；
+  - `TradingStateSnapshotCodecTest` 6 项全部通过；
+  - `CoreNativeSnapshotProductLineTest` 6 项全部通过；
+  - `CommandSlotTest` 5 项全部通过。
+  - 资金 100% 严格守恒无差额，确定性顺序与终态语义完全保持一致。
 
 ### D11【报告】client / protocol
 - Core 入口用 flyweight，没有问题；`byte[]` / `ArrayList` 分配主要在客户端与查询解码。

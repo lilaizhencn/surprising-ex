@@ -54,23 +54,20 @@ final class CoreMatchingFlow {
     CoreResponse recordRejectedMatching(CoreMessage message, TradingCoreRuntime.SourceKey sourceKey,
                                         CommandFingerprint fingerprint, CoreResultCode resultCode) {
         if (!owner.pendingMatching.isEmpty()) {
-            long sequence = Math.incrementExact(owner.appliedCommandCount);
+            long sequence = owner.nextAppliedSequence();
             CommandSlot pending = owner.admissions.newPendingMatching(sequence,
                     MatchingCommandAdmission.matchingOperation(message.header().messageType()),
                     message, fingerprint);
             putPendingMatching(pending);
             pending.rejectMatching(resultCode);
             owner.pendingMatching.completeSubmission(sequence);
-            owner.appliedCommandCount = sequence;
-            owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
+            owner.recordAppliedSequence(sequence, sourceKey, message.header().sourceSequence());
             return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK,
                     TradingCoreRuntime.matchingPendingCode(), sequence,
                     TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         }
-        long sequence = Math.incrementExact(owner.appliedCommandCount);
-        owner.appliedCommandCount = sequence;
-        refreshCommittedCoreSequence();
-        owner.lastSourceSequences.put(sourceKey, message.header().sourceSequence());
+        long sequence = owner.nextAppliedSequence();
+        owner.recordAppliedSequence(sequence, sourceKey, message.header().sourceSequence());
         owner.resultLedger.storeOwnedResult(message.header().commandId(), fingerprint,
                 ResponseStatus.REJECTED, resultCode, sequence,
                 TradingCoreRuntime.EMPTY_RESPONSE_DATA);
@@ -112,11 +109,7 @@ final class CoreMatchingFlow {
     }
 
     void refreshCommittedCoreSequence() {
-        long candidate = owner.pendingMatching.isEmpty()
-                ? owner.appliedCommandCount
-                : Math.subtractExact(owner.pendingMatching.firstSequence(), 1);
-        if (candidate > owner.committedCoreSequence) owner.committedCoreSequence = candidate;
-        owner.runtimeState.releaseRetiredOrderFence(owner.committedCoreSequence);
+        owner.refreshCommittedCoreSequence();
     }
 
     void commitMatchingSequence(long sequence) {

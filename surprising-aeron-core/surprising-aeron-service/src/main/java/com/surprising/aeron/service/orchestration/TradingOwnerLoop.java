@@ -29,7 +29,7 @@ public final class TradingOwnerLoop implements Runnable {
             System.getProperty(ROLE_CHANGE_TIMEOUT_SECONDS_PROPERTY));
     private final OwnerIngressRing input;
     private final ClusterServiceEgress egress;
-    private final TradingCoreOwner processor;
+    private final TradingCoreOwner coreOwner;
     private final OwnerIdleStrategy ownerIdle = new OwnerIdleStrategy(this::ownerWorkAvailable);
     private volatile Throwable failure;
     private boolean stopping;
@@ -44,8 +44,8 @@ public final class TradingOwnerLoop implements Runnable {
 
     public TradingOwnerLoop(ProductLine productLine, ClusterServiceEgress egress) {
         this.egress = egress;
-        processor = new TradingCoreOwner(productLine, this::publishResponse);
-        input = processor.ingress();
+        coreOwner = new TradingCoreOwner(productLine, this::publishResponse);
+        input = coreOwner.ingress();
     }
 
     /** Starts the Owner thread after the Aeron Cluster service has started. */
@@ -59,9 +59,9 @@ public final class TradingOwnerLoop implements Runnable {
         ownerThread = new Thread(this, "trading-owner-" + cluster.memberId());
         ownerThread.start();
         boundary(() -> {
-            processor.start(logContext);
-            if (restored != null) processor.restoreSnapshot(restored);
-            processor.ownerCompletionSignal(ownerIdle::signal);
+            coreOwner.start(logContext);
+            if (restored != null) coreOwner.restoreSnapshot(restored);
+            coreOwner.ownerCompletionSignal(ownerIdle::signal);
             return null;
         }, false);
     }
@@ -78,14 +78,14 @@ public final class TradingOwnerLoop implements Runnable {
     }
 
     public int drainResponses() {
-        return egress.drainResponses(processor);
+        return egress.drainResponses(coreOwner);
     }
 
     public void onRoleChange(Cluster.Role role, long nextEpoch) {
         boundary(() -> {
             logContext.role = role;
             ownerEpoch = nextEpoch;
-            processor.roleChange(role);
+            coreOwner.roleChange(role);
             return null;
         }, true, ROLE_CHANGE_DEADLINE_NS);
     }
@@ -94,7 +94,7 @@ public final class TradingOwnerLoop implements Runnable {
         return boundary(() -> {
             logContext.position = position;
             logContext.timestamp = timestamp;
-            return processor.captureSnapshot(Math.max(1, position));
+            return coreOwner.captureSnapshot(Math.max(1, position));
         }, true);
     }
 
@@ -103,7 +103,7 @@ public final class TradingOwnerLoop implements Runnable {
         return boundary(() -> {
             logContext.position = position;
             logContext.timestamp = timestamp;
-            return processor.captureSnapshotSections(Math.max(1, position));
+            return coreOwner.captureSnapshotSections(Math.max(1, position));
         }, true);
     }
 
@@ -149,16 +149,16 @@ public final class TradingOwnerLoop implements Runnable {
                         initialized = true;
                     } finally { input.remove(); }
                     work++;
-                } else if (initialized && !stopping && processor.ownerWorkAvailable()) {
-                    work += processor.pollCommands();
+                } else if (initialized && !stopping && coreOwner.ownerWorkAvailable()) {
+                    work += coreOwner.pollCommands();
                 }
-                ownerIdle.idle(work, processor.pendingCommandCount() != 0);
+                ownerIdle.idle(work, coreOwner.pendingCommandCount() != 0);
             }
         } catch (Throwable fatal) {
             failure = fatal;
         } finally {
             try {
-                processor.terminate();
+                coreOwner.terminate();
             } catch (Throwable fatal) {
                 if (failure == null) failure = fatal;
             }
@@ -187,7 +187,7 @@ public final class TradingOwnerLoop implements Runnable {
 
     private boolean ownerWorkAvailable() {
         var next = input.first();
-        return next != null && next.action != null || processor.ownerWorkAvailable();
+        return next != null && next.action != null || coreOwner.ownerWorkAvailable();
     }
 
     private <T> T boundary(Supplier<T> action, boolean finish) {
@@ -198,7 +198,7 @@ public final class TradingOwnerLoop implements Runnable {
         var completion = new CompletableFuture<T>();
         enqueue(null, NO_SESSION_ID, 0, 0, () -> {
             try {
-                if (finish) processor.finishCommands();
+                if (finish) coreOwner.finishCommands();
                 completion.complete(action.get());
             } catch (Throwable fatal) {
                 completion.completeExceptionally(fatal);
@@ -222,7 +222,7 @@ public final class TradingOwnerLoop implements Runnable {
 
     private void publishResponse(long sessionId, CoreMessageHeader header, CoreResponse response,
                                  long committedSequence) {
-        egress.publishResponse(processor, sessionId, header, response, committedSequence, ownerEpoch);
+        egress.publishResponse(coreOwner, sessionId, header, response, committedSequence, ownerEpoch);
     }
 
     private void awaitProgress(long deadline) {
@@ -230,7 +230,7 @@ public final class TradingOwnerLoop implements Runnable {
         if (Thread.currentThread().isInterrupted() || System.nanoTime() > deadline) {
             throw new AgentTerminationException("trading owner boundary or ingress deadline");
         }
-        egress.drainResponses(processor);
+        egress.drainResponses(coreOwner);
         cluster.idleStrategy().idle();
     }
 

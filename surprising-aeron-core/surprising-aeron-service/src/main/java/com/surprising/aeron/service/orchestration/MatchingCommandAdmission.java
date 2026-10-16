@@ -51,15 +51,14 @@ final class MatchingCommandAdmission {
         if (queuedMatching.isEmpty()) return;
         for (QueuedTriggerMatching queued : queuedMatching) {
             CoreMessage command = queued.command();
-            long sequence = Math.incrementExact(owner.appliedCommandCount);
+            long sequence = owner.nextAppliedSequence();
             CommandSlot pending = newPendingMatching(sequence, CommandSlot.Operation.TRIGGER, command);
             pending.triggerAdmission(queued.order());
             pending.sourceTrigger(queued.trigger());
             pending.establishCommitFence(clusterTimestamp, clusterPosition);
             owner.matchingFlow.putPendingMatching(pending);
             registerPendingLifecycle(pending);
-            owner.appliedCommandCount = sequence;
-            owner.matchingFlow.refreshCommittedCoreSequence();
+            owner.recordAppliedSequence(sequence, null, 0L);
             owner.matchingFlow.submitMatching(pending);
         }
         queuedMatching.clear();
@@ -243,9 +242,7 @@ final class MatchingCommandAdmission {
         if (replacementAdmission != null) pending.replacementAdmission(replacementAdmission);
         registerPendingLifecycle(pending);
         if (deferredPending == null) {
-            owner.appliedCommandCount = sequence;
-            owner.matchingFlow.refreshCommittedCoreSequence();
-            owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
+            owner.recordAppliedSequence(sequence, sourceKey, message.header().sourceSequence());
         }
         // 当前准入已结束；推进其他序号的异步续接前先释放 owner 的事实上下文。
         owner.clearFactContext();
@@ -269,13 +266,11 @@ final class MatchingCommandAdmission {
             return owner.admissionRejected(rejection instanceof ArithmeticException
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND);
         }
-        long sequence = Math.incrementExact(owner.appliedCommandCount);
+        long sequence = owner.nextAppliedSequence();
         CommandSlot pending = newPendingMatching(sequence, operation, message, fingerprint, decodedCommand);
         owner.matchingFlow.putPendingMatching(pending);
         pending.deferMatching(clusterTimestamp, clusterPosition, sourceKey);
-        owner.appliedCommandCount = sequence;
-        owner.matchingFlow.refreshCommittedCoreSequence();
-        owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
+        owner.recordAppliedSequence(sequence, sourceKey, message.header().sourceSequence());
         return message.matchingPendingResponse(TradingCoreRuntime.matchingPendingCode(), sequence);
     }
 

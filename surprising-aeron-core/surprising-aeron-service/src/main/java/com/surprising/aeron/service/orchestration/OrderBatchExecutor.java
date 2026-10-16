@@ -115,16 +115,14 @@ final class OrderBatchExecutor {
                     exception instanceof ArithmeticException
                             ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND);
         }
-        long sequence = Math.incrementExact(owner.appliedCommandCount);
+        long sequence = owner.nextAppliedSequence();
         CommandSlot pending = owner.admissions.newPendingMatching(sequence, batch.operation, message, fingerprint, decodedCommand);
         batch.sequence = sequence;
         owner.matchingFlow.putPendingMatching(pending);
         owner.admissions.registerPendingLifecycle(pending);
         registerBatch(pending, batch);
         owner.pendingMatching.registerSubmission(sequence, orderBatchMatcherShard(batch));
-        owner.appliedCommandCount = sequence;
-        owner.matchingFlow.refreshCommittedCoreSequence();
-        owner.recordSourceSequence(sourceKey, message.header().sourceSequence());
+        owner.recordAppliedSequence(sequence, sourceKey, message.header().sourceSequence());
         CoreResponse completed = tryActivatePipelinedOrderBatch(batch, pending)
                 ? null
                 : !pending.clusterIndependent && owner.pendingMatching.firstSequence() == sequence

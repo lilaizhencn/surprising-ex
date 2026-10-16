@@ -1033,6 +1033,40 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return committedCoreSequence;
     }
 
+    /** 为流水线命令预分配下一个单调自增序号。由唯一 Owner 线程调用。 */
+    long nextAppliedSequence() {
+        assertOwner();
+        return Math.incrementExact(appliedCommandCount);
+    }
+
+    /**
+     * 确认推进已应用命令序号至指定序号，同步刷新已提交全局水位，并登记来源序号幂等去重。
+     * 由唯一 Owner 线程在命令正式入队或应用时调用。
+     */
+    void recordAppliedSequence(long sequence, SourceKey sourceKey, long sourceSequence) {
+        assertOwner();
+        this.appliedCommandCount = sequence;
+        refreshCommittedCoreSequence();
+        if (sourceKey != null) {
+            recordSourceSequence(sourceKey, sourceSequence);
+        }
+    }
+
+    /**
+     * 刷新全局已提交水位；根据在途撮合环首序列号或已应用命令计数推进，
+     * 并同步通知账户 Lane 释放终态订单回收栅栏。
+     */
+    void refreshCommittedCoreSequence() {
+        assertOwner();
+        long candidate = pendingMatching.isEmpty()
+                ? appliedCommandCount
+                : Math.subtractExact(pendingMatching.firstSequence(), 1);
+        if (candidate > committedCoreSequence) {
+            committedCoreSequence = candidate;
+        }
+        runtimeState.releaseRetiredOrderFence(committedCoreSequence);
+    }
+
     long committedProjectionSequence() {
         return commits.publication.publishedSequence();
     }
