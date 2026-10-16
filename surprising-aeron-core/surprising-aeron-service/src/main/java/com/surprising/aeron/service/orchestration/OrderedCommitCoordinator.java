@@ -23,6 +23,7 @@ import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.RuntimeDerivativeRiskProcessor;
 import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.state.MatcherSettlementEvent;
+import com.surprising.aeron.service.state.PlaceBatchAdmissionEvent;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import exchange.core2.core.common.MatcherEventType;
@@ -113,8 +114,15 @@ final class OrderedCommitCoordinator {
         owner.assertOwner();
         CommandSlot pending = owner.pendingMatching.get(sequence);
         if (pending == null || matchingResult == null) return null;
+        OrderBatchPending waitingBatch = owner.batches.batch(sequence);
+        try {
+            owner.runtimeState.assertAccountLanesHealthy();
+        } catch (RuntimeException failure) {
+            if (waitingBatch != null) throw owner.batches.failOrderBatch(waitingBatch, pending, "batch item Lane failed", failure);
+            throw owner.failMatching(pending, "account lane settlement failed; snapshot/log recovery is required", failure);
+        }
         if (matchingResultNeedsRecovery(pending, matchingResult)) {
-            OrderBatchPending failedBatch = owner.batches.batch(sequence);
+            OrderBatchPending failedBatch = waitingBatch != null ? waitingBatch : owner.batches.batch(sequence);
             Throwable failure = failedBatch == null ? null : failedBatch.pipelinedMatchingFailure;
             String detail = "matcher continuation returned " + matchingResult.resultCode()
                     + (failure == null || failure.getMessage() == null ? "" : ": " + failure.getMessage());
@@ -122,6 +130,17 @@ final class OrderedCommitCoordinator {
             owner.matchingAdapter.poisonFromOwner("unreconciled matcher outcome sequence=" + sequence
                     + " result=" + matchingResult.resultCode());
             throw owner.failMatching(pending, detail, failure);
+        }
+        if (pending.operation() == CommandSlot.Operation.PLACE && pending.placeAdmission() != null) {
+            if (!owner.matchingFlow.collectPlaceAdmissionIfReady(pending)) return null;
+            if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) {
+                if (pending.settlementEvent() != null && pending.settlementEvent().direct()
+                        && (!pending.settlementEvent().complete() || pending.submittedMatcherShard() != -1)) {
+                    return null;
+                }
+                pending.establishCommitFence(clusterTimestamp, clusterPosition);
+                return completeRejectedMatching(pending.sequence());
+            }
         }
         if (!financialHeadReady(pending)) return null;
         pending.establishCommitFence(clusterTimestamp, clusterPosition);
@@ -173,7 +192,13 @@ final class OrderedCommitCoordinator {
                 throw owner.failMatching(pending, "control Lane continuation failed", failure);
             }
         }
-        OrderBatchPending waitingBatch = owner.batches.batch(sequence);
+        if (waitingBatch != null && waitingBatch.pipelined && !waitingBatch.commitStarted()) {
+            PlaceBatchAdmissionEvent admission = waitingBatch.placeBatchAdmissionEvent;
+            boolean preparedCancel = pending.clusterIndependent && waitingBatch.kind == OrderBatchKind.CANCEL;
+            if (preparedCancel || (admission != null && admission.complete() && admission.rejection() == null)) {
+                owner.batches.beginPipelinedOrderBatchCommit(waitingBatch, pending);
+            }
+        }
         if (waitingBatch != null && waitingBatch.settlementEvent != null && waitingBatch.settlementEvent.direct()
                 && !waitingBatch.matchingApplied()) {
             if (!waitingBatch.settlementEvent.complete()) return null;
@@ -184,9 +209,6 @@ final class OrderedCommitCoordinator {
         }
         if (waitingBatch != null) {
             try {
-                if (waitingBatch.itemSettlementEvent != null || waitingBatch.laneCommitEvent != null) {
-                    owner.runtimeState.assertAccountLanesHealthy();
-                }
                 // 尚未完成的 Lane 工作仍拥有挂起的上下文，不能提前占用 owner 发布批次。
                 if (!waitingBatch.laneWorkComplete()) return null;
             } catch (RuntimeException failure) {
@@ -205,7 +227,10 @@ final class OrderedCommitCoordinator {
         if (waitingBatch != null && waitingBatch.itemSettlementEvent != null
                 && waitingBatch.itemSettlementEvent.direct()
                 && waitingBatch.lastMatchingResult == null) {
-            if (!waitingBatch.itemSettlementEvent.complete()) return null;
+            if (!waitingBatch.itemSettlementEvent.complete()) {
+                waitingBatch.lastMatchingResult = matchingResult;
+                return null;
+            }
             MatchingResult directResult = waitingBatch.itemSettlementEvent.directResult();
             validateMatchingEvidence(pending, directResult);
             applyMatcherProgress(directResult);
@@ -910,6 +935,7 @@ final class OrderedCommitCoordinator {
     private boolean financialHeadReady(CommandSlot pending) {
         if (!owner.runtimeState.systemLedgerStarted()) return true;
         if (pending.sequence() != owner.pendingMatching.firstSequence()) return false;
+        if (pending.hasMatchingRejection() || owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) return true;
         OrderBatchPending batch = pending.orderBatch;
         if (batch == null) return owner.runtimeState.pollMatcherFinancialSettlement(pending.settlementEvent());
         if (batch.itemSettlementEvent != null
@@ -918,7 +944,17 @@ final class OrderedCommitCoordinator {
     }
 
     boolean matchingCommitReady(CommandSlot pending) {
-        if (pending == null || !financialHeadReady(pending)) return false;
+        if (pending == null) return false;
+        if (pending.operation() == CommandSlot.Operation.PLACE && pending.placeAdmission() != null) {
+            if (!owner.matchingFlow.collectPlaceAdmissionIfReady(pending)) return false;
+        }
+        if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) {
+            if (!pending.isMatchingSubmitted()) return true;
+            if (pending.settlementEvent() != null && pending.settlementEvent().direct())
+                return pending.settlementEvent().complete();
+            return pending.matchingResult() != null || pending.hasMatchingCompletion();
+        }
+        if (!financialHeadReady(pending)) return false;
         OrderBatchPending batch = pending.orderBatch;
         // A matcher result alone does not make a batch ready while its Lane work is outstanding.
         if (batch != null && (!batch.activated() || !batch.laneWorkComplete())) return false;
@@ -928,12 +964,6 @@ final class OrderedCommitCoordinator {
             return batch.settlementEvent.complete();
         if (batch != null && batch.placeBatchAdmissionEvent != null
                 && (!batch.placeBatchAdmissionEvent.complete() || !pending.isMatchingSubmitted())) return false;
-        if (owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) {
-            if (!pending.isMatchingSubmitted()) return true;
-            if (pending.settlementEvent() != null && pending.settlementEvent().direct())
-                return pending.settlementEvent().complete();
-            return pending.matchingResult() != null || pending.hasMatchingCompletion();
-        }
         // Direct Matcher->Lane events have no Owner matching-result slot.  Their Lane completion
         // bit is the authoritative ordered-commit readiness signal.
         if (pending.settlementEvent() != null && pending.settlementEvent().direct())

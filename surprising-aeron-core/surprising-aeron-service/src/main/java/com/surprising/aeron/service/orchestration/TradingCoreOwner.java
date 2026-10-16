@@ -541,6 +541,10 @@ public final class TradingCoreOwner {
         return state;
     }
 
+    TradingCoreRuntime currentStateOrNull() {
+        return state;
+    }
+
     /** 绑定外部创建的实时输出，供兼容测试和独立回放工具使用。 */
     void attachRealtime(RealtimeOutbox outbox,
                         RealtimeStateCapture capture) {

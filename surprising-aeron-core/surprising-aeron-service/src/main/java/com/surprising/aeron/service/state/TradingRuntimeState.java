@@ -2731,7 +2731,20 @@ public final class TradingRuntimeState implements AutoCloseable {
         requireAccountReadOwnership();
         AccountLaneState scoped = currentLaneCommandScope();
         if (scoped != null) {
-            return scoped.orders.get(orderId);
+            OrderRuntime order = scoped.orders.get(orderId);
+            if (order != null) {
+                if (scoped.pendingReservation(orderId)) {
+                    if (changedOrders.get(orderId) != null || orderBatchMutationScope) {
+                        return order;
+                    }
+                    if (order.clientOrderId() != null && order.clientOrderId().startsWith("TRIGGER:")) {
+                        return order;
+                    }
+                    return null;
+                }
+                return order;
+            }
+            return null;
         }
         if (factIndexes != null) {
             var route = factIndexes.activeOrderRoute(orderId);
@@ -2777,7 +2790,17 @@ public final class TradingRuntimeState implements AutoCloseable {
         requireAccountReadOwnership();
         AccountLaneState scoped = currentLaneCommandScope();
         if (scoped != null) {
-            return scoped.reservations.get(orderId);
+            ReservationRuntime reservation = scoped.reservations.get(orderId);
+            if (reservation != null) {
+                if (scoped.pendingReservation(orderId)) {
+                    if (changedReservations.contains(orderId) || orderBatchMutationScope) {
+                        return reservation;
+                    }
+                    return null;
+                }
+                return reservation;
+            }
+            return null;
         }
         if (factIndexes != null) {
             var route = factIndexes.activeOrderRoute(orderId);
@@ -3745,9 +3768,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         int assetId = balance.assetId();
         long availableUnits = balance.availableUnits();
         long lockedUnits = balance.lockedUnits();
-        accountRollback.captureUserBefore(userId);
-        accountRollback.captureBalanceBefore(userId, assetId);
         onLane(userId, lane -> {
+            accountRollback.captureUserBefore(userId);
+            accountRollback.captureBalanceBefore(userId, assetId);
             IntObjectHashMap<BalanceRuntime> userBalances = lane.balances.get(userId);
             if (userBalances == null) {
                 userBalances = new IntObjectHashMap<>();
@@ -3852,13 +3875,15 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void replaceReservation(ReservationRuntime reservation) {
         assertOwner();
-        accountRollback.captureUserBefore(reservation.userId());
-        accountRollback.captureReservationBefore(reservation.orderId());
-        ReservationRuntime previous = reservation(reservation.orderId());
-        if (previous != null && previous.userId() != reservation.userId()) {
-            throw new IllegalArgumentException("runtime reservation owner cannot change");
-        }
+        ReservationRuntime[] previousHolder = new ReservationRuntime[1];
         onLane(reservation.userId(), lane -> {
+            accountRollback.captureUserBefore(reservation.userId());
+            accountRollback.captureReservationBefore(reservation.orderId(), reservation.userId());
+            ReservationRuntime previous = lane.reservations.get(reservation.orderId());
+            if (previous != null && previous.userId() != reservation.userId()) {
+                throw new IllegalArgumentException("runtime reservation owner cannot change");
+            }
+            previousHolder[0] = previous;
             boolean pending = previous != null && lane.pendingReservation(previous.orderId());
             if (pending) {
                 accountRollback.captureBalanceBefore(previous.userId(), previous.assetId());
@@ -3874,6 +3899,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             return null;
         });
+        ReservationRuntime previous = previousHolder[0];
         publishReservation(reservation.orderId(), reservation);
         if (currentMatcherSettlementChangesScope() == null) {
             markReservationChanged(reservation.orderId());
@@ -3884,9 +3910,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void removeReservation(long orderId, long userId) {
         assertOwner();
-        accountRollback.captureUserBefore(userId);
-        accountRollback.captureReservationBefore(orderId);
         onLane(userId, lane -> {
+            accountRollback.captureUserBefore(userId);
+            accountRollback.captureReservationBefore(orderId, userId);
             ReservationRuntime current = lane.reservations.get(orderId);
             if (current == null || current.userId() != userId) {
                 throw new IllegalArgumentException("runtime reservation is not registered: " + orderId);
@@ -3914,13 +3940,15 @@ public final class TradingRuntimeState implements AutoCloseable {
         AccountLaneState scoped = currentLaneCommandScope();
         if (scoped != null && scoped.laneId() != topology.accountLaneId(userId))
             throw new IllegalStateException("balance write crossed its owner Lane");
-        accountRollback.captureUserBefore(userId);
-        accountRollback.captureBalanceBefore(userId, assetId);
         if (scoped != null) {
+            accountRollback.captureUserBefore(userId);
+            accountRollback.captureBalanceBefore(userId, assetId);
             replaceBalanceInLane(scoped, userId, assetId, availableUnits, lockedUnits);
             return;
         }
         onLane(userId, lane -> {
+            accountRollback.captureUserBefore(userId);
+            accountRollback.captureBalanceBefore(userId, assetId);
             replaceBalanceInLane(lane, userId, assetId, availableUnits, lockedUnits);
             return null;
         });
@@ -3949,9 +3977,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void removeBalance(long userId, int assetId) {
         assertOwner();
-        accountRollback.captureUserBefore(userId);
-        accountRollback.captureBalanceBefore(userId, assetId);
         onLane(userId, lane -> {
+            accountRollback.captureUserBefore(userId);
+            accountRollback.captureBalanceBefore(userId, assetId);
             IntObjectHashMap<BalanceRuntime> userBalances = lane.balances.get(userId);
             if (userBalances == null || userBalances.remove(assetId) == null) {
                 throw new IllegalArgumentException("runtime balance is not registered: " + userId + '/' + assetId);
@@ -4161,9 +4189,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void removePosition(long positionKey, long userId) {
         assertOwner();
-        accountRollback.captureUserBefore(userId);
-        accountRollback.capturePositionBefore(positionKey);
         onLane(userId, lane -> {
+            accountRollback.captureUserBefore(userId);
+            accountRollback.capturePositionBefore(positionKey, userId);
             PositionRuntime current = lane.positions.get(positionKey);
             if (current == null || current.userId() != userId) {
                 throw new IllegalArgumentException("runtime position is not registered: " + positionKey);
@@ -5149,16 +5177,19 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void putPosition(long positionKey, PositionRuntime position) {
         assertOwner();
-        accountRollback.capturePositionBefore(positionKey, position.userId());
-        PositionRuntime previous = position(positionKey);
-        if (previous != null && previous.userId() != position.userId()) {
-            throw new IllegalArgumentException("runtime position owner cannot change");
-        }
+        PositionRuntime[] previousHolder = new PositionRuntime[1];
         onLane(position.userId(), lane -> {
+            accountRollback.capturePositionBefore(positionKey, position.userId());
+            PositionRuntime previous = lane.positions.get(positionKey);
+            if (previous != null && previous.userId() != position.userId()) {
+                throw new IllegalArgumentException("runtime position owner cannot change");
+            }
+            previousHolder[0] = previous;
             lane.positions.put(positionKey, position.laneValue());
             replacePositionIndexes(lane, positionKey, previous, position);
             return null;
         });
+        PositionRuntime previous = previousHolder[0];
         publishPosition(positionKey, position);
         if (currentMatcherSettlementChangesScope() == null) {
             changedPosition(positionKey, position);

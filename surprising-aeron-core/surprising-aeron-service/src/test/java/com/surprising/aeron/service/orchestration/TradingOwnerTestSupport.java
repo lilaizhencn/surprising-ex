@@ -139,9 +139,10 @@ final class TradingOwnerTestSupport implements ClusteredService {
 
     @Override
     public void onTerminate(Cluster ignored) {
+        TradingCoreRuntime runtime = owner.currentStateOrNull();
         try { owner.terminate(); }
         catch (RuntimeException failure) {
-            if (owner.state() == null || owner.state().fatalFailure == null) throw failure;
+            if (runtime == null || runtime.fatalFailure == null) throw failure;
         }
         finally { egress.clear(); }
         cluster = null;
@@ -151,6 +152,7 @@ final class TradingOwnerTestSupport implements ClusteredService {
     @Override
     public void onSessionOpen(ClientSession session, long timestamp) {
         owner.sessionOpened();
+        egress.drainResponses(owner);
     }
 
     @Override

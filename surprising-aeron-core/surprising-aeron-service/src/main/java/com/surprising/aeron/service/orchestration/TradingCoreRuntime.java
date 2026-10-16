@@ -532,7 +532,16 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
-        return commandIngress.apply(message, clusterTimestamp, clusterPosition);
+        CoreResponse response = commandIngress.apply(message, clusterTimestamp, clusterPosition);
+        if (response == null && hasPendingDirectCommand()) {
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while (hasPendingDirectCommand() && System.nanoTime() < deadline) {
+                response = pollDirectCommand();
+                if (response != null) return response;
+                Thread.onSpinWait();
+            }
+        }
+        return response;
     }
 
     boolean requiresOwnerLaneAccessForPreparation(CoreMessage message) {

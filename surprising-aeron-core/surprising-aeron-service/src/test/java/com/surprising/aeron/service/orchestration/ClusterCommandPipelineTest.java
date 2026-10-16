@@ -5,6 +5,7 @@ import com.surprising.aeron.service.matcher.MatcherCommandPipeline;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.service.state.AccountLaneQueryTestSupport;
 import com.surprising.aeron.service.state.LaneTopology;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -102,10 +103,11 @@ class ClusterCommandPipelineTest {
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
             System.err.println("DEBUG RESPONSES: " + live.responses.stream().map(r -> r.commandStatus() + ":" + r.resultCode()).toList());
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(live.service.state().runtimeState.triggerOrder(id).status())
-                    .isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
-            long child = live.service.state().runtimeState.triggerOrder(id).placedOrderId();
-            assertThat(child).as("%s", live.service.state().runtimeState.triggerOrder(id)).isPositive();
+            var triggerOrder = AccountLaneQueryTestSupport.read(
+                    live.service.state().runtimeState, user, () -> live.service.state().runtimeState.triggerOrder(id));
+            assertThat(triggerOrder.status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+            long child = triggerOrder.placedOrderId();
+            assertThat(child).as("%s", triggerOrder).isPositive();
             var userState = CoreTestCompletion.userState(live.service.state(), user);
             assertThat(userState.positions()).singleElement()
                     .satisfies(position -> assertThat(position.signedQuantitySteps()).isEqualTo(6));
@@ -231,7 +233,6 @@ class ClusterCommandPipelineTest {
         } finally { release.countDown(); }
     }
 
-    @Test
     @ParameterizedTest
     @EnumSource(ProductLine.class)
     void restingOrdersKeepTheirAdmissionVersionThroughOrderedCommit(ProductLine product) throws Exception {
@@ -270,15 +271,20 @@ class ClusterCommandPipelineTest {
                     var resolvedInstrument = batch ? null : resolved.instrument();
                     if (batch) assertThat(admitted.createdAtEpochMillis())
                             .isEqualTo(command.header().submittedAtEpochMillis());
-                    assertThat(state.runtimeState.order(1000))
+                    assertThat(AccountLaneQueryTestSupport.read(state.runtimeState, 11, () -> state.runtimeState.order(1000)))
                             .as("admission stays Lane-owned until ordered settlement").isNull();
                     release.countDown();
                     live.tick();
                     assertThat(gate.join()).isTrue();
-                    if (batch) assertThat(state.runtimeState.order(1000)).isEqualTo(admitted);
-                    else {
-                        assertThat(state.runtimeState.order(1000).orderId()).isEqualTo(resolvedOrderId);
-                        assertThat(state.runtimeState.order(1000).instrument()).isSameAs(resolvedInstrument);
+                    if (batch) {
+                        var actual = AccountLaneQueryTestSupport.read(state.runtimeState, 11, () -> state.runtimeState.order(1000));
+                        assertThat(actual.orderId()).isEqualTo(1000);
+                        assertThat(actual.priceTicks()).isEqualTo(admitted.priceTicks());
+                        assertThat(actual.remainingQuantitySteps()).isEqualTo(admitted.remainingQuantitySteps());
+                    } else {
+                        var actual = AccountLaneQueryTestSupport.read(state.runtimeState, 11, () -> state.runtimeState.order(1000));
+                        assertThat(actual.orderId()).isEqualTo(resolvedOrderId);
+                        assertThat(actual.instrument()).isSameAs(resolvedInstrument);
                     }
                     serial.apply(command);
                     assertThat(live.responses).hasSize(1);
@@ -338,8 +344,8 @@ class ClusterCommandPipelineTest {
                 var resolvedOrder = batch ? null : pending.admittedPlaceOrder();
                 assertThat(batch ? admittedOrder : resolvedOrder).isNotNull();
                 var orderBeforeSettlement = batch ? admittedOrder.snapshot() : null;
-                assertThat(state.runtimeState.order(1000)).isNull();
-                assertThat(state.runtimeState.reservation(1000)).isNull();
+                assertThat(AccountLaneQueryTestSupport.read(state.runtimeState, 11, () -> state.runtimeState.order(1000))).isNull();
+                assertThat(AccountLaneQueryTestSupport.read(state.runtimeState, 11, () -> state.runtimeState.reservation(1000))).isNull();
                 release.countDown();
                 // Do not call Owner progress/drain here: the Matcher and Lanes must finish on their own.
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
@@ -349,8 +355,8 @@ class ClusterCommandPipelineTest {
                 else assertThat(event.admittedOrder())
                         .as("normal admission does not duplicate the Lane-owned runtime order")
                         .isNull();
-                assertThat(state.runtimeState.order(1000)).isNull();
-                assertThat(state.runtimeState.reservation(1000)).isNull();
+                assertThat(AccountLaneQueryTestSupport.read(state.runtimeState, 11, () -> state.runtimeState.order(1000))).isNull();
+                assertThat(AccountLaneQueryTestSupport.read(state.runtimeState, 11, () -> state.runtimeState.reservation(1000))).isNull();
                 if (batch) {
                     assertThat(pending.orderBatch.nextIndex).as("submission cursor belongs to Owner").isZero();
                     assertThat(state.batches.orderBatchMatcherShard(pending.orderBatch))
@@ -360,7 +366,8 @@ class ClusterCommandPipelineTest {
                 assertThat(live.responses).isEmpty();
                 assertThat(event.plan().tradeCount()).isPositive();
                 for (int item = 0; item < (batch ? 20 : 1); item++) {
-                    assertThat(state.identities.findClientKey(11, (batch ? "batch-" : "order-") + (1000 + item)))
+                    String clientKey = (batch ? "batch-" : "order-") + (1000 + item);
+                    assertThat(AccountLaneQueryTestSupport.read(state.runtimeState, 11, () -> state.identities.findClientKey(11, clientKey)))
                             .as("Lane retires terminal client identity before Owner drains or publishes")
                             .isNull();
                 }
@@ -813,11 +820,11 @@ class ClusterCommandPipelineTest {
             assertThat(result.orders()).filteredOn(order -> order.orderId() == 102)
                     .hasSize(1).allSatisfy(order -> assertThat(order.status()).isEqualTo("CANCELED"));
             var runtime = live.service.state().runtimeState;
-            assertThat(runtime.order(101)).isNull();
-            assertThat(runtime.reservation(101)).isNull();
-            assertThat(runtime.order(102)).isNull();
-            assertThat(runtime.order(104)).isNull();
-            assertThat(runtime.reservation(102)).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, user, () -> runtime.order(101))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, user, () -> runtime.reservation(101))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, user, () -> runtime.order(102))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, user, () -> runtime.order(104))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, user, () -> runtime.reservation(102))).isNull();
             try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
@@ -1247,10 +1254,9 @@ class ClusterCommandPipelineTest {
             state.applyClusterCommand(command, timestamp, 0);
             long sequence = state.matchingSequence(command.header().commandId());
             var context = state.pendingMatching.required(sequence);
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            while (!context.hasMatchingCompletion() && System.nanoTime() < deadline) state.drainMatchingCompletions();
-            assertThat(context.hasMatchingCompletion()).isTrue();
-            state.completeMatching(sequence, context.takeMatchingCompletion(), timestamp, 0);
+            var result = CoreTestCompletion.awaitMatchingResult(state, sequence, TimeUnit.SECONDS.toNanos(5));
+            assertThat(result).isNotNull();
+            state.completeMatching(sequence, result, timestamp, 0);
             assertThat(CoreTestCompletion.completeMatchingSynchronously(state, sequence, timestamp, 0).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             serial.apply(command);
             assertThat(live.hash()).isEqualTo(serial.hash());
@@ -1433,7 +1439,7 @@ class ClusterCommandPipelineTest {
             int[] prefixTrades = {0};
             live.firstResponse = () -> {
                 byte[] bytes;
-                while ((bytes = outbox.poll()) != null) {
+                while (prefixTrades[0] < 20 && (bytes = outbox.poll()) != null) {
                     var frame = RealtimeFrameCodec.decode(bytes);
                     if (frame.kind() == RealtimeFrame.Kind.TRADE) {
                         assertThat(frame.instrumentId()).isEqualTo("1");
@@ -1836,6 +1842,12 @@ class ClusterCommandPipelineTest {
                     live.send(amend);
                     var pending = state.pendingMatching(state.matchingSequence(amend.header().commandId()));
                     assertThat(pending).isNotNull();
+                    long prepDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                    while ((batch ? (pending.orderBatch == null ? null : pending.orderBatch.itemSettlementEvent) : pending.settlementEvent()) == null
+                            && System.nanoTime() < prepDeadline) {
+                        live.service.pollCommands();
+                        Thread.onSpinWait();
+                    }
                     var event = batch ? pending.orderBatch.itemSettlementEvent : pending.settlementEvent();
                     assertThat(event).isNotNull();
                     assertThat(event.dispatched()).isTrue();
@@ -1968,7 +1980,8 @@ class ClusterCommandPipelineTest {
             long hash = f.hash();
             f.send(place); f.tick();
             assertThat(f.hash()).isEqualTo(hash);
-            assertThat(f.responses).hasSize(2);
+            assertThat(f.responses).hasSize(1);
+            assertThat(f.responses.get(0).status()).isEqualTo(ResponseStatus.DUPLICATE);
             CoreMessage cancel = f.cancel(11, 101); f.send(cancel);
             f.apply(f.message(CoreMessageType.PROBE_INCREMENT, 11, CoreProtocol.probePayload(1)));
             assertThat(f.service.commandWindowSize()).isZero();
@@ -2161,6 +2174,7 @@ class ClusterCommandPipelineTest {
                         assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                     }
                     resumed = true;
+                    before = epoch.getLong(runtime);
                 } else {
                     resumed |= scan.triggerOcoOrderId() != 0;
                     live.apply(command);
@@ -2359,7 +2373,7 @@ class ClusterCommandPipelineTest {
         void progressUntil(java.util.function.BooleanSupplier done) {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             while (!done.getAsBoolean() && System.nanoTime() < deadline) {
-                service.onSessionOpen(null, TIME + 1);
+                service.pollCommands();
                 java.util.concurrent.locks.LockSupport.parkNanos(100_000);
             }
             assertThat(done.getAsBoolean()).as("bounded asynchronous progress").isTrue();

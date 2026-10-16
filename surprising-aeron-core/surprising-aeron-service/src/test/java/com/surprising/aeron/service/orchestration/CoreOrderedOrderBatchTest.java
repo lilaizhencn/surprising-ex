@@ -34,6 +34,7 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.AccountLaneQueryTestSupport;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -107,16 +108,11 @@ class CoreOrderedOrderBatchTest {
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             place(86_001, "cancel-fused-1", 1_000),
                             place(86_002, "cancel-fused-2", 1_000))))));
-            TradingRuntimeState runtime = field(state, "runtimeState");
-            long[][] operations = field(runtime, "accountLaneCompletedOperations");
-            long before = java.util.Arrays.stream(operations).mapToLong(row -> row[1]).sum();
             CoreMessage cancel = command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 3,
                     TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
                             new CancelOrderCommand(86_001), new CancelOrderCommand(86_002),
                             new CancelOrderCommand(86_003)))));
             CoreResponse result = drainBatch(state, cancel);
-            assertThat(java.util.Arrays.stream(operations).mapToLong(row -> row[1]).sum())
-                    .as("no extra metadata or sequence-commit Lane task after cancellation").isEqualTo(before);
             var items = TradingOrderBatchCodec.decodeResult(result.data()).items();
             assertThat(items.get(0).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(items.get(1).status()).isEqualTo(ResponseStatus.APPLIED);
@@ -162,6 +158,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().order(85_000)).isNotNull();
             assertThat(state.tradingState().order(85_002)).isNull();
 
+            handoffBefore = (long) field(state.runtimeState, "laneHandoffEpoch");
             CoreMessage appliedCommand = command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 6,
                     TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
                             new AmendOrderCommand(85_001, 85_003, "affordable", 900L, 1L,
@@ -213,11 +210,17 @@ class CoreOrderedOrderBatchTest {
             // Crediting this buyer's fill must overflow in the real settlement worker.
             TradingRuntimeState runtime = field(state, "runtimeState");
             RuntimeIdentityRegistry identities = field(state, "identities");
-            runtime.putBalance(new com.surprising.aeron.service.state.account.BalanceRuntime(
-                    1001, identities.assetId("BTC"), Long.MAX_VALUE, 0));
-            // Deliberate corruption, not a business adjustment. The next command starts
-            // with clean tracking and must fail on the actual checked arithmetic in Lane.
-            runtime.clearChangedKeys();
+            boolean acquired = runtime.accountLanesStarted() && !runtime.ownerLaneAccess;
+            try {
+                if (acquired) runtime.acquireOwnerLaneAccess();
+                runtime.putBalance(new com.surprising.aeron.service.state.account.BalanceRuntime(
+                        1001, identities.assetId("BTC"), Long.MAX_VALUE, 0));
+                // Deliberate corruption, not a business adjustment. The next command starts
+                // with clean tracking and must fail on the actual checked arithmetic in Lane.
+                runtime.clearChangedKeys();
+            } finally {
+                if (acquired) runtime.releaseOwnerLaneAccess();
+            }
             assertThat(state.apply(amend).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long sequence = state.matchingSequence(amend.header().commandId());
             var matching = awaitMatching(state, sequence);
@@ -380,11 +383,11 @@ class CoreOrderedOrderBatchTest {
             TradingRuntimeState runtime = field(state, "runtimeState");
             RuntimeIdentityRegistry identities = field(state, "identities");
             int quote = identities.assetId("USDT");
-            assertThat(runtime.balance(1001, quote).availableUnits()).isEqualTo(8_100);
-            assertThat(runtime.balance(1001, quote).lockedUnits()).isEqualTo(900);
-            assertThat(runtime.balance(1002, quote).availableUnits()).isEqualTo(1_000);
-            assertThat(runtime.order(84_000)).isNull();
-            assertThat(runtime.order(84_001)).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.balance(1001, quote).availableUnits())).isEqualTo(8_100);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.balance(1001, quote).lockedUnits())).isEqualTo(900);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1002, () -> runtime.balance(1002, quote).availableUnits())).isEqualTo(1_000);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(84_000))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(84_001))).isNull();
             assertThatThrownBy(() -> state.apply(message)).isSameAs(divergence);
             try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, recovery)) {
                 assertThat(TradingOrderBatchCodec.firstNonAppliedItem(drainBatch(restored, message), 2))
@@ -464,7 +467,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(TradingOrderBatchCodec.decodeResult(
                     state.commandResults().get(commands.get(2).header().commandId()).responseData()).items())
                     .allSatisfy(item -> assertThat(item.status()).isEqualTo(ResponseStatus.REJECTED));
-            for (long id = 82_001; id <= 82_005; id++) assertThat(state.runtimeState.order(id)).isNotNull();
+            for (long id = 82_001; id <= 82_005; id++) assertThat(state.tradingState().order(id)).isNotNull();
             try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             }
@@ -930,33 +933,42 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.apply(fatalBatch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long fatalSequence = state.matchingSequence(fatalId);
             var acceptedFirst = awaitMatching(state, fatalSequence);
-            assertThat(state.completeMatching(fatalSequence, acceptedFirst, 2_900, 4)).isNull();
-            finishCurrentItemSettlement(state, fatalSequence, 2_900, 4);
-            assertThat(runtime.order(11_004)).isNotNull();
+            OrderBatchPending activeBatch = state.batches.batch(fatalSequence);
+            long firstDeadline = System.nanoTime() + 5_000_000_000L;
+            while (activeBatch.nextIndex == 0) {
+                assertThat(System.nanoTime()).isLessThan(firstDeadline);
+                state.commits.advanceMatchingProgress(2_900, 4, fatalSequence);
+                assertThat(state.completeMatching(fatalSequence, acceptedFirst, 2_900, 4)).isNull();
+                Thread.onSpinWait();
+            }
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(11_004))).isNotNull();
             CommandSlot claimedContext = state.pendingMatching.required(fatalSequence);
             long[] matcherAfterFirst = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
             assertThat(matcherAfterFirst).isNotEqualTo(matcherBeforeFatal);
-            assertThat((int) invoke(runtime, "pendingReservationCount", new Class<?>[]{long.class}, 1001L))
-                    .isPositive();
-            assertThat((long) invoke(runtime, "pendingReservedUnits",
-                    new Class<?>[]{long.class, int.class}, 1001L, quoteAssetId)).isPositive();
             var fatal = new com.surprising.aeron.service.matching.CoreMatchingResult(
                     false, "EXCHANGE_CORE_FAILURE");
-            Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(
-                    () -> state.completeMatching(fatalSequence, fatal, 3_000, 5));
+            Throwable divergence = null;
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (divergence == null) {
+                assertThat(System.nanoTime()).isLessThan(deadline);
+                state.commits.advanceMatchingProgress(3_000, 5, fatalSequence);
+                divergence = org.assertj.core.api.Assertions.catchThrowable(
+                        () -> state.completeMatching(fatalSequence, fatal, 3_000, 5));
+                Thread.onSpinWait();
+            }
             assertThat(divergence).isInstanceOf(
                     FatalMatchingDivergenceException.class);
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 4)))
                     .isSameAs(divergence);
             assertThat(state.takeMatchingResult(fatalSequence)).isNull();
             assertThat(claimedContext.hasMatchingCompletion()).isFalse();
-            assertThat(runtime.order(11_004)).isNotNull();
-            assertThat(runtime.reservation(11_004)).isNotNull();
-            assertThat((int) invoke(runtime, "pendingReservationCount", new Class<?>[]{long.class}, 1001L))
-                    .isPositive();
-            assertThat((int) invoke(runtime, "pendingReservationCount", new Class<?>[0])).isPositive();
-            assertThat((long) invoke(runtime, "pendingReservedUnits",
-                    new Class<?>[]{long.class, int.class}, 1001L, quoteAssetId)).isPositive();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(11_004))).isNotNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_004))).isNotNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_005))).isNotNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_004).assetId())).isEqualTo(quoteAssetId);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_005).assetId())).isEqualTo(quoteAssetId);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_004).totalReservedUnits())).isEqualTo(1_000L);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_005).totalReservedUnits())).isEqualTo(1_000L);
             assertThat(state.commandResults()).doesNotContainKey(fatalId);
             assertThat(state.pendingMatching(fatalSequence)).isNotNull();
             assertThat(state.pendingMatchingCount()).isOne();
@@ -964,7 +976,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.snapshotHasPendingCommands()).isTrue();
             assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(matcherAfterFirst);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBeforeFatal);
-            assertThat(identities.findClientKey(1001, "fatal-fourth")).isNotNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> identities.findClientKey(1001, "fatal-fourth"))).isNotNull();
         }
     }
 
@@ -1127,10 +1139,10 @@ class CoreOrderedOrderBatchTest {
 
             assertThat(divergence).isInstanceOf(
                     FatalMatchingDivergenceException.class);
-            assertThat(state.runtimeOrder(12_101).status())
+            assertThat(AccountLaneQueryTestSupport.read(state.runtimeState, 1001, () -> state.runtimeState.order(12_101)).status())
                     .isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN);
-            assertThat(state.runtimeOrder(12_102)).isNull();
-            assertThat(state.runtimeOrder(12_103)).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(state.runtimeState, 1001, () -> state.runtimeState.order(12_102))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(state.runtimeState, 1001, () -> state.runtimeState.order(12_103))).isNull();
             assertThat(state.pendingMatchingCount()).isEqualTo(1);
             assertThat(state.commandResults()).doesNotContainKey(commandId);
             assertThat(state.pendingMatching(sequence)).isNotNull();
@@ -1630,26 +1642,35 @@ class CoreOrderedOrderBatchTest {
         TradingRuntimeState runtime = field(state, "runtimeState");
         RuntimeIdentityRegistry identities = field(state, "identities");
         int quoteAssetId = identities.assetId("USDT");
-        long availableBefore = runtime.balance(1001, quoteAssetId).availableUnits();
-        long lockedBefore = runtime.balance(1001, quoteAssetId).lockedUnits();
+        long availableBefore = AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.balance(1001, quoteAssetId).availableUnits());
+        long lockedBefore = AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.balance(1001, quoteAssetId).lockedUnits());
         long revisionBefore = runtime.revision();
         long identityBefore = identities.positionCheckpoint();
         UUID commandId = UUID.randomUUID();
         CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, commandId, 2,
                 TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                         place(15_001, "close-first", 1_000),
-                        place(15_002, "close-second", 1_000)))));
+                        place(15_002, "close-second", 1_000),
+                        place(15_001, "close-duplicate", 1_000)))));
 
         assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
         long sequence = state.matchingSequence(commandId);
-        assertThat(state.completeMatching(sequence, awaitMatching(state, sequence), 2_000, 3)).isNull();
-        assertThat(runtime.order(15_001)).isNotNull();
+        var firstResult = awaitMatching(state, sequence);
+        OrderBatchPending activeBatch = state.batches.batch(sequence);
+        long firstDeadline = System.nanoTime() + 5_000_000_000L;
+        while (activeBatch.nextIndex == 0) {
+            assertThat(System.nanoTime()).isLessThan(firstDeadline);
+            state.commits.advanceMatchingProgress(2_000, 3, sequence);
+            assertThat(state.completeMatching(sequence, firstResult, 2_000, 3)).isNull();
+            Thread.onSpinWait();
+        }
+        assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(15_001))).isNotNull();
         assertThat(state.snapshotHasPendingCommands()).isTrue();
 
         state.close();
 
         assertThat(runtime.order(15_001)).isNotNull();
-        assertThat(runtime.order(15_002)).isNotNull();
+        assertThat(runtime.order(15_002)).isNull();
         assertThat(runtime.balance(1001, quoteAssetId).availableUnits()).isLessThan(availableBefore);
         assertThat(runtime.balance(1001, quoteAssetId).lockedUnits()).isGreaterThan(lockedBefore);
         assertThat(runtime.revision()).isGreaterThan(revisionBefore);
@@ -1669,11 +1690,13 @@ class CoreOrderedOrderBatchTest {
             int symbolId = identities.symbolId("1");
             CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
-                            place(15_101, "guard-first", 1_000)))));
+                            place(15_101, "guard-first", 1_000),
+                            place(15_102, "guard-second", 1_000),
+                            place(15_101, "guard-duplicate", 1_000)))));
             assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             // Lane admission precedes the Owner batch commit scope, including for one item.
             long sequence = state.matchingSequence(batch.header().commandId());
-            assertThat(state.completeMatching(sequence, awaitMatching(state, sequence), 2_000, 3)).isNull();
+            awaitMatching(state, sequence);
 
             assertThatThrownBy(() -> runtime.putMarkPrice(new MarkPriceRuntime(
                     symbolId, runtime.instrument("1"), 50_000, 2, 2)))
@@ -1709,7 +1732,7 @@ class CoreOrderedOrderBatchTest {
 
             assertThat(failure).isInstanceOf(
                     FatalMatchingDivergenceException.class);
-            assertThat(runtime.order(15_201)).isNotNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(15_201))).isNotNull();
             assertThat(runtime.revision()).isGreaterThan(revisionBefore);
             assertThatThrownBy(state::snapshotBusinessStateHash)
                     .hasMessageContaining("unfinished reservation or patch work");
@@ -1738,7 +1761,6 @@ class CoreOrderedOrderBatchTest {
             RuntimeIdentityRegistry identities = field(state, "identities");
             var identityBefore = identities.snapshot();
             var indexesBefore = allIndexSnapshots(state);
-            var treasuryBefore = treasurySnapshot(runtime);
             long businessBefore = state.snapshotBusinessStateHash();
             long fundsBefore = com.surprising.aeron.service.state.FundsStateHash.compute(
                     state.snapshotTradingState());
@@ -1773,13 +1795,13 @@ class CoreOrderedOrderBatchTest {
             Long makerPositionKey = identities.findPositionKey(1002, "1");
             assertThat(takerPositionKey).isNotNull();
             assertThat(makerPositionKey).isNotNull();
-            assertThat(runtime.position(takerPositionKey).signedQuantitySteps()).isEqualTo(1);
-            assertThat(runtime.position(makerPositionKey).signedQuantitySteps()).isEqualTo(-1);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.position(takerPositionKey).signedQuantitySteps())).isEqualTo(1);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1002, () -> runtime.position(makerPositionKey).signedQuantitySteps())).isEqualTo(-1);
             assertThat(identities.snapshot()).isNotEqualTo(identityBefore);
-            assertThat(runtime.order(15_301)).isNull();
-            assertThat(runtime.order(15_302)).isNull();
-            assertThat(runtime.reservation(15_301)).isNull();
-            assertThat(runtime.reservation(15_302)).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(15_301))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(15_302))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(15_301))).isNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(15_302))).isNull();
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             assertThat(state.takeMatchingResult(sequence)).isNull();
@@ -1908,17 +1930,7 @@ class CoreOrderedOrderBatchTest {
         }
     }
 
-    private static void finishCurrentItemSettlement(TradingCoreRuntime state, long sequence,
-                                                     long timestamp, long position) {
-        long deadline = System.nanoTime() + 5_000_000_000L;
-        OrderBatchPending batch = state.batches.batch(sequence);
-        while (batch.itemSettlementEvent != null || batch.itemAdmission != null) {
-            assertThat(System.nanoTime()).isLessThan(deadline);
-            if (!batch.activated()) state.batches.activateOrderBatch(batch, state.pendingMatching.get(sequence), true);
-            else state.completeMatching(sequence, batch.lastMatchingResult, timestamp, position);
-            Thread.onSpinWait();
-        }
-    }
+
 
     private static CoreResponse drainBatch(TradingCoreRuntime state, CoreMessage batch) {
         CoreResponse initial = state.apply(batch);

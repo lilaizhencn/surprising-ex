@@ -23,7 +23,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
      */
     private static final int DIRECT_READY_SPIN_LIMIT = 256;
     private static final int BUSY_SPIN_YIELD_THRESHOLD = 1024;
-    private static final int BUSY_SPIN_PARK_THRESHOLD = 4096;
 
     public interface Command {
         void execute(AccountLaneState lane);
@@ -257,7 +256,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                         continue;
                     }
                     if (waitStrategy == WaitStrategy.BUSY_SPIN) {
-                        backoffPayloadWait(payloadWaitSpins++);
+                        Thread.onSpinWait();
                     } else if (directReadySpins++ >= DIRECT_READY_SPIN_LIMIT) {
                         Thread.onSpinWait();
                         directReadySpins = 0;
@@ -350,10 +349,8 @@ public final class SettlementLaneWorker implements AutoCloseable {
     private void backoffPayloadWait(int spins) {
         if (spins < BUSY_SPIN_YIELD_THRESHOLD) {
             Thread.onSpinWait();
-        } else if (spins < BUSY_SPIN_PARK_THRESHOLD) {
-            Thread.yield();
         } else {
-            LockSupport.parkNanos(this, 10_000L);
+            Thread.yield();
         }
     }
 

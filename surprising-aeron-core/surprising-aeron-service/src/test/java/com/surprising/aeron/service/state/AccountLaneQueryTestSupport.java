@@ -4,8 +4,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
-final class AccountLaneQueryTestSupport {
-    static <T> T read(TradingRuntimeState runtime, long userId, Supplier<T> query) {
+public final class AccountLaneQueryTestSupport {
+    public static <T> T read(TradingRuntimeState runtime, long userId, Supplier<T> query) {
         if (!runtime.accountLanesStarted) return query.get();
         var result = new CompletableFuture<T>();
         long mask = runtime.topology().accountLaneMask(userId);

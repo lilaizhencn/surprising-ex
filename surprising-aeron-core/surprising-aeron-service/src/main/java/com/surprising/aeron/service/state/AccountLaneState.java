@@ -182,6 +182,7 @@ public final class AccountLaneState {
     }
 
     private volatile Thread owner;
+    Thread owner() { return owner; }
     private static final VarHandle OWNER;
     static {
         try { OWNER = MethodHandles.lookup().findVarHandle(AccountLaneState.class, "owner", Thread.class); }
