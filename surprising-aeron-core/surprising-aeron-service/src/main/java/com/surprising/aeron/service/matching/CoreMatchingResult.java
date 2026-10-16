@@ -201,10 +201,13 @@ public final class CoreMatchingResult implements MatchingResult {
     public long nativeMatcherSequence() { return nativeMatcherSequence; }
     long nativeAeronTimestamp() { return nativeAeronTimestamp; }
     public int nativeMatcherShardId() { return nativeMatcherShardId; }
-    public boolean nativeMatches(java.util.UUID commandId) {
+    @Override public boolean nativeMatches(long most, long least) {
+        return nativeCommandIdMostSignificantBits == most
+                && nativeCommandIdLeastSignificantBits == least;
+    }
+    @Override public boolean nativeMatches(java.util.UUID commandId) {
         return commandId != null
-                && nativeCommandIdMostSignificantBits == commandId.getMostSignificantBits()
-                && nativeCommandIdLeastSignificantBits == commandId.getLeastSignificantBits();
+                && nativeMatches(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
     }
     public MatcherResult nativeMatcherResult() { return nativeMatcherResult; }
     public List<MatcherResult.MatcherEvent> matcherEvents() { return matcherEvents; }

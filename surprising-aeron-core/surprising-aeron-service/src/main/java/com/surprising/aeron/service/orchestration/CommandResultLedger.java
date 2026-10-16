@@ -60,9 +60,13 @@ final class CommandResultLedger {
         nextResultRetentionSequence = nextRetentionSequence(results);
     }
 
+    StoredResult get(long most, long least) {
+        return results[locate(most, least)];
+    }
+
     StoredResult get(UUID id) {
         if (id == null) return null;
-        return results[locate(id.getMostSignificantBits(), id.getLeastSignificantBits())];
+        return get(id.getMostSignificantBits(), id.getLeastSignificantBits());
     }
 
     /**
@@ -148,11 +152,18 @@ final class CommandResultLedger {
                 responseData == null ? 0 : responseData.length);
     }
 
-    /** Stores a stable response slice without copying arena-backed storage. */
     void storeOwnedResult(UUID commandId, CommandFingerprint fingerprint, ResponseStatus status,
                           CoreResultCode resultCode, long appliedCommandCount,
                           byte[] responseData, int responseOffset, int responseLength) {
         java.util.Objects.requireNonNull(commandId, "command id");
+        storeOwnedResult(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
+                fingerprint, status, resultCode, appliedCommandCount, responseData, responseOffset, responseLength);
+    }
+
+    /** Stores a stable response slice without copying arena-backed storage. */
+    void storeOwnedResult(long commandIdMsb, long commandIdLsb, CommandFingerprint fingerprint, ResponseStatus status,
+                          CoreResultCode resultCode, long appliedCommandCount,
+                          byte[] responseData, int responseOffset, int responseLength) {
         if (responseData == null) {
             responseData = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
             responseOffset = 0;
@@ -166,7 +177,7 @@ final class CommandResultLedger {
         if (resultBytes > MAX_RESULT_LEDGER_BYTES) {
             throw new IllegalArgumentException("result ledger entry exceeds byte bound");
         }
-        int slot = locate(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
+        int slot = locate(commandIdMsb, commandIdLsb);
         StoredResult previous = results[slot];
         long retentionSequence = previous == null ? nextResultRetentionSequence : previous.retentionSequence();
         byte[] previousResponse = previous == null ? null : previous.responseDataUnsafe();
@@ -196,8 +207,8 @@ final class CommandResultLedger {
         long nextSequence = previous == null ? Math.incrementExact(nextResultRetentionSequence)
                 : nextResultRetentionSequence;
         if (previous == null) {
-            commandIdMost[slot] = commandId.getMostSignificantBits();
-            commandIdLeast[slot] = commandId.getLeastSignificantBits();
+            commandIdMost[slot] = commandIdMsb;
+            commandIdLeast[slot] = commandIdLsb;
             enqueueRetentionSlot(slot);
             size++;
         } else if (responseArena != null && previousResponse != responseData) {
@@ -209,7 +220,7 @@ final class CommandResultLedger {
         commandResultBytes = Math.addExact(commandResultBytes - previousBytes, resultBytes);
         while (size > MAX_IDEMPOTENCY_RESULTS
                 || commandResultBytes > MAX_RESULT_LEDGER_BYTES) {
-            int oldest = oldestSlot(commandId);
+            int oldest = oldestSlot(commandIdMsb, commandIdLsb);
             if (oldest < 0) throw new IllegalStateException("result ledger protected entry exceeds bound");
             commandResultBytes = Math.subtractExact(commandResultBytes, resultEntryBytes(results[oldest]));
             remove(oldest);
@@ -238,9 +249,7 @@ final class CommandResultLedger {
         return slot;
     }
 
-    private int oldestSlot(UUID protectedId) {
-        long protectedMost = protectedId == null ? Long.MIN_VALUE : protectedId.getMostSignificantBits();
-        long protectedLeast = protectedId == null ? Long.MIN_VALUE : protectedId.getLeastSignificantBits();
+    private int oldestSlot(long protectedMost, long protectedLeast) {
         for (int offset = 0; offset < RETENTION_CAPACITY && retentionHead + offset < retentionTail; offset++) {
             int slot = retentionSlots[(retentionHead + offset) & (RETENTION_CAPACITY - 1)];
             if (slot < 0 || results[slot] == null) continue;
@@ -248,6 +257,12 @@ final class CommandResultLedger {
             return slot;
         }
         return -1;
+    }
+
+    private int oldestSlot(UUID protectedId) {
+        long protectedMost = protectedId == null ? Long.MIN_VALUE : protectedId.getMostSignificantBits();
+        long protectedLeast = protectedId == null ? Long.MIN_VALUE : protectedId.getLeastSignificantBits();
+        return oldestSlot(protectedMost, protectedLeast);
     }
 
     private void remove(int slot) {

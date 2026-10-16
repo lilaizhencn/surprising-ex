@@ -77,8 +77,8 @@ public final class CoreMessageCodec {
         destination[cursor++] = (byte) header.route().shardCode();
         CoreProtocol.putShort(destination, cursor, CoreProtocol.HEADER_LENGTH); cursor += Short.BYTES;
         CoreProtocol.putShort(destination, cursor, header.route().version()); cursor += Short.BYTES;
-        CoreProtocol.putLong(destination, cursor, header.commandId().getMostSignificantBits()); cursor += Long.BYTES;
-        CoreProtocol.putLong(destination, cursor, header.commandId().getLeastSignificantBits()); cursor += Long.BYTES;
+        CoreProtocol.putLong(destination, cursor, header.commandIdMsb()); cursor += Long.BYTES;
+        CoreProtocol.putLong(destination, cursor, header.commandIdLsb()); cursor += Long.BYTES;
         CoreProtocol.putLong(destination, cursor, header.sourceId()); cursor += Long.BYTES;
         CoreProtocol.putLong(destination, cursor, header.sourceSequence()); cursor += Long.BYTES;
         CoreProtocol.putLong(destination, cursor, header.userId()); cursor += Long.BYTES;
@@ -111,7 +111,8 @@ public final class CoreMessageCodec {
             throw new ProtocolException("invalid header length: " + headerLength);
         }
         CoreRoute route = CoreRoute.fromWireCodes(shardCode, routeVersion);
-        UUID commandId = new UUID(buffer.getLong(), buffer.getLong());
+        long commandIdMsb = buffer.getLong();
+        long commandIdLsb = buffer.getLong();
         long sourceId = buffer.getLong();
         long sourceSequence = buffer.getLong();
         long userId = buffer.getLong();
@@ -126,9 +127,9 @@ public final class CoreMessageCodec {
         if (payloadLength > 0) {
             buffer.get(payload);
         }
-        CoreMessageHeader header = new CoreMessageHeader(schemaVersion, kind, messageType, commandId,
-                productLine, route, source, sourceId, sourceSequence, userId,
-                submittedAtEpochMillis, correlationId);
+        CoreMessageHeader header = new CoreMessageHeader(schemaVersion, kind, messageType,
+                commandIdMsb, commandIdLsb, productLine, route, source, sourceId, sourceSequence,
+                userId, submittedAtEpochMillis, correlationId);
         return CoreMessage.owned(header, payload);
     }
 }

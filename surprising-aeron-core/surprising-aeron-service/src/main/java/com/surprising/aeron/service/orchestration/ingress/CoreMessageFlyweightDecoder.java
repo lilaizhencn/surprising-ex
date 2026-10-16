@@ -101,7 +101,8 @@ public final class CoreMessageFlyweightDecoder {
     }
 
     private CoreMessage decodeInto(DirectBuffer buffer, DirectMessageReader reader, CoreMessage slot) {
-        UUID commandId = new UUID(reader.commandIdMsb(), reader.commandIdLsb());
+        long commandIdMsb = reader.commandIdMsb();
+        long commandIdLsb = reader.commandIdLsb();
         CoreRoute route = CoreRoute.fromWireCodes(reader.shardCode(), reader.routeVersion());
         int payloadLen = reader.payloadLength();
         byte[] payload = slot != null ? slot.decoderPayloadBuffer(payloadLen)
@@ -110,12 +111,14 @@ public final class CoreMessageFlyweightDecoder {
             buffer.getBytes(reader.payloadOffset(), payload);
         }
         if (slot == null) return CoreMessage.owned(new CoreMessageHeader(
-                reader.schemaVersion(), reader.kind(), reader.messageType(), commandId,
+                reader.schemaVersion(), reader.kind(), reader.messageType(),
+                commandIdMsb, commandIdLsb,
                 reader.productLine(), route, reader.source(), reader.sourceId(),
                 reader.sourceSequence(), reader.userId(), reader.submittedAtEpochMillis(),
                 reader.correlationId()), payload);
         slot.decoderHeader(
-                reader.schemaVersion(), reader.kind(), reader.messageType(), commandId,
+                reader.schemaVersion(), reader.kind(), reader.messageType(),
+                commandIdMsb, commandIdLsb,
                 reader.productLine(), route, reader.source(), reader.sourceId(),
                 reader.sourceSequence(), reader.userId(), reader.submittedAtEpochMillis(),
                 reader.correlationId());

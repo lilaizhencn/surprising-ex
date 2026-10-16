@@ -156,12 +156,22 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
         return tombstones.size();
     }
 
+    CommandFingerprint fundsCommand(long msb, long lsb) {
+        return fundsCommands.get(msb, lsb);
+    }
+
     CommandFingerprint fundsCommand(UUID commandId) {
-        return fundsCommands.get(commandId);
+        if (commandId == null) return null;
+        return fundsCommand(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
+    }
+
+    void retainFundsCommand(long msb, long lsb, CommandFingerprint fingerprint) {
+        fundsCommands.put(msb, lsb, fingerprint);
     }
 
     void retainFundsCommand(UUID commandId, CommandFingerprint fingerprint) {
-        fundsCommands.put(commandId, fingerprint);
+        if (commandId == null) throw new IllegalArgumentException("commandId is required");
+        retainFundsCommand(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), fingerprint);
     }
 
     /** One reusable direct-command I/O request; only Ledger accesses its index payload. */
@@ -169,23 +179,37 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
         private TerminalStateRetention retention;
         private TradingRuntimeState completionRuntime;
         private UUID commandId;
+        private long commandIdMsb;
+        private long commandIdLsb;
         private CommandFingerprint fingerprint, retained;
         private boolean write, prepared, queued;
         private volatile boolean completed = true;
 
+        void prepareLookup(TerminalStateRetention retention, long msb, long lsb) {
+            prepare(retention, null, msb, lsb, null, false);
+        }
+
         void prepareLookup(TerminalStateRetention retention, UUID commandId) {
-            prepare(retention, commandId, null, false);
+            java.util.Objects.requireNonNull(commandId, "commandId");
+            prepare(retention, commandId, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), null, false);
+        }
+
+        void prepareWrite(TerminalStateRetention retention, long msb, long lsb, CommandFingerprint fingerprint) {
+            prepare(retention, null, msb, lsb, java.util.Objects.requireNonNull(fingerprint), true);
         }
 
         void prepareWrite(TerminalStateRetention retention, UUID commandId, CommandFingerprint fingerprint) {
-            prepare(retention, commandId, java.util.Objects.requireNonNull(fingerprint), true);
+            java.util.Objects.requireNonNull(commandId, "commandId");
+            prepare(retention, commandId, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), java.util.Objects.requireNonNull(fingerprint), true);
         }
 
-        private void prepare(TerminalStateRetention retention, UUID commandId,
+        private void prepare(TerminalStateRetention retention, UUID commandId, long msb, long lsb,
                              CommandFingerprint fingerprint, boolean write) {
             if (prepared) throw new IllegalStateException("funds index request is still retained");
             this.retention = java.util.Objects.requireNonNull(retention);
-            this.commandId = java.util.Objects.requireNonNull(commandId);
+            this.commandId = commandId;
+            this.commandIdMsb = msb;
+            this.commandIdLsb = lsb;
             this.fingerprint = fingerprint;
             this.write = write;
             retained = null;
@@ -208,8 +232,8 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
 
         @Override public void apply(com.surprising.aeron.service.state.TreasuryRuntime ignored) {
             retention.fundsCommands.bindIoOwner();
-            if (write) retention.fundsCommands.put(commandId, fingerprint);
-            else retained = retention.fundsCommands.get(commandId);
+            if (write) retention.fundsCommands.put(commandIdMsb, commandIdLsb, fingerprint);
+            else retained = retention.fundsCommands.get(commandIdMsb, commandIdLsb);
             TradingRuntimeState completion = completionRuntime;
             completed = true;
             completion.signalOwnerCompletion();
@@ -222,7 +246,9 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
 
         /** Normal completion, or shutdown after the Ledger worker has stopped. */
         void clear() {
-            retention = null; completionRuntime = null; commandId = null; fingerprint = retained = null;
+            retention = null; completionRuntime = null; commandId = null;
+            commandIdMsb = commandIdLsb = 0;
+            fingerprint = retained = null;
             write = prepared = queued = false;
             completed = true;
         }

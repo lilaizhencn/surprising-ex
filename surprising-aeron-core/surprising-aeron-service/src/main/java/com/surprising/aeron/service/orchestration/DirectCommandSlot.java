@@ -116,12 +116,13 @@ final class DirectCommandSlot {
         initialize(message, fingerprint, sourceKey, timestamp, position, 0, 0, 0);
         fundsPreflight = true;
         fundsLastSourceSequence = lastSourceSequence;
-        fundsIndexWork.prepareLookup(retention, message.header().commandId());
+        fundsIndexWork.prepareLookup(retention, message.header().commandIdMsb(), message.header().commandIdLsb());
     }
 
     boolean retainFundsOnLedger(TradingCoreRuntime owner) {
         if (!fundsRetainPrepared) {
-            fundsIndexWork.prepareWrite(owner.terminalRetention, command.header().commandId(), fingerprint);
+            fundsIndexWork.prepareWrite(owner.terminalRetention, command.header().commandIdMsb(),
+                    command.header().commandIdLsb(), fingerprint);
             fundsRetainPrepared = true;
         }
         return fundsIndexWork.poll(owner);

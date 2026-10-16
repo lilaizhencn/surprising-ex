@@ -797,13 +797,21 @@ public final class TradingCoreRuntime implements AutoCloseable {
         };
     }
 
+    boolean isMatchingPending(long msb, long lsb) {
+        return pendingMatching.findByCommandId(msb, lsb) != null;
+    }
+
     boolean isMatchingPending(UUID commandId) {
-        return pendingMatching.findByCommandId(commandId) != null;
+        return commandId != null && isMatchingPending(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
+    }
+
+    long matchingSequence(long msb, long lsb) {
+        CommandSlot pending = pendingMatching.findByCommandId(msb, lsb);
+        return pending == null ? 0 : pending.sequence();
     }
 
     long matchingSequence(UUID commandId) {
-        CommandSlot pending = pendingMatching.findByCommandId(commandId);
-        return pending == null ? 0 : pending.sequence();
+        return commandId == null ? 0 : matchingSequence(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
     }
 
     /** Fast Owner-side gate for the matching completion pump. */

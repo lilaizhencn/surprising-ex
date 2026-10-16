@@ -77,6 +77,8 @@ public final class MatcherSettlementEvent implements
     private Throwable directFailure;
     private long routedLaneMask;
     private java.util.UUID directCommandId;
+    private long directCommandIdMsb;
+    private long directCommandIdLsb;
     private int directShard;
     private java.util.List<Long> authorizedCancellations = java.util.List.of();
     /** Native immutable result used by the allocation-free ordinary Matcher handoff. */
@@ -220,7 +222,10 @@ public final class MatcherSettlementEvent implements
         directCoreSequence = coreSequence;
         this.commitSequence = commitSequence; routedLaneMask = requiredLaneMask = laneMask;
         commitTimestamp = timestamp; commitClusterPosition = position;
-        directCommandId = commandId; directShard = shard;
+        directCommandId = commandId;
+        directCommandIdMsb = commandId == null ? 0 : commandId.getMostSignificantBits();
+        directCommandIdLsb = commandId == null ? 0 : commandId.getLeastSignificantBits();
+        directShard = shard;
         authorizedCancellations = java.util.Objects.requireNonNull(cancellations);
         this.runtime = runtime; this.identities = identities; resultTarget = target;
         batchPlanCount = count; batchPlans = batchStorage.plans; plan = batchPlans[0];
@@ -675,8 +680,11 @@ public final class MatcherSettlementEvent implements
     @Override public int nativeMatcherShardId() {
         return directShard;
     }
+    @Override public boolean nativeMatches(long most, long least) {
+        return directCommandIdMsb == most && directCommandIdLsb == least;
+    }
     @Override public boolean nativeMatches(java.util.UUID commandId) {
-        return directCommandId != null && directCommandId.equals(commandId);
+        return commandId != null && nativeMatches(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
     }
     @Override public exchange.core2.core.common.MatcherResult nativeMatcherResult() {
         return directNativeResult;
@@ -780,7 +788,9 @@ public final class MatcherSettlementEvent implements
         admissionResultCode = CoreResultCode.NONE.wireCode();
         admissionReservationId = admissionAccountVersion = admissionReservedAmount = 0;
         directCoreSequence = 0;
-        directCommandId = null; authorizedCancellations = java.util.List.of();
+        directCommandId = null;
+        directCommandIdMsb = directCommandIdLsb = 0;
+        authorizedCancellations = java.util.List.of();
         directNativeResult = null;
         directMatcherSequence = directLastMatcherSequence = directOrderId = 0;
         directNativeItemCount = 0;

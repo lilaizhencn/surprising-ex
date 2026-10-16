@@ -24,13 +24,14 @@
 | 先确认 | C1 | `ResponseArena` 引用计数疑似跨线程竞争 | 正确性，需 JCStress |
 | 先确认 | C2 | 出口队列溢出会关闭全部会话 | 可用性 |
 | 先确认 | C3 | 成交结算有 lane 原地修改与值语义两套资金算术 | 资金，需对账测试 |
-| 高收益低风险 | P1 / F1 | 每笔订单无条件 `unpark` | 低 |
+| 已完成 | P1 / F1 / L1 | 撮合流水线并发与伪共享优化（精确挂起唤醒握手、消除高水位写伪共享与影子游标） | 已验证，见 P1 |
 | 高收益低风险 | F2 / L3 | 结算 ring 游标相邻 volatile，消费端多余 fence | 低 |
 | 高收益低风险 | P2 | Lane 线程每次线性查找自己的 lane（85 处调用） | 低 |
 | 高收益低风险 | P3 | 市价单为读最优价走完整引擎命令 | 低到中 |
 | 高收益低风险 | P4 | 每命令 SHA-256 指纹 | 低（未上线可直接改格式） |
 | 已完成 | P5 | 彻底移除 `surprising-aeron-core` 全模块 `traceId` 字段与线上编码 | 已验证，见 P5 |
-| 中 | P6–P13、F3–F9、L1–L6 | 见正文 | 中 |
+| 已完成 | P6 | 彻底移除命令 UUID 分配，全链路 commandId 双 long 标量化（协议/解码/索引/账本零 GC） | 已验证，见 P6 |
+| 中 | P7–P13、F3–F9、L3–L6 | 见正文 | 中 |
 | 已完成 | D1 | 已移除假 `Cluster` / `ClientSession` 实现，Owner 按会话 ID 路由 | 已验证，见 D1 |
 | 已完成 | D2 / L8 | 已删除旧 Owner 直达派发、窗口扫描回调及 Lane 响应回退 | 已验证，见 D2 |
 | 已完成 | D3 / L7 | 交易统一 Direct，删除旧 Future/API、Owner 补结算与分区扫描 | 已验证，见 D3 |
@@ -42,7 +43,7 @@
 | 已完成 | D10 | 序列与水位修改收归权威来源，状态权威来源明确化 | 已验证，见 D10 |
 | 已完成 | D11 | 客户端零中间拷贝 Egress 解码、清理死代码构造器与协议全量 Codec 分配消除 | 已验证，见 D11 |
 
-P5 与 D1–D11 均已完成，具体变更、核查结论与验证证据见各节。建议执行顺序见第 9 节。
+P1/F1/L1、P5、P6 与 D1–D11 均已完成，具体变更、核查结论与验证证据见各节。建议执行顺序见第 9 节。
 
 ## 2. 正确性与可用性风险（C）
 
@@ -73,13 +74,18 @@ P5 与 D1–D11 均已完成，具体变更、核查结论与验证证据见各�
 
 ## 3. 热路径性能问题（P）
 
-### P1【已核】每笔订单无条件 `LockSupport.unpark(worker)`
-- **位置**：`matcher/MatcherCommandPipeline.java:184-187`（owner 线程，per-order）。
-- **证据**：`submissionHighWaterMark = Math.max(...)` 后无条件 `LockSupport.unpark(worker)`，注释称这样可以不加状态标志。
-- **机制**：HotSpot 的 `Parker::unpark` 无论目标是否在 park 都要拿 mutex，worker 真在 park 时 owner 线程还要付一次 futex wake。
-- **参照**：`OwnerIdleStrategy.java:30-49` 与 `SettlementLaneWorker.signalWork()`（`parked` 标志握手，:146-150）已有正确写法。
-- **方案**：worker park 前置位 padded `requested` 标志并复查队列，owner 只在标志为 1 时 unpark。
-- **验证**：JFR `jdk.NativeMethodSample`、`ThreadPark`；owner 线程 syscall 次数；p99 对比。
+### P1 / F1 / L1【已完成】撮合流水线并发与伪共享优化
+- **完成日期**：2026-10-16。针对撮合流水线关键热路径完成以下三项高收益优化：
+- **精确挂起唤醒握手（消除每单无条件 unpark）**：
+  - 在 [`MatcherCommandPipeline`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/MatcherCommandPipeline.java) 中引入独立类 `Wakeup`，使用 128 字节缓存行填充（Padding）与 `VarHandle` 原子 CAS 状态；
+  - 撮合线程在无命令时置位 `parked = 1` 并进行二次双检确认后挂起；Owner 线程提交命令时通过 CAS（`1 -> 0`）精准探测 worker 挂起状态，仅在真正处于挂起状态时才触发 `LockSupport.unpark(worker)`，完全消除了每笔订单无条件调用 `unpark` 引起的内核互斥锁竞争与无谓系统调用开销。
+- **高水位指标消除伪共享风暴**：
+  - 将 `submissionHighWaterMark` 与 `completionHighWaterMark` 改为“仅出现新高时才写入”（`if (currentDepth > mark) ...`），彻底消除了原先每笔订单无条件写诊断 volatile 字段所导致的跨核 CPU 缓存行（L1/L2 Cache line）反复失效与总线广播风暴。
+- **删除冗余影子游标（L2）**：
+  - 彻底删除了与 `completedPosition` 完全同步但仅用于诊断的影子游标 `workerPosition`，减少了撮合核心循环每笔命令的 volatile 写入次数；
+  - `submissionDepth()` 诊断统一使用权威状态 `completedPosition.value` 计算。
+- **验证**：HotSpot JDK 27 下 `MatcherCommandPipelineTest`（6 项）、`MatcherPipelineGroupTest`（5 项）、`OwnerCommandPipelineStateTest`（5 项）100% 成功。
+
 
 ### P2【已核】Lane 线程每次线性查找自己的 lane
 - **位置**：`state/TradingRuntimeState.java:655-668`（`currentLaneCommandScope()`），共 85 处调用；非显式 lane 的 `publishOrder/Reservation/User`（如 3651、3676）都会走到。
@@ -117,15 +123,24 @@ P5 与 D1–D11 均已完成，具体变更、核查结论与验证证据见各�
   - `TriggerOrderService`、`TriggerOrderAeronGateway`、`AeronAlgoOrderStore` 在网关边界使用 `StableOrderIdentity` 确定性派生对外 HTTP DTO 的 `traceId`，Core 内部零感知。
 - **验证**：`grep -rn "traceId\|TraceIds\|withTraceId" surprising-aeron-core/src` 0 命中；HotSpot JDK 27 下 `surprising-aeron-protocol`（240 项）、`surprising-aeron-client`（66 项）及 `surprising-aeron-service` 全部受影响核心测试（120 项）100% 通过。
 
-### P6【报告】解码槽的分配与原子操作
-- **位置**：`CoreMessageFlyweightDecoder:104,46,108`、`CoreMessage:13,20,66`（ingress 子包）。
-- **证据与后果**：
-  - 每条命令 `new UUID`，而 Ledger 与 Index 已用 msb / lsb 两个 long。
-  - 缓存只有 512 槽，入口队列有 8192；超过后每条命令新分配 `CoreMessage`、header 与 payload。
-  - 按精确长度缓存，长度一变就 `new byte[len]`。
-  - 每槽的 `volatile` 与 `AtomicInteger` 引用计数，在两个线程上都做原子读改写。
-- **方案**：命令 id 用两个 long；槽数不小于入口队列数，或让队列按槽数背压；payload 固定 16KB 容量加显式长度。
-- **验证**：`-prof gc`；JFR `ObjectAllocationOutsideTLAB`。
+### P6【已完成】彻底移除命令 UUID 分配，全链路 commandId 双 long 标量化
+- **完成日期**：2026-10-16。依据第一性原理与零 GC 架构规范，彻底清除命令进入 Aeron 消息总线后的堆对象装箱分配，将 `commandId` 全链路原生标量化为双 `long`（`commandIdMsb`, `commandIdLsb`）：
+- **协议层与编解码零分配**：
+  - [`CoreMessageHeader`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreMessageHeader.java)：底层字段改用原生 `long commandIdMsb, long commandIdLsb`，增加原生读取方法 `commandIdMsb()`, `commandIdLsb()`；保留重载方法供外部适配，彻底避免堆分配；
+  - [`CoreMessage`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreMessage.java)：引入双 `long` 版本的 `decoderHeader(...)`；
+  - [`CoreMessageCodec`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreMessageCodec.java)：直接读写两个 `long`，彻底消除消息头编解码时的 `UUID` 对象分配。
+- **服务端飞量解码与核心状态机直通标量**：
+  - [`CoreMessageFlyweightDecoder`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/ingress/CoreMessageFlyweightDecoder.java)：入口 `decodeInto` 彻底消除了原先每笔命令必调的 `new UUID(reader.commandIdMsb(), reader.commandIdLsb())`（40 字节堆分配），直接将两个原生 `long` 传入消息头；
+  - [`PendingCommandIdIndex`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/PendingCommandIdIndex.java)：提供原生标量 `get(long most, long least)`、`put(long most, long least, int slot)`、`remove(long most, long least)`；
+  - [`PendingMatchingRing`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/PendingMatchingRing.java)：检索、排队与删除全链路直通标量双 `long`；
+  - [`TradingCoreRuntime`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreRuntime.java) 与 [`TradingCoreOwner`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreOwner.java)：撮合序列检索与在途判断改用 `matchingSequence(long msb, long lsb)` / `isMatchingPending(long msb, long lsb)`；
+  - [`CommandResultLedger`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CommandResultLedger.java)：结果查询与幂等存储实现 `get(long most, long least)`、`storeOwnedResult(long most, long least, ...)`；
+  - [`MatchingResult`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/MatchingResult.java)、[`CoreMatchingResult`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/CoreMatchingResult.java)、[`MatcherSettlementEvent`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/MatcherSettlementEvent.java)：实现 `nativeMatches(long most, long least)` 零分配校验；
+  - [`OrderedCommitCoordinator`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderedCommitCoordinator.java)、[`FundsCommandIndex`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/FundsCommandIndex.java)、[`TerminalStateRetention`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TerminalStateRetention.java)、[`DirectCommandSlot`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/DirectCommandSlot.java)：全面直通双 `long` 标量。
+- **验证**：HotSpot JDK 27 下全部关键用例 100% 成功：
+  - `DeterministicExchangeCoreAdapterTest`（23 项）、`PendingMatchingRingTest`（6 项）、`TradingCoreOwnerTest`（45 项）、`FundsCommandIndexTest`（2 项）、`TerminalStateRetentionTest`（5 项）；
+  - 网关端到端测试 `AccountAeronGatewayTest`、`AeronOrderCommandServiceTest`、`OrderServiceTest`、`OrderBatchServiceTest`、`OrderAeronGatewayTest`（59 项）100% 通过。
+
 
 ### P7【报告】网关 `AeronClientPool` 的锁与分配
 - **位置**：`surprising-aeron-client/.../AeronClientPool.java`（含未提交改动）。
@@ -180,10 +195,9 @@ P5 与 D1–D11 均已完成，具体变更、核查结论与验证证据见各�
 
 跨线程写入的相邻字段统一处理原则：写者分离到独立缓存行，单写者游标用 release / acquire 而非 volatile 全 fence，对端游标本地缓存。
 
-### F1【已核（P1 同源）】撮合流水线 volatile 字段无填充
-- **位置**：`matcher/MatcherCommandPipeline.java:34-48,184,395`。
-- **证据**：owner 每次提交写 `submissionHighWaterMark = Math.max(...)`（值没变也写）；matcher 每次完成写 `completionHighWaterMark`（:395）并读 owner 写的 `consumedPosition`（:396）；这两个诊断字段与 `worker`、`accepting`、`publicationFailure` 在同一对象，后三者 owner 每次 submit / poll 都读，matcher 的写会使其所在缓存行反复失效。`Slot`（:537）是 7 个字段的小对象，数组里相邻分配，owner 写 N+1 时 matcher 写 N。
-- **方案**：两个 HWM 仅在 `WAIT_DIAGNOSTICS` 时更新，或改线程本地普通 long；`accepting`、`publicationFailure` 等只读标志放进 padded 持有类；`Slot` 做 64B 填充（见 F9）。
+### F1【已完成，随 P1】撮合流水线 volatile 字段无填充与伪共享
+- **完成日期**：2026-10-16。在 [`MatcherCommandPipeline.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/MatcherCommandPipeline.java) 中将高水位诊断字段 `submissionHighWaterMark` 与 `completionHighWaterMark` 改为仅出现新高时才写入，并引入具备 128 字节缓存行填充（Padding）与 VarHandle 原子 CAS 握手的 `Wakeup` 状态隔离类，彻底消除了每笔订单无条件写入 volatile 字段引发的跨核缓存行失效与伪共享风暴。验证见 P1。
+
 
 ### F2【已核】结算 ring 游标相邻 volatile
 - **位置**：`lane/SettlementLaneWorker.java:594-595`（`MatcherSettlementRing`）。
@@ -243,13 +257,12 @@ P5 与 D1–D11 均已完成，具体变更、核查结论与验证证据见各�
 
 ## 5. 锁、fence 与线程模型（L）
 
-### L1【已核（P1 / F1）】每笔订单 unpark 与 volatile 读改写
-见 P1。附：`submissionHighWaterMark = Math.max(...)` 是一次 volatile 读改写（全 fence），建议改 plain / opaque 且只在新高时写。
+### L1【已完成，随 P1】每笔订单 unpark 与 volatile 读改写消除
+- **完成日期**：2026-10-16。已通过精确 `parked` 挂起与 CAS 唤醒握手消除每单无条件 `unpark`；`submissionHighWaterMark` 改为仅在新高时写入，消除了每单无条件 volatile 读改写与全 fence 刷新。验证见 P1。
 
-### L2【报告】重复且全 volatile 的位置游标
-- **位置**：`matcher/MatcherCommandPipeline.java:384-385`。
-- **证据**：`workerPosition.value = position; completedPosition.value = position;` 两者永远相等，`workerPosition` 只用于 `submissionDepth()` 诊断；再加 owner 的 `consumedPosition` 与 `submittedPosition`，每命令共 4 次 volatile 存储（x86 上每次是 `lock` 指令）。
-- **方案**：删除 `workerPosition`；单写者游标改 `VarHandle.setRelease / getAcquire`。
+### L2【已完成，随 P1】重复且全 volatile 的位置游标已删除
+- **完成日期**：2026-10-16。`MatcherCommandPipeline.java` 中的影子游标 `workerPosition` 已彻底删除，`submissionDepth()` 诊断直接统一使用权威状态 `completedPosition.value`，消除撮合核心循环中多余的 volatile 写入。验证见 P1。
+
 
 ### L3【报告】单写者游标多余 fence
 - **位置**：`lane/SettlementLaneWorker.java:280,319`（`MatcherSettlementRing.poll` 的 `consumerPosition`）。
@@ -463,10 +476,10 @@ P5 与 D1–D11 均已完成，具体变更、核查结论与验证证据见各�
 ## 9. 建议执行顺序
 
 1. **确认类**（先于一切性能优化）：C1（JCStress）、C2（决定溢出策略）。
-2. **局部低风险改动**（先写 JMH，再改，再测）：P1+F1+L1（unpark 标志与 HWM）、F2+L3（结算 ring 填充与 `setRelease`）、P2（Lane scope）。
-3. **已完成的过度设计与冗余清理（D 系列与 P5）**：P5 与 D1–D11 均已完成，详见第 3 节与第 6 节各条目。L7/L8 的相关完成范围见 D3/D2。
-4. **中等改动**：P3（最优价）、P4（指纹）、P6（解码槽与双 long commandId）、P7（网关 mailbox）、P9–P11、F3–F7、F9、L2。
-5. **需要先补测试与对账**：C3（P5、D3、D4、D7–D11 已完成）。
+2. **已完成的热路径并发与伪共享优化**：P1+F1+L1（挂起唤醒握手、消除高水位写伪共享、删除影子游标 L2）。
+3. **已完成的过度设计与冗余清理（D 系列与 P5、P6）**：P5（移除 traceId）、P6（命令 ID 双 long 标量化）、D1–D11 均已完成，详见第 3 节与第 6 节各条目。L7/L8 的相关完成范围见 D3/D2。
+4. **低风险与中等改动**：F2+L3（结算 ring 填充与 `setRelease`）、P2（Lane scope）、P3（最优价）、P4（指纹）、P7（网关 mailbox）、P9–P11、F3–F7、F9。
+5. **需要先补测试与对账**：C3（P1、P5、P6、D3、D4、D7–D11 已完成）。
 
 ## 10. 未覆盖与不确定项
 

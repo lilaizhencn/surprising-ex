@@ -73,9 +73,10 @@ final class OrderedCommitCoordinator {
         CoreResultCode resultCode = pending.matchingRejection();
         owner.activateFactContext(pending.command(), pending.fingerprint());
         owner.matchingFlow.commitMatchingSequence(sequence);
-        owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
+        owner.resultLedger.storeOwnedResult(pending.command().header().commandIdMsb(),
+                pending.command().header().commandIdLsb(), pending.fingerprint(),
                 ResponseStatus.REJECTED, resultCode, sequence,
-                TradingCoreRuntime.EMPTY_RESPONSE_DATA);
+                TradingCoreRuntime.EMPTY_RESPONSE_DATA, 0, 0);
         if (direct != null && direct.direct()) {
             // A rejected admission still consumed one Matcher evidence sequence.  Advance the
             // Advance the Owner's shard sequence before recycling the direct event so restored
@@ -386,7 +387,8 @@ final class OrderedCommitCoordinator {
         boolean laneResponse = responseData != null && responseData == pending.lanePreparedResponse();
         pending.resultData = null;
         owner.terminalTradeCount = Math.addExact(owner.terminalTradeCount, owner.resultBuilder.commandTradeCount);
-        owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
+        owner.resultLedger.storeOwnedResult(pending.command().header().commandIdMsb(),
+                pending.command().header().commandIdLsb(), pending.fingerprint(),
                 status, resultCode, applied, responseData,
                 responseOffset, responseLength);
         CoreResponse response = pending.command().ownedResponse(status, status, resultCode, applied,
@@ -799,7 +801,7 @@ final class OrderedCommitCoordinator {
         int matcherShardId = result.nativeMatcherShardId();
         long appliedMatcherSequence = matcherSequence(matcherShardId);
         if (result.nativeCoreSequence() != pending.sequence()
-                || !result.nativeMatches(pending.command().header().commandId())
+                || !result.nativeMatches(pending.command().header().commandIdMsb(), pending.command().header().commandIdLsb())
                 || result.nativeMatcherSequence() <= appliedMatcherSequence) {
             throw owner.failMatching(pending, "matcher result does not continue the applied sequence"
                     + " expectedSequenceAfter=" + appliedMatcherSequence

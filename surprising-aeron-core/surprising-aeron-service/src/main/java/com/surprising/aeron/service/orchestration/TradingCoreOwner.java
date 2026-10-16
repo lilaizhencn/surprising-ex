@@ -154,7 +154,7 @@ public final class TradingCoreOwner {
                 next.ownerObserved = true;
             }
             boolean eligible = state.prepareClusterPipelineScope(next.command, window);
-            boolean retry = eligible && state.matchingSequence(next.command.header().commandId()) != 0;
+            boolean retry = eligible && state.matchingSequence(next.command.header().commandIdMsb(), next.command.header().commandIdLsb()) != 0;
             int prefix = !eligible || retry ? window.size() : window.conflictingPrefixSize();
             if (prefix != 0) {
                 commandPipeline.rememberBlockedIngress(next.command, prefix);
@@ -176,7 +176,7 @@ public final class TradingCoreOwner {
                         window.decodedIfPresent(next.command), false, next.fingerprint));
                 commandPipeline.recordControlProgress();
                 commandPipeline.rememberMatchingResponseSequence(
-                        state.matchingSequence(next.command.header().commandId()));
+                        state.matchingSequence(next.command.header().commandIdMsb(), next.command.header().commandIdLsb()));
                 continue;
             }
             if (window.size() == 0) state.assertClusterCallbackComplete();
@@ -185,7 +185,7 @@ public final class TradingCoreOwner {
             ingress.remove(); // The window now owns this command and its decoder lease.
             CoreResponse result = state.applyDecodedCommand(entry.request, entry.timestamp, entry.position,
                     window.decoded(entry.request), true, fingerprint);
-            window.bindSequence(entry, state.matchingSequence(entry.request.header().commandId()));
+            window.bindSequence(entry, state.matchingSequence(entry.request.header().commandIdMsb(), entry.request.header().commandIdLsb()));
             if (entry.sequence != 0) {
                 var pending = state.pendingMatching(entry.sequence);
                 pending.establishCommitFence(entry.timestamp, entry.position);

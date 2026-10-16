@@ -17,6 +17,7 @@ public interface MatchingResult {
     long nativeOrderId();
     long nativeMatcherSequence();
     int nativeMatcherShardId();
+    boolean nativeMatches(long most, long least);
     boolean nativeMatches(java.util.UUID commandId);
     MatcherResult nativeMatcherResult();
     List<MatcherResult.MatcherEvent> matcherEvents();

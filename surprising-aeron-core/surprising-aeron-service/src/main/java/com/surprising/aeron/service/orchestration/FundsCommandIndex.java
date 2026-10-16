@@ -53,34 +53,44 @@ final class FundsCommandIndex implements AutoCloseable {
         if (closed) throw new IllegalStateException("funds command index is closed");
     }
 
-    CommandFingerprint get(UUID id) {
+    CommandFingerprint get(long msb, long lsb) {
         assertHealthy();
         assertIoOwner();
         if (database == null) return null;
         try {
-            byte[] value = database.get(key(id));
+            byte[] value = database.get(key(msb, lsb));
             return value == null ? null : CommandFingerprint.fromBytes(value);
         } catch (RocksDBException | RuntimeException exception) {
             throw fail(exception);
         }
     }
 
-    void put(UUID id, CommandFingerprint fingerprint) {
+    CommandFingerprint get(UUID id) {
+        if (id == null) return null;
+        return get(id.getMostSignificantBits(), id.getLeastSignificantBits());
+    }
+
+    void put(long msb, long lsb, CommandFingerprint fingerprint) {
         assertHealthy();
         assertIoOwner();
-        if (id == null || fingerprint == null) throw new IllegalArgumentException("funds identity is required");
-        CommandFingerprint previous = get(id);
+        if (fingerprint == null) throw new IllegalArgumentException("funds identity is required");
+        CommandFingerprint previous = get(msb, lsb);
         if (previous != null) {
             if (!previous.equals(fingerprint)) throw new IllegalStateException("funds command fingerprint conflict");
             return;
         }
         open();
         try {
-            database.put(writes, key(id), fingerprint.bytes());
+            database.put(writes, key(msb, lsb), fingerprint.bytes());
             count++;
         } catch (RocksDBException exception) {
             throw fail(exception);
         }
+    }
+
+    void put(UUID id, CommandFingerprint fingerprint) {
+        if (id == null) throw new IllegalArgumentException("funds identity is required");
+        put(id.getMostSignificantBits(), id.getLeastSignificantBits(), fingerprint);
     }
 
     void write(DataOutput output) throws IOException {
@@ -127,19 +137,23 @@ final class FundsCommandIndex implements AutoCloseable {
         return failure;
     }
 
-    private static byte[] key(UUID id) {
+    private static byte[] key(long msb, long lsb) {
         byte[] bytes = new byte[16];
-        long msb = id.getMostSignificantBits();
-        long lsb = id.getLeastSignificantBits();
+        long m = msb;
+        long l = lsb;
         for (int i = 7; i >= 0; i--) {
-            bytes[i] = (byte) msb;
-            msb >>>= 8;
+            bytes[i] = (byte) m;
+            m >>>= 8;
         }
         for (int i = 15; i >= 8; i--) {
-            bytes[i] = (byte) lsb;
-            lsb >>>= 8;
+            bytes[i] = (byte) l;
+            l >>>= 8;
         }
         return bytes;
+    }
+
+    private static byte[] key(UUID id) {
+        return key(id.getMostSignificantBits(), id.getLeastSignificantBits());
     }
 
     @Override

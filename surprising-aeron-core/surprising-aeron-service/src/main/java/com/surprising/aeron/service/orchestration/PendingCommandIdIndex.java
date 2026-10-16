@@ -26,20 +26,22 @@ final class PendingCommandIdIndex {
         mask = capacity - 1;
     }
 
-    CommandSlot get(UUID commandId) {
-        if (commandId == null) return null;
-        int index = index(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
+    CommandSlot get(long most, long least) {
+        int index = index(most, least);
         while (values[index] != null) {
-            if (same(index, commandId)) return values[index];
+            if (mostSignificantBits[index] == most && leastSignificantBits[index] == least) return values[index];
             index = (index + 1) & mask;
         }
         return null;
     }
 
-    void put(UUID commandId, CommandSlot value) {
-        if (commandId == null || value == null) throw new IllegalArgumentException("command id and value are required");
-        long most = commandId.getMostSignificantBits();
-        long least = commandId.getLeastSignificantBits();
+    CommandSlot get(UUID commandId) {
+        if (commandId == null) return null;
+        return get(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
+    }
+
+    void put(long most, long least, CommandSlot value) {
+        if (value == null) throw new IllegalArgumentException("command value is required");
         int index = index(most, least);
         while (values[index] != null) {
             if (mostSignificantBits[index] == most && leastSignificantBits[index] == least) {
@@ -55,10 +57,12 @@ final class PendingCommandIdIndex {
         if (size * 2 > values.length) throw new IllegalStateException("pending command-id index is full");
     }
 
-    void remove(UUID commandId, CommandSlot expected) {
-        if (commandId == null) return;
-        long most = commandId.getMostSignificantBits();
-        long least = commandId.getLeastSignificantBits();
+    void put(UUID commandId, CommandSlot value) {
+        if (commandId == null || value == null) throw new IllegalArgumentException("command id and value are required");
+        put(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), value);
+    }
+
+    void remove(long most, long least, CommandSlot expected) {
         int index = index(most, least);
         while (values[index] != null) {
             if (mostSignificantBits[index] == most && leastSignificantBits[index] == least) {
@@ -68,6 +72,11 @@ final class PendingCommandIdIndex {
             }
             index = (index + 1) & mask;
         }
+    }
+
+    void remove(UUID commandId, CommandSlot expected) {
+        if (commandId == null) return;
+        remove(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), expected);
     }
 
     void clear() {

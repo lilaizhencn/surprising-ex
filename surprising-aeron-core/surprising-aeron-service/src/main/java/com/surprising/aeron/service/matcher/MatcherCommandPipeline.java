@@ -25,6 +25,16 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private static final int WORKER_IDLE_SPINS = 64;
     private static final long WORKER_IDLE_PARK_NANOS = 100_000L;
 
+    private static final java.lang.invoke.VarHandle PARK_REQUESTED;
+    static {
+        try {
+            PARK_REQUESTED = java.lang.invoke.MethodHandles.lookup()
+                    .findVarHandle(Wakeup.class, "requested", long.class);
+        } catch (ReflectiveOperationException failure) {
+            throw new ExceptionInInitializerError(failure);
+        }
+    }
+
     private final Slot[] slots;
     private final int mask;
     private final WaitStrategy waitStrategy;
@@ -32,8 +42,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private Runnable startupAction;
     private final PaddedSequence submittedPosition = new PaddedSequence();
     private final PaddedSequence consumedPosition = new PaddedSequence();
-    private final PaddedSequence workerPosition = new PaddedSequence();
     private final PaddedSequence completedPosition = new PaddedSequence();
+    private final Wakeup wakeup = new Wakeup();
     private volatile boolean accepting;
     private volatile int submissionHighWaterMark;
     private volatile int completionHighWaterMark;
@@ -53,6 +63,9 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         var future = new java.util.concurrent.CompletableFuture<T>();
         if (!accepting || !backgroundReads.offer(new BackgroundRead<>(submittedPosition.value, read, future))) {
             future.completeExceptionally(new RejectedExecutionException("matcher read mailbox unavailable"));
+        } else if (waitStrategy != WaitStrategy.BUSY_SPIN && wakeup.requested != 0L
+                && PARK_REQUESTED.compareAndSet(wakeup, 1L, 0L)) {
+            LockSupport.unpark(worker);
         }
         return future;
     }
@@ -169,7 +182,13 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         slot.directSettlement = settlement != null && settlement.direct();
         submittedPosition.value = position + 1;
         int depth = Math.toIntExact(position + 1 - consumedPosition.value);
-        submissionHighWaterMark = Math.max(submissionHighWaterMark, depth);
+        if (depth > submissionHighWaterMark) {
+            submissionHighWaterMark = depth;
+        }
+        if (waitStrategy != WaitStrategy.BUSY_SPIN && wakeup.requested != 0L
+                && PARK_REQUESTED.compareAndSet(wakeup, 1L, 0L)) {
+            LockSupport.unpark(worker);
+        }
     }
 
     public CoreMatchingResult poll(long expectedCoreSequence) {
@@ -268,7 +287,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     public int submissionDepth() {
-        return Math.toIntExact(submittedPosition.value - workerPosition.value);
+        return Math.toIntExact(submittedPosition.value - completedPosition.value);
     }
 
     public int completionDepth() {
@@ -305,23 +324,31 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             started = true;
         }
         if (startupFailure != null) return;
-        long position = workerPosition.value;
+        long position = completedPosition.value;
         int idle = 0;
         try {
             while (accepting || position < submittedPosition.value) {
                 // Observe the submission cursor before the read mailbox. A later command publication
                 // therefore cannot overtake a read published by the same owner at an earlier fence.
-                long submitted=submittedPosition.value;
-                BackgroundRead<?> read=backgroundReads.peek();
-                if(read!=null && position>=read.fence()) {
-                    backgroundReads.poll();read.execute();continue;
+                long submitted = submittedPosition.value;
+                BackgroundRead<?> read = backgroundReads.peek();
+                if (read != null && position >= read.fence()) {
+                    backgroundReads.poll();
+                    read.execute();
+                    continue;
                 }
                 if (position >= submitted) {
-                    if (waitStrategy == WaitStrategy.BUSY_SPIN) Thread.onSpinWait();
-                    else if (idle++ < WORKER_IDLE_SPINS) Thread.onSpinWait();
-                    else {
+                    if (waitStrategy == WaitStrategy.BUSY_SPIN) {
+                        Thread.onSpinWait();
+                    } else if (idle++ < WORKER_IDLE_SPINS) {
+                        Thread.onSpinWait();
+                    } else {
                         if (accepting && position >= submittedPosition.value && backgroundReads.isEmpty()) {
-                            LockSupport.parkNanos(this, WORKER_IDLE_PARK_NANOS);
+                            wakeup.requested = 1L;
+                            if (accepting && position >= submittedPosition.value && backgroundReads.isEmpty()) {
+                                LockSupport.parkNanos(this, WORKER_IDLE_PARK_NANOS);
+                            }
+                            wakeup.requested = 0L;
                         }
                     }
                     continue;
@@ -356,7 +383,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                 CoreMatchingResult routedResult = target != null && slot.failure == null
                         ? (CoreMatchingResult) slot.result : null;
                 position++;
-                workerPosition.value = position;
                 completedPosition.value = position;
                 if (routedResult != null) {
                     try { target.publishMatcherResult(workerId, routedResult); }
@@ -367,8 +393,10 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                 }
                 Runnable signal = completionSignal;
                 if (signal != null) signal.run();
-                completionHighWaterMark = Math.max(completionHighWaterMark,
-                        Math.toIntExact(position - consumedPosition.value));
+                int compDepth = Math.toIntExact(position - consumedPosition.value);
+                if (compDepth > completionHighWaterMark) {
+                    completionHighWaterMark = compDepth;
+                }
                 if (publicationFailure != null) break;
             }
         } catch (Throwable failure) {
@@ -458,6 +486,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         }
         shutdownAction = action;
         accepting = false;
+        LockSupport.unpark(activeWorker);
         boolean interrupted = false;
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (activeWorker.isAlive() && System.nanoTime() < deadline) {
@@ -507,6 +536,20 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     private static final class PaddedSequence extends PaddedSequenceValue {
+        @SuppressWarnings("unused")
+        private long p10, p11, p12, p13, p14, p15, p16, p17;
+    }
+
+    private static class WakeupLhsPadding {
+        @SuppressWarnings("unused")
+        private long p00, p01, p02, p03, p04, p05, p06, p07;
+    }
+
+    private static class WakeupValue extends WakeupLhsPadding {
+        protected volatile long requested;
+    }
+
+    private static final class Wakeup extends WakeupValue {
         @SuppressWarnings("unused")
         private long p10, p11, p12, p13, p14, p15, p16, p17;
     }

@@ -248,6 +248,10 @@ final class PendingMatchingRing {
         if (index >= 0) removeFromSubmissionOrder(index);
     }
 
+    CommandSlot findByCommandId(long msb, long lsb) {
+        return entriesByCommandId.get(msb, lsb);
+    }
+
     CommandSlot findByCommandId(UUID commandId) {
         return commandId == null ? null : entriesByCommandId.get(commandId);
     }
@@ -284,15 +288,16 @@ final class PendingMatchingRing {
     }
 
     private void addIndexes(CommandSlot pending) {
-        UUID commandId = pending.command().header().commandId();
-        entriesByCommandId.put(commandId, pending);
-        long userId = pending.command().header().userId();
+        var header = pending.command().header();
+        entriesByCommandId.put(header.commandIdMsb(), header.commandIdLsb(), pending);
+        long userId = header.userId();
         if (userId > 0) pendingByUser.addToValue(userId, 1);
     }
 
     private void removeIndexes(CommandSlot pending) {
-        entriesByCommandId.remove(pending.command().header().commandId(), pending);
-        long userId = pending.command().header().userId();
+        var header = pending.command().header();
+        entriesByCommandId.remove(header.commandIdMsb(), header.commandIdLsb(), pending);
+        long userId = header.userId();
         if (userId <= 0) return;
         int remaining = pendingByUser.addToValue(userId, -1);
         if (remaining == 0) pendingByUser.removeKey(userId);
