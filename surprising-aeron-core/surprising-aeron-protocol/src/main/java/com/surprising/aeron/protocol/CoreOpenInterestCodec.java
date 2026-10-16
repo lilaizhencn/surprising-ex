@@ -1,6 +1,7 @@
 package com.surprising.aeron.protocol;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -13,14 +14,15 @@ public final class CoreOpenInterestCodec {
         if (values == null) throw new IllegalArgumentException("open interest values are required");
         int size = Integer.BYTES;
         for (CoreOpenInterestView value : values) {
-            size = Math.addExact(size, Math.addExact(Integer.BYTES + value.instrumentId().getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
+            size = Math.addExact(size, Math.addExact(
+                    Integer.BYTES + CoreStateQueryCodec.utf8Length(value.instrumentId()),
                     Long.BYTES * 2));
         }
         ByteBuffer buffer = ByteBuffer.allocate(size);
         buffer.putInt(values.size());
         for (CoreOpenInterestView value : values) {
-            byte[] instrumentId = value.instrumentId().getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            buffer.putInt(instrumentId.length).put(instrumentId);
+            buffer.putInt(CoreStateQueryCodec.utf8Length(value.instrumentId()));
+            CoreStateQueryCodec.writeUtf8Bytes(buffer, value.instrumentId());
             buffer.putLong(value.longQuantitySteps()).putLong(value.shortQuantitySteps());
         }
         return buffer.array();
@@ -28,7 +30,8 @@ public final class CoreOpenInterestCodec {
 
     public static List<CoreOpenInterestView> decode(byte[] payload) {
         try {
-            ByteBuffer buffer = ByteBuffer.wrap(payload == null ? new byte[0] : payload);
+            byte[] source = payload == null ? new byte[0] : payload;
+            ByteBuffer buffer = ByteBuffer.wrap(source);
             int count = buffer.getInt();
             if (count < 0 || count > 1_000_000) throw new ProtocolException("invalid open interest count");
             List<CoreOpenInterestView> values = new ArrayList<>(count);
@@ -37,10 +40,10 @@ public final class CoreOpenInterestCodec {
                 if (length < 1 || length > 64 || length > buffer.remaining() - Long.BYTES * 2) {
                     throw new ProtocolException("invalid open interest instrumentId");
                 }
-                byte[] instrumentId = new byte[length];
-                buffer.get(instrumentId);
+                String instrumentId = new String(source, buffer.position(), length, StandardCharsets.UTF_8);
+                buffer.position(buffer.position() + length);
                 values.add(new CoreOpenInterestView(
-                        new String(instrumentId, java.nio.charset.StandardCharsets.UTF_8),
+                        instrumentId,
                         buffer.getLong(), buffer.getLong()));
             }
             if (buffer.hasRemaining()) throw new ProtocolException("trailing open interest bytes");

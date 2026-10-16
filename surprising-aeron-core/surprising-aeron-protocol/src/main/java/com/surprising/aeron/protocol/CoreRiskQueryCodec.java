@@ -12,8 +12,9 @@ public final class CoreRiskQueryCodec {
     public static byte[] encode(List<CoreRiskSnapshotView> values) {
         int length = Integer.BYTES;
         for (var value : values) length = Math.addExact(length,
-                Long.BYTES * 12 + Integer.BYTES * 5 + bytes(value.instrumentId()).length
-                        + bytes(value.settleAsset()).length + bytes(value.status()).length);
+                Long.BYTES * 12 + Integer.BYTES * 5 + CoreStateQueryCodec.utf8Length(value.instrumentId())
+                        + CoreStateQueryCodec.utf8Length(value.settleAsset())
+                        + CoreStateQueryCodec.utf8Length(value.status()));
         ByteBuffer output = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).putInt(values.size());
         values.forEach(value -> {
             output.putLong(value.userId());
@@ -39,26 +40,32 @@ public final class CoreRiskQueryCodec {
         for (int index = 0; index < count; index++) {
             if (input.remaining() < Long.BYTES) throw new ProtocolException("risk state is truncated");
             long userId = input.getLong();
-            String instrumentId = text(input);
+            String instrumentId = text(payload, input);
             if (input.remaining() < Integer.BYTES * 2) throw new ProtocolException("risk state is truncated");
             CoreMarginMode marginMode = CoreMarginMode.fromWireCode(input.getInt());
             CorePositionSide positionSide = CorePositionSide.fromWireCode(input.getInt());
-            String settleAsset = text(input);
+            String settleAsset = text(payload, input);
             if (input.remaining() < Long.BYTES * 11) throw new ProtocolException("risk state is truncated");
             values.add(new CoreRiskSnapshotView(userId, instrumentId, marginMode, positionSide,
                     settleAsset, input.getLong(), input.getLong(), input.getLong(), input.getLong(), input.getLong(),
-                    input.getLong(), input.getLong(), input.getLong(), input.getLong(), input.getLong(), input.getLong(), text(input)));
+                    input.getLong(), input.getLong(), input.getLong(), input.getLong(), input.getLong(), input.getLong(),
+                    text(payload, input)));
         }
         if (input.hasRemaining()) throw new ProtocolException("risk state has trailing bytes");
         return List.copyOf(values);
     }
 
-    private static void put(ByteBuffer output, String value) { byte[] bytes = bytes(value); output.putInt(bytes.length).put(bytes); }
-    private static String text(ByteBuffer input) {
+    private static void put(ByteBuffer output, String value) {
+        output.putInt(CoreStateQueryCodec.utf8Length(value));
+        CoreStateQueryCodec.writeUtf8Bytes(output, value);
+    }
+
+    private static String text(byte[] payload, ByteBuffer input) {
         if (input.remaining() < Integer.BYTES) throw new ProtocolException("risk text is truncated");
         int length = input.getInt();
         if (length < 1 || length > 64 || input.remaining() < length) throw new ProtocolException("invalid risk text");
-        byte[] value = new byte[length]; input.get(value); return new String(value, StandardCharsets.UTF_8);
+        String value = new String(payload, input.position(), length, StandardCharsets.UTF_8);
+        input.position(input.position() + length);
+        return value;
     }
-    private static byte[] bytes(String value) { return value.getBytes(StandardCharsets.UTF_8); }
 }

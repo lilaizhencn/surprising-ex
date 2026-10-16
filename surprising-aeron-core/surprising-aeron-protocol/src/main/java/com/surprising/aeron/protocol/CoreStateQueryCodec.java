@@ -29,7 +29,7 @@ public final class CoreStateQueryCodec {
     }
 
     public static byte[] encodeClientOrderStateQuery(String clientOrderId) {
-        Writer writer = new Writer();
+        Writer writer = new Writer(textLength(clientOrderId));
         writer.text(clientOrderId);
         return writer.toByteArray();
     }
@@ -42,7 +42,7 @@ public final class CoreStateQueryCodec {
     }
 
     public static byte[] encodeFundingProgressQuery(String instrumentId) {
-        Writer writer = new Writer();
+        Writer writer = new Writer(textLength(instrumentId));
         writer.text(instrumentId);
         return writer.toByteArray();
     }
@@ -66,7 +66,7 @@ public final class CoreStateQueryCodec {
         if (commandId == null) {
             throw new IllegalArgumentException("commandId is required");
         }
-        Writer writer = new Writer();
+        Writer writer = new Writer(Long.BYTES * 2);
         writer.longValue(commandId.getMostSignificantBits());
         writer.longValue(commandId.getLeastSignificantBits());
         return writer.toByteArray();
@@ -99,8 +99,9 @@ public final class CoreStateQueryCodec {
     public static List<CoreTreasuryAssetView> decodeTreasuryState(byte[] encoded) {
         Reader reader = new Reader(encoded);
         reader.version(2);
-        List<CoreTreasuryAssetView> assets = new ArrayList<>();
-        for (int index = 0, count = reader.count("treasury assets"); index < count; index++) {
+        int count = reader.count("treasury assets");
+        List<CoreTreasuryAssetView> assets = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
             assets.add(new CoreTreasuryAssetView(reader.text(), reader.longValue(),
                     reader.nonNegativeLong("insurance balance"), reader.nonNegativeLong("insurance deficit"),
                     reader.longValue(), reader.longValue(), reader.longValue(), reader.longValue()));
@@ -334,20 +335,23 @@ public final class CoreStateQueryCodec {
         long userId = reader.positiveLong("userId");
         long revision = reader.nonNegativeLong("revision");
         CorePositionMode positionMode = CorePositionMode.fromWireCode(reader.intValue());
-        List<CoreBalanceView> balances = new ArrayList<>();
-        for (int index = 0, count = reader.count("balances"); index < count; index++) {
+        int balanceCount = reader.count("balances");
+        List<CoreBalanceView> balances = new ArrayList<>(balanceCount);
+        for (int index = 0; index < balanceCount; index++) {
             balances.add(new CoreBalanceView(reader.text(), reader.nonNegativeLong("availableUnits"),
                     reader.nonNegativeLong("lockedUnits")));
         }
-        List<CoreReservationView> reservations = new ArrayList<>();
-        for (int index = 0, count = reader.count("reservations"); index < count; index++) {
+        int reservationCount = reader.count("reservations");
+        List<CoreReservationView> reservations = new ArrayList<>(reservationCount);
+        for (int index = 0; index < reservationCount; index++) {
             reservations.add(new CoreReservationView(reader.positiveLong("orderId"), reader.text(),
                     ReservationKind.fromWireCode(reader.intValue()), reader.text(),
                     reader.positiveLong("reservedUnits"), reader.nonNegativeLong("releasedUnits"),
                     reader.nonNegativeLong("consumedUnits"), reader.positiveLong("orderQuantitySteps")));
         }
-        List<CorePositionView> positions = new ArrayList<>();
-        for (int index = 0, count = reader.count("positions"); index < count; index++) {
+        int positionCount = reader.count("positions");
+        List<CorePositionView> positions = new ArrayList<>(positionCount);
+        for (int index = 0; index < positionCount; index++) {
             String instrumentId = reader.text();
             String marginAsset = reader.text();
             CoreMarginMode marginMode = CoreMarginMode.fromWireCode(reader.intValue());
@@ -357,8 +361,9 @@ public final class CoreStateQueryCodec {
                     reader.nonNegativeLong("entryPriceTicks"), reader.nonNegativeLong("entryValueTicks"),
                     reader.longValue(), reader.nonNegativeLong("positionMarginUnits")));
         }
-        List<CoreLeverageView> leverages = new ArrayList<>();
-        for (int index = 0, count = reader.count("leverages"); index < count; index++) {
+        int leverageCount = reader.count("leverages");
+        List<CoreLeverageView> leverages = new ArrayList<>(leverageCount);
+        for (int index = 0; index < leverageCount; index++) {
             leverages.add(new CoreLeverageView(reader.text(), CoreMarginMode.fromWireCode(reader.intValue()),
                     reader.positiveLong("leveragePpm")));
         }
@@ -564,7 +569,7 @@ public final class CoreStateQueryCodec {
     }
 
     public static byte[] encodeOpenOrdersQuery(CoreOpenOrdersQuery query) {
-        Writer writer = new Writer();
+        Writer writer = new Writer(Integer.BYTES * 2 + Long.BYTES + optionalTextLength(query.instrumentId()));
         writer.intValue(1);
         writer.optionalText(query.instrumentId());
         writer.longValue(query.beforeOrderId());
@@ -599,14 +604,20 @@ public final class CoreStateQueryCodec {
     }
 
     public static CoreOpenOrdersView decodeOpenOrders(byte[] encoded) {
-        Reader reader = new Reader(encoded);
+        return new CoreOpenOrdersView(
+                decodeOpenOrdersList(encoded, 0, encoded == null ? 0 : encoded.length));
+    }
+
+    static List<CoreOrderStateView> decodeOpenOrdersList(byte[] encoded, int offset, int length) {
+        Reader reader = new Reader(encoded, offset, length);
         reader.version(1);
-        List<CoreOrderStateView> orders = new ArrayList<>();
-        for (int index = 0, count = reader.count("open orders"); index < count; index++) {
+        int count = reader.count("open orders");
+        List<CoreOrderStateView> orders = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
             orders.add(readOrderState(reader));
         }
         reader.requireConsumed();
-        return new CoreOpenOrdersView(orders);
+        return orders;
     }
 
     public static byte[] encodeOrderBookView(CoreOrderBookView state) {
@@ -625,7 +636,7 @@ public final class CoreStateQueryCodec {
     }
 
     public static byte[] encodeOrderBookQuery(CoreOrderBookQuery query) {
-        Writer writer = new Writer();
+        Writer writer = new Writer(Integer.BYTES * 2 + optionalTextLength(query.instrumentId()));
         writer.intValue(1);
         writer.optionalText(query.instrumentId());
         writer.intValue(query.depth());
@@ -641,7 +652,9 @@ public final class CoreStateQueryCodec {
     }
 
     public static byte[] encodeOrderBookBootstrapQuery(CoreOrderBookBootstrapQuery query) {
-        Writer writer = new Writer();
+        Writer writer = new Writer(Integer.BYTES * 3
+                + optionalTextLength(query.snapshotId())
+                + optionalTextLength(query.symbolCursor()));
         writer.intValue(1);
         writer.optionalText(query.snapshotId());
         writer.optionalText(query.symbolCursor());
@@ -750,31 +763,54 @@ public final class CoreStateQueryCodec {
             if (value == null) {
                 throw new IllegalArgumentException("query text is required");
             }
-            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-            if (bytes.length == 0 || bytes.length > MAX_TEXT_BYTES) {
+            int byteLength = utf8Length(value);
+            if (byteLength == 0 || byteLength > MAX_TEXT_BYTES) {
                 throw new IllegalArgumentException("invalid query text length");
             }
-            intValue(bytes.length);
-            bytes(bytes);
+            intValue(byteLength);
+            writeUtf8(value, byteLength);
         }
 
         void optionalText(String value) {
-            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-            if (bytes.length > MAX_TEXT_BYTES) {
+            int byteLength = utf8Length(value);
+            if (byteLength > MAX_TEXT_BYTES) {
                 throw new IllegalArgumentException("invalid optional query text length");
             }
-            intValue(bytes.length);
-            bytes(bytes);
+            intValue(byteLength);
+            writeUtf8(value, byteLength);
         }
 
         byte[] toByteArray() {
             return offset == output.length ? output : Arrays.copyOf(output, offset);
         }
 
-        private void bytes(byte[] value) {
-            ensureCapacity(value.length);
-            System.arraycopy(value, 0, output, offset, value.length);
-            offset += value.length;
+        private void writeUtf8(String value, int byteLength) {
+            if (byteLength == 0) {
+                return;
+            }
+            ensureCapacity(byteLength);
+            for (int index = 0; index < value.length(); index++) {
+                char current = value.charAt(index);
+                if (current < 0x80) {
+                    output[offset++] = (byte) current;
+                } else if (current < 0x800) {
+                    output[offset++] = (byte) (0xc0 | current >>> 6);
+                    output[offset++] = (byte) (0x80 | current & 0x3f);
+                } else if (Character.isHighSurrogate(current) && index + 1 < value.length()
+                        && Character.isLowSurrogate(value.charAt(index + 1))) {
+                    int codePoint = Character.toCodePoint(current, value.charAt(++index));
+                    output[offset++] = (byte) (0xf0 | codePoint >>> 18);
+                    output[offset++] = (byte) (0x80 | codePoint >>> 12 & 0x3f);
+                    output[offset++] = (byte) (0x80 | codePoint >>> 6 & 0x3f);
+                    output[offset++] = (byte) (0x80 | codePoint & 0x3f);
+                } else if (Character.isSurrogate(current)) {
+                    output[offset++] = (byte) '?';
+                } else {
+                    output[offset++] = (byte) (0xe0 | current >>> 12);
+                    output[offset++] = (byte) (0x80 | current >>> 6 & 0x3f);
+                    output[offset++] = (byte) (0x80 | current & 0x3f);
+                }
+            }
         }
 
         private void ensureCapacity(int additional) {
@@ -806,21 +842,11 @@ public final class CoreStateQueryCodec {
             this.limit = offset + length;
         }
 
-        void requireVersion() {
+        void version(int expected) {
             int version = intValue();
-            if (version != VERSION) {
+            if (version != expected) {
                 throw new ProtocolException("unsupported query state version: " + version);
             }
-        }
-
-        int version(int... supported) {
-            int version = intValue();
-            for (int candidate : supported) {
-                if (version == candidate) {
-                    return version;
-                }
-            }
-            throw new ProtocolException("unsupported query state version: " + version);
         }
 
         int byteValue() {

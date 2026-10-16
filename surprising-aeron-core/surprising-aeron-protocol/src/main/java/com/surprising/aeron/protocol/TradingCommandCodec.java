@@ -112,7 +112,13 @@ public final class TradingCommandCodec {
 
     /** v1 的划转双方都是已提交命令头中的用户；不能从当前登录态补齐。 */
     public static TransferFundsCommand decodeTransferFunds(byte[] payload, long committedUserId) {
-        ByteBuffer buffer = readable(payload);
+        return decodeTransferFunds(payload, 0, payload == null ? 0 : payload.length, committedUserId);
+    }
+
+    static TransferFundsCommand decodeTransferFunds(
+            byte[] payload, int offset, int length, long committedUserId) {
+        requireRange(payload, offset, length);
+        ByteBuffer buffer = ByteBuffer.wrap(payload, offset, length).order(ByteOrder.LITTLE_ENDIAN);
         requireRemaining(buffer, Integer.BYTES + Long.BYTES + Integer.BYTES * 2);
         int version = buffer.getInt();
         if (version != 1 && version != TRANSFER_FUNDS_VERSION) {
@@ -830,16 +836,19 @@ public final class TradingCommandCodec {
                 .putLong(command.coveredUnits()).array();
     }
 
+    private static final ResolveLiquidationCommand.Resolution[] LIQUIDATION_RESOLUTIONS =
+            ResolveLiquidationCommand.Resolution.values();
+
     public static ResolveLiquidationCommand decodeResolveLiquidation(byte[] payload) {
         ByteBuffer buffer = readable(payload);
         requireRemaining(buffer, Long.BYTES + Integer.BYTES + Long.BYTES);
         long liquidationId = buffer.getLong();
         int resolutionCode = buffer.getInt();
-        if (resolutionCode < 0 || resolutionCode >= ResolveLiquidationCommand.Resolution.values().length) {
+        if (resolutionCode < 0 || resolutionCode >= LIQUIDATION_RESOLUTIONS.length) {
             throw new ProtocolException("invalid liquidation resolution: " + resolutionCode);
         }
         ResolveLiquidationCommand command = new ResolveLiquidationCommand(liquidationId,
-                ResolveLiquidationCommand.Resolution.values()[resolutionCode], buffer.getLong());
+                LIQUIDATION_RESOLUTIONS[resolutionCode], buffer.getLong());
         requireConsumed(buffer);
         return command;
     }
@@ -982,22 +991,6 @@ public final class TradingCommandCodec {
         if (length < 0 || offset < 0 || offset > limit - length) {
             throw new ProtocolException("truncated trading command payload");
         }
-    }
-
-    private static int putShort(byte[] target, int offset, int value) {
-        target[offset] = (byte) value;
-        target[offset + 1] = (byte) (value >>> 8);
-        return offset + Short.BYTES;
-    }
-
-    private static int putInt(byte[] target, int offset, int value) {
-        for (int index = 0; index < Integer.BYTES; index++) target[offset + index] = (byte) (value >>> (index * 8));
-        return offset + Integer.BYTES;
-    }
-
-    private static int putLong(byte[] target, int offset, long value) {
-        for (int index = 0; index < Long.BYTES; index++) target[offset + index] = (byte) (value >>> (index * 8));
-        return offset + Long.BYTES;
     }
 
     private static int getUnsignedShort(byte[] source, int offset) {

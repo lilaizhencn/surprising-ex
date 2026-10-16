@@ -1,6 +1,5 @@
 package com.surprising.aeron.protocol;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -15,18 +14,19 @@ public final class CoreCancelAllAfterCodec {
     }
 
     public static byte[] encodeCommand(CoreCancelAllAfterCommand command) {
-        Writer writer = new Writer();
-        writer.intValue(VERSION);
-        writer.intValue(command.action().wireCode());
-        writer.longValue(command.userId());
-        writer.text(command.symbolScope());
-        writer.longValue(command.countdownMillis());
-        writer.longValue(command.triggerAtEpochMillis());
-        writer.longValue(command.expectedRevision());
-        writer.intValue(command.canceledOrders());
-        writer.intValue(command.canceledTriggerOrders());
-        writer.longValue(command.updatedAtEpochMillis());
-        return writer.bytes();
+        int length = Integer.BYTES * 4 + Long.BYTES * 5 + textLength(command.symbolScope());
+        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.putInt(VERSION)
+                .putInt(command.action().wireCode())
+                .putLong(command.userId());
+        CoreStateQueryCodec.putText(buffer, command.symbolScope(), true, MAX_TEXT_BYTES);
+        buffer.putLong(command.countdownMillis())
+                .putLong(command.triggerAtEpochMillis())
+                .putLong(command.expectedRevision())
+                .putInt(command.canceledOrders())
+                .putInt(command.canceledTriggerOrders())
+                .putLong(command.updatedAtEpochMillis());
+        return buffer.array();
     }
 
     public static CoreCancelAllAfterCommand decodeCommand(byte[] payload) {
@@ -41,13 +41,13 @@ public final class CoreCancelAllAfterCodec {
     }
 
     public static byte[] encodeQuery(long userId, String symbolScope, long dueAtEpochMillis, int limit) {
-        Writer writer = new Writer();
-        writer.intValue(VERSION);
-        writer.longValue(userId);
-        writer.text(symbolScope == null ? "" : symbolScope);
-        writer.longValue(dueAtEpochMillis);
-        writer.intValue(limit);
-        return writer.bytes();
+        String normalizedScope = symbolScope == null ? "" : symbolScope;
+        int length = Integer.BYTES * 2 + Long.BYTES * 2 + textLength(normalizedScope);
+        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.putInt(VERSION).putLong(userId);
+        CoreStateQueryCodec.putText(buffer, normalizedScope, true, MAX_TEXT_BYTES);
+        buffer.putLong(dueAtEpochMillis).putInt(limit);
+        return buffer.array();
     }
 
     public static Query decodeQuery(byte[] payload) {
@@ -59,21 +59,24 @@ public final class CoreCancelAllAfterCodec {
     }
 
     public static byte[] encodeList(List<CoreCancelAllAfterView> values) {
-        Writer writer = new Writer();
-        writer.intValue(VERSION);
-        writer.intValue(values.size());
+        int length = Integer.BYTES * 2;
         for (CoreCancelAllAfterView value : values) {
-            writer.longValue(value.userId());
-            writer.text(value.symbolScope());
-            writer.longValue(value.countdownMillis());
-            writer.intValue(value.status().wireCode());
-            writer.longValue(value.triggerAtEpochMillis());
-            writer.longValue(value.updatedAtEpochMillis());
-            writer.intValue(value.canceledOrders());
-            writer.intValue(value.canceledTriggerOrders());
-            writer.longValue(value.revision());
+            length = Math.addExact(length, Long.BYTES * 5 + Integer.BYTES * 3 + textLength(value.symbolScope()));
         }
-        return writer.bytes();
+        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.putInt(VERSION).putInt(values.size());
+        for (CoreCancelAllAfterView value : values) {
+            buffer.putLong(value.userId());
+            CoreStateQueryCodec.putText(buffer, value.symbolScope(), true, MAX_TEXT_BYTES);
+            buffer.putLong(value.countdownMillis())
+                    .putInt(value.status().wireCode())
+                    .putLong(value.triggerAtEpochMillis())
+                    .putLong(value.updatedAtEpochMillis())
+                    .putInt(value.canceledOrders())
+                    .putInt(value.canceledTriggerOrders())
+                    .putLong(value.revision());
+        }
+        return buffer.array();
     }
 
     public static List<CoreCancelAllAfterView> decodeList(byte[] payload) {
@@ -90,6 +93,13 @@ public final class CoreCancelAllAfterCodec {
         return List.copyOf(values);
     }
 
+    private static int textLength(String value) {
+        if (value == null) throw new IllegalArgumentException("text is required");
+        int bytes = CoreStateQueryCodec.utf8Length(value);
+        if (bytes > MAX_TEXT_BYTES) throw new IllegalArgumentException("text too long");
+        return Integer.BYTES + bytes;
+    }
+
     public record Query(long userId, String symbolScope, long dueAtEpochMillis, int limit) {
         public Query {
             if (userId < 0 || symbolScope == null || dueAtEpochMillis < 0 || limit < 1 || limit > 1000) {
@@ -98,26 +108,14 @@ public final class CoreCancelAllAfterCodec {
         }
     }
 
-    private static final class Writer {
-        private final ByteArrayOutputStream output = new ByteArrayOutputStream();
-
-        void intValue(int value) { output.writeBytes(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(value).array()); }
-        void longValue(long value) { output.writeBytes(ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(value).array()); }
-        void text(String value) {
-            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-            if (bytes.length > MAX_TEXT_BYTES) throw new IllegalArgumentException("text too long");
-            intValue(bytes.length);
-            output.writeBytes(bytes);
-        }
-        byte[] bytes() { return output.toByteArray(); }
-    }
-
     private static final class Reader {
+        private final byte[] payload;
         private final ByteBuffer buffer;
 
         Reader(byte[] payload) {
             if (payload == null) throw new ProtocolException("payload required");
-            buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN);
+            this.payload = payload;
+            this.buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN);
         }
         void version() { if (intValue() != VERSION) throw new ProtocolException("unsupported cancel-all-after codec version"); }
         int intValue() { require(4); return buffer.getInt(); }
@@ -128,9 +126,10 @@ public final class CoreCancelAllAfterCodec {
             int length = count();
             if (length > MAX_TEXT_BYTES) throw new ProtocolException("text too long");
             require(length);
-            byte[] bytes = new byte[length];
-            buffer.get(bytes);
-            return new String(bytes, StandardCharsets.UTF_8);
+            if (length == 0) return "";
+            String value = new String(payload, buffer.position(), length, StandardCharsets.UTF_8);
+            buffer.position(buffer.position() + length);
+            return value;
         }
         void require(int count) { if (buffer.remaining() < count) throw new ProtocolException("truncated cancel-all-after payload"); }
         void consumed() { if (buffer.hasRemaining()) throw new ProtocolException("trailing cancel-all-after payload"); }

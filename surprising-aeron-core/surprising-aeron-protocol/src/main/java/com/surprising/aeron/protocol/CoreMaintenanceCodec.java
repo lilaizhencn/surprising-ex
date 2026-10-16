@@ -7,6 +7,9 @@ import java.util.List;
 
 /** Bounded administrative protocol; quantities and identifiers remain integer units. */
 public final class CoreMaintenanceCodec {
+    private static final CoreInstrumentMaintenance.Mode[] MODES = CoreInstrumentMaintenance.Mode.values();
+    private static final int STATE_BYTES = Long.BYTES * 2 + Integer.BYTES;
+
     private CoreMaintenanceCodec() { }
     public record Command(String instrumentId, long expectedTaskId, CoreInstrumentMaintenance state) {
         public Command { instrumentId = CoreMaintenanceCodec.instrumentId(instrumentId); if (expectedTaskId < 0 || state == null) throw new IllegalArgumentException("invalid maintenance command"); }
@@ -18,22 +21,25 @@ public final class CoreMaintenanceCodec {
         public Page { userIds = List.copyOf(userIds); if (state == null || userIds.size() > 32) throw new IllegalArgumentException("invalid maintenance page"); }
     }
     public static byte[] encodeCommand(Command value) {
-        var b = buffer(128); text(b, value.instrumentId()); b.putLong(value.expectedTaskId()); state(b, value.state()); return bytes(b);
+        var b = buffer(Integer.BYTES + value.instrumentId().length() + Long.BYTES + STATE_BYTES);
+        text(b, value.instrumentId()); b.putLong(value.expectedTaskId()); state(b, value.state()); return b.array();
     }
     public static Command decodeCommand(byte[] bytes) {
-        try { var b = read(bytes); var value = new Command(text(b), b.getLong(), state(b)); end(b); return value; }
+        try { var b = read(bytes); var value = new Command(text(bytes, b), b.getLong(), state(b)); end(b); return value; }
         catch (java.nio.BufferUnderflowException e) { throw new IllegalArgumentException("truncated maintenance command",e); }
     }
     public static byte[] encodeQuery(Query value) {
-        var b = buffer(96); text(b, value.instrumentId()); b.putLong(value.afterUserId()).putInt(value.limit()); return bytes(b);
+        var b = buffer(Integer.BYTES + value.instrumentId().length() + Long.BYTES + Integer.BYTES);
+        text(b, value.instrumentId()); b.putLong(value.afterUserId()).putInt(value.limit()); return b.array();
     }
     public static Query decodeQuery(byte[] bytes) {
-        try { var b = read(bytes); var value = new Query(text(b), b.getLong(), b.getInt()); end(b); return value; }
+        try { var b = read(bytes); var value = new Query(text(bytes, b), b.getLong(), b.getInt()); end(b); return value; }
         catch (java.nio.BufferUnderflowException e) { throw new IllegalArgumentException("truncated maintenance query",e); }
     }
     public static byte[] encodePage(Page value) {
-        var b = buffer(512); state(b, value.state()); b.putInt(value.hasMore() ? 1 : 0).putInt(value.userIds().size());
-        value.userIds().forEach(b::putLong); return bytes(b);
+        var b = buffer(STATE_BYTES + Integer.BYTES * 2 + value.userIds().size() * Long.BYTES);
+        state(b, value.state()); b.putInt(value.hasMore() ? 1 : 0).putInt(value.userIds().size());
+        value.userIds().forEach(b::putLong); return b.array();
     }
     public static Page decodePage(byte[] bytes) {
         try {
@@ -48,10 +54,18 @@ public final class CoreMaintenanceCodec {
     }
     private static ByteBuffer buffer(int size) { return ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN); }
     private static ByteBuffer read(byte[] bytes) { if (bytes == null || bytes.length > 512) throw new IllegalArgumentException("invalid maintenance payload"); return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN); }
-    private static byte[] bytes(ByteBuffer b) { return java.util.Arrays.copyOf(b.array(), b.position()); }
-    private static void text(ByteBuffer b, String value) { byte[] bytes = value.getBytes(StandardCharsets.US_ASCII); b.putInt(bytes.length).put(bytes); }
-    private static String text(ByteBuffer b) { int n = b.getInt(); if (n < 1 || n > 64 || n > b.remaining()) throw new IllegalArgumentException("invalid instrumentId length"); byte[] bytes = new byte[n]; b.get(bytes); return instrumentId(new String(bytes, StandardCharsets.US_ASCII)); }
+    private static void text(ByteBuffer b, String value) {
+        b.putInt(value.length());
+        for (int i = 0; i < value.length(); i++) b.put((byte) value.charAt(i));
+    }
+    private static String text(byte[] raw, ByteBuffer b) {
+        int n = b.getInt();
+        if (n < 1 || n > 64 || n > b.remaining()) throw new IllegalArgumentException("invalid instrumentId length");
+        String value = new String(raw, b.position(), n, StandardCharsets.US_ASCII);
+        b.position(b.position() + n);
+        return instrumentId(value);
+    }
     private static void state(ByteBuffer b, CoreInstrumentMaintenance s) { b.putLong(s.taskId()).putInt(s.mode().ordinal()).putLong(s.settlementPriceTicks()); }
-    private static CoreInstrumentMaintenance state(ByteBuffer b) { long id = b.getLong(); int mode = b.getInt(); if (mode < 0 || mode >= CoreInstrumentMaintenance.Mode.values().length) throw new IllegalArgumentException("invalid maintenance mode"); return new CoreInstrumentMaintenance(id, CoreInstrumentMaintenance.Mode.values()[mode], b.getLong()); }
+    private static CoreInstrumentMaintenance state(ByteBuffer b) { long id = b.getLong(); int mode = b.getInt(); if (mode < 0 || mode >= MODES.length) throw new IllegalArgumentException("invalid maintenance mode"); return new CoreInstrumentMaintenance(id, MODES[mode], b.getLong()); }
     private static void end(ByteBuffer b) { if (b.hasRemaining()) throw new IllegalArgumentException("trailing maintenance bytes"); }
 }

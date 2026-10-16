@@ -39,8 +39,9 @@
 | 已完成 | D8 | `OrderedCommitCoordinator` 终态收尾逻辑合并消除重复与缩进错位 | 已验证，见 D8 |
 | 已完成 | D9 | 命名统一（`processor` 重命名为 `coreOwner`，理清 Owner 层级） | 已验证，见 D9 |
 | 已完成 | D10 | 序列与水位修改收归权威来源，状态权威来源明确化 | 已验证，见 D10 |
+| 已完成 | D11 | 客户端零中间拷贝 Egress 解码、清理死代码构造器与协议全量 Codec 分配消除 | 已验证，见 D11 |
 
-D2–D10 均已完成，具体变更、核查结论与验证证据见各节。建议执行顺序见第 9 节。
+D2–D11 均已完成，具体变更、核查结论与验证证据见各节。建议执行顺序见第 9 节。
 
 ## 2. 正确性与可用性风险（C）
 
@@ -393,9 +394,26 @@ D2–D10 均已完成，具体变更、核查结论与验证证据见各节。�
   - `CommandSlotTest` 5 项全部通过。
   - 资金 100% 严格守恒无差额，确定性顺序与终态语义完全保持一致。
 
-### D11【报告】client / protocol
-- Core 入口用 flyweight，没有问题；`byte[]` / `ArrayList` 分配主要在客户端与查询解码。
-- `AeronClientPool` 的包级 `Session` / `SessionFactory` 是否单一实现未验证。
+### D11【已完成】client / protocol
+- **完成日期**：2026-10-16。按业务语义优先与 KISS 原则，彻底消除客户端响应接收与协议查询/结果编解码中的冗余 `byte[]` 拷贝、临时对象分配及死代码：
+- **`AeronClientPool` 的 `Session` / `SessionFactory` 边界核实**：
+  - 经核查，`Session` 与 `SessionFactory` 为包级（package-private）SPI，共有 2 个实现：生产实现 `SurprisingAeronClient::beginConnect`（封装 Aeron Cluster 会话连接）与测试故障注入实现 `AeronClientPoolTest.ScriptedSession`（用于模拟背压、断连、重连和超时且无需启动真实集群），符合 `AGENTS.md` 外部传输依赖隔离边界，予以保留。
+- **客户端 `SurprisingAeronClient` 零中间拷贝解码与死代码清理**：
+  - 消除 `onMessage` 接收 Egress 响应时的 2 次多余 `byte[]` 拷贝与 `CoreMessage` / `CoreMessageHeader` / `UUID` / `traceId String` 临时包装对象分配，直接基于 `DirectBuffer` 偏移量原地校验消息头与 `traceId`，仅对业务 `data` 执行唯一一次必要的字节读取并构造 `CoreResponse.decoded(...)`；
+  - 删除生产与测试均 0 调用的阻塞连接构造器及 5 参数 `connect(...)` 静态工厂，移除恒为 `AeronCluster::pollEgress` 的冗余 `egressPoller` 字段。
+- **客户端连接池 `AeronClientPool` 发送热路径收敛**：
+  - 在 `CoreMessageHeader` 新增接收 `String traceId` 的 `command(...)` / `query(...)` 10 参数静态工厂重载，使 `AeronClientPool.encodeHeader` 一步构造消息头，消除原先先构造默认 `traceId = commandId.toString()` 再通过 `.withTraceId(...)` 丢弃重分配的浪费；
+  - `Request.reset(...)` 仅在入参 `traceId` 为空白时读取一次 `MDC.get("traceId")`；
+  - 将 `claimedCorrelations` 并发集合的装箱 `add` / `remove` 收敛为仅对显式预备请求（`prepareCommand` / `submitPrepared`）生效，普通单调自增 `correlationId` 请求彻底免除该集合操作。
+- **协议层 `surprising-aeron-protocol` 全量 Codec 零冗余分配重构（16 个文件）**：
+  - `CoreCommandResultCodec`：直接调用 `CoreStateQueryCodec.decodeOpenOrdersList(encoded, offset, length)` 原地解码挂单列表，消除 `new byte[ordersLength]` 拷贝与 `CoreOpenOrdersView` 临时包装；
+  - `CoreStateQueryCodec`：在 `decodeTreasuryState`、`decodeUserState`、`decodeOpenOrdersList` 中按 `count` 预分配 `ArrayList` 容量；为全部 12 个查询编码方法预算精确容量；消除 `Writer.text/optionalText` 的 `String.getBytes(UTF_8)` 临时数组；将 `Reader.version(int... supported)` 改为单参数 `void version(int expected)` 消除可变参数数组分配；
+  - `CoreAlgoOrderCodec`、`CoreCancelAllAfterCodec`、`CoreTriggerOrderCodec`、`CorePendingTransferCodec`、`TradingCommandCodec`：用精确容量的单个 `ByteBuffer` 替代逐字段 `ByteBuffer.allocate(4/8)` + `ByteArrayOutputStream`；消除 `CoreTriggerOrderCodec.decodeList` 与 `CorePendingTransferCodec.decode` 中的逐元素 `byte[]` 切片拷贝；静态缓存全部枚举 `values()` 数组；
+  - `CoreMessageCodec`、`CoreRiskQueryCodec`、`CoreOpenInterestCodec`、`CoreAdlQueryCodec`、`CoreOrderPreflightCodec`、`CoreRiskScanControlCodec`、`CoreMaintenanceCodec`、`CoreLiquidationWorkCodec`：全面消除重复 `getBytes(UTF_8)`、解码 `new byte[length]` 中间拷贝及 `ByteArrayOutputStream` 扩容。
+- **验证**：HotSpot JDK 27 下合计 **399 项测试用例 100% 全部通过**（0 失败、0 错误、0 跳过）：
+  - `surprising-aeron-protocol` 全量 29 个测试类、**253 项用例**全部通过；
+  - `surprising-aeron-client` 全量 12 个测试类、**66 项用例**全部通过；
+  - `surprising-aeron-service` 下游核心交易与快照/查询回归测试 **80 项用例**（`TradingCoreOwnerTest` 45 项、`CoreTransferLaneLifecycleTest` 6 项、`TriggerOrderIndexTest` 5 项、`TradingStateSnapshotCodecTest` 6 项、`PublishedSnapshotRecoveryTest` 8 项、`CoreNativeSnapshotProductLineTest` 6 项、`CoreAlgoLaneQueryTest` 4 项）全部通过。
 
 ## 7. 已核实无问题（X，不需处理）
 
@@ -433,18 +451,16 @@ D2–D10 均已完成，具体变更、核查结论与验证证据见各节。�
 
 1. **确认类**（先于一切性能优化）：C1（JCStress）、C2（决定溢出策略）。
 2. **局部低风险改动**（先写 JMH，再改，再测）：P1+F1+L1（unpark 标志与 HWM）、F2+L3（结算 ring 填充与 `setRelease`）、P2（Lane scope）。
-3. **已完成的删除项**：D1–D6 已完成；D6 仅删除确认的死代码，其余原疑点已核实并纠正。L7/L8 的相关完成范围见 D3/D2。
+3. **已完成的过度设计清理（D 系列）**：D1–D11 均已完成，详见第 6 节各条目。L7/L8 的相关完成范围见 D3/D2。
 4. **中等改动**：P3（最优价）、P4（指纹）、P5（traceId）、P7（网关 mailbox）、P9–P11、F3–F7、F9、L2。
-5. **需要先补测试与对账**：C3、D8（D3、D4 已完成）。
-6. **最后**：D7、D9、D10（状态枢纽与重复状态），分步进行并跑恢复测试。
+5. **需要先补测试与对账**：C3（D3、D4、D7–D11 已完成）。
 
 ## 10. 未覆盖与不确定项
 
 - 只做了模式搜索、未细读：`state/index/TriggerOrderIndex`、`state/index/ActiveOrderIndex`、`RuntimeDerivativeLiquidationProcessor`、`RuntimePerpetualFundingProcessor`。
-- `OrderedCommitCoordinator`、`OrderBatchExecutor`、`DeterministicExchangeCoreAdapter` 内部大部分没有逐行读。
+- `OrderBatchExecutor`、`DeterministicExchangeCoreAdapter` 内部大部分没有逐行读。
 - `CommandFingerprint` 所在模块未核实（P4）。
 - C1 的线程模型（retain 与 release 是否确实跨线程）未核实。
 - L5 中默认等待策略是否为 BLOCKING 未核实。
-- `AeronClientPool` 的 `Session` / `SessionFactory` 是否单一实现未验证。
 - 全部「每单对象数」「每命令次数」为静态估算，必须以 JMH / JFR 实测替代。
 - 工作区有未提交改动（`AeronClientPool.java`、`CoreTestCompletion.java` 等），行号以审计时为准。

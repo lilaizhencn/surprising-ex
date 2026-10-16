@@ -665,7 +665,7 @@ public final class AeronClientPool implements AutoCloseable {
             if (mode.oneWay) {
                 correlationId = -correlationId;
             }
-            request.reset(null, commandId, mode, callback);
+            request.reset(null, commandId, mode, callback, false);
             request.correlationId = correlationId;
             request.commandType = type;
             request.commandUserId = userId;
@@ -681,29 +681,33 @@ public final class AeronClientPool implements AutoCloseable {
                 return null;
             }
             long correlationId = nextCorrelation.incrementAndGet();
+            String currentTrace = org.slf4j.MDC.get("traceId");
+            String traceId = currentTrace == null ? queryId.toString() : currentTrace;
             CoreMessage message = new CoreMessage(CoreMessageHeader.query(type, queryId, productLine,
-                    CommandSource.GATEWAY, sourceId, 0, userId, Instant.now().toEpochMilli(), correlationId)
-                    .withTraceId(org.slf4j.MDC.get("traceId") == null ? queryId.toString() : org.slf4j.MDC.get("traceId")), payload);
-            request.reset(message, queryId, RequestMode.QUERY, null);
+                    CommandSource.GATEWAY, sourceId, 0, userId, Instant.now().toEpochMilli(),
+                    correlationId, traceId), payload);
+            request.reset(message, queryId, RequestMode.QUERY, null, false);
             return request;
         }
 
         private Request preparedRequest(CoreMessage message, RequestMode mode) {
             Request request = availableRequests.poll();
             if (request != null) {
-                request.reset(message, message.header().commandId(), mode, null);
+                request.reset(message, message.header().commandId(), mode, null, true);
             }
             return request;
         }
 
         private boolean enqueue(Request request) {
-            long correlationId = request.correlationId;
-            if (!claimedCorrelations.add(correlationId)) {
-                request.fail(new IllegalStateException(
-                        "duplicate in-flight Aeron correlationId=" + correlationId));
-                return true;
+            if (request.preparedCorrelation) {
+                long correlationId = request.correlationId;
+                if (!claimedCorrelations.add(correlationId)) {
+                    request.fail(new IllegalStateException(
+                            "duplicate in-flight Aeron correlationId=" + correlationId));
+                    return true;
+                }
+                request.correlationClaimed = true;
             }
-            request.correlationClaimed = true;
             RuntimeException failure = dispatcherFailure.get();
             if (failure != null) {
                 request.fail(failure);
@@ -989,7 +993,7 @@ public final class AeronClientPool implements AutoCloseable {
                     request.message = CoreMessage.owned(CoreMessageHeader.command(request.commandType,
                             request.operationId, productLine, CommandSource.GATEWAY, lane.sourceId,
                             ++lane.nextSequence, request.commandUserId, request.commandSubmittedMillis,
-                            request.correlationId).withTraceId(request.traceId), request.commandPayload);
+                            request.correlationId, request.traceId), request.commandPayload);
                     request.commandType = null;
                     request.commandPayload = null;
                 }
@@ -1232,6 +1236,7 @@ public final class AeronClientPool implements AutoCloseable {
         // Generation and phase share one CAS: an old timeout cannot cancel a recycled slot.
         // Only the current slot lease writes payload fields; the mailbox publishes them.
         private volatile long lifecycle = COMPLETED;
+        private boolean preparedCorrelation;
         private boolean correlationClaimed;
         private long queueDeadlineNanos;
         private long deadlineNanos;
@@ -1241,11 +1246,17 @@ public final class AeronClientPool implements AutoCloseable {
         }
 
         private void reset(CoreMessage message, UUID operationId, RequestMode mode,
-                                        CommandAdmissionCallback admissionCallback) {
-            String currentTrace = org.slf4j.MDC.get("traceId");
-            this.traceId = message != null && !message.header().traceId().isEmpty() ? message.header().traceId()
-                    : message != null ? operationId.toString()
-                    : currentTrace != null ? com.surprising.aeron.protocol.TraceIds.validate(currentTrace) : operationId.toString();
+                           CommandAdmissionCallback admissionCallback, boolean preparedCorrelation) {
+            if (message != null) {
+                this.traceId = !message.header().traceId().isEmpty()
+                        ? message.header().traceId()
+                        : operationId.toString();
+            } else {
+                String currentTrace = org.slf4j.MDC.get("traceId");
+                this.traceId = currentTrace != null
+                        ? com.surprising.aeron.protocol.TraceIds.validate(currentTrace)
+                        : operationId.toString();
+            }
             this.message = message;
             this.correlationId = message == null ? 0 : message.header().correlationId();
             this.commandType = null;
@@ -1257,6 +1268,7 @@ public final class AeronClientPool implements AutoCloseable {
                     ? new CompletableFuture<>() : null;
             this.admissionFuture = mode == RequestMode.ONE_WAY_FUTURE ? new CompletableFuture<>() : null;
             this.admissionCallback = admissionCallback;
+            this.preparedCorrelation = preparedCorrelation;
             this.correlationClaimed = false;
             this.queueDeadlineNanos = 0;
             this.deadlineNanos = 0;

@@ -10,10 +10,13 @@ public final class CoreOrderPreflightCodec {
     }
 
     public static byte[] encode(CoreOrderPreflightView view) {
-        byte[] asset = view.reservationAsset().getBytes(StandardCharsets.UTF_8);
-        if (asset.length == 0 || asset.length > 64) throw new IllegalArgumentException("invalid reservation asset");
-        return ByteBuffer.allocate(Short.BYTES + asset.length + Long.BYTES).order(ByteOrder.LITTLE_ENDIAN)
-                .putShort((short) asset.length).put(asset).putLong(view.reservedUnits()).array();
+        int assetLength = CoreStateQueryCodec.utf8Length(view.reservationAsset());
+        if (assetLength == 0 || assetLength > 64) throw new IllegalArgumentException("invalid reservation asset");
+        ByteBuffer buffer = ByteBuffer.allocate(Short.BYTES + assetLength + Long.BYTES)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putShort((short) assetLength);
+        CoreStateQueryCodec.writeUtf8Bytes(buffer, view.reservationAsset());
+        return buffer.putLong(view.reservedUnits()).array();
     }
 
     public static CoreOrderPreflightView decode(byte[] payload) {
@@ -25,8 +28,8 @@ public final class CoreOrderPreflightCodec {
         if (length == 0 || length > 64 || buffer.remaining() != length + Long.BYTES) {
             throw new ProtocolException("invalid order preflight result");
         }
-        byte[] asset = new byte[length];
-        buffer.get(asset);
-        return new CoreOrderPreflightView(new String(asset, StandardCharsets.UTF_8), buffer.getLong());
+        String asset = new String(payload, buffer.position(), length, StandardCharsets.UTF_8);
+        buffer.position(buffer.position() + length);
+        return new CoreOrderPreflightView(asset, buffer.getLong());
     }
 }

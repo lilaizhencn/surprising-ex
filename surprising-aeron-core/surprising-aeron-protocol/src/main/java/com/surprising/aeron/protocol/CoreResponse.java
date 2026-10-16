@@ -13,7 +13,7 @@ public final class CoreResponse {
 
     private final boolean commandSlot;
 
-    static final byte[] EMPTY_DATA = new byte[0];
+    public static final byte[] EMPTY_DATA = new byte[0];
 
     public CoreResponse(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
                         int routeVersion, long committedCoreSequence, long appliedCommandCount,
@@ -151,7 +151,7 @@ public final class CoreResponse {
                 data, offset, length, true);
     }
 
-    static CoreResponse decoded(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
+    public static CoreResponse decoded(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
                                 int routeVersion, long committedCoreSequence, long appliedCommandCount,
                                 byte[] data) {
         return new CoreResponse(status, commandStatus, resultCode, routeVersion, committedCoreSequence,

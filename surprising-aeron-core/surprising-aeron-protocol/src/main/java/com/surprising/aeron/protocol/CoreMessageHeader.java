@@ -138,9 +138,24 @@ public final class CoreMessageHeader {
             long userId,
             long submittedAtEpochMillis,
             long correlationId) {
+        return command(messageType, commandId, productLine, source, sourceId, sourceSequence, userId,
+                submittedAtEpochMillis, correlationId, "");
+    }
+
+    public static CoreMessageHeader command(
+            CoreMessageType messageType,
+            UUID commandId,
+            ProductLine productLine,
+            CommandSource source,
+            long sourceId,
+            long sourceSequence,
+            long userId,
+            long submittedAtEpochMillis,
+            long correlationId,
+            String traceId) {
         return new CoreMessageHeader(CoreProtocol.SCHEMA_VERSION, WireMessageKind.COMMAND, messageType,
                 commandId, productLine, CoreRoute.DEFAULT, source, sourceId, sourceSequence, userId,
-                submittedAtEpochMillis, correlationId);
+                submittedAtEpochMillis, correlationId, traceId == null || traceId.isBlank() ? "" : traceId);
     }
 
     public static CoreMessageHeader query(
@@ -153,9 +168,24 @@ public final class CoreMessageHeader {
             long userId,
             long submittedAtEpochMillis,
             long correlationId) {
+        return query(messageType, queryId, productLine, source, sourceId, sourceSequence, userId,
+                submittedAtEpochMillis, correlationId, "");
+    }
+
+    public static CoreMessageHeader query(
+            CoreMessageType messageType,
+            UUID queryId,
+            ProductLine productLine,
+            CommandSource source,
+            long sourceId,
+            long sourceSequence,
+            long userId,
+            long submittedAtEpochMillis,
+            long correlationId,
+            String traceId) {
         return new CoreMessageHeader(CoreProtocol.SCHEMA_VERSION, WireMessageKind.QUERY, messageType,
                 queryId, productLine, CoreRoute.DEFAULT, source, sourceId, sourceSequence, userId,
-                submittedAtEpochMillis, correlationId);
+                submittedAtEpochMillis, correlationId, traceId == null || traceId.isBlank() ? "" : traceId);
     }
 
     public CoreMessageHeader response(CoreMessageType responseType) {

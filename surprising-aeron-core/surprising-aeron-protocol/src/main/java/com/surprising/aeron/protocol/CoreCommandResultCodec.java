@@ -142,9 +142,9 @@ public final class CoreCommandResultCodec {
         if (ordersLength < 0 || ordersLength > buffer.remaining() - Integer.BYTES) {
             throw new ProtocolException("invalid command result orders length: " + ordersLength);
         }
-        byte[] orders = new byte[ordersLength];
-        buffer.get(orders);
-        List<CoreOrderStateView> orderViews = CoreStateQueryCodec.decodeOpenOrders(orders).orders();
+        List<CoreOrderStateView> orderViews =
+                CoreStateQueryCodec.decodeOpenOrdersList(encoded, buffer.position(), ordersLength);
+        buffer.position(buffer.position() + ordersLength);
         requireRemaining(buffer, Integer.BYTES);
         int executionCount = buffer.getInt();
         if (executionCount < 0 || executionCount > MAX_ITEMS

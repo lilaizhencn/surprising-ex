@@ -133,8 +133,9 @@ public final class CoreMessageCodec {
             if (traceLength < 1 || traceLength > TraceIds.MAX_LENGTH
                     || CoreProtocol.HEADER_LENGTH + Short.BYTES + traceLength != headerLength)
                 throw new ProtocolException("invalid trace id header length");
-            byte[] trace = new byte[traceLength]; buffer.get(trace);
-            traceId = TraceIds.validate(new String(trace, java.nio.charset.StandardCharsets.US_ASCII));
+            traceId = TraceIds.validate(new String(
+                    encoded, buffer.position(), traceLength, java.nio.charset.StandardCharsets.US_ASCII));
+            buffer.position(buffer.position() + traceLength);
         }
         buffer.position(headerLength);
         byte[] payload = payloadLength == 0 ? CoreMessage.EMPTY_PAYLOAD : new byte[payloadLength];

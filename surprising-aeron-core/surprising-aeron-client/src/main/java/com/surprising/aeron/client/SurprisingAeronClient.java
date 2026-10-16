@@ -1,10 +1,19 @@
 package com.surprising.aeron.client;
 
+import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
+import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.CoreResultCode;
+import com.surprising.aeron.protocol.CoreRoute;
 import com.surprising.aeron.protocol.ProductLineClusterLayout;
+import com.surprising.aeron.protocol.ProductLineWireCode;
+import com.surprising.aeron.protocol.ProtocolException;
+import com.surprising.aeron.protocol.ResponseStatus;
+import com.surprising.aeron.protocol.TraceIds;
+import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.client.AeronCluster;
 import io.aeron.cluster.client.EgressListener;
@@ -13,6 +22,7 @@ import io.aeron.driver.MediaDriver;
 import io.aeron.driver.ThreadingMode;
 import io.aeron.Publication;
 import io.aeron.logbuffer.Header;
+import java.nio.ByteOrder;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -41,38 +51,12 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     private final ClusterOperations cluster;
     /** Pool sessions are confined to their existing dispatcher; standalone sessions serialize shared callers. */
     private final Thread ioOwner;
-    private final IntSupplier egressPoller;
     private final ScheduledExecutorService keepAliveExecutor;
     private final IdleStrategy idleStrategy = new BackoffIdleStrategy();
     private final Map<Long, CoreResponse> responses = new ConcurrentHashMap<>();
     private UnsafeBuffer ingressBuffer = new UnsafeBuffer(new byte[CoreProtocol.HEADER_LENGTH]);
     private volatile RuntimeException sessionFailure;
     private boolean closed;
-
-    private SurprisingAeronClient(
-            ProductLine productLine,
-            List<String> hostnames,
-            String egressHostname,
-            Duration responseTimeout,
-            MediaDriver mediaDriver,
-            boolean closeMediaDriver) {
-        this.productLine = Objects.requireNonNull(productLine, "productLine");
-        this.responseTimeout = Objects.requireNonNull(responseTimeout, "responseTimeout");
-        this.mediaDriver = Objects.requireNonNull(mediaDriver, "mediaDriver");
-        this.closeMediaDriver = closeMediaDriver;
-        this.ioOwner = null;
-        try {
-            cluster = new AeronClusterOperations(AeronCluster.connect(clusterContext(productLine, hostnames,
-                    egressHostname, responseTimeout, mediaDriver, this)));
-            egressPoller = cluster::pollEgress;
-            keepAliveExecutor = closeMediaDriver ? startKeepAlive() : null;
-        } catch (RuntimeException exception) {
-            if (closeMediaDriver) {
-                mediaDriver.close();
-            }
-            throw exception;
-        }
-    }
 
     private SurprisingAeronClient(
             ProductLine productLine,
@@ -86,7 +70,6 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         this.closeMediaDriver = closeMediaDriver;
         this.cluster = new AeronClusterOperations(Objects.requireNonNull(cluster, "cluster"));
         this.ioOwner = ioOwner;
-        this.egressPoller = this.cluster::pollEgress;
         this.keepAliveExecutor = closeMediaDriver ? startKeepAlive() : null;
     }
 
@@ -105,7 +88,6 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         this.closeMediaDriver = false;
         this.cluster = Objects.requireNonNull(cluster, "cluster");
         this.ioOwner = ioOwner;
-        this.egressPoller = this.cluster::pollEgress;
         this.keepAliveExecutor = null;
     }
 
@@ -149,19 +131,6 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             }
             throw failure;
         }
-    }
-
-    static SurprisingAeronClient connect(
-            ProductLine productLine,
-            List<String> hostnames,
-            String egressHostname,
-            Duration responseTimeout,
-            MediaDriver mediaDriver) {
-        if (responseTimeout == null || responseTimeout.isNegative() || responseTimeout.isZero()) {
-            throw new IllegalArgumentException("responseTimeout must be positive");
-        }
-        return new SurprisingAeronClient(productLine, hostnames, egressHostname, responseTimeout,
-                mediaDriver, false);
     }
 
     static AsyncConnection connectAsync(
@@ -291,7 +260,23 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
 
     private int pollClusterEgress(int fragmentLimit) {
         ensureOpen();
-        return pollEgressBounded(fragmentLimit, egressPoller);
+        if (fragmentLimit <= 0) {
+            throw new IllegalArgumentException("fragmentLimit must be positive");
+        }
+        int workCount = 0;
+        int remainingFragments = fragmentLimit;
+        while (remainingFragments >= AERON_EGRESS_POLL_LIMIT) {
+            int polled = cluster.pollEgress();
+            if (polled < 0) {
+                throw new IllegalStateException("Aeron egress poll returned invalid fragment count: " + polled);
+            }
+            workCount += polled;
+            remainingFragments -= AERON_EGRESS_POLL_LIMIT;
+            if (polled < AERON_EGRESS_POLL_LIMIT) {
+                break;
+            }
+        }
+        return workCount;
     }
 
     static int pollEgressBounded(int fragmentLimit, IntSupplier poller) {
@@ -345,19 +330,92 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             int length,
             Header header) {
         try {
-            byte[] encoded = new byte[length];
-            buffer.getBytes(offset, encoded);
-            CoreMessage message = CoreMessageCodec.decode(encoded);
-            if (message.header().productLine() != productLine) {
+            if (buffer == null || length < CoreProtocol.HEADER_LENGTH) {
+                throw new ProtocolException("message shorter than fixed header");
+            }
+            int magic = buffer.getInt(offset, ByteOrder.LITTLE_ENDIAN);
+            if (magic != CoreProtocol.MAGIC) {
+                throw new ProtocolException("invalid protocol magic");
+            }
+            int schemaVersion = Short.toUnsignedInt(buffer.getShort(offset + 4, ByteOrder.LITTLE_ENDIAN));
+            if (schemaVersion != CoreProtocol.SCHEMA_VERSION) {
+                throw new ProtocolException("unsupported schema version: " + schemaVersion);
+            }
+            WireMessageKind kind = WireMessageKind.fromWireCode(Byte.toUnsignedInt(buffer.getByte(offset + 6)));
+            ProductLine messageProductLine = ProductLineWireCode.decode(Byte.toUnsignedInt(buffer.getByte(offset + 7)));
+            CoreMessageType messageType = CoreMessageType.fromWireCode(
+                    Short.toUnsignedInt(buffer.getShort(offset + 8, ByteOrder.LITTLE_ENDIAN)));
+            if (messageType.kind() != kind) {
+                throw new IllegalArgumentException("messageType does not belong to kind: " + messageType);
+            }
+            CommandSource.fromWireCode(Byte.toUnsignedInt(buffer.getByte(offset + 10)));
+            int shardCode = Byte.toUnsignedInt(buffer.getByte(offset + 11));
+            int headerLength = Short.toUnsignedInt(buffer.getShort(offset + 12, ByteOrder.LITTLE_ENDIAN));
+            int headerRouteVersion = Short.toUnsignedInt(buffer.getShort(offset + 14, ByteOrder.LITTLE_ENDIAN));
+            if (headerLength != CoreProtocol.HEADER_LENGTH
+                    && (headerLength < CoreProtocol.HEADER_LENGTH + 3
+                    || headerLength > CoreProtocol.HEADER_LENGTH + Short.BYTES + TraceIds.MAX_LENGTH)) {
+                throw new ProtocolException("invalid header length: " + headerLength);
+            }
+            CoreRoute.fromWireCodes(shardCode, headerRouteVersion);
+            long sourceSequence = buffer.getLong(offset + 40, ByteOrder.LITTLE_ENDIAN);
+            if (sourceSequence < 0) {
+                throw new IllegalArgumentException("sourceSequence must not be negative");
+            }
+            long submittedAtEpochMillis = buffer.getLong(offset + 56, ByteOrder.LITTLE_ENDIAN);
+            if (submittedAtEpochMillis < 0) {
+                throw new IllegalArgumentException("submittedAtEpochMillis must not be negative");
+            }
+            long correlationId = buffer.getLong(offset + 64, ByteOrder.LITTLE_ENDIAN);
+            int payloadLength = buffer.getInt(offset + 72, ByteOrder.LITTLE_ENDIAN);
+            if (payloadLength < 0 || payloadLength > CoreMessageCodec.MAX_PAYLOAD_LENGTH
+                    || headerLength + payloadLength != length) {
+                throw new ProtocolException("invalid payload length: " + payloadLength);
+            }
+            if (headerLength > CoreProtocol.HEADER_LENGTH) {
+                int traceLength = Short.toUnsignedInt(
+                        buffer.getShort(offset + CoreProtocol.HEADER_LENGTH, ByteOrder.LITTLE_ENDIAN));
+                if (traceLength < 1 || traceLength > TraceIds.MAX_LENGTH
+                        || CoreProtocol.HEADER_LENGTH + Short.BYTES + traceLength != headerLength) {
+                    throw new ProtocolException("invalid trace id header length");
+                }
+                int traceStart = offset + CoreProtocol.HEADER_LENGTH + Short.BYTES;
+                for (int i = 0; i < traceLength; i++) {
+                    if (!TraceIds.isValidChar(Byte.toUnsignedInt(buffer.getByte(traceStart + i)))) {
+                        throw new ProtocolException("invalid trace id");
+                    }
+                }
+            }
+            if (messageProductLine != productLine) {
                 sessionFailure = new IllegalStateException("received response from another product line");
                 return;
             }
-            if (message.header().correlationId() < 0) {
+            if (correlationId < 0) {
                 return;
             }
-            // The decoded message is private to this callback; response decoding establishes
-            // its own ownership before the Aeron fragment or this message can be released.
-            responses.put(message.header().correlationId(), CoreProtocol.decodeResponse(message.payloadUnsafe()));
+            int payloadOffset = offset + headerLength;
+            if (payloadLength < CoreProtocol.RESPONSE_FIXED_PAYLOAD_LENGTH) {
+                throw new ProtocolException("response payload is shorter than fixed response");
+            }
+            ResponseStatus status = ResponseStatus.fromWireCode(
+                    buffer.getInt(payloadOffset, ByteOrder.LITTLE_ENDIAN));
+            ResponseStatus commandStatus = ResponseStatus.fromWireCode(
+                    buffer.getInt(payloadOffset + 4, ByteOrder.LITTLE_ENDIAN));
+            CoreResultCode resultCode = CoreResultCode.fromWireCode(
+                    buffer.getInt(payloadOffset + 8, ByteOrder.LITTLE_ENDIAN));
+            int routeVersion = buffer.getInt(payloadOffset + 12, ByteOrder.LITTLE_ENDIAN);
+            long committedCoreSequence = buffer.getLong(payloadOffset + 16, ByteOrder.LITTLE_ENDIAN);
+            long appliedCommandCount = buffer.getLong(payloadOffset + 24, ByteOrder.LITTLE_ENDIAN);
+            int dataLength = buffer.getInt(payloadOffset + 32, ByteOrder.LITTLE_ENDIAN);
+            if (dataLength < 0 || dataLength != payloadLength - CoreProtocol.RESPONSE_FIXED_PAYLOAD_LENGTH) {
+                throw new ProtocolException("invalid response data length: " + dataLength);
+            }
+            byte[] data = dataLength == 0 ? CoreResponse.EMPTY_DATA : new byte[dataLength];
+            if (dataLength > 0) {
+                buffer.getBytes(payloadOffset + CoreProtocol.RESPONSE_FIXED_PAYLOAD_LENGTH, data);
+            }
+            responses.put(correlationId, CoreResponse.decoded(status, commandStatus, resultCode,
+                    routeVersion, committedCoreSequence, appliedCommandCount, data));
         } catch (RuntimeException exception) {
             sessionFailure = new IllegalStateException("failed to decode Aeron Cluster egress response", exception);
         }

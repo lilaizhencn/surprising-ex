@@ -12,17 +12,21 @@ public final class CoreAdlQueryCodec {
     }
 
     public static byte[] encodeQuery(String asset, int limit) {
-        byte[] encoded = asset.trim().toUpperCase().getBytes(StandardCharsets.UTF_8);
-        if (encoded.length < 2 || encoded.length > 20 || limit < 1 || limit > 1000) {
+        String normalized = asset.trim().toUpperCase();
+        int byteLength = CoreStateQueryCodec.utf8Length(normalized);
+        if (byteLength < 2 || byteLength > 20 || limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("invalid ADL candidate query");
         }
-        return ByteBuffer.allocate(Integer.BYTES * 2 + encoded.length).order(ByteOrder.LITTLE_ENDIAN)
-                .putInt(encoded.length).put(encoded).putInt(limit).array();
+        ByteBuffer output = ByteBuffer.allocate(Integer.BYTES * 2 + byteLength)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(byteLength);
+        CoreStateQueryCodec.writeUtf8Bytes(output, normalized);
+        return output.putInt(limit).array();
     }
 
     public static Query decodeQuery(byte[] payload) {
         ByteBuffer input = input(payload);
-        String asset = string(input);
+        String asset = string(payload, input);
         if (input.remaining() != Integer.BYTES) throw new ProtocolException("invalid ADL query length");
         int limit = input.getInt();
         if (limit < 1 || limit > 1000) throw new ProtocolException("invalid ADL query limit");
@@ -33,7 +37,8 @@ public final class CoreAdlQueryCodec {
         int length = Integer.BYTES;
         for (var value : candidates) {
             length = Math.addExact(length, Integer.BYTES * 4 + Long.BYTES * 11
-                    + bytes(value.instrumentId()).length + bytes(value.asset()).length);
+                    + CoreStateQueryCodec.utf8Length(value.instrumentId())
+                    + CoreStateQueryCodec.utf8Length(value.asset()));
         }
         ByteBuffer output = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).putInt(candidates.size());
         candidates.forEach(value -> {
@@ -59,8 +64,8 @@ public final class CoreAdlQueryCodec {
         for (int index = 0; index < count; index++) {
             if (input.remaining() < Long.BYTES) throw new ProtocolException("ADL candidate is truncated");
             long userId = input.getLong();
-            String instrumentId = string(input);
-            String asset = string(input);
+            String instrumentId = string(payload, input);
+            String asset = string(payload, input);
             if (input.remaining() < Integer.BYTES * 2 + Long.BYTES * 10) {
                 throw new ProtocolException("ADL candidate is truncated");
             }
@@ -74,21 +79,17 @@ public final class CoreAdlQueryCodec {
     }
 
     private static void putString(ByteBuffer output, String value) {
-        byte[] encoded = bytes(value);
-        output.putInt(encoded.length).put(encoded);
+        output.putInt(CoreStateQueryCodec.utf8Length(value));
+        CoreStateQueryCodec.writeUtf8Bytes(output, value);
     }
 
-    private static String string(ByteBuffer input) {
+    private static String string(byte[] payload, ByteBuffer input) {
         if (input.remaining() < Integer.BYTES) throw new ProtocolException("ADL text is truncated");
         int length = input.getInt();
         if (length <= 0 || length > 64 || input.remaining() < length) throw new ProtocolException("invalid ADL text");
-        byte[] encoded = new byte[length];
-        input.get(encoded);
-        return new String(encoded, StandardCharsets.UTF_8);
-    }
-
-    private static byte[] bytes(String value) {
-        return value.getBytes(StandardCharsets.UTF_8);
+        String value = new String(payload, input.position(), length, StandardCharsets.UTF_8);
+        input.position(input.position() + length);
+        return value;
     }
 
     private static ByteBuffer input(byte[] payload) {

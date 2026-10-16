@@ -61,9 +61,10 @@ public final class CorePendingTransferCodec {
             if (commandLength <= 0 || commandLength > buffer.remaining()) {
                 throw new ProtocolException("invalid pending transfer command length");
             }
-            byte[] command = new byte[commandLength];
-            buffer.get(command);
-            transfers.add(new CorePendingTransferView(userId, TradingCommandCodec.decodeTransferFunds(command, userId)));
+            TransferFundsCommand command =
+                    TradingCommandCodec.decodeTransferFunds(payload, buffer.position(), commandLength, userId);
+            buffer.position(buffer.position() + commandLength);
+            transfers.add(new CorePendingTransferView(userId, command));
         }
         if (buffer.hasRemaining()) throw new ProtocolException("pending transfer response has trailing bytes");
         return List.copyOf(transfers);

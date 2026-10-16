@@ -36,9 +36,9 @@ public final class CoreRiskScanControlCodec {
         boolean enabled = readBoolean(buffer);
         long scanDelayMs = buffer.getLong();
         int scanBatchSize = buffer.getInt();
-        String ruleName = readText(buffer);
-        String adminUserId = readText(buffer);
-        String reason = readText(buffer);
+        String ruleName = readText(payload, buffer);
+        String adminUserId = readText(payload, buffer);
+        String reason = readText(payload, buffer);
         requireConsumed(buffer);
         return new UpdateRiskScanControlCommand(expectedVersion, ruleName, enabled, scanDelayMs,
                 scanBatchSize, adminUserId, reason);
@@ -70,9 +70,9 @@ public final class CoreRiskScanControlCodec {
         boolean enabled = readBoolean(buffer);
         long scanDelayMs = buffer.getLong();
         int scanBatchSize = buffer.getInt();
-        String ruleName = readText(buffer);
-        String updatedBy = readText(buffer);
-        String reason = readText(buffer);
+        String ruleName = readText(payload, buffer);
+        String updatedBy = readText(payload, buffer);
+        String reason = readText(payload, buffer);
         long updatedAtEpochMillis = buffer.getLong();
         requireConsumed(buffer);
         return new CoreRiskScanControlView(version, ruleName, enabled, scanDelayMs, scanBatchSize,
@@ -100,14 +100,14 @@ public final class CoreRiskScanControlCodec {
         return value.getBytes(StandardCharsets.UTF_8);
     }
 
-    private static String readText(ByteBuffer buffer) {
+    private static String readText(byte[] payload, ByteBuffer buffer) {
         requireRemaining(buffer, Short.BYTES);
         int length = Short.toUnsignedInt(buffer.getShort());
         if (length == 0) throw new ProtocolException("risk scan control text is empty");
         requireRemaining(buffer, length);
-        byte[] bytes = new byte[length];
-        buffer.get(bytes);
-        return new String(bytes, StandardCharsets.UTF_8);
+        String value = new String(payload, buffer.position(), length, StandardCharsets.UTF_8);
+        buffer.position(buffer.position() + length);
+        return value;
     }
 
     private static void requireRemaining(ByteBuffer buffer, int length) {
