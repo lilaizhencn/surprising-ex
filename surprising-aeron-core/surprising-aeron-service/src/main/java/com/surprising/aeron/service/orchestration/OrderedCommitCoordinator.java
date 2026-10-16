@@ -365,12 +365,6 @@ final class OrderedCommitCoordinator {
         return finishAppliedMatching(pending, matchingResult, settlementTreasuryDelta, false);
     }
 
-    /** 已校验撮合证据，账户阶段完成后只进入一次终态提交。 */
-    private CoreResponse finishAppliedMatching(CommandSlot pending, MatchingResult matchingResult,
-            RuntimeTreasuryDelta settlementTreasuryDelta) {
-        return finishAppliedMatching(pending, matchingResult, settlementTreasuryDelta, false);
-    }
-
     /**
      * Common deterministic tail for every terminal matching path.  Collection and Lane event
      * release remain operation-specific, but sequence/hash/ledger/response work must have one
@@ -402,22 +396,49 @@ final class OrderedCommitCoordinator {
         return response;
     }
 
+    /**
+     * 撮合终态提交统一收尾：完成发布批次、校验资金守恒、关闭财务派发、
+     * 记录终态响应、递减在途派发计数、回收结算事件、移除挂起状态、
+     * 结束事实上下文并触发后续延期或批量撮合推进。
+     */
+    private CoreResponse finishTerminalMatching(CommandSlot pending, MatchingResult matchingResult) {
+        completeCommitPublicationBatch();
+        owner.validateFundsConservation(pending.command());
+        ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
+        CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
+        closeFinancialDispatch(pending);
+        CoreResponse response = storeTerminalResponse(
+                pending, matchingResult, status, resultCode);
+        if (pending.takePipelinedSettlementCounted()) {
+            dispatchedSettlementInFlight--;
+            if (dispatchedSettlementInFlight < 0) {
+                throw new IllegalStateException("matcher settlement in-flight count underflow");
+            }
+        }
+        owner.runtimeState.releaseMatcherSettlement(pending.takeSettlementEvent());
+        owner.matchingFlow.removePendingMatching(pending.sequence());
+        // Finish this command before restoring the next batch's suspended commit context.
+        owner.finishFactContext(response);
+        if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) {
+            owner.matchingProgress.submitDeferredMatchingAfterBatch();
+        }
+        return response;
+    }
+
     private CoreResponse finishAppliedMatching(CommandSlot pending, MatchingResult matchingResult,
             RuntimeTreasuryDelta settlementTreasuryDelta,
             boolean lanesCommitted) {
         long sequence = pending.sequence();
         long clusterTimestamp = pending.commitFenceTimestamp();
         long clusterPosition = pending.commitFenceClusterPosition();
-        ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
-        CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
         RuntimeTreasuryDelta settledTreasuryDelta = settlementTreasuryDelta;
-            if (settledTreasuryDelta != null) {
-                owner.runtimeState.applyCollectedTreasuryBeforeActivation(settledTreasuryDelta);
-                owner.runtimeState.setMetadata(owner.productLine,
-                        Math.addExact(owner.runtimeState.revision(),
-                                pending.operation() == CommandSlot.Operation.TRIGGER && !matchingResult.accepted() ? 2 : 1));
-                requestCommitPublication();
-            }
+        if (settledTreasuryDelta != null) {
+            owner.runtimeState.applyCollectedTreasuryBeforeActivation(settledTreasuryDelta);
+            owner.runtimeState.setMetadata(owner.productLine,
+                    Math.addExact(owner.runtimeState.revision(),
+                            pending.operation() == CommandSlot.Operation.TRIGGER && !matchingResult.accepted() ? 2 : 1));
+            requestCommitPublication();
+        }
         if (!lanesCommitted && pending.settlementEvent() == null) {
             owner.resultBuilder.materializeChangeAccumulators();
             pending.commitEvent = owner.runtimeState.dispatchLaneMutation(sequence,
@@ -437,16 +458,16 @@ final class OrderedCommitCoordinator {
                 pending.completeLanes(laneMask);
             }
         }
-            if (pending.completedLaneMask() != pending.expectedLaneMask()) {
-                throw owner.failMatching(pending, "account lane mask differs from immutable matcher result", null);
-            }
-            requireCompleteAccountLanes(pending);
-            // A settlement that finishes in this poll seeded primitive Lane changes, but
-            // never took the deferred completion path that publishes these result views.
-            owner.resultBuilder.materializeChangeAccumulators();
-            if (!owner.resultBuilder.commandChangedOrderIds.isEmpty()) {
-                owner.resultBuilder.materializeCommandOrderViews(pending);
-            }
+        if (pending.completedLaneMask() != pending.expectedLaneMask()) {
+            throw owner.failMatching(pending, "account lane mask differs from immutable matcher result", null);
+        }
+        requireCompleteAccountLanes(pending);
+        // A settlement that finishes in this poll seeded primitive Lane changes, but
+        // never took the deferred completion path that publishes these result views.
+        owner.resultBuilder.materializeChangeAccumulators();
+        if (!owner.resultBuilder.commandChangedOrderIds.isEmpty()) {
+            owner.resultBuilder.materializeCommandOrderViews(pending);
+        }
         if ((pending.operation() == CommandSlot.Operation.LIQUIDATION
                 || pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
                 || pending.operation() == CommandSlot.Operation.SETTLEMENT)) {
@@ -458,18 +479,7 @@ final class OrderedCommitCoordinator {
                 return null;
             }
         }
-        completeCommitPublicationBatch();
-        owner.validateFundsConservation(pending.command());
-        closeFinancialDispatch(pending);
-        CoreResponse response = storeTerminalResponse(
-                pending, matchingResult, status, resultCode);
-        owner.runtimeState.releaseMatcherSettlement(pending.takeSettlementEvent());
-        owner.matchingFlow.removePendingMatching(sequence);
-        owner.finishFactContext(response);
-        if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) {
-            owner.matchingProgress.submitDeferredMatchingAfterBatch();
-        }
-        return response;
+        return finishTerminalMatching(pending, matchingResult);
     }
 
     CoreResponse completeDispatchedMatcherSettlement(
@@ -535,8 +545,6 @@ final class OrderedCommitCoordinator {
                     || pending.operation() == CommandSlot.Operation.REPLACE
                     || pending.operation() == CommandSlot.Operation.AMEND)
                 owner.resultBuilder.materializeCommandOrderViews(pending);
-            completeCommitPublicationBatch();
-            owner.validateFundsConservation(pending.command());
         } catch (CoreStateRejectedException exception) {
             throw owner.failMatching(pending, "Core rejected an accepted matcher result", exception);
         } catch (ArithmeticException | IllegalArgumentException exception) {
@@ -545,23 +553,7 @@ final class OrderedCommitCoordinator {
             throw owner.failMatching(pending, "account lane settlement failed; snapshot/log recovery is required",
                     exception);
         }
-        ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
-        CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
-        closeFinancialDispatch(pending);
-        CoreResponse response = storeTerminalResponse(
-                pending, matchingResult, status, resultCode);
-        if (pending.takePipelinedSettlementCounted()) {
-            dispatchedSettlementInFlight--;
-            if (dispatchedSettlementInFlight < 0) {
-                throw new IllegalStateException("matcher settlement in-flight count underflow");
-            }
-        }
-        owner.runtimeState.releaseMatcherSettlement(pending.takeSettlementEvent());
-        owner.matchingFlow.removePendingMatching(pending.sequence());
-        // Finish this command before restoring the next batch's suspended commit context.
-        owner.finishFactContext(response);
-        if (owner.pendingMatching.hasDeferred() || owner.batches.hasPendingBatches()) owner.matchingProgress.submitDeferredMatchingAfterBatch();
-        return response;
+        return finishTerminalMatching(pending, matchingResult);
     }
 
     long expectedLaneMask(

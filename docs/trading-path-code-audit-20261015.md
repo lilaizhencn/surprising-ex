@@ -35,11 +35,12 @@
 | 已完成 | D3 / L7 | 交易统一 Direct，删除旧 Future/API、Owner 补结算与分区扫描 | 已验证，见 D3 |
 | 已完成 | D4 | Owner 直接消费唯一输入环，删除重复 FIFO 与回收队列 | 已验证，见 D4 |
 | 已完成 | D5 | 删除命令能力接口，直接引用既有运行时 | 已验证，见 D5 |
-| 已完成 | D6 | 已删除无调用旧观察链，核实并纠正原报告误判 | 已验证，见 D6 |
-| 待处理 | D7–D9 | 职责、收尾重复及层级问题 | 中到高 |
+| 已完成 | D7 | 超大类与职责混杂解耦（划转迁入 Treasury、指标去中心化并去时钟、CommandSlot 解耦） | 已验证，见 D7 |
+| 已完成 | D8 | `OrderedCommitCoordinator` 终态收尾逻辑合并消除重复与缩进错位 | 已验证，见 D8 |
+| 待处理 | D9 | 命名与层级问题 | 中 |
 | 最后做 | D10 | `TradingCoreRuntime` 状态枢纽、状态重复 | 中高 |
 
-D2–D6 均已完成，具体变更、核查结论与验证证据见各节。建议执行顺序见第 9 节。
+D2–D8 均已完成，具体变更、核查结论与验证证据见各节。建议执行顺序见第 9 节。
 
 ## 2. 正确性与可用性风险（C）
 
@@ -341,9 +342,27 @@ D2–D6 均已完成，具体变更、核查结论与验证证据见各节。建
   - 模块测试编译 100% 干净，资金与持仓严格守恒。
 
 
-### D8【报告】`OrderedCommitCoordinator` 收尾逻辑重复
-- **位置**：`orchestration/OrderedCommitCoordinator.java`：`finishAppliedMatching`（457-540）与 `completeDispatchedMatcherSettlement`（524-620）收尾逻辑重复，前者带缩进错位的拷贝残留。
-- **方案**：合并为一个收尾方法，并保持顺序语义。
+### D8【已完成】`OrderedCommitCoordinator` 收尾逻辑重复
+- **完成日期**：2026-10-16。按业务语义优先与 KISS 原则，消除收尾逻辑重复与拷贝残留：
+- **终态提交统一收尾**：
+  - 在 `OrderedCommitCoordinator` 中提取统一的终态提交收尾方法 `finishTerminalMatching(CommandSlot pending, MatchingResult matchingResult)`。
+  - 将原先在 `finishAppliedMatching` 与 `completeDispatchedMatcherSettlement` 中逐行重复的代码彻底收敛：包括完成提交发布批次（`completeCommitPublicationBatch`）、资金守恒校验（`owner.validateFundsConservation`）、关闭财务派发通道（`closeFinancialDispatch`）、构建与存储终态响应（`storeTerminalResponse`）、递减在途派发计数（`pending.takePipelinedSettlementCounted()`）、回收结算事件（`releaseMatcherSettlement`）、移出待决队列（`removePendingMatching`）、结束事实上下文（`finishFactContext`）以及推进后续延期或批量撮合（`submitDeferredMatchingAfterBatch`）。
+- **清理代码异味与残留**：
+  - 彻底修正了 `finishAppliedMatching` 中由于历史拷贝导致的缩进错位（由 12 格修正为规范的 8 格）；
+  - 删除了提前计算且作用域脱节的多余局部变量声明；
+  - 删除了无任何调用的 3 参死代码重载 `finishAppliedMatching(pending, matchingResult, settlementTreasuryDelta)`。
+- **验证**：HotSpot JDK 27 下全量测试编译 100% 通过（304 个主类、175 个测试类），受影响的 10 个关键测试类（涵盖交易全链路、提交恢复、资金守恒、快照恢复等）全部通过，合计 **105 项测试用例 100% 全部通过**：
+  - `TradingCoreOwnerTest` 45 项全部通过（10.99s）；
+  - `CoreTransferLaneLifecycleTest` 6 项全部通过（3.91s）；
+  - `RuntimeCommitRecoveryTest` 18 项全部通过（28.09s）；
+  - `OrderBatchSlotReuseTest` 4 项全部通过（0.01s）；
+  - `CoreSpotAssetUnitsTest` 4 项全部通过（1.67s）；
+  - `PublishedSnapshotRecoveryTest` 8 项全部通过（7.29s）；
+  - `CoreOptionPremiumFeeFundingTest` 2 项全部通过（1.23s）；
+  - `TradingStateSnapshotCodecTest` 6 项全部通过（0.54s）；
+  - `CoreNativeSnapshotProductLineTest` 6 项全部通过（0.14s）；
+  - `CommandSlotTest` 5 项全部通过（0.03s）。
+  - 六产品线资金严格守恒，确定性顺序与终态语义完全保持一致。
 
 ### D9【报告】命名与层数
 - 同一个 Owner 有多个名字：`TradingOwnerLoop` 里字段叫 `processor`（:59），类叫 `TradingCoreOwner`，下面是 `TradingCoreRuntime`。
