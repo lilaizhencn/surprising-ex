@@ -27,29 +27,30 @@
   - 严格保持 `-Dsurprising.aeron.account-lanes=<N>` 的系统属性动态读取与 2 的幂校验逻辑，支持生产按服务器核心数自由配置为 1, 2, 4, 8, 16 等；
   - 在 [`LaneTopologyTest.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/LaneTopologyTest.java) 中补充并验证了默认值断言与动态配置覆盖。
 
-### 2.2 核心热路径彻底消除 LockSupport.park / unpark 系统调用
+### 2.2 核心热路径彻底删除 LockSupport.unpark 与 park 逻辑代码
 
 1. **Account Lane 结算工作线程 ([`SettlementLaneWorker.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/lane/SettlementLaneWorker.java))**：
    - 默认等待策略由 `BLOCKING` 改为 **`BUSY_SPIN`**；
    - 消除 `publishMatcherSettlement` 中 Ring 满时的 `LockSupport.parkNanos(1L)`，改为持续 `Thread.onSpinWait()` 纯用户态自旋；
-   - 在 `BUSY_SPIN` 模式下，移除 `idleSpins` 和 `directReadySpins` 超限后退化调用 `parkUntilWork` 的逻辑，保持纯 `Thread.onSpinWait()`；
-   - 优化 `signalWork()`：Worker 从不休眠，`parked` 恒为 false，彻底消除了生产者的 `LockSupport.unpark` 系统调用。
+   - 在 `BUSY_SPIN` 模式下，移除 `directReadySpins` 超限后退化调用 `parkUntilWork` 的逻辑，保持纯用户态 `Thread.onSpinWait()`；
+   - **彻底删除 `LockSupport.unpark` 代码**：从 `signalWork()` 方法中彻底删除 `if (parked) LockSupport.unpark(thread);`，使其成为无开销空方法；在 `close()` 中彻底删除 `LockSupport.unpark(thread);`。
 
 2. **撮合命令流水线 ([`MatcherCommandPipeline.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/MatcherCommandPipeline.java))**：
    - 默认等待策略由 `ADAPTIVE` 改为 **`BUSY_SPIN`**；
-   - **消除提交命令时的系统调用**：此前在 `submitInternal` 时每笔命令均无条件调用 `LockSupport.unpark(worker)`。本次改为在 `waitStrategy != WaitStrategy.BUSY_SPIN` 时才调用，自旋模式下 Matcher 线程直接通过 volatile 游标感知新命令，消除数十万次 unpark 系统调用；
-   - Worker 循环在无工作时保持 `Thread.onSpinWait()`，不进入 `LockSupport.parkNanos`。
+   - **彻底删除提交与读取时的系统调用**：从 `submitInternal` 和 `readAtSubmissionFence` 中彻底删除 `LockSupport.unpark(worker)` 代码，纯自旋模式下 Matcher 线程直接通过 volatile 游标感知新命令；
+   - **彻底删除生命周期中的系统调用**：从 `awaitStartup` 和 `close` 中彻底删除 `LockSupport.unpark` 代码；Worker 循环在无工作时保持 `Thread.onSpinWait()`，不进入 `LockSupport.parkNanos`。
 
 3. **Owner 空闲退避策略 ([`OwnerIdleStrategy.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/cluster/OwnerIdleStrategy.java))**：
    - 默认策略由 `ADAPTIVE` 改为 **`BUSY_SPIN`**；
-   - 在 `BUSY_SPIN` 下持续 `Thread.onSpinWait()`，消除 `LockSupport.parkNanos`。
+   - 在 `BUSY_SPIN` 下持续 `Thread.onSpinWait()`，消除 `LockSupport.parkNanos`；
+   - 在自旋模式下彻底绕过 `LockSupport.unpark(owner)`，消除每次撮合和结算完成时的唤醒开销。
 
 4. **下单准入等待 ([`PlaceAdmissionEvent.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/PlaceAdmissionEvent.java))**：
    - 在 `awaitMatcherReceipt` 中消除 1024 次自旋后的 `LockSupport.parkNanos(this, 1_000L)`，保持纯 `Thread.onSpinWait()` 自旋。
 
 5. **财务总账结算 Lane ([`SystemLedgerLane.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/SystemLedgerLane.java))**：
    - 移除 256 次自旋后的 `LockSupport.parkNanos(this, 100_000L)`，在无就绪条目时持续使用 `Thread.onSpinWait()` 极速自旋；
-   - 相应跳过日常流转中的 `LockSupport.unpark`。
+   - **彻底删除 `LockSupport.unpark` 代码**：从 `signalWork()`、`close()` 和 `awaitStartup` 中彻底删除全部 `LockSupport.unpark` 调用。
 
 ---
 

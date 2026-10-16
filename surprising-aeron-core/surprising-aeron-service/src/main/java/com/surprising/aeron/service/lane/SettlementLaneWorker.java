@@ -174,9 +174,8 @@ public final class SettlementLaneWorker implements AutoCloseable {
         return position + 1;
     }
 
-    /** Publish work first; the volatile parking handshake avoids a syscall for an active Lane. */
+    /** Publish work first; the worker spins on volatile ring pointers in user space. */
     public void signalWork() {
-        if (parked) LockSupport.unpark(thread);
     }
 
     /** Matcher publishes a direct payload; this is separate from the normal Owner submission path. */
@@ -275,7 +274,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     if (waitStrategy == WaitStrategy.BUSY_SPIN) {
                         Thread.onSpinWait();
                     } else if (directReadySpins++ >= DIRECT_READY_SPIN_LIMIT) {
-                        parkUntilWork(false);
+                        Thread.onSpinWait();
                         directReadySpins = 0;
                     } else {
                         Thread.onSpinWait();
@@ -339,8 +338,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
     private void parkUntilWork(boolean waitingForHandoff) {
         parked = true;
         try {
-            // A producer either observes parked=true, or its earlier volatile publication is
-            // visible in these rechecks. Admission must be checked even behind an unready fact.
             if (!running) return;
             if (admissionConsumerSequence.value < admissionProducerSequence.value) {
                 Command admission = admissionCommands[(int) admissionConsumerSequence.value & admissionIndexMask];
@@ -442,7 +439,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
     @Override
     public void close() {
         running = false;
-        LockSupport.unpark(thread);
         boolean interrupted = false;
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (thread.isAlive() && System.nanoTime() < deadline) {

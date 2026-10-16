@@ -45,7 +45,6 @@ public final class SystemLedgerLane implements AutoCloseable {
         while (!started && System.nanoTime() < deadline) LockSupport.parkNanos(this, 100_000L);
         if (!started) {
             running = false;
-            LockSupport.unpark(thread);
             throw new IllegalStateException("system ledger Lane did not start");
         }
         assertHealthy();
@@ -62,7 +61,7 @@ public final class SystemLedgerLane implements AutoCloseable {
         return true;
     }
 
-    void signalWork() { if (parked) LockSupport.unpark(thread); }
+    void signalWork() {}
 
     Thread thread() { return thread; }
     int depth() { return entries.size(); }
@@ -132,7 +131,6 @@ public final class SystemLedgerLane implements AutoCloseable {
 
     @Override public void close() {
         running = false;
-        LockSupport.unpark(thread);
         boolean interrupted = false;
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (thread.isAlive() && System.nanoTime() < deadline) {

@@ -53,8 +53,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         var future = new java.util.concurrent.CompletableFuture<T>();
         if (!accepting || !backgroundReads.offer(new BackgroundRead<>(submittedPosition.value, read, future))) {
             future.completeExceptionally(new RejectedExecutionException("matcher read mailbox unavailable"));
-        } else if (waitStrategy != WaitStrategy.BUSY_SPIN) {
-            LockSupport.unpark(worker);
         }
         return future;
     }
@@ -172,9 +170,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         submittedPosition.value = position + 1;
         int depth = Math.toIntExact(position + 1 - consumedPosition.value);
         submissionHighWaterMark = Math.max(submissionHighWaterMark, depth);
-        if (waitStrategy != WaitStrategy.BUSY_SPIN) {
-            LockSupport.unpark(worker);
-        }
     }
 
     public CoreMatchingResult poll(long expectedCoreSequence) {
@@ -427,7 +422,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         }
         if (!started) {
             accepting = false;
-            LockSupport.unpark(worker);
             throw new IllegalStateException("matcher pipeline startup timed out");
         }
         if (startupFailure instanceof RuntimeException runtimeFailure) throw runtimeFailure;
@@ -464,7 +458,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         }
         shutdownAction = action;
         accepting = false;
-        LockSupport.unpark(activeWorker);
         boolean interrupted = false;
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (activeWorker.isAlive() && System.nanoTime() < deadline) {

@@ -34,7 +34,7 @@ public final class OwnerIdleStrategy {
     public void bindOwner() { owner = Thread.currentThread(); }
 
     public void signal() {
-        if (wakeup.requested != 0 && PARK_REQUESTED.compareAndSet(wakeup, 1L, 0L)) LockSupport.unpark(owner);
+        if (waitStrategy != WaitStrategy.BUSY_SPIN && wakeup.requested != 0 && PARK_REQUESTED.compareAndSet(wakeup, 1L, 0L)) LockSupport.unpark(owner);
     }
 
     public void idle(int work, boolean pendingCommands) {
