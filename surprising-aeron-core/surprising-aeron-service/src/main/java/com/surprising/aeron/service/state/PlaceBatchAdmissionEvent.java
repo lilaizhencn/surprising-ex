@@ -85,7 +85,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     }
 
     public void execute(AccountLaneState lane) {
-        long startedNanos = System.nanoTime();
         if (lane.laneId() != laneId || laneId != runtime.topology().accountLaneId(userId)) {
             throw new IllegalStateException("place batch admission reached the wrong Account Lane");
         }
@@ -157,7 +156,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         }
         identityAllocations = lane.clientIdentityAllocations - allocationsBefore;
         TradingRuntimeState completionRuntime = runtime;
-        completionRuntime.recordAdmissionLaneOperation(lane, System.nanoTime() - startedNanos);
         completed = true;
         completionRuntime.publishAccountAdmissionReadyShard(matcherShard);
     }

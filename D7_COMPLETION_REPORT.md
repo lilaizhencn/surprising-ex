@@ -30,13 +30,14 @@
   - `TradingRuntimeState` 删除了冗余的 `pendingTransferUsers` 集合与相关直接操作，仅通过委托 `treasury` 满足外界调用，彻底清除了在 RuntimeState 中散落的第二份转账状态。
 - **线程模型安全**：待划转路由仅在 Owner 单线程准入期被访问，避免与被 `SystemLedgerWorker` 绑定的总账执行期锁产生冲突，所有权边界清晰。
 
-### 2. 指标迁出至 `AccountLaneState`
+### 2. 指标彻底去中心化与热路径去计时（消除 `System.nanoTime()` 开销）
 
-- **去中心化自治**：原先 `TradingRuntimeState` 集中声明和维护了每个 Lane 的 `laneMetricValues(int laneCount)` 矩阵，包括 `accountLaneCompletedOperations`、`accountLaneLatencySamples`、`accountLaneTotalLatencyNanos`、`accountLaneMaxLatencyNanos` 以及队列高水位数组。
-- **下沉至 Lane 自主维护**：
-  - 每个 `AccountLaneState` 自主持有自身操作计数与延迟数组，封装 `recordOperation(AccountLaneOperationType, long latencyNanos)`、`updateQueueHighWaterMark(int)` 以及 `writeMetrics(CoreLaneMetricsCodec.Encoder, ...)`。
-  - `TradingRuntimeState` 完全移除了集中式的指标矩阵和集中编码逻辑，委托各 Lane 自主输出。
-  - 既解除了 `TradingRuntimeState` 内部巨大的静态与实例矩阵，又避免了外部对 Lane 内部状态的跨线程干扰。
+- **痛点与问题**：
+  此前在结算（Settlement）、下单准入（Place Admission）、批量准入（Place Batch）、撤单（Cancel）以及风控扫描（Risk）等高频核心热路径上，每次操作前后均调用 `System.nanoTime()` 计算纳秒耗时，并在多线程下频繁累加指标数组（`completedOperations`、`latencySamples`、`totalLatencyNanos`、`maxLatencyNanos`）。在 40万+ TPS 的极限性能追求下，系统时钟调用和数组写入引入了纳秒级的流水线停顿与缓存行更新。
+- **彻底清理落地**：
+  - **彻底移除热路径采样点**：在 `PlaceAdmissionEvent`、`PlaceBatchAdmissionEvent`、`LaneCancelEvent`、`LaneCommitEvent`、`MatcherSettlementEvent`、`TradingRuntimeState` 及 `ControlLaneDispatcher` 中彻底删除了所有 `System.nanoTime()` 采样和 `record...LaneOperation` 调用；
+  - **移除指标数组**：从 `AccountLaneState` 和 `TradingRuntimeState` 中彻底移除了 4 个操作延迟统计数组，消除额外的堆内存分配与写入开销；
+  - **协议轻量化兼容**：`AccountLaneState.writeMetrics` 仅保留已有队列深度（`depth`）、容量（`capacity`）、高水位（`highWater`）和已提交序列号等轻量原子游标输出，operations 部分直接写入空占位，既彻底消除了热路径时钟开销，又保障了外部监控查询协议的兼容性。
 
 ### 3. `CommandSlot` 专有字段下沉解耦
 
@@ -58,13 +59,19 @@
 
 | 文件路径 | 改动性质 | 核心修改说明 |
 |---|---|---|
-| `AccountLaneState.java` | 增强 / 下沉 | 新增自治指标统计数组及 `recordOperation`、`writeMetrics` 等方法 |
-| `MatcherSettlementDispatcher.java` | 适配 | 队列高水位采样由 Lane 自主更新 |
-| `TradingRuntimeState.java` | 精简 / 迁出 | 删除 `pendingTransferUsers` 和 `laneMetricValues`，指标委托 Lane，划转委托 Treasury |
+| `AccountLaneState.java` | 精简 / 去指标 | 彻底删除操作延迟统计数组与 `recordOperation` 等方法，`writeMetrics` 仅输出轻量原子队列游标 |
+| `TradingRuntimeState.java` | 精简 / 迁出 | 彻底删除指标矩阵与采样方法；删除 `pendingTransferUsers`，划转委托 Treasury |
+| `PlaceAdmissionEvent.java` | 优化 / 去时钟 | 彻底消除下单准入执行前后的 `System.nanoTime()` 采样及指标更新 |
+| `PlaceBatchAdmissionEvent.java` | 优化 / 去时钟 | 彻底消除批量下单准入执行前后的 `System.nanoTime()` 采样及指标更新 |
+| `LaneCancelEvent.java` | 优化 / 去时钟 | 彻底消除撤单核心路径上的 `System.nanoTime()` 采样及指标更新 |
+| `LaneCommitEvent.java` | 优化 / 去时钟 | 彻底消除顺序提交核心路径上的 `System.nanoTime()` 采样及指标更新 |
+| `MatcherSettlementEvent.java` | 优化 / 去时钟 | 彻底消除撮合结算核心路径上的 `System.nanoTime()` 采样及指标更新 |
+| `ControlLaneDispatcher.java` | 优化 / 去时钟 | 彻底消除控制异步任务执行前后的 `System.nanoTime()` 采样及指标更新 |
 | `TreasuryRuntime.java` | 增强 / 迁入 | 承接待划转路由状态、容量控制、分页查询及快照恢复生命周期 |
 | `CommandSlot.java` | 解耦 / 下沉 | 专有操作字段分类下沉至 5 个预分配 Context，消除万能大记录平铺混杂 |
 | `CoreMatchingFlow.java` | 适配 | 下单撮合流程适配 `pending.place.realtimeResolvedTakerOrder` |
 | `TradingCoreRuntime.java` | 适配 | 运行时订单状态解析适配 `pending.place.realtimeResolvedTakerOrder` |
+| `TradingRuntimeStateTest.java` | 测试更新 | 移除对操作延迟指标统计的废弃断言 |
 | `docs/trading-path-code-audit-20261015.md` | 文档更新 | 将 D7 状态由【报告】变更为【已完成】，补充核查与验证记录 |
 
 ---

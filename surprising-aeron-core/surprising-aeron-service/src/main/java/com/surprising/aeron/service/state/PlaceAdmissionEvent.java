@@ -130,7 +130,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
 
     public void execute(AccountLaneState lane) {
         if (!inputReady) throw new IllegalStateException("Ledger admission input is incomplete");
-        long startedNanos = System.nanoTime();
         if (lane.laneId() != runtime.topology().accountLaneId(userId)) {
             throw new IllegalStateException("place admission reached the wrong Account Lane");
         }
@@ -179,7 +178,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         // Capture every publication dependency before completed becomes visible. The Owner
         // retains queued events until the command's Matcher continuation consumes this payload.
         TradingRuntimeState completionRuntime = runtime;
-        completionRuntime.recordAdmissionLaneOperation(lane, System.nanoTime() - startedNanos);
         completed = true;
         completionRuntime.publishPlaceAdmissionReady(laneId, coreSequence);
     }

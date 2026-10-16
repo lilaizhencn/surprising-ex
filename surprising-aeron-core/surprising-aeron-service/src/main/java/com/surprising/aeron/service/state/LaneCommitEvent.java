@@ -178,15 +178,12 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         if ((requiredLaneMask & laneBit) == 0) {
             throw new IllegalStateException("Account Lane commit reached an unrelated lane");
         }
-        long startedNanos = System.nanoTime();
         cancelClosingTriggers(lane);
         stampMetadata(lane);
         if ((committedLaneMask & laneBit) != 0)
             runtime.applyLaneUsers(lane, usersByLane[laneId], coreSequence);
         if (resultTarget != null && laneId == resultLaneId)
             LaneOrderResultTarget.captureFinal(resultTarget, identities, lane);
-        long finishedNanos = System.nanoTime();
-        runtime.recordSequenceCommitLaneOperation(laneId, finishedNanos - startedNanos);
         int completionOffset = laneId * CACHE_LINE_LONGS;
         if ((long) LONGS.getAcquire(completedLanes, completionOffset) != 0) {
             throw new IllegalStateException("Account Lane committed the same sequence twice");

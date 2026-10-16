@@ -142,7 +142,6 @@ final class ControlLaneDispatcher {
         }
 
         @Override public void execute(AccountLaneState lane) {
-            long startedNanos = System.nanoTime();
             executing = true;
             try { result = owner.inLaneCommandScope(lane, ignored -> operation.apply(laneId)); }
             catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
@@ -152,7 +151,6 @@ final class ControlLaneDispatcher {
                 executing = false;
                 operation = null;
             }
-            owner.recordLaneOperation(laneId, operationType, System.nanoTime() - startedNanos);
             // No mutable task fields are read after release; the Owner may reuse this slot immediately.
             LONGS.setRelease(completedLanes, laneId * CACHE_LINE_LONGS, 1L);
             owner.signalOwnerCompletion();

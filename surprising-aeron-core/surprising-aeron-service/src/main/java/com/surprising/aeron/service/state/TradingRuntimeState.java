@@ -144,14 +144,6 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** 各 Lane 派发队列长度峰值，仅用于运行观测。 */
     final int[] accountLaneQueueHighWaterMarks;
-    /** 各 Lane 按业务类型累计的完成数量。 */
-    final long[][] accountLaneCompletedOperations;
-    /** 各 Lane 按业务类型累计的延迟样本数。 */
-    final long[][] accountLaneLatencySamples;
-    /** 各 Lane 按业务类型累计的延迟纳秒数。 */
-    final long[][] accountLaneTotalLatencyNanos;
-    /** 各 Lane 按业务类型观察到的最大延迟。 */
-    final long[][] accountLaneMaxLatencyNanos;
     /** owner 可见的各 Lane 已提交序号。 */
     final long[] publishedLaneCommittedSequences;
     /** 缓存行隔离的已提交序号槽位，防止多 Lane worker 并发写触发 CPU 伪共享。 */
@@ -322,10 +314,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.laneMutationStartedNanosScratch = new long[topology.accountLaneCount()];
         this.laneMutationResultsScratch = new Object[topology.accountLaneCount()];
         this.accountLaneQueueHighWaterMarks = new int[topology.accountLaneCount()];
-        this.accountLaneCompletedOperations = new long[topology.accountLaneCount()][];
-        this.accountLaneLatencySamples = new long[topology.accountLaneCount()][];
-        this.accountLaneTotalLatencyNanos = new long[topology.accountLaneCount()][];
-        this.accountLaneMaxLatencyNanos = new long[topology.accountLaneCount()][];
         this.publishedLaneCommittedSequences = new long[topology.accountLaneCount()];
         this.publishedLaneCommittedSlots = new PaddedCommittedSequenceSlot[topology.accountLaneCount()];
         for (int i = 0; i < topology.accountLaneCount(); i++) {
@@ -335,10 +323,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.dispatchedLaneCommitSequences = new long[topology.accountLaneCount()];
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
-            accountLaneCompletedOperations[laneId] = accountLanes[laneId].completedOperations();
-            accountLaneLatencySamples[laneId] = accountLanes[laneId].latencySamples();
-            accountLaneTotalLatencyNanos[laneId] = accountLanes[laneId].totalLatencyNanos();
-            accountLaneMaxLatencyNanos[laneId] = accountLanes[laneId].maxLatencyNanos();
             placeAdmissionReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
             matcherSettlementReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
             publishLaneCommittedSequence(accountLanes[laneId]);
@@ -815,10 +799,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (accountLanesStarted) {
             throw new IllegalStateException("active Account Lane risk must be dispatched to its worker");
         }
-        long startedNanos = System.nanoTime();
-        T result = onLane(laneId, ignored -> operation.get());
-        recordLaneOperation(laneId, AccountLaneOperationType.RISK, System.nanoTime() - startedNanos);
-        return result;
+        return onLane(laneId, ignored -> operation.get());
     }
 
     public Object[] executeOwnerSettlements(Iterable<Long> userIds,
@@ -900,11 +881,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             if ((selectedLaneMask & 1L << laneId) == 0) continue;
             int currentLaneId = laneId;
-            long startedNanos = System.nanoTime();
             results[laneId] = inLaneCommandScope(accountLanes[currentLaneId],
                     ignored -> operation.apply(currentLaneId));
-            recordLaneOperation(laneId, AccountLaneOperationType.SETTLEMENT,
-                    System.nanoTime() - startedNanos);
         }
         return results;
     }
@@ -1153,22 +1131,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         if (failure instanceof Error error) throw error;
         if (failure != null) throw new IllegalStateException("Core workers stopped with a failure", failure);
-    }
-
-    void recordLaneOperation(int laneId, AccountLaneOperationType operation, long latencyNanos) {
-        accountLanes[laneId].recordOperation(operation, latencyNanos);
-    }
-
-    void recordMatcherLaneOperation(AccountLaneState lane, long latencyNanos) {
-        lane.recordMatcherSettlement(latencyNanos);
-    }
-
-    void recordAdmissionLaneOperation(AccountLaneState lane, long latencyNanos) {
-        recordLaneOperation(lane.laneId(), AccountLaneOperationType.COMMAND, latencyNanos);
-    }
-
-    void recordSequenceCommitLaneOperation(int laneId, long latencyNanos) {
-        recordLaneOperation(laneId, AccountLaneOperationType.SETTLEMENT, latencyNanos);
     }
 
     record TerminalRelease(long units, int assetId) {

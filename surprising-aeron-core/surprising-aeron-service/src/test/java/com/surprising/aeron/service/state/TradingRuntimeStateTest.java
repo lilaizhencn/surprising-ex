@@ -1365,10 +1365,6 @@ class TradingRuntimeStateTest {
                 assertThat(decoded.accountLaneRevisions()[lane]).isEqualTo(view.revision());
                 assertThat(decoded.accountLaneAppliedSequences()[lane]).isEqualTo(view.appliedSequence());
                 assertThat(decoded.accountLaneCommittedSequences()[lane]).isEqualTo(view.committedSequence());
-                int offset = lane * 4;
-                int settlementIndex = offset + AccountLaneOperationType.SETTLEMENT.ordinal();
-                assertThat(decoded.accountLaneCompletedOperations()[settlementIndex]).isEqualTo(1);
-                assertThat(decoded.accountLaneLatencySamples()[settlementIndex]).isEqualTo(1);
             }
         }
     }
@@ -1389,27 +1385,6 @@ class TradingRuntimeStateTest {
         }
         assertThat(lane.activeOrderIdsByUser.get(7)).isSameAs(membership);
         assertThat(membership.size()).isZero();
-    }
-
-    @Test
-    void metricsIncludeEarlierQueuedAdmissionAfterItsCompletionFence() throws Exception {
-        try (TradingRuntimeState state = new TradingRuntimeState()) {
-            state.startAccountLanes();
-            var complete = new java.util.concurrent.CountDownLatch(1);
-            assertThat(state.dispatchAccountQuery(1, lane -> {
-                state.recordAdmissionLaneOperation(lane, 123);
-                complete.countDown();
-            })).isTrue();
-            assertThat(complete.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-            var encoder = new com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder(
-                    1, 1, 0, 16, 0, 0, 16, 0, 0, 16, 0, 0);
-            state.writeAccountLaneMetrics(0, encoder);
-            var metrics = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(encoder.finish());
-            int command = AccountLaneOperationType.COMMAND.ordinal();
-            assertThat(metrics.accountLaneCompletedOperations()[command]).isEqualTo(1);
-            assertThat(metrics.accountLaneLatencySamples()[command]).isEqualTo(1);
-            assertThat(metrics.accountLaneTotalLatencyNanos()[command]).isEqualTo(123);
-        }
     }
 
     @Test

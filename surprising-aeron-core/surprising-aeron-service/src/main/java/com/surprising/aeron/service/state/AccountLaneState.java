@@ -2,7 +2,6 @@ package com.surprising.aeron.service.state;
 
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
-import com.surprising.aeron.service.command.AccountLaneOperationType;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.state.account.UserRuntime;
 
@@ -31,9 +30,6 @@ public final class AccountLaneState {
     private static final java.lang.invoke.VarHandle METRIC_REVISION = metricField("revision");
     private static final java.lang.invoke.VarHandle METRIC_APPLIED = metricField("appliedSequence");
     private static final java.lang.invoke.VarHandle METRIC_COMMITTED = metricField("committedSequence");
-    private static final java.lang.invoke.VarHandle METRIC_SETTLEMENTS = metricField("matcherSettlementOperations");
-    private static final java.lang.invoke.VarHandle METRIC_LATENCY = metricField("matcherSettlementLatencyNanos");
-    private static final java.lang.invoke.VarHandle METRIC_MAX_LATENCY = metricField("matcherSettlementMaxLatencyNanos");
 
     private static java.lang.invoke.VarHandle metricField(String name) {
         try { return java.lang.invoke.MethodHandles.lookup().findVarHandle(AccountLaneState.class, name, long.class); }
@@ -97,19 +93,7 @@ public final class AccountLaneState {
     final RuntimeDerivativeFillCalculator.FillCursor singleFillCursor = new RuntimeDerivativeFillCalculator.FillCursor();
     final RuntimeDerivativeFillCalculator.FillCursor takerFillCursor = new RuntimeDerivativeFillCalculator.FillCursor();
 
-    private final long[] completedOperations = new long[AccountLaneOperationType.values().length];
-    private final long[] latencySamples = new long[AccountLaneOperationType.values().length];
-    private final long[] totalLatencyNanos = new long[AccountLaneOperationType.values().length];
-    private final long[] maxLatencyNanos = new long[AccountLaneOperationType.values().length];
     private volatile int queueHighWaterMark;
-
-    public void recordOperation(AccountLaneOperationType operation, long latencyNanos) {
-        int index = operation.ordinal();
-        completedOperations[index]++;
-        latencySamples[index]++;
-        totalLatencyNanos[index] = Math.addExact(totalLatencyNanos[index], latencyNanos);
-        maxLatencyNanos[index] = Math.max(maxLatencyNanos[index], latencyNanos);
-    }
 
     public int updateQueueHighWaterMark(int depth) {
         int current = queueHighWaterMark;
@@ -123,11 +107,6 @@ public final class AccountLaneState {
     public int queueHighWaterMark() {
         return queueHighWaterMark;
     }
-
-    public long[] completedOperations() { return completedOperations; }
-    public long[] latencySamples() { return latencySamples; }
-    public long[] totalLatencyNanos() { return totalLatencyNanos; }
-    public long[] maxLatencyNanos() { return maxLatencyNanos; }
 
     CoreTriggerOrderState putTrigger(CoreTriggerOrderState value) {
         CoreTriggerOrderState previous = cold.triggerOrders.put(value.triggerOrderId(), value);
@@ -166,9 +145,6 @@ public final class AccountLaneState {
     /** Hashes are rebuilt on the lane owner; retain sort buffers across commits. */
     private long[] hashLongScratch = new long[16];
     private int[] hashIntScratch = new int[16];
-    private long matcherSettlementOperations;
-    private long matcherSettlementLatencyNanos;
-    private long matcherSettlementMaxLatencyNanos;
     private final LaneAdmissionOrderIndex admissionOrderIndex = new LaneAdmissionOrderIndex();
     boolean commandScopeActive;
     MatcherSettlementChanges matcherSettlementChanges;
@@ -294,22 +270,6 @@ public final class AccountLaneState {
         encoder.writeLane(laneId, (long) METRIC_REVISION.getOpaque(this), applied, committed,
                 depth, capacity, highWater, 0, 0);
         encoder.writeOperations(laneId, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS);
-        for (int op = 0; op < completedOperations.length; op++) {
-            long completed = completedOperations[op];
-            long samples = latencySamples[op];
-            long total = totalLatencyNanos[op];
-            long max = maxLatencyNanos[op];
-            if (op == AccountLaneOperationType.SETTLEMENT.ordinal()) {
-                long settlements = (long) METRIC_SETTLEMENTS.getOpaque(this);
-                if (settlements > completed) {
-                    completed = settlements;
-                    samples = settlements;
-                    total = (long) METRIC_LATENCY.getOpaque(this);
-                    max = (long) METRIC_MAX_LATENCY.getOpaque(this);
-                }
-            }
-            encoder.addOperation(laneId, op, completed, samples, total, max);
-        }
     }
 
     public int laneId() { return laneId; }
@@ -451,20 +411,6 @@ public final class AccountLaneState {
     int pendingReservationCount() {
         assertOwner();
         return totalPendingReservations;
-    }
-
-    void recordMatcherSettlement(long latencyNanos) {
-        assertOwner();
-        if (latencyNanos < 0) throw new IllegalArgumentException("invalid matcher settlement latency");
-        matcherSettlementOperations++;
-        matcherSettlementLatencyNanos = Math.addExact(matcherSettlementLatencyNanos, latencyNanos);
-        matcherSettlementMaxLatencyNanos = Math.max(matcherSettlementMaxLatencyNanos, latencyNanos);
-    }
-
-    MatcherSettlementMetrics matcherSettlementMetrics() {
-        assertOwner();
-        return new MatcherSettlementMetrics(matcherSettlementOperations,
-                matcherSettlementLatencyNanos, matcherSettlementMaxLatencyNanos);
     }
 
     boolean hasPendingReservations() {

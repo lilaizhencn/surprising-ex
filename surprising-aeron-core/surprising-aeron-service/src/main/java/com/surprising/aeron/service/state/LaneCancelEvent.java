@@ -69,7 +69,6 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
 
     public void execute(AccountLaneState lane) {
         if (lane.laneId() != laneId) throw new IllegalStateException("cancel reached the wrong Account Lane");
-        long startedNanos = System.nanoTime();
         runtime.enterMatcherSettlementScope(lane, changes);
         try {
             for (int index = 0; index < orderCount; index++) {
@@ -102,7 +101,6 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
         } finally {
             runtime.exitMatcherSettlementScope(lane, changes);
         }
-        runtime.recordMatcherLaneOperation(lane, System.nanoTime() - startedNanos);
         TradingRuntimeState completionRuntime = runtime;
         int completionLaneId = laneId;
         long completionSequence = coreSequence;

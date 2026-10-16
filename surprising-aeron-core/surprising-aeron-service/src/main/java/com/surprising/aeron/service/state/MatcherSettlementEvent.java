@@ -807,12 +807,11 @@ public final class MatcherSettlementEvent implements
 
     public void execute(AccountLaneState lane) {
         if (direct) requireDirectResult();
-        long startedNanos = System.nanoTime();
         int laneId = lane.laneId();
         long laneMask = 1L << laneId;
         if ((requiredLaneMask & laneMask) == 0) {
             if (direct && (routedLaneMask & laneMask) != 0) {
-                publishCompletion(lane, startedNanos);
+                publishCompletion(lane);
                 return;
             }
             throw new IllegalStateException("matcher fact was routed to an unrelated account lane");
@@ -825,7 +824,7 @@ public final class MatcherSettlementEvent implements
         }
         if (admissionRequired && !admissionAccepted) {
             if (changes != null) changes.prepareLaneTerminal(laneId, identities, lane, runtime, direct ? directCoreSequence : plan.coreSequence());
-            publishCompletion(lane, startedNanos);
+            publishCompletion(lane);
             return;
         }
         if (changes == null) runtime.enterLaneCommandScope(lane);
@@ -870,15 +869,13 @@ public final class MatcherSettlementEvent implements
         }
         // Publish each Lane independently. The owner validates the event-wide completion fence,
         // avoiding a contended atomic OR written by every Lane.
-        publishCompletion(lane, startedNanos);
+        publishCompletion(lane);
     }
 
-    private void publishCompletion(AccountLaneState lane, long startedNanos) {
+    private void publishCompletion(AccountLaneState lane) {
         int laneId = lane.laneId();
         TradingRuntimeState completionRuntime = runtime;
         long completionSequence = plan.coreSequence();
-        long finishedNanos = System.nanoTime();
-        completionRuntime.recordMatcherLaneOperation(lane, finishedNanos - startedNanos);
         int completionOffset = laneId * CACHE_LINE_LONGS;
         if ((long) LONGS.getAcquire(completedLanes, completionOffset) != 0) {
             throw new IllegalStateException("account lane completed the same matcher fact twice");
