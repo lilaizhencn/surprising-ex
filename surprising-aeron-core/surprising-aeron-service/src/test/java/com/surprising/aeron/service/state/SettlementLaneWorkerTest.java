@@ -48,10 +48,9 @@ class SettlementLaneWorkerTest {
                 assertThat(olderSettlement.await(2, TimeUnit.SECONDS)).isTrue();
                 assertThat(executed.get()).isZero();
                 inputReady.set(true);
-                worker.signalWork();
                 assertThat(completed.await(2, TimeUnit.SECONDS)).isTrue();
                 worker.assertHealthy();
-            } finally { inputReady.set(true); release.countDown(); worker.signalWork(); }
+            } finally { inputReady.set(true); release.countDown(); }
         } finally {
             if (previous == null) System.clearProperty(key); else System.setProperty(key, previous);
         }

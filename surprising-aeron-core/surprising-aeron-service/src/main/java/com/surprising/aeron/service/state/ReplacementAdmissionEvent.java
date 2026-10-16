@@ -116,10 +116,7 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
 
     @Override public void apply(TreasuryRuntime ignored) {
         openInterestSteps = runtime.ledgerAdmissionOpenInterest(decision.instrument().instrumentId());
-        TradingRuntimeState completion = runtime;
-        int laneId = completion.topology().accountLaneId(userId);
         inputReady = true;
-        completion.signalAccountLane(laneId);
     }
     public long coreSequence() { return sequence; }
     public RuntimeException rejection() { requireComplete(); return rejection; }

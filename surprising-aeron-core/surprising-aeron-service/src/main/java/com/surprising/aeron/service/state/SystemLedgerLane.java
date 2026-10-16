@@ -56,12 +56,8 @@ public final class SystemLedgerLane implements AutoCloseable {
         if (entry == null) throw new IllegalArgumentException("system ledger entry is required");
         assertHealthy();
         if (!running) throw new RejectedExecutionException("system ledger Lane is closed");
-        if (!entries.offer(entry)) return false;
-        signalWork();
-        return true;
+        return entries.offer(entry);
     }
-
-    void signalWork() {}
 
     Thread thread() { return thread; }
     int depth() { return entries.size(); }

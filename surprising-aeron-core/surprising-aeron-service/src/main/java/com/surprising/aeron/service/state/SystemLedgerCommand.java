@@ -96,7 +96,6 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
         if (!completed || !queueClose()) return false;
         close.rollback = true;
         close.requested = true;
-        runtime.signalLedgerWork();
         return close.completed;
     }
 
@@ -104,7 +103,6 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
         if (!completed || !scopeCompleted || !closeQueued)
             throw new IllegalStateException("Ledger financial scope is incomplete");
         close.requested = true;
-        runtime.signalLedgerWork();
     }
 
     final boolean validateFunds(boolean externalAdjustment) {
@@ -112,7 +110,6 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
         if (!queueClose()) return false;
         close.externalAdjustment = externalAdjustment;
         close.validationRequested = true;
-        runtime.signalLedgerWork();
         return close.validated;
     }
 

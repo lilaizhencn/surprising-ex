@@ -884,9 +884,7 @@ public final class MatcherSettlementEvent implements
             throw new IllegalStateException("account lane completed the same matcher fact twice");
         }
         boolean directCompletion = direct;
-        SystemLedgerLane ledgerToWake = treasurySettlement == null ? null : treasurySettlement.ledger;
         LONGS.setRelease(completedLanes, completionOffset, 1L);
-        if (ledgerToWake != null) ledgerToWake.signalWork();
         if (directCompletion) completionRuntime.publishDirectMatcherSettlementReady(laneId);
         else completionRuntime.publishMatcherSettlementReady(laneId, completionSequence);
     }

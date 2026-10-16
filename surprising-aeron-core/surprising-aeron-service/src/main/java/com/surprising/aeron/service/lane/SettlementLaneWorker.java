@@ -115,7 +115,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
     public boolean handoffReady(long epoch) { return completedHandoff == epoch; }
     public void resumeHandoff(long epoch) {
         resumedHandoff = epoch;
-        signalWork();
     }
 
     public Thread thread() { return thread; }
@@ -131,10 +130,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
         }
         commands[(int) next & indexMask] = command;
         producerSequence.value = next + 1;
-        // The consumer announces parking BEFORE rechecking producerSequence. These volatile
-        // accesses ensure either it sees this publication or we observe its wake-up request.
-        // Do not replace this handshake with an empty-queue check on consumerSequence.
-        signalWork();
         return next + 1;
     }
 
@@ -153,7 +148,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
         }
         admissionCommands[(int) next & admissionIndexMask] = command;
         admissionProducerSequence.value = next + 1;
-        signalWork();
         return next + 1;
     }
 
@@ -170,17 +164,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
             Thread.onSpinWait();
         }
         long position = ring.publish(event);
-        signalWork();
         return position + 1;
-    }
-
-    /** Publish work first; the worker spins on volatile ring pointers in user space. */
-    public void signalWork() {
-    }
-
-    /** Matcher publishes a direct payload; this is separate from the normal Owner submission path. */
-    public void signalDirectReady() {
-        signalWork();
     }
 
     public int depth() {

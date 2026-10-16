@@ -194,10 +194,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
 
     @Override public void apply(TreasuryRuntime ignored) {
         openInterestSteps = runtime.ledgerAdmissionOpenInterest(instrumentId());
-        TradingRuntimeState completion = runtime;
-        int targetLane = laneId;
         inputReady = true;
-        completion.signalAccountLane(targetLane);
     }
 
     /** Abort a prepared event that was never submitted to a Lane. */

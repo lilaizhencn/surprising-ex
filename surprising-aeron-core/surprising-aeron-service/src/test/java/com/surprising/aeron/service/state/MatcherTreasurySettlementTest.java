@@ -149,7 +149,7 @@ class MatcherTreasurySettlementTest {
                 }
                 assertThat(event.complete()).isFalse();
                 assertThat(runtime.collectMatcherSettlement(event, null, null)).isNull();
-                releaseLedgerHead.set(true); ledger.signalWork();
+                releaseLedgerHead.set(true);
                 long admissionDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                 while (!event.submitTreasurySettlement(ledger)) {
                     if (System.nanoTime() >= admissionDeadline) throw new AssertionError("Ledger queue remained full");

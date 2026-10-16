@@ -73,7 +73,7 @@ class OrderBatchSettlementWaitTest {
                 assertThat(event.accountLanesCompleteForLedger()).isFalse();
                 assertThat(cache.getLong(event)).isZero();
                 assertThat(done.getCount()).isOne();
-            } finally { longs.setRelease(slots, 16, 1L); ledger.signalWork(); }
+            } finally { longs.setRelease(slots, 16, 1L); }
             assertThat(done.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
             assertThat(failure.get()).isNull();
             assertThat(event.accountLanesCompleteForLedger()).isTrue();

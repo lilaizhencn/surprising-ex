@@ -144,10 +144,7 @@ final class OrderBookQueryService {
 
         @Override public void apply(TreasuryRuntime ignored) {
             openInterest = owner.runtimeState.ledgerAdmissionOpenInterest(command.instrumentId());
-            var runtime = owner.runtimeState;
-            int laneId = runtime.topology().accountLaneId(userId);
             inputReady = true;
-            runtime.signalAccountLane(laneId);
         }
 
         @Override public void execute(AccountLaneState lane) {
@@ -587,7 +584,6 @@ final class OrderBookQueryService {
                 failures[lane.laneId()] = CoreResultCode.INVALID_COMMAND;
             }
             completed.getAndUpdate(mask -> mask | (1L << lane.laneId()));
-            owner.runtimeState.signalLedgerWork();
             owner.runtimeState.signalOwnerCompletion();
         }
         @Override public boolean ready() { return completed.get() == laneMask; }

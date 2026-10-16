@@ -58,7 +58,7 @@ class SystemLedgerControlTest {
                 while (ledger.offer(ignored -> { })) { }
                 assertThat(runtime.dispatchLedgerCommand(work)).isFalse();
                 assertThat(work.reusable()).isTrue();
-            } finally { ready.set(true); ledger.signalWork(); }
+            } finally { ready.set(true); }
             LedgerControlTestSupport.await(runtime, work);
             LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
             assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 7L);

@@ -64,7 +64,7 @@ class SystemLedgerLaneTest {
                 account.start();
                 assertThat(accountDone.await(3, TimeUnit.SECONDS)).isTrue();
                 account.join(3_000L);
-            } finally { ready.set(true); lane.signalWork(); }
+            } finally { ready.set(true); }
             assertThat(done.await(3, TimeUnit.SECONDS)).isTrue();
         }
         assertThat(failure).hasValue(null);
@@ -92,7 +92,7 @@ class SystemLedgerLaneTest {
                 producer.start(); producer.join(3_000L);
                 assertThat(producer.isAlive()).isFalse();
                 assertThat(foreign.get()).isInstanceOf(IllegalStateException.class);
-            } finally { ready.set(true); lane.signalWork(); }
+            } finally { ready.set(true); }
         }
         assertThat(failure).hasValue(null);
         assertThat(ledger.fee(1)).isEqualTo(2);
@@ -202,13 +202,12 @@ class SystemLedgerLaneTest {
                 try {
                     assertThat(parkedWindow.await(3, TimeUnit.SECONDS)).isTrue();
                     ready.set(true);
-                    lane.signalWork();
                     assertThat(lane.offer(actual -> {
                         actual.setFee(1, Math.incrementExact(actual.fee(1)));
                         actual.clearChangedKeys();
                         done.countDown();
                     })).isTrue();
-                } finally { ready.set(true); releaseCheck.countDown(); lane.signalWork(); }
+                } finally { ready.set(true); releaseCheck.countDown(); }
                 assertThat(done.await(3, TimeUnit.SECONDS)).isTrue();
             }
         }

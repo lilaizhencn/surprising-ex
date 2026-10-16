@@ -548,14 +548,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (factIndexes != null) undo.rollback(factIndexes);
     }
 
-    public void signalAccountLane(int laneId) {
-        var workers = laneWorkers;
-        if (workers != null) {
-            var worker = workers[laneId];
-            if (worker != null) worker.signalWork();
-        }
-    }
-
     public boolean dispatchLedgerCommand(SystemLedgerCommand command) {
         assertOwner();
         if (command == null) throw new IllegalArgumentException("Ledger command is required");
@@ -588,8 +580,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         return systemLedger.offer(close);
     }
-
-    public void signalLedgerWork() { systemLedger.signalWork(); }
 
     /** 启动worker后的所有入口都派发真实Lane；显式作用域只用于尚未启动的命令边界。 */
     public boolean asynchronousCommands() { assertOwner(); return accountLanesStarted || asynchronousCommandScope; }
@@ -4848,7 +4838,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (!queued) return true;
             rollback = true;
             requested = true;
-            systemLedger.signalWork();
             return completed;
         }
 
@@ -4856,7 +4845,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (!queued || completed) return;
             if (!validated) throw new IllegalStateException("Ledger funds validation is incomplete");
             requested = true;
-            systemLedger.signalWork();
         }
     }
 
@@ -5434,14 +5422,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     void signalDirectSettlement(long laneMask) {
-        if (accountLanesStarted) {
-            long lanes = laneMask;
-            while (lanes != 0) {
-                int lane = Long.numberOfTrailingZeros(lanes);
-                lanes &= lanes - 1;
-                laneWorkers[lane].signalDirectReady();
-            }
-        }
         signalOwnerCompletion();
     }
 
