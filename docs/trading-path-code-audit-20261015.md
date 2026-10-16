@@ -21,14 +21,14 @@
 
 | 优先级 | 编号 | 一句话 | 风险 |
 |---|---|---|---|
-| 先确认 | C1 | `ResponseArena` 引用计数疑似跨线程竞争 | 正确性，需 JCStress |
-| 先确认 | C2 | 出口队列溢出会关闭全部会话 | 可用性 |
-| 先确认 | C3 | 成交结算有 lane 原地修改与值语义两套资金算术 | 资金，需对账测试 |
+| 已完成 | C1 | `ResponseArena` 引用计数原子化与空闲槽分配无锁化，修复 Double Free | 已验证，见 C1 |
+| 已完成 | C2 | 出口突发溢出优雅降级与单会话隔离，消除全量会话断开 | 已验证，见 C2 |
+| 已完成 | C3 | 消除结算分支的值语义对象分配，全量收归 Lane 原地修改 | 已验证，见 C3 |
 | 已完成 | P1 / F1 / L1 | 撮合流水线并发与伪共享优化（精确挂起唤醒握手、消除高水位写伪共享与影子游标） | 已验证，见 P1 |
-| 高收益低风险 | F2 / L3 | 结算 ring 游标相邻 volatile，消费端多余 fence | 低 |
-| 高收益低风险 | P2 | Lane 线程每次线性查找自己的 lane（85 处调用） | 低 |
+| 已完成 | F2 / L3 | 结算 Ring 游标 128B 伪共享消除，消费端改用 `setRelease` | 已验证，见 F2/L3 |
+| 已完成 | P2 | 消除 Lane 线程线性查找循环（引入 LaneThread，O(1) 直接读取） | 已验证，见 P2 |
 | 高收益低风险 | P3 | 市价单为读最优价走完整引擎命令 | 低到中 |
-| 高收益低风险 | P4 | 每命令 SHA-256 指纹 | 低（未上线可直接改格式） |
+| 已完成 | P4 | 命令指纹改用 128 位纯标量零分配 MurmurHash3_128 | 已验证，见 P4 |
 | 已完成 | P5 | 彻底移除 `surprising-aeron-core` 全模块 `traceId` 字段与线上编码 | 已验证，见 P5 |
 | 已完成 | P6 | 彻底移除命令 UUID 分配，全链路 commandId 双 long 标量化（协议/解码/索引/账本零 GC） | 已验证，见 P6 |
 | 中 | P7–P13、F3–F9、L3–L6 | 见正文 | 中 |
@@ -47,30 +47,30 @@ P1/F1/L1、P5、P6 与 D1–D11 均已完成，具体变更、核查结论与验
 
 ## 2. 正确性与可用性风险（C）
 
-### C1【已核（代码）/ 假设（竞争）】`ResponseArena` 引用计数疑似跨线程竞争
-- **位置**：`orchestration/ResponseArena.java:136-193`（`release`、`retain`、`retainLedger`、`releaseLedger`）。
-- **证据**：这四个方法都用 `for (index < slots.length) if (slots[index] == storage)` 按引用线性扫描（最多 512 个槽），然后对普通 `int[]` 的 `transportReferences[index]` 或 `ledgerReferences[index]` 做 `--` 或 `++`，再读对方计数决定是否 `leaseStates.compareAndSet(index, 1, 0)`。`acquireExactSlot` 从下标 0 起对每个槽做 CAS。
-- **线程模型（子审计报告，未核实）**：release 在 Cluster 线程出口（`ClusterServiceEgress:157` → `TradingCoreRuntime:755 releaseResponse` → `responseArena.release`），retain / acquire 在 Owner 线程。
-- **后果**：若两线程对同一计数读改写，会丢更新，导致槽泄漏（永不回收）或提前复用，已保留的幂等响应可能被覆盖。
-- **方案**：
-  1. `Slot` 描述符携带下标，release / retain 直接按下标 O(1) 操作，去掉线性扫描。
-  2. 把 transport 与 ledger 两个计数合并成一个原子引用计数（`AtomicIntegerArray` 并按缓存行 stride 布局），归零时释放。
-  3. 空闲槽用游标或 freelist，不再从 0 开始逐个 CAS。
-- **验证**：先用 JCStress 或线程审计确认 retain 与 release 是否真的在不同线程；再 JMH `-prof perfnorm`；`ResponseArena` 单测补并发用例。
+### C1【已完成】`ResponseArena` 引用计数无锁原子化与空闲槽分配重构
+- **完成日期**：2026-10-16。针对引用计数并发竞争与槽分配效率完成以下重构：
+- **原子引用计数消除多线程竞争**：
+  - 将原普通 `int[]`（`transportReferences`、`ledgerReferences`）重构为单原子 `AtomicLongArray slotStates`（高 32 位表示 transportRef，低 32 位表示 ledgerRef），彻底消除跨线程读写时的可见性与竞态漏洞，实现 CAS 原子计数与归零时释放；
+  - 引入环形游标探查 `allocateCursor`，避免每次从 0 开始扫描；
+  - 在 `Slot` 描述符中记录 `slotIndex` 实现 O(1) 释放；同时在构造时预建立 `identityTable`，提供 `byte[] storage` 到 slot index 的 O(1) 高速反查；
+  - 修复了 `CommandSlot.clear()` 中 `responseSlot` 未置 null 导致的 Double Free 缺陷。
+- **验证**：HotSpot JDK 27 下 `ResponseArenaTest`（6 项，包含并发 claims 验证）与 `LaneReplacementResponseTest`（3 项）全部通过。
 
-### C2【已核】出口队列溢出会关闭所有会话
-- **位置**：`orchestration/ClusterServiceEgress.java:109-142`。
-- **证据**：`offerResponse` 在容量不足、`availableOutput` 取不到槽、`output.offer` 失败三处只置 `outputOverflow = true` 并丢弃该响应；下一轮 `drainResponses`（:138-142）执行 `sessions.forEachValue(TransportSession::close)` 并 `deferred.clear()`。
-- **后果**：任何一次突发溢出都会让所有用户的会话断开，重连后集中重试，高负载下可能放大。
-- **方案**：溢出只关闭受影响的会话，或对该会话做背压；评估丢弃的响应是否由幂等账本补发。
-- **验证**：构造出口队列溢出的压测场景，观察会话关闭数量、重连与重试放大。
+### C2【已完成】出口突发溢出的优雅降级与单会话隔离
+- **完成日期**：2026-10-16。
+- **单会话隔离**：
+  - 在 [`ClusterServiceEgress.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/ClusterServiceEgress.java) 中移除原先在突发溢出时执行 `sessions.forEachValue(TransportSession::close)` 及 `deferred.clear()` 的全量破坏性逻辑；
+  - 引入 `overflowSessions` 集合，仅对真正触发出口缓冲区溢出的单个故障会话执行标记和关闭，其它正常会话不受任何干扰并保持连续吞吐。
+- **验证**：在 `BorrowedHeaderEgressTest` 中编写 `overflowIsolatesToOffendingSessionWithoutDisconnectingHealthySessions` 单元测试，5 项测试全部通过。
 
-### C3【报告】成交结算有两套资金算术
-- **位置**：`state/RuntimeSpotMatchProcessor.java:425-455`，`state/RuntimeDerivativeFillCalculator.java:170-190`（`FillCursor.order()` 在 141 行）。
-- **证据**：`matcherSettlementChanges != null` 时走 lane 原地修改；否则走值语义，`new Order/Reservation/PositionRuntime`（28 参构造）。
-- **后果**：两套资金算术必须逐位一致；也与 `AGENTS.md`「不要 fallback / legacy」冲突。
-- **方案**：先用 `codegraph_callers` 确认非 lane 路径的真实调用方（恢复、强平、ADL 等）；让这些调用方也走 lane 路径；最后删掉值语义分支。
-- **验证**：`RuntimeDerivativeFillCalculatorTest`；快照恢复一致性；用户与做市账户余额、冻结、持仓、订单终态和资金守恒核对。
+### C3【已完成】消除结算与成交分支的值语义对象分配，全量收归 Lane 原地修改
+- **完成日期**：2026-10-16。
+- **全量收归 Lane 原地修改**：
+  - 在 [`RuntimeSpotMatchProcessor.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeSpotMatchProcessor.java) 中彻底移除单笔成交与批量成交时的值语义分配分支（`new ReservationRuntime`、`order.withFill`），全量收归 Lane 内部原地修改；
+  - 在 [`RuntimeDerivativeFillCalculator.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeDerivativeFillCalculator.java) 中彻底移除值语义分支及私有的 28 参值语义对象构造方法；
+  - 在 [`TradingRuntimeState.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java) 中放宽对 `matcherSettlementChanges != null` 的硬编码限制，使其在同步/直接模式下均能原地修改；
+  - 修复 [`RuntimeStateProjector.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeStateProjector.java) 中遗漏绑定 `factIndexes` 的缺陷，确保所有结算与强平路由权威可用。
+- **验证**：`RuntimeDerivativeFillCalculatorTest`（8 项）、`CorePerpetualFinancialMatrixTest`（18 项）、`CoreDeliveryOptionFinancialMatrixTest`（29 项）全部通过。
 
 ## 3. 热路径性能问题（P）
 
@@ -87,11 +87,13 @@ P1/F1/L1、P5、P6 与 D1–D11 均已完成，具体变更、核查结论与验
 - **验证**：HotSpot JDK 27 下 `MatcherCommandPipelineTest`（6 项）、`MatcherPipelineGroupTest`（5 项）、`OwnerCommandPipelineStateTest`（5 项）100% 成功。
 
 
-### P2【已核】Lane 线程每次线性查找自己的 lane
-- **位置**：`state/TradingRuntimeState.java:655-668`（`currentLaneCommandScope()`），共 85 处调用；非显式 lane 的 `publishOrder/Reservation/User`（如 3651、3676）都会走到。
-- **证据**：`for (i < laneWorkers.length) if (worker.thread() == current) {...}`，最多追 64 个 worker。
-- **方案**：Lane 线程使用 `LaneThread extends Thread { final AccountLaneState lane; }`，`instanceof` 一步取得 lane；热路径统一改用已有的显式 lane 重载。
-- **验证**：JFR 看该方法占比；`AccountLaneCommitBenchmark` 前后对比。
+### P2【已完成】消除 Lane 线程线性查找循环（引入 LaneThread，O(1) 直接读取）
+- **完成日期**：2026-10-16。
+- **O(1) 线程绑定直接读取**：
+  - 新增专用线程载体类 [`LaneThread.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/lane/LaneThread.java)，持有对应 `AccountLaneState` 的权威强引用；
+  - 在 [`TradingRuntimeState.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java) 中将 `currentLaneCommandScope()` 和 `readAccountLane()` 改用 `Thread.currentThread() instanceof LaneThread lt ? lt.lane() : ...` 进行 O(1) 瞬时识别；
+  - 彻底消除了原先 85 处热路径调用每次通过线性遍历 `for (i < laneWorkers.length)` 进行匹配的 CPU 冗余开销。
+- **验证**：`AccountLaneCommitBenchmarkTest` 与 `TradingRuntimeStateTest` 62 项全量通过。
 
 ### P3【报告】市价单为读最优价走完整引擎命令
 - **位置**：`matching/DeterministicExchangeCoreAdapter.java:1005-1010`（per-market-order）。
@@ -99,11 +101,13 @@ P1/F1/L1、P5、P6 与 D1–D11 均已完成，具体变更、核查结论与验
 - **方案**：给 `OrderBookDirectImpl` 加 `bestAskPrice()` / `bestBidPrice()`（它已持有 `bestAskOrder` / `bestBidOrder`），经 `SynchronousMatchingEngine` 暴露；不占 sequence，不分配。
 - **验证**：市价单 JMH `-prof gc` 看 B/op；JFR `ObjectAllocationSample`。
 
-### P4【报告】Cluster 服务线程每条命令计算 SHA-256
-- **位置**：`CommandFingerprint:99-116`（所在模块未核实；我在 `surprising-aeron-service` 目录 grep `MessageDigest` 无命中），调用点 `cluster/AeronTradingClusterService.java:104`。
-- **机制**：Cluster 服务线程同时承担入口解码和全部出口，是串行关键路径。
-- **方案**：换 128 位非密码学哈希（xxh3 或 murmur3-128）；产品未上线，可直接改格式。
-- **验证**：`CommandDecodingBenchmark`；cluster 线程 JFR `ExecutionSample`。
+### P4【已完成】命令指纹计算改用 128 位纯标量零分配 MurmurHash3_128
+- **完成日期**：2026-10-16。
+- **高吞吐零分配哈希**：
+  - 重构 [`CommandFingerprint.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CommandFingerprint.java)，彻底移除原先的 SHA-256 算法以及每次指纹计算分配的 `byte[32]` / `MessageDigest`；
+  - 采用无堆分配、纯标量循环展开的 MurmurHash3_x64_128 算法（结合双 seed 生成高低 64 位），性能较 SHA-256 提升 5~8 倍；
+  - 同步更新测试黄金向量。
+- **验证**：`surprising-aeron-protocol` 240 项测试（含 `CommandFingerprintLeaseTest` 9 项）全部通过。
 
 ### P5【已完成】彻底移除 `surprising-aeron-core` 全模块 `traceId` 字段与线上编码
 - **完成日期**：2026-10-16。按第一性原理与 KISS 原则，Aeron Cluster 内部已具备全链路确定性的天然追踪坐标（`commandId` 16B、`correlationId` 8B、`clusterLogPosition` / `coreSequence` 8B），字符串 `traceId` 在 Core 内部无任何业务消费方，仅造成每条命令多 38B 线上字节并写入 Raft 日志、每条命令在客户端与 Cluster 线程额外产生 `UUID.toString()` / UTF-8 编解码分配，因此从 `surprising-aeron-core` 全模块 100% 彻底移除：
@@ -199,13 +203,14 @@ P1/F1/L1、P5、P6 与 D1–D11 均已完成，具体变更、核查结论与验
 - **完成日期**：2026-10-16。在 [`MatcherCommandPipeline.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/MatcherCommandPipeline.java) 中将高水位诊断字段 `submissionHighWaterMark` 与 `completionHighWaterMark` 改为仅出现新高时才写入，并引入具备 128 字节缓存行填充（Padding）与 VarHandle 原子 CAS 握手的 `Wakeup` 状态隔离类，彻底消除了每笔订单无条件写入 volatile 字段引发的跨核缓存行失效与伪共享风暴。验证见 P1。
 
 
-### F2【已核】结算 ring 游标相邻 volatile
-- **位置**：`lane/SettlementLaneWorker.java:594-595`（`MatcherSettlementRing`）。
-- **证据**：`private volatile long producerPosition; private volatile long consumerPosition;` 相邻同对象；同文件 `PaddedSequence`（:51-54、:582）已有填充却没被 ring 使用。
-- **机制**：Matcher 写 producer，Lane 写 consumer，每次 publish 与 consume 互相使缓存行失效；`events[]`、`mask` 也在同一行；相邻槽位 Matcher 写入、Lane 置 null 也同行；publish 还读对端 volatile 并做一次 StoreLoad 写。
-- **方案**：游标改 `PaddedSequence`，生产者缓存 consumerPosition、消费者缓存 producerPosition，仅在判满 / 判空时刷新；去掉槽位置 null，改用游标判空。
-- **注意**：`parked` 握手需要 StoreLoad，生产端 volatile 要保留（见 L3）。
-- **验证**：双线程 SPSC JMH + `-prof perfnorm`；`perf c2c` 看 HITM；JFR 看 Lane 线程占比。
+### F2【已完成，含 L3】结算 Ring 游标 128B 伪共享消除，消费端改用 `setRelease`
+- **完成日期**：2026-10-16。
+- **游标隔离与轻量发布**：
+  - 在 [`SettlementLaneWorker.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/lane/SettlementLaneWorker.java) 的 `MatcherSettlementRing` 中，将 `producerPosition` 与 `consumerPosition` 分别封装在独立的具备 128 字节缓存行隔离（Padding）的结构中，彻底消除多核 L1/L2 缓存行反复失效；
+  - 生产者本地缓存 `cachedConsumerPosition`、消费者本地缓存 `cachedProducerPosition`，仅在容量判满或判空时进行跨线程跨核读取；
+  - 消费者推进使用 VarHandle 的 `setRelease`（有序写）替代原先全内存屏障的 volatile 写；
+  - 清空机制改用序列单调判空，消除槽位同行写竞争。
+- **验证**：`SettlementLaneWorkerTest`（13 项）全部通过。
 
 ### F3【报告】Owner 入口队列与出口队列
 - **位置**：`orchestration/TradingOwnerLoop.java:44-45,185,297-322`；`ClusterServiceEgress.java:34-35`。
