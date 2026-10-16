@@ -54,7 +54,7 @@ final class LaneSequenceQueue {
     /** Producer and consumer write different cache lines on the hot SPSC path. */
     private static class PaddedSequenceLhsPadding {
         @SuppressWarnings("unused")
-        private long p00, p01, p02, p03, p04, p05, p06, p07;
+        private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e;
     }
 
     private static class PaddedSequenceValue extends PaddedSequenceLhsPadding {
@@ -63,6 +63,6 @@ final class LaneSequenceQueue {
 
     private static final class PaddedSequence extends PaddedSequenceValue {
         @SuppressWarnings("unused")
-        private long p10, p11, p12, p13, p14, p15, p16, p17;
+        private long p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p1a, p1b, p1c, p1d, p1e;
     }
 }

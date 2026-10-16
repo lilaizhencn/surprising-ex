@@ -73,9 +73,9 @@ public final class OwnerIdleStrategy {
 
     private static final class Wakeup {
         @SuppressWarnings("unused")
-        private long p01, p02, p03, p04, p05, p06, p07;
+        private long p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e, p0f;
         private volatile long requested;
         @SuppressWarnings("unused")
-        private long p11, p12, p13, p14, p15, p16, p17;
+        private long p11, p12, p13, p14, p15, p16, p17, p18, p19, p1a, p1b, p1c, p1d, p1e, p1f;
     }
 }

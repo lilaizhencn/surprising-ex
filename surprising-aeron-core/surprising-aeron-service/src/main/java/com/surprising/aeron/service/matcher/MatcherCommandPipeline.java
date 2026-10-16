@@ -102,7 +102,9 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         }
         startupAction = action;
         accepting = true;
-        worker = Thread.ofPlatform().daemon(true).name("core-matcher-" + workerId).start(this::run);
+        MatcherThread matcherWorker = new MatcherThread(this::run, "core-matcher-" + workerId, workerId);
+        worker = matcherWorker;
+        matcherWorker.start();
         awaitStartup();
     }
 
@@ -528,7 +530,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
 
     private static class PaddedSequenceLhsPadding {
         @SuppressWarnings("unused")
-        private long p00, p01, p02, p03, p04, p05, p06, p07;
+        private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e;
     }
 
     private static class PaddedSequenceValue extends PaddedSequenceLhsPadding {
@@ -537,12 +539,12 @@ public final class MatcherCommandPipeline implements AutoCloseable {
 
     private static final class PaddedSequence extends PaddedSequenceValue {
         @SuppressWarnings("unused")
-        private long p10, p11, p12, p13, p14, p15, p16, p17;
+        private long p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p1a, p1b, p1c, p1d, p1e;
     }
 
     private static class WakeupLhsPadding {
         @SuppressWarnings("unused")
-        private long p00, p01, p02, p03, p04, p05, p06, p07;
+        private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e;
     }
 
     private static class WakeupValue extends WakeupLhsPadding {
@@ -551,6 +553,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
 
     private static final class Wakeup extends WakeupValue {
         @SuppressWarnings("unused")
-        private long p10, p11, p12, p13, p14, p15, p16, p17;
+        private long p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p1a, p1b, p1c, p1d, p1e;
     }
 }

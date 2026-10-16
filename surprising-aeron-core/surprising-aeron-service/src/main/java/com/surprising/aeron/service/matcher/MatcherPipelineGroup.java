@@ -15,16 +15,16 @@ public final class MatcherPipelineGroup implements AutoCloseable {
     private final MatcherCommandPipeline[] shards;
     private final CommandSlotRing contexts;
     /** Matcher workers set one bit on publication; the Owner drains only signalled shards. */
-    private final java.util.concurrent.atomic.AtomicLong completedShardMask =
-            new java.util.concurrent.atomic.AtomicLong();
+    private final com.surprising.aeron.service.state.TradingRuntimeState.PaddedReadyMask completedShardMask =
+            new com.surprising.aeron.service.state.TradingRuntimeState.PaddedReadyMask();
     private volatile boolean completionSignalConfigured;
 
     public void completionSignal(Runnable signal) {
         completionSignalConfigured = true;
         for (int shardId = 0; shardId < shards.length; shardId++) {
-            final long bit = 1L << shardId;
+            final int currentShardId = shardId;
             shards[shardId].completionSignal(() -> {
-                completedShardMask.getAndAccumulate(bit, (left, right) -> left | right);
+                completedShardMask.setBit(currentShardId);
                 if (signal != null) signal.run();
             });
         }
@@ -91,7 +91,7 @@ public final class MatcherPipelineGroup implements AutoCloseable {
 
     /** Retire transport cells only. Matcher has already published each command's result. */
     public void drainMatchingCompletions() {
-        long readyMask = completedShardMask.getAndSet(0L);
+        long readyMask = completedShardMask.getAndClear();
         if (!completionSignalConfigured) {
             for (int shardId = 0; shardId < shards.length; shardId++) {
                 if (shards[shardId].completedMatchingSequence() != 0) readyMask |= 1L << shardId;

@@ -33,8 +33,30 @@ public final class ClusterServiceEgress {
     private final EgressFactory egressFactory;
     private Cluster cluster;
     private boolean closeRequests;
-    private long outputProduced;
-    private volatile long outputConsumed;
+    private static class PaddedOutputProducedPadding {
+        @SuppressWarnings("unused")
+        private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e;
+    }
+
+    private static class PaddedOutputProducedValue extends PaddedOutputProducedPadding {
+        protected long outputProduced;
+    }
+
+    private static class PaddedOutputConsumedPadding extends PaddedOutputProducedValue {
+        @SuppressWarnings("unused")
+        private long p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p1a, p1b, p1c, p1d, p1e;
+    }
+
+    private static class PaddedOutputConsumedValue extends PaddedOutputConsumedPadding {
+        protected volatile long outputConsumed;
+    }
+
+    private static final class PaddedEgressOffsets extends PaddedOutputConsumedValue {
+        @SuppressWarnings("unused")
+        private long p20, p21, p22, p23, p24, p25, p26, p27, p28, p29, p2a, p2b, p2c, p2d, p2e;
+    }
+
+    private final PaddedEgressOffsets egressOffsets = new PaddedEgressOffsets();
     private long epoch;
     private long leadershipTermId;
 
@@ -115,7 +137,7 @@ public final class ClusterServiceEgress {
     void publishResponse(TradingCoreOwner processor, long sessionId, CoreMessageHeader header, CoreResponse response,
                          long committedSequence, long ownerEpoch) {
         int length = CoreMessageCodec.encodedResponseLength(header, response);
-        if (length > OUTPUT_BYTES - (outputProduced - outputConsumed) || output.remainingCapacity() == 0) {
+        if (length > OUTPUT_BYTES - (egressOffsets.outputProduced - egressOffsets.outputConsumed) || output.remainingCapacity() == 0) {
             handleSessionOverflow(sessionId);
             processor.releaseResponse(response);
             return;
@@ -138,10 +160,13 @@ public final class ClusterServiceEgress {
             unpublishedOutput = slot;
             return;
         }
-        outputProduced += length;
+        egressOffsets.outputProduced += length;
     }
 
     int drainResponses(TradingCoreOwner processor) {
+        if (output.peek() == null && deferred.size() == 0 && overflowSessions.isEmpty()) {
+            return 0;
+        }
         int work = 0;
         if (!overflowSessions.isEmpty()) {
             var iterator = overflowSessions.iterator();
@@ -155,10 +180,11 @@ public final class ClusterServiceEgress {
             }
             overflowSessions.clear();
         }
+        long consumedBytes = 0;
         for (; work < 256; work++) {
             Output next = output.poll();
             if (next == null) break;
-            outputConsumed += next.length;
+            consumedBytes += next.length;
             try {
                 if (next.epoch != epoch || cluster.role() != Cluster.Role.LEADER) continue;
                 TransportSession session = sessions.get(next.sessionId);
@@ -176,6 +202,9 @@ public final class ClusterServiceEgress {
                     returnOutput(next);
                 }
             }
+        }
+        if (consumedBytes > 0) {
+            egressOffsets.outputConsumed += consumedBytes;
         }
         return work + deferred.poll(System.nanoTime(), 256);
     }

@@ -47,7 +47,9 @@ final class CoreDirectCommandFlow {
             status = ResponseStatus.REJECTED;
             resultCode = CoreResultCode.INVALID_COMMAND;
         }
-        if (!runtime.directCommand.hasControlWork() && runtime.runtimeState.asynchronousCommands()
+        boolean isProbe = message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.PROBE_INCREMENT
+                || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.VERIFY_STATE_HASH;
+        if (!isProbe && !runtime.directCommand.hasControlWork() && runtime.runtimeState.asynchronousCommands()
                 && !runtime.commandIngress.clusterPipelineAdmission()) {
             runtime.directCommand.result(status, resultCode);
         }

@@ -130,8 +130,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 永久运行的各账户 Lane 工作线程；承担所有多核真并发结算。 */
     public final SettlementLaneWorker[] laneWorkers;
     /** 批量准入完成的 shard 唤醒位；批上下文本身保存唯一完成事实。 */
-    private final java.util.concurrent.atomic.AtomicLong accountAdmissionReadyShards =
-            new java.util.concurrent.atomic.AtomicLong();
+    private final PaddedReadyMask accountAdmissionReadyShards =
+            new PaddedReadyMask();
     /** Admission payload stays in its command event; this queue only wakes the exact Owner slot. */
     final LaneSequenceQueue[] placeAdmissionReadyQueues;
     /** 各 Lane 到 owner 的结算完成通知队列。 */
@@ -145,8 +145,6 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** 各 Lane 派发队列长度峰值，仅用于运行观测。 */
     final int[] accountLaneQueueHighWaterMarks;
-    /** owner 可见的各 Lane 已提交序号。 */
-    final long[] publishedLaneCommittedSequences;
     /** 缓存行隔离的已提交序号槽位，防止多 Lane worker 并发写触发 CPU 伪共享。 */
     final PaddedCommittedSequenceSlot[] publishedLaneCommittedSlots;
     /** Owner-only committed metadata, updated from existing Lane receipts; no position copies. */
@@ -157,9 +155,63 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 可复用的 laneCommitEvent 对象池；仅在消费者完成后回收。 */
     final java.util.ArrayDeque<LaneCommitEvent> laneCommitEventPool = new java.util.ArrayDeque<>();
 
+    public static final class PaddedReadyMask {
+        @SuppressWarnings("unused")
+        private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p10, p11, p12, p13, p14;
+        private final java.util.concurrent.atomic.AtomicLong mask = new java.util.concurrent.atomic.AtomicLong();
+        @SuppressWarnings("unused")
+        private long p20, p21, p22, p23, p24, p25, p26, p27, p28, p29, p30, p31, p32, p33, p34;
+
+        public boolean setBit(int bitIndex) {
+            long bit = 1L << bitIndex;
+            while (true) {
+                long current = mask.get();
+                if ((current & bit) != 0) {
+                    return false;
+                }
+                if (mask.compareAndSet(current, current | bit)) {
+                    return true;
+                }
+            }
+        }
+
+        public void clearBit(int bitIndex) {
+            long bit = 1L << bitIndex;
+            while (true) {
+                long current = mask.get();
+                if ((current & bit) == 0) {
+                    return;
+                }
+                if (mask.compareAndSet(current, current & ~bit)) {
+                    return;
+                }
+            }
+        }
+
+        public void clearBits(long bitsToClear) {
+            while (true) {
+                long current = mask.get();
+                if ((current & bitsToClear) == 0) {
+                    return;
+                }
+                if (mask.compareAndSet(current, current & ~bitsToClear)) {
+                    return;
+                }
+            }
+        }
+
+        public long get() {
+            return mask.get();
+        }
+
+        public long getAndClear() {
+            return mask.getAndSet(0L);
+        }
+    }
+
     private static class PaddedCommittedSequenceLhsPadding {
         @SuppressWarnings("unused")
-        private long p00, p01, p02, p03, p04, p05, p06, p07;
+        private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p10, p11, p12, p13, p14;
     }
 
     private static class PaddedCommittedSequenceValue extends PaddedCommittedSequenceLhsPadding {
@@ -168,7 +220,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     private static final class PaddedCommittedSequenceSlot extends PaddedCommittedSequenceValue {
         @SuppressWarnings("unused")
-        private long p10, p11, p12, p13, p14, p15, p16, p17;
+        private long p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p20, p21, p22, p23, p24;
     }
 
     /** 可复用的 placeAdmissionEvent 对象池；仅在消费者完成后回收。 */
@@ -315,7 +367,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.laneMutationStartedNanosScratch = new long[topology.accountLaneCount()];
         this.laneMutationResultsScratch = new Object[topology.accountLaneCount()];
         this.accountLaneQueueHighWaterMarks = new int[topology.accountLaneCount()];
-        this.publishedLaneCommittedSequences = new long[topology.accountLaneCount()];
         this.publishedLaneCommittedSlots = new PaddedCommittedSequenceSlot[topology.accountLaneCount()];
         for (int i = 0; i < topology.accountLaneCount(); i++) {
             this.publishedLaneCommittedSlots[i] = new PaddedCommittedSequenceSlot();
@@ -977,7 +1028,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         int laneId = lane.laneId();
         long committed = lane.committedSequence();
         publishedLaneCommittedSlots[laneId].sequence = committed;
-        publishedLaneCommittedSequences[laneId] = committed;
     }
 
     static BalanceRuntime copyBalance(IntObjectHashMap<BalanceRuntime> balances, int assetId) {
@@ -1575,17 +1625,15 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** Owner 登记的 matcher 结算通知范围；其序号仍由各 Lane 的 SPSC 队列承载。 */
     private long expectedSettlementLanes;
-    private final java.util.concurrent.atomic.AtomicLong settlementReadyLanes = new java.util.concurrent.atomic.AtomicLong();
+    private final PaddedReadyMask settlementReadyLanes = new PaddedReadyMask();
     /**
      * Direct Matcher->Lane settlements do not need an Owner-consumed sequence queue.  The
      * settlement event already owns the per-Lane completion bits; this mask is only a wake-up
      * hint so the Owner retries its ordered head.  Keeping it separate avoids allocating and
      * draining one notification record for every Lane touched by every matching result.
      */
-    private final java.util.concurrent.atomic.AtomicLong directSettlementReadyLanes =
-            new java.util.concurrent.atomic.AtomicLong();
-    private final java.util.concurrent.atomic.AtomicLong placeAdmissionReadyLanes =
-            new java.util.concurrent.atomic.AtomicLong();
+    private final PaddedReadyMask directSettlementReadyLanes = new PaddedReadyMask();
+    private final PaddedReadyMask placeAdmissionReadyLanes = new PaddedReadyMask();
     private final int[] expectedSettlements = new int[64];
     void releaseSettlementExpectation(int laneId) {
         assertOwner();
@@ -1593,7 +1641,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (--expectedSettlements[laneId] == 0) {
             long bit = 1L << laneId;
             expectedSettlementLanes &= ~bit;
-            if ((settlementReadyLanes.get() & bit) != 0) settlementReadyLanes.getAndAccumulate(~bit, CLEAR_READY_BITS);
+            settlementReadyLanes.clearBit(laneId);
         }
     }
     void expectMatcherSettlement(long lanes) {
@@ -1607,13 +1655,13 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void publishPlaceAdmissionReady(int laneId, long coreSequence) {
         placeAdmissionReadyQueues[laneId].publish(coreSequence);
-        placeAdmissionReadyLanes.getAndAccumulate(1L << laneId, SET_READY_BITS);
+        placeAdmissionReadyLanes.setBit(laneId);
         signalOwnerCompletion();
     }
 
     public long takePlaceAdmissionReadyLaneMask() {
         assertOwner();
-        return placeAdmissionReadyLanes.getAndSet(0L);
+        return placeAdmissionReadyLanes.getAndClear();
     }
 
     public long pollPlaceAdmissionReady(int laneId) {
@@ -1626,13 +1674,13 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (matcherShard < 0 || matcherShard >= topology.matchingEngineCount()) {
             throw new IllegalArgumentException("invalid matcher shard");
         }
-        accountAdmissionReadyShards.getAndAccumulate(1L << matcherShard, SET_READY_BITS);
+        accountAdmissionReadyShards.setBit(matcherShard);
         signalOwnerCompletion();
     }
 
     public long takeAccountAdmissionReadyShardMask() {
         assertOwner();
-        return accountAdmissionReadyShards.getAndSet(0L);
+        return accountAdmissionReadyShards.getAndClear();
     }
 
     /** 仅读两个就绪字，不消费序号；滞后的置位最多造成一次无效收集，不会丢通知。 */
@@ -1663,7 +1711,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void publishMatcherSettlementReady(int laneId, long coreSequence) {
         matcherSettlementReadyQueues[laneId].publish(coreSequence);
-        settlementReadyLanes.getAndAccumulate(1L << laneId, SET_READY_BITS);
+        settlementReadyLanes.setBit(laneId);
         signalOwnerCompletion();
     }
 
@@ -1672,12 +1720,12 @@ public final class TradingRuntimeState implements AutoCloseable {
      * is the authoritative source, so no Owner-side queue node or expectation counter is needed.
      */
     void publishDirectMatcherSettlementReady(int laneId) {
-        directSettlementReadyLanes.getAndAccumulate(1L << laneId, SET_READY_BITS);
+        directSettlementReadyLanes.setBit(laneId);
         signalOwnerCompletion();
     }
 
     public long takeDirectMatcherSettlementReadyLaneMask() {
-        return directSettlementReadyLanes.getAndSet(0L);
+        return directSettlementReadyLanes.getAndClear();
     }
 
     public long takeMatcherSettlementReadyLaneMask() {
@@ -1695,16 +1743,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         return sequence;
     }
 
-    /** 无捕获的共享运算器，通知发布不创建 lambda/消息对象。 */
-    private static final java.util.function.LongBinaryOperator SET_READY_BITS = (left, right) -> left | right;
-    private static final java.util.function.LongBinaryOperator CLEAR_READY_BITS = (left, right) -> left & right;
-
-    private static long takeReadyLaneMask(java.util.concurrent.atomic.AtomicLong ready,
+    private static long takeReadyLaneMask(PaddedReadyMask ready,
                                          LaneSequenceQueue[] queues, long expected) {
         long signalled = ready.get() & expected;
         if (signalled == 0) return 0;
         // 先清位再消费。清位之后的发布留下新位；之前的发布已经可从队列读取。
-        ready.getAndAccumulate(~signalled, CLEAR_READY_BITS);
+        ready.clearBits(signalled);
         return readyLaneMask(queues, signalled);
     }
 

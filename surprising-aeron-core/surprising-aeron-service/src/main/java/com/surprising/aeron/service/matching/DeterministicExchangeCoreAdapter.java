@@ -92,10 +92,19 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private MatcherCommandScope currentCommandScope() {
         Thread current = Thread.currentThread();
-        for (int i = 0; i < shardThreads.length; i++) {
-            if (shardThreads[i] == current) return shardCommandScopes[i];
+        if (current instanceof com.surprising.aeron.service.matcher.MatcherThread mt) {
+            int shardId = mt.shardId();
+            if (shardId >= 0 && shardId < shardCommandScopes.length) {
+                return shardCommandScopes[shardId];
+            }
         }
         if (current == standaloneThread) return standaloneCommandScope;
+        Thread[] threads = shardThreads;
+        if (threads != null) {
+            for (int i = 0; i < threads.length; i++) {
+                if (threads[i] == current) return shardCommandScopes[i];
+            }
+        }
         throw new IllegalStateException("matcher command must run on its owning shard thread");
     }
 
@@ -621,14 +630,69 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         matcherFailure.compareAndSet(null, new IllegalStateException(detail));
     }
 
+    private static final class DirectTopPriceReader {
+        private static final java.lang.reflect.Field ROUTER_FIELD;
+        private static final java.lang.reflect.Field BEST_ASK_FIELD;
+        private static final java.lang.reflect.Field BEST_BID_FIELD;
+        private static final boolean AVAILABLE;
+
+        static {
+            boolean available = false;
+            java.lang.reflect.Field routerField = null;
+            java.lang.reflect.Field bestAskField = null;
+            java.lang.reflect.Field bestBidField = null;
+            try {
+                routerField = exchange.core2.core.SynchronousMatchingEngine.class.getDeclaredField("router");
+                routerField.setAccessible(true);
+                Class<?> directBookClass = Class.forName("exchange.core2.core.orderbook.OrderBookDirectImpl");
+                bestAskField = directBookClass.getDeclaredField("bestAskOrder");
+                bestAskField.setAccessible(true);
+                bestBidField = directBookClass.getDeclaredField("bestBidOrder");
+                bestBidField.setAccessible(true);
+                available = true;
+            } catch (Throwable ignored) {
+            }
+            ROUTER_FIELD = routerField;
+            BEST_ASK_FIELD = bestAskField;
+            BEST_BID_FIELD = bestBidField;
+            AVAILABLE = available;
+        }
+
+        static long readBestPrice(exchange.core2.core.SynchronousMatchingEngine engine, int symbolId, boolean isBuy) {
+            if (!AVAILABLE || engine == null) return -1L;
+            try {
+                exchange.core2.core.processors.MatchingEngineRouter router =
+                        (exchange.core2.core.processors.MatchingEngineRouter) ROUTER_FIELD.get(engine);
+                if (router == null) return -1L;
+                exchange.core2.core.orderbook.IOrderBook book = router.getOrderBooks().get(symbolId);
+                if (book == null) return -1L;
+                Object directOrder = isBuy ? BEST_ASK_FIELD.get(book) : BEST_BID_FIELD.get(book);
+                if (directOrder == null) return -1L;
+                if (directOrder instanceof exchange.core2.core.common.IOrder order) {
+                    return order.getPrice();
+                }
+                return -1L;
+            } catch (Throwable e) {
+                return -1L;
+            }
+        }
+    }
+
     /** Read and place on the same matcher thread: no other order can consume the quoted top between them. */
     private long protectedMarketPrice(int symbolId, CoreOrderSide side,
             com.surprising.aeron.protocol.CoreOrderType type, long originalBound, long slippagePpm) {
         if (type != com.surprising.aeron.protocol.CoreOrderType.MARKET || slippagePpm == 0) return originalBound;
-        L2MarketData top = engine(symbolId).orderBook(symbolId, 1);
         boolean buy = side == CoreOrderSide.BUY;
-        if (buy ? top.askSize == 0 : top.bidSize == 0) return originalBound;
-        long best = buy ? top.askPrices[0] : top.bidPrices[0];
+        long best = DirectTopPriceReader.readBestPrice(engine(symbolId), symbolId, buy);
+        if (best <= 0) {
+            if (!DirectTopPriceReader.AVAILABLE) {
+                L2MarketData top = engine(symbolId).orderBook(symbolId, 1);
+                if (buy ? top.askSize == 0 : top.bidSize == 0) return originalBound;
+                best = buy ? top.askPrices[0] : top.bidPrices[0];
+            } else {
+                return originalBound;
+            }
+        }
         // Round toward the best price; outward rounding can exceed 1bp by a whole tick.
         long distance = Math.addExact(Math.multiplyExact(best / 1_000_000L, slippagePpm),
                 (best % 1_000_000L) * slippagePpm / 1_000_000L);

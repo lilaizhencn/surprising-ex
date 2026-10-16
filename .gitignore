@@ -14,3 +14,4 @@ data/
 .codegraph/
 reports/capacity/**/resources.tsv
 reports/capacity/**/resource-monitor.stop
+performance-artifacts/

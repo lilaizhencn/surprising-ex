@@ -885,8 +885,8 @@ class TradingCoreOwnerTest {
         var outbox = new com.surprising.aeron.client.RealtimeOutbox(1024, 1_048_576);
         CoreFaults.attachRealtime(service, outbox);
         try {
-            service.state().apply(timerInstrument());
-            service.state().apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+            CoreTestCompletion.applyAsynchronously(service.state(), timerInstrument());
+            CoreTestCompletion.applyAsynchronously(service.state(), command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));
             var field = TradingCoreRuntime.class.getDeclaredField("matcherPipeline");
             field.setAccessible(true);

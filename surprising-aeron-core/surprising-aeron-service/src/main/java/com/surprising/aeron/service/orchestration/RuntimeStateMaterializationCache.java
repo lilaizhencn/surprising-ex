@@ -18,18 +18,24 @@ final class RuntimeStateMaterializationCache {
     /** Full state exists only at an explicit cold read fence, outside the trading mutation path. */
     TradingCoreState current() {
         owner.runtimeState.requireSnapshotFenceReady();
-        if (owner.runtimeState.systemLedgerStarted()) {
-            state = null;
-            return RuntimeStateMaterializer.materialize(owner.runtimeState, owner.identities);
+        boolean acquired = owner.runtimeState.accountLanesStarted() && !owner.runtimeState.ownerLaneAccess;
+        try {
+            if (acquired) while (!owner.runtimeState.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
+            if (owner.runtimeState.systemLedgerStarted()) {
+                state = null;
+                return RuntimeStateMaterializer.materialize(owner.runtimeState, owner.identities);
+            }
+            long currentRevision = owner.runtimeState.revision();
+            long currentMarketRevision = owner.runtimeState.marketRevision();
+            long currentSequence = owner.commits.publication.publishedSequence();
+            if (state == null || revision != currentRevision || marketRevision != currentMarketRevision || sequence != currentSequence) {
+                state = RuntimeStateMaterializer.materialize(owner.runtimeState, owner.identities);
+                revision = currentRevision; marketRevision = currentMarketRevision; sequence = currentSequence;
+            }
+            return state;
+        } finally {
+            if (acquired) owner.runtimeState.releaseOwnerLaneAccess();
         }
-        long currentRevision = owner.runtimeState.revision();
-        long currentMarketRevision = owner.runtimeState.marketRevision();
-        long currentSequence = owner.commits.publication.publishedSequence();
-        if (state == null || revision != currentRevision || marketRevision != currentMarketRevision || sequence != currentSequence) {
-            state = RuntimeStateMaterializer.materialize(owner.runtimeState, owner.identities);
-            revision = currentRevision; marketRevision = currentMarketRevision; sequence = currentSequence;
-        }
-        return state;
     }
 
     TradingCoreState snapshot() {

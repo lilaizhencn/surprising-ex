@@ -232,7 +232,8 @@ final class CoreCommandIngress {
         if (sourceKey == null) {
             sourceKey = new TradingCoreRuntime.SourceKey(message.header().source(), message.header().sourceId());
         }
-        if (TradingCoreRuntime.isFundsIdempotencyCommand(message.header().messageType())) {
+        if (TradingCoreRuntime.isFundsIdempotencyCommand(message.header().messageType())
+                && runtime.runtimeState.systemLedgerStarted()) {
             runtime.directCommand.beginFundsCheck(message, fingerprint, sourceKey, clusterTimestamp,
                     clusterPosition, lastSourceSequence, runtime.terminalRetention);
             return null;
