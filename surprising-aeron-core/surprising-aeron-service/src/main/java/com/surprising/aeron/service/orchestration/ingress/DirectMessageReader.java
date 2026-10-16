@@ -33,8 +33,6 @@ public final class DirectMessageReader {
     private long userId;
     private long submittedAtEpochMillis;
     private long correlationId;
-    private int traceOffset;
-    private int traceLength;
 
     public DirectMessageReader() {
     }
@@ -45,7 +43,6 @@ public final class DirectMessageReader {
             throw new ProtocolException("message shorter than fixed header");
         }
         int cursor = offset;
-        int end = offset + length;
         if (buffer.getInt(cursor, ByteOrder.LITTLE_ENDIAN) != CoreProtocol.MAGIC) {
             throw new ProtocolException("invalid protocol magic");
         }
@@ -71,8 +68,7 @@ public final class DirectMessageReader {
         this.routeVersion = Short.toUnsignedInt(buffer.getShort(cursor, ByteOrder.LITTLE_ENDIAN));
         cursor += Short.BYTES;
 
-        if (headerLength != CoreProtocol.HEADER_LENGTH && (headerLength < CoreProtocol.HEADER_LENGTH + 3
-                || headerLength > CoreProtocol.HEADER_LENGTH + Short.BYTES + TraceIds.MAX_LENGTH)) {
+        if (headerLength != CoreProtocol.HEADER_LENGTH) {
             throw new ProtocolException("invalid header length: " + headerLength);
         }
 
@@ -91,7 +87,6 @@ public final class DirectMessageReader {
         this.correlationId = buffer.getLong(cursor, ByteOrder.LITTLE_ENDIAN);
         cursor += Long.BYTES;
         this.payloadLength = buffer.getInt(cursor, ByteOrder.LITTLE_ENDIAN);
-        cursor += Integer.BYTES;
 
         if (payloadLength < 0 || payloadLength > CoreMessageCodec.MAX_PAYLOAD_LENGTH
                 || headerLength + payloadLength != length) {
@@ -102,27 +97,6 @@ public final class DirectMessageReader {
         this.offset = offset;
         this.length = length;
         this.payloadOffset = offset + headerLength;
-
-        if (headerLength > CoreProtocol.HEADER_LENGTH) {
-            int traceLen = Short.toUnsignedInt(buffer.getShort(cursor, ByteOrder.LITTLE_ENDIAN));
-            cursor += Short.BYTES;
-            if (traceLen < 1 || traceLen > TraceIds.MAX_LENGTH
-                    || CoreProtocol.HEADER_LENGTH + Short.BYTES + traceLen != headerLength) {
-                throw new ProtocolException("invalid trace id header length");
-            }
-            for (int i = 0; i < traceLen; i++) {
-                byte b = buffer.getByte(cursor + i);
-                if (!(b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9'
-                        || b == '.' || b == '_' || b == ':' || b == '-')) {
-                    throw new ProtocolException("invalid trace id");
-                }
-            }
-            this.traceOffset = cursor;
-            this.traceLength = traceLen;
-        } else {
-            this.traceOffset = 0;
-            this.traceLength = 0;
-        }
         return this;
     }
 
@@ -146,14 +120,4 @@ public final class DirectMessageReader {
     public long userId() { return userId; }
     public long submittedAtEpochMillis() { return submittedAtEpochMillis; }
     public long correlationId() { return correlationId; }
-    public int traceLength() { return traceLength; }
-
-    public String traceId() {
-        if (traceLength == 0) return "";
-        char[] chars = new char[traceLength];
-        for (int i = 0; i < traceLength; i++) {
-            chars[i] = (char) buffer.getByte(traceOffset + i);
-        }
-        return new String(chars);
-    }
 }

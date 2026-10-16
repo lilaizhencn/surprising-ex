@@ -21,7 +21,7 @@ public record CoreTriggerOrderState(
         long lowestPriceTicks, long activatedAtEpochMillis, CoreOrderType orderType, CoreTimeInForce timeInForce,
         long priceTicks, long quantitySteps, CoreMarginMode marginMode, CorePositionSide positionSide,
         CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence, long triggeredPriceTicks,
-        String rejectReason, String traceId, long expiresAtEpochMillis, long triggeredAtEpochMillis,
+        String rejectReason, long expiresAtEpochMillis, long triggeredAtEpochMillis,
         long createdAtEpochMillis, long updatedAtEpochMillis, long revision,
         long makerFeeRatePpm, long takerFeeRatePpm, CoreTriggerPriceSource priceSource) {
 
@@ -34,7 +34,7 @@ public record CoreTriggerOrderState(
                                  CoreTimeInForce timeInForce, long priceTicks, long quantitySteps,
                                  CoreMarginMode marginMode, CorePositionSide positionSide,
                                  CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence,
-                                 long triggeredPriceTicks, String rejectReason, String traceId,
+                                 long triggeredPriceTicks, String rejectReason,
                                  long expiresAtEpochMillis, long triggeredAtEpochMillis,
                                  long createdAtEpochMillis, long updatedAtEpochMillis, long revision,
                                  long makerFeeRatePpm, long takerFeeRatePpm) {
@@ -42,7 +42,7 @@ public record CoreTriggerOrderState(
                 instrument, side, triggerType, triggerCondition, triggerPriceTicks, activationPriceTicks,
                 callbackRatePpm, highestPriceTicks, lowestPriceTicks, activatedAtEpochMillis, orderType,
                 timeInForce, priceTicks, quantitySteps, marginMode, positionSide, status, placedOrderId,
-                triggerSequence, triggeredPriceTicks, rejectReason, traceId, expiresAtEpochMillis,
+                triggerSequence, triggeredPriceTicks, rejectReason, expiresAtEpochMillis,
                 triggeredAtEpochMillis, createdAtEpochMillis, updatedAtEpochMillis, revision,
                 makerFeeRatePpm, takerFeeRatePpm, CoreTriggerPriceSource.MARK);
     }
@@ -56,14 +56,14 @@ public record CoreTriggerOrderState(
                                  CoreOrderType orderType, CoreTimeInForce timeInForce, long priceTicks,
                                  long quantitySteps, CoreMarginMode marginMode, CorePositionSide positionSide,
                                  CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence,
-                                 long triggeredPriceTicks, String rejectReason, String traceId,
+                                 long triggeredPriceTicks, String rejectReason,
                                  long expiresAtEpochMillis, long triggeredAtEpochMillis, long createdAtEpochMillis,
                                  long updatedAtEpochMillis, long revision) {
         this(triggerOrderId, productLine, userId, clientTriggerOrderId, ocoGroupId, instrumentId, instrument, side, triggerType,
                 triggerCondition, triggerPriceTicks, activationPriceTicks, callbackRatePpm, highestPriceTicks,
                 lowestPriceTicks, activatedAtEpochMillis, orderType, timeInForce, priceTicks, quantitySteps,
                 marginMode, positionSide, status, placedOrderId, triggerSequence, triggeredPriceTicks,
-                rejectReason, traceId, expiresAtEpochMillis, triggeredAtEpochMillis, createdAtEpochMillis,
+                rejectReason, expiresAtEpochMillis, triggeredAtEpochMillis, createdAtEpochMillis,
                 updatedAtEpochMillis, revision, 0, 0);
     }
 
@@ -71,7 +71,6 @@ public record CoreTriggerOrderState(
         clientTriggerOrderId = clientTriggerOrderId == null ? "" : clientTriggerOrderId;
         ocoGroupId = ocoGroupId == null ? "" : ocoGroupId;
         rejectReason = rejectReason == null ? "" : rejectReason;
-        traceId = traceId == null ? "" : traceId;
         if (triggerOrderId <= 0 || productLine == null || userId <= 0 || instrumentId == null || instrumentId.isBlank()
                 || instrument == null || !instrument.instrumentId().equals(instrumentId)
                 || side == null || triggerType == null || triggerCondition == null || triggerPriceTicks < 0
@@ -87,7 +86,7 @@ public record CoreTriggerOrderState(
                 instrumentId, side, triggerType, triggerCondition, triggerPriceTicks, activationPriceTicks, callbackRatePpm,
                 highestPriceTicks, lowestPriceTicks, activatedAtEpochMillis, orderType, timeInForce, priceTicks,
                 quantitySteps, marginMode, positionSide, status, placedOrderId, triggerSequence, triggeredPriceTicks,
-                rejectReason, traceId, expiresAtEpochMillis, triggeredAtEpochMillis, createdAtEpochMillis,
+                rejectReason, expiresAtEpochMillis, triggeredAtEpochMillis, createdAtEpochMillis,
                 updatedAtEpochMillis, revision, makerFeeRatePpm, takerFeeRatePpm, priceSource);
     }
 
@@ -98,7 +97,7 @@ public record CoreTriggerOrderState(
                 view.highestPriceTicks(), view.lowestPriceTicks(), view.activatedAtEpochMillis(), view.orderType(),
                 view.timeInForce(), view.priceTicks(), view.quantitySteps(), view.marginMode(), view.positionSide(),
                 view.status(), view.placedOrderId(), view.triggerSequence(), view.triggeredPriceTicks(),
-                view.rejectReason(), view.traceId(), view.expiresAtEpochMillis(), view.triggeredAtEpochMillis(),
+                view.rejectReason(), view.expiresAtEpochMillis(), view.triggeredAtEpochMillis(),
                 view.createdAtEpochMillis(), view.updatedAtEpochMillis(), view.revision(),
                 view.makerFeeRatePpm(), view.takerFeeRatePpm(), view.priceSource());
     }
@@ -109,7 +108,7 @@ public record CoreTriggerOrderState(
                 instrumentId, instrument, side, triggerType, triggerCondition, triggerPriceTicks, activationPriceTicks,
                 callbackRatePpm, highestPriceTicks, lowestPriceTicks, activatedAtEpochMillis, orderType,
                 timeInForce, priceTicks, quantitySteps, marginMode, positionSide, status, placedOrderId,
-                triggerSequence, triggeredPriceTicks, rejectReason, traceId, expiresAtEpochMillis,
+                triggerSequence, triggeredPriceTicks, rejectReason, expiresAtEpochMillis,
                 triggeredAtEpochMillis, createdAtEpochMillis, updatedAtEpochMillis, revision,
                 makerFeeRatePpm, takerFeeRatePpm, priceSource);
     }

@@ -393,7 +393,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
                 CoreOrderSide.SELL,loss?CoreTriggerOrderType.STOP_LOSS:CoreTriggerOrderType.TAKE_PROFIT,
                 loss?CoreTriggerCondition.LESS_OR_EQUAL:CoreTriggerCondition.GREATER_OR_EQUAL,mark[i],
                 0,0,0,0,0,CoreOrderType.LIMIT,CoreTimeInForce.IOC,110,1,CoreMarginMode.CROSS,CorePositionSide.NET,
-                CoreTriggerOrderStatus.PENDING,0,0,0,"","mixed-trace-"+id,0,0,0,0,1,0,0);
+                CoreTriggerOrderStatus.PENDING,0,0,0,"",0,0,0,0,1,0,0);
         send(CoreMessageType.PLACE_TRIGGER_ORDER,taker(i),CoreTriggerOrderCodec.encodeState(trigger),1,null);
         send(CoreMessageType.EXECUTE_TRIGGER_ORDER,0,CoreTriggerOrderCodec.encodeExecute(id,markSequence[i],mark[i],System.currentTimeMillis()),1,null);
         triggerExecutions++;

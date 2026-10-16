@@ -93,7 +93,7 @@ class ClusterCommandPipelineTest {
                     CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                     100, 0, 0, 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 4,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                    0, 0, 0, "", "test", 0, 0, 0, 0, 1, 0, 0);
+                    0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
             live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
             live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 100,
@@ -178,7 +178,7 @@ class ClusterCommandPipelineTest {
                 ? CoreTriggerCondition.GREATER_OR_EQUAL : CoreTriggerCondition.LESS_OR_EQUAL,
                 threshold, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100, 1,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                0, 0, 0, "", "test", 0, 0, 0, 0, 1, 0, 0);
+                0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
     }
 
     @ParameterizedTest
@@ -945,13 +945,13 @@ class ClusterCommandPipelineTest {
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, fill ? 100 : 110, Math.max(1, matchedQuantity),
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 0, 0);
+                        0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
                 var sibling = new CoreTriggerOrderStateView(9002, product, user, "trigger-9002", "oco-9001", "1",
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         200, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 200, 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 0, 0);
+                        0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(sibling)));
                 live.responses.clear();
                 var handoff = com.surprising.aeron.service.state.TradingRuntimeState.class.getDeclaredField("laneHandoffEpoch");
@@ -1013,13 +1013,13 @@ class ClusterCommandPipelineTest {
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTX, fill ? 100 : 110, Math.max(1, matchedQuantity),
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 0, 0);
+                        0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
                 var sibling = new CoreTriggerOrderStateView(9002, product, user, "trigger-9002", "oco-9001", "1",
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         200, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 200, 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 0, 0);
+                        0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(sibling)));
                 live.responses.clear();
                 var handoff = com.surprising.aeron.service.state.TradingRuntimeState.class.getDeclaredField("laneHandoffEpoch");
@@ -1074,7 +1074,7 @@ class ClusterCommandPipelineTest {
                         100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100,
                         overflow && id == 9101 ? Long.MAX_VALUE : 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 0, 0);
+                        0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             }
@@ -2134,7 +2134,7 @@ class ClusterCommandPipelineTest {
                         0, trailing ? 100_000 : 0, trailing ? 120 : 0, 0, 0,
                         CoreOrderType.LIMIT, CoreTimeInForce.IOC, 110, 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", "scan", expired ? TIME + 500 : 0, 0, 0, 0, 1, 0, 0);
+                        0, 0, 0, "", expired ? TIME + 500 : 0, 0, 0, 0, 1, 0, 0);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             }
@@ -2224,7 +2224,7 @@ class ClusterCommandPipelineTest {
                         CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         110, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC,
                         110, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
-                        CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "source", 0, 0, 0, 0,
+                        CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 0, 0,
                         1, 0, 0, sources[i]);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user,
                         CoreTriggerOrderCodec.encodeState(trigger)));

@@ -71,7 +71,6 @@ public final class CoreAlgoOrderCodec {
         length = Math.addExact(length, textLength(value.clientAlgoOrderId()));
         length = Math.addExact(length, textLength(value.instrumentId()));
         length = Math.addExact(length, textLength(value.rejectReason()));
-        length = Math.addExact(length, textLength(value.traceId()));
         return Math.addExact(length, Math.multiplyExact(value.childOrderIds().size(), Long.BYTES));
     }
 
@@ -94,7 +93,6 @@ public final class CoreAlgoOrderCodec {
                 .putInt(value.timeInForce().wireCode())
                 .putInt(value.statusCode()).putLong(value.currentOrderId());
         CoreStateQueryCodec.putText(buffer, value.rejectReason(), true, MAX_TEXT_BYTES);
-        CoreStateQueryCodec.putText(buffer, value.traceId(), true, MAX_TEXT_BYTES);
         buffer.putLong(value.startAtEpochMillis()).putLong(value.nextSliceAtEpochMillis())
                 .putLong(value.completedAtEpochMillis()).putLong(value.createdAtEpochMillis())
                 .putLong(value.updatedAtEpochMillis()).putLong(value.revision())
@@ -114,13 +112,13 @@ public final class CoreAlgoOrderCodec {
         CoreMarginMode margin = CoreMarginMode.fromWireCode(reader.intValue());
         CorePositionSide position = CorePositionSide.fromWireCode(reader.intValue());
         boolean reduce = reader.bool(), post = reader.bool(); CoreTimeInForce tif = CoreTimeInForce.fromWireCode(reader.intValue());
-        int status = reader.intValue(); long current = reader.longValue(); String reason = reader.text(), trace = reader.text();
+        int status = reader.intValue(); long current = reader.longValue(); String reason = reader.text();
         long start = reader.longValue(), next = reader.longValue(), completed = reader.longValue();
         long created = reader.longValue(), updated = reader.longValue(), revision = reader.longValue();
         int childCount = reader.count(); List<Long> children = new ArrayList<>(childCount);
         for (int index = 0; index < childCount; index++) children.add(reader.longValue());
         return new CoreAlgoOrderView(id, userId, clientId, instrumentId, type, side, price, quantity, childQuantity,
-                interval, duration, margin, position, reduce, post, tif, status, current, reason, trace,
+                interval, duration, margin, position, reduce, post, tif, status, current, reason,
                 start, next, completed, created, updated, revision, children, reader.longValue(), reader.longValue(), reader.intValue());
     }
 

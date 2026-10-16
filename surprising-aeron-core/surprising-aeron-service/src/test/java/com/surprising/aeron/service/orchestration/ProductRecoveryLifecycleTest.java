@@ -43,7 +43,7 @@ class ProductRecoveryLifecycleTest {
                     CoreTriggerOrderType.STOP_LOSS, CoreTriggerCondition.GREATER_OR_EQUAL,
                     200, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                    0, 0, 0, "", "qa", 0, 0, 0, 0, 1, 0, 0);
+                    0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
             apply(live, command(product, 6, 22, CoreMessageType.PLACE_TRIGGER_ORDER,
                     CoreTriggerOrderCodec.encodeState(trigger)));
             byte[] checkpoint = live.snapshot(100);
@@ -94,7 +94,7 @@ class ProductRecoveryLifecycleTest {
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         120, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 120, 2,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", "qa", 0, 0, 0, 0, 1, 0, 0);
+                        0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
                 var stopLoss = ocoStopLoss(product, "recovery-stop-loss");
                 var invalidPair = command(product, 12, 22, CoreMessageType.PLACE_TRIGGER_OCO_PAIR,
                         CoreTriggerOrderCodec.encodeList(List.of(takeProfit, ocoStopLoss(product, " "))));
@@ -148,7 +148,7 @@ class ProductRecoveryLifecycleTest {
                 CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS, CoreTriggerCondition.LESS_OR_EQUAL,
                 80, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 80, 2,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                0, 0, 0, "", "qa", 0, 0, 0, 0, 1, 0, 0);
+                0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
     }
 
     private static void parity(TradingCoreRuntime expected, TradingCoreRuntime actual) {

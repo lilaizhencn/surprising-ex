@@ -7,7 +7,7 @@ public record CoreAlgoOrderView(
         CoreOrderSide side, long priceTicks, long quantitySteps, long childQuantitySteps,
         long intervalSeconds, long durationSeconds, CoreMarginMode marginMode, CorePositionSide positionSide,
         boolean reduceOnly, boolean postOnly, CoreTimeInForce timeInForce, int statusCode,
-        long currentOrderId, String rejectReason, String traceId, long startAtEpochMillis,
+        long currentOrderId, String rejectReason, long startAtEpochMillis,
         long nextSliceAtEpochMillis, long completedAtEpochMillis, long createdAtEpochMillis,
         long updatedAtEpochMillis, long revision, List<Long> childOrderIds,
         long executedQuantitySteps, long activeQuantitySteps, int activeChildOrderCount) {
@@ -15,7 +15,6 @@ public record CoreAlgoOrderView(
     public CoreAlgoOrderView {
         clientAlgoOrderId = clientAlgoOrderId == null ? "" : clientAlgoOrderId;
         rejectReason = rejectReason == null ? "" : rejectReason;
-        traceId = traceId == null ? "" : traceId;
         childOrderIds = List.copyOf(childOrderIds);
         boolean creationTemplate = revision == 1 && createdAtEpochMillis == 0 && updatedAtEpochMillis == 0;
         if (algoOrderId <= 0 || userId <= 0 || instrumentId == null || instrumentId.isBlank() || algoTypeCode < 0
@@ -40,7 +39,7 @@ public record CoreAlgoOrderView(
         return new CoreAlgoOrderView(algoOrderId, userId, clientAlgoOrderId, instrumentId, algoTypeCode, side,
                 priceTicks, quantitySteps, childQuantitySteps, intervalSeconds, durationSeconds, marginMode,
                 positionSide, reduceOnly, postOnly, timeInForce, statusCode, currentOrderId, rejectReason,
-                traceId, effectiveStartAt, effectiveStartAt, completedAtEpochMillis, clusterTimestamp,
+                effectiveStartAt, effectiveStartAt, completedAtEpochMillis, clusterTimestamp,
                 clusterTimestamp, revision, childOrderIds, executedQuantitySteps, activeQuantitySteps,
                 activeChildOrderCount);
     }

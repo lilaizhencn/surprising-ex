@@ -396,13 +396,13 @@ final class TradingSnapshotV36Reader {
         CoreMarginMode margin = CoreMarginMode.fromWireCode(reader.intValue());
         CorePositionSide position = CorePositionSide.fromWireCode(reader.intValue());
         boolean reduce = reader.booleanValue(), post = reader.booleanValue(); CoreTimeInForce tif = CoreTimeInForce.fromWireCode(reader.intValue());
-        int status = reader.intValue(); long current = reader.longValue(); String reason = reader.embeddedText(256), trace = reader.embeddedText(256);
+        int status = reader.intValue(); long current = reader.longValue(); String reason = reader.embeddedText(256); reader.embeddedText(256);
         long start = reader.longValue(), next = reader.longValue(), completed = reader.longValue();
         long created = reader.longValue(), updated = reader.longValue(), revision = reader.longValue();
         int childCount = reader.count("algo children"); List<Long> children = new ArrayList<>(childCount);
         for (int index = 0; index < childCount; index++) children.add(reader.longValue());
         var result = new CoreAlgoOrderView(id, userId, clientId, instrumentId, type, side, price, quantity, childQuantity,
-                interval, duration, margin, position, reduce, post, tif, status, current, reason, trace,
+                interval, duration, margin, position, reduce, post, tif, status, current, reason,
                 start, next, completed, created, updated, revision, children, reader.longValue(), reader.longValue(), reader.intValue());
         reader.requireConsumed();
         return result;
@@ -421,12 +421,18 @@ final class TradingSnapshotV36Reader {
                 reader.nonNegativeLong("trigger value"), reader.positiveLong("trigger value"), CoreMarginMode.fromWireCode(reader.intValue()),
                 CorePositionSide.fromWireCode(reader.intValue()),
                 SnapshotEnumCodes.readCoreTriggerOrderStatus(reader.intValue()), reader.nonNegativeLong("trigger value"),
-                reader.nonNegativeLong("trigger value"), reader.nonNegativeLong("trigger value"), reader.embeddedText(128), reader.embeddedText(128), reader.nonNegativeLong("trigger value"),
+                reader.nonNegativeLong("trigger value"), reader.nonNegativeLong("trigger value"),
+                discardSecondText(reader.embeddedText(128), reader.embeddedText(128)),
+                reader.nonNegativeLong("trigger value"),
                 reader.nonNegativeLong("trigger value"), reader.nonNegativeLong("trigger value"), reader.nonNegativeLong("trigger value"), reader.nonNegativeLong("trigger value"),
                 reader.longValue(), reader.longValue(),
                 version < 3 ? CoreTriggerPriceSource.MARK
                         : SnapshotEnumCodes.readCoreTriggerPriceSource(reader.intValue()));
         reader.requireConsumed(); return result;
+    }
+
+    private static String discardSecondText(String first, String ignoredSecond) {
+        return first;
     }
 
     private static Map<String, Long> readUnits(Reader reader, String name) {

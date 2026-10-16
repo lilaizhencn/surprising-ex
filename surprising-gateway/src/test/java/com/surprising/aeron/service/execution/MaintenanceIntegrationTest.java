@@ -45,7 +45,7 @@ class MaintenanceIntegrationTest {
             var trigger = new CoreTriggerOrderStateView(511,line,22,"maintenance-trigger","","1",line==ProductLine.SPOT?CoreOrderSide.BUY:CoreOrderSide.SELL,
                     CoreTriggerOrderType.STOP_LOSS,CoreTriggerCondition.GREATER_OR_EQUAL,200,0,0,0,0,0,
                     CoreOrderType.LIMIT,CoreTimeInForce.GTC,90,1,CoreMarginMode.CROSS,CorePositionSide.NET,CoreTriggerOrderStatus.PENDING,
-                    0,0,0,"","test",0,0,0,0,1,0,0);
+                    0,0,0,"",0,0,0,0,1,0,0);
             submit(22,CoreMessageType.PLACE_TRIGGER_ORDER,CoreTriggerOrderCodec.encodeState(trigger));
             var request = new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.CANCEL,"0","upgrade test");
             var task = fixture.service.create("1",request);

@@ -83,7 +83,7 @@ final class OperationalLifecycle implements AutoCloseable {
         var state=new CoreTriggerOrderStateView(trigger,ProductLine.LINEAR_PERPETUAL,user,"ops-trigger-"+trigger,
                 "",ACTIVE,CoreOrderSide.SELL,CoreTriggerOrderType.TAKE_PROFIT,CoreTriggerCondition.GREATER_OR_EQUAL,
                 100,0,0,0,0,0,CoreOrderType.LIMIT,CoreTimeInForce.IOC,100,1,CoreMarginMode.CROSS,
-                CorePositionSide.NET,CoreTriggerOrderStatus.PENDING,0,0,0,"","ops",0,0,0,0,1,0,0);
+                CorePositionSide.NET,CoreTriggerOrderStatus.PENDING,0,0,0,"",0,0,0,0,1,0,0);
         endpoint.command(CoreMessageType.PLACE_TRIGGER_ORDER,user,CoreTriggerOrderCodec.encodeState(state));
         var pending=CoreTriggerOrderCodec.decodeList(endpoint.query(CoreMessageType.TRIGGER_ORDER_QUERY,0,
                 CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(0,ACTIVE,0,1000,CoreTriggerOrderStatus.PENDING))).data());

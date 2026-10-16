@@ -683,7 +683,7 @@ class TradingCoreOwnerTest {
             for (int revision = 1; revision <= 3; revision++) {
                 var algo = new com.surprising.aeron.protocol.CoreAlgoOrderView(501, 1001, "algo-client", "1", 0,
                         CoreOrderSide.BUY, 0, 100, 10, 1, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
-                        false, false, CoreTimeInForce.IOC, 0, 0, "", "trace",
+                        false, false, CoreTimeInForce.IOC, 0, 0, "",
                         1, 1, 0, 1, revision, revision, List.of(), 0, 0, 0);
                 onSessionMessage(service, responses, command(CoreMessageType.UPSERT_ALGO_ORDER,
                         revision, 1001, com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(algo)));
@@ -696,7 +696,7 @@ class TradingCoreOwnerTest {
             runtime.setMetadata(ProductLine.SPOT, Long.MAX_VALUE);
             var next = new com.surprising.aeron.protocol.CoreAlgoOrderView(501, 1001, "algo-client", "1", 0,
                     CoreOrderSide.BUY, 0, 100, 10, 1, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
-                    false, false, CoreTimeInForce.IOC, 0, 0, "", "trace",
+                    false, false, CoreTimeInForce.IOC, 0, 0, "",
                     1, 1, 0, 1, 4, 4, List.of(), 0, 0, 0);
             byte[] payload = com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(next);
             onSessionMessage(service, responses, command(CoreMessageType.UPSERT_ALGO_ORDER, 4, 1001, payload));

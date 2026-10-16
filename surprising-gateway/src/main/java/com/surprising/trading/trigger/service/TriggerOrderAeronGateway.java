@@ -145,6 +145,11 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
     private static UUID stable(String value) { return UUID.nameUUIDFromBytes(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
     public static TriggerOrderResponse response(CoreTriggerOrderStateView value) {
         if (value == null) return null;
+        String traceId = value.productLine() != null && value.userId() > 0
+                && value.clientTriggerOrderId() != null && !value.clientTriggerOrderId().isBlank()
+                ? com.surprising.trading.order.service.StableOrderIdentity.triggerCommandId(
+                        value.productLine(), value.userId(), value.clientTriggerOrderId()).toString()
+                : null;
         return new TriggerOrderResponse(value.triggerOrderId(), value.userId(), empty(value.clientTriggerOrderId()), empty(value.ocoGroupId()),
                 value.instrumentId(), OrderSide.valueOf(value.side().name()), TriggerOrderType.valueOf(value.triggerType().name()),
                 TriggerCondition.valueOf(value.triggerCondition().name()), value.triggerPriceTicks(),
@@ -155,7 +160,7 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
                 MarginMode.valueOf(value.marginMode().name()), PositionSide.valueOf(value.positionSide().name()),
                 TriggerOrderStatus.valueOf(value.status().name()), value.placedOrderId() == 0 ? null : value.placedOrderId(),
                 value.triggerSequence() == 0 ? null : value.triggerSequence(), value.triggeredPriceTicks() == 0 ? null : value.triggeredPriceTicks(),
-                empty(value.rejectReason()), empty(value.traceId()), value.expiresAtEpochMillis() == 0 ? null : Instant.ofEpochMilli(value.expiresAtEpochMillis()),
+                empty(value.rejectReason()), traceId, value.expiresAtEpochMillis() == 0 ? null : Instant.ofEpochMilli(value.expiresAtEpochMillis()),
                 value.triggeredAtEpochMillis() == 0 ? null : Instant.ofEpochMilli(value.triggeredAtEpochMillis()),
                 Instant.ofEpochMilli(value.createdAtEpochMillis()), Instant.ofEpochMilli(value.updatedAtEpochMillis()),
                 com.surprising.trading.api.model.TriggerPriceSource.valueOf(value.priceSource().name()));

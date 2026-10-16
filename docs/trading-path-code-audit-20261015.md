@@ -29,7 +29,8 @@
 | 高收益低风险 | P2 | Lane 线程每次线性查找自己的 lane（85 处调用） | 低 |
 | 高收益低风险 | P3 | 市价单为读最优价走完整引擎命令 | 低到中 |
 | 高收益低风险 | P4 | 每命令 SHA-256 指纹 | 低（未上线可直接改格式） |
-| 中 | P5–P13、F3–F9、L1–L6 | 见正文 | 中 |
+| 已完成 | P5 | 彻底移除 `surprising-aeron-core` 全模块 `traceId` 字段与线上编码 | 已验证，见 P5 |
+| 中 | P6–P13、F3–F9、L1–L6 | 见正文 | 中 |
 | 已完成 | D1 | 已移除假 `Cluster` / `ClientSession` 实现，Owner 按会话 ID 路由 | 已验证，见 D1 |
 | 已完成 | D2 / L8 | 已删除旧 Owner 直达派发、窗口扫描回调及 Lane 响应回退 | 已验证，见 D2 |
 | 已完成 | D3 / L7 | 交易统一 Direct，删除旧 Future/API、Owner 补结算与分区扫描 | 已验证，见 D3 |
@@ -41,7 +42,7 @@
 | 已完成 | D10 | 序列与水位修改收归权威来源，状态权威来源明确化 | 已验证，见 D10 |
 | 已完成 | D11 | 客户端零中间拷贝 Egress 解码、清理死代码构造器与协议全量 Codec 分配消除 | 已验证，见 D11 |
 
-D2–D11 均已完成，具体变更、核查结论与验证证据见各节。建议执行顺序见第 9 节。
+P5 与 D1–D11 均已完成，具体变更、核查结论与验证证据见各节。建议执行顺序见第 9 节。
 
 ## 2. 正确性与可用性风险（C）
 
@@ -98,11 +99,23 @@ D2–D11 均已完成，具体变更、核查结论与验证证据见各节。�
 - **方案**：换 128 位非密码学哈希（xxh3 或 murmur3-128）；产品未上线，可直接改格式。
 - **验证**：`CommandDecodingBenchmark`；cluster 线程 JFR `ExecutionSample`。
 
-### P5【报告】traceId 默认等于 `commandId.toString()`，每条命令上线
-- **位置**：`surprising-aeron-client/.../AeronClientPool.java:1246`，编码 `CoreMessageCodec:86`，服务端 `DirectMessageReader:151-157`（protocol 与 client 模块）。
-- **后果**：每条命令多 38B 线上字节并复制进 Raft 日志；Cluster 服务线程每条命令还会 `new char[36]` 加 `String`，约 170B 垃圾（估算）。
-- **方案**：仅在 MDC 有值或被采样时携带；服务端只保存 offset，诊断时才解码。
-- **验证**：`CommandDecodingBenchmark -prof gc`；JFR `ObjectAllocationSample`（cluster 线程）。
+### P5【已完成】彻底移除 `surprising-aeron-core` 全模块 `traceId` 字段与线上编码
+- **完成日期**：2026-10-16。按第一性原理与 KISS 原则，Aeron Cluster 内部已具备全链路确定性的天然追踪坐标（`commandId` 16B、`correlationId` 8B、`clusterLogPosition` / `coreSequence` 8B），字符串 `traceId` 在 Core 内部无任何业务消费方，仅造成每条命令多 38B 线上字节并写入 Raft 日志、每条命令在客户端与 Cluster 线程额外产生 `UUID.toString()` / UTF-8 编解码分配，因此从 `surprising-aeron-core` 全模块 100% 彻底移除：
+- **协议层 `surprising-aeron-protocol`**：
+  - 删除 `TraceIds.java` 及 `CoreTracePropagationTest.java`；
+  - 从 `CoreMessageHeader`、`CoreMessage`、`CoreMessageCodec` 移除 `traceId` 字段与变长尾部编码，`CoreMessageHeader` 成为纯定长 91 字节二进制结构（`FIXED_HEADER_BYTES = 91`），彻底消除消息头的变长 UTF-8 读写；
+  - 从 `RealtimeFrame`、`RealtimeFrameCodec`、`CoreTriggerOrderStateView`、`CoreTriggerOrderCodec`、`CoreAlgoOrderView`、`CoreAlgoOrderCodec` 移除 `traceId` 字段与线上编解码。
+- **客户端 `surprising-aeron-client`**：
+  - 从 `AeronClientPool` 移除 `Request.traceId`、`MDC.get("traceId")`、`MDC.put/remove`、`TraceScope` 及响应 `traceId` 比较；
+  - 从 `SurprisingAeronClient` 移除响应头中的 `traceId` 偏移校验与解码。
+- **服务端 `surprising-aeron-service` 与基准 `surprising-aeron-benchmarks`**：
+  - 从 `DirectMessageReader`、`CoreMessageFlyweightDecoder` 移除 `traceId` 偏移量与 UTF-8 字符串解码工作区；
+  - 从 `RealtimeStateCapture`、`TradingRealtimeBoundary`、`CommittedTradeReplay`、`CoreTriggerOrderState`、`CoreAlgoOrderState`、`RuntimeTriggerOrderStateTransitions`、`RuntimeOperationalQueryService`、`TradingStateSnapshotCodec` 移除 `traceId` 字段与传递；
+  - 在 `TradingSnapshotV36Reader` 中通过消费并丢弃流中的历史 `traceId` 文本字节保持历史快照二进制固件 100% 兼容。
+- **网关边界 `surprising-gateway` 适配**：
+  - `RealtimeWebSocketBridge` 直接使用 `"core-" + f.productLine() + "-" + f.sequence()` 作为网关侧日志追踪上下文 ID；
+  - `TriggerOrderService`、`TriggerOrderAeronGateway`、`AeronAlgoOrderStore` 在网关边界使用 `StableOrderIdentity` 确定性派生对外 HTTP DTO 的 `traceId`，Core 内部零感知。
+- **验证**：`grep -rn "traceId\|TraceIds\|withTraceId" surprising-aeron-core/src` 0 命中；HotSpot JDK 27 下 `surprising-aeron-protocol`（240 项）、`surprising-aeron-client`（66 项）及 `surprising-aeron-service` 全部受影响核心测试（120 项）100% 通过。
 
 ### P6【报告】解码槽的分配与原子操作
 - **位置**：`CoreMessageFlyweightDecoder:104,46,108`、`CoreMessage:13,20,66`（ingress 子包）。
@@ -439,11 +452,11 @@ D2–D11 均已完成，具体变更、核查结论与验证证据见各节。�
 | P1 / F1 / L1 unpark 与 volatile | JMH `-prof perfnorm`；JFR `ThreadPark`、`jdk.NativeMethodSample`；owner 线程 syscall 数 |
 | F2 / F3 / F4 / F5 / F6 / F9 / F10 伪共享 | `perf c2c`（HITM）；JMH `-prof perfnorm`；JOL 看字段布局 |
 | P2 Lane scope | JFR 方法占比；`AccountLaneCommitBenchmark` 前后对比 |
-| 所有分配类（P3、P5、P6、P7、P9、P10、P11） | JMH `-prof gc`（B/op）；JFR `ObjectAllocationSample`、`ObjectAllocationOutsideTLAB`、`ThreadAllocationStatistics` |
+| 所有分配类（P3、P6、P7、P9、P10、P11） | JMH `-prof gc`（B/op）；JFR `ObjectAllocationSample`、`ObjectAllocationOutsideTLAB`、`ThreadAllocationStatistics` |
 | P4 指纹 | `CommandDecodingBenchmark`；cluster 线程 `ExecutionSample` |
 | P7 网关 | JFR `JavaMonitorEnter`、`ThreadPark`；`HttpOpenLoopWorkload` |
 | P12 结算计划位置 | `core-matcher-*` 线程 CPU 样本 |
-| 删除类（D 系列） | 先 `codegraph_callers` / `codegraph_impact`；再跑受影响模块测试与快照恢复 |
+| 删除类（D 系列、P5） | 先 `codegraph_callers` / `codegraph_impact`；再跑受影响模块测试与快照恢复 |
 
 每项主链路改动按标准新增或更新覆盖真实改动路径的 JMH，并只在当前 `master` 上取基线；诊断一次只改一个因素，预先写明预期变化和证伪条件；结果追加到 `PERFORMANCE_VALIDATION.md`。
 
@@ -451,9 +464,9 @@ D2–D11 均已完成，具体变更、核查结论与验证证据见各节。�
 
 1. **确认类**（先于一切性能优化）：C1（JCStress）、C2（决定溢出策略）。
 2. **局部低风险改动**（先写 JMH，再改，再测）：P1+F1+L1（unpark 标志与 HWM）、F2+L3（结算 ring 填充与 `setRelease`）、P2（Lane scope）。
-3. **已完成的过度设计清理（D 系列）**：D1–D11 均已完成，详见第 6 节各条目。L7/L8 的相关完成范围见 D3/D2。
-4. **中等改动**：P3（最优价）、P4（指纹）、P5（traceId）、P7（网关 mailbox）、P9–P11、F3–F7、F9、L2。
-5. **需要先补测试与对账**：C3（D3、D4、D7–D11 已完成）。
+3. **已完成的过度设计与冗余清理（D 系列与 P5）**：P5 与 D1–D11 均已完成，详见第 3 节与第 6 节各条目。L7/L8 的相关完成范围见 D3/D2。
+4. **中等改动**：P3（最优价）、P4（指纹）、P6（解码槽与双 long commandId）、P7（网关 mailbox）、P9–P11、F3–F7、F9、L2。
+5. **需要先补测试与对账**：C3（P5、D3、D4、D7–D11 已完成）。
 
 ## 10. 未覆盖与不确定项
 

@@ -714,7 +714,7 @@ public class ClusteredBatchTradingBenchmark {
             var next = new com.surprising.aeron.protocol.CoreAlgoOrderView(9_000_000, 1000,
                     "algo-lane-0", "10", 0, CoreOrderSide.BUY, 0, 100, 10, 1, 10,
                     CoreMarginMode.CROSS, CorePositionSide.NET, false, false, CoreTimeInForce.IOC,
-                    0, 0, "", "trace", 1, 1, 0, 1, revision, revision, java.util.List.of(), 0, 0, 0);
+                    0, 0, "", 1, 1, 0, 1, revision, revision, java.util.List.of(), 0, 0, 0);
             long terminalBefore = terminal;
             singleResponses = true;
             expectSingleRejection = true;
@@ -743,7 +743,7 @@ public class ClusteredBatchTradingBenchmark {
                     var algo = new com.surprising.aeron.protocol.CoreAlgoOrderView(id, 1000 + i,
                             "algo-lane-" + i, "10", 0, CoreOrderSide.BUY, 0, 100, 10, 1, 10,
                             CoreMarginMode.CROSS, CorePositionSide.NET, false, false, CoreTimeInForce.IOC,
-                            0, 0, "", "trace", 1, 1, 0, 1, revision, revision, java.util.List.of(), 0, 0, 0);
+                            0, 0, "", 1, 1, 0, 1, revision, revision, java.util.List.of(), 0, 0, 0);
                     send(command(CoreMessageType.UPSERT_ALGO_ORDER, 1000 + i,
                             com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(algo)));
                 }
@@ -798,7 +798,7 @@ public class ClusteredBatchTradingBenchmark {
                                     CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
                                     CoreTriggerCondition.LESS_OR_EQUAL, 90, 0, 0, 0, 0, 0,
                                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
-                                    CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "",
+                                    CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "",
                                     0, 0, 1, 1, 1);
                             wave[user] = command(CoreMessageType.PLACE_TRIGGER_ORDER, 1_000 + user,
                                     CoreTriggerOrderCodec.encodeState(trigger.view()));

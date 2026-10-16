@@ -102,7 +102,7 @@ class CommandFingerprintLeaseTest {
         assertThat(target.acquireDecoderSlot()).isTrue();
         var h = source.header();
         target.decoderHeader(h.schemaVersion(), h.kind(), h.messageType(), h.commandId(), h.productLine(), h.route(),
-                h.source(), h.sourceId(), h.sourceSequence(), h.userId(), h.submittedAtEpochMillis(), h.correlationId(), h.traceId());
+                h.source(), h.sourceId(), h.sourceSequence(), h.userId(), h.submittedAtEpochMillis(), h.correlationId());
         source.copyPayloadTo(target.decoderPayloadBuffer(source.payloadLength()), 0);
     }
 }

@@ -150,7 +150,7 @@ class CoreAlgoLaneQueryTest {
     private static CoreAlgoOrderState algo(long id, long user, String symbol, long due, List<Long> children) {
         return new CoreAlgoOrderState(id, user, "algo-query-" + id, symbol, 0, CoreOrderSide.BUY, 100, 100, 10,
                 1, 10, CoreMarginMode.CROSS, CorePositionSide.NET, false, false, CoreTimeInForce.GTC, 1,
-                0, "", "query", TIME, due, 0, TIME, TIME, 1, children);
+                0, "", TIME, due, 0, TIME, TIME, 1, children);
     }
 
     private TradingCoreRuntime initial(TradingCoreState state) {

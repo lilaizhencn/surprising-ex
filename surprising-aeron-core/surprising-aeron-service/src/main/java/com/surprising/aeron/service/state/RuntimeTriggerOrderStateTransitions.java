@@ -159,7 +159,7 @@ public final class RuntimeTriggerOrderStateTransitions {
                 activatedAtEpochMillis, current.orderType(), current.timeInForce(), current.priceTicks(),
                 current.quantitySteps(), current.marginMode(), current.positionSide(), current.status(),
                 current.placedOrderId(), current.triggerSequence(), current.triggeredPriceTicks(), current.rejectReason(),
-                current.traceId(), current.expiresAtEpochMillis(), current.triggeredAtEpochMillis(),
+                current.expiresAtEpochMillis(), current.triggeredAtEpochMillis(),
                 current.createdAtEpochMillis(), Math.max(current.updatedAtEpochMillis(), activatedAtEpochMillis),
                 Math.incrementExact(current.revision()), current.makerFeeRatePpm(),
                 current.takerFeeRatePpm(), current.priceSource()));
@@ -263,7 +263,7 @@ public final class RuntimeTriggerOrderStateTransitions {
                 current.lowestPriceTicks(), current.activatedAtEpochMillis(), current.orderType(),
                 current.timeInForce(), current.priceTicks(), current.quantitySteps(), current.marginMode(),
                 current.positionSide(), status, placedOrderId, triggerSequence, triggeredPriceTicks, rejectReason,
-                current.traceId(), current.expiresAtEpochMillis(),
+                current.expiresAtEpochMillis(),
                 status == CoreTriggerOrderStatus.TRIGGERED || status == CoreTriggerOrderStatus.TRIGGER_FAILED
                         ? updatedAt : current.triggeredAtEpochMillis(),
                 current.createdAtEpochMillis(), updatedAt, Math.incrementExact(current.revision()),

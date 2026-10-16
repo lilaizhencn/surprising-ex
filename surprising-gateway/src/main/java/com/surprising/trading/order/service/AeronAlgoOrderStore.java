@@ -62,14 +62,19 @@ public class AeronAlgoOrderStore {
         return aeron.algoOrders(userId, instrumentId, dueAt, limit);
     }
     public AlgoOrderRecord record(CoreAlgoOrderView value) {
-        return new AlgoOrderRecord(value.algoOrderId(), properties.getKafka().getProductLine(), value.userId(), empty(value.clientAlgoOrderId()),
+        var productLine = properties.getKafka().getProductLine();
+        String traceId = productLine != null && value.userId() > 0
+                && value.clientAlgoOrderId() != null && !value.clientAlgoOrderId().isBlank()
+                ? StableOrderIdentity.algoCommandId(productLine, value.userId(), value.clientAlgoOrderId()).toString()
+                : null;
+        return new AlgoOrderRecord(value.algoOrderId(), productLine, value.userId(), empty(value.clientAlgoOrderId()),
                 value.instrumentId(), AlgoOrderType.values()[value.algoTypeCode()], OrderSide.valueOf(value.side().name()),
                 value.priceTicks(), value.quantitySteps(), value.childQuantitySteps(), value.intervalSeconds(),
                 value.durationSeconds(), MarginMode.valueOf(value.marginMode().name()),
                 PositionSide.valueOf(value.positionSide().name()), value.reduceOnly(), value.postOnly(),
                 TimeInForce.valueOf(value.timeInForce().name()), AlgoOrderStatus.values()[value.statusCode()],
                 value.currentOrderId() == 0 ? null : value.currentOrderId(), empty(value.rejectReason()),
-                empty(value.traceId()), instant(value.startAtEpochMillis()), instant(value.nextSliceAtEpochMillis()),
+                traceId, instant(value.startAtEpochMillis()), instant(value.nextSliceAtEpochMillis()),
                 instant(value.completedAtEpochMillis()), instant(value.createdAtEpochMillis()), instant(value.updatedAtEpochMillis()));
     }
     public AlgoOrderProgress progress(CoreAlgoOrderView value) {
@@ -97,7 +102,7 @@ public class AeronAlgoOrderStore {
                 value.childQuantitySteps(), value.intervalSeconds(), value.durationSeconds(),
                 CoreMarginMode.valueOf(value.marginMode().name()), CorePositionSide.valueOf(value.positionSide().name()),
                 value.reduceOnly(), value.postOnly(), CoreTimeInForce.valueOf(value.timeInForce().name()), value.status().ordinal(),
-                value.currentOrderId() == null ? 0 : value.currentOrderId(), text(value.rejectReason()), text(value.traceId()),
+                value.currentOrderId() == null ? 0 : value.currentOrderId(), text(value.rejectReason()),
                 epoch(value.startAt()), epoch(value.nextSliceAt()), epoch(value.completedAt()), epoch(value.createdAt()),
                 epoch(value.updatedAt()), revision, children, executed, active, activeCount);
     }

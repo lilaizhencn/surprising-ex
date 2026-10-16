@@ -10,7 +10,7 @@ class BorrowedResponseSlotTest {
         slot.decoderPayloadBuffer(0);
         slot.decoderHeader(CoreProtocol.SCHEMA_VERSION, WireMessageKind.COMMAND, CoreMessageType.PROBE_INCREMENT,
                 new UUID(1, id), ProductLine.SPOT, CoreRoute.DEFAULT, CommandSource.GATEWAY,
-                1, id, 7, 1, id, "");
+                1, id, 7, 1, id);
     }
 
     @Test void terminalResponseAndHeaderRemainLeasedThroughTheLastTransportReader() {

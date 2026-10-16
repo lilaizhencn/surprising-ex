@@ -12,7 +12,6 @@ import com.surprising.aeron.protocol.ProductLineClusterLayout;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.aeron.protocol.TraceIds;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.client.AeronCluster;
@@ -352,9 +351,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             int shardCode = Byte.toUnsignedInt(buffer.getByte(offset + 11));
             int headerLength = Short.toUnsignedInt(buffer.getShort(offset + 12, ByteOrder.LITTLE_ENDIAN));
             int headerRouteVersion = Short.toUnsignedInt(buffer.getShort(offset + 14, ByteOrder.LITTLE_ENDIAN));
-            if (headerLength != CoreProtocol.HEADER_LENGTH
-                    && (headerLength < CoreProtocol.HEADER_LENGTH + 3
-                    || headerLength > CoreProtocol.HEADER_LENGTH + Short.BYTES + TraceIds.MAX_LENGTH)) {
+            if (headerLength != CoreProtocol.HEADER_LENGTH) {
                 throw new ProtocolException("invalid header length: " + headerLength);
             }
             CoreRoute.fromWireCodes(shardCode, headerRouteVersion);
@@ -371,20 +368,6 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             if (payloadLength < 0 || payloadLength > CoreMessageCodec.MAX_PAYLOAD_LENGTH
                     || headerLength + payloadLength != length) {
                 throw new ProtocolException("invalid payload length: " + payloadLength);
-            }
-            if (headerLength > CoreProtocol.HEADER_LENGTH) {
-                int traceLength = Short.toUnsignedInt(
-                        buffer.getShort(offset + CoreProtocol.HEADER_LENGTH, ByteOrder.LITTLE_ENDIAN));
-                if (traceLength < 1 || traceLength > TraceIds.MAX_LENGTH
-                        || CoreProtocol.HEADER_LENGTH + Short.BYTES + traceLength != headerLength) {
-                    throw new ProtocolException("invalid trace id header length");
-                }
-                int traceStart = offset + CoreProtocol.HEADER_LENGTH + Short.BYTES;
-                for (int i = 0; i < traceLength; i++) {
-                    if (!TraceIds.isValidChar(Byte.toUnsignedInt(buffer.getByte(traceStart + i)))) {
-                        throw new ProtocolException("invalid trace id");
-                    }
-                }
             }
             if (messageProductLine != productLine) {
                 sessionFailure = new IllegalStateException("received response from another product line");

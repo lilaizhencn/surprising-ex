@@ -93,7 +93,7 @@ public class TriggerOrderService {
                 normalized.quantitySteps(),
                 com.surprising.aeron.protocol.CoreMarginMode.valueOf(normalized.marginMode().name()),
                 com.surprising.aeron.protocol.CorePositionSide.valueOf(normalized.positionSide().name()),
-                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", commandId.toString(),
+                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "",
                 normalized.expiresAt() == null ? 0 : normalized.expiresAt().toEpochMilli(), 0, 0, 0, 1,
                 0, 0, com.surprising.aeron.protocol.CoreTriggerPriceSource.valueOf(normalized.priceSource().name()));
         return new PreparedTriggerOrder(commandId, view);

@@ -14,7 +14,7 @@ class CoreTriggerOrderCodecTest {
                 "tp-501", "oco-1", "1", CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
                 CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0, 0, 0, 0, CoreOrderType.MARKET,
                 CoreTimeInForce.IOC, 0, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
-                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "追踪", 0, 0, 1_000, 1_000, 1,
+                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 1_000, 1_000, 1,
                 -25, 40, CoreTriggerPriceSource.LAST);
         assertThat(CoreTriggerOrderCodec.decodeState(CoreTriggerOrderCodec.encodeState(state))).isEqualTo(state);
         assertThat(CoreTriggerOrderCodec.encodedStateLength(state))
@@ -35,7 +35,7 @@ class CoreTriggerOrderCodecTest {
                 "", "", "1", CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
                 CoreTriggerCondition.LESS_OR_EQUAL, 60_000, 0, 0, 0, 0, 0, CoreOrderType.MARKET,
                 CoreTimeInForce.IOC, 0, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
-                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "", 0, 0, 1_000, 1_000, 1);
+                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 1_000, 1_000, 1);
         byte[] encoded = CoreTriggerOrderCodec.encodeState(state);
         assertThatThrownBy(() -> CoreTriggerOrderCodec.decodeState(
                 java.util.Arrays.copyOf(encoded, encoded.length - 1)))
@@ -48,7 +48,7 @@ class CoreTriggerOrderCodecTest {
                 "old", "", "1", CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
                 CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0, 0, 0, 0, CoreOrderType.MARKET,
                 CoreTimeInForce.IOC, 0, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
-                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "", 0, 0, 1_000, 1_000, 1);
+                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 1_000, 1_000, 1);
         byte[] versionThree = CoreTriggerOrderCodec.encodeState(state);
         byte[] versionTwo = java.util.Arrays.copyOf(versionThree, versionThree.length - Integer.BYTES);
         versionTwo[0] = 2;
@@ -71,7 +71,7 @@ class CoreTriggerOrderCodecTest {
                 ProductLine.LINEAR_PERPETUAL, 1001, "tp-501", "", "1", CoreOrderSide.SELL,
                 CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0,
                 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 10, CoreMarginMode.CROSS,
-                CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "command-id",
+                CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "",
                 0, 0, 0, 0, 1);
 
         CoreTriggerOrderStateView decoded = CoreTriggerOrderCodec.decodeState(

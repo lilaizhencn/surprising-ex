@@ -70,10 +70,10 @@ public final class CoreMessage {
     public void decoderHeader(int schemaVersion, WireMessageKind kind, CoreMessageType messageType,
             java.util.UUID commandId, com.surprising.product.api.ProductLine productLine, CoreRoute route,
             CommandSource source, long sourceId, long sourceSequence, long userId, long submittedAtEpochMillis,
-            long correlationId, String traceId) {
+            long correlationId) {
         if (!decoderSlot || !decoderLeased) throw new IllegalStateException("decoder slot is not owned");
         decoderHeader.assign(schemaVersion, kind, messageType, commandId, productLine, route, source,
-                sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId, traceId);
+                sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId);
         header = decoderHeader;
     }
 
@@ -118,7 +118,7 @@ public final class CoreMessage {
         }
         decoderResponseHeader.assign(header.schemaVersion(), WireMessageKind.RESPONSE, responseType,
                 header.commandId(), header.productLine(), header.route(), header.source(), header.sourceId(),
-                header.sourceSequence(), header.userId(), header.submittedAtEpochMillis(), header.correlationId(), header.traceId());
+                header.sourceSequence(), header.userId(), header.submittedAtEpochMillis(), header.correlationId());
         return decoderResponseHeader;
     }
 

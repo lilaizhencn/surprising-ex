@@ -54,7 +54,6 @@ public final class CoreTriggerOrderCodec {
                 .putLong(state.placedOrderId()).putLong(state.triggerSequence())
                 .putLong(state.triggeredPriceTicks());
         CoreStateQueryCodec.putText(buffer, state.rejectReason(), true, MAX_TEXT_BYTES);
-        CoreStateQueryCodec.putText(buffer, state.traceId(), true, MAX_TEXT_BYTES);
         buffer.putLong(state.expiresAtEpochMillis()).putLong(state.triggeredAtEpochMillis())
                 .putLong(state.createdAtEpochMillis()).putLong(state.updatedAtEpochMillis())
                 .putLong(state.revision())
@@ -71,7 +70,7 @@ public final class CoreTriggerOrderCodec {
         length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES * 6L);
         length = Math.addExact(length, Integer.BYTES * 2L + Long.BYTES * 2L);
         length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES * 3L);
-        length = Math.addExact(length, textLength(state.rejectReason()) + textLength(state.traceId()));
+        length = Math.addExact(length, textLength(state.rejectReason()));
         length = Math.addExact(length, Long.BYTES * 7L + Integer.BYTES);
         return Math.toIntExact(length);
     }
@@ -100,7 +99,7 @@ public final class CoreTriggerOrderCodec {
                 reader.nonNegative(), reader.positive(), CoreMarginMode.fromWireCode(reader.intValue()),
                 CorePositionSide.fromWireCode(reader.intValue()),
                 STATUSES[reader.enumIndex(STATUSES.length)], reader.nonNegative(),
-                reader.nonNegative(), reader.nonNegative(), reader.text(), reader.text(), reader.nonNegative(),
+                reader.nonNegative(), reader.nonNegative(), reader.text(), reader.nonNegative(),
                 reader.nonNegative(), reader.nonNegative(), reader.nonNegative(), reader.nonNegative(),
                 reader.longValue(), reader.longValue(),
                 version < 3 ? CoreTriggerPriceSource.MARK

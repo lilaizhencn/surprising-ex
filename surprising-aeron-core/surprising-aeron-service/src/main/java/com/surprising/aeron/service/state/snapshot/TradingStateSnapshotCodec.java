@@ -421,7 +421,6 @@ public final class TradingStateSnapshotCodec {
                 .number(17, value.statusCode()) // 17: statusCode
                 .number(18, value.currentOrderId()) // 18: currentOrderId
                 .text(19, value.rejectReason()) // 19: rejectReason
-                .text(20, value.traceId()) // 20: traceId
                 .number(21, value.startAtEpochMillis()) // 21: startAtEpochMillis
                 .number(22, value.nextSliceAtEpochMillis()) // 22: nextSliceAtEpochMillis
                 .number(23, value.completedAtEpochMillis()) // 23: completedAtEpochMillis
@@ -453,7 +452,6 @@ public final class TradingStateSnapshotCodec {
                 r.integer(17), // 17: statusCode
                 r.number(18), // 18: currentOrderId
                 r.text(19), // 19: rejectReason
-                r.text(20), // 20: traceId
                 r.number(21), // 21: startAtEpochMillis
                 r.number(22), // 22: nextSliceAtEpochMillis
                 r.number(23), // 23: completedAtEpochMillis
@@ -533,7 +531,6 @@ public final class TradingStateSnapshotCodec {
                 .number(24, value.triggerSequence()) // 24: triggerSequence
                 .number(25, value.triggeredPriceTicks()) // 25: triggeredPriceTicks
                 .text(26, value.rejectReason()) // 26: rejectReason
-                .text(27, value.traceId()) // 27: traceId
                 .number(28, value.expiresAtEpochMillis()) // 28: expiresAtEpochMillis
                 .number(29, value.triggeredAtEpochMillis()) // 29: triggeredAtEpochMillis
                 .number(30, value.createdAtEpochMillis()) // 30: createdAtEpochMillis
@@ -573,7 +570,6 @@ public final class TradingStateSnapshotCodec {
                 r.number(24), // 24: triggerSequence
                 r.number(25), // 25: triggeredPriceTicks
                 r.text(26), // 26: rejectReason
-                r.text(27), // 27: traceId
                 r.number(28), // 28: expiresAtEpochMillis
                 r.number(29), // 29: triggeredAtEpochMillis
                 r.number(30), // 30: createdAtEpochMillis

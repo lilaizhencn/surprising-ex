@@ -230,14 +230,14 @@ public final class SmallControlReproMain {
                 CoreTriggerCondition.GREATER_OR_EQUAL, 100, 0, 0, 0, 0, 0,
                 CoreOrderType.LIMIT, rejectTrigger ? CoreTimeInForce.GTX : CoreTimeInForce.IOC, rejectTrigger ? 100 : (index & 1) == 0 ? 110 : 100, 1,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                0, 0, 0, "", "repro", 0, 0, 0, 0, 1, 0, 0);
+                0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
         command(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger));
         var sibling = new CoreTriggerOrderStateView(10001 + index, PRODUCT, user, "repro-sibling-" + index,
                 "repro-oco-" + index, instrumentId, CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
                 CoreTriggerCondition.GREATER_OR_EQUAL, 200, 0, 0, 0, 0, 0,
                 CoreOrderType.LIMIT, CoreTimeInForce.IOC, 200, 1,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                0, 0, 0, "", "repro", 0, 0, 0, 0, 1, 0, 0);
+                0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
         command(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(sibling));
         if (scan) {
             command(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(

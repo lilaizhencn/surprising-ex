@@ -91,8 +91,7 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
     public void beginCapture(TradingCoreRuntime state, long position, long timestamp, CoreMessageHeader header) {
         if (capture == null || !leader) return;
         try {
-            String traceId = header.traceId().isEmpty() ? header.commandId().toString() : header.traceId();
-            capture.begin(position, timestamp, 0, state.realtimeExportSequence(), traceId);
+            capture.begin(position, timestamp, 0, state.realtimeExportSequence());
         } catch (RuntimeException failure) {
             capture.failed();
         }

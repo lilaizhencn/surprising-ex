@@ -61,7 +61,7 @@ public class TriggerCommitBenchmark {
                     "trigger-" + id, "", "1", instrument, CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
                     CoreTriggerCondition.LESS_OR_EQUAL, 90, 0, 0, 0, 0, 0,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
-                    CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "", 0, 0, 1, 1, 1));
+                    CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 1, 1, 1));
         }
         runtime.clearChangedKeys();
     }

@@ -681,11 +681,9 @@ public final class AeronClientPool implements AutoCloseable {
                 return null;
             }
             long correlationId = nextCorrelation.incrementAndGet();
-            String currentTrace = org.slf4j.MDC.get("traceId");
-            String traceId = currentTrace == null ? queryId.toString() : currentTrace;
             CoreMessage message = new CoreMessage(CoreMessageHeader.query(type, queryId, productLine,
                     CommandSource.GATEWAY, sourceId, 0, userId, Instant.now().toEpochMilli(),
-                    correlationId, traceId), payload);
+                    correlationId), payload);
             request.reset(message, queryId, RequestMode.QUERY, null, false);
             return request;
         }
@@ -718,7 +716,7 @@ public final class AeronClientPool implements AutoCloseable {
                 return true;
             }
             request.startQueueTimeout(responseTimeout.toNanos());
-            ClientTransportBoundary.record("queued", request.operationId, request.traceId);
+            ClientTransportBoundary.record("queued", request.operationId);
             if (!mailbox.offer(request)) {
                 request.releaseCorrelation();
                 return false;
@@ -770,29 +768,19 @@ public final class AeronClientPool implements AutoCloseable {
         }
     }
 
-    /** Request callbacks run on transport workers; restore any caller identity after completion. */
-    private static final class TraceScope implements AutoCloseable {
-        private final String previous = org.slf4j.MDC.get("traceId");
-        TraceScope(String id) { org.slf4j.MDC.put("traceId", id); }
-        @Override public void close() {
-            if (previous == null) org.slf4j.MDC.remove("traceId"); else org.slf4j.MDC.put("traceId", previous);
-        }
-    }
-
     /** Optional sparse transport trace; no request state or cross-JVM clock assumptions. */
     @jdk.jfr.Name("surprising.ClientTransportBoundary")
     @jdk.jfr.StackTrace(false)
     static final class ClientTransportBoundary extends jdk.jfr.Event {
         private static final jdk.jfr.EventType TYPE = jdk.jfr.EventType.getEventType(ClientTransportBoundary.class);
-        public String stage, traceId;
+        public String stage;
         public long commandIdHigh, commandIdLow, observedNanos;
 
-        static void record(String stage, UUID id, String traceId) {
+        static void record(String stage, UUID id) {
             if ((id.hashCode() & 63) != 0 || !TYPE.isEnabled()) return;
             long observed = System.nanoTime();
             var event = new ClientTransportBoundary();
             event.stage = stage;
-            event.traceId = traceId;
             event.commandIdHigh = id.getMostSignificantBits();
             event.commandIdLow = id.getLeastSignificantBits();
             event.observedNanos = observed;
@@ -993,7 +981,7 @@ public final class AeronClientPool implements AutoCloseable {
                     request.message = CoreMessage.owned(CoreMessageHeader.command(request.commandType,
                             request.operationId, productLine, CommandSource.GATEWAY, lane.sourceId,
                             ++lane.nextSequence, request.commandUserId, request.commandSubmittedMillis,
-                            request.correlationId, request.traceId), request.commandPayload);
+                            request.correlationId), request.commandPayload);
                     request.commandType = null;
                     request.commandPayload = null;
                 }
@@ -1004,7 +992,7 @@ public final class AeronClientPool implements AutoCloseable {
                 return;
             }
             if (offerResult > 0) {
-                ClientTransportBoundary.record("offered", request.operationId, request.traceId);
+                ClientTransportBoundary.record("offered", request.operationId);
                 lane.connected();
                 if (!request.oneWay()) {
                     request.deadlineNanos = System.nanoTime() + responseTimeout.toNanos();
@@ -1215,7 +1203,6 @@ public final class AeronClientPool implements AutoCloseable {
     private static final class Request {
         private final AgentLane owner;
         private CoreMessage message;
-        private String traceId;
         private long correlationId;
         private CoreMessageType commandType;
         private long commandUserId;
@@ -1247,16 +1234,6 @@ public final class AeronClientPool implements AutoCloseable {
 
         private void reset(CoreMessage message, UUID operationId, RequestMode mode,
                            CommandAdmissionCallback admissionCallback, boolean preparedCorrelation) {
-            if (message != null) {
-                this.traceId = !message.header().traceId().isEmpty()
-                        ? message.header().traceId()
-                        : operationId.toString();
-            } else {
-                String currentTrace = org.slf4j.MDC.get("traceId");
-                this.traceId = currentTrace != null
-                        ? com.surprising.aeron.protocol.TraceIds.validate(currentTrace)
-                        : operationId.toString();
-            }
             this.message = message;
             this.correlationId = message == null ? 0 : message.header().correlationId();
             this.commandType = null;
@@ -1330,18 +1307,16 @@ public final class AeronClientPool implements AutoCloseable {
             if (!claimCompletion()) {
                 return;
             }
-            try (var trace = new TraceScope(traceId)) {
-                CompletableFuture<Long> future = admissionFuture;
-                CommandAdmissionCallback callback = admissionCallback;
-                UUID commandId = operationId;
-                if (future != null) {
-                    future.complete(offerResult);
-                }
-                try {
-                    invokeCallback(callback, commandId, TryCommandResult.SENT);
-                } finally {
-                    owner.recycle(this);
-                }
+            CompletableFuture<Long> future = admissionFuture;
+            CommandAdmissionCallback callback = admissionCallback;
+            UUID commandId = operationId;
+            if (future != null) {
+                future.complete(offerResult);
+            }
+            try {
+                invokeCallback(callback, commandId, TryCommandResult.SENT);
+            } finally {
+                owner.recycle(this);
             }
         }
 
@@ -1349,42 +1324,38 @@ public final class AeronClientPool implements AutoCloseable {
             if (!claimCompletion()) {
                 return;
             }
-            try (var trace = new TraceScope(traceId)) {
-                ClientTransportBoundary.record("delivered", operationId, traceId);
-                CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
-                CompletableFuture<CoreResponse> result = responseFuture;
-                if (outcome != null) {
-                    outcome.complete(new CoreCommandOutcome.Terminal(response));
-                } else if (result != null) {
-                    result.complete(response);
-                }
-                owner.recycle(this);
+            ClientTransportBoundary.record("delivered", operationId);
+            CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
+            CompletableFuture<CoreResponse> result = responseFuture;
+            if (outcome != null) {
+                outcome.complete(new CoreCommandOutcome.Terminal(response));
+            } else if (result != null) {
+                result.complete(response);
             }
+            owner.recycle(this);
         }
 
         private void notAccepted(CoreCommandOutcome.NotAccepted rejection) {
             if (!claimCompletion()) {
                 return;
             }
-            try (var trace = new TraceScope(traceId)) {
-                CompletableFuture<Long> admission = admissionFuture;
-                CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
-                CompletableFuture<CoreResponse> result = responseFuture;
-                CommandAdmissionCallback callback = admissionCallback;
-                UUID commandId = operationId;
-                if (admission != null) {
-                    admission.complete(rejection.rawOfferResult());
-                }
-                if (outcome != null) {
-                    outcome.complete(rejection);
-                } else if (result != null) {
-                    result.completeExceptionally(new CoreCommandOutcome.NotAcceptedException(rejection));
-                }
-                try {
-                    invokeCallback(callback, commandId, mapTryCommandResult(rejection.rawOfferResult()));
-                } finally {
-                    owner.recycle(this);
-                }
+            CompletableFuture<Long> admission = admissionFuture;
+            CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
+            CompletableFuture<CoreResponse> result = responseFuture;
+            CommandAdmissionCallback callback = admissionCallback;
+            UUID commandId = operationId;
+            if (admission != null) {
+                admission.complete(rejection.rawOfferResult());
+            }
+            if (outcome != null) {
+                outcome.complete(rejection);
+            } else if (result != null) {
+                result.completeExceptionally(new CoreCommandOutcome.NotAcceptedException(rejection));
+            }
+            try {
+                invokeCallback(callback, commandId, mapTryCommandResult(rejection.rawOfferResult()));
+            } finally {
+                owner.recycle(this);
             }
         }
 
@@ -1392,43 +1363,39 @@ public final class AeronClientPool implements AutoCloseable {
             if (!claimCompletion()) {
                 return;
             }
-            try (var trace = new TraceScope(traceId)) {
-                CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
-                CompletableFuture<CoreResponse> result = responseFuture;
-                UUID commandId = operationId;
-                if (outcome != null) {
-                    outcome.complete(new CoreCommandOutcome.ResultUnknown(commandId));
-                } else if (result != null) {
-                    result.completeExceptionally(new ResultUnknownException(commandId,
-                            "Aeron request was admitted but its result is unknown"));
-                }
-                owner.recycle(this);
+            CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
+            CompletableFuture<CoreResponse> result = responseFuture;
+            UUID commandId = operationId;
+            if (outcome != null) {
+                outcome.complete(new CoreCommandOutcome.ResultUnknown(commandId));
+            } else if (result != null) {
+                result.completeExceptionally(new ResultUnknownException(commandId,
+                        "Aeron request was admitted but its result is unknown"));
             }
+            owner.recycle(this);
         }
 
         private void fail(RuntimeException failure) {
             if (!claimCompletion()) {
                 return;
             }
-            try (var trace = new TraceScope(traceId)) {
-                CompletableFuture<Long> admission = admissionFuture;
-                CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
-                CompletableFuture<CoreResponse> result = responseFuture;
-                CommandAdmissionCallback callback = admissionCallback;
-                UUID commandId = operationId;
-                if (admission != null) {
-                    admission.completeExceptionally(failure);
-                }
-                if (outcome != null) {
-                    outcome.completeExceptionally(failure);
-                } else if (result != null) {
-                    result.completeExceptionally(failure);
-                }
-                try {
-                    invokeCallback(callback, commandId, TryCommandResult.UNAVAILABLE);
-                } finally {
-                    owner.recycle(this);
-                }
+            CompletableFuture<Long> admission = admissionFuture;
+            CompletableFuture<CoreCommandOutcome> outcome = commandFuture;
+            CompletableFuture<CoreResponse> result = responseFuture;
+            CommandAdmissionCallback callback = admissionCallback;
+            UUID commandId = operationId;
+            if (admission != null) {
+                admission.completeExceptionally(failure);
+            }
+            if (outcome != null) {
+                outcome.completeExceptionally(failure);
+            } else if (result != null) {
+                result.completeExceptionally(failure);
+            }
+            try {
+                invokeCallback(callback, commandId, TryCommandResult.UNAVAILABLE);
+            } finally {
+                owner.recycle(this);
             }
         }
 
@@ -1449,7 +1416,6 @@ public final class AeronClientPool implements AutoCloseable {
 
         private void clear() {
             message = null;
-            traceId = null;
             commandType = null;
             commandPayload = null;
             correlationId = 0;

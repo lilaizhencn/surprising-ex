@@ -12,7 +12,7 @@ class PublishedEmbeddedSnapshotTest {
     void readsPublishedAlgoWithoutDependingOnInterfaceCodec() throws Exception {
         var expected = new CoreAlgoOrderView(7, 11, "client-7", "1", 0, CoreOrderSide.BUY,
                 0, 100, 25, 10, 40, CoreMarginMode.CROSS, CorePositionSide.NET, false, false,
-                CoreTimeInForce.IOC, 1, 91, "", "trace", 1, 2, 0, 1, 2, 3, List.of(91L), 25, 0, 0);
+                CoreTimeInForce.IOC, 1, 91, "", 1, 2, 0, 1, 2, 3, List.of(91L), 25, 0, 0);
         byte[] data = read("published-algo-v1.bin");
         assertThat(TradingSnapshotV36Reader.readPublishedAlgo(data)).isEqualTo(expected);
         assertThatThrownBy(() -> TradingSnapshotV36Reader.readPublishedAlgo(Arrays.copyOf(data, data.length - 1)))
@@ -40,7 +40,7 @@ class PublishedEmbeddedSnapshotTest {
                 "tp-501", "oco-1", "1", CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
                 CoreTriggerCondition.GREATER_OR_EQUAL, 70000, 0, 0, 0, 0, 0, CoreOrderType.MARKET,
                 CoreTimeInForce.IOC, 0, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
-                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "追踪", 0, 0, 1000, 1000, 1, -25, 40, source);
+                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 1000, 1000, 1, -25, 40, source);
     }
 
     private static byte[] read(String file) throws Exception {

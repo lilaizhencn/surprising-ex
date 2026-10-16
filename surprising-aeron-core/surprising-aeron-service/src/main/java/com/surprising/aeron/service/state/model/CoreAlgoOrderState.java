@@ -14,7 +14,7 @@ public record CoreAlgoOrderState(
         CoreOrderSide side, long priceTicks, long quantitySteps, long childQuantitySteps,
         long intervalSeconds, long durationSeconds, CoreMarginMode marginMode, CorePositionSide positionSide,
         boolean reduceOnly, boolean postOnly, CoreTimeInForce timeInForce, int statusCode,
-        long currentOrderId, String rejectReason, String traceId, long startAtEpochMillis,
+        long currentOrderId, String rejectReason, long startAtEpochMillis,
         long nextSliceAtEpochMillis, long completedAtEpochMillis, long createdAtEpochMillis,
         long updatedAtEpochMillis, long revision, List<Long> childOrderIds) {
 
@@ -22,7 +22,6 @@ public record CoreAlgoOrderState(
         clientAlgoOrderId = clientAlgoOrderId == null ? "" : clientAlgoOrderId;
         instrumentId = OrderReservation.requireInstrumentId(instrumentId);
         rejectReason = rejectReason == null ? "" : rejectReason;
-        traceId = traceId == null ? "" : traceId;
         childOrderIds = List.copyOf(childOrderIds);
         if (algoOrderId <= 0 || userId <= 0 || algoTypeCode < 0 || side == null || quantitySteps <= 0
                 || childQuantitySteps <= 0 || intervalSeconds <= 0 || durationSeconds <= 0 || marginMode == null
@@ -38,7 +37,7 @@ public record CoreAlgoOrderState(
                 value.algoTypeCode(), value.side(), value.priceTicks(), value.quantitySteps(), value.childQuantitySteps(),
                 value.intervalSeconds(), value.durationSeconds(), value.marginMode(), value.positionSide(), value.reduceOnly(),
                 value.postOnly(), value.timeInForce(), value.statusCode(), value.currentOrderId(), value.rejectReason(),
-                value.traceId(), value.startAtEpochMillis(), value.nextSliceAtEpochMillis(), value.completedAtEpochMillis(),
+                value.startAtEpochMillis(), value.nextSliceAtEpochMillis(), value.completedAtEpochMillis(),
                 value.createdAtEpochMillis(), value.updatedAtEpochMillis(), value.revision(), value.childOrderIds());
     }
 

@@ -137,7 +137,7 @@ class TriggerOrderIndexTest {
                 CoreTriggerOrderType.STOP_LOSS,
                 CoreTriggerCondition.GREATER_OR_EQUAL, price, 0, 0, 0, 0, 0,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
-                CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "",
+                CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "",
                 0, 0, 1, 1, 1);
     }
 
@@ -151,7 +151,7 @@ class TriggerOrderIndexTest {
                     CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0, 0, 0, 0,
                     CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1, CoreMarginMode.CROSS,
                     CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "",
-                    "trace-" + id, 0, 0, 1, 1, 1));
+                    0, 0, 1, 1, 1));
         }
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 0,
                 Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(), Map.of(),
@@ -232,6 +232,6 @@ class TriggerOrderIndexTest {
                 CoreTriggerOrderType.TRAILING_STOP, CoreTriggerCondition.GREATER_OR_EQUAL, 0,
                 activationPrice, callbackRate, highest, lowest, activatedAt, CoreOrderType.MARKET,
                 CoreTimeInForce.IOC, 0, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
-                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "trace-" + id, 0, 0, 1, 1, 1);
+                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 1, 1, 1);
     }
 }

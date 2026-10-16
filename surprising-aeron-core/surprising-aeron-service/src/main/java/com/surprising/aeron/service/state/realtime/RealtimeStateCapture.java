@@ -37,7 +37,6 @@ public final class RealtimeStateCapture {
 
     private long sequence, timestamp, snapshotId;
     private int ordinal;
-    private String traceId;
     private long failures;
     private long exportSequence;
     private long previousExportSequence;
@@ -54,12 +53,6 @@ public final class RealtimeStateCapture {
     }
 
     public void begin(long position, long time, long snapshot, long previousExportSequence) {
-        begin(position, time, snapshot, previousExportSequence,
-                (snapshot == 0 ? "core-" : "snapshot-") + product.name() + "-" + (snapshot == 0 ? position : snapshot));
-    }
-
-    public void begin(long position, long time, long snapshot, long previousExportSequence, String traceId) {
-        this.traceId = TraceIds.validate(traceId);
         this.previousExportSequence = previousExportSequence;
         this.exportSequence = previousExportSequence;
         sequence = position;
@@ -69,7 +62,7 @@ public final class RealtimeStateCapture {
         outbox.begin();
         if (snapshot == 0) {
             outbox.stage(RealtimeFrameCodec.encodeLongPayload(
-                    product, RealtimeFrame.Kind.COMMIT_BEGIN, 0, sequence, ordinal++, timestamp, snapshotId, "", "", previousExportSequence, traceId));
+                    product, RealtimeFrame.Kind.COMMIT_BEGIN, 0, sequence, ordinal++, timestamp, snapshotId, "", "", previousExportSequence));
         }
     }
 
@@ -89,7 +82,7 @@ public final class RealtimeStateCapture {
                 return;
             }
             outbox.stage(RealtimeFrameCodec.encodeLongPayload(
-                    product, RealtimeFrame.Kind.COMMIT_END, 0, sequence, ordinal++, timestamp, snapshotId, "", "", exportSequence, traceId));
+                    product, RealtimeFrame.Kind.COMMIT_END, 0, sequence, ordinal++, timestamp, snapshotId, "", "", exportSequence));
         }
         outbox.commit();
     }
@@ -121,7 +114,7 @@ public final class RealtimeStateCapture {
                                 snapshotId,
                                 instrumentId,
                                 key,
-                                payload, traceId));
+                                payload));
     }
 
     public void snapshot(long userId, RealtimeUserSnapshot snapshot, long exportSequence) {
@@ -186,7 +179,7 @@ public final class RealtimeStateCapture {
         snapshot.triggers().forEach(this::trigger);
         snapshot.risks().forEach(this::risk);
         outbox.stage(RealtimeFrameCodec.encodeLongPayload(
-                product, RealtimeFrame.Kind.SNAPSHOT_END, userId, sequence, ordinal++, timestamp, snapshotId, "", "", exportSequence, traceId));
+                product, RealtimeFrame.Kind.SNAPSHOT_END, userId, sequence, ordinal++, timestamp, snapshotId, "", "", exportSequence));
     }
 
     public void user(CoreUserStateView view) {
@@ -325,7 +318,7 @@ public final class RealtimeStateCapture {
 
     public void order(CoreOrderStateView o) {
         if (!active()) return;
-        outbox.stage(RealtimeFrameCodec.encodeOrder(o, sequence, ordinal++, timestamp, snapshotId, traceId));
+        outbox.stage(RealtimeFrameCodec.encodeOrder(o, sequence, ordinal++, timestamp, snapshotId));
     }
 
     public void trigger(CoreTriggerOrderState t) {
@@ -377,7 +370,7 @@ public final class RealtimeStateCapture {
         String instrumentId = identities.instrumentId(takerSymbolId);
         outbox.stage(RealtimeFrameCodec.encodeTradePayload(
                 product, sequence, ordinal++, timestamp, snapshotId, instrumentId, id,
-                price, quantity, matcherSequence, (byte) takerSide.ordinal(), traceId));
+                price, quantity, matcherSequence, (byte) takerSide.ordinal()));
         execution(
                 takerUserId,
                 takerOrderId,
@@ -409,7 +402,7 @@ public final class RealtimeStateCapture {
             boolean maker) {
         outbox.stage(RealtimeFrameCodec.encodeExecutionPayload(
                 product, user, sequence, ordinal++, timestamp, snapshotId, instrumentId, id,
-                order, price, quantity, (byte) side.ordinal(), maker, traceId));
+                order, price, quantity, (byte) side.ordinal(), maker));
     }
 
     public void risk(RiskSnapshotRuntime risk) {
@@ -421,6 +414,6 @@ public final class RealtimeStateCapture {
                 instrumentId + ":" + risk.positionSide(),
                 risk.priceSequence(), risk.equityUnits(), risk.unrealizedPnlUnits(),
                 risk.maintenanceMarginUnits(), risk.marginRatioPpm(),
-                (byte) risk.positionSide().ordinal(), (byte) risk.status().ordinal(), traceId));
+                (byte) risk.positionSide().ordinal(), (byte) risk.status().ordinal()));
     }
 }
