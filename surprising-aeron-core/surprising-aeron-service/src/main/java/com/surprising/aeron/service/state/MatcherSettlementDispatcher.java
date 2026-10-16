@@ -210,8 +210,8 @@ final class MatcherSettlementDispatcher {
                 event.execute(owner.accountLanes[laneId]);
             } else {
                 owner.releaseOwnerLaneAccess();
-                owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
-                        owner.accountLaneQueueHighWaterMarks[laneId], owner.laneWorkers[laneId].depth() + 1);
+                int highWater = owner.accountLanes[laneId].updateQueueHighWaterMark(owner.laneWorkers[laneId].depth() + 1);
+                owner.accountLaneQueueHighWaterMarks[laneId] = highWater;
                 owner.laneWorkers[laneId].submit(event);
             }
         }

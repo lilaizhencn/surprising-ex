@@ -428,7 +428,7 @@ final class CoreMatchingFlow {
             } else {
                 ResolvedPlaceOrder admitted = owner.runtimeState.collectPlaceAdmission(admission);
                 pending.admissionCompleted(admitted);
-                if (owner.realtimeCapture != null) pending.realtimeResolvedTakerOrder = admitted;
+                if (owner.realtimeCapture != null) pending.place.realtimeResolvedTakerOrder = admitted;
             }
             pending.markPlaceAdmissionOwnerCollected();
         }

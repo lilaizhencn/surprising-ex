@@ -97,6 +97,38 @@ public final class AccountLaneState {
     final RuntimeDerivativeFillCalculator.FillCursor singleFillCursor = new RuntimeDerivativeFillCalculator.FillCursor();
     final RuntimeDerivativeFillCalculator.FillCursor takerFillCursor = new RuntimeDerivativeFillCalculator.FillCursor();
 
+    private final long[] completedOperations = new long[AccountLaneOperationType.values().length];
+    private final long[] latencySamples = new long[AccountLaneOperationType.values().length];
+    private final long[] totalLatencyNanos = new long[AccountLaneOperationType.values().length];
+    private final long[] maxLatencyNanos = new long[AccountLaneOperationType.values().length];
+    private volatile int queueHighWaterMark;
+
+    public void recordOperation(AccountLaneOperationType operation, long latencyNanos) {
+        int index = operation.ordinal();
+        completedOperations[index]++;
+        latencySamples[index]++;
+        totalLatencyNanos[index] = Math.addExact(totalLatencyNanos[index], latencyNanos);
+        maxLatencyNanos[index] = Math.max(maxLatencyNanos[index], latencyNanos);
+    }
+
+    public int updateQueueHighWaterMark(int depth) {
+        int current = queueHighWaterMark;
+        if (depth > current) {
+            queueHighWaterMark = depth;
+            return depth;
+        }
+        return current;
+    }
+
+    public int queueHighWaterMark() {
+        return queueHighWaterMark;
+    }
+
+    public long[] completedOperations() { return completedOperations; }
+    public long[] latencySamples() { return latencySamples; }
+    public long[] totalLatencyNanos() { return totalLatencyNanos; }
+    public long[] maxLatencyNanos() { return maxLatencyNanos; }
+
     CoreTriggerOrderState putTrigger(CoreTriggerOrderState value) {
         CoreTriggerOrderState previous = cold.triggerOrders.put(value.triggerOrderId(), value);
         if (previous != null && previous.userId() != value.userId()) unindexTrigger(previous);
@@ -252,6 +284,8 @@ public final class AccountLaneState {
             throw new IllegalStateException("account lane " + laneId + " is bound to another thread");
     }
 
+    private static final long[] EMPTY_METRIC_OPERATIONS = new long[com.surprising.aeron.protocol.CoreLaneMetricsView.OPERATION_TYPE_COUNT];
+
     /** Owner可观察原子原语计数，各字段允许独立滞后；没有账户读取或Lane作用域。 */
     void writeMetrics(com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder encoder,
                       int depth, int capacity, int highWater) {
@@ -259,9 +293,23 @@ public final class AccountLaneState {
         long applied = Math.max(committed, (long) METRIC_APPLIED.getOpaque(this));
         encoder.writeLane(laneId, (long) METRIC_REVISION.getOpaque(this), applied, committed,
                 depth, capacity, highWater, 0, 0);
-        long settlements = (long) METRIC_SETTLEMENTS.getOpaque(this);
-        encoder.addOperation(laneId, AccountLaneOperationType.SETTLEMENT.ordinal(),
-                settlements, settlements, (long) METRIC_LATENCY.getOpaque(this), (long) METRIC_MAX_LATENCY.getOpaque(this));
+        encoder.writeOperations(laneId, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS);
+        for (int op = 0; op < completedOperations.length; op++) {
+            long completed = completedOperations[op];
+            long samples = latencySamples[op];
+            long total = totalLatencyNanos[op];
+            long max = maxLatencyNanos[op];
+            if (op == AccountLaneOperationType.SETTLEMENT.ordinal()) {
+                long settlements = (long) METRIC_SETTLEMENTS.getOpaque(this);
+                if (settlements > completed) {
+                    completed = settlements;
+                    samples = settlements;
+                    total = (long) METRIC_LATENCY.getOpaque(this);
+                    max = (long) METRIC_MAX_LATENCY.getOpaque(this);
+                }
+            }
+            encoder.addOperation(laneId, op, completed, samples, total, max);
+        }
     }
 
     public int laneId() { return laneId; }

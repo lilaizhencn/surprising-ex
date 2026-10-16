@@ -513,4 +513,71 @@ public final class TreasuryRuntime {
                     ordersComplete, 0, nextCursorOrderId, nextCursorUserId, commandId);
         }
     }
+
+    public static final int MAX_PENDING_TRANSFERS = 131_072;
+    private final java.util.NavigableMap<Long, Long> pendingTransferUsers = new java.util.TreeMap<>();
+    private long pendingTransferQueryAfterId;
+
+    public boolean hasPendingTransferCapacity() {
+        return pendingTransferUsers.size() < MAX_PENDING_TRANSFERS;
+    }
+
+    public int pendingTransferCount() {
+        return pendingTransferUsers.size();
+    }
+
+    public long pendingTransferUser(long transferId) {
+        return pendingTransferUsers.getOrDefault(transferId, 0L);
+    }
+
+    public void registerPendingTransferRoute(long id, long userId) {
+        if (!hasPendingTransferCapacity() || pendingTransferUsers.putIfAbsent(id, userId) != null)
+            throw new IllegalStateException("completed transfer route was not reserved");
+    }
+
+    public void completePendingTransferRoute(long id, long userId) {
+        Long previous = pendingTransferUsers.get(id);
+        if (previous != null && previous != userId) throw new IllegalStateException("transfer route owner changed");
+        pendingTransferUsers.remove(id);
+    }
+
+    public record PendingTransferRoutes(long[] ids, long[] users, long laneMask) { }
+
+    public PendingTransferRoutes pendingTransferRoutes(int limit, java.util.function.LongUnaryOperator laneMaskProvider) {
+        if (limit <= 0 || limit > com.surprising.aeron.protocol.CorePendingTransferCodec.MAX_RESULTS)
+            throw new IllegalArgumentException("invalid pending transfer limit");
+        var tail = pendingTransferUsers.tailMap(pendingTransferQueryAfterId, false);
+        if (tail.isEmpty()) tail = pendingTransferUsers;
+        int count = Math.min(limit, pendingTransferUsers.size());
+        long[] ids = new long[count], users = new long[count];
+        long laneMask = 0;
+        int index = 0;
+        for (var entry : tail.entrySet()) {
+            if (index == count) break;
+            ids[index] = entry.getKey();
+            users[index] = entry.getValue();
+            if (laneMaskProvider != null) {
+                laneMask |= laneMaskProvider.applyAsLong(entry.getValue());
+            }
+            index++;
+        }
+        if (index != count) {
+            ids = java.util.Arrays.copyOf(ids, index);
+            users = java.util.Arrays.copyOf(users, index);
+        }
+        return new PendingTransferRoutes(ids, users, laneMask);
+    }
+
+    public void completePendingTransferPage(long lastId) {
+        pendingTransferQueryAfterId = lastId;
+    }
+
+    public void clearPendingTransfers() {
+        pendingTransferUsers.clear();
+        pendingTransferQueryAfterId = 0;
+    }
+
+    public void restorePendingTransferRoute(long id, long userId) {
+        pendingTransferUsers.put(id, userId);
+    }
 }

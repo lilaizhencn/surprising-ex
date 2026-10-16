@@ -104,7 +104,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     final PendingReservationTracker pendingReservations = new PendingReservationTracker(this);
 
     /** 尚未完成的资金转账容量上限。 */
-    public static final int MAX_PENDING_TRANSFERS = 131_072;
+    public static final int MAX_PENDING_TRANSFERS = TreasuryRuntime.MAX_PENDING_TRANSFERS;
     /** 控制命令等同步提交边界等待 Lane 的最长时间，单位为纳秒。 */
     static final long LANE_COMMIT_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
     /** 变更键缓冲触发压缩的数量阈值。 */
@@ -205,11 +205,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 用户手续费策略状态，参与持久化与恢复。 */
     /** Lane 0 writes active fee configuration; readers retain immutable versions. */
     private volatile FeePolicyBook feePolicies = FeePolicyBook.EMPTY;
-    /** 尚未结束的跨账户资金转账，完成后移除。 */
-    /** Owner retains transfer identity routing/capacity only; the full command lives in its account Lane. */
-    private final java.util.NavigableMap<Long, Long> pendingTransferUsers = new TreeMap<>();
-    /** Owner-only query cursor; not a money fact. Recovery starts a new fair scan from zero. */
-    private long pendingTransferQueryAfterId;
     final Object[] laneMutationTasks;
 
     /** 当前执行范围复用的 matcherSettlementRemaining 临时缓冲，不保存第二份业务状态。 */
@@ -327,10 +322,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.laneMutationStartedNanosScratch = new long[topology.accountLaneCount()];
         this.laneMutationResultsScratch = new Object[topology.accountLaneCount()];
         this.accountLaneQueueHighWaterMarks = new int[topology.accountLaneCount()];
-        this.accountLaneCompletedOperations = laneMetricValues(topology.accountLaneCount());
-        this.accountLaneLatencySamples = laneMetricValues(topology.accountLaneCount());
-        this.accountLaneTotalLatencyNanos = laneMetricValues(topology.accountLaneCount());
-        this.accountLaneMaxLatencyNanos = laneMetricValues(topology.accountLaneCount());
+        this.accountLaneCompletedOperations = new long[topology.accountLaneCount()][];
+        this.accountLaneLatencySamples = new long[topology.accountLaneCount()][];
+        this.accountLaneTotalLatencyNanos = new long[topology.accountLaneCount()][];
+        this.accountLaneMaxLatencyNanos = new long[topology.accountLaneCount()][];
         this.publishedLaneCommittedSequences = new long[topology.accountLaneCount()];
         this.publishedLaneCommittedSlots = new PaddedCommittedSequenceSlot[topology.accountLaneCount()];
         for (int i = 0; i < topology.accountLaneCount(); i++) {
@@ -340,6 +335,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.dispatchedLaneCommitSequences = new long[topology.accountLaneCount()];
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
+            accountLaneCompletedOperations[laneId] = accountLanes[laneId].completedOperations();
+            accountLaneLatencySamples[laneId] = accountLanes[laneId].latencySamples();
+            accountLaneTotalLatencyNanos[laneId] = accountLanes[laneId].totalLatencyNanos();
+            accountLaneMaxLatencyNanos[laneId] = accountLanes[laneId].maxLatencyNanos();
             placeAdmissionReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
             matcherSettlementReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
             publishLaneCommittedSequence(accountLanes[laneId]);
@@ -393,9 +392,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         return worker == null ? 0 : Math.max(0, worker.depth());
     }
 
-    private static final java.lang.invoke.VarHandle METRIC_LONGS = java.lang.invoke.MethodHandles.arrayElementVarHandle(long[].class);
-    private static final long[] EMPTY_METRIC_OPERATIONS = new long[com.surprising.aeron.protocol.CoreLaneMetricsView.OPERATION_TYPE_COUNT];
-
     /** 指标是非fence观测；Owner只读原子计数，不进入账户作用域或收集业务回执。 */
     public void writeAccountLaneMetrics(int laneId, com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder encoder) {
         assertOwner();
@@ -405,15 +401,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         int depth = laneWorkerDepth(laneId);
         int capacity = laneWorkers[laneId] == null ? accountLanes[laneId].queueCapacity() : laneWorkers[laneId].metricsQueueCapacity();
         int highWater = Math.max(accountLaneQueueHighWaterMarks[laneId], depth);
+        highWater = accountLanes[laneId].updateQueueHighWaterMark(highWater);
         accountLaneQueueHighWaterMarks[laneId] = highWater; // 指标采样所见的高水位，不声称捕获每次入队。
-        encoder.writeOperations(laneId, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS);
-        for (int operation = 0; operation < EMPTY_METRIC_OPERATIONS.length; operation++) {
-            encoder.addOperation(laneId, operation,
-                    (long) METRIC_LONGS.getOpaque(accountLaneCompletedOperations[laneId], operation),
-                    (long) METRIC_LONGS.getOpaque(accountLaneLatencySamples[laneId], operation),
-                    (long) METRIC_LONGS.getOpaque(accountLaneTotalLatencyNanos[laneId], operation),
-                    (long) METRIC_LONGS.getOpaque(accountLaneMaxLatencyNanos[laneId], operation));
-        }
         accountLanes[laneId].writeMetrics(encoder, depth, capacity, highWater);
     }
 
@@ -1166,22 +1155,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (failure != null) throw new IllegalStateException("Core workers stopped with a failure", failure);
     }
 
-    static long[][] laneMetricValues(int laneCount) {
-        long[][] values = new long[laneCount][];
-        for (int laneId = 0; laneId < laneCount; laneId++) {
-            values[laneId] = new long[AccountLaneOperationType.values().length];
-        }
-        return values;
-    }
-
     void recordLaneOperation(int laneId, AccountLaneOperationType operation, long latencyNanos) {
-        int operationIndex = operation.ordinal();
-        accountLaneCompletedOperations[laneId][operationIndex]++;
-        accountLaneLatencySamples[laneId][operationIndex]++;
-        accountLaneTotalLatencyNanos[laneId][operationIndex] = Math.addExact(
-                accountLaneTotalLatencyNanos[laneId][operationIndex], latencyNanos);
-        accountLaneMaxLatencyNanos[laneId][operationIndex] = Math.max(
-                accountLaneMaxLatencyNanos[laneId][operationIndex], latencyNanos);
+        accountLanes[laneId].recordOperation(operation, latencyNanos);
     }
 
     void recordMatcherLaneOperation(AccountLaneState lane, long latencyNanos) {
@@ -3441,7 +3416,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     public long pendingTransferUser(long transferId) {
         assertOwner();
         if (currentLaneCommandScope() != null) throw new IllegalStateException("transfer routing belongs to Owner");
-        return pendingTransferUsers.getOrDefault(transferId, 0L);
+        return treasury.pendingTransferUser(transferId);
     }
 
     public TransferRuntime pendingTransfer(long transferId) {
@@ -3467,30 +3442,13 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public PendingTransferRoutes pendingTransferRoutes(int limit) {
         assertOwner();
-        if (limit <= 0 || limit > com.surprising.aeron.protocol.CorePendingTransferCodec.MAX_RESULTS)
-            throw new IllegalArgumentException("invalid pending transfer limit");
-        var tail = pendingTransferUsers.tailMap(pendingTransferQueryAfterId, false);
-        if (tail.isEmpty()) tail = pendingTransferUsers;
-        // A sub-map size() scans its entire tail; pagination touches at most the requested IDs.
-        int count = Math.min(limit, pendingTransferUsers.size());
-        long[] ids = new long[count], users = new long[count];
-        long laneMask = 0;
-        int index = 0;
-        for (var entry : tail.entrySet()) {
-            if (index == count) break;
-            ids[index] = entry.getKey(); users[index++] = entry.getValue();
-            laneMask |= topology.accountLaneMask(entry.getValue());
-        }
-        if (index != count) {
-            ids = java.util.Arrays.copyOf(ids, index);
-            users = java.util.Arrays.copyOf(users, index);
-        }
-        return new PendingTransferRoutes(ids, users, laneMask);
+        TreasuryRuntime.PendingTransferRoutes routes = treasury.pendingTransferRoutes(limit, topology::accountLaneMask);
+        return new PendingTransferRoutes(routes.ids(), routes.users(), routes.laneMask());
     }
 
     public void completePendingTransferPage(PendingTransferRoutes page) {
         assertOwner();
-        pendingTransferQueryAfterId = page.ids().length == 0 ? 0 : page.ids()[page.ids().length - 1];
+        treasury.completePendingTransferPage(page.ids().length == 0 ? 0 : page.ids()[page.ids().length - 1]);
     }
 
     public List<TransferRuntime> pendingTransfers(int limit) {
@@ -3510,31 +3468,27 @@ public final class TradingRuntimeState implements AutoCloseable {
                 || restored.entrySet().stream().anyMatch(entry -> entry.getKey() == null
                 || entry.getValue() == null || entry.getKey() != entry.getValue().transferId()))
             throw new IllegalArgumentException("invalid pending transfer snapshot");
-        pendingTransferUsers.clear();
+        treasury.clearPendingTransfers();
         for (AccountLaneState lane : accountLanes) lane.cold.pendingTransfers.clear();
         restored.forEach((id, transfer) -> {
-            pendingTransferUsers.put(id, transfer.userId());
+            treasury.restorePendingTransferRoute(id, transfer.userId());
             accountLanes[topology.accountLaneId(transfer.userId())].cold.pendingTransfers.put(id, transfer);
         });
-        pendingTransferQueryAfterId = 0;
     }
 
     boolean hasPendingTransferCapacity() {
         assertOwner();
-        return pendingTransferUsers.size() < MAX_PENDING_TRANSFERS;
+        return treasury.hasPendingTransferCapacity();
     }
 
     void registerPendingTransferRoute(long id, long userId) {
         assertOwner();
-        if (!hasPendingTransferCapacity() || pendingTransferUsers.putIfAbsent(id, userId) != null)
-            throw new IllegalStateException("completed transfer route was not reserved");
+        treasury.registerPendingTransferRoute(id, userId);
     }
 
     void completePendingTransferRoute(long id, long userId) {
         assertOwner();
-        Long previous = pendingTransferUsers.get(id);
-        if (previous != null && previous != userId) throw new IllegalStateException("transfer route owner changed");
-        pendingTransferUsers.remove(id);
+        treasury.completePendingTransferRoute(id, userId);
     }
 
     void putPendingTransfer(TransferRuntime transfer) {

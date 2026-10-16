@@ -1388,9 +1388,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
     void captureRealtimeTrades(CommandSlot pending) {
         var plan = pending.settlementPlan();
         OrderRuntime taker = pending.realtimeTakerOrder;
-        ResolvedPlaceOrder resolvedTaker = pending.realtimeResolvedTakerOrder;
+        ResolvedPlaceOrder resolvedTaker = pending.place.realtimeResolvedTakerOrder;
         pending.realtimeTakerOrder = null;
-        pending.realtimeResolvedTakerOrder = null;
+        pending.place.realtimeResolvedTakerOrder = null;
         if (realtimeCapture == null || !realtimeCapture.active()) return;
         try {
             for (int index = 0; index < plan.matcherEventCount(); index++) {

@@ -40,17 +40,16 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private boolean commitFenceEstablished;
     /** The preconstructed Direct settlement belongs to this command until terminal retirement. */
     private com.surprising.aeron.service.state.MatcherSettlementEvent settlementContinuation;
-    /** Normal PLACE admission runs alongside the settlement continuation. */
-    private PlaceAdmissionEvent placeAdmission;
-    private boolean placeAdmissionOwnerCollected;
-    private com.surprising.aeron.service.state.ReplacementAdmissionEvent replacementAdmission;
     private com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan;
-    /** 普通 PLACE 已在 Owner 解析，Lane 完成后直接复用该值，避免撮合命令副本。 */
-    private ResolvedPlaceOrder admittedPlaceOrder;
     private CoreMatchingOrder admittedMatchingOrder;
-    /** 已完成冻结的不可变触发子订单回执，仅保留到本命令槽释放。 */
-    private OrderRuntime triggerAdmissionOrder;
-    private com.surprising.aeron.service.state.model.CoreTriggerOrderState sourceTrigger;
+
+    /** 专有操作下沉上下文：将只被单个操作写入的字段从大槽中下沉隔离 */
+    final PlaceSlotContext place = new PlaceSlotContext();
+    final TriggerSlotContext trigger = new TriggerSlotContext();
+    final LiquidationSlotContext liquidation = new LiquidationSlotContext();
+    final DeferredSlotContext deferred = new DeferredSlotContext();
+    final ReplaceSlotContext replace = new ReplaceSlotContext();
+
     /**
      * Compact command lifecycle.  The slot is reused by the pending ring, so a byte is enough
      * to describe the owner-side admission/submission boundary without a second continuation map.
@@ -62,10 +61,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     static final byte MATCHER_DONE = 3;
     static final byte LANES_DONE = 4;
     static final byte COMMITTED = 5;
-    /** Deferred commands keep their replay fence in the slot instead of a boxed map entry. */
-    private long deferredClusterTimestamp;
-    private long deferredClusterPosition;
-    private TradingCoreRuntime.SourceKey deferredSourceKey;
     /** 跨分片清算撤单已进入异步协调队列，防止重复派发。 */
     boolean crossShardCancellationStarted;
     boolean clusterIndependent;
@@ -74,8 +69,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     /** 准入时固定的潜在成交账户分区，整个命令终态前保持不变。 */
     /** 派发前的不可变订单身份；仅实时推送启用时保留，提交后释放。 */
     com.surprising.aeron.service.state.OrderRuntime realtimeTakerOrder;
-    /** Normal PLACE reuses its immutable resolved input for realtime trade identity. */
-    ResolvedPlaceOrder realtimeResolvedTakerOrder;
     private boolean pipelinedSettlementCounted;
     /** Cached matcher shard for a non-batch command; stable until this slot is recycled. */
     private int cachedMatcherShard = -1;
@@ -85,9 +78,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     /** Slot-owned settlement continuation; retained across reuse to avoid per-command lambdas. */
     private com.surprising.aeron.service.state.RuntimeLifecycleSettlementContinuation.SettlementWork reusableSettlementWork;
     private final SettlementControlContinuation settlementControl = new SettlementControlContinuation();
-    private com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableLiquidationWork;
-    /** 仅强平命令首次使用时创建，随槽位复用的Lane前置校验。 */
-    private com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionCheck liquidationCheck;
     private final LiquidationExecutionContinuation liquidationExecutionControl =
             new LiquidationExecutionContinuation();
     /** Fixed task for the only admission-gated Matcher submission. */
@@ -260,17 +250,15 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     }
 
     com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionCheck liquidationCheck() {
-        if (liquidationCheck == null)
-            liquidationCheck = new com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionCheck();
-        return liquidationCheck;
+        return liquidation.check();
     }
 
     com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork liquidationWork() {
-        return reusableLiquidationWork;
+        return liquidation.reusableWork();
     }
 
     void liquidationWork(com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork work) {
-        reusableLiquidationWork = Objects.requireNonNull(work);
+        liquidation.reusableWork(work);
     }
 
     void deferLiquidationExecutionControl(OrderedCommitCoordinator coordinator,
@@ -362,23 +350,17 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         commitFenceClusterPosition = 0;
         commitFenceEstablished = false;
         settlementContinuation = null;
-        placeAdmission = null;
-        placeAdmissionOwnerCollected = false;
-        replacementAdmission = null;
+        place.clear();
+        replace.clear();
         settlementPlan = null;
         admittedMatchingOrder = null;
-        triggerAdmissionOrder = null;
-        sourceTrigger = null;
-        admittedPlaceOrder = null;
+        trigger.clear();
         matchingLifecycle = MATCHING_ADMITTED;
-        deferredClusterTimestamp = 0;
-        deferredClusterPosition = 0;
-        deferredSourceKey = null;
+        deferred.clear();
         crossShardCancellationStarted = false;
         clusterIndependent = false;
         ledgerDispatchClosed = false;
         realtimeTakerOrder = null;
-        realtimeResolvedTakerOrder = null;
         pipelinedSettlementCounted = false;
         cachedMatcherShard = -1;
         return this;
@@ -432,14 +414,14 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     RuntimeFundsAccumulator fundsAccumulator() { return fundsAccumulator; }
     DecodedMatchingCommand decodedCommand() { return decodedCommand; }
     ResolvedMatchingAdmission matchingAdmission() { return admission; }
-    com.surprising.aeron.service.state.ReplacementAdmissionEvent replacementAdmission() { return replacementAdmission; }
+    com.surprising.aeron.service.state.ReplacementAdmissionEvent replacementAdmission() { return replace.admission(); }
     void replacementAdmission(com.surprising.aeron.service.state.ReplacementAdmissionEvent event) {
-        if (event == null || replacementAdmission != null || operation != Operation.AMEND && operation != Operation.REPLACE)
+        if (event == null || replace.admission != null || operation != Operation.AMEND && operation != Operation.REPLACE)
             throw new IllegalStateException("invalid replacement admission slot");
-        replacementAdmission = event;
+        replace.admission(event);
     }
     com.surprising.aeron.service.state.ReplacementAdmissionEvent takeReplacementAdmission() {
-        var value = replacementAdmission; replacementAdmission = null; return value;
+        var value = replace.admission; replace.admission = null; return value;
     }
     com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent() {
         return settlementContinuation;
@@ -451,7 +433,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     }
     com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan() { return settlementPlan; }
     PlaceAdmissionEvent placeAdmission() {
-        return placeAdmission;
+        return place.admission();
     }
     boolean hasLaneContinuation() {
         return settlementContinuation != null;
@@ -461,38 +443,39 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         return settlementContinuation.complete();
     }
     PlaceAdmissionEvent takePlaceAdmission() {
-        PlaceAdmissionEvent value = placeAdmission;
-        placeAdmission = null;
+        PlaceAdmissionEvent value = place.admission;
+        place.admission = null;
         return value;
     }
     void placeAdmission(PlaceAdmissionEvent event) {
-        if (event == null || placeAdmission != null || operation != Operation.PLACE) {
+        if (event == null || place.admission != null || operation != Operation.PLACE) {
             throw new IllegalStateException("invalid place admission continuation");
         }
-        placeAdmission = event;
+        place.admission(event);
     }
     void admissionCompleted(ResolvedPlaceOrder resolvedOrder) {
-        if (resolvedOrder == null || placeAdmission() == null || admittedPlaceOrder != null
+        if (resolvedOrder == null || placeAdmission() == null || place.admittedOrder != null
                 || admittedMatchingOrder != null) {
             throw new IllegalStateException("invalid completed place admission");
         }
-        admittedPlaceOrder = resolvedOrder;
+        place.admittedOrder(resolvedOrder);
     }
-    boolean placeAdmissionOwnerCollected() { return placeAdmissionOwnerCollected; }
-    void markPlaceAdmissionOwnerCollected() { placeAdmissionOwnerCollected = true; }
-    ResolvedPlaceOrder admittedPlaceOrder() { return admittedPlaceOrder; }
+    boolean placeAdmissionOwnerCollected() { return place.ownerCollected(); }
+    void markPlaceAdmissionOwnerCollected() { place.markOwnerCollected(); }
+    ResolvedPlaceOrder admittedPlaceOrder() { return place.admittedOrder(); }
+    ResolvedPlaceOrder realtimeResolvedTakerOrder() { return place.realtimeResolvedTakerOrder; }
+    void realtimeResolvedTakerOrder(ResolvedPlaceOrder order) { place.realtimeResolvedTakerOrder = order; }
     CoreMatchingOrder admittedMatchingOrder() { return admittedMatchingOrder; }
     /** 沿用已完成冻结的不可变订单，触发续步不得再回读 Lane 的客户端订单索引。 */
-    com.surprising.aeron.service.state.model.CoreTriggerOrderState sourceTrigger() { return sourceTrigger; }
+    com.surprising.aeron.service.state.model.CoreTriggerOrderState sourceTrigger() { return trigger.sourceTrigger(); }
     void sourceTrigger(com.surprising.aeron.service.state.model.CoreTriggerOrderState value) {
-        if (value == null || sourceTrigger != null) throw new IllegalStateException("trigger receipt already bound");
-        sourceTrigger = value;
+        trigger.sourceTrigger(value);
     }
-    OrderRuntime triggerAdmissionOrder() { return triggerAdmissionOrder; }
+    OrderRuntime triggerAdmissionOrder() { return trigger.admissionOrder(); }
     void triggerAdmission(OrderRuntime order) {
         if (operation != Operation.TRIGGER || order == null || admittedMatchingOrder != null)
             throw new IllegalStateException("invalid trigger admission");
-        triggerAdmissionOrder = order;
+        trigger.admissionOrder(order);
         admittedMatchingOrder = new CoreMatchingOrder(order.orderId(), order.instrument().instrumentId(),
                 order.side(), order.orderType(), order.timeInForce(), order.matchingPriceTicks(),
                 order.remainingQuantitySteps(), CoreMatchingOrder.slippagePpm(order.productLine()));
@@ -540,20 +523,15 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         decodedCommand = null;
         admission = null;
         settlementContinuation = null;
-        placeAdmission = null;
-        placeAdmissionOwnerCollected = false;
-        replacementAdmission = null;
+        place.clear();
+        replace.clear();
         settlementPlan = null;
-        admittedPlaceOrder = null;
         admittedMatchingOrder = null;
-        triggerAdmissionOrder = null;
-        sourceTrigger = null;
+        trigger.clear();
+        liquidation.clear();
         realtimeTakerOrder = null;
-        realtimeResolvedTakerOrder = null;
         matchingLifecycle = MATCHING_ADMITTED;
-        deferredClusterTimestamp = 0;
-        deferredClusterPosition = 0;
-        deferredSourceKey = null;
+        deferred.clear();
         cachedMatcherShard = -1;
         reusableResolvedOrder.clear();
     }
@@ -562,9 +540,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         if (matchingLifecycle != MATCHING_ADMITTED || sourceKey == null) {
             throw new IllegalStateException("invalid deferred matching transition");
         }
-        deferredClusterTimestamp = clusterTimestamp;
-        deferredClusterPosition = clusterPosition;
-        deferredSourceKey = sourceKey;
+        deferred.set(clusterTimestamp, clusterPosition, sourceKey);
         matchingLifecycle = MATCHING_DEFERRED;
     }
     void activateDeferredMatching() {
@@ -572,9 +548,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             throw new IllegalStateException("matching command is not deferred");
         }
         matchingLifecycle = MATCHING_ADMITTED;
-        deferredClusterTimestamp = 0;
-        deferredClusterPosition = 0;
-        deferredSourceKey = null;
+        deferred.clear();
     }
     boolean deferredMatching() { return matchingLifecycle == MATCHING_DEFERRED; }
     void committed() {
@@ -582,15 +556,15 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     }
     long deferredClusterTimestamp() {
         if (!deferredMatching()) throw new IllegalStateException("matching command is not deferred");
-        return deferredClusterTimestamp;
+        return deferred.clusterTimestamp;
     }
     long deferredClusterPosition() {
         if (!deferredMatching()) throw new IllegalStateException("matching command is not deferred");
-        return deferredClusterPosition;
+        return deferred.clusterPosition;
     }
     TradingCoreRuntime.SourceKey deferredSourceKey() {
         if (!deferredMatching()) throw new IllegalStateException("matching command is not deferred");
-        return deferredSourceKey;
+        return deferred.sourceKey;
     }
 
     int cachedMatcherShard() { return cachedMatcherShard; }
@@ -822,8 +796,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private void clearLifecycleState() {
         clearMatchingControlContinuations();
         if (reusableSettlementWork != null) reusableSettlementWork.clearReferences();
-        if (reusableLiquidationWork != null) reusableLiquidationWork.clearReferences();
-        if (liquidationCheck != null) liquidationCheck.clearReferences();
+        liquidation.clear();
         controlWork = null;
         controlPending = false;
         controlAccountsCommitted = false;
@@ -842,12 +815,10 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         commitSnapshotProvisionalOnly = false;
         commitContextActive = false;
         matchingRejection = null;
-        placeAdmission = null;
-        replacementAdmission = null;
+        place.clear();
+        replace.clear();
         matchingLifecycle = MATCHING_ADMITTED;
-        deferredClusterTimestamp = 0;
-        deferredClusterPosition = 0;
-        deferredSourceKey = null;
+        deferred.clear();
         cachedMatcherShard = -1;
         laneResultTarget.clear();
     }
@@ -1267,8 +1238,113 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             capturedMask = 0;
             prepared = false;
             response = null;
-            responseLength = 0;
-            responseSlot = null;
+        }
+    }
+
+    /**
+     * 下沉上下文：普通 PLACE 操作专有生命周期状态。
+     */
+    static final class PlaceSlotContext {
+        PlaceAdmissionEvent admission;
+        boolean ownerCollected;
+        ResolvedPlaceOrder admittedOrder;
+        ResolvedPlaceOrder realtimeResolvedTakerOrder;
+
+        PlaceAdmissionEvent admission() { return admission; }
+        void admission(PlaceAdmissionEvent event) { this.admission = event; }
+        boolean ownerCollected() { return ownerCollected; }
+        void markOwnerCollected() { this.ownerCollected = true; }
+        ResolvedPlaceOrder admittedOrder() { return admittedOrder; }
+        void admittedOrder(ResolvedPlaceOrder order) { this.admittedOrder = order; }
+
+        void clear() {
+            admission = null;
+            ownerCollected = false;
+            admittedOrder = null;
+            realtimeResolvedTakerOrder = null;
+        }
+    }
+
+    /**
+     * 下沉上下文：触发单（TRIGGER）专有生命周期状态。
+     */
+    static final class TriggerSlotContext {
+        OrderRuntime admissionOrder;
+        com.surprising.aeron.service.state.model.CoreTriggerOrderState sourceTrigger;
+
+        OrderRuntime admissionOrder() { return admissionOrder; }
+        void admissionOrder(OrderRuntime order) { this.admissionOrder = order; }
+        com.surprising.aeron.service.state.model.CoreTriggerOrderState sourceTrigger() { return sourceTrigger; }
+        void sourceTrigger(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger) {
+            if (trigger == null || this.sourceTrigger != null) throw new IllegalStateException("trigger receipt already bound");
+            this.sourceTrigger = trigger;
+        }
+
+        void clear() {
+            admissionOrder = null;
+            sourceTrigger = null;
+        }
+    }
+
+    /**
+     * 下沉上下文：强平（LIQUIDATION）专有生命周期状态。
+     */
+    static final class LiquidationSlotContext {
+        private com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableWork;
+        private com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionCheck check;
+
+        com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionCheck check() {
+            if (check == null)
+                check = new com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionCheck();
+            return check;
+        }
+
+        com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableWork() {
+            return reusableWork;
+        }
+
+        void reusableWork(com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.ExecutionWork work) {
+            this.reusableWork = Objects.requireNonNull(work);
+        }
+
+        void clear() {
+            if (reusableWork != null) reusableWork.clearReferences();
+            if (check != null) check.clearReferences();
+        }
+    }
+
+    /**
+     * 下沉上下文：延迟重放栅栏专有生命周期状态。
+     */
+    static final class DeferredSlotContext {
+        long clusterTimestamp;
+        long clusterPosition;
+        TradingCoreRuntime.SourceKey sourceKey;
+
+        void set(long clusterTimestamp, long clusterPosition, TradingCoreRuntime.SourceKey sourceKey) {
+            this.clusterTimestamp = clusterTimestamp;
+            this.clusterPosition = clusterPosition;
+            this.sourceKey = sourceKey;
+        }
+
+        void clear() {
+            clusterTimestamp = 0;
+            clusterPosition = 0;
+            sourceKey = null;
+        }
+    }
+
+    /**
+     * 下沉上下文：替换（REPLACE/AMEND）专有生命周期状态。
+     */
+    static final class ReplaceSlotContext {
+        com.surprising.aeron.service.state.ReplacementAdmissionEvent admission;
+
+        com.surprising.aeron.service.state.ReplacementAdmissionEvent admission() { return admission; }
+        void admission(com.surprising.aeron.service.state.ReplacementAdmissionEvent event) { this.admission = event; }
+
+        void clear() {
+            admission = null;
         }
     }
 }

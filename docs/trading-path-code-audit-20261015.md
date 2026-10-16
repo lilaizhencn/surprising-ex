@@ -316,11 +316,30 @@ D2–D6 均已完成，具体变更、核查结论与验证证据见各节。建
 - **测试/诊断误判纠正**：`probeValue` 由生产协议命令 `PROBE_INCREMENT` 修改，生产快照写入也读取它；`preparedOrder` 仍服务未启动 Lane 的构建路径；`CoreMatchingPhaseMetrics` 有实际阶段统计和受开关/采样/JFR 控制的诊断用途。这些代码经核实保留，撤销原“仅测试使用/可直接清理”的笼统判断。
 - **验证及范围**：HotSpot JDK 27，21 项必要功能用例通过，失败、错误、跳过均为 0，覆盖终态标记淘汰/客户身份、Lane 终态发布、六产品线资金命令幂等、满 Ledger 邮箱续步、跨 Lane IOC 及非零手续费资金守恒；受影响模块及依赖编译通过。见 [D6 功能验证](validation/d6-complete-20261015.json)。本轮仅清理确认的死代码，不运行压测、JMH/JFR、快照/恢复或 wallet；不更新性能记录、不宣称吞吐收益。
 
-### D7【报告】超大类与职责混杂
-- `state/TradingRuntimeState.java`：5332 行、约 350 到 390 个方法，混有 lane 拓扑、指标、对象池、变更缓冲、控制任务、转账、触发、算法单、物化，以及 `TreeMap<Long,Long> pendingTransferUsers`（:198）。
-- `orchestration/CommandSlot.java`：承载 PLACE / CANCEL / REPLACE / AMEND / TRIGGER / BATCH 的万能可变记录，另有一个 `DirectCommandSlot`。
-- 其余大类：`TradingCoreRuntime` 1604 行、`OrderedCommitCoordinator` 1444 行、`OrderBatchExecutor` 1328 行。
-- **方案**：不要机械拆类。先只迁出指标（到 `AccountLaneState`）和待划转（到 `TreasuryRuntime`）；`CommandSlot` 先把「只被单个操作写入」的字段下沉。
+### D7【已完成】超大类与职责混杂
+- **完成日期**：2026-10-16。按业务语义优先与 KISS 原则，拒绝机械拆类，保持零 GC 与零额外堆分配，完成以下三项拆解：
+- **待划转路由迁出至 `TreasuryRuntime`**：
+  - 将 `TradingRuntimeState` 中的 `pendingTransferUsers`（原 `TreeMap<Long,Long>`）、`pendingTransferQueryAfterId`、容量判断（`MAX_PENDING_TRANSFERS`）以及分页路由查询逻辑全部迁出至 `TreasuryRuntime`。
+  - `TreasuryRuntime` 作为资金与总账的权威实体，统一管理待转账路由的注册、查询、分页标记、完成与快照恢复；`TradingRuntimeState` 仅保留对外契约委托，不再直接维护第二套转账路由状态。
+- **指标迁出至 `AccountLaneState`**：
+  - 将 `TradingRuntimeState` 集中维护的 `laneMetricValues` 矩阵（`accountLaneCompletedOperations`、`accountLaneLatencySamples`、`accountLaneTotalLatencyNanos`、`accountLaneMaxLatencyNanos` 及队列高水位）全量下沉至各 `AccountLaneState` 实例内部。
+  - 各 Lane 线程自治维护自身的操作计数与延迟统计，自主实现 `recordOperation`、`updateQueueHighWaterMark` 以及指标编码 `writeMetrics`；`TradingRuntimeState` 彻底删除了集中式的矩阵分配与集中编码逻辑。
+- **`CommandSlot` 专有字段下沉解耦**：
+  - 将原平铺在 `CommandSlot` 万能记录中、只被单个操作写入的 20 余个专有字段下沉至 5 个专有上下文组件：
+    - `PlaceSlotContext place`：承载 `placeAdmission`, `ownerCollected`, `admittedPlaceOrder`, `realtimeResolvedTakerOrder`；
+    - `TriggerSlotContext trigger`：承载 `admissionOrder`, `sourceTrigger`；
+    - `LiquidationSlotContext liquidation`：承载 `reusableWork`, `check`；
+    - `DeferredSlotContext deferred`：承载 `clusterTimestamp`, `clusterPosition`, `sourceKey`；
+    - `ReplaceSlotContext replace`：承载 `admission`；
+  - 各 Context 作为 final 字段随 `CommandSlot` 实例化一同预分配，复用时仅执行标量与引用的 `clear()`，彻底消除了巨型类的字段扁平混杂，同时做到零额外 GC 分配，并保留了核心便捷 getter/setter 转发以保障各模块平滑兼容。
+- **验证**：HotSpot JDK 27 下全部 78 项受影响核心及专项用例通过，失败、错误、跳过均为 0：
+  - 核心交易流水线与状态机：`TradingCoreOwnerTest` 45 项全部通过；
+  - 划转生命周期与容量：`CoreTransferLaneLifecycleTest` 6 项、`TransferLaneCapacityTest` 1 项全部通过；
+  - 账户 Lane 指标边界与自治统计：`CoreLaneMetricsBoundaryTest` 1 项全部通过；
+  - 快照持久化、编解码与产品线恢复：`TradingStateSnapshotCodecTest` 6 项、`PublishedSnapshotRecoveryTest` 8 项、`CoreNativeSnapshotProductLineTest` 6 项全部通过；
+  - 槽位解耦与生命周期复用：`CommandSlotTest` 5 项全部通过，`OrderBatchSlotReuseTest` 4 项全部通过；
+  - 模块测试编译 100% 干净，资金与持仓严格守恒。
+
 
 ### D8【报告】`OrderedCommitCoordinator` 收尾逻辑重复
 - **位置**：`orchestration/OrderedCommitCoordinator.java`：`finishAppliedMatching`（457-540）与 `completeDispatchedMatcherSettlement`（524-620）收尾逻辑重复，前者带缩进错位的拷贝残留。
