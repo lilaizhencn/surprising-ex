@@ -210,6 +210,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
             started = true;
             long reboundHandoff = 0;
             int directReadySpins = 0;
+            int payloadWaitSpins = 0;
             while (running || next < producerSequence.value
                     || admissionNext < admissionProducerSequence.value
                     || hasMatcherSettlementWork()) {
@@ -238,6 +239,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                         admissionConsumerSequence.value = admissionNext;
                         execute(admission);
                         idleSpins = 0;
+                        payloadWaitSpins = 0;
                         continue;
                     }
                 }
@@ -251,10 +253,11 @@ public final class SettlementLaneWorker implements AutoCloseable {
                         execute(direct);
                         idleSpins = 0;
                         directReadySpins = 0;
+                        payloadWaitSpins = 0;
                         continue;
                     }
                     if (waitStrategy == WaitStrategy.BUSY_SPIN) {
-                        Thread.onSpinWait();
+                        backoffPayloadWait(payloadWaitSpins++);
                     } else if (directReadySpins++ >= DIRECT_READY_SPIN_LIMIT) {
                         Thread.onSpinWait();
                         directReadySpins = 0;
@@ -278,6 +281,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                         execute(command);
                         idleSpins = 0;
                         directReadySpins = 0;
+                        payloadWaitSpins = 0;
                         continue;
                     }
                     if (!running) throw new IllegalStateException("Lane stopped before its matcher payload arrived");
@@ -287,7 +291,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                     // can starve the Owner/Matcher that will make the event executable. After a
                     // short hand-tuned spin, park until the Matcher signals publication.
                     if (waitStrategy == WaitStrategy.BUSY_SPIN) {
-                        Thread.onSpinWait();
+                        backoffPayloadWait(payloadWaitSpins++);
                         continue;
                     }
                 }
@@ -340,6 +344,16 @@ public final class SettlementLaneWorker implements AutoCloseable {
             LockSupport.parkNanos(this, 100_000L);
         } finally {
             parked = false;
+        }
+    }
+
+    private void backoffPayloadWait(int spins) {
+        if (spins < BUSY_SPIN_YIELD_THRESHOLD) {
+            Thread.onSpinWait();
+        } else if (spins < BUSY_SPIN_PARK_THRESHOLD) {
+            Thread.yield();
+        } else {
+            LockSupport.parkNanos(this, 10_000L);
         }
     }
 

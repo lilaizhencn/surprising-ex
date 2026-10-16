@@ -600,7 +600,7 @@ public final class AeronClientPool implements AutoCloseable {
 
     private final class AgentLane {
         private final ArrayBlockingQueue<Request> mailbox;
-        private final ArrayBlockingQueue<Request> availableRequests;
+        private final java.util.concurrent.ConcurrentLinkedQueue<Request> availableRequests;
         private final int maxInFlight;
         private final long sourceId;
         // Only the egress dispatcher assigns source sequence, in actual offer order.
@@ -620,7 +620,7 @@ public final class AeronClientPool implements AutoCloseable {
 
         private AgentLane(int mailboxCapacity, int maxInFlight, long sourceId) {
             this.mailbox = new ArrayBlockingQueue<>(mailboxCapacity);
-            this.availableRequests = new ArrayBlockingQueue<>(mailboxCapacity + maxInFlight);
+            this.availableRequests = new java.util.concurrent.ConcurrentLinkedQueue<>();
             for (int index = 0; index < mailboxCapacity + maxInFlight; index++) {
                 availableRequests.add(new Request(this));
             }
@@ -721,7 +721,9 @@ public final class AeronClientPool implements AutoCloseable {
                 request.releaseCorrelation();
                 return false;
             }
-            java.util.concurrent.locks.LockSupport.unpark(egressDispatcher.thread);
+            if (egressDispatcher.parked) {
+                java.util.concurrent.locks.LockSupport.unpark(egressDispatcher.thread);
+            }
             failure = dispatcherFailure.get();
             if ((closed.get() || dispatcherStopped.get() || failure != null) && mailbox.remove(request)) {
                 if (failure == null) {
@@ -791,6 +793,7 @@ public final class AeronClientPool implements AutoCloseable {
     private final class EgressDispatcher implements Runnable {
         private final AgentLane[] lanes;
         private final Thread thread;
+        private volatile boolean parked;
 
         private EgressDispatcher(boolean startAgents) {
             this.lanes = new AgentLane[commandAgents.length + 1];
@@ -841,7 +844,14 @@ public final class AeronClientPool implements AutoCloseable {
                         }
                         // Queue admission already unparks this thread. In-flight responses
                         // retain the short poll; idle sessions still service heartbeats/reconnects.
-                        java.util.concurrent.locks.LockSupport.parkNanos(this, waitNanos);
+                        parked = true;
+                        try {
+                            if (!hasPendingWork()) {
+                                java.util.concurrent.locks.LockSupport.parkNanos(this, waitNanos);
+                            }
+                        } finally {
+                            parked = false;
+                        }
                         if (Thread.currentThread().isInterrupted()) {
                             if (!closed.get()) {
                                 dispatcherFailure.compareAndSet(null,
@@ -860,6 +870,15 @@ public final class AeronClientPool implements AutoCloseable {
                 closeSessions();
                 closeMediaDriver();
             }
+        }
+
+        private boolean hasPendingWork() {
+            for (AgentLane lane : lanes) {
+                if (!lane.mailbox.isEmpty() || !lane.pending.isEmpty() || lane.deferredAdminOffer != null) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private void openSessions() {
