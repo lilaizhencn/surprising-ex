@@ -10,9 +10,9 @@ import static org.assertj.core.api.Assertions.*;
 class CommandFingerprintLeaseTest {
     @Test void canonicalDigestMatchesThePublishedWireFieldVector() {
         // Canonical-v1: schema8, PROBE1, SPOT1, shard0/route3, gateway1, user7,
-        // payloadLength8 then LE delta1. Expected SHA-256 was computed independently.
+        // payloadLength8 then LE delta1. Expected MurmurHash3_x64_128 was computed independently.
         var expected = java.util.HexFormat.of().parseHex(
-                "f1d0788b350d61d3c37ff2657c5d76c1cc4fb8f73b8b1f026237953df1c6e330");
+                "520c06b17d62b44983c6e5c3afaa1140b584c443bea8a9445303c65814834ffa");
         var calculator = new CommandFingerprint.Calculator();
         var message = probe(ProductLine.SPOT, 1);
         assertThat(calculator.of(message).bytes()).containsExactly(expected);

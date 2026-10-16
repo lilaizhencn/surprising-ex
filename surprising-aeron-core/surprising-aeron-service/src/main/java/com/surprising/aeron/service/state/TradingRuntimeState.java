@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
+import com.surprising.aeron.service.lane.LaneThread;
 import com.surprising.aeron.service.command.AccountLaneOperationType;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.state.account.UserRuntime;
@@ -598,27 +599,39 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void readFence(long userId, long committedCoreSequence) {
         assertOwner();
-        onLane(topology.accountLaneId(userId), lane -> {
-            lane.readFence(committedCoreSequence);
-            return null;
-        });
+        boolean acquired = accountLanesStarted && !ownerLaneAccess;
+        try {
+            if (acquired) while (!tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
+            onLane(topology.accountLaneId(userId), lane -> {
+                lane.readFence(committedCoreSequence);
+                return null;
+            });
+        } finally {
+            if (acquired) releaseOwnerLaneAccess();
+        }
     }
 
     public void readFenceAll(long committedCoreSequence) {
         assertOwner();
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            final int currentLaneId = laneId;
-            onLane(currentLaneId, lane -> {
-                lane.requireReadFence(committedCoreSequence);
-                return null;
-            });
-        }
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            final int currentLaneId = laneId;
-            onLane(currentLaneId, lane -> {
-                lane.advanceReadFence(committedCoreSequence);
-                return null;
-            });
+        boolean acquired = accountLanesStarted && !ownerLaneAccess;
+        try {
+            if (acquired) while (!tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+                final int currentLaneId = laneId;
+                onLane(currentLaneId, lane -> {
+                    lane.requireReadFence(committedCoreSequence);
+                    return null;
+                });
+            }
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+                final int currentLaneId = laneId;
+                onLane(currentLaneId, lane -> {
+                    lane.advanceReadFence(committedCoreSequence);
+                    return null;
+                });
+            }
+        } finally {
+            if (acquired) releaseOwnerLaneAccess();
         }
     }
 
@@ -661,6 +674,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (current == owner) {
             return ownerLaneScope;
         }
+        if (current instanceof LaneThread laneThread) {
+            AccountLaneState lane = laneThread.lane();
+            return lane.commandScopeActive ? lane : null;
+        }
         if (laneWorkers != null) {
             for (int i = 0; i < laneWorkers.length; i++) {
                 SettlementLaneWorker worker = laneWorkers[i];
@@ -676,9 +693,17 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 查询只在实际Lane线程读原表；不能由Owner借用作用域执行。 */
     public <T> T readAccountLane(AccountLaneState lane, java.util.function.Function<AccountLaneState, T> query) {
         if (lane == null || query == null || lane.laneId() >= laneWorkers.length
-                || accountLanes[lane.laneId()] != lane || laneWorkers[lane.laneId()] == null
-                || Thread.currentThread() != laneWorkers[lane.laneId()].thread())
+                || accountLanes[lane.laneId()] != lane || laneWorkers[lane.laneId()] == null) {
+            throw new IllegalArgumentException("invalid account lane read scope");
+        }
+        Thread current = Thread.currentThread();
+        if (current instanceof LaneThread laneThread) {
+            if (laneThread.lane() != lane) {
+                throw new IllegalStateException("account query must run on its owning Lane thread");
+            }
+        } else if (current != laneWorkers[lane.laneId()].thread()) {
             throw new IllegalStateException("account query must run on its owning Lane thread");
+        }
         enterLaneCommandScope(lane);
         try { return query.apply(lane); }
         finally { exitLaneCommandScope(lane, false); }
@@ -3620,8 +3645,11 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void advanceUserRevision(AccountLaneState lane, long userId, long count) {
         requireLaneAccess(lane, userId);
-        if (count <= 0 || lane.matcherSettlementChanges == null)
-            throw new IllegalStateException("revision increment requires its settlement Lane");
+        if (count <= 0) return;
+        if (lane.matcherSettlementChanges == null) {
+            advanceUserRevision(userId, count);
+            return;
+        }
         if (lane.users.get(userId) == null)
             throw new IllegalArgumentException("runtime user is not registered: " + userId);
         lane.matcherSettlementChanges.addUserRevision(lane.laneId(), userId, count);
@@ -3898,8 +3926,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                                          long realizedPnlUnits, long positionMarginUnits,
                                          CoreMarginMode marginMode, CorePositionSide positionSide) {
         lane.assertOwner();
-        if (lane == null || lane.matcherSettlementChanges == null
-                || lane.laneId() != topology.accountLaneId(userId)) {
+        if (lane == null || lane.laneId() != topology.accountLaneId(userId)) {
             throw new IllegalStateException("position update must execute in its owning Account Lane");
         }
         PositionRuntime current = lane.positions.get(positionKey);
@@ -3930,7 +3957,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                                    CoreOrderStatus status, long revision,
                                    long commitTimestamp, long commitPosition) {
         lane.assertOwner();
-        if (lane == null || lane.matcherSettlementChanges == null) {
+        if (lane == null) {
             throw new IllegalStateException("order update must execute in its owning Account Lane");
         }
         OrderRuntime order = lane.updateOrderInPlace(orderId, executed, remaining, feeUnits,
@@ -3944,7 +3971,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     OrderRuntime updateOrderStatusInLane(AccountLaneState lane, long orderId, CoreOrderStatus status, long revision,
                                          long commitTimestamp, long commitPosition) {
         lane.assertOwner();
-        if (lane == null || lane.matcherSettlementChanges == null) {
+        if (lane == null) {
             throw new IllegalStateException("order status update must execute in its owning Account Lane");
         }
         OrderRuntime order = lane.updateOrderStatusInPlace(orderId, status, revision,
@@ -3962,7 +3989,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     ReservationRuntime updateReservationInLane(AccountLaneState lane, long orderId, long nextConsumed, long nextReleased,
                                                boolean publish) {
         lane.assertOwner();
-        if (lane == null || lane.matcherSettlementChanges == null) {
+        if (lane == null) {
             throw new IllegalStateException("reservation update must execute in its owning Account Lane");
         }
         ReservationRuntime reservation = lane.reservations.get(orderId);

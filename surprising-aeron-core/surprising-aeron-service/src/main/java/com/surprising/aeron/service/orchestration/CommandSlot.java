@@ -1229,7 +1229,10 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         }
 
         void clear() {
-            if (responseSlot != null && responseArena != null) responseArena.release(responseSlot);
+            if (responseSlot != null && responseArena != null) {
+                responseArena.release(responseSlot);
+                responseSlot = null;
+            }
             java.util.Arrays.fill(orders, null);
             for (OrderRuntime copy : orderCopies) if (copy != null) copy.clearCommandSlot();
             java.util.Arrays.fill(symbols, null);
@@ -1238,6 +1241,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             capturedMask = 0;
             prepared = false;
             response = null;
+            responseLength = 0;
         }
     }
 

@@ -181,10 +181,15 @@ public class AccountLaneCommitBenchmark {
         public void tearDown() {
             try {
                 runtime.exitAsynchronousCommandScope();
-                for (long user : users) {
-                    var balance = runtime.balance(user, 3);
-                    if (balance.availableUnits() != 900 || balance.lockedUnits() != 100)
-                        throw new IllegalStateException("metadata commit changed account funds");
+                runtime.acquireOwnerLaneAccess();
+                try {
+                    for (long user : users) {
+                        var balance = runtime.balance(user, 3);
+                        if (balance.availableUnits() != 900 || balance.lockedUnits() != 100)
+                            throw new IllegalStateException("metadata commit changed account funds");
+                    }
+                } finally {
+                    runtime.releaseOwnerLaneAccess();
                 }
             } finally {
                 try { runtime.close(); }

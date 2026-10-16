@@ -108,7 +108,8 @@ public final class PositionRuntime {
     void copyStateFrom(PositionRuntime source) {
         if (source == null || userId != source.userId || symbolId != source.symbolId
                 || assetId != source.assetId || marginMode != source.marginMode
-                || positionSide != source.positionSide || instrument != source.instrument) {
+                || positionSide != source.positionSide
+                || (instrument != source.instrument && (source.instrument == null || !instrument.instrumentId().equals(source.instrument.instrumentId())))) {
             throw new IllegalArgumentException("position publication identity changed");
         }
         applyInPlace(instrument, source.signedQuantitySteps, source.entryPriceTicks,
@@ -117,8 +118,10 @@ public final class PositionRuntime {
 
     void applyInPlace(CoreInstrument instrument, long signedQuantitySteps, long entryPriceTicks,
                       long entryValueTicks, long realizedPnlUnits, long positionMarginUnits) {
-        if (this.instrument != instrument) throw new IllegalArgumentException("position instrument mismatch");
-        validate(userId, symbolId, assetId, marginMode, positionSide, instrument,
+        if (this.instrument != instrument && (instrument == null || !this.instrument.instrumentId().equals(instrument.instrumentId()))) {
+            throw new IllegalArgumentException("position instrument mismatch");
+        }
+        validate(userId, symbolId, assetId, marginMode, positionSide, this.instrument,
                 signedQuantitySteps, entryPriceTicks, entryValueTicks, positionMarginUnits);
         this.signedQuantitySteps = signedQuantitySteps;
         this.entryPriceTicks = entryPriceTicks;
@@ -132,7 +135,8 @@ public final class PositionRuntime {
         if (this == other) return true;
         if (!(other instanceof PositionRuntime value)) return false;
         return userId == value.userId && symbolId == value.symbolId && assetId == value.assetId
-                && instrument == value.instrument && signedQuantitySteps == value.signedQuantitySteps
+                && (instrument == value.instrument || (instrument != null && value.instrument != null && instrument.instrumentId().equals(value.instrument.instrumentId())))
+                && signedQuantitySteps == value.signedQuantitySteps
                 && entryPriceTicks == value.entryPriceTicks && entryValueTicks == value.entryValueTicks
                 && realizedPnlUnits == value.realizedPnlUnits && positionMarginUnits == value.positionMarginUnits
                 && marginMode == value.marginMode && positionSide == value.positionSide;

@@ -176,6 +176,68 @@ class BorrowedHeaderEgressTest {
         assertThat(detached.header().commandId()).isEqualTo(new UUID(1, 1));
         egress.clear();
     }
+    @Test void overflowIsolatesToOffendingSessionWithoutDisconnectingHealthySessions() {
+        var decoder = new CoreMessageFlyweightDecoder();
+        var bytes = frame(1);
+        var egress = new ClusterServiceEgress((ignored, target) -> new ClusterServiceEgress.SessionEgress() {
+            public long offer(long term, long timestamp, DirectBuffer source, int offset, int length) {
+                return target.offer(source, offset, length);
+            }
+            public void close() { }
+        });
+        var cluster = (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(), new Class<?>[]{Cluster.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "role" -> Cluster.Role.LEADER;
+                    case "time" -> 1L;
+                    default -> zero(method.getReturnType());
+                });
+        egress.start(cluster);
+        var processor = new TradingCoreOwner(ProductLine.SPOT, (session, requestHeader, response, sequence) -> { });
+        var healthyReceived = new AtomicReference<CoreMessage>();
+        var offendingSession = (ClientSession) Proxy.newProxyInstance(ClientSession.class.getClassLoader(),
+                new Class<?>[]{ClientSession.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "id" -> 100L;
+                    default -> zero(method.getReturnType());
+                });
+        var healthySession = (ClientSession) Proxy.newProxyInstance(ClientSession.class.getClassLoader(),
+                new Class<?>[]{ClientSession.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "id" -> 200L;
+                    case "offer" -> {
+                        byte[] result = new byte[(int) args[2]];
+                        ((DirectBuffer) args[0]).getBytes((int) args[1], result);
+                        healthyReceived.set(CoreMessageCodec.decode(result));
+                        yield 1L;
+                    }
+                    default -> zero(method.getReturnType());
+                });
+
+        var offendingTransport = egress.transportSession(offendingSession);
+        var healthyTransport = egress.transportSession(healthySession);
+
+        var normalMsg = decoder.decodeBorrowed(new UnsafeBuffer(bytes), 0, bytes.length);
+        var normalResponse = new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE, 1, CoreMessage.EMPTY_PAYLOAD);
+
+        // Healthy session publishes normal response
+        egress.publishResponse(processor, healthyTransport.id(), normalMsg.header(), normalResponse, 1, 0);
+
+        // Offending session attempts to overflow with oversized response exceeding 16MB OUTPUT_BYTES
+        byte[] hugePayload = new byte[17 * 1024 * 1024];
+        var overflowResponse = new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE, 2, hugePayload);
+        egress.publishResponse(processor, offendingTransport.id(), normalMsg.header(), overflowResponse, 2, 0);
+
+        normalMsg.releaseDecoderSlot();
+
+        // Drain responses: only offending session should be marked for close; healthy session should receive response
+        egress.drainResponses(processor);
+
+        assertThat(offendingTransport.isClosing()).as("Offending session must be marked for closure").isTrue();
+        assertThat(healthyTransport.isClosing()).as("Healthy session must stay alive").isFalse();
+        assertThat(healthyReceived.get()).isNotNull();
+        assertThat(healthyReceived.get().payload()).isNotNull();
+
+        egress.clear();
+    }
+
     private static Object zero(Class<?> type) {
         if (type == long.class) return 0L;
         if (type == int.class) return 0;

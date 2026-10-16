@@ -136,60 +136,22 @@ public final class RuntimeDerivativeFillCalculator {
             treasury.addClearing(settleAssetId, clearingTreasuryUnits);
         }
         long positionKey() { return positionKey; }
-        OrderRuntime order() {
-            OrderRuntime o = originalOrder;
-            return new OrderRuntime(o.orderId(), o.productLine(), o.userId(), o.symbolId(), o.instrument(),
-                    o.side(), o.priceTicks(), o.matchingPriceTicks(), o.quantitySteps(), executed, remaining,
-                    o.reduceOnly(), o.marginMode(), o.positionSide(), o.orderType(), o.timeInForce(), o.postOnly(),
-                    o.clientOrderId(), o.commandId(), o.makerFeeRatePpm(), o.takerFeeRatePpm(), cumulativeFee, executedValueHigh, executedValueLow,
-                    o.createdAtEpochMillis() == 0 && timestamp >= 0 ? timestamp : o.createdAtEpochMillis(),
-                    timestamp < 0 ? o.updatedAtEpochMillis() : timestamp,
-                    timestamp < 0 ? o.clusterPosition() : clusterPosition,
-                    remaining == 0 ? CoreOrderStatus.FILLED : o.status(), orderRevision);
-        }
-        ReservationRuntime reservation() {
-            ReservationRuntime r = originalReservation;
-            if (consumed == r.consumedUnits()) return r;
-            return new ReservationRuntime(r.orderId(), r.userId(), r.symbolId(), r.kind(), r.assetId(),
-                    r.totalReservedUnits(), r.releasedUnits(), consumed, r.orderQuantitySteps());
-        }
-        PositionRuntime position() {
-            OrderRuntime o = originalOrder;
-            return new PositionRuntime(o.userId(), o.symbolId(), settleAssetId, o.marginMode(), o.positionSide(),
-                    o.instrument(), quantity, entryPrice, entryValue, realizedPnl, margin);
-        }
         OrderRuntime publish(TradingRuntimeState runtime, AccountLaneState lane, long positionKey, RuntimeTreasuryDelta treasury) {
             if (fills == 0) return null;
             CoreOrderStatus nextStatus = remaining == 0 ? CoreOrderStatus.FILLED : originalOrder.status();
             long feeDelta = Math.subtractExact(cumulativeFee, originalOrder.cumulativeFeeUnits());
-            if (lane.matcherSettlementChanges != null) {
-                // Lane-owned settlement mutates the existing primitive state. The helper methods
-                // append one immutable after-image to LaneCommitDelta; no replacement chain is built.
-                runtime.updateReservationInLane(lane, originalOrder.orderId(), consumed, originalReservation.releasedUnits(), remaining != 0);
-                runtime.replaceBalance(lane, originalOrder.userId(), settleAssetId, available, locked);
-                runtime.updatePositionInLane(lane, positionKey, originalOrder.userId(), originalOrder.symbolId(), settleAssetId,
-                        originalOrder.instrument(), quantity, entryPrice, entryValue,
-                        realizedPnl, margin, originalOrder.marginMode(), originalOrder.positionSide());
-                OrderRuntime nextOrder = runtime.updateOrderInLane(lane, originalOrder.orderId(), executed, remaining,
-                        feeDelta, executedValueHigh, executedValueLow, nextStatus, orderRevision, timestamp, clusterPosition);
-                if (treasury != null) {
-                    treasury.addFee(settleAssetId, feeTreasuryUnits);
-                    treasury.addClearing(settleAssetId, clearingTreasuryUnits);
-                }
-                runtime.advanceUserRevision(lane, originalOrder.userId(), fills);
-                return nextOrder;
-            }
-            // Synchronous/recovery path retains value semantics and is outside the Lane hot path.
-            OrderRuntime nextOrder = order();
-            runtime.replaceReservation(reservation());
-            runtime.replaceBalance(originalOrder.userId(), settleAssetId, available, locked);
+            runtime.updateReservationInLane(lane, originalOrder.orderId(), consumed, originalReservation.releasedUnits(), remaining != 0);
+            runtime.replaceBalance(lane, originalOrder.userId(), settleAssetId, available, locked);
+            runtime.updatePositionInLane(lane, positionKey, originalOrder.userId(), originalOrder.symbolId(), settleAssetId,
+                    originalOrder.instrument(), quantity, entryPrice, entryValue,
+                    realizedPnl, margin, originalOrder.marginMode(), originalOrder.positionSide());
+            OrderRuntime nextOrder = runtime.updateOrderInLane(lane, originalOrder.orderId(), executed, remaining,
+                    feeDelta, executedValueHigh, executedValueLow, nextStatus, orderRevision, timestamp, clusterPosition);
             if (treasury != null) {
                 treasury.addFee(settleAssetId, feeTreasuryUnits);
                 treasury.addClearing(settleAssetId, clearingTreasuryUnits);
             }
-            runtime.replacePosition(positionKey, position());
-            runtime.replaceOrder(nextOrder);
-            runtime.advanceUserRevision(originalOrder.userId(), fills);
+            runtime.advanceUserRevision(lane, originalOrder.userId(), fills);
             return nextOrder;
         }
         OrderRuntime publish(TradingRuntimeState runtime) { return publish(runtime, runtime.accountLaneForUser(originalOrder.userId()), positionKey, null); }

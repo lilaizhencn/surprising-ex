@@ -88,7 +88,7 @@ public class ClientSourceOrderingBenchmark {
                         @Override public int pollEgress() { return 0; }
                         @Override public boolean sendKeepAlive() { return true; }
                         @Override public void close() { }
-                    }, Thread.currentThread());
+                    });
         }
         @Override public long offer(CoreMessage message) { return client.offer(message); }
         @Override public int pollEgress(int limit) { return client.pollEgress(limit); }

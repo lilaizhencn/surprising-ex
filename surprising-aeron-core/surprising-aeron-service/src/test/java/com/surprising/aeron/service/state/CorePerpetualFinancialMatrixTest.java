@@ -170,11 +170,9 @@ class CorePerpetualFinancialMatrixTest {
         ApplyFundingCommand command = new ApplyFundingCommand(701, SYMBOL, 100_000);
         RuntimeTestStateTransitions.FundingApplication expected = reducer.applyFundingWithFacts(marked, command);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimeStateProjector.project(marked, identities);
-        assertThat(runtime.topology().accountLaneId(USER_ID))
-                .isNotEqualTo(runtime.topology().accountLaneId(SECOND_MAKER_ID));
-        runtime.startAccountLanes();
-        try {
+        try (TradingRuntimeState runtime = RuntimeStateProjector.project(marked, identities)) {
+            assertThat(runtime.topology().accountLaneId(USER_ID))
+                    .isNotEqualTo(runtime.topology().accountLaneId(SECOND_MAKER_ID));
             RuntimePerpetualFundingProcessor.FundingResult actual =
                     RuntimePerpetualFundingProcessor.applyRuntime(command, List.of(USER_ID, SECOND_MAKER_ID),
                             null, runtime, identities);
@@ -183,8 +181,6 @@ class CorePerpetualFinancialMatrixTest {
             assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
                     .isEqualTo(expected.state());
             assertThat(actual.payments()).isEqualTo(expected.payments());
-        } finally {
-            runtime.close();
         }
     }
 

@@ -35,7 +35,7 @@ class CoreMessageCodecTest {
         CoreMessage message = command(UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"), 42, 99, 7);
 
         assertThat(CommandFingerprint.of(message).toString())
-                .isEqualTo("0eade47bc3ab8192eec285041e562c2e8703e54f1b8fdf9a84cd8084efbf06c1");
+                .isEqualTo("c87a1212d64d7aeba88bced765f959a67e6c61899f0eb79d12585ac373ab2a04");
     }
 
     @Test
@@ -48,7 +48,7 @@ class CoreMessageCodecTest {
         assertThat(producerB.of(second)).isEqualTo(CommandFingerprint.of(second));
         assertThat(producerA.of(second)).isEqualTo(CommandFingerprint.of(second));
         assertThat(producerA.of(first)).isEqualTo(retained);
-        assertThat(retained.toString()).isEqualTo("0eade47bc3ab8192eec285041e562c2e8703e54f1b8fdf9a84cd8084efbf06c1");
+        assertThat(retained.toString()).isEqualTo("c87a1212d64d7aeba88bced765f959a67e6c61899f0eb79d12585ac373ab2a04");
     }
 
     @Test

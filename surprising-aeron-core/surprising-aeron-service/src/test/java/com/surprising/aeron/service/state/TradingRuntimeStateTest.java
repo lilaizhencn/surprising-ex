@@ -979,7 +979,12 @@ class TradingRuntimeStateTest {
             LaneValues lane = laneValues(state, state.topology().accountLaneId(7));
             assertThat(lane.appliedSequence()).isEqualTo(1);
             assertThat(lane.committedSequence()).isEqualTo(1);
-            assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1_000);
+            state.acquireOwnerLaneAccess();
+            try {
+                assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1_000);
+            } finally {
+                state.releaseOwnerLaneAccess();
+            }
         } finally {
             state.close();
         }
@@ -1160,6 +1165,7 @@ class TradingRuntimeStateTest {
     void cancellationReturnsBorrowedOwnershipAndRunsOnTheLane(boolean batch) throws Exception {
         TradingRuntimeState state = new TradingRuntimeState(LaneTopology.productionDefault());
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        identities.bindClientLanes(state);
         long userId = 1, orderId = 10_000;
         state.putUser(new UserRuntime(userId));
         state.putBalance(new BalanceRuntime(userId, 3, 2, 0));
@@ -1170,13 +1176,19 @@ class TradingRuntimeStateTest {
             LaneCancelEvent event = batch
                     ? state.dispatchCancelBatch(1, userId, new long[]{orderId}, 1, 1, identities)
                     : state.dispatchCancel(1, userId, orderId, 1, 1, identities);
+            while (!event.complete()) Thread.onSpinWait();
             assertThat(event.complete()).isTrue();
             state.collectCancel(event, null, null);
             state.releaseCancel(event);
-            assertThat(state.balance(userId, 3).availableUnits()).isEqualTo(2);
-            assertThat(state.balance(userId, 3).lockedUnits()).isZero();
-            assertThat(state.order(orderId)).isNull();
-            assertThat(state.reservation(orderId)).isNull();
+            state.acquireOwnerLaneAccess();
+            try {
+                assertThat(state.balance(userId, 3).availableUnits()).isEqualTo(2);
+                assertThat(state.balance(userId, 3).lockedUnits()).isZero();
+                assertThat(state.order(orderId)).isNull();
+                assertThat(state.reservation(orderId)).isNull();
+            } finally {
+                state.releaseOwnerLaneAccess();
+            }
         } finally {
             state.close();
         }
@@ -1187,6 +1199,7 @@ class TradingRuntimeStateTest {
         LaneTopology topology = LaneTopology.productionDefault();
         TradingRuntimeState state = new TradingRuntimeState(topology);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        identities.bindClientLanes(state);
         LaneCancelEvent[] cancellations = new LaneCancelEvent[256];
         for (int index = 0; index < cancellations.length; index++) {
             long userId = index + 1L;
@@ -1209,10 +1222,17 @@ class TradingRuntimeStateTest {
                 while (!event.complete()) Thread.onSpinWait();
                 state.collectCancel(event, null, null);
                 state.releaseCancel(event);
-                assertThat(state.balance(index + 1L, 3).availableUnits()).isEqualTo(2);
-                assertThat(state.balance(index + 1L, 3).lockedUnits()).isZero();
-                assertThat(state.order(10_000L + index)).isNull();
-                assertThat(state.reservation(10_000L + index)).isNull();
+            }
+            state.acquireOwnerLaneAccess();
+            try {
+                for (int index = 0; index < cancellations.length; index++) {
+                    assertThat(state.balance(index + 1L, 3).availableUnits()).isEqualTo(2);
+                    assertThat(state.balance(index + 1L, 3).lockedUnits()).isZero();
+                    assertThat(state.order(10_000L + index)).isNull();
+                    assertThat(state.reservation(10_000L + index)).isNull();
+                }
+            } finally {
+                state.releaseOwnerLaneAccess();
             }
             assertThat(identities.snapshot().clientKeys()).isEmpty();
         } finally {
@@ -1293,10 +1313,15 @@ class TradingRuntimeStateTest {
                 return Thread.currentThread();
             });
             awaitControlLanes(state);
-            for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
-                Thread actual = (Thread) state.controlLaneResult(laneId);
-                assertThat(actual).isSameAs(state.laneWorkers[laneId].thread()).isNotSameAs(Thread.currentThread());
-                assertThat(state.user(users.get(laneId)).revision()).isEqualTo(1);
+            state.acquireOwnerLaneAccess();
+            try {
+                for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
+                    Thread actual = (Thread) state.controlLaneResult(laneId);
+                    assertThat(actual).isSameAs(state.laneWorkers[laneId].thread()).isNotSameAs(Thread.currentThread());
+                    assertThat(state.user(users.get(laneId)).revision()).isEqualTo(1);
+                }
+            } finally {
+                state.releaseOwnerLaneAccess();
             }
         }
     }
@@ -1436,8 +1461,14 @@ class TradingRuntimeStateTest {
     }
 
     private static LaneValues laneValues(TradingRuntimeState state, int laneId) {
-        return state.onLane(laneId, lane -> new LaneValues(lane.revision(), lane.appliedSequence(),
-                lane.committedSequence(), lane.localStateHash(), lane.localFundsHash()));
+        boolean acquired = state.accountLanesStarted() && !state.ownerLaneAccess;
+        try {
+            if (acquired) while (!state.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
+            return state.onLane(laneId, lane -> new LaneValues(lane.revision(), lane.appliedSequence(),
+                    lane.committedSequence(), lane.localStateHash(), lane.localFundsHash()));
+        } finally {
+            if (acquired) state.releaseOwnerLaneAccess();
+        }
     }
 
     private record LaneValues(long revision, long appliedSequence, long committedSequence,

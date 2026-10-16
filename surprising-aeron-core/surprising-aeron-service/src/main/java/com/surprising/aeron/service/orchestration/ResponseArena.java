@@ -1,13 +1,14 @@
 package com.surprising.aeron.service.orchestration;
 
-import java.util.concurrent.atomic.AtomicIntegerArray;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLongArray;
 
 /**
  * Shared fixed response storage for the common command-result path.
  *
  * <p>Slots are returned only after both the result ledger and transport release them. Lease
  * metadata is shared by Lane encoders and the Owner, so allocation and reference changes are
- * claimed with CAS while payload encoding remains outside the claim path. Large responses use an
+ * claimed with lock-free atomic CAS while payload encoding remains outside the claim path. Large responses use an
  * ordinary exact-sized array and do not force the arena to grow.</p>
  */
 final class ResponseArena {
@@ -20,13 +21,23 @@ final class ResponseArena {
     static final int DEFAULT_SLOT_COUNT = 512;
     static final int DEFAULT_SLOT_BYTES = 64 * 1024;
 
+    private static final int TRANSPORT_SHIFT = 32;
+    private static final long TRANSPORT_UNIT = 1L << TRANSPORT_SHIFT;
+    private static final long LEDGER_MASK = 0xFFFFFFFFL;
+
     private final byte[][] slots;
-    private final AtomicIntegerArray leaseStates;
-    private final int[] transportReferences;
-    private final int[] ledgerReferences;
+    private final AtomicLongArray slotStates;
     private final Slot[] slotDescriptors;
     private final int slotBytes;
-    private static final Slot EMPTY_SLOT = new Slot(TradingCoreRuntime.EMPTY_RESPONSE_DATA, false);
+    private final int slotCount;
+    private final AtomicInteger allocateCursor = new AtomicInteger();
+
+    // Fast O(1) identity lookup: storage byte[] -> slotIndex
+    private final int identityMask;
+    private final byte[][] identityKeys;
+    private final int[] identityTable;
+
+    private static final Slot EMPTY_SLOT = new Slot(TradingCoreRuntime.EMPTY_RESPONSE_DATA, false, -1);
 
     /**
      * A leased response is a ring slot, not an ephemeral payload.  The byte array is allocated
@@ -37,13 +48,15 @@ final class ResponseArena {
     static final class Slot {
         byte[] storage;
         final boolean arenaBacked;
+        final int slotIndex;
         int length;
         /** Same lease as storage; only the claiming encoder touches its position. */
         private java.nio.ByteBuffer writer;
 
-        private Slot(byte[] storage, boolean arenaBacked) {
+        private Slot(byte[] storage, boolean arenaBacked, int slotIndex) {
             this.storage = storage;
             this.arenaBacked = arenaBacked;
+            this.slotIndex = slotIndex;
         }
 
         java.nio.ByteBuffer writer() {
@@ -58,13 +71,32 @@ final class ResponseArena {
 
     ResponseArena(int slotCount, int slotBytes) {
         if (slotCount <= 0 || slotBytes <= 0) throw new IllegalArgumentException("invalid response arena");
-        this.slots = new byte[slotCount][];
-        this.leaseStates = new AtomicIntegerArray(slotCount);
-        this.transportReferences = new int[slotCount];
-        this.ledgerReferences = new int[slotCount];
-        this.slotDescriptors = new Slot[slotCount];
-        for (int index = 0; index < slotCount; index++) slotDescriptors[index] = new Slot(null, true);
+        this.slotCount = slotCount;
         this.slotBytes = slotBytes;
+        this.slots = new byte[slotCount][];
+        this.slotStates = new AtomicLongArray(slotCount);
+        this.slotDescriptors = new Slot[slotCount];
+
+        int capacity = Integer.highestOneBit(slotCount) << 2;
+        if (capacity < 16) capacity = 16;
+        this.identityMask = capacity - 1;
+        this.identityKeys = new byte[capacity][];
+        this.identityTable = new int[capacity];
+        java.util.Arrays.fill(this.identityTable, -1);
+
+        for (int index = 0; index < slotCount; index++) {
+            byte[] storage = new byte[slotBytes];
+            this.slots[index] = storage;
+            this.slotDescriptors[index] = new Slot(storage, true, index);
+
+            int h = System.identityHashCode(storage);
+            int probe = h & identityMask;
+            while (identityKeys[probe] != null) {
+                probe = (probe + 1) & identityMask;
+            }
+            identityKeys[probe] = storage;
+            identityTable[probe] = index;
+        }
     }
 
     /**
@@ -85,9 +117,8 @@ final class ResponseArena {
     Slot acquireSlot(int requiredLength) {
         if (requiredLength == 0) return EMPTY_SLOT;
         int index = claimPooledSlot(requiredLength);
-        if (index < 0) return new Slot(new byte[requiredLength], false);
+        if (index < 0) return new Slot(new byte[requiredLength], false, -1);
         Slot descriptor = slotDescriptors[index];
-        descriptor.storage = slots[index];
         descriptor.length = 0;
         return descriptor;
     }
@@ -96,33 +127,51 @@ final class ResponseArena {
     private int claimPooledSlot(int requiredLength) {
         if (requiredLength < 0) throw new IllegalArgumentException("negative response length");
         if (requiredLength > slotBytes) return -1;
-        for (int index = 0; index < slots.length; index++) {
-            if (!leaseStates.compareAndSet(index, 0, 1)) continue;
-            if (slots[index] == null) slots[index] = new byte[slotBytes];
-            transportReferences[index] = 1;
-            ledgerReferences[index] = 0;
-            return index;
+        int start = allocateCursor.getAndIncrement() & 0x7FFFFFFF;
+        for (int i = 0; i < slotCount; i++) {
+            int index = (start + i) % slotCount;
+            if (slotStates.compareAndSet(index, 0L, TRANSPORT_UNIT)) {
+                return index;
+            }
         }
         return -1;
     }
 
+    private int findSlotIndex(byte[] storage) {
+        if (storage == null) return -1;
+        int mask = identityMask;
+        int h = System.identityHashCode(storage);
+        int probe = h & mask;
+        while (true) {
+            byte[] key = identityKeys[probe];
+            if (key == storage) return identityTable[probe];
+            if (key == null) return -1;
+            probe = (probe + 1) & mask;
+        }
+    }
+
     void release(Slot slot) {
-        if (slot == null || !slot.arenaBacked) return;
-        release(slot.storage);
+        if (slot == null || !slot.arenaBacked || slot.slotIndex < 0) return;
+        releaseSlot(slot.slotIndex);
     }
 
     /** Returns an arena slot by identity; non-arena arrays are intentionally ignored. */
     void release(byte[] storage) {
         if (storage == null) return;
-        for (int index = 0; index < slots.length; index++) {
-            if (slots[index] == storage) {
-                if (leaseStates.get(index) == 0 || transportReferences[index] <= 0) {
-                    throw new IllegalStateException("response arena transport slot released more than once");
-                }
-                transportReferences[index]--;
-                if (transportReferences[index] == 0 && ledgerReferences[index] == 0) {
-                    leaseStates.compareAndSet(index, 1, 0);
-                }
+        int index = findSlotIndex(storage);
+        if (index < 0) return;
+        releaseSlot(index);
+    }
+
+    private void releaseSlot(int index) {
+        while (true) {
+            long state = slotStates.get(index);
+            long transport = state >>> TRANSPORT_SHIFT;
+            if (state == 0L || transport <= 0) {
+                throw new IllegalStateException("response arena transport slot released more than once");
+            }
+            long next = state - TRANSPORT_UNIT;
+            if (slotStates.compareAndSet(index, state, next)) {
                 return;
             }
         }
@@ -131,12 +180,18 @@ final class ResponseArena {
     /** Retains a response for another transport/output owner. */
     void retain(byte[] storage) {
         if (storage == null) return;
-        for (int index = 0; index < slots.length; index++) {
-            if (slots[index] == storage) {
-                if (leaseStates.get(index) == 0) {
-                    throw new IllegalStateException("response arena slot is not leased");
-                }
-                transportReferences[index]++;
+        int index = findSlotIndex(storage);
+        if (index < 0) return;
+        retainSlot(index);
+    }
+
+    private void retainSlot(int index) {
+        while (true) {
+            long state = slotStates.get(index);
+            if (state == 0L) {
+                throw new IllegalStateException("response arena slot is not leased");
+            }
+            if (slotStates.compareAndSet(index, state, state + TRANSPORT_UNIT)) {
                 return;
             }
         }
@@ -145,10 +200,18 @@ final class ResponseArena {
     /** Retains a response for the idempotency ledger independently of transport lifetime. */
     void retainLedger(byte[] storage) {
         if (storage == null) return;
-        for (int index = 0; index < slots.length; index++) {
-            if (slots[index] == storage) {
-                if (leaseStates.get(index) == 0) throw new IllegalStateException("response arena slot is not leased");
-                ledgerReferences[index]++;
+        int index = findSlotIndex(storage);
+        if (index < 0) return;
+        retainLedgerSlot(index);
+    }
+
+    private void retainLedgerSlot(int index) {
+        while (true) {
+            long state = slotStates.get(index);
+            if (state == 0L) {
+                throw new IllegalStateException("response arena slot is not leased");
+            }
+            if (slotStates.compareAndSet(index, state, state + 1L)) {
                 return;
             }
         }
@@ -157,23 +220,28 @@ final class ResponseArena {
     /** Releases the ledger's retained reference after eviction or replacement. */
     void releaseLedger(byte[] storage) {
         if (storage == null) return;
-        for (int index = 0; index < slots.length; index++) {
-            if (slots[index] == storage) {
-                if (leaseStates.get(index) == 0 || ledgerReferences[index] <= 0) {
-                    throw new IllegalStateException("response arena ledger slot released more than once");
-                }
-                ledgerReferences[index]--;
-                if (transportReferences[index] == 0 && ledgerReferences[index] == 0) {
-                    leaseStates.compareAndSet(index, 1, 0);
-                }
+        int index = findSlotIndex(storage);
+        if (index < 0) return;
+        releaseLedgerSlot(index);
+    }
+
+    private void releaseLedgerSlot(int index) {
+        while (true) {
+            long state = slotStates.get(index);
+            int ledger = (int) (state & LEDGER_MASK);
+            if (state == 0L || ledger <= 0) {
+                throw new IllegalStateException("response arena ledger slot released more than once");
+            }
+            long next = state - 1L;
+            if (slotStates.compareAndSet(index, state, next)) {
                 return;
             }
         }
     }
 
     void clear() {
-        for (int index = 0; index < leaseStates.length(); index++) leaseStates.set(index, 0);
-        java.util.Arrays.fill(transportReferences, 0);
-        java.util.Arrays.fill(ledgerReferences, 0);
+        for (int index = 0; index < slotCount; index++) {
+            slotStates.set(index, 0L);
+        }
     }
 }

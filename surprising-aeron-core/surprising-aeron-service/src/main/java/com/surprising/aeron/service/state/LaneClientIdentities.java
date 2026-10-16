@@ -43,6 +43,7 @@ final class LaneClientIdentities {
     }
 
     String name(long key, long userId) {
+        assertOwner();
         int row = row(key);
         if (row < 0 || users[row] != userId)
             throw new IllegalArgumentException("unknown runtime client key: " + userId + '/' + key);

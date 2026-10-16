@@ -4,6 +4,7 @@ import com.surprising.aeron.service.state.account.UserRuntime;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 
 import com.surprising.aeron.service.state.risk.*;
+import com.surprising.aeron.service.state.index.*;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
@@ -116,6 +117,19 @@ public final class RuntimeStateProjector {
             }
         });
         validateClientIndex(source, runtime, identities);
+        PositionUserIndex positionUserIndex = new PositionUserIndex(source, identities, topology);
+        OpenInterestIndex openInterestIndex = new OpenInterestIndex(source, identities);
+        TriggerOrderIndex triggerOrderIndex = new TriggerOrderIndex(source);
+        AlgoOrderIndex algoOrderIndex = new AlgoOrderIndex(source);
+        LiquidationIndex liquidationIndex = new LiquidationIndex(source);
+        CancelAllAfterIndex cancelAllAfterIndex = new CancelAllAfterIndex(source);
+        ActiveOrderIndex activeOrderIndex = new ActiveOrderIndex(source, identities);
+        AdlPositionIndex adlPositionIndex = new AdlPositionIndex(source, identities);
+        RuntimeFactIndexes factIndexes = new RuntimeFactIndexes(
+                positionUserIndex, openInterestIndex, triggerOrderIndex, algoOrderIndex,
+                liquidationIndex, cancelAllAfterIndex, activeOrderIndex, adlPositionIndex);
+        runtime.bindFactIndexes(factIndexes, identities);
+        factIndexes.rebuild(source, identities);
         runtime.rebuildAccountLaneHashes();
         runtime.clearChangedKeys();
         runtime.releaseOwnerForHandoff();

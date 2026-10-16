@@ -35,7 +35,6 @@ public final class ClusterServiceEgress {
     private boolean closeRequests;
     private long outputProduced;
     private volatile long outputConsumed;
-    private volatile boolean outputOverflow;
     private long epoch;
     private long leadershipTermId;
 
@@ -105,11 +104,19 @@ public final class ClusterServiceEgress {
         leadershipTermId = termId;
     }
 
+    private final org.agrona.collections.LongHashSet overflowSessions = new org.agrona.collections.LongHashSet();
+
+    private void handleSessionOverflow(long sessionId) {
+        if (sessionId != NO_SESSION_ID) {
+            overflowSessions.add(sessionId);
+        }
+    }
+
     void publishResponse(TradingCoreOwner processor, long sessionId, CoreMessageHeader header, CoreResponse response,
                          long committedSequence, long ownerEpoch) {
         int length = CoreMessageCodec.encodedResponseLength(header, response);
         if (length > OUTPUT_BYTES - (outputProduced - outputConsumed) || output.remainingCapacity() == 0) {
-            outputOverflow = true;
+            handleSessionOverflow(sessionId);
             processor.releaseResponse(response);
             return;
         }
@@ -117,14 +124,14 @@ public final class ClusterServiceEgress {
         unpublishedOutput = null;
         if (slot == null) slot = availableOutput.poll();
         if (slot == null) {
-            outputOverflow = true;
+            handleSessionOverflow(sessionId);
             processor.releaseResponse(response);
             return;
         }
         header.retainForEgress();
         slot.prepare(processor, sessionId, header, response, committedSequence, length, ownerEpoch);
         if (!output.offer(slot)) {
-            outputOverflow = true;
+            handleSessionOverflow(sessionId);
             header.releaseFromEgress();
             processor.releaseResponse(response);
             slot.clear();
@@ -136,10 +143,17 @@ public final class ClusterServiceEgress {
 
     int drainResponses(TradingCoreOwner processor) {
         int work = 0;
-        if (outputOverflow) {
-            outputOverflow = false;
-            sessions.forEachValue(TransportSession::close);
-            deferred.clear();
+        if (!overflowSessions.isEmpty()) {
+            var iterator = overflowSessions.iterator();
+            while (iterator.hasNext()) {
+                long sid = iterator.nextValue();
+                TransportSession session = sessions.get(sid);
+                if (session != null) {
+                    session.close();
+                }
+                deferred.remove(sid);
+            }
+            overflowSessions.clear();
         }
         for (; work < 256; work++) {
             Output next = output.poll();
@@ -176,6 +190,7 @@ public final class ClusterServiceEgress {
             }
         }
         deferred.clear();
+        overflowSessions.clear();
         sessions.forEachValue(TransportSession::disconnect);
         sessions.clear();
     }

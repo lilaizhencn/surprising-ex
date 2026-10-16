@@ -87,9 +87,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
         if (spinLimit < 0 || spinLimit > 4096)
             throw new IllegalArgumentException("settlement spin limit must be in [0,4096]");
         this.lane = lane;
-        thread = Thread.ofPlatform().daemon(true)
-                .name("core-" + role + "-lane-" + lane.laneId())
-                .unstarted(this::run);
+        thread = new LaneThread("core-" + role + "-lane-" + lane.laneId(), this::run, lane);
         lane.bindWorker(thread);
         thread.start();
         while (!started && failure == null) Thread.onSpinWait();
@@ -456,7 +454,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
 
     private static class PaddedSequenceLhsPadding {
         @SuppressWarnings("unused")
-        private long p00, p01, p02, p03, p04, p05, p06, p07;
+        private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e;
     }
 
     private static class PaddedSequenceValue extends PaddedSequenceLhsPadding {
@@ -465,34 +463,46 @@ public final class SettlementLaneWorker implements AutoCloseable {
 
     private static final class PaddedSequence extends PaddedSequenceValue {
         @SuppressWarnings("unused")
-        private long p10, p11, p12, p13, p14, p15, p16, p17;
+        private long p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p1a, p1b, p1c, p1d, p1e;
     }
 
     private static class MatcherSettlementRingLhsPadding {
         @SuppressWarnings("unused")
-        private long p00, p01, p02, p03, p04, p05, p06, p07;
+        private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e;
     }
 
     private static class MatcherSettlementRingProducerPosition extends MatcherSettlementRingLhsPadding {
         protected volatile long producerPosition;
+        protected long cachedConsumerPosition;
     }
 
     private static class MatcherSettlementRingMidPadding extends MatcherSettlementRingProducerPosition {
         @SuppressWarnings("unused")
-        private long p10, p11, p12, p13, p14, p15, p16, p17;
+        private long p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p1a, p1b, p1c, p1d, p1e;
     }
 
     private static class MatcherSettlementRingConsumerPosition extends MatcherSettlementRingMidPadding {
         protected volatile long consumerPosition;
+        protected long cachedProducerPosition;
     }
 
     private static class MatcherSettlementRingRhsPadding extends MatcherSettlementRingConsumerPosition {
         @SuppressWarnings("unused")
-        private long p20, p21, p22, p23, p24, p25, p26, p27;
+        private long p20, p21, p22, p23, p24, p25, p26, p27, p28, p29, p2a, p2b, p2c, p2d, p2e;
     }
 
     /** Fixed reference ring with one producer and one consumer; cache lines are padded to prevent false sharing. */
     private static final class MatcherSettlementRing extends MatcherSettlementRingRhsPadding {
+        private static final java.lang.invoke.VarHandle CONSUMER_POSITION_VH;
+        static {
+            try {
+                CONSUMER_POSITION_VH = java.lang.invoke.MethodHandles.lookup()
+                        .findVarHandle(MatcherSettlementRingConsumerPosition.class, "consumerPosition", long.class);
+            } catch (ReflectiveOperationException e) {
+                throw new ExceptionInInitializerError(e);
+            }
+        }
+
         private final MatcherSettlementEvent[] events;
         private final int mask;
 
@@ -501,15 +511,27 @@ public final class SettlementLaneWorker implements AutoCloseable {
             mask = capacity - 1;
         }
 
-        boolean isFull() { return producerPosition - consumerPosition >= events.length; }
+        boolean isFull() {
+            long position = producerPosition;
+            if (position - cachedConsumerPosition >= events.length) {
+                cachedConsumerPosition = consumerPosition;
+                return position - cachedConsumerPosition >= events.length;
+            }
+            return false;
+        }
 
         long publish(MatcherSettlementEvent event) {
             long position = producerPosition;
-            if (position - consumerPosition >= events.length)
-                throw new RejectedExecutionException("Matcher settlement ring is full");
+            if (position - cachedConsumerPosition >= events.length) {
+                cachedConsumerPosition = consumerPosition;
+                if (position - cachedConsumerPosition >= events.length) {
+                    throw new RejectedExecutionException("Matcher settlement ring is full");
+                }
+            }
             int index = (int) position & mask;
-            if (events[index] != null)
+            if (events[index] != null) {
                 throw new IllegalStateException("Matcher settlement ring slot was not released");
+            }
             events[index] = event;
             producerPosition = position + 1;
             return position;
@@ -517,16 +539,29 @@ public final class SettlementLaneWorker implements AutoCloseable {
 
         MatcherSettlementEvent peek() {
             long position = consumerPosition;
-            return position < producerPosition ? events[(int) position & mask] : null;
+            if (position >= cachedProducerPosition) {
+                cachedProducerPosition = producerPosition;
+                if (position >= cachedProducerPosition) {
+                    return null;
+                }
+            }
+            return events[(int) position & mask];
         }
 
         void poll() {
             long position = consumerPosition;
             int index = (int) position & mask;
-            if (position >= producerPosition || events[index] == null)
+            if (position >= cachedProducerPosition) {
+                cachedProducerPosition = producerPosition;
+                if (position >= cachedProducerPosition) {
+                    throw new IllegalStateException("Matcher settlement ring is empty");
+                }
+            }
+            if (events[index] == null) {
                 throw new IllegalStateException("Matcher settlement ring is empty");
+            }
             events[index] = null;
-            consumerPosition = position + 1;
+            CONSUMER_POSITION_VH.setRelease(this, position + 1);
         }
 
         long depth() {

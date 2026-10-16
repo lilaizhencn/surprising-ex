@@ -101,16 +101,12 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 701, variant.instrumentId(), variant.settlementPriceTicks(), 9_999);
         TradingCoreState expected = reducer.settleInstrument(opening, command);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimeStateProjector.project(opening, identities);
-        runtime.startAccountLanes();
-        try {
+        try (TradingRuntimeState runtime = RuntimeStateProjector.project(opening, identities)) {
             CoreSettlementProgressView actual = RuntimeLifecycleSettlement.applyRuntime(command,
                     List.of(USER_ID, SECOND_MAKER_ID), null, new ActiveOrderIndex(opening), runtime, identities);
 
             assertThat(actual.complete()).isTrue();
             RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
-        } finally {
-            runtime.close();
         }
     }
 
