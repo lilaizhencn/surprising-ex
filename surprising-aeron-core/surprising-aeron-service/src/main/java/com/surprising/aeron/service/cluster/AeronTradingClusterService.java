@@ -5,18 +5,22 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.service.orchestration.ClusterServiceEgress;
 import com.surprising.aeron.service.orchestration.TradingOwnerLoop;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder;
-import com.surprising.aeron.service.orchestration.snapshot.ClusterCoreSnapshotTransfer;
 import com.surprising.product.api.ProductLine;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
+import io.aeron.Publication;
 import io.aeron.cluster.codecs.CloseReason;
 import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster;
 import io.aeron.cluster.service.ClusteredService;
 import io.aeron.logbuffer.Header;
+import java.util.concurrent.TimeUnit;
+import java.util.function.LongConsumer;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.AgentTerminationException;
+import org.agrona.concurrent.UnsafeBuffer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -29,11 +33,12 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public final class AeronTradingClusterService implements ClusteredService {
+    private static final long SNAPSHOT_TIMEOUT_NS = TimeUnit.SECONDS.toNanos(
+            Long.getLong("surprising.aeron.snapshot-timeout-seconds", 300L));
     private final ClusterServiceEgress egress;
     private final TradingOwnerLoop owner;
     private final CoreMessageFlyweightDecoder messageDecoder = new CoreMessageFlyweightDecoder();
     private final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
-    private final ClusterCoreSnapshotTransfer snapshotTransfer = new ClusterCoreSnapshotTransfer();
     private Cluster cluster;
 
     /** Spring 使用的构造方法；注入已配置好的 Owner 与响应出口。 */
@@ -70,7 +75,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         this.cluster = cluster;
         messageDecoder.reset();
         egress.start(cluster);
-        owner.start(cluster, snapshotTransfer.read(snapshot, cluster));
+        owner.start(cluster, readSnapshot(snapshot, cluster));
     }
 
     /**
@@ -202,7 +207,7 @@ public final class AeronTradingClusterService implements ClusteredService {
     @Override
     public void onTakeSnapshot(ExclusivePublication publication) {
         var snapshot = owner.captureSnapshotSections(cluster.logPosition(), cluster.time());
-        snapshotTransfer.write(snapshot, publication, this::awaitProgress);
+        writeSnapshot(snapshot, publication, this::awaitProgress);
     }
 
     /** 捕获当前交易运行态快照，供诊断和基准测试的恢复检查使用；Cluster 正式快照走 {@link #onTakeSnapshot(ExclusivePublication)}。 */
@@ -239,4 +244,43 @@ public final class AeronTradingClusterService implements ClusteredService {
         cluster.idleStrategy().idle();
     }
 
+    private SectionedCoreSnapshotCodec.RecoveryBuffer readSnapshot(Image image, Cluster cluster) {
+        if (image == null) return null;
+        var recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
+        long deadline = System.nanoTime() + SNAPSHOT_TIMEOUT_NS;
+        while (!image.isEndOfStream()) {
+            int work = image.poll((buffer, offset, length, header) ->
+                    recovery.accept(buffer, offset, length), 10);
+            if (System.nanoTime() > deadline) {
+                throw new IllegalStateException("snapshot recovery deadline");
+            }
+            cluster.idleStrategy().idle(work);
+        }
+        return recovery;
+    }
+
+    private void writeSnapshot(SectionedCoreSnapshotCodec.SectionedSnapshot snapshot,
+                              ExclusivePublication publication, LongConsumer awaitProgress) {
+        long deadline = System.nanoTime() + SNAPSHOT_TIMEOUT_NS;
+        for (byte[] chunk : snapshot.chunks()) {
+            var buffer = new UnsafeBuffer(chunk);
+            for (int offset = 0; offset < chunk.length;) {
+                int length = Math.min(publication.maxPayloadLength(), chunk.length - offset);
+                long result = publication.offer(buffer, offset, length);
+                if (result >= 0) {
+                    offset += length;
+                } else {
+                    if (result != Publication.BACK_PRESSURED
+                            && result != Publication.ADMIN_ACTION
+                            && result != Publication.NOT_CONNECTED) {
+                        throw new IllegalStateException("snapshot publication failed: " + result);
+                    }
+                    if (System.nanoTime() > deadline) {
+                        throw new IllegalStateException("snapshot publication deadline");
+                    }
+                    awaitProgress.accept(deadline);
+                }
+            }
+        }
+    }
 }

@@ -14,7 +14,12 @@ final class OwnerIngressRing {
     private final Entry[] entries = new Entry[CAPACITY];
     /** Producer-only cursor/budget; a failed offer never claims or changes an entry. */
     private long producedEntries, producedBytes;
+    @SuppressWarnings("unused")
+    private long p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e, p0f;
+    /** Consumer-only cursor/budget; updated only by the Owner thread. */
     private volatile long consumedBytes;
+    @SuppressWarnings("unused")
+    private long p11, p12, p13, p14, p15, p16, p17, p18, p19, p1a, p1b, p1c, p1d, p1e, p1f;
 
     OwnerIngressRing() {
         for (int i = 0; i < entries.length; i++) entries[i] = new Entry();

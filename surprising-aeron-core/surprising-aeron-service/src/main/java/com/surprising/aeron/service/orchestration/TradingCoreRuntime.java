@@ -9,8 +9,7 @@ import com.surprising.aeron.service.state.account.TransferRuntime;
 import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
 import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
-import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
-import com.surprising.aeron.service.orchestration.realtime.RealtimeReadCoordinator;
+
 
 import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
@@ -169,8 +168,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /** 盘口查询与分页会话；仅在查询边界物化视图。 */
     final OrderBookQueryService bookQueries = new OrderBookQueryService(this);
-    /** 查询协议路由；只读权威状态，不参与命令准入或资金变更。 */
-    final TradingCoreQueryRouter queryRouter = new TradingCoreQueryRouter(this);
     /** 撮合在途推进状态；拥有 Lane/Matcher 通知排空和队首唤醒规则。 */
     final MatchingPipelineProgress matchingProgress = new MatchingPipelineProgress(this);
     /** 已准入命令到确定性 Matcher 输入的协议转换与证据包装。 */
@@ -187,36 +184,285 @@ public final class TradingCoreRuntime implements AutoCloseable {
         realtimeCapture = new com.surprising.aeron.service.state.realtime.RealtimeStateCapture(
                 outbox, productLine, identities);
         runtimeState.realtimeCapture(realtimeCapture);
-        realtimeReads = new RealtimeReadCoordinator(runtimeState, matcherPipeline, matchingAdapter, realtimeCapture);
         return realtimeCapture;
     }
 
-    /** 异步实时快照和盘口读取的生命周期管理。 */
-    RealtimeReadCoordinator realtimeReads;
+    private java.util.concurrent.CompletableFuture<com.surprising.aeron.service.state.RealtimeUserSnapshot> pendingRealtimeSnapshot;
+    private long realtimeSnapshotUser, realtimeSnapshotId, realtimeSnapshotPosition, realtimeSnapshotTimestamp, realtimeSnapshotExportSequence;
+    private java.util.concurrent.CompletableFuture<java.util.List<com.surprising.aeron.protocol.CoreBookLevelView>> realtimeBook;
+    private String realtimeBookSymbol;
+    private long realtimeBookPosition, realtimeBookTimestamp;
 
     /** 返回已经提交并可对外发布的实时事件水位。 */
     public long realtimeExportSequence() { return commits.publication.publishedSequence(); }
     /** 返回是否存在尚未完成的用户实时快照读取。 */
-    public boolean realtimeSnapshotPending() { return realtimeReads != null && realtimeReads.realtimeSnapshotPending(); }
+    public boolean realtimeSnapshotPending() { return pendingRealtimeSnapshot != null; }
     /** 返回是否存在尚未完成的盘口读取。 */
-    public boolean realtimeBookPending() { return realtimeReads != null && realtimeReads.realtimeBookPending(); }
+    public boolean realtimeBookPending() { return realtimeBook != null; }
+
     /** 推进用户实时快照读取，并返回本轮完成的工作数。 */
-    public int pollRealtimeSnapshot() { return realtimeReads == null ? 0 : realtimeReads.pollRealtimeSnapshot(); }
+    public int pollRealtimeSnapshot() {
+        if (pendingRealtimeSnapshot == null || !pendingRealtimeSnapshot.isDone()) return 0;
+        var future = pendingRealtimeSnapshot;
+        pendingRealtimeSnapshot = null;
+        try {
+            var snapshot = future.join();
+            realtimeCapture.begin(realtimeSnapshotPosition, realtimeSnapshotTimestamp, realtimeSnapshotId);
+            realtimeCapture.snapshot(realtimeSnapshotUser, snapshot, realtimeSnapshotExportSequence);
+            realtimeCapture.commit();
+        } catch (RuntimeException failure) {
+            realtimeCapture.failed();
+            realtimeCapture.begin(realtimeSnapshotPosition, realtimeSnapshotTimestamp, realtimeSnapshotId);
+            realtimeCapture.emit(com.surprising.aeron.protocol.RealtimeFrame.Kind.SNAPSHOT_UNAVAILABLE,
+                    realtimeSnapshotUser, "", "", new byte[0]);
+            realtimeCapture.commit();
+        }
+        return 1;
+    }
+
     /** 推进盘口读取，并返回本轮完成的工作数。 */
-    public int pollRealtimeBook() { return realtimeReads == null ? 0 : realtimeReads.pollRealtimeBook(); }
+    public int pollRealtimeBook() {
+        if (realtimeBook == null || !realtimeBook.isDone()) return 0;
+        var future = realtimeBook;
+        realtimeBook = null;
+        try {
+            var levels = future.join();
+            realtimeCapture.begin(realtimeBookPosition, realtimeBookTimestamp, 0);
+            realtimeCapture.emit(com.surprising.aeron.protocol.RealtimeFrame.Kind.BOOK, 0,
+                    realtimeBookSymbol, realtimeBookSymbol,
+                    com.surprising.aeron.protocol.CoreStateQueryCodec.encodeOrderBookView(
+                            new com.surprising.aeron.protocol.CoreOrderBookView(realtimeBookPosition, levels)));
+            realtimeCapture.commit();
+        } catch (RuntimeException failure) {
+            realtimeCapture.failed();
+        }
+        return 1;
+    }
 
     /** 在已提交位置上登记一个用户实时快照请求。 */
     public void captureRealtimeSnapshot(long userId, long snapshotId, long position, long timestamp) {
-        if (realtimeReads == null || realtimeReads.realtimeSnapshotPending()) return;
+        if (realtimeCapture == null || pendingRealtimeSnapshot != null) return;
         assertClusterCallbackComplete();
-        realtimeReads.captureRealtimeSnapshot(userId, snapshotId, position, timestamp, realtimeExportSequence());
+        realtimeSnapshotExportSequence = realtimeExportSequence();
+        realtimeSnapshotUser = userId;
+        realtimeSnapshotId = snapshotId;
+        realtimeSnapshotPosition = position;
+        realtimeSnapshotTimestamp = timestamp;
+        try { pendingRealtimeSnapshot = runtimeState.realtimeSnapshot(userId); }
+        catch (RuntimeException failure) { realtimeCapture.failed(); }
     }
 
     /** 在已提交位置上登记一个盘口读取请求。 */
     public void captureRealtimeBook(String instrumentId, long position, long timestamp) {
-        if (realtimeReads == null || realtimeReads.realtimeBookPending()) return;
+        if (realtimeCapture == null || realtimeBook != null) return;
         assertClusterCallbackComplete();
-        realtimeReads.captureRealtimeBook(instrumentId, position, timestamp);
+        realtimeBookSymbol = instrumentId;
+        realtimeBookPosition = position;
+        realtimeBookTimestamp = timestamp;
+        try {
+            realtimeBook = matcherPipeline.readAtSubmissionFence(matchingAdapter.matcherShardId(instrumentId),
+                    () -> matchingAdapter.orderBookLevelsAsync(instrumentId, 50).join());
+        } catch (RuntimeException failure) {
+            realtimeCapture.failed();
+        }
+    }
+
+    /** 查询协议路由：读取已有路由索引并向实际账户、撮合器或账本所有者派发查询。 */
+    CoreResponse routeQuery(CoreMessage message, long clusterTimestamp) {
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && OrderBookQueryService.accountQuery(message.header().messageType())) {
+            try { return bookQueries.beginAccountQuery(message); }
+            catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException tooLarge) {
+                return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
+            } catch (IllegalArgumentException invalid) { return rejected(CoreResultCode.INVALID_COMMAND); }
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.STATE_HASH_QUERY
+                || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.BUSINESS_STATE_HASH_QUERY)) {
+            return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
+                    com.surprising.aeron.protocol.CoreStateQueryCodec.encodeStateHash(currentBusinessStateHash()));
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.LANE_METRICS_QUERY) {
+            if (message.payloadUnsafe().length != 0) return rejected(CoreResultCode.INVALID_COMMAND);
+            return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount, encodeLaneMetrics());
+        }
+        if (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY) {
+            try {
+                var query = com.surprising.aeron.protocol.CoreMaintenanceCodec.decodeQuery(message.payloadUnsafe());
+                var instrument = runtimeState.instrument(query.instrumentId());
+                if (instrument == null) return rejected(CoreResultCode.ENTITY_NOT_FOUND);
+                return bookQueries.beginPositionIndexQuery(message, query, instrument.maintenance());
+            } catch (IllegalArgumentException | java.nio.BufferUnderflowException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.COMMAND_RESULT_QUERY) {
+            try {
+                java.util.UUID commandId = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeCommandResultQuery(message.payloadUnsafe());
+                CommandResultLedger.StoredResult result = resultLedger.get(commandId);
+                if (result == null) {
+                    return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED, com.surprising.aeron.protocol.ResponseStatus.REJECTED,
+                            CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION, appliedCommandCount,
+                            EMPTY_RESPONSE_DATA);
+                }
+                responseArena.retain(result.responseDataUnsafe());
+                return CoreResponse.owned(com.surprising.aeron.protocol.ResponseStatus.OK, result.status(), result.resultCode(),
+                        result.appliedCommandCount(),
+                        result.responseDataUnsafe(), result.responseDataOffsetUnsafe(), result.responseDataLength());
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TRIGGER_ORDER_QUERY
+                || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY)) {
+            try { return bookQueries.beginTriggerQuery(message);
+            } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
+                return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.BOOK_STATE_QUERY) {
+            try {
+                return bookQueries.beginBookQuery(message);
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ORDER_BOOK_BOOTSTRAP_QUERY) {
+            try {
+                return bookQueries.beginBookBootstrapQuery(message);
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TREASURY_STATE_QUERY) {
+            try {
+                if (runtimeState.systemLedgerStarted()) return bookQueries.beginTreasuryQuery(message);
+                var views = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.treasuryAssets(
+                        runtimeState, identities);
+                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
+                        com.surprising.aeron.protocol.CoreStateQueryCodec.encodeTreasuryState(views));
+            } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
+                return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
+            }
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.FUNDING_PROGRESS_QUERY) {
+            try {
+                String instrumentId = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeFundingProgressQuery(message.payloadUnsafe());
+                var view = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService
+                        .fundingProgress(runtimeState, identities, instrumentId);
+                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
+                        com.surprising.aeron.protocol.CoreFundingProgressCodec.encode(view));
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.SETTLEMENT_PROGRESS_QUERY) {
+            try {
+                String instrumentId = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeSettlementProgressQuery(message.payloadUnsafe());
+                var view = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService
+                        .settlementProgress(runtimeState, identities, instrumentId);
+                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
+                        com.surprising.aeron.protocol.CoreSettlementProgressCodec.encode(view));
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && OrderBookQueryService.riskAccountQuery(message.header().messageType())) {
+            try { return bookQueries.beginRiskAccountQuery(message); }
+            catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException failure) {
+                return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
+            } catch (IllegalArgumentException failure) { return rejected(CoreResultCode.INVALID_COMMAND); }
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.RISK_SCAN_CONTROL_QUERY) {
+            if (message.payloadUnsafe().length != 0) return rejected(CoreResultCode.INVALID_COMMAND);
+            return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
+                    com.surprising.aeron.protocol.CoreRiskScanControlCodec.encodeView(runtimeState.riskScanControl()));
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.OPEN_INTEREST_QUERY) {
+            return bookQueries.beginPositionIndexQuery(message, null, null);
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.CANCEL_ALL_AFTER_QUERY) {
+            try {
+                var query = com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeQuery(message.payloadUnsafe());
+                var keys = cancelAllAfterIndex.query(query.userId(), query.symbolScope(), query.dueAtEpochMillis(),
+                        query.limit(), runtimeState::cancelAllAfterTimer);
+                var values = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.cancelAllAfter(
+                        runtimeState, keys);
+                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
+                        com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeList(values));
+            } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
+                return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.LIQUIDATION_WORK_QUERY) {
+            try {
+                var query = com.surprising.aeron.protocol.CoreLiquidationWorkCodec.decodeQuery(message.payloadUnsafe());
+                if (query.productLine() != productLine) {
+                    return rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
+                }
+                java.util.NavigableSet<Long> candidates = liquidationIndex.activeIds()
+                        .tailSet(query.afterLiquidationId(), false);
+                if (runtimeState.systemLedgerStarted()) {
+                    return bookQueries.beginLiquidationWorkQuery(message, query);
+                }
+                var work = com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService.work(
+                        runtimeState, identities, productLine, query, candidates,
+                        liquidationIndex.activeIds());
+                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
+                        com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeWork(work));
+            } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
+                return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ORDER_PREFLIGHT_QUERY) {
+            try {
+                return bookQueries.beginPreflightQuery(message, clusterTimestamp);
+            } catch (com.surprising.aeron.service.exception.CoreStateRejectedException exception) {
+                return rejected(CoreResultCode.fromRejectionCode(exception.code()));
+            } catch (ArithmeticException exception) {
+                return rejected(CoreResultCode.ARITHMETIC_OVERFLOW);
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
+                && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.PENDING_TRANSFER_QUERY) {
+            try {
+                int limit = com.surprising.aeron.protocol.CorePendingTransferCodec.decodeQuery(
+                        message.payloadUnsafe());
+                if (runtimeState.asynchronousCommands())
+                    return bookQueries.beginPendingTransferQuery(message, limit);
+                var transfers = runtimeState.pendingTransfers(limit).stream()
+                        .map(value -> new com.surprising.aeron.protocol.CorePendingTransferView(
+                                value.userId(), value.command()))
+                        .toList();
+                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
+                        com.surprising.aeron.protocol.CorePendingTransferCodec.encode(transfers));
+            } catch (IllegalArgumentException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
+        return null;
     }
 
     /** 幂等结果账本允许保留的最大命令数。 */
@@ -1775,6 +2021,134 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 this.command = command; this.orders = orders;
                 results = new java.util.ArrayList<>(orders.size());
             }
+        }
+    }
+
+    static final class DirectMatcherSettlementPreparation {
+        private final TradingCoreRuntime owner;
+
+        DirectMatcherSettlementPreparation(TradingCoreRuntime owner) {
+            this.owner = java.util.Objects.requireNonNull(owner);
+        }
+
+        com.surprising.aeron.service.state.MatcherSettlementEvent prepareForMatching(CommandSlot pending) {
+            if (pending.operation() == CommandSlot.Operation.REPLACE
+                    || pending.operation() == CommandSlot.Operation.AMEND) {
+                return prepareReplacement(pending);
+            }
+            return switch (pending.operation()) {
+                case PLACE -> preparePlace(pending);
+                case TRIGGER -> prepareTrigger(pending);
+                case CANCEL -> prepareCancellation(pending);
+                default -> null;
+            };
+        }
+
+        com.surprising.aeron.service.state.MatcherSettlementEvent preparePipelinedPlaceBatch(
+                CommandSlot pending, OrderBatchPending batch, int shard) {
+            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectMatcherSettlement(
+                    pending.sequence(), owner.commits.validAccountLaneMask(),
+                    null, batch.preparedAdmittedOrders, batch.items.size(), pending.command().header().commandId(),
+                    shard, owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                    pending.preMatchingCancellationOrderIds(), batch);
+            reserveMatcherPublication(direct);
+            return direct;
+        }
+
+        com.surprising.aeron.service.state.MatcherSettlementEvent prepareBatchPlaceItem(
+                CommandSlot pending, OrderBatchPending batch, com.surprising.aeron.service.state.OrderRuntime admitted, int shard) {
+            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectMatcherSettlement(
+                    pending.sequence(), 0, owner.commits.validAccountLaneMask(), admitted, null, 1,
+                    pending.command().header().commandId(), shard, owner.identities,
+                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                    pending.preMatchingCancellationOrderIds(), batch);
+            reserveMatcherPublication(direct);
+            return direct;
+        }
+
+        com.surprising.aeron.service.state.MatcherSettlementEvent prepareBatchAmend(
+                CommandSlot pending, ResolvedMatchingAdmission admission, int shard) {
+            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectReplacement(
+                    pending.sequence(), 0, owner.commits.validAccountLaneMask(), admission,
+                    pending.command().header().commandId(), shard, owner.identities,
+                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                    pending.preMatchingCancellationOrderIds());
+            reserveMatcherPublication(direct);
+            return direct;
+        }
+
+        com.surprising.aeron.service.state.MatcherSettlementEvent prepareCancelBatch(
+                CommandSlot pending, OrderBatchPending batch, int shard, boolean finalChunk, int count) {
+            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectCancelBatch(
+                    pending.sequence(), finalChunk, pending.command().header().userId(),
+                    batch.preparedCancellationOrderIds, count, pending.command().header().commandId(), shard,
+                    owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), batch);
+            reserveMatcherPublication(direct);
+            return direct;
+        }
+
+        private com.surprising.aeron.service.state.MatcherSettlementEvent preparePlace(CommandSlot pending) {
+            var admission = java.util.Objects.requireNonNull(pending.placeAdmission(), "place admission receipt");
+            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectMatcherSettlement(
+                    pending.sequence(), directInitialLaneMask(admission.userId()), admission,
+                    pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending),
+                    owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                    pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
+            reserveMatcherPublication(pending, direct);
+            return direct;
+        }
+
+        private com.surprising.aeron.service.state.MatcherSettlementEvent prepareReplacement(CommandSlot pending) {
+            var admission = owner.requireMatchingAdmission(pending);
+            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectReplacement(
+                    pending.sequence(), pending.sequence(), directInitialLaneMask(admission.userId()), admission,
+                    pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,
+                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                    pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
+            pending.settlement(direct, direct.plan());
+            reserveMatcherPublication(direct);
+            if (owner.realtimeCapture != null) pending.realtimeTakerOrder = direct.admittedOrder();
+            return direct;
+        }
+
+        private com.surprising.aeron.service.state.MatcherSettlementEvent prepareTrigger(CommandSlot pending) {
+            long[] execute = pending.decodedCommand().trigger();
+            var trigger = java.util.Objects.requireNonNull(pending.sourceTrigger(),
+                    "admitted trigger is missing");
+            com.surprising.aeron.service.state.OrderRuntime triggerOrder = java.util.Objects.requireNonNull(pending.triggerAdmissionOrder(),
+                    "trigger admission receipt is missing");
+            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
+                    directInitialLaneMask(triggerOrder.userId()), triggerOrder, null, 1,
+                    pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,
+                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                    pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
+            direct.triggerCompletion(trigger, execute[3]);
+            reserveMatcherPublication(pending, direct);
+            if (owner.realtimeCapture != null) pending.realtimeTakerOrder = triggerOrder;
+            return direct;
+        }
+
+        private com.surprising.aeron.service.state.MatcherSettlementEvent prepareCancellation(CommandSlot pending) {
+            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectCancellation(pending.sequence(),
+                    pending.command().header().userId(), pending.decodedCommand().cancelOrder().orderId(),
+                    pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,
+                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), pending.laneResultTarget());
+            reserveMatcherPublication(pending, direct);
+            return direct;
+        }
+
+        private void reserveMatcherPublication(CommandSlot pending, com.surprising.aeron.service.state.MatcherSettlementEvent direct) {
+            pending.settlement(direct, direct.plan());
+            reserveMatcherPublication(direct);
+        }
+
+        private void reserveMatcherPublication(com.surprising.aeron.service.state.MatcherSettlementEvent direct) {
+            direct.reserveMatcherPublication();
+        }
+
+        private long directInitialLaneMask(long userId) {
+            if (userId <= 0) throw new IllegalArgumentException("direct settlement user is required");
+            return owner.runtimeState.topology().accountLaneMask(userId);
         }
     }
 }

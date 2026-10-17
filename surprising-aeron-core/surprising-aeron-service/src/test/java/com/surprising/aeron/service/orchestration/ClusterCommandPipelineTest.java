@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.realtime.RealtimeReadCoordinator;
+
 import com.surprising.aeron.service.orchestration.ClusterCommandWindow;import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
 import com.surprising.aeron.service.matcher.MatcherCommandPipeline;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1509,11 +1509,9 @@ class ClusterCommandPipelineTest {
             f.progressUntil(() -> requests.isEmpty());
             assertThat(f.service.commandWindowSize()).isOne();
             assertThat(requests.isEmpty()).as("continuous input must not starve a read at the preceding commit boundary").isTrue();
-            var readsField = TradingCoreRuntime.class.getDeclaredField("realtimeReads");
-            readsField.setAccessible(true);
-            var pendingField = RealtimeReadCoordinator.class.getDeclaredField("pendingRealtimeSnapshot");
+            var pendingField = TradingCoreRuntime.class.getDeclaredField("pendingRealtimeSnapshot");
             pendingField.setAccessible(true);
-            var snapshot = (java.util.concurrent.CompletableFuture<?>) pendingField.get(readsField.get(f.service.state()));
+            var snapshot = (java.util.concurrent.CompletableFuture<?>) pendingField.get(f.service.state());
             assertThat(snapshot).isNotNull();
             snapshot.get(2, TimeUnit.SECONDS);
             f.send(f.cancelBatch(11, 1000));

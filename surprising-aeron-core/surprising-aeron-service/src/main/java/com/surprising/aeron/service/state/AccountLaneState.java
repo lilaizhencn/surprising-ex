@@ -1013,3 +1013,44 @@ public final class AccountLaneState {
         return mixed;
     }
 }
+
+/**
+ * Lane 状态中不参与持续撮合的索引集合。
+ *
+ * <p>把风险、触发、清算和杠杆结构放在独立对象中，AccountLaneState 的热对象只保留
+ * 订单、余额、预留和持仓引用。冷状态仍由同一个 Lane 线程拥有，因而不引入新的锁或
+ * 可见性协议；快照、回放和查询继续使用原来的索引。</p>
+ */
+final class LaneColdState {
+    final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<LiquidationRuntime> liquidations =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
+    final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<Long>>> activeLiquidationIndex =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
+    final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<com.surprising.aeron.service.state.risk.RiskSnapshotRuntime> riskSnapshots =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
+    final java.util.Map<com.surprising.aeron.service.state.model.CoreLeverageKey, Long> leverages =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<java.util.HashSet<com.surprising.aeron.service.state.model.CoreLeverageKey>> leverageKeysByUser =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
+    final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<com.surprising.aeron.service.state.model.CoreAlgoOrderState> algoOrders =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
+    final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<com.surprising.aeron.service.state.model.CoreTriggerOrderState> triggerOrders =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
+    final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<org.eclipse.collections.impl.set.mutable.primitive.LongHashSet> triggerIdsByUser =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
+    final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
+
+    void clear() {
+        liquidations.clear();
+        activeLiquidationIndex.clear();
+        riskSnapshots.clear();
+        leverages.clear();
+        leverageKeysByUser.clear();
+        algoOrders.clear();
+        triggerOrders.clear();
+        triggerIdsByUser.clear();
+        pendingTransfers.clear();
+    }
+}
+

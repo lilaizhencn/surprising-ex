@@ -92,3 +92,100 @@ class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
         super.clear();
     }
 }
+
+/** Position after-images move with their physical buffer until its consumer releases them. */
+final class RuntimePositionChangeBuffer
+        extends RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> {
+    private PositionRuntime[] copies = new PositionRuntime[8];
+
+    @Override int put(long key, PositionRuntime value) {
+        int slot = indexOf(key);
+        if (slot < 0) slot = super.put(key, null);
+        if (slot >= copies.length)
+            copies = java.util.Arrays.copyOf(copies, Math.max(slot + 1, copies.length * 2));
+        if (value != null) value = copies[slot] = value.copyIntoPublicationSlot(copies[slot]);
+        return super.put(key, value);
+    }
+
+    @Override RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> emptyLike() {
+        return new RuntimePositionChangeBuffer();
+    }
+
+    @Override void swapWith(RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> other) {
+        if (!(other instanceof RuntimePositionChangeBuffer positions))
+            throw new IllegalStateException("position after-images require a position change buffer");
+        super.swapWith(other);
+        PositionRuntime[] previous = copies;
+        copies = positions.copies;
+        positions.copies = previous;
+    }
+
+    @Override void clear() {
+        for (int slot = 0; slot < size; slot++)
+            if (copies[slot] != null) copies[slot].clearPublicationSlot();
+        super.clear();
+    }
+}
+
+/** User before/after values belong to the existing command buffer, never to the live Lane table. */
+final class RuntimeUserChangeBuffer extends RuntimeIndexedChangeBuffer<com.surprising.aeron.service.state.account.UserRuntime, com.surprising.aeron.service.state.account.UserRuntime> {
+    private com.surprising.aeron.service.state.account.UserRuntime[] copies = new com.surprising.aeron.service.state.account.UserRuntime[8];
+
+    @Override int put(long key, com.surprising.aeron.service.state.account.UserRuntime value) {
+        int slot = indexOf(key);
+        if (slot < 0) slot = super.put(key, null);
+        if (slot >= copies.length)
+            copies = java.util.Arrays.copyOf(copies, Math.max(slot + 1, copies.length * 2));
+        if (value != null) value = copies[slot] = value.copyIntoCommandSlot(copies[slot]);
+        return super.put(key, value);
+    }
+
+    /** Preserve the original authority identity as well as its independent before-value. */
+    void captureBefore(long key, com.surprising.aeron.service.state.account.UserRuntime authority) {
+        if (containsKey(key)) return;
+        put(key, authority);
+        putPrepared(key, authority);
+    }
+
+    @Override void clear() {
+        for (int slot = 0; slot < size; slot++) if (copies[slot] != null) copies[slot].clearCommandSlot();
+        super.clear();
+    }
+}
+
+/** Command-local order after-images. Their objects move with the physical change buffer. */
+final class RuntimeOrderChangeBuffer extends RuntimeIndexedChangeBuffer<OrderRuntime, Void> {
+    private OrderRuntime[] copies = new OrderRuntime[8];
+
+    /** Only the Lane uses live references, until its final publication fence. */
+    void putLive(long key, OrderRuntime value) { super.put(key, value); }
+
+    void freezeValues() {
+        for (int slot = 0; slot < size; slot++) put(keyAt(slot), valueAt(slot));
+    }
+
+    @Override int put(long key, OrderRuntime value) {
+        int slot = indexOf(key);
+        if (slot < 0) slot = super.put(key, null);
+        if (slot >= copies.length) copies = java.util.Arrays.copyOf(copies, Math.max(slot + 1, copies.length * 2));
+        if (value != null) value = copies[slot] = value.copyIntoCommandSlot(copies[slot]);
+        return super.put(key, value);
+    }
+
+    @Override RuntimeIndexedChangeBuffer<OrderRuntime, Void> emptyLike() {
+        return new RuntimeOrderChangeBuffer();
+    }
+
+    @Override void swapWith(RuntimeIndexedChangeBuffer<OrderRuntime, Void> other) {
+        if (!(other instanceof RuntimeOrderChangeBuffer orders))
+            throw new IllegalStateException("order after-images require an order change buffer");
+        super.swapWith(other);
+        OrderRuntime[] previous = copies; copies = orders.copies; orders.copies = previous;
+    }
+
+    @Override void clear() {
+        for (int slot = 0; slot < size; slot++) if (copies[slot] != null) copies[slot].clearCommandSlot();
+        super.clear();
+    }
+}
+

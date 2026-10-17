@@ -70,7 +70,7 @@ final class CoreCommandIngress {
                 runtime.runtimeState.readFenceAll(runtime.committedCoreSequence);
             }
         }
-        CoreResponse queryResponse = runtime.queryRouter.apply(message, clusterTimestamp);
+        CoreResponse queryResponse = runtime.routeQuery(message, clusterTimestamp);
         if (queryResponse != null) return queryResponse;
         if (message.header().kind() != WireMessageKind.COMMAND) {
             return runtime.rejected(CoreResultCode.INVALID_MESSAGE);
