@@ -30,6 +30,8 @@ final class ResponseArena {
     private final Slot[] slotDescriptors;
     private final int slotBytes;
     private final int slotCount;
+    private final boolean isPowerOfTwo;
+    private final int slotMask;
     private final AtomicInteger allocateCursor = new AtomicInteger();
 
     // Fast O(1) identity lookup: storage byte[] -> slotIndex
@@ -73,6 +75,8 @@ final class ResponseArena {
         if (slotCount <= 0 || slotBytes <= 0) throw new IllegalArgumentException("invalid response arena");
         this.slotCount = slotCount;
         this.slotBytes = slotBytes;
+        this.isPowerOfTwo = (slotCount & (slotCount - 1)) == 0;
+        this.slotMask = slotCount - 1;
         this.slots = new byte[slotCount][];
         this.slotStates = new AtomicLongArray(slotCount);
         this.slotDescriptors = new Slot[slotCount];
@@ -128,9 +132,12 @@ final class ResponseArena {
         if (requiredLength < 0) throw new IllegalArgumentException("negative response length");
         if (requiredLength > slotBytes) return -1;
         int start = allocateCursor.getAndIncrement() & 0x7FFFFFFF;
-        for (int i = 0; i < slotCount; i++) {
-            int index = (start + i) % slotCount;
-            if (slotStates.compareAndSet(index, 0L, TRANSPORT_UNIT)) {
+        boolean powerOfTwo = this.isPowerOfTwo;
+        int mask = this.slotMask;
+        int count = this.slotCount;
+        for (int i = 0; i < count; i++) {
+            int index = powerOfTwo ? ((start + i) & mask) : ((start + i) % count);
+            if (slotStates.get(index) == 0L && slotStates.compareAndSet(index, 0L, TRANSPORT_UNIT)) {
                 return index;
             }
         }

@@ -264,26 +264,26 @@ public final class TradingCommandCodec {
 
     static int encodedAmendOrderLength(AmendOrderCommand command) {
         return Integer.BYTES * 2 + Long.BYTES * 2
-                + (command.priceTicks() == null ? 0 : Long.BYTES)
-                + (command.quantitySteps() == null ? 0 : Long.BYTES)
+                + (command.hasPriceTicks() ? Long.BYTES : 0)
+                + (command.hasQuantitySteps() ? Long.BYTES : 0)
                 + (command.timeInForce() == null ? 0 : Integer.BYTES)
-                + (command.postOnly() == null ? 0 : Byte.BYTES)
+                + (command.hasPostOnly() ? Byte.BYTES : 0)
                 + (command.newClientOrderId() == null ? 0
                 : Short.BYTES + commandTextLength(command.newClientOrderId(), true));
     }
 
     static void writeAmendOrder(ByteBuffer output, AmendOrderCommand command) {
-        int mask = (command.priceTicks() == null ? 0 : 1)
-                | (command.quantitySteps() == null ? 0 : 2)
+        int mask = (command.hasPriceTicks() ? 1 : 0)
+                | (command.hasQuantitySteps() ? 2 : 0)
                 | (command.timeInForce() == null ? 0 : 4)
-                | (command.postOnly() == null ? 0 : 8)
+                | (command.hasPostOnly() ? 8 : 0)
                 | (command.newClientOrderId() == null ? 0 : 16);
         output.putInt(AMEND_ORDER_V1_MARKER).putLong(command.originalOrderId())
                 .putLong(command.replacementOrderId()).putInt(mask);
-        if ((mask & 1) != 0) output.putLong(command.priceTicks());
-        if ((mask & 2) != 0) output.putLong(command.quantitySteps());
+        if ((mask & 1) != 0) output.putLong(command.rawPriceTicks());
+        if ((mask & 2) != 0) output.putLong(command.rawQuantitySteps());
         if ((mask & 4) != 0) output.putInt(command.timeInForce().wireCode());
-        if ((mask & 8) != 0) output.put((byte) (command.postOnly() ? 1 : 0));
+        if ((mask & 8) != 0) output.put((byte) (command.isPostOnly() ? 1 : 0));
         if ((mask & 16) != 0) putCommandText(output, command.newClientOrderId(), true);
     }
 
@@ -505,20 +505,23 @@ public final class TradingCommandCodec {
         if (mask <= 0 || (mask & ~0x1f) != 0) {
             throw new ProtocolException("invalid amend order field mask");
         }
-        Long priceTicks = null;
+        long priceTicks = 0L;
         if ((mask & 1) != 0) {
             requireRemaining(buffer, Long.BYTES);
             priceTicks = buffer.getLong();
         }
-        Long quantitySteps = null;
+        long quantitySteps = 0L;
         if ((mask & (1 << 1)) != 0) {
             requireRemaining(buffer, Long.BYTES);
             quantitySteps = buffer.getLong();
         }
         CoreTimeInForce timeInForce = (mask & (1 << 2)) == 0 ? null
                 : readTimeInForce(buffer);
-        Boolean postOnly = (mask & (1 << 3)) == 0 ? null
-                : readBoolean(buffer);
+        byte postOnly = -1;
+        if ((mask & (1 << 3)) != 0) {
+            requireRemaining(buffer, Byte.BYTES);
+            postOnly = buffer.get();
+        }
         String clientOrderId = (mask & (1 << 4)) == 0 ? null : readOptionalText(buffer);
         requireConsumed(buffer);
         return new AmendOrderCommand(originalOrderId, replacementOrderId, clientOrderId,

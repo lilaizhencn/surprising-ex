@@ -495,7 +495,18 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         accountLanesStarted = true;
         ownerLaneAccess = false;
+        boolean nonLane = false;
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            SettlementLaneWorker worker = laneWorkers[laneId];
+            if (worker != null && !(worker.thread() instanceof LaneThread)) {
+                nonLane = true;
+                break;
+            }
+        }
+        this.hasNonLaneThreadWorkers = nonLane;
     }
+
+    private volatile boolean hasNonLaneThreadWorkers;
 
     /** 集群命令推进作用域内禁止退回跨线程同步调用；独立恢复/快照 API 不在此作用域。 */
     private boolean asynchronousCommandScope;
@@ -762,7 +773,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             AccountLaneState lane = laneThread.lane();
             return lane.commandScopeActive ? lane : null;
         }
-        if (laneWorkers != null) {
+        if (hasNonLaneThreadWorkers && laneWorkers != null) {
             for (int i = 0; i < laneWorkers.length; i++) {
                 SettlementLaneWorker worker = laneWorkers[i];
                 if (worker != null && worker.thread() == current) {

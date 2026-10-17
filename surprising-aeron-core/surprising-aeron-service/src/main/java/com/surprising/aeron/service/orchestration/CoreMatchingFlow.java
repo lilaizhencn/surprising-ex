@@ -309,10 +309,10 @@ public final class CoreMatchingFlow {
         if (owner.runtimeState.instrument(instrumentId) == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
         }
-        long priceTicks = command.priceTicks() == null ? order.priceTicks() : command.priceTicks();
-        long quantitySteps = command.quantitySteps() == null ? order.remainingQuantitySteps() : command.quantitySteps();
+        long priceTicks = command.hasPriceTicks() ? command.rawPriceTicks() : order.priceTicks();
+        long quantitySteps = command.hasQuantitySteps() ? command.rawQuantitySteps() : order.remainingQuantitySteps();
         var timeInForce = command.timeInForce() == null ? order.timeInForce() : command.timeInForce();
-        boolean postOnly = command.postOnly() == null ? order.postOnly() : command.postOnly();
+        boolean postOnly = command.hasPostOnly() ? command.isPostOnly() : order.postOnly();
         String clientOrderId = command.newClientOrderId() == null ? "" : command.newClientOrderId();
         return new PlaceOrderCommand(command.replacementOrderId(), instrumentId,
                 order.side(), priceTicks, quantitySteps, order.reduceOnly(), order.marginMode(),

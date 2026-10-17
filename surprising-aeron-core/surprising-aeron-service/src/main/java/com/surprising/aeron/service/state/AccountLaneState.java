@@ -889,69 +889,58 @@ public final class AccountLaneState {
 
     private long computeStateHash() {
         long hash = mix(0xcbf29ce484222325L, laneId);
-        long[] userKeys = copyLongKeys(userIds.size());
-        int userIndex = 0;
+        long userSum = 0;
         var userIterator = userIds.longIterator();
-        while (userIterator.hasNext()) userKeys[userIndex++] = userIterator.next();
-        java.util.Arrays.sort(userKeys, 0, userIndex);
-        for (int index = 0; index < userIndex; index++) {
-            long userId = userKeys[index];
-            hash = mix(hash, userId);
-            hash = mixValue(hash, users.get(userId));
+        while (userIterator.hasNext()) {
+            long userId = userIterator.next();
+            userSum += mix(mix(0x9e3779b97f4a7c15L, userId), mixValue(0, users.get(userId)));
         }
-        hash = mixMap(hash, orders);
-        hash = mixMap(hash, reservations);
-        hash = mixMap(hash, positions);
-        hash = mixMap(hash, cold.liquidations);
-        hash = mixMap(hash, cold.riskSnapshots);
+        hash = mix(hash, userSum);
+        hash = mix(hash, mixMapUnordered(orders));
+        hash = mix(hash, mixMapUnordered(reservations));
+        hash = mix(hash, mixMapUnordered(positions));
+        hash = mix(hash, mixPrimitiveMapUnordered(cold.liquidations));
+        hash = mix(hash, mixPrimitiveMapUnordered(cold.riskSnapshots));
+        long leverageSum = 0;
         for (Map.Entry<CoreLeverageKey, Long> entry : cold.leverages.entrySet()) {
-            hash = mixValue(hash, entry.getKey());
-            hash = mix(hash, entry.getValue());
+            leverageSum += mix(mixValue(0, entry.getKey()), entry.getValue());
         }
-        hash = mixPrimitiveMap(hash, cold.algoOrders);
-        hash = mixPrimitiveMap(hash, cold.triggerOrders);
+        hash = mix(hash, leverageSum);
+        hash = mix(hash, mixPrimitiveMapUnordered(cold.algoOrders));
+        hash = mix(hash, mixPrimitiveMapUnordered(cold.triggerOrders));
         return hash == 0 ? 1 : hash;
     }
 
-    private long mixPrimitiveMap(long hash, LongObjectHashMap<?> values) {
-        long[] keys = copyLongKeys(values.size());
-        int keyIndex = 0;
+    private <T> long mixPrimitiveMapUnordered(LongObjectHashMap<T> values) {
+        long sum = 0;
         var iterator = values.keySet().longIterator();
-        while (iterator.hasNext()) keys[keyIndex++] = iterator.next();
-        java.util.Arrays.sort(keys, 0, keyIndex);
-        long mixed = hash;
-        for (int index = 0; index < keyIndex; index++) {
-            long key = keys[index];
-            mixed = mix(mixed, key);
-            mixed = mixValue(mixed, values.get(key));
+        while (iterator.hasNext()) {
+            long key = iterator.next();
+            sum += mix(mix(0x9e3779b97f4a7c15L, key), mixValue(0, values.get(key)));
         }
-        return mixed;
+        return sum;
     }
 
     private long computeFundsHash() {
         long hash = mix(0xcbf29ce484222325L, laneId);
-        long[] userKeys = copyLongKeys(balances.size());
-        int userIndex = 0;
+        long userSum = 0;
         var userIterator = balances.keySet().longIterator();
-        while (userIterator.hasNext()) userKeys[userIndex++] = userIterator.next();
-        java.util.Arrays.sort(userKeys, 0, userIndex);
-        for (int index = 0; index < userIndex; index++) {
-            long userId = userKeys[index];
-            hash = mix(hash, userId);
+        while (userIterator.hasNext()) {
+            long userId = userIterator.next();
+            long assetSum = 0;
             IntObjectHashMap<BalanceRuntime> userBalances = balances.get(userId);
-            int[] assetIds = copyIntKeys(userBalances.size());
-            int assetIndex = 0;
-            var assetIterator = userBalances.keySet().intIterator();
-            while (assetIterator.hasNext()) assetIds[assetIndex++] = assetIterator.next();
-            java.util.Arrays.sort(assetIds, 0, assetIndex);
-            for (int asset = 0; asset < assetIndex; asset++) {
-                int assetId = assetIds[asset];
-                BalanceRuntime balance = userBalances.get(assetId);
-                hash = mix(hash, assetId);
-                hash = mix(hash, balance.availableUnits());
-                hash = mix(hash, balance.lockedUnits());
+            if (userBalances != null) {
+                var assetIterator = userBalances.keySet().intIterator();
+                while (assetIterator.hasNext()) {
+                    int assetId = assetIterator.next();
+                    BalanceRuntime balance = userBalances.get(assetId);
+                    long itemHash = mix(mix(mix(0x9e3779b97f4a7c15L, assetId), balance.availableUnits()), balance.lockedUnits());
+                    assetSum += itemHash;
+                }
             }
+            userSum += mix(mix(0x9e3779b97f4a7c15L, userId), assetSum);
         }
+        hash = mix(hash, userSum);
         return hash == 0 ? 1 : hash;
     }
 
@@ -961,52 +950,18 @@ public final class AccountLaneState {
         localFundsHash = computeFundsHash();
     }
 
-    private long mixMap(long hash, Long2ObjectHashMap<?> values) {
-        long[] keys = copyLongKeys(values.size());
+    private long mixMapUnordered(Long2ObjectHashMap<?> values) {
+        long sum = 0;
         var iterator = values.keySet().iterator();
-        int keyIndex = 0;
-        while (iterator.hasNext()) keys[keyIndex++] = iterator.nextLong();
-        java.util.Arrays.sort(keys, 0, keyIndex);
-        long mixed = hash;
-        for (int index = 0; index < keyIndex; index++) {
-            long key = keys[index];
-            mixed = mix(mixed, key);
-            mixed = mixValue(mixed, values.get(key));
+        while (iterator.hasNext()) {
+            long key = iterator.nextLong();
+            sum += mix(mix(0x9e3779b97f4a7c15L, key), mixValue(0, values.get(key)));
         }
-        return mixed;
+        return sum;
     }
 
-    private <T> long mixMap(long hash, LongObjectHashMap<T> values) {
-        long[] keys = copyLongKeys(values.size());
-        int keyIndex = 0;
-        var iterator = values.keySet().longIterator();
-        while (iterator.hasNext()) keys[keyIndex++] = iterator.next();
-        java.util.Arrays.sort(keys, 0, keyIndex);
-        long mixed = hash;
-        for (int index = 0; index < keyIndex; index++) {
-            long key = keys[index];
-            mixed = mix(mixed, key);
-            mixed = mixValue(mixed, values.get(key));
-        }
-        return mixed;
-    }
-
-    private long[] copyLongKeys(int size) {
-        if (hashLongScratch.length < size) {
-            int capacity = hashLongScratch.length;
-            while (capacity < size) capacity = Math.multiplyExact(capacity, 2);
-            hashLongScratch = java.util.Arrays.copyOf(hashLongScratch, capacity);
-        }
-        return hashLongScratch;
-    }
-
-    private int[] copyIntKeys(int size) {
-        if (hashIntScratch.length < size) {
-            int capacity = hashIntScratch.length;
-            while (capacity < size) capacity = Math.multiplyExact(capacity, 2);
-            hashIntScratch = java.util.Arrays.copyOf(hashIntScratch, capacity);
-        }
-        return hashIntScratch;
+    private <T> long mixMapUnordered(LongObjectHashMap<T> values) {
+        return mixPrimitiveMapUnordered(values);
     }
 
     private static long mixValue(long hash, Object value) {

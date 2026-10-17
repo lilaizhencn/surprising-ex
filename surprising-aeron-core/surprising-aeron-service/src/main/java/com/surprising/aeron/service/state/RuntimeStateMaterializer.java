@@ -37,7 +37,7 @@ public final class RuntimeStateMaterializer {
             if (!runtimeUsers.containsKey(reservation.userId())) {
                 throw new IllegalStateException("reservation owner is not registered: " + reservation.userId());
             }
-            reservationsByUser.computeIfAbsent(reservation.userId(), ignored -> new TreeMap<>())
+            reservationsByUser.computeIfAbsent(reservation.userId(), ignored -> new HashMap<>())
                     .put(orderId, new OrderReservation(orderId, identities.instrumentId(reservation.symbolId()),
                             reservation.kind(), identities.asset(reservation.assetId()),
                             reservation.totalReservedUnits(), reservation.releasedUnits(), reservation.consumedUnits(),
@@ -51,7 +51,7 @@ public final class RuntimeStateMaterializer {
                 throw new IllegalStateException("position owner is not registered: " + position.userId());
             }
             String key = identities.positionKey(position.userId(), positionKey);
-            positionsByUser.computeIfAbsent(position.userId(), ignored -> new TreeMap<>())
+            positionsByUser.computeIfAbsent(position.userId(), ignored -> new HashMap<>())
                     .put(key, new CorePositionState(identities.instrumentId(position.symbolId()),
                             identities.asset(position.assetId()), position.marginMode(), position.positionSide(),
                             position.signedQuantitySteps(), position.entryPriceTicks(),
@@ -65,7 +65,7 @@ public final class RuntimeStateMaterializer {
             if (userBalances == null || userBalances.isEmpty()) {
                 balances = Map.of();
             } else {
-                balances = new TreeMap<>();
+                balances = new HashMap<>(userBalances.size());
                 userBalances.forEachKeyValue((assetId, balance) -> {
                     String asset = identities.asset(assetId);
                     long pending = runtime.pendingReservations.pendingReservedUnits(userId, assetId);
