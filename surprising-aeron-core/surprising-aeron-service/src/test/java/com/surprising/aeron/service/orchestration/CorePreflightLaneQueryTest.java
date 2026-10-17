@@ -128,8 +128,8 @@ class CorePreflightLaneQueryTest {
             try (var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                 var request = message(core, 1, TradingCommandCodec.encodePlaceOrder(intent));
                 assertThat(core.apply(request).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-                long id = core.querySequence(request.header().commandId());
-                assertThat(core.takeQueryResult(id)).isNull();
+                long id = core.bookQueries.querySequence(request.header().commandId());
+                assertThat(core.bookQueries.takeQueryResult(id)).isNull();
                 assertThat(release.getCount()).isOne();
                 var instrument = core.runtimeState.instrument("1");
                 instrument.updateConfiguration(CoreInstrument.from(core.productLine, instrument(core.productLine, 200_000)));
@@ -182,20 +182,20 @@ class CorePreflightLaneQueryTest {
         assertThat(core.requiresOwnerLaneAccessForPreparation(request)).isFalse();
         var response = core.apply(request);
         return response.resultCode() == CoreResultCode.MATCHING_PENDING
-                ? await(core, request, core.querySequence(request.header().commandId())) : response;
+                ? await(core, request, core.bookQueries.querySequence(request.header().commandId())) : response;
     }
 
     private CoreResponse await(TradingCoreRuntime core, CoreMessage request, long id) {
         assertThat(id).isNotZero();
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         CoreResponse response;
-        while ((response = core.takeQueryResult(id)) == null) {
+        while ((response = core.bookQueries.takeQueryResult(id)) == null) {
             core.assertHealthy();
             if (System.nanoTime() >= deadline) throw new AssertionError("preflight query timeout");
             Thread.onSpinWait();
         }
-        assertThat(core.takeQueryResult(id)).isNull();
-        assertThat(core.querySequence(request.header().commandId())).isZero();
+        assertThat(core.bookQueries.takeQueryResult(id)).isNull();
+        assertThat(core.bookQueries.querySequence(request.header().commandId())).isZero();
         return response;
     }
 

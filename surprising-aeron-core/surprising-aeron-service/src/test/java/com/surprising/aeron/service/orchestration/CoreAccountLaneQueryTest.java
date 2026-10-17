@@ -150,8 +150,8 @@ class CoreAccountLaneQueryTest {
                 var response = core.apply(request);
                 assertThat(response.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
                 assertThat(release.getCount()).isOne();
-                long id = core.querySequence(request.header().commandId());
-                assertThat(core.takeQueryResult(id)).isNull();
+                long id = core.bookQueries.querySequence(request.header().commandId());
+                assertThat(core.bookQueries.takeQueryResult(id)).isNull();
                 release.countDown();
                 assertThat(await(core, request, id).status()).isEqualTo(ResponseStatus.OK);
             }
@@ -269,20 +269,20 @@ class CoreAccountLaneQueryTest {
         assertThat(core.requiresOwnerLaneAccessForPreparation(request)).isFalse();
         var response = core.apply(request);
         if (response.resultCode() != CoreResultCode.MATCHING_PENDING) return response;
-        return await(core, request, core.querySequence(request.header().commandId()));
+        return await(core, request, core.bookQueries.querySequence(request.header().commandId()));
     }
 
     private CoreResponse await(TradingCoreRuntime core, CoreMessage request, long id) {
         assertThat(id).isNotZero();
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         CoreResponse response;
-        while ((response = core.takeQueryResult(id)) == null) {
+        while ((response = core.bookQueries.takeQueryResult(id)) == null) {
             core.assertHealthy();
             if (System.nanoTime() >= deadline) throw new AssertionError("account query timeout");
             Thread.onSpinWait();
         }
-        assertThat(core.takeQueryResult(id)).isNull();
-        assertThat(core.querySequence(request.header().commandId())).isZero();
+        assertThat(core.bookQueries.takeQueryResult(id)).isNull();
+        assertThat(core.bookQueries.querySequence(request.header().commandId())).isZero();
         return response;
     }
 

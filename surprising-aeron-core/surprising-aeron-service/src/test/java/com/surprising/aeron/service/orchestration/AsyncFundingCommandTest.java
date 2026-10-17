@@ -123,16 +123,16 @@ class AsyncFundingCommandTest {
         state.runtimeState.enterAsynchronousCommandScope();
         try (var guard = new OwnerAccountReadGuard(state.runtimeState)) {
             assertThat(state.applyDecodedCommand(message, TIME, message.header().sourceSequence(), null, false)).isNull();
-            assertThat(state.hasPendingDirectCommand()).isTrue();
+            assertThat(state.directCommand.active()).isTrue();
             assertThatThrownBy(() -> state.apply(message)).hasMessageContaining("still active");
             assertThatThrownBy(state::assertClusterCallbackComplete).hasMessageContaining("unfinished business");
             CoreResponse response;
-            while ((response = state.pollDirectCommand()) == null) {
+            while ((response = state.directCommand.poll(state)) == null) {
                 if (System.nanoTime() >= deadline) throw new AssertionError("funding timed out");
                 Thread.onSpinWait();
             }
             assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.hasPendingDirectCommand()).isFalse();
+            assertThat(state.directCommand.active()).isFalse();
             var access = state.runtimeState.getClass().getDeclaredField("ownerLaneAccess");
             access.setAccessible(true);
             assertThat(access.getBoolean(state.runtimeState)).isFalse();

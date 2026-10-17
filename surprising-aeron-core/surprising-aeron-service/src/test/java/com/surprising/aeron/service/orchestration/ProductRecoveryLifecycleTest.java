@@ -170,19 +170,19 @@ class ProductRecoveryLifecycleTest {
     private static CoreResponse apply(TradingCoreRuntime state, CoreMessage message) {
         CoreResponse result = state.apply(message);
         long directDeadline = System.nanoTime() + 5_000_000_000L;
-        while (result == null && state.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
-            result = state.pollDirectCommand();
+        while (result == null && state.directCommand.active() && System.nanoTime() < directDeadline) {
+            result = state.directCommand.poll(state);
             if (result == null) Thread.onSpinWait();
         }
-        if (result == null && state.hasPendingDirectCommand()) {
+        if (result == null && state.directCommand.active()) {
             throw new AssertionError("Direct command timed out: " + message.header().messageType());
         }
         if (result.resultCode() == CoreResultCode.MATCHING_PENDING) {
             result = CoreTestCompletion.completeMatchingSynchronously(state, state.matchingSequence(message.header().commandId()),
                     message.header().submittedAtEpochMillis(), message.header().sourceSequence());
         }
-        while (state.firstPendingMatchingSequence() != 0) {
-            CoreTestCompletion.completeMatchingSynchronously(state, state.firstPendingMatchingSequence(),
+        while (state.pendingMatching.firstSequence() != 0) {
+            CoreTestCompletion.completeMatchingSynchronously(state, state.pendingMatching.firstSequence(),
                     message.header().submittedAtEpochMillis(), message.header().sourceSequence());
         }
         assertThat(result.commandStatus()).as("%s: %s", message.header().messageType(), result.resultCode())
@@ -193,11 +193,11 @@ class ProductRecoveryLifecycleTest {
     private static CoreResponse applyDirect(TradingCoreRuntime state, CoreMessage message) {
         CoreResponse result = state.apply(message);
         long directDeadline = System.nanoTime() + 5_000_000_000L;
-        while (result == null && state.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
-            result = state.pollDirectCommand();
+        while (result == null && state.directCommand.active() && System.nanoTime() < directDeadline) {
+            result = state.directCommand.poll(state);
             if (result == null) Thread.onSpinWait();
         }
-        if (result == null && state.hasPendingDirectCommand()) {
+        if (result == null && state.directCommand.active()) {
             throw new AssertionError("Direct command timed out: " + message.header().messageType());
         }
         return result;

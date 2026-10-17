@@ -7,6 +7,7 @@ import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
+import com.surprising.aeron.service.state.index.*;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;
@@ -26,6 +27,7 @@ import org.openjdk.jmh.annotations.*;
 public class TriggerCommitBenchmark {
     @Param("4") public int accountLanes;
     private TradingRuntimeState runtime;
+    private TriggerOrderIndex triggerIndex;
     private List<Long> users, triggerIds;
     private CoreInstrument instrument;
     private long sequence;
@@ -35,6 +37,18 @@ public class TriggerCommitBenchmark {
         var topology = new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0, accountLanes,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 256, 256, 256);
         runtime = new TradingRuntimeState(topology);
+        var initial = TradingCoreState.empty(ProductLine.SPOT);
+        var identities = new RuntimeIdentityRegistry();
+        triggerIndex = new TriggerOrderIndex(initial);
+        runtime.bindFactIndexes(new RuntimeFactIndexes(
+                new PositionUserIndex(initial, identities),
+                new OpenInterestIndex(initial, identities),
+                triggerIndex,
+                new AlgoOrderIndex(initial),
+                new LiquidationIndex(initial),
+                new CancelAllAfterIndex(initial),
+                new ActiveOrderIndex(initial, identities),
+                new AdlPositionIndex(initial, identities)), identities);
         instrument = CoreInstrument.from(ProductLine.SPOT,
                 new RegisterInstrumentCommand("1", ContractType.SPOT.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
@@ -55,15 +69,22 @@ public class TriggerCommitBenchmark {
 
     @Setup(Level.Invocation)
     public void preparePendingFixture() {
-        for (int i = 0; i < users.size(); i++) {
-            long id = triggerIds.get(i);
-            runtime.putTriggerOrder(new CoreTriggerOrderState(id, ProductLine.SPOT, users.get(i),
-                    "trigger-" + id, "", "1", instrument, CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
-                    CoreTriggerCondition.LESS_OR_EQUAL, 90, 0, 0, 0, 0, 0,
-                    CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
-                    CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 1, 1, 1));
+        runtime.acquireOwnerLaneAccess();
+        try {
+            for (int i = 0; i < users.size(); i++) {
+                long id = triggerIds.get(i);
+                var trigger = new CoreTriggerOrderState(id, ProductLine.SPOT, users.get(i),
+                        "trigger-" + id, "", "1", instrument, CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
+                        CoreTriggerCondition.LESS_OR_EQUAL, 90, 0, 0, 0, 0, 0,
+                        CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
+                        CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 1, 1, 1);
+                runtime.putTriggerOrder(trigger);
+                triggerIndex.apply(id, trigger);
+            }
+            runtime.clearChangedKeys();
+        } finally {
+            runtime.releaseOwnerLaneAccess();
         }
-        runtime.clearChangedKeys();
     }
 
     @Benchmark
@@ -81,19 +102,29 @@ public class TriggerCommitBenchmark {
             runtime.releaseLaneCommit(event);
         } finally { runtime.exitAsynchronousCommandScope(); }
         if (runtime.revision() != before + users.size()) throw new IllegalStateException("trigger version mismatch");
-        for (long id : triggerIds)
-            if (runtime.triggerOrder(id).status() != CoreTriggerOrderStatus.CANCELED)
-                throw new IllegalStateException("trigger not canceled");
+        runtime.acquireOwnerLaneAccess();
+        try {
+            for (long id : triggerIds)
+                if (runtime.triggerOrder(id).status() != CoreTriggerOrderStatus.CANCELED)
+                    throw new IllegalStateException("trigger not canceled");
+        } finally {
+            runtime.releaseOwnerLaneAccess();
+        }
         return next;
     }
 
     @TearDown(Level.Trial)
     public void close() {
         try {
-            for (long user : users) {
-                var balance = runtime.balance(user, 3);
-                if (balance.availableUnits() != 1000 || balance.lockedUnits() != 0)
-                    throw new IllegalStateException("trigger cancellation changed funds");
+            runtime.acquireOwnerLaneAccess();
+            try {
+                for (long user : users) {
+                    var balance = runtime.balance(user, 3);
+                    if (balance.availableUnits() != 1000 || balance.lockedUnits() != 0)
+                        throw new IllegalStateException("trigger cancellation changed funds");
+                }
+            } finally {
+                runtime.releaseOwnerLaneAccess();
             }
         } finally { runtime.close(); }
     }

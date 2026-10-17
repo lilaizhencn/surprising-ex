@@ -102,8 +102,8 @@ class CoreFundsLedgerIndexTest {
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 17)));
             try {
                 assertThat(core.apply(request)).isNull();
-                assertThat(core.hasPendingDirectCommand()).isTrue();
-                for (int retry = 0; retry < 8; retry++) assertThat(core.pollDirectCommand()).isNull();
+                assertThat(core.directCommand.active()).isTrue();
+                for (int retry = 0; retry < 8; retry++) assertThat(core.directCommand.poll(core)).isNull();
                 assertThat(core.appliedCommandCount()).isEqualTo(count);
                 assertThat(core.resultLedger.get(request.header().commandId())).isNull();
             } finally { gate.released = true; }
@@ -159,7 +159,7 @@ class CoreFundsLedgerIndexTest {
                     .hasMessageContaining("funds command index unavailable");
             assertThat(core.appliedCommandCount()).isZero();
             assertThat(core.directCommand.publicationComplete()).isTrue();
-            assertThat(core.hasPendingDirectCommand()).isTrue();
+            assertThat(core.directCommand.active()).isTrue();
             assertThat(core.resultLedger.get(request.header().commandId())).isNull();
             assertThatThrownBy(core::assertHealthy).isInstanceOf(IllegalStateException.class);
         } finally {
@@ -245,8 +245,8 @@ class CoreFundsLedgerIndexTest {
     private CoreResponse drain(TradingCoreRuntime core) {
         CoreResponse result = null;
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (core.hasPendingDirectCommand()) {
-            result = core.pollDirectCommand();
+        while (core.directCommand.active()) {
+            result = core.directCommand.poll(core);
             if (System.nanoTime() >= deadline) throw new AssertionError("funds direct command timed out");
             Thread.onSpinWait();
         }

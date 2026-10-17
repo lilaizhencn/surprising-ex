@@ -68,12 +68,12 @@ class CrossShardCancellationTest {
                 assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
                 assertThat(release.getCount()).isOne();
                 long checkDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                while (!state.pendingMatching(state.matchingSequence(batch.header().commandId())).crossShardCancellationStarted) {
+                while (!state.pendingMatching.get(state.matchingSequence(batch.header().commandId())).crossShardCancellationStarted) {
                     if (System.nanoTime() >= checkDeadline) throw new AssertionError("liquidation Lane check timeout");
                     state.matchingProgress.progressPlaceBatchAdmissions();
                     Thread.onSpinWait();
                 }
-                assertThat(state.pendingMatching(state.matchingSequence(batch.header().commandId()))
+                assertThat(state.pendingMatching.get(state.matchingSequence(batch.header().commandId()))
                         .crossShardCancellationStarted).isTrue();
                 release.countDown();
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);

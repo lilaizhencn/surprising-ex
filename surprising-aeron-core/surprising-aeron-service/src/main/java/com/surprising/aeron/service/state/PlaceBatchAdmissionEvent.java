@@ -156,6 +156,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         }
         identityAllocations = lane.clientIdentityAllocations - allocationsBefore;
         TradingRuntimeState completionRuntime = runtime;
+        lane.recordCommandOperation();
         completed = true;
         completionRuntime.publishAccountAdmissionReadyShard(matcherShard);
     }

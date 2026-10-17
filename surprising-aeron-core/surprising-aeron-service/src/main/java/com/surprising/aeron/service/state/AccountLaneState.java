@@ -30,6 +30,8 @@ public final class AccountLaneState {
     private static final java.lang.invoke.VarHandle METRIC_REVISION = metricField("revision");
     private static final java.lang.invoke.VarHandle METRIC_APPLIED = metricField("appliedSequence");
     private static final java.lang.invoke.VarHandle METRIC_COMMITTED = metricField("committedSequence");
+    private static final java.lang.invoke.VarHandle METRIC_COMMANDS = metricField("commandOperations");
+    private static final java.lang.invoke.VarHandle METRIC_SETTLEMENTS = metricField("matcherSettlementOperations");
 
     private static java.lang.invoke.VarHandle metricField(String name) {
         try { return java.lang.invoke.MethodHandles.lookup().findVarHandle(AccountLaneState.class, name, long.class); }
@@ -140,6 +142,8 @@ public final class AccountLaneState {
     private long revision;
     private long appliedSequence;
     private long committedSequence;
+    private long commandOperations;
+    private long matcherSettlementOperations;
     private long localStateHash = 0xcbf29ce484222325L;
     private long localFundsHash = 0xcbf29ce484222325L;
     /** Hashes are rebuilt on the lane owner; retain sort buffers across commits. */
@@ -262,6 +266,14 @@ public final class AccountLaneState {
             throw new IllegalStateException("account lane " + laneId + " is bound to another thread");
     }
 
+    public void recordCommandOperation() {
+        commandOperations++;
+    }
+
+    public void recordSettlementOperation() {
+        matcherSettlementOperations++;
+    }
+
     private static final long[] EMPTY_METRIC_OPERATIONS = new long[com.surprising.aeron.protocol.CoreLaneMetricsView.OPERATION_TYPE_COUNT];
 
     /** Owner可观察原子原语计数，各字段允许独立滞后；没有账户读取或Lane作用域。 */
@@ -272,6 +284,14 @@ public final class AccountLaneState {
         encoder.writeLane(laneId, (long) METRIC_REVISION.getOpaque(this), applied, committed,
                 depth, capacity, highWater, 0, 0);
         encoder.writeOperations(laneId, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS);
+        long commands = (long) METRIC_COMMANDS.getOpaque(this);
+        if (commands != 0) {
+            encoder.addOperation(laneId, 0, commands, 0, 0, 0);
+        }
+        long settlements = (long) METRIC_SETTLEMENTS.getOpaque(this);
+        if (settlements != 0) {
+            encoder.addOperation(laneId, 1, settlements, 0, 0, 0);
+        }
     }
 
     public int laneId() { return laneId; }

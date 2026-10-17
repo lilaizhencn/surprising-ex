@@ -77,7 +77,7 @@ public final class DirectCommandSlot {
     private RiskScanCoordinator reusableRiskCoordinator;
     private com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment;
 
-    boolean active() { return active; }
+    public boolean active() { return active; }
 
     void initialize(CoreMessage command, CommandFingerprint fingerprint,
             TradingCoreRuntime.SourceKey sourceKey, long timestamp, long position,
@@ -300,7 +300,7 @@ public final class DirectCommandSlot {
         controlWork = triggerControl;
     }
 
-    CoreResponse poll(TradingCoreRuntime owner) {
+    public CoreResponse poll(TradingCoreRuntime owner) {
         owner.assertOwner();
         if (!active) throw new IllegalStateException("no pending direct command");
         if (fundsPreflight) return pollFundsCheck(owner);
@@ -322,11 +322,11 @@ public final class DirectCommandSlot {
             controlWork = null;
         }
         if (status != ResponseStatus.APPLIED
-                && (owner.commits.commitPublicationDirty()
+                && (owner.commits.publication.dirty()
                 || owner.runtimeState.revision() != beforeRevision
                 || owner.runtimeState.hasUncommittedCommandChanges())) {
             if (controlWork == null) {
-                owner.commits.abortCommitPublicationBatch();
+                owner.commits.publication.abort();
                 controlWork = owner.runtimeState.beginCommandRollback(
                         checkpoint, Math.incrementExact(owner.appliedCommandCount));
             }

@@ -215,7 +215,7 @@ final class MatchingCommandAdmission {
         com.surprising.aeron.service.state.PlaceAdmissionEvent placeAdmission = null;
         com.surprising.aeron.service.state.ReplacementAdmissionEvent replacementAdmission = null;
         owner.resultBuilder.beginCommand();
-        owner.commits.beginCommitPublicationBatch();
+        owner.commits.publication.begin();
         try {
             switch (operation) {
                 case PLACE -> {
@@ -236,31 +236,31 @@ final class MatchingCommandAdmission {
                 preMatchingCancellations = preMatchingCloseCapacityCancellations(
                         operation, message, decodedCommand, placeAdmission);
         } catch (CoreStateRejectedException exception) {
-            if (owner.commits.commitPublicationDirty()) {
+            if (owner.commits.publication.dirty()) {
                 if (!owner.pendingMatching.isEmpty()) {
                     throw new IllegalStateException("cannot roll back across an in-flight lane command", exception);
                 }
                 owner.rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint, sequence);
             }
-            else owner.commits.abortCommitPublicationBatch();
+            else owner.commits.publication.abort();
             CoreResponse response = rejectMatching(message, sourceKey, effectiveFingerprint,
                     CoreResultCode.fromRejectionCode(exception.code()), deferredPending);
             return owner.finishFactContext(response);
         } catch (ArithmeticException | IllegalArgumentException exception) {
-            if (owner.commits.commitPublicationDirty()) {
+            if (owner.commits.publication.dirty()) {
                 if (!owner.pendingMatching.isEmpty()) {
                     throw new IllegalStateException("cannot roll back across an in-flight lane command", exception);
                 }
                 owner.rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint, sequence);
             }
-            else owner.commits.abortCommitPublicationBatch();
+            else owner.commits.publication.abort();
             CoreResponse response = rejectMatching(message, sourceKey, effectiveFingerprint,
                     exception instanceof ArithmeticException
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND, deferredPending);
             return owner.finishFactContext(response);
         }
-        boolean tradingStateChanged = owner.commits.commitPublicationDirty()
-                && !owner.commits.commitPublicationProvisionalOnly();
+        boolean tradingStateChanged = owner.commits.publication.dirty()
+                && !owner.commits.publication.provisionalOnly();
         if (tradingStateChanged) {
             try {
                 owner.stampOrderChangesRuntime(clusterTimestamp, clusterPosition, owner.resultBuilder.commandChangedOrderIds);
@@ -269,7 +269,7 @@ final class MatchingCommandAdmission {
                 throw exception;
             }
         }
-        owner.commits.completeCommitPublicationBatch();
+        owner.commits.publication.complete();
         CommandSlot pending = deferredPending == null
                 ? newPendingMatching(sequence, operation, message, effectiveFingerprint,
                         preMatchingCancellations, decodedCommand, admission)

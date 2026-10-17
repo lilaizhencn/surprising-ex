@@ -13,7 +13,7 @@ import com.surprising.aeron.service.state.TradingRuntimeState;
  * commit. It does not own orders, balances or command slots; those remain owned by the runtime,
  * {@link TradingRuntimeState} and {@link PendingMatchingRing} respectively.
  */
-final class MatchingPipelineProgress {
+public final class MatchingPipelineProgress {
     private final TradingCoreRuntime owner;
     /** Wake-up hints for matcher shards whose submission head can advance. */
     private long readyShardMask;
@@ -230,7 +230,7 @@ final class MatchingPipelineProgress {
         }
     }
 
-    boolean hasDrainWork() {
+    public boolean hasDrainWork() {
         return owner.crossShardCancellations.hasPending()
                 || readyShardMask != 0
                 || owner.runtimeState.hasMatchingNotifications()
@@ -238,7 +238,7 @@ final class MatchingPipelineProgress {
                 || hasLocalMatchingWork();
     }
 
-    void drainMatchingCompletions() {
+    public void drainMatchingCompletions() {
         if (owner.crossShardCancellations.hasPending()) owner.crossShardCancellations.poll();
         drainPlaceAdmissionCompletions();
         if (readyShardMask != 0 || owner.runtimeState.hasPlaceAdmissionNotifications()
@@ -272,7 +272,7 @@ final class MatchingPipelineProgress {
     }
 
     /** Owner-local progress must continue even when no new cross-thread notification arrives. */
-    boolean hasLocalMatchingWork() {
+    public boolean hasLocalMatchingWork() {
         if (readyShardMask != 0 || owner.commits.hasFinancialDispatchWork()) return true;
         CommandSlot head = owner.pendingMatching.get(owner.pendingMatching.firstSequence());
         OrderBatchPending batch = head == null ? null : head.orderBatch;
@@ -299,11 +299,11 @@ final class MatchingPipelineProgress {
         return pending != null && pending.hasMatchingRejection();
     }
 
-    boolean hasNotifications() {
+    public boolean hasNotifications() {
         return hasNotifications(System.nanoTime());
     }
 
-    boolean hasNotifications(long now) {
+    public boolean hasNotifications(long now) {
         // A failed Lane need not publish a completion. Keep a bounded empty-path health check;
         // apply/commit still check on every invocation, including ready notifications.
         if (now - nextHealthCheckNs >= 0) {

@@ -127,10 +127,10 @@ class CoreSelfTradePrefixTest {
                     assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
                     var trade = place(core, taker, 102, CoreOrderSide.BUY, priorFill);
                     assertThat(submit(core, trade).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-                    var tradeSlot = core.pendingMatching(core.matchingSequence(trade.header().commandId()));
+                    var tradeSlot = core.pendingMatching.get(core.matchingSequence(trade.header().commandId()));
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                     while (!tradeSlot.settlementEvent().ready()) {
-                        core.drainMatchingCompletions();
+                        core.matchingProgress.drainMatchingCompletions();
                         if (System.nanoTime() >= deadline) throw new AssertionError("Matcher did not publish the preceding trade");
                         Thread.onSpinWait();
                     }
@@ -143,7 +143,7 @@ class CoreSelfTradePrefixTest {
                 // Admission is queued before releasing the maker; Lane's separate mailbox can overtake the old fill.
                 releaseMaker.countDown();
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                while (core.pendingMatchingCount() != 0) {
+                while (core.pendingMatching.size() != 0) {
                     core.commits.commitReadyMatching(16, TIME, sequence, false,
                             (id, response) -> terminals.put(id, response.commandStatus()));
                     if (System.nanoTime() >= deadline) throw new AssertionError("self-trade prefix did not finish");

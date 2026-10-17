@@ -95,6 +95,7 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
         } finally { runtime.exitLaneCommandScope(lane); }
         // The Owner can retire/rearm this pooled event as soon as completion is visible.
         // Capture every notification input first; never read event fields after release.
+        lane.recordCommandOperation();
         completed = true;
         completionRuntime.publishAccountAdmissionReadyShard(completionShard);
     }

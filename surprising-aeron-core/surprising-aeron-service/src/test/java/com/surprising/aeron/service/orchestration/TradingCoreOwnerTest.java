@@ -113,7 +113,7 @@ class TradingCoreOwnerTest {
                 var head = core.pendingMatching.head();
                 event = head == null ? null : head.settlementEvent();
                 if (event != null && event.completedLaneMask() == event.requiredLaneMask()
-                        && !core.hasMatchingNotifications() && !service.ownerWorkAvailable()) break;
+                        && !core.matchingProgress.hasNotifications() && !service.ownerWorkAvailable()) break;
                 if (System.nanoTime() > deadline) throw new AssertionError("Owner did not await Ledger completion");
                 java.util.concurrent.locks.LockSupport.parkNanos(100_000);
             } while (true);
@@ -126,7 +126,7 @@ class TradingCoreOwnerTest {
                 java.util.concurrent.locks.LockSupport.parkNanos(100_000);
             }
             // Ledger publishes only a release completion and a wake-up; all Matcher/Lane queues are empty.
-            assertThat(core.hasMatchingNotifications()).isFalse();
+            assertThat(core.matchingProgress.hasNotifications()).isFalse();
             assertThat(service.ownerCompletionAvailable()).isTrue();
             assertThat(service.ownerWorkAvailable()).isTrue();
             service.pollCommands();
@@ -213,7 +213,7 @@ class TradingCoreOwnerTest {
                         accountsComplete &= event != null && event.ready() && event.completedLaneMask() != 0
                                 && (event.completedLaneMask() & event.requiredLaneMask()) == event.requiredLaneMask();
                     }
-                    if (accountsComplete && !core.hasMatchingNotifications() && !service.ownerWorkAvailable()) break;
+                    if (accountsComplete && !core.matchingProgress.hasNotifications() && !service.ownerWorkAvailable()) break;
                     if (System.nanoTime() > deadline) throw new AssertionError("Independent Lane facts were not ready");
                     java.util.concurrent.locks.LockSupport.parkNanos(100_000);
                 } while (true);
@@ -356,8 +356,8 @@ class TradingCoreOwnerTest {
                 awaitPipelineAccounts(service, List.of(first, following));
                 assertThat(core.pendingMatching.ledgerDispatchHead().command().header().commandId())
                         .isEqualTo(first.header().commandId());
-                assertThat(core.hasMatchingNotifications()).isFalse();
-                assertThat(core.hasLocalMatchingWork()).isTrue();
+                assertThat(core.matchingProgress.hasNotifications()).isFalse();
+                assertThat(core.matchingProgress.hasLocalMatchingWork()).isTrue();
                 assertThat(responses).hasSize(before);
                 // Facts are already ready. Even commands admitted outside the independent
                 // ingress path must feed the Ledger before the first response is retired.
@@ -412,7 +412,7 @@ class TradingCoreOwnerTest {
                 ready &= event != null && event.ready() && event.completedLaneMask() != 0
                         && (event.completedLaneMask() & event.requiredLaneMask()) == event.requiredLaneMask();
             }
-            if (ready && !core.hasMatchingNotifications()) return;
+            if (ready && !core.matchingProgress.hasNotifications()) return;
             if (System.nanoTime() > deadline) throw new AssertionError("Pipeline account completion timeout");
             java.util.concurrent.locks.LockSupport.parkNanos(100_000);
         } while (true);
@@ -535,7 +535,7 @@ class TradingCoreOwnerTest {
                         ? batch.itemSettlementEvent : batch.settlementEvent;
                 if (event != null && event.requiredLaneMask() != 0
                         && (event.completedLaneMask() & event.requiredLaneMask()) == event.requiredLaneMask()
-                        && !core.hasMatchingNotifications()
+                        && !core.matchingProgress.hasNotifications()
                         && (type != CoreMessageType.CANCEL_ORDER_BATCH || !service.ownerWorkAvailable())) break;
                 if (System.nanoTime() > deadline) throw new AssertionError("Batch Owner did not await Ledger completion");
                 java.util.concurrent.locks.LockSupport.parkNanos(100_000);
@@ -620,7 +620,7 @@ class TradingCoreOwnerTest {
                 // Inject only after that lookup has installed the actual continuation.
                 long preparationDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 while (!owner.directCommand.hasControlWork()) {
-                    assertThat(owner.pollDirectCommand()).isNull();
+                    assertThat(owner.directCommand.poll(owner)).isNull();
                     if (System.nanoTime() >= preparationDeadline)
                         throw new AssertionError("funds preflight did not reach Account Lane work");
                     Thread.onSpinWait();
@@ -648,7 +648,7 @@ class TradingCoreOwnerTest {
                 });
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 do {
-                    result = owner.pollDirectCommand();
+                    result = owner.directCommand.poll(owner);
                     if (System.nanoTime() > deadline) throw new AssertionError("finalization rollback timed out");
                 } while (result == null);
             } finally { runtime.exitAsynchronousCommandScope(); }
@@ -776,9 +776,9 @@ class TradingCoreOwnerTest {
                 service.onSessionMessage(clientSession(responses), 1000, new UnsafeBuffer(encoded), 0,
                         encoded.length, aeronHeader());
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                while (service.state().querySequence(request.header().commandId()) == 0 && System.nanoTime() < deadline)
+                while (service.state().bookQueries.querySequence(request.header().commandId()) == 0 && System.nanoTime() < deadline)
                     service.pollCommands();
-                assertThat(service.state().querySequence(request.header().commandId())).isNotZero();
+                assertThat(service.state().bookQueries.querySequence(request.header().commandId())).isNotZero();
                 assertThat(responses).isEmpty();
                 assertThat(release.getCount()).isOne();
                 release.countDown();
@@ -819,11 +819,11 @@ class TradingCoreOwnerTest {
             service.onSessionMessage(clientSession(responses), 1000, new UnsafeBuffer(encoded), 0,
                     encoded.length, aeronHeader());
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            while (service.state().querySequence(query.header().commandId()) == 0 && System.nanoTime() < deadline) {
+            while (service.state().bookQueries.querySequence(query.header().commandId()) == 0 && System.nanoTime() < deadline) {
                 service.pollCommands();
                 java.util.concurrent.locks.LockSupport.parkNanos(100_000);
             }
-            assertThat(service.state().querySequence(query.header().commandId())).isNotZero();
+            assertThat(service.state().bookQueries.querySequence(query.header().commandId())).isNotZero();
             assertThat(responses).isEmpty();
             assertThat(release.getCount()).isOne();
             release.countDown();
@@ -852,12 +852,12 @@ class TradingCoreOwnerTest {
             assertThat(CoreTestCompletion.applyAsynchronously(state, timerInstrument()).status())
                     .isEqualTo(ResponseStatus.APPLIED);
             long now = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
-            assertThat(state.hasMatchingNotifications(now)).isFalse();
+            assertThat(state.matchingProgress.hasNotifications(now)).isFalse();
             var failure = new IllegalStateException("silent snapshot audit failure");
             failureSlot.set(failure);
-            assertThat(state.hasMatchingNotifications(now + 999_999)).isFalse();
+            assertThat(state.matchingProgress.hasNotifications(now + 999_999)).isFalse();
             assertThatThrownBy(() -> state.apply(timerInstrument())).isSameAs(failure);
-            assertThatThrownBy(() -> state.hasMatchingNotifications(now + 1_000_000)).isSameAs(failure);
+            assertThatThrownBy(() -> state.matchingProgress.hasNotifications(now + 1_000_000)).isSameAs(failure);
         } finally {
             failureSlot.set(null);
             service.onTerminate(null);
@@ -1079,7 +1079,7 @@ class TradingCoreOwnerTest {
                     com.surprising.aeron.protocol.CoreStateQueryCodec.encodeOrderBookQuery(
                             new com.surprising.aeron.protocol.CoreOrderBookQuery("1", 10)));
             replayWithoutSession(service, query);
-            assertThat(service.state().querySequence(query.header().commandId())).isZero();
+            assertThat(service.state().bookQueries.querySequence(query.header().commandId())).isZero();
             assertThat(service.doBackgroundWork(0)).isZero();
         } finally {
             service.onTerminate(null);
@@ -1157,7 +1157,7 @@ class TradingCoreOwnerTest {
                             CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "later")));
             onSessionMessage(service, responses, later);
             assertThat(state.matchingSequence(later.header().commandId())).isZero();
-            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.pendingMatching.size()).isZero();
             assertThat(responses).hasSize(2);
 
             var query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.USER_STATE_QUERY,
@@ -1217,7 +1217,7 @@ class TradingCoreOwnerTest {
             service.onTimerEvent(service.state().appliedCommandCount(), 1_001);
             assertThat(service.doBackgroundWork(0)).isZero();
 
-            assertThat(service.state().pendingMatchingCount()).isZero();
+            assertThat(service.state().pendingMatching.size()).isZero();
             assertThat(responses).hasSize(1);
             assertThat(CoreTestCompletion.orderState(service.state(), 1001, 904).status())
                     .isEqualTo("OPEN");
@@ -1242,7 +1242,7 @@ class TradingCoreOwnerTest {
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(906, "1", CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "session-fence")),
                     UUID.fromString("00000000-0000-0000-0000-000000000013"));
             onSessionMessage(service, responses, place);
-            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.pendingMatching.size()).isZero();
             assertThat(responses).hasSize(1);
 
             onSessionMessage(service, responses, command(CoreMessageType.PROBE_INCREMENT, 3, 1001,
@@ -1250,7 +1250,7 @@ class TradingCoreOwnerTest {
                     UUID.fromString("00000000-0000-0000-0000-000000000014")));
             assertThat(service.doBackgroundWork(0)).isZero();
 
-            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.pendingMatching.size()).isZero();
             assertThat(CoreTestCompletion.orderState(state, 1001, 906).status())
                     .isEqualTo("OPEN");
             assertThat(responses).hasSize(2);
@@ -1421,7 +1421,7 @@ class TradingCoreOwnerTest {
 
             service.onTimerEvent(Long.MAX_VALUE - 1, 31_000);
 
-            assertThat(service.state().pendingMatching(sequence)).isNotNull();
+            assertThat(service.state().pendingMatching.get(sequence)).isNotNull();
         } finally {
             service.onTerminate(null);
         }
@@ -1474,8 +1474,8 @@ class TradingCoreOwnerTest {
                     .hasMessageStartingWith("unfinished business work outside cluster log callback");
 
             // Then
-            assertThat(service.state().pendingMatchingCount()).isOne();
-            assertThat(service.state().pendingMatching(pendingSequence)).isNotNull();
+            assertThat(service.state().pendingMatching.size()).isOne();
+            assertThat(service.state().pendingMatching.get(pendingSequence)).isNotNull();
         } finally {
             service.onTerminate(null);
         }
@@ -1515,8 +1515,8 @@ class TradingCoreOwnerTest {
         CoreResponse response = state.apply(place);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         // Finish admission only: these tests deliberately leave matching uncommitted.
-        while (state.hasPendingDirectCommand()) {
-            response = state.pollDirectCommand();
+        while (state.directCommand.active()) {
+            response = state.directCommand.poll(state);
             state.assertHealthy();
             if (System.nanoTime() >= deadline) throw new AssertionError("place admission timeout");
             Thread.onSpinWait();

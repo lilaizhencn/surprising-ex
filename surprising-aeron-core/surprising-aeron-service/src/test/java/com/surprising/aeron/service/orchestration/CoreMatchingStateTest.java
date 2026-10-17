@@ -126,10 +126,10 @@ class CoreMatchingStateTest {
             var signal = (java.util.concurrent.atomic.AtomicReference<Throwable>) failureField.get(runtime);
             var failure = new IllegalStateException("injected lane failure before completion publication");
             long now = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(1);
-            assertThat(state.hasMatchingNotifications(now)).isFalse();
+            assertThat(state.matchingProgress.hasNotifications(now)).isFalse();
             signal.compareAndSet(null, failure);
             try {
-                assertThatThrownBy(() -> state.hasMatchingNotifications(now + 1_000_000)).isSameAs(failure);
+                assertThatThrownBy(() -> state.matchingProgress.hasNotifications(now + 1_000_000)).isSameAs(failure);
             } finally {
                 signal.set(null);
             }
@@ -165,7 +165,7 @@ class CoreMatchingStateTest {
             assertThat(completed).isOne();
             assertThat(rejected[0]).isNotNull();
             assertThat(rejected[0].resultCode()).isEqualTo(CoreResultCode.STALE_MARK_PRICE);
-            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.pendingMatching.size()).isZero();
         }
     }
 
@@ -1101,8 +1101,8 @@ class CoreMatchingStateTest {
     private static CoreResponse submit(TradingCoreRuntime state, CoreMessage command) {
         CoreResponse response = state.apply(command);
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
-        while (state.hasPendingDirectCommand()) {
-            response = state.pollDirectCommand();
+        while (state.directCommand.active()) {
+            response = state.directCommand.poll(state);
             state.assertHealthy();
             if (System.nanoTime() >= deadline)
                 throw new AssertionError("command admission timed out: " + command.header().messageType());

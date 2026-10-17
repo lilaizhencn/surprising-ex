@@ -18,9 +18,9 @@ final class CoreTestCompletion {
         CoreResponse requestedResponse = null;
         try {
             while (true) {
-                owner.drainMatchingCompletions();
+                owner.matchingProgress.drainMatchingCompletions();
                 long sequence = requestedSequence != 0 && owner.pendingMatching.contains(requestedSequence)
-                        ? requestedSequence : owner.firstPendingMatchingSequence();
+                        ? requestedSequence : owner.pendingMatching.firstSequence();
                 if (sequence == 0) break;
                 owner.matchingProgress.progressPlaceBatchAdmissions();
                 CoreResponse response;
@@ -73,7 +73,7 @@ final class CoreTestCompletion {
             if (head != null && head.orderBatch != null && !head.orderBatch.activated()) {
                 owner.batches.activateOrderBatch(head.orderBatch, head, true);
             }
-            owner.drainMatchingCompletions();
+            owner.matchingProgress.drainMatchingCompletions();
             if (owner.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
             CommandSlot context = owner.pendingMatching.required(sequence);
             MatchingResult result = context.matchingResult();

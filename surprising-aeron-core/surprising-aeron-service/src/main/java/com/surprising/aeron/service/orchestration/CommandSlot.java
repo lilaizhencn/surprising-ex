@@ -1052,7 +1052,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
             coordinator.owner.resultBuilder.beginChangedUsers();
             for (long user : work.selectedUsers()) coordinator.owner.resultBuilder.addChangedUser(user);
             coordinator.owner.resultBuilder.commandSettlementProgress = work.result();
-            coordinator.requestCommitPublication();
+            coordinator.publication.request();
             return true;
         }
     }
@@ -1081,7 +1081,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         public boolean getAsBoolean() {
             if (!work.getAsBoolean()) return false;
             coordinator.owner.resultBuilder.commandLiquidationProgress = progress;
-            coordinator.requestCommitPublication();
+            coordinator.publication.request();
             return true;
         }
     }

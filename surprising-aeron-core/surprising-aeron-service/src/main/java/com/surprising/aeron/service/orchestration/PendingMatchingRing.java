@@ -9,7 +9,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 
-final class PendingMatchingRing {
+public final class PendingMatchingRing {
     private final int[] nextSlots;
     private final int[] previousSlots;
     private final int[] submissionShards;
@@ -28,7 +28,7 @@ final class PendingMatchingRing {
     private int size;
     /** Owner 调度进度标记：队列变化或异步完成后重新尝试派发。 */
     private long dispatchRevision;
-    long dispatchRevision() { return dispatchRevision; }
+    public long dispatchRevision() { return dispatchRevision; }
 
     /** Completion and admission notifications wake the Owner to resume the ordered command and financial cursors. */
     void progressChanged() { dispatchRevision++; }
@@ -119,7 +119,7 @@ final class PendingMatchingRing {
         return pending;
     }
 
-    CommandSlot get(long sequence) {
+    public CommandSlot get(long sequence) {
         int index = slot(sequence);
         if (!linked(index)) return null;
         CommandSlot pending = pendingAt(index);
@@ -164,7 +164,7 @@ final class PendingMatchingRing {
         return removed;
     }
 
-    long firstSequence() {
+    public long firstSequence() {
         return head == -1 ? 0 : pendingAt(head).sequence();
     }
 
@@ -256,7 +256,7 @@ final class PendingMatchingRing {
         return commandId == null ? null : entriesByCommandId.get(commandId);
     }
 
-    boolean hasUser(long userId) {
+    public boolean hasUser(long userId) {
         return userId > 0 && pendingByUser.get(userId) > 0;
     }
 
@@ -277,7 +277,7 @@ final class PendingMatchingRing {
         }
     }
 
-    Map<Long, CommandSlot> snapshot() {
+    public Map<Long, CommandSlot> snapshot() {
         LinkedHashMap<Long, CommandSlot> snapshot = new LinkedHashMap<>(size);
         forEach(pending -> snapshot.put(pending.sequence(), pending));
         return Collections.unmodifiableMap(snapshot);
@@ -345,9 +345,9 @@ final class PendingMatchingRing {
         return context.coreSequence() == 0 || context.command() == null ? null : context;
     }
 
-    int size() { return size; }
-    boolean isEmpty() { return size == 0; }
-    int capacity() { return contexts.capacity(); }
+    public int size() { return size; }
+    public boolean isEmpty() { return size == 0; }
+    public int capacity() { return contexts.capacity(); }
     CommandSlotRing contexts() { return contexts; }
 
     CommandSlot required(long sequence) { return contexts.required(sequence); }
@@ -355,7 +355,7 @@ final class PendingMatchingRing {
     CommandSlot claim(long sequence) { return contexts.claim(sequence); }
     void release(long sequence) { contexts.release(sequence); }
     void discard(long sequence) { contexts.discard(sequence); }
-    int inFlight() { return contexts.inFlight(); }
-    int highWaterMark() { return contexts.highWaterMark(); }
+    public int inFlight() { return contexts.inFlight(); }
+    public int highWaterMark() { return contexts.highWaterMark(); }
     CommandSlot contextAt(int slot) { return contexts.contextAt(slot); }
 }

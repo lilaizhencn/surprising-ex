@@ -91,11 +91,11 @@ class CoreSpotAssetUnitsTest {
                 CommandSource.OPERATIONS, 991, seq, user, 1_700_000_000_000L + seq, seq), payload);
         var result = runtime.apply(message);
         long directDeadline = System.nanoTime() + 5_000_000_000L;
-        while (result == null && runtime.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
-            result = runtime.pollDirectCommand();
+        while (result == null && runtime.directCommand.active() && System.nanoTime() < directDeadline) {
+            result = runtime.directCommand.poll(runtime);
             if (result == null) Thread.onSpinWait();
         }
-        if (result == null && runtime.hasPendingDirectCommand()) {
+        if (result == null && runtime.directCommand.active()) {
             throw new AssertionError("Direct command timed out: " + type);
         }
         if (result.resultCode() == CoreResultCode.MATCHING_PENDING) {

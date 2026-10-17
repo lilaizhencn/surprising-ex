@@ -38,18 +38,18 @@ public final class CommittedTradeReplay implements AutoCloseable {
         try {
             CoreResponse response = state.apply(command, timestamp, logPosition);
             long directDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            while (response == null && state.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
-                response = state.pollDirectCommand();
+            while (response == null && state.directCommand.active() && System.nanoTime() < directDeadline) {
+                response = state.directCommand.poll(state);
                 if (response == null) Thread.onSpinWait();
             }
-            if (response == null && state.hasPendingDirectCommand()) {
+            if (response == null && state.directCommand.active()) {
                 throw new AssertionError("Direct command timed out in CommittedTradeReplay: " + command.header().messageType());
             }
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
             // Only the separate replay waits here. Live owner scheduling is unchanged.
             // No-progress retries are bounded; Matcher/Account Lane still own settlement.
             long idleNanos = 1_000L;
-            while (state.firstPendingMatchingSequence() != 0) {
+            while (state.pendingMatching.firstSequence() != 0) {
                 if (Thread.currentThread().isInterrupted())
                     throw new IllegalStateException("committed replay interrupted; checkpoint must not advance");
                 if (state.commits.commitReadyMatching(

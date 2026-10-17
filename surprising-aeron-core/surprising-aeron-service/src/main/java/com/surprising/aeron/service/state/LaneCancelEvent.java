@@ -101,6 +101,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
         } finally {
             runtime.exitMatcherSettlementScope(lane, changes);
         }
+        lane.recordSettlementOperation();
         TradingRuntimeState completionRuntime = runtime;
         int completionLaneId = laneId;
         long completionSequence = coreSequence;

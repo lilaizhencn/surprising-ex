@@ -434,11 +434,11 @@ class SectionedCoreSnapshotCodecTest {
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             var response = state.apply(adjustment);
             long directDeadline = System.nanoTime() + 5_000_000_000L;
-            while (response == null && state.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
-                response = state.pollDirectCommand();
+            while (response == null && state.directCommand.active() && System.nanoTime() < directDeadline) {
+                response = state.directCommand.poll(state);
                 if (response == null) Thread.onSpinWait();
             }
-            if (response == null && state.hasPendingDirectCommand()) {
+            if (response == null && state.directCommand.active()) {
                 throw new AssertionError("Direct command timed out: " + adjustment.header().messageType());
             }
             assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);

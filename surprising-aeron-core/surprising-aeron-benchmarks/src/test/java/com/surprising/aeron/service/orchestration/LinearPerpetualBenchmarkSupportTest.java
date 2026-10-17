@@ -66,11 +66,11 @@ class LinearPerpetualBenchmarkSupportTest {
     void scalarProgressCountersMatchMaterializedState() {
         try (var harness = LinearPerpetualBenchmarkSupport.Harness.create(4)) {
             harness.adjust(100_001L, 100);
-            assertThat(harness.state().activeOrderCount()).isZero();
-            assertThat(harness.state().positionCount()).isZero();
-            assertThat(harness.state().triggerOrderCount()).isZero();
-            assertThat(harness.state().incompleteFundingCount()).isZero();
-            assertThat(harness.state().incompleteRiskScanCount()).isZero();
+            assertThat(harness.state().activeOrderIndex().count()).isZero();
+            assertThat(harness.state().adlPositionIndex().count()).isZero();
+            assertThat(harness.state().triggerOrderIndex().ids().size()).isZero();
+            assertThat(harness.state().runtimeState().treasury().incompleteFundingCount()).isZero();
+            assertThat(harness.state().runtimeState().incompleteRiskScanCount()).isZero();
         }
     }
 

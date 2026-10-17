@@ -1002,6 +1002,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             int currentLaneId = laneId;
             results[laneId] = inLaneCommandScope(accountLanes[currentLaneId],
                     ignored -> operation.apply(currentLaneId));
+            accountLanes[laneId].recordSettlementOperation();
         }
         return results;
     }

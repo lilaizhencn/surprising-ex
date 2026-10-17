@@ -21,7 +21,7 @@ final class BenchmarkMatchingAwait {
         if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
         int idle = 0;
         while (state.pendingMatching.contains(sequence) && System.nanoTime() < deadline) {
-            state.drainMatchingCompletions();
+            state.matchingProgress.drainMatchingCompletions();
             if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
             var result = state.takeMatchingResult(sequence);
             if (result != null) return result;

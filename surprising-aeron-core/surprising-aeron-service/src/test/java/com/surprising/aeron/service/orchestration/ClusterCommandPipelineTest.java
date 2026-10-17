@@ -204,8 +204,8 @@ class ClusterCommandPipelineTest {
             var second = live.place(disjointUser(11), "1", 81001, 80, 1, CoreOrderSide.BUY);
             live.send(first);
             live.send(second);
-            var firstPending = state.pendingMatching(state.matchingSequence(first.header().commandId()));
-            var secondPending = state.pendingMatching(state.matchingSequence(second.header().commandId()));
+            var firstPending = state.pendingMatching.get(state.matchingSequence(first.header().commandId()));
+            var secondPending = state.pendingMatching.get(state.matchingSequence(second.header().commandId()));
             live.progressUntil(() -> firstPending.settlementEvent() != null
                     && firstPending.settlementEvent().dispatched()
                     && secondPending.settlementEvent() != null && secondPending.settlementEvent().dispatched());
@@ -256,14 +256,14 @@ class ClusterCommandPipelineTest {
                     live.send(command);
                     long sequence = state.matchingSequence(command.header().commandId());
                     live.progressUntil(() -> {
-                        var pending = state.pendingMatching(sequence);
+                        var pending = state.pendingMatching.get(sequence);
                         var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
                         var receipt = batch
                                 ? pending.orderBatch.preparedAdmittedOrders[0]
                                 : pending.admittedPlaceOrder();
                         return event != null && event.dispatched() && receipt != null;
                     });
-                    var pending = state.pendingMatching(sequence);
+                    var pending = state.pendingMatching.get(sequence);
                     var admitted = batch ? pending.orderBatch.preparedAdmittedOrders[0] : null;
                     var resolved = batch ? null : pending.admittedPlaceOrder();
                     assertThat(batch ? admitted : resolved).isNotNull();
@@ -328,14 +328,14 @@ class ClusterCommandPipelineTest {
                 live.send(command);
                 long sequence = state.matchingSequence(command.header().commandId());
                 live.progressUntil(() -> {
-                    var pending = state.pendingMatching(sequence);
+                    var pending = state.pendingMatching.get(sequence);
                     var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
                     var receipt = batch
                             ? pending.orderBatch.preparedAdmittedOrders[0]
                             : pending.admittedPlaceOrder();
                     return event != null && event.dispatched() && receipt != null;
                 });
-                var pending = state.pendingMatching(sequence);
+                var pending = state.pendingMatching.get(sequence);
                 var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
                 assertThat(event.direct()).isTrue();
                 assertThat(event.ready()).isFalse();
@@ -515,7 +515,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.responses.getFirst().resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
             assertThat(live.service.state().tradingState().user(11).balances()).isEqualTo(before);
             assertThat(live.service.state().tradingState().user(11).reservations()).isEmpty();
-            assertThat(live.service.state().pendingMatchingCount()).isZero();
+            assertThat(live.service.state().pendingMatching.size()).isZero();
             var access = live.service.state().runtimeState.getClass().getDeclaredField("ownerLaneAccess");
             access.setAccessible(true);
             assertThat(access.getBoolean(live.service.state().runtimeState)).isFalse();
@@ -744,7 +744,7 @@ class ClusterCommandPipelineTest {
                 live.send(first);
                 long sequence = state.matchingSequence(first.header().commandId());
                 live.service.pollCommands();
-                assertThat(state.commits.commitPublicationDeferred()).as("batch waiting for matcher").isFalse();
+                assertThat(state.commits.publication.deferred()).as("batch waiting for matcher").isFalse();
                 live.send(next);
                 live.tick();
                 assertThat(live.responses).hasSize(2).allSatisfy(response ->
@@ -894,7 +894,7 @@ class ClusterCommandPipelineTest {
                 CoreResponse firstResponse = state.completeMatching(sequence, matching, timestamp, 0);
                 if (firstResponse != null) {
                     assertThat(firstResponse.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-                    assertThat(state.pendingMatching(sequence)).isNull();
+                    assertThat(state.pendingMatching.get(sequence)).isNull();
                 }
                 state.applyClusterCommand(next, next.header().submittedAtEpochMillis(), 0);
                 if (firstResponse == null)
@@ -1352,7 +1352,7 @@ class ClusterCommandPipelineTest {
             assertThat(state.prepareClusterPipelineScope(command, window)).isTrue();
             assertThat(window.decoded(command)).isSameAs(decoded);
             state.applyClusterCommand(command, TIME, 1000, decoded);
-            var pending = state.pendingMatching(state.matchingSequence(command.header().commandId()));
+            var pending = state.pendingMatching.get(state.matchingSequence(command.header().commandId()));
             assertThat(pending.decodedCommand()).isSameAs(decoded);
             var completed = CoreTestCompletion.completeMatchingSynchronously(state, pending.sequence(), TIME, 1000);
             assertThat(completed.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
@@ -1379,10 +1379,10 @@ class ClusterCommandPipelineTest {
             java.util.concurrent.CompletableFuture<Integer> blocked;
             try {
                 live.send(a);
-                var pending = live.service.state().pendingMatching(live.service.state().matchingSequence(a.header().commandId()));
+                var pending = live.service.state().pendingMatching.get(live.service.state().matchingSequence(a.header().commandId()));
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
                 while (!pending.isMatchingSubmitted() && System.nanoTime() < deadline)
-                    live.service.state().drainMatchingCompletions();
+                    live.service.state().matchingProgress.drainMatchingCompletions();
                 assertThat(pending.isMatchingSubmitted()).isTrue();
                 blocked = matcher.readAtSubmissionFence(0, () -> {
                     entered.countDown();
@@ -1635,7 +1635,7 @@ class ClusterCommandPipelineTest {
             long timestamp = first.header().submittedAtEpochMillis();
             state.applyClusterCommand(first, timestamp, 0);
             long sequence = state.matchingSequence(first.header().commandId());
-            var pending = state.pendingMatching(sequence);
+            var pending = state.pendingMatching.get(sequence);
             var event = pending.settlementEvent();
             assertThat(event).isNotNull();
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
@@ -1645,7 +1645,7 @@ class ClusterCommandPipelineTest {
             // Matcher/Lane 已完成，但 owner 尚未收取拒单；直接进入有序提交。
             var response = state.completeMatching(sequence, event.directResult(), timestamp, 0);
             assertThat(response.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(state.commits.commitPublicationDeferred()).isFalse();
+            assertThat(state.commits.publication.deferred()).isFalse();
             serial.apply(first);
             var next = live.placeBatch(disjointUser(11), disjointSymbol("1"), 20000);
             live.apply(next); serial.apply(next);
@@ -1838,7 +1838,7 @@ class ClusterCommandPipelineTest {
                 try {
                     assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
                     live.send(amend);
-                    var pending = state.pendingMatching(state.matchingSequence(amend.header().commandId()));
+                    var pending = state.pendingMatching.get(state.matchingSequence(amend.header().commandId()));
                     assertThat(pending).isNotNull();
                     long prepDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                     while ((batch ? (pending.orderBatch == null ? null : pending.orderBatch.itemSettlementEvent) : pending.settlementEvent()) == null
@@ -1854,7 +1854,7 @@ class ClusterCommandPipelineTest {
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                     while (!event.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
                     assertThat(event.complete()).as("Lane completes without an Owner turn").isTrue();
-                    assertThat(state.pendingMatching(pending.sequence())).isSameAs(pending);
+                    assertThat(state.pendingMatching.get(pending.sequence())).isSameAs(pending);
                 } finally { release.countDown(); }
                 assertThat(gate.join()).isOne();
                 live.tick(); serial.apply(amend);
@@ -1897,7 +1897,7 @@ class ClusterCommandPipelineTest {
             try {
                 assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
                 live.send(cancel);
-                var pending = state.pendingMatching(state.matchingSequence(cancel.header().commandId()));
+                var pending = state.pendingMatching.get(state.matchingSequence(cancel.header().commandId()));
                 assertThat(pending).isNotNull();
                 var event = pending.orderBatch.itemSettlementEvent;
                 assertThat(event).isNotNull();
@@ -1913,7 +1913,7 @@ class ClusterCommandPipelineTest {
                 assertThat(TradingOrderBatchCodec.decodeResult(pending.orderBatch.preparedResponse,
                         pending.orderBatch.preparedResponseLength).items())
                         .allSatisfy(item -> assertThat(item.status()).isEqualTo(ResponseStatus.APPLIED));
-                assertThat(state.pendingMatching(pending.sequence())).isSameAs(pending);
+                assertThat(state.pendingMatching.get(pending.sequence())).isSameAs(pending);
             } finally { release.countDown(); }
             assertThat(gate.join()).isOne();
             live.tick(); serial.apply(cancel);
@@ -1946,7 +1946,7 @@ class ClusterCommandPipelineTest {
             try {
                 assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
                 live.send(cancel);
-                var pending = state.pendingMatching(state.matchingSequence(cancel.header().commandId()));
+                var pending = state.pendingMatching.get(state.matchingSequence(cancel.header().commandId()));
                 assertThat(pending).isNotNull();
                 var event = pending.settlementEvent();
                 assertThat(event).isNotNull();
@@ -1957,7 +1957,7 @@ class ClusterCommandPipelineTest {
                 // No pollCommands/tick: Matcher must wake Lane itself.
                 while (!event.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
                 assertThat(event.complete()).isTrue();
-                assertThat(state.pendingMatching(pending.sequence())).isSameAs(pending);
+                assertThat(state.pendingMatching.get(pending.sequence())).isSameAs(pending);
             } finally { release.countDown(); }
             assertThat(gate.join()).isOne();
             live.tick(); serial.apply(cancel);
@@ -2093,10 +2093,10 @@ class ClusterCommandPipelineTest {
                 long firstSequence = state.matchingSequence(first.header().commandId());
                 long secondSequence = state.matchingSequence(second.header().commandId());
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                while ((!state.pendingMatching(firstSequence).isMatchingSubmitted()
-                        || !state.pendingMatching(secondSequence).isMatchingSubmitted()) && System.nanoTime() < deadline)
+                while ((!state.pendingMatching.get(firstSequence).isMatchingSubmitted()
+                        || !state.pendingMatching.get(secondSequence).isMatchingSubmitted()) && System.nanoTime() < deadline)
                     live.service.pollCommands();
-                assertThat(state.pendingMatching(secondSequence).isMatchingSubmitted()).isTrue();
+                assertThat(state.pendingMatching.get(secondSequence).isMatchingSubmitted()).isTrue();
                 // Sequenced direct mailboxes are already queued while Matcher is blocked.
                 // A later Lane blocker would sit behind those mailboxes and cannot run yet.
                 deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
@@ -2104,7 +2104,7 @@ class ClusterCommandPipelineTest {
                     live.service.pollCommands();
                 assertThat(state.commits.dispatchedSettlementInFlight).isEqualTo(2);
                 assertThat(live.responses).isEmpty();
-                assertThat(state.firstPendingMatchingSequence()).isEqualTo(firstSequence);
+                assertThat(state.pendingMatching.firstSequence()).isEqualTo(firstSequence);
             } finally { releaseMatcher.countDown(); releaseLanes.countDown(); }
             live.tick(); serial.apply(first); serial.apply(second);
             assertThat(matcherGate.join()).isOne();
@@ -2169,8 +2169,8 @@ class ClusterCommandPipelineTest {
                     try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(501))) {
                         live.apply(command);
                         var restoredResponse = restored.apply(command);
-                        while (restoredResponse == null && restored.hasPendingDirectCommand()) {
-                            restoredResponse = restored.pollDirectCommand();
+                        while (restoredResponse == null && restored.directCommand.active()) {
+                            restoredResponse = restored.directCommand.poll(restored);
                             if (restoredResponse == null) Thread.onSpinWait();
                         }
                         assertThat(restoredResponse.commandStatus()).isEqualTo(ResponseStatus.APPLIED);

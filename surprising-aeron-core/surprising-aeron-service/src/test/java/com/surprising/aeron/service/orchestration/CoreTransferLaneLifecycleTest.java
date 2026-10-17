@@ -111,9 +111,9 @@ class CoreTransferLaneLifecycleTest {
         assertThat(core.requiresOwnerLaneAccessForPreparation(request)).isFalse();
         var response = core.apply(request);
         if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
-            long queryId = core.querySequence(request.header().commandId());
+            long queryId = core.bookQueries.querySequence(request.header().commandId());
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            while ((response = core.takeQueryResult(queryId)) == null) {
+            while ((response = core.bookQueries.takeQueryResult(queryId)) == null) {
                 core.assertHealthy();
                 if (System.nanoTime() >= deadline) throw new AssertionError("pending transfer query timed out");
                 Thread.onSpinWait();

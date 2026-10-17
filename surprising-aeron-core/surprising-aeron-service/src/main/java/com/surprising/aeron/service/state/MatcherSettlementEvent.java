@@ -885,6 +885,7 @@ public final class MatcherSettlementEvent implements
         int laneId = lane.laneId();
         TradingRuntimeState completionRuntime = runtime;
         long completionSequence = plan.coreSequence();
+        lane.recordSettlementOperation();
         int completionOffset = laneId * CACHE_LINE_LONGS;
         if ((long) LONGS.getAcquire(completedLanes, completionOffset) != 0) {
             throw new IllegalStateException("account lane completed the same matcher fact twice");

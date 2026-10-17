@@ -101,7 +101,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     final MatchingCommandAdmission admissions = new MatchingCommandAdmission(this);
 
     /** 有序提交阶段：验证撮合证据、收集 Lane 结算并发布已提交变化；不重新执行资金业务。 */
-    final OrderedCommitCoordinator commits = new OrderedCommitCoordinator(this);
+    public final OrderedCommitCoordinator commits = new OrderedCommitCoordinator(this);
 
     /** 余额调整与资金转入转出命令；维护转账幂等状态。 */
     final BalanceTransferCommands balances = new BalanceTransferCommands(this);
@@ -169,9 +169,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
     public final CoreSnapshotLifecycle snapshots = new CoreSnapshotLifecycle(this);
 
     /** 盘口查询与分页会话；仅在查询边界物化视图。 */
-    final OrderBookQueryService bookQueries = new OrderBookQueryService(this);
+    public final OrderBookQueryService bookQueries = new OrderBookQueryService(this);
     /** 撮合在途推进状态；拥有 Lane/Matcher 通知排空和队首唤醒规则。 */
-    final MatchingPipelineProgress matchingProgress = new MatchingPipelineProgress(this);
+    public final MatchingPipelineProgress matchingProgress = new MatchingPipelineProgress(this);
 
     /** 实时事件编码出口；只能读取已提交或有快照屏障保护的值。 */
     com.surprising.aeron.service.state.realtime.RealtimeStateCapture realtimeCapture;
@@ -509,9 +509,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 各命令来源已应用序号，供来源去重及恢复使用。 */
     final SourceSequenceIndex lastSourceSequences;
     /** 在途命令环；统一保存日志顺序、准入、撮合、Lane 上下文与结算关联。 */
-    final PendingMatchingRing pendingMatching;
+    public final PendingMatchingRing pendingMatching;
     /** 撮合派发和完成通知通道；只在完成边界交接数据。 */
-    final MatcherPipelineGroup matcherPipeline;
+    public final MatcherPipelineGroup matcherPipeline;
     /** 真实撮合器适配器；命令经 matcher 队列推进。 */
     final DeterministicExchangeCoreAdapter matchingAdapter;
 
@@ -580,11 +580,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     public TradingRuntimeState runtimeState() { return runtimeState; }
     public RuntimeIdentityRegistry identities() { return identities; }
-    public void requestCommitPublication() { commits.requestCommitPublication(); }
+    public void requestCommitPublication() { commits.publication.request(); }
     public boolean asynchronousCommands() { return runtimeState.asynchronousCommands(); }
     public PositionUserIndex positionUserIndex() { return positionUserIndex; }
     public TriggerOrderIndex triggerOrderIndex() { return triggerOrderIndex; }
     public ActiveOrderIndex activeOrderIndex() { return activeOrderIndex; }
+    public AdlPositionIndex adlPositionIndex() { return adlPositionIndex; }
     public Iterable<Long> activeLiquidationIds() { return liquidationIndex.activeIds(); }
     public void initializeTriggerScan(com.surprising.aeron.protocol.ApplyMarkPriceCommand command) {
         triggers.initializeTriggerScan(command);
@@ -696,7 +697,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         runtimeState.bindFactIndexes(factIndexes, identities);
         this.runtimeState.restoreFeePolicies(restoredFeePolicies);
         this.runtimeState.restorePendingTransfers(restoredPendingTransfers);
-        commits.initializeCommitPublication(snapshotState.revision(), projectionSequence);
+        commits.publication.initialize(snapshotState.revision(), projectionSequence);
         this.factIndexes.rebuild(snapshotState, identities);
         runtimeState.releaseOwnerForHandoff();
         identities.releaseOwnerForHandoff();
@@ -964,7 +965,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
         resultBuilder.beginCommand();
         admissions.clearQueuedMatching();
-        commits.beginCommitPublicationBatch();
+        commits.publication.begin();
         try {
             if (directCommands.dispatch(message, clusterTimestamp)) {
                 status = ResponseStatus.APPLIED;
@@ -1057,21 +1058,21 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
         if (!directCommand.finalizationPrepared()) {
             if (status != ResponseStatus.APPLIED
-                    && (commits.commitPublicationDirty()
+                    && (commits.publication.dirty()
                     || runtimeState.revision() != beforeRuntimeRevision
                     || runtimeState.hasUncommittedCommandChanges())) {
                 rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
                         Math.incrementExact(appliedCommandCount));
             }
             if (status == null) {
-                commits.abortCommitPublicationBatch();
+                commits.publication.abort();
                 return finishDirectCommandContext(rejected(CoreResultCode.INVALID_MESSAGE));
             }
             if (status == ResponseStatus.APPLIED) {
                 if (runtimeState.asynchronousCommands()) {
                     try {
                         if (!triggers.collectClosingTriggerIds().isEmpty()) {
-                            commits.requestCommitPublication();
+                            commits.publication.request();
                         }
                     } catch (ArithmeticException failure) {
                         if (deferFinalizationRejection(CoreResultCode.ARITHMETIC_OVERFLOW)) return null;
@@ -1138,7 +1139,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             return null;
         }
         directCommand.clearFinalizationPrepared();
-        commits.completeCommitPublicationBatch();
+        commits.publication.complete();
         if (status == ResponseStatus.APPLIED) validateFundsConservation(message);
         directCommand.markPublicationComplete();
         return finishResponseAfterFundsRetention(message, clusterTimestamp, clusterPosition,
@@ -1184,10 +1185,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
     /** 唯一直接控制命令的续步槽；与订单撮合序号槽分离。 */
     public final DirectCommandSlot directCommand = new DirectCommandSlot();
-
-    boolean hasPendingDirectCommand() { return directCommand.active(); }
-
-    CoreResponse pollDirectCommand() { return directCommand.poll(this); }
 
     /** Dispatch once from either preparation or ordered commit; collection stays at commit. */
 
@@ -1294,8 +1291,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return commandId == null ? 0 : matchingSequence(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
     }
 
-    /** Fast Owner-side gate for the matching completion pump. */
-    boolean hasMatchingDrainWork() { return matchingProgress.hasDrainWork(); }
 
     /**
      * Reads the existing Lane/financial completion held by the ordered Owner head. Completion
@@ -1320,40 +1315,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return batch.laneCommitEvent != null && batch.laneCommitEvent.complete();
     }
 
-    /** Consumes Lane/Matcher notifications and advances the ordered matching pipeline. */
-    void drainMatchingCompletions() { matchingProgress.drainMatchingCompletions(); }
-
-    long matchingProgressSequence() {
-        return pendingMatching.dispatchRevision();
-    }
-
-    boolean hasLocalMatchingWork() { return matchingProgress.hasLocalMatchingWork(); }
-
-    /** Only external completion cursors; the caller must first exhaust owner-local progress. */
-    boolean hasMatchingNotifications() { return matchingProgress.hasNotifications(); }
-
-    boolean hasMatchingNotifications(long now) { return matchingProgress.hasNotifications(now); }
-
-    int matchingCompletionHighWaterMark() {
-        return matcherPipeline.completionHighWaterMark();
-    }
-
-    int dispatchedSettlementHighWaterMark() {
-        return commits.dispatchedSettlementHighWaterMark;
-    }
-
-    int matchingCompletionCapacity() {
-        return matcherPipeline.capacity();
-    }
 
     @FunctionalInterface
     interface MatchingCommitHandler {
         void onCommitted(long sequence, CoreResponse response);
     }
 
-    public int pendingMatchingCount() {
-        return pendingMatching.size();
-    }
 
     public long terminalTradeCount() {
         assertOwner();
@@ -1394,18 +1361,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return encoder.finish();
     }
 
-    public long firstPendingMatchingSequence() {
-        return pendingMatching.firstSequence();
-    }
-
-    boolean hasPendingMatchingForUser(long userId) {
-        return pendingMatching.hasUser(userId);
-    }
-
-    Map<Long, CommandSlot> pendingMatching() {
-        return pendingMatching.snapshot();
-    }
-
     com.surprising.aeron.service.state.LaneTopology laneTopology() {
         return matchingAdapter.topology();
     }
@@ -1444,10 +1399,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     boolean activated() { return activated; }
-
-    CommandSlot pendingMatching(long sequence) {
-        return pendingMatching.get(sequence);
-    }
 
     int terminalRetentionCandidateCount() {
         return terminalRetention.candidateCount();
@@ -1633,12 +1584,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
     }
 
-    int incompleteRiskScanCount() { return runtimeState.incompleteRiskScanCount(); }
-    int incompleteFundingCount() { return runtimeState.treasury().incompleteFundingCount(); }
-    int activeOrderCount() { return activeOrderIndex.count(); }
-    int positionCount() { return adlPositionIndex.count(); }
-    int triggerOrderCount() { return triggerOrderIndex.ids().size(); }
-
     TradingCoreState snapshotTradingState() {
         CoreSnapshotLifecycle.SnapshotFence fence = snapshots.snapshotFence;
         return fence != null && fence.snapshotState != null ? fence.snapshotState : tradingState();
@@ -1662,15 +1607,30 @@ public final class TradingCoreRuntime implements AutoCloseable {
         Integer symbolId = identities.findSymbolId(instrumentId);
         return symbolId == null ? 0 : runtimeState.treasury().fundingSettlement(symbolId);
     }
-    LiquidationRuntime runtimeLiquidation(long liquidationId) { return runtimeState.liquidation(liquidationId); }
+    LiquidationRuntime runtimeLiquidation(long liquidationId) {
+        boolean acquired = runtimeState.accountLanesStarted() && !runtimeState.ownerLaneAccess;
+        try {
+            if (acquired) {
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                while (!runtimeState.tryAcquireOwnerLaneAccess()) {
+                    if (System.nanoTime() - deadline >= 0) {
+                        throw new IllegalStateException("timed out waiting for owner lane access in runtimeLiquidation");
+                    }
+                    Thread.onSpinWait();
+                }
+            }
+            return runtimeState.liquidation(liquidationId);
+        } finally {
+            if (acquired) {
+                runtimeState.releaseOwnerLaneAccess();
+            }
+        }
+    }
     boolean snapshotHasPendingCommands() {
         return factContextActive || directCommand.active() || pendingMatching.inFlight() != 0;
     }
     Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies() {
         return runtimeState.feePoliciesSnapshot();
-    }
-    void restoreFeePolicies(Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> policies) {
-        runtimeState.restoreFeePolicies(policies);
     }
     Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers() {
         boolean acquired = runtimeState.accountLanesStarted() && !runtimeState.ownerLaneAccess;
@@ -1688,12 +1648,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         } finally {
             if (acquired) runtimeState.releaseOwnerLaneAccess();
         }
-    }
-    void restorePendingTransfers(Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> transfers) {
-        runtimeState.restorePendingTransfers(transfers);
-    }
-    long sourceSequenceDigest() {
-        return lastSourceSequences.digest();
     }
 
     Map<UUID, StoredResult> commandResults() {
@@ -1731,10 +1685,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         else if (owner != Thread.currentThread()) {
             throw new IllegalStateException("trading runtime is bound to another thread");
         }
-    }
-
-    void deferProvisionalSnapshotProjection() {
-        commits.deferProvisionalCommitPublication();
     }
 
     com.surprising.aeron.service.state.PlaceAdmissionEvent dispatchPlaceAdmission(
@@ -1792,8 +1742,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 throw failure;
             }
         });
-        if (!batches.hasPendingBatches()) deferProvisionalSnapshotProjection();
-        else commits.requestCommitPublication();
+        if (!batches.hasPendingBatches()) commits.publication.deferProvisionalProjection();
+        else commits.publication.request();
     }
 
     ResolvedMatchingAdmission requireMatchingAdmission(CommandSlot pending) {
@@ -1831,14 +1781,14 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (RuntimeOrderCommitStateTransitions.stampChangedOrdersByLane(
                 runtimeState, timestamp, clusterPosition,
                 changedOrderIds, resultBuilder.commandChangedUserIds)) {
-            commits.requestCommitPublication();
+            commits.publication.request();
         }
     }
 
 
 
     void suspendMatchingCommitContext(CommandSlot pending) {
-        if (!commits.commitPublicationDeferred() || pending == null
+        if (!commits.publication.deferred() || pending == null
                 || pending.settlementEvent() == null
                 && pending.orderBatch == null
                 && !commits.controlPending(pending.sequence())) {
@@ -1852,8 +1802,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
         CommandSlot context = pending;
         context.suspendCommitContext(
                 resultBuilder, runtimeState.coldCommandFunds(),
-                commits.commitPublicationDirty(), commits.commitPublicationProvisionalOnly());
-        commits.suspendCommitPublication();
+                commits.publication.dirty(), commits.publication.provisionalOnly());
+        commits.publication.suspend();
         resultBuilder.commandChangedUserIds = List.of();
         resultBuilder.commandChangedOrderIds = List.of();
         resultBuilder.resetChangeAccumulators();
@@ -1861,12 +1811,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     void restoreMatchingCommitContext(CommandSlot pending) {
-        if (commits.commitPublicationDeferred() || factContextActive) {
+        if (commits.publication.deferred() || factContextActive) {
             throw new IllegalStateException("another owner commit context is active");
         }
         CommandSlot context = pending;
         activateFactContext(pending.command(), pending.fingerprint());
-        commits.restoreCommitPublication(context.commitSnapshotDirty(), context.commitSnapshotProvisionalOnly());
+        commits.publication.restore(context.commitSnapshotDirty(), context.commitSnapshotProvisionalOnly());
         context.restoreCommitContext(resultBuilder);
         resultBuilder.commandChangedUserIds = List.of();
         resultBuilder.commandChangedOrderIds = List.of();
@@ -1893,7 +1843,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             long runtimeCheckpoint,
             long positionIdentityCheckpoint,
             long commandSequence) {
-        commits.abortCommitPublicationBatch();
+        commits.publication.abort();
         runtimeState.rollbackActiveCommand(runtimeCheckpoint, commandSequence);
         identities.rollbackPositionKeys(positionIdentityCheckpoint);
     }
@@ -2223,8 +2173,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     record SourceKey(CommandSource source, long sourceId) {
     }
 
-    public long querySequence(UUID queryId) { return bookQueries.querySequence(queryId); }
-    public CoreResponse takeQueryResult(long queryId) { return bookQueries.takeQueryResult(queryId); }
     public byte[] snapshot() { return snapshots.snapshot(); }
     public byte[] snapshot(long snapshotId) { return snapshots.snapshot(snapshotId); }
 

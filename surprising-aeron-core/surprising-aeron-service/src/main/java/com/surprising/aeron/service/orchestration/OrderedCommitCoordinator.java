@@ -35,7 +35,7 @@ import java.util.List;
 
 /** 有序提交阶段：验证撮合证据、收集 Lane 结算并发布已提交变化；不重新执行资金业务。 */
 @Slf4j
-final class OrderedCommitCoordinator {
+public final class OrderedCommitCoordinator {
     /** 唯一 owner；仅在其线程访问共享交易状态和提交边界。 */
     final TradingCoreRuntime owner;
 
@@ -53,8 +53,12 @@ final class OrderedCommitCoordinator {
     /** 结算在途数量峰值，仅用于运行观测。 */
     int dispatchedSettlementHighWaterMark;
 
+    public int dispatchedSettlementHighWaterMark() {
+        return dispatchedSettlementHighWaterMark;
+    }
+
     /** 只拥有撮合完成顺序；提交发布批次由独立的状态 owner 管理。 */
-    final CommitPublication publication;
+    public final CommitPublication publication;
 
     CoreResponse completeRejectedMatching(long sequence) {
         owner.assertOwner();
@@ -286,7 +290,7 @@ final class OrderedCommitCoordinator {
                 owner.resultBuilder.resetChangeAccumulators();
                 owner.setCommandFunds(pending.fundsAccumulator());
                 owner.activateFactContext(pending.command(), pending.fingerprint());
-                beginCommitPublicationBatch();
+                publication.begin();
                 return completeDispatchedMatcherSettlement(pending, matchingResult);
             }
             if (pending.hasCommitContext()) owner.restoreMatchingCommitContext(pending);
@@ -321,7 +325,7 @@ final class OrderedCommitCoordinator {
         owner.resultBuilder.resetChangeAccumulators();
         owner.setCommandFunds(pending.fundsAccumulator());
         owner.activateFactContext(pending.command(), pending.fingerprint());
-        beginCommitPublicationBatch();
+        publication.begin();
         com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta = null;
         try {
             switch (pending.operation()) {
@@ -429,7 +433,7 @@ final class OrderedCommitCoordinator {
      * 结束事实上下文并触发后续延期或批量撮合推进。
      */
     private CoreResponse finishTerminalMatching(CommandSlot pending, MatchingResult matchingResult) {
-        completeCommitPublicationBatch();
+        publication.complete();
         owner.validateFundsConservation(pending.command());
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
@@ -464,7 +468,7 @@ final class OrderedCommitCoordinator {
             owner.runtimeState.setMetadata(owner.productLine,
                     Math.addExact(owner.runtimeState.revision(),
                             pending.operation() == CommandSlot.Operation.TRIGGER && !matchingResult.accepted() ? 2 : 1));
-            requestCommitPublication();
+            publication.request();
         }
         if (!lanesCommitted && pending.settlementEvent() == null) {
             owner.resultBuilder.materializeChangeAccumulators();
@@ -538,7 +542,7 @@ final class OrderedCommitCoordinator {
                     if (trigger == null) {
                         throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
                     }
-                    requestCommitPublication();
+                    publication.request();
                     owner.resultBuilder.commandTradeCount = TradingCoreRuntime.tradeCount(pending.settlementPlan());
                 }
                 default -> throw new IllegalStateException(
@@ -548,7 +552,7 @@ final class OrderedCommitCoordinator {
                     || pending.operation() == CommandSlot.Operation.REPLACE
                     || pending.operation() == CommandSlot.Operation.AMEND
                     || pending.operation() == CommandSlot.Operation.TRIGGER) {
-                requestCommitPublication();
+                publication.request();
             }
             owner.runtimeState.applyCollectedTreasuryBeforeActivation(settlementTreasuryDelta);
             long revisionDelta = switch (pending.operation()) {
@@ -560,7 +564,7 @@ final class OrderedCommitCoordinator {
             owner.runtimeState.setMetadata(owner.productLine,
                     Math.addExact(owner.runtimeState.revision(),
                             Math.addExact(revisionDelta, pending.settlementPlan().preCancellationCount())));
-            requestCommitPublication();
+            publication.request();
             owner.resultBuilder.materializeChangeAccumulators();
             long committedLaneMask = event.requiredLaneMask();
             if (pending.completedLaneMask() != pending.expectedLaneMask()) {
@@ -678,7 +682,7 @@ final class OrderedCommitCoordinator {
                 if (accountWork != null) {
                     if (!accountWork.getAsBoolean()) return false;
                     accountWork = null;
-                    requestCommitPublication();
+                    publication.request();
                 }
                 if (executionRequests == null) executionRequests = new ArrayList<>();
                 while (index < batch.actions().size()) {
@@ -756,14 +760,14 @@ final class OrderedCommitCoordinator {
                             if (completedRiskWork > 0) owner.runtimeState.acceptChangedUserIds(userId ->
                                     pending.includeControlLanes(owner.matchingAdapter.topology().accountLaneMask(userId),
                                             validAccountLaneMask()));
-                            if (owner.runtimeState.revision() != beforeRiskRevision) requestCommitPublication();
+                            if (owner.runtimeState.revision() != beforeRiskRevision) publication.request();
                         }
                     }
                 }
                 if (riskWork != null) {
                     if (!riskWork.poll()) return false;
                     completedRiskWork = riskWork.completedWork();
-                    if (owner.runtimeState.revision() != beforeRiskRevision) requestCommitPublication();
+                    if (owner.runtimeState.revision() != beforeRiskRevision) publication.request();
                 }
                 owner.resultBuilder.materializeChangeAccumulators();
                 owner.resultBuilder.commandLiquidationBatchResult = new CoreLiquidationBatchResultView(
@@ -882,7 +886,7 @@ final class OrderedCommitCoordinator {
         if (head != null && !head.activated()) {
             owner.batches.activateOrderBatch(head, pending, true);
         }
-        if (owner.hasMatchingDrainWork()) owner.drainMatchingCompletions();
+        if (owner.matchingProgress.hasDrainWork()) owner.matchingProgress.drainMatchingCompletions();
         dispatchReadyMatcherFinancialSettlements(throughSequence);
     }
 
@@ -1137,22 +1141,5 @@ final class OrderedCommitCoordinator {
         MatchingResult matching = matchingResult(pending);
         return matching == null ? null
                 : tryMatchingCommit(pending, matching, clusterTimestamp, clusterPosition);
-    }
-
-    void requestCommitPublication() { publication.request(); }
-    void beginCommitPublicationBatch() { publication.begin(); }
-    void completeCommitPublicationBatch() { publication.complete(); }
-    void abortCommitPublicationBatch() { publication.abort(); }
-    void publishCommittedChanges() { publication.publish(); }
-    boolean commitPublicationDeferred() { return publication.deferred(); }
-    boolean commitPublicationDirty() { return publication.dirty(); }
-    boolean commitPublicationProvisionalOnly() { return publication.provisionalOnly(); }
-    void initializeCommitPublication(long runtimePatchRevision, long publishedSequence) {
-        publication.initialize(runtimePatchRevision, publishedSequence);
-    }
-    void deferProvisionalCommitPublication() { publication.deferProvisionalProjection(); }
-    void suspendCommitPublication() { publication.suspend(); }
-    void restoreCommitPublication(boolean dirty, boolean provisionalOnly) {
-        publication.restore(dirty, provisionalOnly);
     }
 }

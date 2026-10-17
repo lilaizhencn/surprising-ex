@@ -40,10 +40,11 @@ class LifecycleGuardTest {
             assertThat(early.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(h.state().tradingState().treasuryState().lifecycleSettlements()).isEmpty();
             h.advanceClockTo(2_000_000_000_000L);
-            var expired = h.state().apply(h.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, 1000,
+            var cmd = h.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, 1000,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(h.nextOrderId(), "42",
                             CoreOrderSide.BUY, 100, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
-                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""))));
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "")));
+            var expired = h.state().apply(cmd);
             assertThat(expired.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(h.state().tradingState().orders()).isEmpty();
             h.execute(h.command(CoreMessageType.SETTLE_INSTRUMENT, CommandSource.OPERATIONS, 0,

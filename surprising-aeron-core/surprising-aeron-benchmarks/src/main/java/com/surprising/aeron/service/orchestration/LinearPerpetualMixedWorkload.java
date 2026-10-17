@@ -499,27 +499,27 @@ final class LinearPerpetualMixedWorkload {
 
             @Override
             public int incompleteRiskScans() {
-                return harness.state().incompleteRiskScanCount();
+                return harness.state().runtimeState().incompleteRiskScanCount();
             }
 
             @Override
             public int incompleteFundingSettlements() {
-                return harness.state().incompleteFundingCount();
+                return harness.state().runtimeState().treasury().incompleteFundingCount();
             }
 
             @Override
             public int activeOrders() {
-                return harness.state().activeOrderCount();
+                return harness.state().activeOrderIndex().count();
             }
 
             @Override
             public int positions() {
-                return harness.state().positionCount();
+                return harness.state().adlPositionIndex().count();
             }
 
             @Override
             public int triggerOrders() {
-                return harness.state().triggerOrderCount();
+                return harness.state().triggerOrderIndex().ids().size();
             }
 
             @Override

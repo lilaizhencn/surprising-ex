@@ -693,7 +693,7 @@ public class ClusteredBatchTradingBenchmark {
                 });
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 do {
-                    result = owner.pollDirectCommand();
+                    result = owner.directCommand.poll(owner);
                     if (System.nanoTime() > deadline) throw new IllegalStateException("fault rollback timeout");
                 } while (result == null);
             } finally { runtime.exitAsynchronousCommandScope(); }
@@ -1058,7 +1058,7 @@ public class ClusteredBatchTradingBenchmark {
             enqueueCommittedCommand(session.id(), messageDecoder.decode(
                             new UnsafeBuffer(bytes), 0, bytes.length),
                     1_700_000_000_000L, header.position(), null);
-            maxBacklog = Math.max(maxBacklog, service.state().pendingMatchingCount());
+            maxBacklog = Math.max(maxBacklog, service.state().pendingMatching.size());
         }
 
         private void enqueueCommittedCommand(long sessionId, CoreMessage command, long timestamp, long position,

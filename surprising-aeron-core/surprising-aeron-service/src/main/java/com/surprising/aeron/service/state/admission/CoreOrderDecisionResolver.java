@@ -50,6 +50,11 @@ public final class CoreOrderDecisionResolver {
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         Integer symbolId = identities.findSymbolId(instrument.instrumentId());
         if (symbolId == null) throw new IllegalStateException("instrument instrumentId identity is missing");
+        instrument.requireOrderEnabled(intent);
+        if (instrument.expiryEpochMillis() > 0 && clusterTimestamp >= instrument.expiryEpochMillis()) {
+            boolean lifecycleSettled = runtime.treasury().lifecycleSettlement(symbolId) != 0;
+            throw new CoreStateRejectedException(lifecycleSettled ? "INSTRUMENT_SETTLED" : "INVALID_COMMAND", "expired instrument cannot accept new orders");
+        }
         target.prepareDecision(intent, instrument, symbolId, runtime.markPrice(symbolId), runtime.feePolicyBook(), clusterTimestamp);
     }
 

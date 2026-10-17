@@ -58,8 +58,8 @@ class CoreActiveLaneIngressTest {
                 var adjustment = message(core, CoreMessageType.ADJUST_BALANCE, 1,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 10_000)));
                 assertThat(core.apply(adjustment)).isNull();
-                assertThat(core.pollDirectCommand()).isNull();
-                assertThat(core.hasPendingDirectCommand()).isTrue();
+                assertThat(core.directCommand.poll(core)).isNull();
+                assertThat(core.directCommand.active()).isTrue();
                 assertThat(release.getCount()).isOne();
                 release.countDown();
                 assertThat(complete(core, adjustment, null).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
@@ -110,14 +110,14 @@ class CoreActiveLaneIngressTest {
 
     private CoreResponse complete(TradingCoreRuntime core, CoreMessage message, CoreResponse response) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (core.hasPendingDirectCommand()) {
-            response = core.pollDirectCommand();
+        while (core.directCommand.active()) {
+            response = core.directCommand.poll(core);
             if (System.nanoTime() >= deadline) throw new AssertionError("direct completion timeout");
             Thread.onSpinWait();
         }
         long requested = core.matchingSequence(message.header().commandId());
         CoreResponse[] terminal = {response};
-        while (core.firstPendingMatchingSequence() != 0) {
+        while (core.pendingMatching.firstSequence() != 0) {
             core.commits.commitReadyMatching(16, TIME, message.header().sourceSequence(), false,
                     (id, result) -> { if (id == requested) terminal[0] = result; });
             if (System.nanoTime() >= deadline) throw new AssertionError("matching completion timeout");

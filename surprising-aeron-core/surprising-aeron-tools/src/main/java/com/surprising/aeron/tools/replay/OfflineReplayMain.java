@@ -48,14 +48,14 @@ public final class OfflineReplayMain {
                             + ", actual=" + encoded.length);
                 }
                 CoreMessage message = CoreMessageCodec.decode(encoded);
-                int pendingBefore = state.pendingMatchingCount();
+                int pendingBefore = state.pendingMatching.size();
                 CoreResponse response = state.apply(message);
                 if (response.resultCode() == CoreResultCode.MATCHING_PENDING
-                        || state.pendingMatchingCount() > pendingBefore) {
+                        || state.pendingMatching.size() > pendingBefore) {
                     drainMatching(state, pendingBefore, message);
                 }
                 if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
-                    long queryId = state.querySequence(message.header().commandId());
+                    long queryId = state.bookQueries.querySequence(message.header().commandId());
                     if (queryId != 0) {
                         drainQuery(state, queryId);
                     }
@@ -69,8 +69,8 @@ public final class OfflineReplayMain {
     }
 
     private static void drainMatching(TradingCoreRuntime state, int pendingBefore, CoreMessage message) {
-        while (state.pendingMatchingCount() > pendingBefore) {
-            long sequence = state.firstPendingMatchingSequence();
+        while (state.pendingMatching.size() > pendingBefore) {
+            long sequence = state.pendingMatching.firstSequence();
             MatchingResult matching = null;
             long deadline = System.nanoTime() + 30_000_000_000L;
             while (matching == null && System.nanoTime() < deadline) {
@@ -92,7 +92,7 @@ public final class OfflineReplayMain {
         CoreResponse result = null;
         long deadline = System.nanoTime() + 30_000_000_000L;
         while (result == null && System.nanoTime() < deadline) {
-            result = state.takeQueryResult(queryId);
+            result = state.bookQueries.takeQueryResult(queryId);
             if (result == null) Thread.onSpinWait();
         }
         if (result == null) throw new IllegalStateException("book query replay timed out queryId=" + queryId);

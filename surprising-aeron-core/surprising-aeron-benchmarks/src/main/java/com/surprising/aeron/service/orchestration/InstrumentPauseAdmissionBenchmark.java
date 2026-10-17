@@ -38,7 +38,7 @@ public class InstrumentPauseAdmissionBenchmark {
                 requireApplied(state.apply(message(productLine,3,CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,
                         CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("1",0,
                                 new CoreInstrumentMaintenance(1,CoreInstrumentMaintenance.Mode.HALTED,0))))));
-                requireApplied(state.apply(message(productLine,4,CoreMessageType.ADJUST_BALANCE,
+                requireApplied(applyAndDrain(state,message(productLine,4,CoreMessageType.ADJUST_BALANCE,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(type.isInverse()?"BTC":"USDT",20_000)))));
                 snapshot=state.snapshot(777);
             }
@@ -81,9 +81,14 @@ public class InstrumentPauseAdmissionBenchmark {
     }
     private static CoreResponse applyAndDrain(TradingCoreRuntime core, CoreMessage message) {
         CoreResponse[] result = {core.apply(message)};
+        if (result[0] == null && core.directCommand.active()) {
+            do {
+                result[0] = core.directCommand.poll(core);
+            } while (result[0] == null);
+        }
         long requested = core.matchingSequence(message.header().commandId());
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (core.firstPendingMatchingSequence() != 0) {
+        while (core.pendingMatching.firstSequence() != 0) {
             core.commits.commitReadyMatching(256, message.header().submittedAtEpochMillis(),
                     message.header().sourceSequence(), false,
                     (sequence, response) -> { if (sequence == requested) result[0] = response; });

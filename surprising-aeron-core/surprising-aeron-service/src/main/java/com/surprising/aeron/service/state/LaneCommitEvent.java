@@ -184,6 +184,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
             runtime.applyLaneUsers(lane, usersByLane[laneId], coreSequence);
         if (resultTarget != null && laneId == resultLaneId)
             LaneOrderResultTarget.captureFinal(resultTarget, identities, lane);
+        lane.recordSettlementOperation();
         int completionOffset = laneId * CACHE_LINE_LONGS;
         if ((long) LONGS.getAcquire(completedLanes, completionOffset) != 0) {
             throw new IllegalStateException("Account Lane committed the same sequence twice");

@@ -297,7 +297,7 @@ class MaintenanceIntegrationTest {
         long seq=++sequence; var message=new CoreMessage(CoreMessageHeader.command(type,id,line,CommandSource.OPERATIONS,998,seq,user,1_700_000_000_000L+seq,seq),bytes);
         var response=state.apply(message);
         if(response.resultCode()==CoreResultCode.MATCHING_PENDING) response=CoreTestCompletion.completeMatchingSynchronously(state, state.matchingSequence(id),message.header().submittedAtEpochMillis(),seq);
-        while(state.firstPendingMatchingSequence()!=0) CoreTestCompletion.completeMatchingSynchronously(state, state.firstPendingMatchingSequence(),message.header().submittedAtEpochMillis(),seq);
+        while(state.pendingMatching.firstSequence()!=0) CoreTestCompletion.completeMatchingSynchronously(state, state.pendingMatching.firstSequence(),message.header().submittedAtEpochMillis(),seq);
         return response;
     }
     private CoreResponse query(long user,CoreMessageType type,byte[] bytes) {

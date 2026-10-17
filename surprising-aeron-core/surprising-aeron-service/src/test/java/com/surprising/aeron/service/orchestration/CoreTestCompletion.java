@@ -63,9 +63,9 @@ final class CoreTestCompletion {
     static CoreResponse querySynchronously(TradingCoreRuntime owner, com.surprising.aeron.protocol.CoreMessage request) {
         CoreResponse response = applyAsynchronously(owner, request);
         if (response.resultCode() == com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING) {
-            long id = owner.querySequence(request.header().commandId());
+            long id = owner.bookQueries.querySequence(request.header().commandId());
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-            while ((response = owner.takeQueryResult(id)) == null) {
+            while ((response = owner.bookQueries.takeQueryResult(id)) == null) {
                 owner.assertHealthy();
                 if (System.nanoTime() >= deadline) throw new AssertionError("user query timeout");
                 Thread.onSpinWait();
@@ -94,23 +94,23 @@ final class CoreTestCompletion {
         owner.runtimeState.enterAsynchronousCommandScope();
         try {
             CoreResponse response = owner.applyDecodedCommand(message, timestamp, position, window.decodedIfPresent(message), independent);
-            while (owner.hasPendingDirectCommand()) {
-                response = owner.pollDirectCommand();
+            while (owner.directCommand.active()) {
+                response = owner.directCommand.poll(owner);
                 if (System.nanoTime() >= deadline) throw new AssertionError("direct command timeout");
                 Thread.onSpinWait();
             }
             long requestedSequence = owner.matchingSequence(message.header().commandId());
             CoreResponse[] completed = {response};
-            while (owner.firstPendingMatchingSequence() != 0) {
+            while (owner.pendingMatching.firstSequence() != 0) {
                 owner.commits.commitReadyMatching(64, timestamp, position, false,
                         (sequence, result) -> { if (sequence == requestedSequence) completed[0] = result; });
                 if (System.nanoTime() >= deadline) throw new AssertionError("matching command timeout " + message.header().messageType()
                         + " independent=" + independent + " requested=" + requestedSequence
-                        + " first=" + owner.firstPendingMatchingSequence()
+                        + " first=" + owner.pendingMatching.firstSequence()
                         + " control=" + owner.commits.controlPending(requestedSequence)
                         + " completion=" + owner.pendingMatching.required(requestedSequence).hasMatchingCompletion()
                         + " result=" + owner.pendingMatching.required(requestedSequence).matchingResult()
-                        + " submitted=" + owner.pendingMatching(requestedSequence).isMatchingSubmitted());
+                        + " submitted=" + owner.pendingMatching.get(requestedSequence).isMatchingSubmitted());
                 Thread.onSpinWait();
             }
             return completed[0];
@@ -133,9 +133,9 @@ final class CoreTestCompletion {
         while (true) {
             owner.runtimeState.assertAccountLanesHealthy();
             owner.commits.advanceMatchingProgress(clusterTimestamp, clusterPosition, Long.MAX_VALUE);
-            owner.drainMatchingCompletions();
+            owner.matchingProgress.drainMatchingCompletions();
             long sequence = requestedSequence != 0 && owner.pendingMatching.contains(requestedSequence)
-                    ? requestedSequence : owner.firstPendingMatchingSequence();
+                    ? requestedSequence : owner.pendingMatching.firstSequence();
             if (sequence == 0) break;
             owner.matchingProgress.progressPlaceBatchAdmissions();
             CoreResponse response;
@@ -201,7 +201,7 @@ final class CoreTestCompletion {
             CommandSlot head = state.pendingMatching.get(state.pendingMatching.firstSequence());
             if (head != null && head.orderBatch != null && !head.orderBatch.activated())
                 state.batches.activateOrderBatch(head.orderBatch, head, true);
-            state.drainMatchingCompletions();
+            state.matchingProgress.drainMatchingCompletions();
             if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
             CommandSlot context = state.pendingMatching.required(sequence);
             com.surprising.aeron.service.matching.MatchingResult result = context.matchingResult();

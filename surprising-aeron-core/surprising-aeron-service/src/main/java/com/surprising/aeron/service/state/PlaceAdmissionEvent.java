@@ -178,6 +178,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         // Capture every publication dependency before completed becomes visible. The Owner
         // retains queued events until the command's Matcher continuation consumes this payload.
         TradingRuntimeState completionRuntime = runtime;
+        lane.recordCommandOperation();
         completed = true;
         completionRuntime.publishPlaceAdmissionReady(laneId, coreSequence);
     }

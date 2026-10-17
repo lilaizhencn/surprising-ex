@@ -171,21 +171,21 @@ class CoreLedgerQueryTest {
                         LINE, CoreLiquidationWorkView.Purpose.EXECUTION, 0, 1, 1_024));
                 var first = message(CoreMessageType.LIQUIDATION_WORK_QUERY, payload);
                 assertThat(CoreTestCompletion.applyAsynchronously(core, first).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-                long id = core.querySequence(first.header().commandId());
+                long id = core.bookQueries.querySequence(first.header().commandId());
                 var second = message(CoreMessageType.LIQUIDATION_WORK_QUERY, payload);
                 assertThat(CoreTestCompletion.applyAsynchronously(core, second).resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
-                assertThat(core.querySequence(second.header().commandId())).isZero();
+                assertThat(core.bookQueries.querySequence(second.header().commandId())).isZero();
                 release.set(true);
                 CoreResponse response;
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
-                while ((response = core.takeQueryResult(id)) == null) {
+                while ((response = core.bookQueries.takeQueryResult(id)) == null) {
                     core.assertHealthy();
                     if (System.nanoTime() >= deadline) throw new AssertionError("deferred query timed out");
                     Thread.onSpinWait();
                 }
                 assertThat(CoreLiquidationWorkCodec.decodeWork(response.data()).complete()).isTrue();
-                assertThat(core.takeQueryResult(id)).isNull();
-                assertThat(core.querySequence(first.header().commandId())).isZero();
+                assertThat(core.bookQueries.takeQueryResult(id)).isNull();
+                assertThat(core.bookQueries.querySequence(first.header().commandId())).isZero();
                 core.assertHealthy();
             } finally { release.set(true); }
         }
@@ -199,7 +199,7 @@ class CoreLedgerQueryTest {
             assertThat(core.runtimeState.systemLedgerStarted()).isTrue();
             var message = message(CoreMessageType.TREASURY_STATE_QUERY, new byte[0]);
             assertThat(CoreTestCompletion.applyAsynchronously(core, message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-            assertThat(core.querySequence(message.header().commandId())).isNotZero();
+            assertThat(core.bookQueries.querySequence(message.header().commandId())).isNotZero();
         } finally { core.close(); }
         assertThat(core.runtimeState.systemLedgerStarted()).isFalse();
         assertThat(core.bookQueries.queryIds).isEmpty();
@@ -224,16 +224,16 @@ class CoreLedgerQueryTest {
         assertThat(core.requiresOwnerLaneAccessForPreparation(message)).isFalse();
         var response = CoreTestCompletion.applyAsynchronously(core, message);
         assertThat(response.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-        long id = core.querySequence(message.header().commandId());
+        long id = core.bookQueries.querySequence(message.header().commandId());
         assertThat(id).isNotZero();
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while ((response = core.takeQueryResult(id)) == null) {
+        while ((response = core.bookQueries.takeQueryResult(id)) == null) {
             core.assertHealthy();
             if (System.nanoTime() >= deadline) throw new AssertionError("Ledger query timeout");
             Thread.onSpinWait();
         }
-        assertThat(core.takeQueryResult(id)).isNull();
-        assertThat(core.querySequence(message.header().commandId())).isZero();
+        assertThat(core.bookQueries.takeQueryResult(id)).isNull();
+        assertThat(core.bookQueries.querySequence(message.header().commandId())).isZero();
         return response;
     }
 

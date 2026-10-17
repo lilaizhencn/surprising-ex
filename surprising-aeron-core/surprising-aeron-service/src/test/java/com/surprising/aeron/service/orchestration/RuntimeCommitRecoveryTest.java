@@ -74,7 +74,7 @@ class RuntimeCommitRecoveryTest {
                         ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 25,
                         "ordered-" + id, "recovery", 1001, 1001)));
             }
-            original.restorePendingTransfers(transfers);
+            original.runtimeState.restorePendingTransfers(transfers);
             long hash = original.stateHash();
             try (var recovered = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, original.snapshot())) {
                 assertThat(recovered.stateHash()).isEqualTo(hash);
@@ -92,8 +92,8 @@ class RuntimeCommitRecoveryTest {
                 701, ProductLine.LINEAR_PERPETUAL, ProductLine.SPOT,
                 "USDT_PERPETUAL", "SPOT", "USDT", 125, "recovery-701", "snapshot parity", 1001L, 1001L));
         try (TradingCoreRuntime original = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
-            original.restoreFeePolicies(Map.of(feePolicy.policyId(), feePolicy));
-            original.restorePendingTransfers(Map.of(transfer.transferId(), transfer));
+            original.runtimeState.restoreFeePolicies(Map.of(feePolicy.policyId(), feePolicy));
+            original.runtimeState.restorePendingTransfers(Map.of(transfer.transferId(), transfer));
             long originalStateHash = original.stateHash();
             try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(
                     ProductLine.LINEAR_PERPETUAL, original.snapshot(700))) {
@@ -661,11 +661,11 @@ class RuntimeCommitRecoveryTest {
     private static CoreResponse apply(TradingCoreRuntime state, CoreMessage command) {
         CoreResponse response = state.apply(command);
         long directDeadline = System.nanoTime() + 5_000_000_000L;
-        while (response == null && state.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
-            response = state.pollDirectCommand();
+        while (response == null && state.directCommand.active() && System.nanoTime() < directDeadline) {
+            response = state.directCommand.poll(state);
             if (response == null) Thread.onSpinWait();
         }
-        if (response == null && state.hasPendingDirectCommand()) {
+        if (response == null && state.directCommand.active()) {
             throw new AssertionError("Direct command timed out: " + command.header().messageType());
         }
         if (response != null && response.resultCode() != CoreResultCode.MATCHING_PENDING) {
@@ -677,7 +677,7 @@ class RuntimeCommitRecoveryTest {
         com.surprising.aeron.service.matching.MatchingResult matching = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
-            state.drainMatchingCompletions();
+            state.matchingProgress.drainMatchingCompletions();
             matching = state.takeMatchingResult(sequence);
             if (matching == null) Thread.onSpinWait();
         }
@@ -735,9 +735,9 @@ class RuntimeCommitRecoveryTest {
                         CoreLiquidationWorkView.Purpose.EXECUTION, 0, 100, 1_048_576));
         CoreResponse response = state.apply(query);
         if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
-            long queryId = state.querySequence(query.header().commandId());
+            long queryId = state.bookQueries.querySequence(query.header().commandId());
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-            while ((response = state.takeQueryResult(queryId)) == null) {
+            while ((response = state.bookQueries.takeQueryResult(queryId)) == null) {
                 state.assertHealthy();
                 if (System.nanoTime() >= deadline) throw new AssertionError("Liquidation query timeout");
                 Thread.onSpinWait();
@@ -750,7 +750,7 @@ class RuntimeCommitRecoveryTest {
     private static void assertParity(TradingCoreRuntime actualState, TradingCoreRuntime expectedState,
                                      ReplayResult actual, ReplayResult expected) {
         assertThat(actual.responses()).isEqualTo(expected.responses());
-        assertThat(actualState.pendingMatchingCount()).isZero();
+        assertThat(actualState.pendingMatching.size()).isZero();
         assertThat(actualState.tradingState()).isEqualTo(expectedState.tradingState());
         assertThat(actualState.tradingState().users()).isEqualTo(expectedState.tradingState().users());
         assertThat(actualState.tradingState().orders()).isEqualTo(expectedState.tradingState().orders());
@@ -784,7 +784,7 @@ class RuntimeCommitRecoveryTest {
         com.surprising.aeron.service.matching.MatchingResult matching = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
-            state.drainMatchingCompletions();
+            state.matchingProgress.drainMatchingCompletions();
             matching = state.takeMatchingResult(sequence);
             if (matching == null) Thread.onSpinWait();
         }
@@ -998,8 +998,8 @@ class RuntimeCommitRecoveryTest {
 
     private static void assertNoUnfinishedCommands(TradingCoreRuntime state) throws Exception {
         assertThat(state.factContextActive).isFalse();
-        assertThat(state.hasPendingDirectCommand()).isFalse();
-        assertThat(state.pendingMatchingCount()).isZero();
+        assertThat(state.directCommand.active()).isFalse();
+        assertThat(state.pendingMatching.size()).isZero();
         assertThat(state.pendingMatching.inFlight()).isZero();
         state.runtimeState.requireSnapshotFenceReady();
     }

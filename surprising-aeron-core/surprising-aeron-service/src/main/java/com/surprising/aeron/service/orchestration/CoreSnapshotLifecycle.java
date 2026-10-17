@@ -82,7 +82,7 @@ final class CoreSnapshotLifecycle {
         if (snapshotId <= 0 || deadlineNanos <= 0) {
             throw new IllegalArgumentException("invalid snapshot fence");
         }
-        if (owner.hasPendingDirectCommand() || owner.commits.controlPending(owner.firstPendingMatchingSequence()))
+        if (owner.directCommand.active() || owner.commits.controlPending(owner.pendingMatching.firstSequence()))
             throw new TradingCoreRuntime.SnapshotNotReadyException();
         if (snapshotFence != null) {
             if (snapshotFence.snapshotId == snapshotId) {
@@ -117,9 +117,9 @@ final class CoreSnapshotLifecycle {
                 snapshotFence = null;
                 return encoded;
             }
-            owner.drainMatchingCompletions();
+            owner.matchingProgress.drainMatchingCompletions();
             while (!owner.pendingMatching.isEmpty()) {
-                long sequence = owner.firstPendingMatchingSequence();
+                long sequence = owner.pendingMatching.firstSequence();
                 CommandSlot pending = owner.pendingMatching.get(sequence);
                 MatchingResult result =
                         pending != null && pending.settlementEvent() != null
@@ -130,13 +130,13 @@ final class CoreSnapshotLifecycle {
                     result = pending.settlementEvent().directResult();
                 if (result == null) return null;
                 if (owner.commits.completeMatching(sequence, result, clusterTimestamp, clusterPosition) == null) return null;
-                owner.drainMatchingCompletions();
+                owner.matchingProgress.drainMatchingCompletions();
             }
             if (owner.pendingMatching.inFlight() != 0) {
                 throw new IllegalStateException("snapshot fence contains unfinished lane or matcher work");
             }
             if (owner.snapshotHasPendingCommands()
-                    || owner.commits.commitPublicationDeferred() || owner.commits.commitPublicationDirty()) {
+                    || owner.commits.publication.deferred() || owner.commits.publication.dirty()) {
                 throw new IllegalStateException("snapshot fence contains unfinished commands or patch work");
             }
             owner.runtimeState.requireSnapshotFenceReady();

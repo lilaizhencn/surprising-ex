@@ -526,7 +526,7 @@ final class LinearPerpetualBenchmarkSupport {
                 }
                 long fees = state.treasuryState().feeBalances().getOrDefault(SETTLE_ASSET, 0L);
                 if (Math.addExact(balances, fees) != Math.multiplyExact(users.size(), SAFE_BALANCE)
-                        || netPosition != 0 || harness.state().activeOrderCount() != 0) {
+                        || netPosition != 0 || harness.state().activeOrderIndex().count() != 0) {
                     throw new IllegalStateException("deep fill violated funds, positions or terminal orders");
                 }
             }
@@ -973,7 +973,7 @@ final class LinearPerpetualBenchmarkSupport {
                 if (Math.addExact(balances, treasury) != Math.multiplyExact(SAFE_BALANCE, 2)
                         || harness.acceptedMessages() != harness.terminalMessages()
                         || harness.acceptedCoreMessages() != harness.terminalCoreMessages()
-                        || harness.state().activeOrderCount() != (makerQuantity > filled ? 1 : 0))
+                        || harness.state().activeOrderIndex().count() != (makerQuantity > filled ? 1 : 0))
                     throw new IllegalStateException("cross-lane fill did not conserve funds or drain commands");
             }
 
@@ -1268,7 +1268,7 @@ final class LinearPerpetualBenchmarkSupport {
             executedMessages = Math.addExact(executedMessages, operationWeight);
             acceptedMessages = Math.addExact(acceptedMessages, operationWeight);
             acceptedCoreMessages = Math.incrementExact(acceptedCoreMessages);
-            int pendingBefore = state.pendingMatchingCount();
+            int pendingBefore = state.pendingMatching.size();
             ClusterCommandWindow.Entry windowEntry = null;
             CoreResponse response;
             if (clusterMatchingPipeline
@@ -1283,9 +1283,9 @@ final class LinearPerpetualBenchmarkSupport {
                         command.header().correlationId(), clusterCommandWindow.decoded(command));
             } else {
                 response = state.apply(command);
-                if (response == null && state.hasPendingDirectCommand()) {
+                if (response == null && state.directCommand.active()) {
                     do {
-                        response = state.pollDirectCommand();
+                        response = state.directCommand.poll(state);
                     } while (response == null);
                 }
             }
@@ -1294,8 +1294,8 @@ final class LinearPerpetualBenchmarkSupport {
             long sequence = state.matchingSequence(command.header().commandId());
             if (windowEntry != null) clusterCommandWindow.bindSequence(windowEntry, sequence);
             boolean indirectSequence = false;
-            if (sequence == 0 && pendingBefore == 0 && state.pendingMatchingCount() != 0) {
-                sequence = state.firstPendingMatchingSequence();
+            if (sequence == 0 && pendingBefore == 0 && state.pendingMatching.size() != 0) {
+                sequence = state.pendingMatching.firstSequence();
                 indirectSequence = true;
             }
             PendingCommand pending = new PendingCommand(
@@ -1375,8 +1375,8 @@ final class LinearPerpetualBenchmarkSupport {
                     throw new IllegalStateException("matching timed out for "
                             + pending.command.header().messageType()
                             + " sequence=" + pending.sequence
-                            + " firstPending=" + state.firstPendingMatchingSequence()
-                            + " pendingCount=" + state.pendingMatchingCount()
+                            + " firstPending=" + state.pendingMatching.firstSequence()
+                            + " pendingCount=" + state.pendingMatching.size()
                             + " submittedCount=" + submittedMatching.size());
                 }
                 MatchingResult matching = BenchmarkMatchingAwait.awaitMatchingResult(state, pending.sequence);
@@ -1433,8 +1433,8 @@ final class LinearPerpetualBenchmarkSupport {
                             throw new IllegalStateException("matching batch completion crossed submission order: actual="
                                     + sequence + ", expected=" + (pending == null ? 0 : pending.sequence)
                                     + ", expectedType=" + (pending == null ? "none" : pending.command.header().messageType())
-                                    + ", coreHead=" + state.firstPendingMatchingSequence()
-                                    + ", corePending=" + state.pendingMatchingCount()
+                                    + ", coreHead=" + state.pendingMatching.firstSequence()
+                                    + ", corePending=" + state.pendingMatching.size()
                                     + ", submitted=" + submittedMatching.size());
                         }
                         pending.response = response;
@@ -1508,6 +1508,19 @@ final class LinearPerpetualBenchmarkSupport {
             }
         }
 
+        private CoreResponse awaitQueryResponse(CoreMessage query, CoreResponse response) {
+            if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
+                long queryId = state.bookQueries.querySequence(query.header().commandId());
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                while ((response = state.bookQueries.takeQueryResult(queryId)) == null) {
+                    state.assertHealthy();
+                    if (System.nanoTime() >= deadline) throw new AssertionError("query timeout: " + query.header().messageType());
+                    Thread.onSpinWait();
+                }
+            }
+            return response;
+        }
+
         CoreLiquidationWorkView executionWork() {
             CoreMessage query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.LIQUIDATION_WORK_QUERY,
                     new UUID(99, sequences.clusterPosition++), productLine(),
@@ -1516,7 +1529,7 @@ final class LinearPerpetualBenchmarkSupport {
                     CoreLiquidationWorkCodec.encodeQuery(productLine(),
                             CoreLiquidationWorkView.Purpose.EXECUTION, 0, 1_000, 1_048_576));
             executedMessages++;
-            CoreResponse response = state.apply(query);
+            CoreResponse response = awaitQueryResponse(query, state.apply(query));
             acceptedMessages++;
             terminalMessages++;
             acceptedCoreMessages++;
@@ -1535,7 +1548,7 @@ final class LinearPerpetualBenchmarkSupport {
                     CoreLiquidationWorkCodec.encodeQuery(productLine(),
                             CoreLiquidationWorkView.Purpose.INSURANCE, 0, 1_000, 1_048_576));
             executedMessages++;
-            CoreResponse response = state.apply(query);
+            CoreResponse response = awaitQueryResponse(query, state.apply(query));
             acceptedMessages++;
             terminalMessages++;
             acceptedCoreMessages++;
@@ -1585,15 +1598,15 @@ final class LinearPerpetualBenchmarkSupport {
         }
 
         int matchingCompletionHighWaterMark() {
-            return state.matchingCompletionHighWaterMark();
+            return state.matcherPipeline.completionHighWaterMark();
         }
 
         int matchingCompletionCapacity() {
-            return state.matchingCompletionCapacity();
+            return state.matcherPipeline.capacity();
         }
 
         int dispatchedSettlementHighWaterMark() {
-            return state.dispatchedSettlementHighWaterMark();
+            return state.commits.dispatchedSettlementHighWaterMark();
         }
 
         long terminalTradeCount() {

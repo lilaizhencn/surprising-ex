@@ -190,7 +190,7 @@ public final class TradingCoreOwner {
                     window.decoded(entry.request), true, fingerprint);
             window.bindSequence(entry, state.matchingSequence(entry.request.header().commandIdMsb(), entry.request.header().commandIdLsb()));
             if (entry.sequence != 0) {
-                var pending = state.pendingMatching(entry.sequence);
+                var pending = state.pendingMatching.get(entry.sequence);
                 pending.establishCommitFence(entry.timestamp, entry.position);
                 state.pendingMatching.progressChanged();
             }
@@ -202,7 +202,7 @@ public final class TradingCoreOwner {
             if (awaitingCompletion && ++admissionsSinceHeadCheck == 8) {
                 admissionsSinceHeadCheck = 0;
                 if (state.commits.matchingCommitReady(
-                        state.pendingMatching(commandPipeline.committingHead().sequence))) {
+                        state.pendingMatching.get(commandPipeline.committingHead().sequence))) {
                     awaitingCompletion = false;
                     advanceMatching = false;
                 }
@@ -228,24 +228,24 @@ public final class TradingCoreOwner {
         ClusterCommandWindow window = commandPipeline.commandWindow();
         var last = commandPipeline.committingHead();
         long dispatchThrough = Math.max(last.sequence, window.lastMatchingSequence());
-        long progressBefore = state.matchingProgressSequence();
+        long progressBefore = state.pendingMatching.dispatchRevision();
         if (commandPipeline.waitingForMatchingNotification()
                 && commandPipeline.canSkipMatchingPoll(dispatchThrough, progressBefore,
-                state.hasMatchingNotifications() || state.hasCompletedLaneCommit())) {
+                state.matchingProgress.hasNotifications() || state.hasCompletedLaneCommit())) {
             checkProgressDeadline();
             return false;
         }
         commandPipeline.beginMatchingPoll();
         // 新队首可能需要激活批量、派发结算或收取队列通知；不能因本轮已收集过而饿死续接。
         if (!advanceMatching && last.sequence != 0) {
-            advanceMatching = !state.commits.matchingCommitReady(state.pendingMatching(last.sequence));
+            advanceMatching = !state.commits.matchingCommitReady(state.pendingMatching.get(last.sequence));
         }
         if (last.sequence != 0) {
             CoreResponse terminalResponse = state.commits.commitReadyMatchingHead(
                     last.timestamp, last.position, last.sequence, dispatchThrough, advanceMatching);
             if (terminalResponse == null) {
-                commandPipeline.rememberMatchingWait(dispatchThrough, state.matchingProgressSequence(),
-                        progressBefore, state.hasLocalMatchingWork());
+                commandPipeline.rememberMatchingWait(dispatchThrough, state.pendingMatching.dispatchRevision(),
+                        progressBefore, state.matchingProgress.hasLocalMatchingWork());
                 checkProgressDeadline();
                 return false;
             }
@@ -266,22 +266,22 @@ public final class TradingCoreOwner {
     private boolean pollControl() {
         OwnerIngressRing.Entry activeControl = commandPipeline.activeControl();
         var request = activeControl.command;
-        if (state.hasPendingDirectCommand()) {
-            commandPipeline.controlResponse(state.pollDirectCommand());
+        if (state.directCommand.active()) {
+            commandPipeline.controlResponse(state.directCommand.poll(state));
             if (commandPipeline.controlResponse() == null) { checkProgressDeadline(); return false; }
         }
         state.commits.commitReadyMatching(OwnerCommandPipelineState.COMPLETION_BATCH_SIZE,
                 activeControl.timestamp, activeControl.position, false, matchingCommitHandler);
-        if (state.firstPendingMatchingSequence() != 0) { checkProgressDeadline(); return false; }
+        if (state.pendingMatching.firstSequence() != 0) { checkProgressDeadline(); return false; }
         if (commandPipeline.hasMatchingResponseSequence()) {
             if (commandPipeline.matchingResponse() == null) {
                 throw new IllegalStateException("missing terminal callback result");
             }
             commandPipeline.controlResponse(commandPipeline.matchingResponse());
         }
-        long querySequence = state.querySequence(request.header().commandId());
+        long querySequence = state.bookQueries.querySequence(request.header().commandId());
         if (querySequence != 0) {
-            CoreResponse result = state.takeQueryResult(querySequence);
+            CoreResponse result = state.bookQueries.takeQueryResult(querySequence);
             if (result == null) { checkProgressDeadline(); return false; }
             commandPipeline.controlResponse(result);
         }
@@ -330,8 +330,8 @@ public final class TradingCoreOwner {
                 + " matcherCompletionDepth=" + state.matcherPipeline.completionDepth()
                 + " controlLanes=" + state.runtimeState.controlLaneDiagnostics()
                 + " completionAvailable=" + ownerCompletionAvailable()
-                + " localMatchingWork=" + state.hasLocalMatchingWork()
-                + " drainWork=" + state.hasMatchingDrainWork();
+                + " localMatchingWork=" + state.matchingProgress.hasLocalMatchingWork()
+                + " drainWork=" + state.matchingProgress.hasDrainWork();
     }
 
     /** 仅框架快照边界需要等待：快照不能遗漏已经复制但尚未完成的业务。 */
@@ -360,7 +360,7 @@ public final class TradingCoreOwner {
         if (pendingIngressReady()) return true;
         // 已经观察到完成游标没有变化；在生产者发布新通知前，重复进入完整推进器不会产生进展。
         if (commandPipeline.waitingForMatchingNotification()) return ownerCompletionAvailable();
-        return state != null && state.hasMatchingDrainWork();
+        return state != null && state.matchingProgress.hasDrainWork();
     }
 
     /**
@@ -517,13 +517,13 @@ public final class TradingCoreOwner {
     /** 在 Owner 线程上收集完成通知、提交命令并推进实时读取。 */
     int pollCommands() {
         long before = commandPipeline.commandProgress();
-        long matchingBefore = state.matchingProgressSequence();
+        long matchingBefore = state.pendingMatching.dispatchRevision();
         processingLogCallback = true;
         try {
             progressCommands();
             int realtimeWork = pendingCommandCount() == 0 ? progressRealtimeReads(System.nanoTime()) : 0;
             return (before != commandPipeline.commandProgress()
-                    || matchingBefore != state.matchingProgressSequence() ? 1 : 0)
+                    || matchingBefore != state.pendingMatching.dispatchRevision() ? 1 : 0)
                     + realtimeWork;
         } catch (org.agrona.concurrent.AgentTerminationException fatal) {
             throw fatal;

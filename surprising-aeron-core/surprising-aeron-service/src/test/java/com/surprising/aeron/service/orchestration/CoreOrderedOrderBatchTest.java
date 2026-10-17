@@ -417,9 +417,9 @@ class CoreOrderedOrderBatchTest {
                 state.apply(single);
                 state.apply(batch);
                 long deadline = System.nanoTime() + 5_000_000_000L;
-                while (state.pendingMatchingCount() != 0 && System.nanoTime() < deadline)
+                while (state.pendingMatching.size() != 0 && System.nanoTime() < deadline)
                     state.commits.commitReadyMatching(256, 2_000, 6, false, (sequence, response) -> {});
-                assertThat(state.pendingMatchingCount()).isZero();
+                assertThat(state.pendingMatching.size()).isZero();
                 drainBatch(state, command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 4 + cycle * 3L,
                         TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
                                 new CancelOrderCommand(id), new CancelOrderCommand(id + 1), new CancelOrderCommand(id + 2))))));
@@ -456,14 +456,14 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.pendingMatching.deferredCount()).isEqualTo(2);
             var completed = new ArrayList<Long>();
             long deadline = System.nanoTime() + 5_000_000_000L;
-            while (state.pendingMatchingCount() != 0 && System.nanoTime() < deadline) {
+            while (state.pendingMatching.size() != 0 && System.nanoTime() < deadline) {
                 state.commits.commitReadyMatching(256, 2_000, 6, false,
                         (sequence, response) -> completed.add(sequence));
             }
             assertThat(completed).containsExactlyElementsOf(expected);
             assertThat(state.pendingMatching.deferredCount()).isZero();
             assertThat(state.batches.hasPendingBatches()).isFalse();
-            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.pendingMatching.size()).isZero();
             assertThat(TradingOrderBatchCodec.decodeResult(
                     state.commandResults().get(commands.get(2).header().commandId()).responseData()).items())
                     .allSatisfy(item -> assertThat(item.status()).isEqualTo(ResponseStatus.REJECTED));
@@ -498,14 +498,14 @@ class CoreOrderedOrderBatchTest {
             var actual = new ArrayList<Long>();
             var responses = new ArrayList<CoreResponse>();
             long deadline = System.nanoTime() + 5_000_000_000L;
-            while (state.pendingMatchingCount() != 0 && System.nanoTime() < deadline) {
+            while (state.pendingMatching.size() != 0 && System.nanoTime() < deadline) {
                 state.commits.commitReadyMatching(256, 2_000, 4, false, (sequence, response) -> {
                     actual.add(sequence);
                     responses.add(response);
                 });
             }
             assertThat(actual).containsExactlyElementsOf(expected);
-            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.pendingMatching.size()).isZero();
             assertThat(TradingOrderBatchCodec.decodeResult(responses.get(1).data()).items())
                     .allSatisfy(item -> {
                         assertThat(item.status()).isEqualTo(ResponseStatus.REJECTED);
@@ -561,7 +561,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(items.get(3).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
             assertThat(items).extracting(CoreOrderBatchResult.Item::index).containsExactly(0, 1, 2, 3, 4, 5);
             assertThat(shards[0].submittedPosition() - submittedBefore).isEqualTo(2);
-            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.pendingMatching.size()).isZero();
             assertThat(state.tradingState().users().get(1001L).balances()).isEqualTo(before);
             assertThat(state.tradingState().users().get(1001L).reservations()).isEmpty();
             assertThat(state.tradingState().users().get(1001L).positions()).isEmpty();
@@ -601,7 +601,7 @@ class CoreOrderedOrderBatchTest {
                     ResponseStatus.APPLIED, ResponseStatus.APPLIED, ResponseStatus.APPLIED,
                     ResponseStatus.REJECTED, ResponseStatus.APPLIED, ResponseStatus.APPLIED);
             assertThat(items.get(6).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
-            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.pendingMatching.size()).isZero();
             assertThat(CoreTestCompletion.applyAsynchronously(state,
                     command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 11,
                             TradingCommandCodec.encodePlaceOrder(place(19_009, "after-async-chunk", 1_000))))
@@ -646,7 +646,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(batchResponse.appliedCommandCount()).isLessThan(laterResponse.appliedCommandCount());
             assertThat(state.commandResults().get(batchId).responseData()).containsExactly(batchResponse.data());
             assertThat(state.commandResults().get(laterId).responseData()).containsExactly(laterResponse.data());
-            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.pendingMatching.size()).isZero();
             assertThat(TradingOrderBatchCodec.decodeResult(batchResponse.data()).items())
                     .extracting(item -> item.order().orderId())
                     .containsExactly(9_001L, 9_002L);
@@ -681,7 +681,7 @@ class CoreOrderedOrderBatchTest {
                     .isEqualTo(CoreResultCode.STALE_SOURCE_SEQUENCE);
             assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
             assertThat(duplicate.appliedCommandCount()).isEqualTo(deferred.appliedCommandCount());
-            assertThat(state.pendingMatching()).containsKeys(
+            assertThat(state.pendingMatching.snapshot()).containsKeys(
                     state.matchingSequence(laterId), state.matchingSequence(lastId));
             assertThat(state.commandResults()).doesNotContainKey(laterId);
             assertThat(state.commandResults()).doesNotContainKey(lastId);
@@ -690,7 +690,7 @@ class CoreOrderedOrderBatchTest {
             var batchMatching = awaitMatching(state, batchSequence);
             CoreResponse batchResponse = completeEventually(state, batchSequence, batchMatching, 2_000, 4);
             assertThat(batchResponse).isNotNull();
-            assertThat(state.pendingMatching()).containsKeys(
+            assertThat(state.pendingMatching.snapshot()).containsKeys(
                     state.matchingSequence(laterId), state.matchingSequence(lastId));
             assertThat(batchResponse.appliedCommandCount()).isEqualTo(batchSequence);
             assertThat(state.commandResults().get(batchId).responseData()).containsExactly(batchResponse.data());
@@ -711,7 +711,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(laterResponse.appliedCommandCount()).isLessThan(lastResponse.appliedCommandCount());
             assertThat(state.commandResults().get(laterId).responseData()).containsExactly(laterResponse.data());
             assertThat(state.commandResults().get(lastId).responseData()).containsExactly(lastResponse.data());
-            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.pendingMatching.size()).isZero();
             assertThat(state.tradingState().orders().keySet())
                     .containsExactlyInAnyOrder(9_101L, 9_102L, 9_103L);
         }
@@ -842,8 +842,8 @@ class CoreOrderedOrderBatchTest {
                     UUID.randomUUID(), 3, TradingCommandCodec.encodeBalanceAdjustment(
                             new BalanceAdjustmentCommand("USDT", 1_000_000)));
             var adjustResponse = state.apply(adjust);
-            while (adjustResponse == null && state.hasPendingDirectCommand()) {
-                adjustResponse = state.pollDirectCommand();
+            while (adjustResponse == null && state.directCommand.active()) {
+                adjustResponse = state.directCommand.poll(state);
                 if (adjustResponse == null) Thread.onSpinWait();
             }
             assertThat(adjustResponse.status()).isEqualTo(ResponseStatus.APPLIED);
@@ -885,7 +885,7 @@ class CoreOrderedOrderBatchTest {
             var user = state.tradingState().user(1001);
             assertThat(user.reservations()).containsOnlyKeys(19_001L);
             assertThat(user.balances().get("USDT").totalUnits()).isEqualTo(1_000_000);
-            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.pendingMatching.size()).isZero();
             byte[] snapshot = state.snapshot();
             try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
                 assertThat(restored.tradingState().businessStateHash())
@@ -975,8 +975,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_004).totalReservedUnits())).isEqualTo(1_000L);
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_005).totalReservedUnits())).isEqualTo(1_000L);
             assertThat(state.commandResults()).doesNotContainKey(fatalId);
-            assertThat(state.pendingMatching(fatalSequence)).isNotNull();
-            assertThat(state.pendingMatchingCount()).isOne();
+            assertThat(state.pendingMatching.get(fatalSequence)).isNotNull();
+            assertThat(state.pendingMatching.size()).isOne();
             assertThat(state.matchingSequence(fatalId)).isEqualTo(fatalSequence);
             assertThat(state.snapshotHasPendingCommands()).isTrue();
             assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(matcherAfterFirst);
@@ -1119,15 +1119,15 @@ class CoreOrderedOrderBatchTest {
             // Inject at the actual Matcher -> Lane boundary. An Owner-supplied token is no
             // longer authoritative once the command has a direct settlement event.
             long admissionDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
-            while (state.pendingMatching(sequence).orderBatch.itemSettlementEvent == null) {
-                var pending = state.pendingMatching(sequence);
+            while (state.pendingMatching.get(sequence).orderBatch.itemSettlementEvent == null) {
+                var pending = state.pendingMatching.get(sequence);
                 if (!pending.orderBatch.activated())
                     state.batches.activateOrderBatch(pending.orderBatch, pending, true);
                 state.runtimeState.assertAccountLanesHealthy();
                 if (System.nanoTime() >= admissionDeadline) throw new AssertionError("amend admission timeout");
                 Thread.onSpinWait();
             }
-            var event = state.pendingMatching(sequence).orderBatch.itemSettlementEvent;
+            var event = state.pendingMatching.get(sequence).orderBatch.itemSettlementEvent;
             assertThat(event).isNotNull();
             var nativeCancellation = nativeResult(CommandResultCode.SUCCESS, 12_101);
             var nativePlacement = nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID, 12_102);
@@ -1148,9 +1148,9 @@ class CoreOrderedOrderBatchTest {
                     .isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN);
             assertThat(AccountLaneQueryTestSupport.read(state.runtimeState, 1001, () -> state.runtimeState.order(12_102))).isNull();
             assertThat(AccountLaneQueryTestSupport.read(state.runtimeState, 1001, () -> state.runtimeState.order(12_103))).isNull();
-            assertThat(state.pendingMatchingCount()).isEqualTo(1);
+            assertThat(state.pendingMatching.size()).isEqualTo(1);
             assertThat(state.commandResults()).doesNotContainKey(commandId);
-            assertThat(state.pendingMatching(sequence)).isNotNull();
+            assertThat(state.pendingMatching.get(sequence)).isNotNull();
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 4)))
                     .isSameAs(divergence);
         } finally {
@@ -1630,7 +1630,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState()).isEqualTo(before);
             assertThat(state.appliedCommandCount()).isEqualTo(appliedBefore);
             assertThat(state.stateHash()).isEqualTo(stateHashBefore);
-            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.pendingMatching.size()).isZero();
             assertThat(state.commandResults()).doesNotContainKey(commandId);
             assertThat(state.tradingState().order(13_001).status())
                     .isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN);
@@ -1861,7 +1861,7 @@ class CoreOrderedOrderBatchTest {
 
             state.close();
 
-            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.pendingMatching.size()).isZero();
             assertThat(state.snapshotHasPendingCommands()).isFalse();
             assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(fatalMatcherSequences);
             assertThat(state.takeMatchingResult(sequence)).isNull();
@@ -1887,7 +1887,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState()).isEqualTo(before);
             assertThat(state.appliedCommandCount()).isEqualTo(appliedBefore);
             assertThat(state.stateHash()).isEqualTo(stateHashBefore);
-            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.pendingMatching.size()).isZero();
             assertThat(state.commandResults()).doesNotContainKey(commandId);
         }
     }
@@ -1985,7 +1985,7 @@ class CoreOrderedOrderBatchTest {
             CommandSlot head = state.pendingMatching.get(state.pendingMatching.firstSequence());
             if (head != null && head.orderBatch != null && !head.orderBatch.activated())
                 state.batches.activateOrderBatch(head.orderBatch, head, true);
-            state.drainMatchingCompletions();
+            state.matchingProgress.drainMatchingCompletions();
             matching = state.takeMatchingResult(sequence);
             if (matching == null) Thread.onSpinWait();
         }

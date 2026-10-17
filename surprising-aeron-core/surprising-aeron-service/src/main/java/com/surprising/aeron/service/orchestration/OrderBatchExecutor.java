@@ -416,7 +416,7 @@ final class OrderBatchExecutor {
         batch.currentPreMatchingCancellationOrderIds = work.closeCapacityCancellations();
         batch.retainPreparedClientKey(userId, work.clientOrderId(),
                 com.surprising.aeron.service.state.RuntimeIdentityRegistry.clientKeyValue(key));
-        owner.commits.requestCommitPublication();
+        owner.commits.publication.request();
     }
 
     void prepareOrderBatchItem(OrderBatchPending batch, OrderBatchItem item, long userId,
@@ -622,7 +622,7 @@ final class OrderBatchExecutor {
                 if (!event.complete()) throw new IllegalStateException("cancel chunk Lane is incomplete");
                 batch.mergeTreasuryDelta(owner.runtimeState.collectOrderBatchMatcherSettlement(
                         event, owner.runtimeState.coldCommandFunds(), owner.terminalRetention));
-                owner.commits.requestCommitPublication();
+                owner.commits.publication.request();
                 if (event.commitSequence() != 0) batch.laneCommitCompleted(true);
                 owner.runtimeState.releaseMatcherSettlement(event);
                 batch.itemSettlementEvent = null;
@@ -714,7 +714,7 @@ final class OrderBatchExecutor {
     }
 
     void rollbackOrderBatchMutations(OrderBatchPending batch, boolean endScope) {
-        owner.commits.abortCommitPublicationBatch();
+        owner.commits.publication.abort();
         owner.runtimeState.rollbackActiveCommand(batch.runtimeCheckpoint, batch.sequence);
         batch.rollbackPreparedClientKeys(owner.identities);
         owner.identities.rollbackPositionKeys(batch.positionIdentityCheckpoint);
@@ -808,7 +808,7 @@ final class OrderBatchExecutor {
                 pending.completeLanes(settlementLaneMask);
                 batch.laneCommitCompleted(true);
             }
-            owner.commits.requestCommitPublication();
+            owner.commits.publication.request();
         }
         owner.runtimeState.completePendingReservations(batch.sequence);
         if (!batch.laneCommitCompleted() || batch.preparedResponse == null) {
@@ -827,7 +827,7 @@ final class OrderBatchExecutor {
                 pending.completeLanes(batch.laneCommitEvent.committedLaneMask());
                 owner.runtimeState.releaseLaneCommit(batch.laneCommitEvent);
                 batch.laneCommitEvent = null;
-                owner.commits.requestCommitPublication();
+                owner.commits.publication.request();
             }
             batch.laneCommitCompleted(true);
         }
@@ -849,7 +849,7 @@ final class OrderBatchExecutor {
             throw failOrderBatch(batch, pending, "order batch final validation failed", validationFailure);
         }
         captureCommittedBatchTrades(batch);
-        owner.commits.completeCommitPublicationBatch();
+        owner.commits.publication.complete();
         owner.commits.closeFinancialDispatch(pending);
         if (batch.preparedResponse == null)
             throw failOrderBatch(batch, pending, "final account Lane did not prepare the batch response", null);
@@ -953,7 +953,7 @@ final class OrderBatchExecutor {
         batch.runtimeCheckpoint = owner.runtimeState.commandRevisionCheckpoint();
         batch.positionIdentityCheckpoint = owner.identities.positionCheckpoint();
         batch.beginCommit();
-        owner.commits.beginCommitPublicationBatch();
+        owner.commits.publication.begin();
     }
 
     void beginPipelinedOrderBatchCommit(OrderBatchPending batch, CommandSlot pending) {
@@ -968,7 +968,7 @@ final class OrderBatchExecutor {
             owner.runtimeState.collectPlaceBatchAdmission(admission, owner.runtimeState.coldCommandFunds());
             owner.runtimeState.releasePlaceBatchAdmission(admission);
             batch.placeBatchAdmissionEvent = null;
-            owner.commits.requestCommitPublication();
+            owner.commits.publication.request();
         }
     }
 

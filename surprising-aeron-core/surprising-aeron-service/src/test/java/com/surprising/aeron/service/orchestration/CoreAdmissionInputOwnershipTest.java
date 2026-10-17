@@ -48,9 +48,9 @@ class CoreAdmissionInputOwnershipTest {
                 var request = message(core, CoreMessageType.ORDER_PREFLIGHT_QUERY, 7, TradingCommandCodec.encodePlaceOrder(place(900, 1)));
                 var response = core.apply(request);
                 if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
-                    long id = core.querySequence(request.header().commandId());
+                    long id = core.bookQueries.querySequence(request.header().commandId());
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                    while ((response = core.takeQueryResult(id)) == null) {
+                    while ((response = core.bookQueries.takeQueryResult(id)) == null) {
                         core.assertHealthy();
                         if (System.nanoTime() >= deadline) throw new AssertionError("preflight timeout");
                         Thread.onSpinWait();

@@ -42,7 +42,7 @@ public final class SectionedCoreSnapshotWriter {
             long coreSequence,
             long clusterTimestamp,
             long clusterPosition) {
-        if (!state.pendingMatching().isEmpty()) {
+        if (!state.pendingMatching.isEmpty()) {
             throw new IllegalStateException("pending matcher continuations cannot be snapshotted");
         }
         var snapshotState = state.snapshotTradingState();
@@ -55,7 +55,7 @@ public final class SectionedCoreSnapshotWriter {
             throw new IllegalStateException("snapshot fence and matcher manifest do not match");
         }
         return new CoreSnapshotImage(state.productLine(), state.appliedCommandCount(), state.probeValue(),
-                state.sourceSequenceDigest(), snapshotId, coreSequence, state.snapshotProjectionSequence(),
+                state.lastSourceSequences.digest(), snapshotId, coreSequence, state.commits.publication.publishedSequence(),
                 businessStateHash, fundsStateHash,
                 clusterTimestamp, clusterPosition, matcherSnapshot, snapshotState,
                 state.lastSourceSequences(), state.commandResults(),

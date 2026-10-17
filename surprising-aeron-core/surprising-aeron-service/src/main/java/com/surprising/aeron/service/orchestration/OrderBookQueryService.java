@@ -34,7 +34,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** 异步查询结果路由：由实际Lane、撮合器或账本读取并编码，不复制权威状态。 */
-final class OrderBookQueryService {
+public final class OrderBookQueryService {
     /** 唯一交易执行 owner；共享提交上下文，不复制账户或订单状态。 */
     final TradingCoreRuntime owner;
 
