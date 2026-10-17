@@ -147,7 +147,7 @@ final class CoreSnapshotLifecycle {
                 }
                 if (fence.projectionSequence < 0) {
                     fence.projectionSequence = owner.commits.publication.publishedSequence();
-                    fence.snapshotState = owner.materializedState.current();
+                    fence.snapshotState = owner.tradingState();
                     long businessStateHash = TradingCoreRuntime.canonicalBusinessStateHash(
                             fence.snapshotState.businessStateHash(), owner.runtimeState.feePoliciesSnapshot(),
                             owner.runtimeState.pendingTransfersSnapshot());

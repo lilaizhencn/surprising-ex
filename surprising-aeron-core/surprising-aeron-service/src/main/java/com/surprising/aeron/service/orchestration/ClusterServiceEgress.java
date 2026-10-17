@@ -3,6 +3,10 @@ package com.surprising.aeron.service.orchestration;
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreResponse;
+import io.aeron.Publication;
+import io.aeron.cluster.client.AeronCluster;
+import io.aeron.cluster.codecs.MessageHeaderEncoder;
+import io.aeron.cluster.codecs.SessionMessageHeaderEncoder;
 import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster;
 import java.util.Objects;
@@ -291,6 +295,28 @@ public final class ClusterServiceEgress {
             sessionId = NO_SESSION_ID;
             header = null;
             response = null;
+        }
+    }
+
+    static final class SessionResponsePublication implements SessionEgress {
+        private final Publication publication;
+        private final UnsafeBuffer header = new UnsafeBuffer(new byte[AeronCluster.SESSION_HEADER_LENGTH]);
+        private final SessionMessageHeaderEncoder encoder = new SessionMessageHeaderEncoder();
+
+        SessionResponsePublication(Cluster cluster, ClientSession session) {
+            publication = cluster.aeron().addPublication(session.responseChannel(), session.responseStreamId());
+            encoder.wrapAndApplyHeader(header, 0, new MessageHeaderEncoder()).clusterSessionId(session.id());
+        }
+
+        @Override
+        public long offer(long leadershipTermId, long timestamp, DirectBuffer source, int offset, int length) {
+            encoder.leadershipTermId(leadershipTermId).timestamp(timestamp);
+            return publication.offer(header, 0, header.capacity(), source, offset, length, null);
+        }
+
+        @Override
+        public void close() {
+            publication.close();
         }
     }
 }

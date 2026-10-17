@@ -223,8 +223,43 @@ public final class CoreContractMath {
             long addedAbs,
             long addedPrice) {
         return instrument.contractType().isInverse()
-                ? InverseContractMath.weightedEntryPrice(instrument, currentAbs, currentPrice, addedAbs, addedPrice)
-                : LinearContractMath.weightedEntryPrice(instrument, currentAbs, currentPrice, addedAbs, addedPrice);
+                ? weightedInverseEntryPrice(currentAbs, currentPrice, addedAbs, addedPrice)
+                : weightedLinearEntryPrice(currentAbs, currentPrice, addedAbs, addedPrice);
     }
 
+    private static long weightedLinearEntryPrice(
+            long currentAbs,
+            long currentPrice,
+            long addedAbs,
+            long addedPrice) {
+        try {
+            long value = Math.addExact(Math.multiplyExact(currentAbs, currentPrice),
+                    Math.multiplyExact(addedAbs, addedPrice));
+            return value / Math.addExact(currentAbs, addedAbs);
+        } catch (ArithmeticException overflow) {
+            BigInteger value = big(currentAbs).multiply(big(currentPrice))
+                    .add(big(addedAbs).multiply(big(addedPrice)));
+            return value.divide(big(Math.addExact(currentAbs, addedAbs))).longValueExact();
+        }
+    }
+
+    private static long weightedInverseEntryPrice(
+            long currentAbs,
+            long currentPrice,
+            long addedAbs,
+            long addedPrice) {
+        try {
+            long numerator = Math.multiplyExact(Math.addExact(currentAbs, addedAbs), currentPrice);
+            numerator = Math.multiplyExact(numerator, addedPrice);
+            long denominator = Math.addExact(Math.multiplyExact(currentAbs, addedPrice),
+                    Math.multiplyExact(addedAbs, currentPrice));
+            return Math.max(1, divideRounded(numerator, denominator));
+        } catch (ArithmeticException overflow) {
+            BigInteger numerator = big(Math.addExact(currentAbs, addedAbs))
+                    .multiply(big(currentPrice)).multiply(big(addedPrice));
+            BigInteger denominator = big(currentAbs).multiply(big(addedPrice))
+                    .add(big(addedAbs).multiply(big(currentPrice)));
+            return Math.max(1, divideRounded(numerator, denominator));
+        }
+    }
 }

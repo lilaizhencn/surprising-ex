@@ -102,7 +102,7 @@ HotSpot JDK27的18个必要测试执行通过：六产品线直接/扫描触发�
 
 ### 账本投递与响应退休分离（2026-10-13）
 
-生产 `SystemLedgerLane` 已由 `CoreRuntimeLifecycle` 自动启动。原先 `financialHeadReady` 只在响应队首投递财务事实，导致后续独立命令即使完成账户结算，也要等 Owner 退休前一条响应才能进入账本。
+生产 `SystemLedgerLane` 已由 `TradingCoreRuntime.activate` 自动启动。原先 `financialHeadReady` 只在响应队首投递财务事实，导致后续独立命令即使完成账户结算，也要等 Owner 退休前一条响应才能进入账本。
 
 现在 `PendingMatchingRing.ledgerDispatchHead` 只表示尚未投递的日志前缀，复用原有槽位和 `nextSlots`，由 Owner 单线程维护。`OrderedCommitCoordinator.advanceMatchingProgress` 先推进 Matcher/Lane，再连续投递已派发的独立命令与流水下单批次；`TradingRuntimeState.dispatchMatcherFinancialSettlement` 只负责非阻塞投递，原 `pollMatcherFinancialSettlement` 继续用于队首完成检查。Ledger 单写者按 FIFO 等账户完成位、应用原 Treasury 并验证资金守恒；Owner 只消费既有回执，响应和槽位回收仍等原终态条件。
 
@@ -321,7 +321,7 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 
 ### 活跃运行时的业务哈希读取边界（2026-10-15）
 
-`TradingCoreRuntime.stateHash()` 经 `RuntimeStateMaterializationCache.businessStateHash()` 在同一个现有冷读取屏障内物化交易状态，并读取手续费策略和各 Lane 的完整待划转字段，然后按原 canonical 规则计算哈希。查询结束或异常时，只归还本次取得的 Lane 所有权；外层已经持有的屏障不被内层查询释放。Owner 在普通活跃路径直接读取 Lane 待划转表仍被拒绝，没有放宽热路径的单写者检查。
+`TradingCoreRuntime.stateHash()` 经 `currentBusinessStateHash()` 在同一个现有冷读取屏障内物化交易状态，并读取手续费策略和各 Lane 的完整待划转字段，然后按原 canonical 规则计算哈希。查询结束或异常时，只归还本次取得的 Lane 所有权；外层已经持有的屏障不被内层查询释放。Owner 在普通活跃路径直接读取 Lane 待划转表仍被拒绝，没有放宽热路径的单写者检查。
 
 14 个必要用例覆盖六产品线、跨 Lane 待划转、手续费、重复及完成、外层屏障和查询后 worker 写入；两个批量拒绝夹具重新使用生产 `stateHash()`，见 [活跃业务哈希验证](../../docs/validation/active-business-hash-20261015.json)。本次是冷查询正确性修复，不执行快照/恢复、wallet 或压测。Owner 其余迁移及完整 Core 分配目标继续处理。
 

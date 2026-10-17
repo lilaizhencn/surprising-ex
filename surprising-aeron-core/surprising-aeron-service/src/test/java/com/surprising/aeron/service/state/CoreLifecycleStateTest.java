@@ -6,7 +6,6 @@ import com.surprising.aeron.service.state.math.*;
 
 import com.surprising.aeron.service.state.snapshot.*;
 import com.surprising.aeron.service.state.settlement.FundsPosting;
-import com.surprising.aeron.service.state.settlement.FundsDelta;
 
 
 import com.surprising.aeron.service.state.model.AssetBalance;
@@ -587,8 +586,6 @@ class CoreLifecycleStateTest {
         assertThat(resolved.riskState().liquidations().get(1L).status())
                 .isEqualTo(CoreLiquidationState.Status.COMPLETED);
         assertThat(totalEconomicEquity(resolved, "USDT")).isEqualTo(before);
-        assertThatCode(() -> FundsDelta.between(beforeAdl, resolved, Set.of(2L), Set.of("USDT"), false))
-                .doesNotThrowAnyException();
     }
 
     @Test
