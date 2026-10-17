@@ -76,6 +76,6 @@ public final class RiskCommands {
         var command = CoreRiskScanControlCodec.decodeCommand(message.payloadUnsafe());
         RuntimeRiskStateTransitions.updateScanControl(owner.runtimeState(), command, clusterTimestamp);
         owner.requestCommitPublication();
-        owner.setCommandRiskScanControl(owner.runtimeState().riskScanControl());
+        owner.resultBuilder.commandRiskScanControl = owner.runtimeState().riskScanControl();
     }
 }

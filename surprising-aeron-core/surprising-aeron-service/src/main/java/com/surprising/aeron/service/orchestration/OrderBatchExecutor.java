@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.service.command.order.OrderBatchKind;
+import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
@@ -253,7 +254,7 @@ final class OrderBatchExecutor {
         pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
         long userId = pending.command().header().userId();
         int shard = owner.matchingAdapter.matcherShardId(batch.preparedSymbols.getFirst());
-        batch.settlementEvent = owner.preparePipelinedPlaceBatch(pending, batch, shard);
+        batch.settlementEvent = preparePipelinedPlaceBatch(pending, batch, shard);
         owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
             owner.matchingAdapter.prepareOrderRoutes(userId, batch.preparedSymbols);
             return submitPreparedPipelinedPlaceBatch(pending, batch, userId, shard);
@@ -522,12 +523,12 @@ final class OrderBatchExecutor {
             OrderRuntime admitted = item.admittedOrder;
             if (admitted == null) throw new IllegalStateException("batch item admission order is missing");
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-            direct = owner.prepareBatchPlaceItem(pending, batch, admitted, shard);
+            direct = prepareBatchPlaceItem(pending, batch, admitted, shard);
             batch.itemSettlementEvent = direct;
         }
         if (batch.kind == OrderBatchKind.AMEND) {
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-            direct = owner.prepareBatchAmend(pending,
+            direct = prepareBatchAmend(pending,
                     java.util.Objects.requireNonNull(batch.replacementAdmission), shard);
             batch.itemSettlementEvent = direct;
             batch.items.get(batch.nextIndex).captureAdmittedOrder(direct.admittedOrder());
@@ -579,7 +580,7 @@ final class OrderBatchExecutor {
             }
         }
         pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-        var direct = owner.prepareCancelBatch(
+        var direct = prepareCancelBatch(
                 pending, batch, shard, finalChunk, end - start);
         batch.itemSettlementEvent = direct;
         owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
@@ -1099,5 +1100,48 @@ final class OrderBatchExecutor {
             }
             default -> throw new IllegalStateException("unsupported order batch kind");
         };
+    }
+
+    private com.surprising.aeron.service.state.MatcherSettlementEvent preparePipelinedPlaceBatch(
+            CommandSlot pending, OrderBatchPending batch, int shard) {
+        com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectMatcherSettlement(
+                pending.sequence(), owner.commits.validAccountLaneMask(),
+                null, batch.preparedAdmittedOrders, batch.items.size(), pending.command().header().commandId(),
+                shard, owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                pending.preMatchingCancellationOrderIds(), batch);
+        direct.reserveMatcherPublication();
+        return direct;
+    }
+
+    private com.surprising.aeron.service.state.MatcherSettlementEvent prepareBatchPlaceItem(
+            CommandSlot pending, OrderBatchPending batch, OrderRuntime admitted, int shard) {
+        com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectMatcherSettlement(
+                pending.sequence(), 0, owner.commits.validAccountLaneMask(), admitted, null, 1,
+                pending.command().header().commandId(), shard, owner.identities,
+                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                pending.preMatchingCancellationOrderIds(), batch);
+        direct.reserveMatcherPublication();
+        return direct;
+    }
+
+    private com.surprising.aeron.service.state.MatcherSettlementEvent prepareBatchAmend(
+            CommandSlot pending, ResolvedMatchingAdmission admission, int shard) {
+        com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectReplacement(
+                pending.sequence(), 0, owner.commits.validAccountLaneMask(), admission,
+                pending.command().header().commandId(), shard, owner.identities,
+                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                pending.preMatchingCancellationOrderIds(), null);
+        direct.reserveMatcherPublication();
+        return direct;
+    }
+
+    private com.surprising.aeron.service.state.MatcherSettlementEvent prepareCancelBatch(
+            CommandSlot pending, OrderBatchPending batch, int shard, boolean finalChunk, int count) {
+        com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectCancelBatch(
+                pending.sequence(), finalChunk, pending.command().header().userId(),
+                batch.preparedCancellationOrderIds, count, pending.command().header().commandId(), shard,
+                owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), batch);
+        direct.reserveMatcherPublication();
+        return direct;
     }
 }

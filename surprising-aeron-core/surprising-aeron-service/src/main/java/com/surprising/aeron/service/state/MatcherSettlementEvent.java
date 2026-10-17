@@ -604,15 +604,14 @@ public final class MatcherSettlementEvent implements
 
     private void notifyDirectPublication() {
         TradingRuntimeState completionRuntime = runtime;
-        long completionLanes = routedLaneMask;
         // Complete every producer access before the readiness release. The Owner polls this
         // flag and may apply, clear and reuse the pooled event without waiting for our signal.
-        completionRuntime.publishMatcherSettlementDirect(this);
+        completionRuntime.settlements.publishMatcherOwned(this);
         releaseMatcherCompletionBeforeSignal();
         directPublished = true;
         // Only captured values may be used after the release; even failure handling must not
         // write back to an event which may now belong to the next command.
-        completionRuntime.signalDirectSettlement(completionLanes);
+        completionRuntime.signalOwnerCompletion();
     }
 
     /** 由 Matcher pipeline 设置；复用已有 Context，不为每笔直达命令创建回调对象。 */

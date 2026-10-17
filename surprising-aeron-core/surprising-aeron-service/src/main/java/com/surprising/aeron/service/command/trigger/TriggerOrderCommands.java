@@ -448,8 +448,8 @@ public final class TriggerOrderCommands {
             completeTriggerOrderRuntime(triggerOrderId, false, 0, exception.code(), triggeredAtEpochMillis);
             return;
         }
-        owner.markUserChanged(trigger.userId());
-        owner.markOrderChanged(childOrderId);
+        owner.resultBuilder.markUserChanged(trigger.userId());
+        owner.resultBuilder.markOrderChanged(childOrderId);
         owner.queueTriggerMatching(owner.runtimeState().triggerOrder(triggerOrderId), triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis, commandId,
                 owner.runtimeState().changedOrderValue(childOrderId));
     }
@@ -622,9 +622,9 @@ public final class TriggerOrderCommands {
             return null;
         });
         owner.requestCommitPublication();
-        owner.setCommandTriggerOrderViews(java.util.List.of(
+        owner.resultBuilder.commandTriggerOrderViews = java.util.List.of(
                 owner.runtimeState().triggerOrder(first.triggerOrderId()).view(),
-                owner.runtimeState().triggerOrder(second.triggerOrderId()).view()));
+                owner.runtimeState().triggerOrder(second.triggerOrderId()).view());
     }
 
     public void executePlaceTriggerOrder(CoreMessage message, long clusterTimestamp) {
@@ -654,7 +654,7 @@ public final class TriggerOrderCommands {
             return null;
         });
         owner.requestCommitPublication();
-        owner.setCommandTriggerOrderView(owner.runtimeState().triggerOrder(trigger.triggerOrderId()).view());
+        owner.resultBuilder.commandTriggerOrderViews = java.util.List.of(owner.runtimeState().triggerOrder(trigger.triggerOrderId()).view());
     }
 
     public void executeCancelTriggerOrder(CoreMessage message, long clusterTimestamp) {
@@ -850,8 +850,8 @@ public final class TriggerOrderCommands {
             if (result != null) {
                 var receipt = (com.surprising.aeron.service.state.OrderRuntime) result;
                 owner.runtimeState().collectControlReservation(receipt, childSequence);
-                owner.markUserChanged(trigger.userId());
-                owner.markOrderChanged(order.orderId());
+                owner.resultBuilder.markUserChanged(trigger.userId());
+                owner.resultBuilder.markOrderChanged(order.orderId());
                 owner.queueTriggerMatching(trigger, triggerSequence, price, triggeredAt, commandId, receipt);
             }
             trigger = null;

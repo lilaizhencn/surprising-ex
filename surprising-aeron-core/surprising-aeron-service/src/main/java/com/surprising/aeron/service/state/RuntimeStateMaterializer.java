@@ -33,7 +33,7 @@ public final class RuntimeStateMaterializer {
         if (traversalProbe != null) traversalProbe.reservationTraversalStarted();
         runtime.reservationsForSnapshot().forEachKeyValue((orderId, reservation) -> {
             if (traversalProbe != null) traversalProbe.reservationEntryVisited();
-            if (runtime.pendingReservation(orderId, reservation.userId())) return;
+            if (runtime.pendingReservations.pendingReservation(orderId, reservation.userId())) return;
             if (!runtimeUsers.containsKey(reservation.userId())) {
                 throw new IllegalStateException("reservation owner is not registered: " + reservation.userId());
             }
@@ -68,7 +68,7 @@ public final class RuntimeStateMaterializer {
                 balances = new TreeMap<>();
                 userBalances.forEachKeyValue((assetId, balance) -> {
                     String asset = identities.asset(assetId);
-                    long pending = runtime.pendingReservedUnits(userId, assetId);
+                    long pending = runtime.pendingReservations.pendingReservedUnits(userId, assetId);
                     balances.put(asset, new AssetBalance(asset, Math.addExact(balance.availableUnits(), pending),
                             Math.subtractExact(balance.lockedUnits(), pending)));
                 });
@@ -78,13 +78,13 @@ public final class RuntimeStateMaterializer {
             Map<String, CorePositionState> positionValues = positionsByUser.get(userId);
             Map<String, CorePositionState> positions = positionValues == null ? Map.of() : positionValues;
             users.put(userId, new CoreUserState(user.productLine(), userId,
-                    Math.subtractExact(user.revision(), runtime.pendingReservationCount(userId)), balances,
+                    Math.subtractExact(user.revision(), runtime.pendingReservations.pendingReservationCount(userId)), balances,
                     reservations, positions, user.positionMode()));
         });
 
         Map<Long, CoreOrderState> orders = new TreeMap<>();
         runtime.ordersForSnapshot().forEachKeyValue((orderId, order) -> {
-            if (runtime.pendingReservation(orderId, order.userId())) return;
+            if (runtime.pendingReservations.pendingReservation(orderId, order.userId())) return;
             orders.put(orderId,
                 new CoreOrderState(orderId, order.productLine(), order.userId(), identities.instrumentId(order.symbolId()),
                         order.side(), order.priceTicks(), order.matchingPriceTicks(),
@@ -138,13 +138,13 @@ public final class RuntimeStateMaterializer {
         Map<TradingCoreState.ClientOrderKey, Long> clientIndex = new TreeMap<>();
         runtime.clientOrderIndexForSnapshot().forEachKeyValue((userId, entries) ->
                 entries.forEachKeyValue((clientKey, orderId) -> {
-                    if (!runtime.pendingReservation(orderId, userId)) {
+                    if (!runtime.pendingReservations.pendingReservation(orderId, userId)) {
                         clientIndex.put(new TradingCoreState.ClientOrderKey(
                                 userId, identities.clientOrderId(userId, clientKey)), orderId);
                     }
                 }));
         return new TradingCoreState(runtime.productLine(),
-                Math.subtractExact(runtime.revision(), runtime.pendingReservationCount()), users, orders,
+                Math.subtractExact(runtime.revision(), runtime.pendingReservations.pendingReservationCount()), users, orders,
                 new TreeMap<>(runtime.instrumentsForRuntime()), risk, treasury,
                 new TreeMap<>(runtime.leveragesForRuntime()), new TreeMap<>(runtime.algoOrdersForRuntime()),
                 new TreeMap<>(runtime.cancelAllAfterTimersForRuntime()), clientIndex,

@@ -5484,14 +5484,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     public MatcherSettlementEvent prepareDirectReplacement(long sequence, long commitSequence, long laneMask,
             com.surprising.aeron.service.command.order.ResolvedMatchingAdmission admission,
             java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
-            long timestamp, long position, List<Long> cancellations) {
-        return prepareDirectReplacement(sequence, commitSequence, laneMask, admission, commandId, shard,
-                identities, timestamp, position, cancellations, null);
-    }
-
-    public MatcherSettlementEvent prepareDirectReplacement(long sequence, long commitSequence, long laneMask,
-            com.surprising.aeron.service.command.order.ResolvedMatchingAdmission admission,
-            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
             long timestamp, long position, List<Long> cancellations, LaneOrderResultTarget resultTarget) {
         return settlements.prepareDirectReplacement(sequence, commitSequence, laneMask, admission, commandId, shard,
                 identities, timestamp, position, cancellations, resultTarget);
@@ -5518,15 +5510,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                 identities, timestamp, position, resultTarget);
     }
 
-    /** Matcher finishes dispatch metadata before releasing the pooled event to the Owner. */
-    void publishMatcherSettlementDirect(MatcherSettlementEvent event) {
-        settlements.publishMatcherOwned(event);
-    }
-
-    void signalDirectSettlement(long laneMask) {
-        signalOwnerCompletion();
-    }
-
     public MatcherSettlementEvent dispatchMatcherSettlement(
             long coreSequence, long expectedLaneMask, long commitSequence,
             long commitTimestamp, long commitClusterPosition,
@@ -5543,9 +5526,4 @@ public final class TradingRuntimeState implements AutoCloseable {
             MatcherSettlementEvent event, RuntimeFundsAccumulator funds, TerminalOrderSink terminalOrderSink) {
         return settlements.collectOrderBatchMatcherSettlement(event, funds, terminalOrderSink);
     }
-
-    boolean pendingReservation(long orderId, long userId) { return pendingReservations.pendingReservation(orderId, userId); }
-    long pendingReservedUnits(long userId, int assetId) { return pendingReservations.pendingReservedUnits(userId, assetId); }
-    int pendingReservationCount(long userId) { return pendingReservations.pendingReservationCount(userId); }
-    int pendingReservationCount() { return pendingReservations.pendingReservationCount(); }
 }

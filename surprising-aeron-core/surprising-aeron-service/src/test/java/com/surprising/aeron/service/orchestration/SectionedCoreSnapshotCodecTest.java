@@ -321,11 +321,11 @@ class SectionedCoreSnapshotCodecTest {
                     UUID.fromString("00000000-0000-0000-0000-000000000073"), ProductLine.SPOT,
                     CommandSource.GATEWAY, 73, 1, 7, 1_000, 73), CoreProtocol.probePayload(3));
             assertThat(state.apply(increment).status()).isEqualTo(ResponseStatus.APPLIED);
-            state.beginSnapshot(73, Long.MAX_VALUE);
+            state.snapshots.beginSnapshot(73, Long.MAX_VALUE);
             byte[] snapshot = null;
             long deadline = System.nanoTime() + 5_000_000_000L;
             while (snapshot == null && System.nanoTime() < deadline) {
-                snapshot = state.pollSnapshot(1_234, 5_678, System.nanoTime());
+                snapshot = state.snapshots.pollSnapshot(1_234, 5_678, System.nanoTime());
                 if (snapshot == null) Thread.onSpinWait();
             }
             assertThat(snapshot).isNotNull();

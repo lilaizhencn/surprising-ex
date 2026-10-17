@@ -130,8 +130,8 @@ public final class RuntimeOrderStateTransitions {
         }
         ReservationRuntime reservation = runtime.reservation(orderId);
         if (reservation == null) throw new IllegalStateException("rejected order reservation is missing");
-        if (runtime.pendingReservation(orderId, userId)) {
-            runtime.completePendingReservation(userId, orderId, coreSequence);
+        if (runtime.pendingReservations.pendingReservation(orderId, userId)) {
+            runtime.pendingReservations.completePendingReservation(userId, orderId, coreSequence);
         }
         BalanceRuntime balance = runtime.balance(userId, reservation.assetId());
         if (balance == null) throw new IllegalStateException("rejected order balance is missing");

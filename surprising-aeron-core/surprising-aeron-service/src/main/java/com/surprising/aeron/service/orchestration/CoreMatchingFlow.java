@@ -36,20 +36,12 @@ import java.util.function.Supplier;
  * {@link TradingCoreRuntime} 仍是唯一状态 owner；本类只组织跨线程交接，不维护第二份订单、
  * 余额或持仓状态。</p>
  */
-final class CoreMatchingFlow {
+public final class CoreMatchingFlow {
 
     private final TradingCoreRuntime owner;
 
     CoreMatchingFlow(TradingCoreRuntime owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
-    }
-
-    CoreResponse recordRejectedMatching(CoreMessage message, TradingCoreRuntime.SourceKey sourceKey,
-                                        CommandFingerprint fingerprint, CoreResultCode resultCode,
-                                        CommandSlot deferredPending) {
-        return deferredPending == null
-                ? recordRejectedMatching(message, sourceKey, fingerprint, resultCode)
-                : owner.admissions.recordRejectedDeferredMatching(deferredPending, resultCode);
     }
 
     CoreResponse recordRejectedMatching(CoreMessage message, TradingCoreRuntime.SourceKey sourceKey,
@@ -156,7 +148,7 @@ final class CoreMatchingFlow {
         return shard;
     }
 
-    TradingCoreRuntime.LifecycleOrderChunk lifecycleOrders(
+    public TradingCoreRuntime.LifecycleOrderChunk lifecycleOrders(
             long userId, String instrumentId, long cursorOrderId, int maxOrders) {
         var page = owner.activeOrderIndex.page(userId, instrumentId, cursorOrderId, maxOrders);
         List<CancellationOrder> selected = new ArrayList<>(page.orderIds().size());

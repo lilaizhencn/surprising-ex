@@ -48,7 +48,7 @@ class TradingRuntimeStateTest {
             assertThat(state.accountRollback.patchBalancesBeforeByLane[lane].size()).isZero();
             // Completing an earlier commit must not require the future batch's after-image.
             state.clearChangedKeys();
-            assertThat(state.pendingReservationCount()).isEqualTo(1);
+            assertThat(state.pendingReservations.pendingReservationCount()).isEqualTo(1);
             assertThat(state.publishedAvailableBalance(7, 3)).isEqualTo(1000);
         }
     }
@@ -189,7 +189,7 @@ class TradingRuntimeStateTest {
                 }
                 assertThat(state.ownerLaneAccess).isFalse();
             } finally { state.exitAsynchronousCommandScope(); }
-            assertThat(state.pendingReservationCount()).isZero();
+            assertThat(state.pendingReservations.pendingReservationCount()).isZero();
             state.dispatchControlLanes(1L << laneId, id -> {
                 assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1000);
                 assertThat(state.balance(7, 3).lockedUnits()).isZero();
@@ -197,8 +197,8 @@ class TradingRuntimeStateTest {
                 assertThat(state.order(12)).isNull();
                 assertThat(state.reservation(11)).isNull();
                 assertThat(state.orderIdByClient(7, 91)).isNull();
-                assertThat(state.pendingReservationCount(7)).isZero();
-                assertThat(state.pendingReservedUnits(7, 3)).isZero();
+                assertThat(state.pendingReservations.pendingReservationCount(7)).isZero();
+                assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isZero();
                 return null;
             });
             awaitControlLanes(state);
@@ -548,12 +548,12 @@ class TradingRuntimeStateTest {
 
         org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
                 () -> state.completePendingReservation(7, 11, 5));
-        assertThat(state.pendingReservationCount(7)).isEqualTo(1);
-        assertThat(state.pendingReservedUnits(7, 3)).isEqualTo(200);
+        assertThat(state.pendingReservations.pendingReservationCount(7)).isEqualTo(1);
+        assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isEqualTo(200);
 
         state.completePendingReservation(7, 11, 4);
-        assertThat(state.pendingReservationCount(7)).isZero();
-        assertThat(state.pendingReservedUnits(7, 3)).isZero();
+        assertThat(state.pendingReservations.pendingReservationCount(7)).isZero();
+        assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isZero();
     }
 
     @Test
@@ -625,20 +625,20 @@ class TradingRuntimeStateTest {
 
         // When: each user and user/asset counter is read directly.
         for (long userId = 1; userId <= 100; userId++) {
-            assertThat(state.pendingReservationCount(userId)).isEqualTo(100);
+            assertThat(state.pendingReservations.pendingReservationCount(userId)).isEqualTo(100);
             for (int assetId = 1; assetId <= 10; assetId++) {
-                assertThat(state.pendingReservedUnits(userId, assetId)).isEqualTo(10L * assetId);
+                assertThat(state.pendingReservations.pendingReservedUnits(userId, assetId)).isEqualTo(10L * assetId);
             }
         }
 
         // Then: completion removes every lane and global pending total without changing reservations.
         state.completePendingReservations(1);
-        assertThat(state.pendingReservationCount()).isZero();
+        assertThat(state.pendingReservations.pendingReservationCount()).isZero();
         assertThat(state.hasPendingReservations()).isFalse();
         for (long userId = 1; userId <= 100; userId++) {
-            assertThat(state.pendingReservationCount(userId)).isZero();
+            assertThat(state.pendingReservations.pendingReservationCount(userId)).isZero();
             for (int assetId = 1; assetId <= 10; assetId++) {
-                assertThat(state.pendingReservedUnits(userId, assetId)).isZero();
+                assertThat(state.pendingReservations.pendingReservedUnits(userId, assetId)).isZero();
             }
         }
 
@@ -666,9 +666,9 @@ class TradingRuntimeStateTest {
                 .isInstanceOf(IllegalStateException.class);
 
         // Then: the failed retry leaves counters, funds, revision, and lane hashes unchanged.
-        assertThat(state.pendingReservationCount()).isZero();
-        assertThat(state.pendingReservationCount(7)).isZero();
-        assertThat(state.pendingReservedUnits(7, 3)).isZero();
+        assertThat(state.pendingReservations.pendingReservationCount()).isZero();
+        assertThat(state.pendingReservations.pendingReservationCount(7)).isZero();
+        assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isZero();
         assertThat(state.balance(7, 3).availableUnits())
                 .isEqualTo(balanceAfterFirstCompletion.availableUnits());
         assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(balanceAfterFirstCompletion.lockedUnits());
@@ -691,9 +691,9 @@ class TradingRuntimeStateTest {
                 .isInstanceOf(IllegalStateException.class);
 
         // Then: neither failed command changes pending counters or locked funds.
-        assertThat(state.pendingReservationCount()).isEqualTo(1);
-        assertThat(state.pendingReservationCount(7)).isEqualTo(1);
-        assertThat(state.pendingReservedUnits(7, 3)).isEqualTo(200);
+        assertThat(state.pendingReservations.pendingReservationCount()).isEqualTo(1);
+        assertThat(state.pendingReservations.pendingReservationCount(7)).isEqualTo(1);
+        assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isEqualTo(200);
         assertThat(state.balance(7, 3).availableUnits()).isEqualTo(800);
         assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
     }
@@ -713,17 +713,17 @@ class TradingRuntimeStateTest {
 
         // When: a pending reservation is partially released, then the pre-pending snapshot is restored.
         state.replaceReservation(state.reservation(11).release(50));
-        assertThat(state.pendingReservationCount(7)).isEqualTo(1);
-        assertThat(state.pendingReservedUnits(7, assetId)).isEqualTo(150);
+        assertThat(state.pendingReservations.pendingReservationCount(7)).isEqualTo(1);
+        assertThat(state.pendingReservations.pendingReservedUnits(7, assetId)).isEqualTo(150);
         assertThatThrownBy(() -> state.accountLaneSnapshots(2, global))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("pending reservation");
         state.restoreAccountLaneSnapshots(snapshots, 1, global);
 
         // Then: no transient pending reservation or counter crosses the restored snapshot fence.
-        assertThat(state.pendingReservationCount()).isZero();
-        assertThat(state.pendingReservationCount(7)).isZero();
-        assertThat(state.pendingReservedUnits(7, assetId)).isZero();
+        assertThat(state.pendingReservations.pendingReservationCount()).isZero();
+        assertThat(state.pendingReservations.pendingReservationCount(7)).isZero();
+        assertThat(state.pendingReservations.pendingReservedUnits(7, assetId)).isZero();
         assertThat(state.hasPendingReservations()).isFalse();
         assertThat(state.balance(7, assetId).availableUnits()).isEqualTo(800);
         assertThat(state.balance(7, assetId).lockedUnits()).isEqualTo(200);
@@ -741,12 +741,12 @@ class TradingRuntimeStateTest {
         // When: the reservation is partially consumed and then canceled.
         state.replaceReservation(state.reservation(11).consume(50));
         state.replaceBalance(new BalanceRuntime(7, 3, 800, 150));
-        assertThat(state.pendingReservedUnits(7, 3)).isEqualTo(150);
+        assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isEqualTo(150);
         state.cancelOrder(11, 7, 150);
 
         // Then: the counter reaches zero while the balance release remains exact.
-        assertThat(state.pendingReservationCount(7)).isEqualTo(1);
-        assertThat(state.pendingReservedUnits(7, 3)).isZero();
+        assertThat(state.pendingReservations.pendingReservationCount(7)).isEqualTo(1);
+        assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isZero();
         assertThat(state.balance(7, 3).availableUnits()).isEqualTo(950);
         assertThat(state.balance(7, 3).lockedUnits()).isZero();
     }
@@ -765,9 +765,9 @@ class TradingRuntimeStateTest {
 
         // Then: the reservation, pending counters, and locked funds remain unchanged.
         assertThat(state.reservation(11)).isNotNull();
-        assertThat(state.pendingReservationCount()).isEqualTo(1);
-        assertThat(state.pendingReservationCount(7)).isEqualTo(1);
-        assertThat(state.pendingReservedUnits(7, 3)).isEqualTo(200);
+        assertThat(state.pendingReservations.pendingReservationCount()).isEqualTo(1);
+        assertThat(state.pendingReservations.pendingReservationCount(7)).isEqualTo(1);
+        assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isEqualTo(200);
         assertThat(state.balance(7, 3).availableUnits()).isEqualTo(800);
         assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
     }
@@ -800,9 +800,9 @@ class TradingRuntimeStateTest {
                 .isInstanceOf(IllegalStateException.class);
 
         // Then: global and per-user counters remain at zero.
-        assertThat(state.pendingReservationCount()).isZero();
-        assertThat(state.pendingReservationCount(7)).isZero();
-        assertThat(state.pendingReservedUnits(7, 3)).isZero();
+        assertThat(state.pendingReservations.pendingReservationCount()).isZero();
+        assertThat(state.pendingReservations.pendingReservationCount(7)).isZero();
+        assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isZero();
     }
 
     @Test
@@ -834,12 +834,12 @@ class TradingRuntimeStateTest {
 
         // Then: neither the earlier lane nor either global pending index has drifted.
         assertThat(state.reservation(11)).isEqualTo(firstReservation);
-        assertThat(state.pendingReservationCount()).isEqualTo(2);
-        assertThat(state.pendingReservationCount(firstUser)).isEqualTo(1);
-        assertThat(state.pendingReservationCount(laterUser)).isEqualTo(1);
-        assertThat(state.pendingReservedUnits(firstUser, 3)).isEqualTo(200);
-        assertThat(state.pendingReservation(11, firstUser)).isTrue();
-        assertThat(state.pendingReservation(12, laterUser)).isTrue();
+        assertThat(state.pendingReservations.pendingReservationCount()).isEqualTo(2);
+        assertThat(state.pendingReservations.pendingReservationCount(firstUser)).isEqualTo(1);
+        assertThat(state.pendingReservations.pendingReservationCount(laterUser)).isEqualTo(1);
+        assertThat(state.pendingReservations.pendingReservedUnits(firstUser, 3)).isEqualTo(200);
+        assertThat(state.pendingReservations.pendingReservation(11, firstUser)).isTrue();
+        assertThat(state.pendingReservations.pendingReservation(12, laterUser)).isTrue();
         assertThat(pendingReservationOrderIds(state, 4)).containsExactlyInAnyOrder(pendingOrderIds);
         assertThat(pendingReservationOwner(state, 11)).isEqualTo(firstPendingOwner);
         assertThat(pendingReservationOwner(state, 12)).isEqualTo(laterPendingOwner);
@@ -1427,10 +1427,10 @@ class TradingRuntimeStateTest {
             state.pendingReservations.registerBatch(4, 7,
                     new OrderRuntime[]{state.order(11), state.order(12)}, 2);
 
-            assertThat(state.pendingReservation(11, 7)).isTrue();
-            assertThat(state.pendingReservation(12, 7)).isTrue();
-            assertThat(state.pendingReservation(13, 7)).isFalse();
-            assertThat(state.pendingReservation(11, 8)).isFalse();
+            assertThat(state.pendingReservations.pendingReservation(11, 7)).isTrue();
+            assertThat(state.pendingReservations.pendingReservation(12, 7)).isTrue();
+            assertThat(state.pendingReservations.pendingReservation(13, 7)).isFalse();
+            assertThat(state.pendingReservations.pendingReservation(11, 8)).isFalse();
         }
     }
 

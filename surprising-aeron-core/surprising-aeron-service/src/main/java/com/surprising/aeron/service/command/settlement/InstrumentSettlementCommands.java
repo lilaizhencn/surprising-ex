@@ -22,26 +22,26 @@ public final class InstrumentSettlementCommands {
 
     public void applySettlementChangedIds(com.surprising.aeron.protocol.SettleInstrumentCommand command) {
         var progress = owner.lifecycleProgress(command.instrumentId());
-        TradingCoreRuntime.LifecycleOrderChunk chunk = owner.settlementLifecycleOrders(
+        TradingCoreRuntime.LifecycleOrderChunk chunk = owner.matchingFlow.lifecycleOrders(
                 0, command.instrumentId(), command.cursorOrderId(), command.maxOrders());
         if (progress == null || !progress.ordersComplete()) {
-            owner.setCommandChangedOrderIds(boxedOrderIds(chunk.orders()));
-            owner.addChangedUsersFromOrders(chunk.orders());
+            owner.resultBuilder.commandChangedOrderIds = boxedOrderIds(chunk.orders());
+            owner.resultBuilder.addChangedUsersFromOrders(chunk.orders());
             return;
         }
-        owner.setCommandChangedOrderIds(List.of());
+        owner.resultBuilder.commandChangedOrderIds = List.of();
     }
 
     /** Primitive pagination for the command result path; keeps no boxed user page alive. */
     public void addSettlementUsersToResult(String instrumentId, long cursorUserId, int maxUsers) {
         if (owner.runtimeState().systemLedgerStarted())
             throw new IllegalStateException("active settlement uses its Ledger route receipt");
-        owner.beginChangedUsers();
+        owner.resultBuilder.beginChangedUsers();
         if (maxUsers <= 0) return;
         long userId = owner.positionUserIndex().higherUserId(instrumentId, cursorUserId);
         int count = 0;
         while (userId != 0 && count < maxUsers) {
-            owner.addChangedUser(userId);
+            owner.resultBuilder.addChangedUser(userId);
             count++;
             userId = owner.positionUserIndex().higherUserId(instrumentId, userId);
         }
@@ -51,9 +51,9 @@ public final class InstrumentSettlementCommands {
                                         UUID commandId) {
         addSettlementUsersToResult(command.instrumentId(), command.cursorUserId(), command.maxUsers());
         long beforeRevision = owner.runtimeState().revision();
-        owner.setCommandSettlementProgress(RuntimeLifecycleSettlement.applyRuntime(command,
+        owner.resultBuilder.commandSettlementProgress = RuntimeLifecycleSettlement.applyRuntime(command,
                 owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId()), commandId,
-                owner.activeOrderIndex(), owner.runtimeState(), owner.identities()));
+                owner.activeOrderIndex(), owner.runtimeState(), owner.identities());
         if (owner.runtimeState().revision() != beforeRevision) owner.requestCommitPublication();
     }
 

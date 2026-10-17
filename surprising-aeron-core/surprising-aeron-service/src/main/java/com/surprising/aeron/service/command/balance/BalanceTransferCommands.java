@@ -22,7 +22,7 @@ public final class BalanceTransferCommands {
     }
 
     public void executeAdjustBalance(CoreMessage message, long clusterTimestamp) {
-        owner.setSingleChangedUser(message.header().userId());
+        owner.resultBuilder.setSingleChangedUser(message.header().userId());
         adjustBalance(message.header().userId(), TradingCommandCodec.decodeBalanceAdjustment(message.payloadUnsafe()));
     }
 
@@ -36,7 +36,7 @@ public final class BalanceTransferCommands {
     }
 
     public void executeTransferOut(CoreMessage message, long clusterTimestamp) {
-        owner.setSingleChangedUser(message.header().userId());
+        owner.resultBuilder.setSingleChangedUser(message.header().userId());
         var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe(), message.header().userId());
         if (owner.asynchronousCommands()) {
             owner.directCommand.deferTransferOut(owner, message.header().userId(), command);
@@ -51,7 +51,7 @@ public final class BalanceTransferCommands {
     }
 
     public void executeTransferIn(CoreMessage message, long clusterTimestamp) {
-        owner.setSingleChangedUser(message.header().userId());
+        owner.resultBuilder.setSingleChangedUser(message.header().userId());
         var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe(), message.header().userId());
         if (message.header().userId() != command.targetUserId())
             throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer recipient mismatch");

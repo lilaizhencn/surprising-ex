@@ -34,7 +34,7 @@ import java.util.List;
 import java.util.RandomAccess;
 
 /** 当前命令的结果与变更 ID；owner 串行复用，在命令完成边界编码。 */
-final class CommandResultBuilder {
+public final class CommandResultBuilder {
     /** Empty response payload is immutable and shared by all no-body results. */
     private static final byte[] EMPTY_RESULT = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
     /** 唯一 owner；仅在其线程访问共享交易状态和提交边界。 */
@@ -79,10 +79,10 @@ final class CommandResultBuilder {
     }
 
     /** 当前命令返回的用户 ID 集合；完成边界生成。 */
-    List<Long> commandChangedUserIds;
+    public List<Long> commandChangedUserIds;
 
     /** 当前命令返回的订单 ID 集合；完成边界生成。 */
-    List<Long> commandChangedOrderIds;
+    public List<Long> commandChangedOrderIds;
 
     /** 当前命令变化的用户 ID，保持 primitive 收集直到返回边界。 */
     PrimitiveLongChangeSet changedUserIds = new PrimitiveLongChangeSet();
@@ -101,64 +101,64 @@ final class CommandResultBuilder {
     long commandTradeCount;
 
     /** 当前资金费命令的续作进度。 */
-    CoreFundingProgressView commandFundingProgress;
+    public CoreFundingProgressView commandFundingProgress;
 
     /** 当前清算命令的续作进度。 */
-    CoreLiquidationProgressView commandLiquidationProgress;
+    public CoreLiquidationProgressView commandLiquidationProgress;
 
     /** 当前批量清算的逐项结果。 */
-    CoreLiquidationBatchResultView commandLiquidationBatchResult;
+    public CoreLiquidationBatchResultView commandLiquidationBatchResult;
 
     /** 当前到期结算命令的续作进度。 */
-    CoreSettlementProgressView commandSettlementProgress;
+    public CoreSettlementProgressView commandSettlementProgress;
 
     /** 当前风险扫描控制命令的返回状态。 */
-    CoreRiskScanControlView commandRiskScanControl;
+    public CoreRiskScanControlView commandRiskScanControl;
 
     /** 当前触发单命令返回的终态视图。 */
-    java.util.List<com.surprising.aeron.protocol.CoreTriggerOrderStateView> commandTriggerOrderViews;
+    public java.util.List<com.surprising.aeron.protocol.CoreTriggerOrderStateView> commandTriggerOrderViews;
 
-    void markUserChanged(long userId) {
+    public void markUserChanged(long userId) {
         owner.seedChangeAccumulators();
         changedUserIds.add(userId);
     }
 
-    void markOrderChanged(long orderId) {
+    public void markOrderChanged(long orderId) {
         owner.seedChangeAccumulators();
         changedOrderIds.add(orderId);
     }
 
     /** Replace a single changed id without allocating a boxed Long or a temporary List. */
-    void setSingleChangedUser(long userId) {
+    public void setSingleChangedUser(long userId) {
         owner.seedChangeAccumulators();
         changedUserIds.add(userId);
         commandChangedUserIds = List.of();
     }
 
     /** Replace a single changed id without allocating a boxed Long or a temporary List. */
-    void setSingleChangedOrder(long orderId) {
+    public void setSingleChangedOrder(long orderId) {
         owner.seedChangeAccumulators();
         changedOrderIds.add(orderId);
         commandChangedOrderIds = List.of();
     }
 
-    void beginChangedUsers() {
+    public void beginChangedUsers() {
         owner.seedChangeAccumulators();
         commandChangedUserIds = List.of();
     }
 
-    void addChangedUser(long userId) {
+    public void addChangedUser(long userId) {
         changedUserIds.add(userId);
     }
 
-    void addChangedUsersFromOrders(Iterable<CancellationOrder> orders) {
+    public void addChangedUsersFromOrders(Iterable<CancellationOrder> orders) {
         owner.seedChangeAccumulators();
         commandChangedUserIds = List.of();
         if (orders == null) return;
         for (var order : orders) if (order != null) changedUserIds.add(order.userId());
     }
 
-    void addChangedUsersFromFundingPayments(
+    public void addChangedUsersFromFundingPayments(
             Iterable<? extends com.surprising.aeron.protocol.CoreFundingPaymentView> payments) {
         owner.seedChangeAccumulators();
         commandChangedUserIds = List.of();

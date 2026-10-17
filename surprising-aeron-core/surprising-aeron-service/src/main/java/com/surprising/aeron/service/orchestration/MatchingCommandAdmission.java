@@ -197,11 +197,11 @@ final class MatchingCommandAdmission {
         try {
             rejectLifecycleOverlap(message, operation, decodedCommand);
         } catch (CoreStateRejectedException exception) {
-            CoreResponse response = owner.matchingFlow.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
+            CoreResponse response = rejectMatching(message, sourceKey, effectiveFingerprint,
                     CoreResultCode.fromRejectionCode(exception.code()), deferredPending);
             return owner.finishFactContext(response);
         } catch (ArithmeticException | IllegalArgumentException exception) {
-            CoreResponse response = owner.matchingFlow.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
+            CoreResponse response = rejectMatching(message, sourceKey, effectiveFingerprint,
                     exception instanceof ArithmeticException
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND, deferredPending);
             return owner.finishFactContext(response);
@@ -243,7 +243,7 @@ final class MatchingCommandAdmission {
                 owner.rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint, sequence);
             }
             else owner.commits.abortCommitPublicationBatch();
-            CoreResponse response = owner.matchingFlow.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
+            CoreResponse response = rejectMatching(message, sourceKey, effectiveFingerprint,
                     CoreResultCode.fromRejectionCode(exception.code()), deferredPending);
             return owner.finishFactContext(response);
         } catch (ArithmeticException | IllegalArgumentException exception) {
@@ -254,7 +254,7 @@ final class MatchingCommandAdmission {
                 owner.rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint, sequence);
             }
             else owner.commits.abortCommitPublicationBatch();
-            CoreResponse response = owner.matchingFlow.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
+            CoreResponse response = rejectMatching(message, sourceKey, effectiveFingerprint,
                     exception instanceof ArithmeticException
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND, deferredPending);
             return owner.finishFactContext(response);
@@ -316,6 +316,14 @@ final class MatchingCommandAdmission {
         pending.deferMatching(clusterTimestamp, clusterPosition, sourceKey);
         owner.recordAppliedSequence(sequence, sourceKey, message.header().sourceSequence());
         return message.matchingPendingResponse(TradingCoreRuntime.matchingPendingCode(), sequence);
+    }
+
+    private CoreResponse rejectMatching(CoreMessage message, TradingCoreRuntime.SourceKey sourceKey,
+                                        CommandFingerprint effectiveFingerprint, CoreResultCode resultCode,
+                                        CommandSlot deferredPending) {
+        return deferredPending != null
+                ? recordRejectedDeferredMatching(deferredPending, resultCode)
+                : owner.matchingFlow.recordRejectedMatching(message, sourceKey, effectiveFingerprint, resultCode);
     }
 
     CoreResponse recordRejectedDeferredMatching(CommandSlot pending, CoreResultCode resultCode) {

@@ -16,7 +16,7 @@ public final class LeverageCommands {
 
     public void executeUpdateLeverage(CoreMessage message, long clusterTimestamp) {
         long userId = message.header().userId();
-        owner.setSingleChangedUser(userId);
+        owner.resultBuilder.setSingleChangedUser(userId);
         var command = TradingCommandCodec.decodeUpdateLeverage(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
             long beforeRevision = owner.runtimeState().revision();

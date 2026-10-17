@@ -16,7 +16,7 @@ public final class AdlCommands {
 
     public void executeExecuteAdl(CoreMessage message, long clusterTimestamp) {
         var command = TradingCommandCodec.decodeExecuteAdl(message.payloadUnsafe());
-        owner.setSingleChangedUser(command.targetUserId());
+        owner.resultBuilder.setSingleChangedUser(command.targetUserId());
         if (owner.asynchronousCommands()) {
             var work = RuntimeAdlExecution.begin(owner.directCommand.reusableAdlWork(),
                     command, owner.runtimeState(), owner.identities());

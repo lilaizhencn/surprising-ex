@@ -45,8 +45,8 @@ public final class PerpetualFundingCommands {
             throw new IllegalStateException("funding processor replaced authoritative runtime state");
         }
         owner.requestCommitPublication();
-        owner.setCommandFundingProgress(result.progress());
-        owner.addChangedUsersFromFundingPayments(result.payments());
+        owner.resultBuilder.commandFundingProgress = result.progress();
+        owner.resultBuilder.addChangedUsersFromFundingPayments(result.payments());
     }
 
 }

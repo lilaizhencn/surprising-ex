@@ -16,7 +16,7 @@ public final class PositionCommands {
 
     public void executeUpdatePositionMode(CoreMessage message, long clusterTimestamp) {
         long userId = message.header().userId();
-        owner.setSingleChangedUser(userId);
+        owner.resultBuilder.setSingleChangedUser(userId);
         var command = TradingCommandCodec.decodeUpdatePositionMode(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
             long beforeRevision = owner.runtimeState().revision();
@@ -28,7 +28,7 @@ public final class PositionCommands {
 
     public void executeAdjustPositionMargin(CoreMessage message, long clusterTimestamp) {
         long userId = message.header().userId();
-        owner.setSingleChangedUser(userId);
+        owner.resultBuilder.setSingleChangedUser(userId);
         var command = TradingCommandCodec.decodeAdjustPositionMargin(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
             owner.directCommand.deferPositionMarginAdjustment(owner, userId, command);

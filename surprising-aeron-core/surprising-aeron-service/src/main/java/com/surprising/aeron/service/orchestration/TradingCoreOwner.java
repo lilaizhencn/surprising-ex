@@ -433,10 +433,10 @@ public final class TradingCoreOwner {
             processingLogCallback = true;
             finishSnapshotPrefix(deadlineNanos);
             state.assertClusterCallbackComplete();
-            state.beginSnapshot(snapshotId, deadlineNanos);
+            state.snapshots.beginSnapshot(snapshotId, deadlineNanos);
             idleStrategy.reset();
             while (true) {
-                SectionedCoreSnapshotCodec.SectionedSnapshot snapshot = state.pollSnapshotSections(
+                SectionedCoreSnapshotCodec.SectionedSnapshot snapshot = state.snapshots.pollSnapshotSections(
                         logContext == null ? 0 : logContext.timestamp,
                         logContext == null ? 0 : logContext.position,
                         System.nanoTime());

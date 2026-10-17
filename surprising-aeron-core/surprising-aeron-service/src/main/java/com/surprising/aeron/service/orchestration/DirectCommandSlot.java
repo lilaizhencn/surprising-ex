@@ -380,8 +380,8 @@ public final class DirectCommandSlot {
                 throw new IllegalStateException("funding processor replaced authoritative runtime state");
             }
             owner.requestCommitPublication();
-            owner.setCommandFundingProgress(result.progress());
-            owner.addChangedUsersFromFundingPayments(result.payments());
+            owner.resultBuilder.commandFundingProgress = result.progress();
+            owner.resultBuilder.addChangedUsersFromFundingPayments(result.payments());
             owner.funding.notifyReplayObserver(result);
             return true;
         }
@@ -542,10 +542,10 @@ public final class DirectCommandSlot {
                 if (Boolean.TRUE.equals(result)) owner.requestCommitPublication();
             } else if (kind == TRIGGER_UPSERT) {
                 owner.requestCommitPublication();
-                if (secondTrigger == null) owner.setCommandTriggerOrderView((CoreTriggerOrderStateView) result);
+                if (secondTrigger == null) owner.resultBuilder.commandTriggerOrderViews = java.util.List.of((CoreTriggerOrderStateView) result);
                 else {
                     @SuppressWarnings("unchecked") var views = (java.util.List<CoreTriggerOrderStateView>) result;
-                    owner.setCommandTriggerOrderViews(views);
+                    owner.resultBuilder.commandTriggerOrderViews = views;
                 }
             } else {
                 owner.requestCommitPublication();
