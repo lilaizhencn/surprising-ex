@@ -166,6 +166,14 @@ class CoreMaintenanceTest {
     }
     private static CoreResponse apply(TradingCoreRuntime state,CoreMessage message) {
         var response = state.apply(message);
+        long directDeadline = System.nanoTime() + 5_000_000_000L;
+        while (response == null && state.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
+            response = state.pollDirectCommand();
+            if (response == null) Thread.onSpinWait();
+        }
+        if (response == null && state.hasPendingDirectCommand()) {
+            throw new AssertionError("Direct command timed out: " + message.header().messageType());
+        }
         if (response.resultCode()==CoreResultCode.MATCHING_PENDING) response = CoreTestCompletion.completeMatchingSynchronously(state, state.matchingSequence(message.header().commandId()),message.header().submittedAtEpochMillis(),message.header().sourceSequence());
         while(state.firstPendingMatchingSequence()!=0) CoreTestCompletion.completeMatchingSynchronously(state, state.firstPendingMatchingSequence(),message.header().submittedAtEpochMillis(),message.header().sourceSequence());
         return response;

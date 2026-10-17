@@ -14,13 +14,13 @@ class CoreAuditHashQueryTest {
             CoreMessage adjust = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
                     UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 77, 1, 11, 1, 1),
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 123)));
-            assertThat(state.apply(adjust).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(CoreTestCompletion.applyAsynchronously(state, adjust).status()).isEqualTo(ResponseStatus.APPLIED);
             long after = hash(state, CoreMessageType.BUSINESS_STATE_HASH_QUERY);
             assertThat(after).isNotEqualTo(before).isEqualTo(state.tradingState().businessStateHash());
             assertThat(hash(state, CoreMessageType.STATE_HASH_QUERY)).isEqualTo(after);
             try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot(100))) {
                 assertThat(hash(restored, CoreMessageType.BUSINESS_STATE_HASH_QUERY)).isEqualTo(after);
-                assertThat(restored.apply(adjust).status()).isEqualTo(ResponseStatus.DUPLICATE);
+                assertThat(CoreTestCompletion.applyAsynchronously(restored, adjust).status()).isEqualTo(ResponseStatus.DUPLICATE);
                 assertThat(hash(restored, CoreMessageType.STATE_HASH_QUERY)).isEqualTo(after);
             }
         }

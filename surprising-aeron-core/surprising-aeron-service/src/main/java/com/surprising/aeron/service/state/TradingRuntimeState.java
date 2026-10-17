@@ -483,6 +483,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public boolean ownerLaneAccess = true;
+    public boolean ownerLaneAccess() { return ownerLaneAccess; }
     public volatile long laneHandoffEpoch = 0L;
     public long laneHandoffEpoch() { return laneHandoffEpoch; }
     private boolean laneHandoffRequested;
@@ -698,13 +699,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             return operation.apply(scoped);
         }
-        boolean acquired = Thread.currentThread() == owner && accountLanesStarted && !ownerLaneAccess;
-        try {
-            if (acquired) acquireOwnerLaneAccess();
-            return inLaneCommandScope(accountLanes[laneId], operation);
-        } finally {
-            if (acquired) releaseOwnerLaneAccess();
+        if (Thread.currentThread() == owner && accountLanesStarted && !ownerLaneAccess) {
+            throw new IllegalStateException("active account access must run on its owning Lane thread");
         }
+        return inLaneCommandScope(accountLanes[laneId], operation);
     }
 
     <T> T onLaneReadOnly(int laneId, LaneOperation<T> operation) {
@@ -762,8 +760,12 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalStateException("account query must run on its owning Lane thread");
         }
         enterLaneCommandScope(lane);
+        lane.queryScopeActive = true;
         try { return query.apply(lane); }
-        finally { exitLaneCommandScope(lane, false); }
+        finally {
+            lane.queryScopeActive = false;
+            exitLaneCommandScope(lane, false);
+        }
     }
 
     /** 单Owner向既有Lane邮箱派发读请求；预检全部容量后才发布，满时不产生部分查询。 */
@@ -807,11 +809,14 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (current != owner && (worker == null || worker.thread() != current)) {
             throw new IllegalStateException("account command must run on its owning Lane thread");
         }
-        if (current == owner && accountLanesStarted && !ownerLaneAccess)
+        if (current == owner && accountLanesStarted && !ownerLaneAccess) {
             throw new IllegalStateException("active account access must run on its owning Lane thread");
-        lane.assertOwner();
+        }
+        if (current != owner || !accountLanesStarted) {
+            lane.assertOwner();
+        }
         if (current == owner) ownerLaneScope = lane;
-        lane.commandScopeActive = true;
+        else lane.commandScopeActive = true;
     }
 
     void enterMatcherSettlementScope(AccountLaneState lane, MatcherSettlementChanges changes) {
@@ -830,15 +835,18 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     private void exitLaneCommandScope(AccountLaneState lane, boolean captureRetirementProof) {
-        if (lane == null || (Thread.currentThread() == owner
+        Thread current = Thread.currentThread();
+        if (lane == null || (current == owner
                 ? ownerLaneScope != lane : !lane.commandScopeActive)) {
             throw new IllegalStateException("account lane command scope is not active");
         }
-        lane.assertOwner();
-        if (captureRetirementProof) laneDeltas[lane.laneId()].preparePositionRetirement(lane);
-        if (Thread.currentThread() == owner) ownerLaneScope = null;
-        lane.commandScopeActive = false;
-        if (Thread.currentThread() == owner) flushPublishedChanges(lane.laneId());
+        if (current != owner || !accountLanesStarted) {
+            lane.assertOwner();
+            if (captureRetirementProof) laneDeltas[lane.laneId()].preparePositionRetirement(lane);
+        }
+        if (current == owner) ownerLaneScope = null;
+        else lane.commandScopeActive = false;
+        if (current == owner) flushPublishedChanges(lane.laneId());
     }
 
     void exitMatcherSettlementScope(AccountLaneState lane, MatcherSettlementChanges changes) {
@@ -878,13 +886,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (laneId < 0 || laneId >= accountLanes.length || operation == null) {
             throw new IllegalArgumentException("invalid risk lane command");
         }
-        boolean acquired = accountLanesStarted && !ownerLaneAccess;
-        try {
-            if (acquired) acquireOwnerLaneAccess();
-            return onLane(laneId, ignored -> operation.get());
-        } finally {
-            if (acquired) releaseOwnerLaneAccess();
+        if (accountLanesStarted && !ownerLaneAccess) {
+            throw new IllegalStateException("active Account Lane risk must be dispatched to its worker");
         }
+        return onLane(laneId, ignored -> operation.get());
     }
 
     public Object[] executeOwnerSettlements(Iterable<Long> userIds,
@@ -948,31 +953,28 @@ public final class TradingRuntimeState implements AutoCloseable {
         if ((selectedLaneMask & ~validMask) != 0 || workItems < 0 || operation == null) {
             throw new IllegalArgumentException("invalid account lane mutation");
         }
-        boolean acquired = accountLanesStarted && !ownerLaneAccess;
-        try {
-            if (acquired) acquireOwnerLaneAccess();
-            Object[] results = laneMutationResultsScratch;
-            long staleResults = laneMutationResultsMask;
-            while (staleResults != 0) {
-                int laneId = Long.numberOfTrailingZeros(staleResults);
-                results[laneId] = null;
-                staleResults &= staleResults - 1;
-            }
-            laneMutationResultsMask = selectedLaneMask;
-            if (selectedLaneMask == 0) {
-                return results;
-            }
-            if (workItems == 0) throw new IllegalArgumentException("account lane mutation has no work");
-            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-                if ((selectedLaneMask & 1L << laneId) == 0) continue;
-                int currentLaneId = laneId;
-                results[laneId] = inLaneCommandScope(accountLanes[currentLaneId],
-                        ignored -> operation.apply(currentLaneId));
-            }
-            return results;
-        } finally {
-            if (acquired) releaseOwnerLaneAccess();
+        if (accountLanesStarted && !ownerLaneAccess) {
+            throw new IllegalStateException("active Account Lane mutations must be dispatched to their workers");
         }
+        Object[] results = laneMutationResultsScratch;
+        long staleResults = laneMutationResultsMask;
+        while (staleResults != 0) {
+            int laneId = Long.numberOfTrailingZeros(staleResults);
+            results[laneId] = null;
+            staleResults &= staleResults - 1;
+        }
+        laneMutationResultsMask = selectedLaneMask;
+        if (selectedLaneMask == 0) {
+            return results;
+        }
+        if (workItems == 0) throw new IllegalArgumentException("account lane mutation has no work");
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((selectedLaneMask & 1L << laneId) == 0) continue;
+            int currentLaneId = laneId;
+            results[laneId] = inLaneCommandScope(accountLanes[currentLaneId],
+                    ignored -> operation.apply(currentLaneId));
+        }
+        return results;
     }
 
     /** Preflight all owner-to-Lane submissions before changing task or control state. */
@@ -2739,7 +2741,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (scoped != null) {
             OrderRuntime order = scoped.orders.get(orderId);
             if (order != null) {
-                if (scoped.pendingReservation(orderId)) {
+                if (scoped.queryScopeActive && scoped.pendingReservation(orderId)) {
+                    return null;
+                }
+                if (Thread.currentThread() == owner && scoped.pendingReservation(orderId)) {
                     if (changedOrders.get(orderId) != null || orderBatchMutationScope) {
                         return order;
                     }
@@ -2798,7 +2803,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (scoped != null) {
             ReservationRuntime reservation = scoped.reservations.get(orderId);
             if (reservation != null) {
-                if (scoped.pendingReservation(orderId)) {
+                if (scoped.queryScopeActive && scoped.pendingReservation(orderId)) {
+                    return null;
+                }
+                if (Thread.currentThread() == owner && scoped.pendingReservation(orderId)) {
                     if (changedReservations.contains(orderId) || orderBatchMutationScope) {
                         return reservation;
                     }
@@ -3490,6 +3498,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public Map<Long, TransferRuntime> pendingTransfersSnapshot() {
         assertOwner();
+        if (accountLanesStarted && !ownerLaneAccess) {
+            throw new IllegalStateException("pending transfers snapshot requires owner lane access");
+        }
         TreeMap<Long, TransferRuntime> values = new TreeMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             onLaneReadOnly(laneId, lane -> { lane.cold.pendingTransfers.forEachKeyValue(values::put); return null; });

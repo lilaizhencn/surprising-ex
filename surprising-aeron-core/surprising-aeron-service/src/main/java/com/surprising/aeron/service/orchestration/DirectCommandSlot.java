@@ -378,6 +378,7 @@ final class DirectCommandSlot {
             owner.requestCommitPublication();
             owner.setCommandFundingProgress(result.progress());
             owner.addChangedUsersFromFundingPayments(result.payments());
+            owner.funding.notifyReplayObserver(result);
             return true;
         }
     }

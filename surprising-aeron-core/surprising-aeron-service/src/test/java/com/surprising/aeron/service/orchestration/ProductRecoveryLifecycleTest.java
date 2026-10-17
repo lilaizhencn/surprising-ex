@@ -98,12 +98,12 @@ class ProductRecoveryLifecycleTest {
                 var stopLoss = ocoStopLoss(product, "recovery-stop-loss");
                 var invalidPair = command(product, 12, 22, CoreMessageType.PLACE_TRIGGER_OCO_PAIR,
                         CoreTriggerOrderCodec.encodeList(List.of(takeProfit, ocoStopLoss(product, " "))));
-                assertThat(live.apply(invalidPair).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+                assertThat(applyDirect(live, invalidPair).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
                 assertThat(live.tradingState().triggerOrders()).doesNotContainKeys(502L, 503L);
                 CoreMessage placeTrigger = command(product, 13, 22, CoreMessageType.PLACE_TRIGGER_OCO_PAIR,
                         CoreTriggerOrderCodec.encodeList(List.of(takeProfit, stopLoss)));
                 // Apply the same rejected command to keep recovery sequence/state parity.
-                assertThat(recovered.apply(invalidPair).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+                assertThat(applyDirect(recovered, invalidPair).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
                 var placed = apply(live, placeTrigger);
                 assertThat(CoreTriggerOrderCodec.decodeList(placed.data())).hasSize(2);
                 assertThat(apply(live, placeTrigger).data()).isEqualTo(placed.data());
@@ -169,6 +169,14 @@ class ProductRecoveryLifecycleTest {
 
     private static CoreResponse apply(TradingCoreRuntime state, CoreMessage message) {
         CoreResponse result = state.apply(message);
+        long directDeadline = System.nanoTime() + 5_000_000_000L;
+        while (result == null && state.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
+            result = state.pollDirectCommand();
+            if (result == null) Thread.onSpinWait();
+        }
+        if (result == null && state.hasPendingDirectCommand()) {
+            throw new AssertionError("Direct command timed out: " + message.header().messageType());
+        }
         if (result.resultCode() == CoreResultCode.MATCHING_PENDING) {
             result = CoreTestCompletion.completeMatchingSynchronously(state, state.matchingSequence(message.header().commandId()),
                     message.header().submittedAtEpochMillis(), message.header().sourceSequence());
@@ -179,6 +187,19 @@ class ProductRecoveryLifecycleTest {
         }
         assertThat(result.commandStatus()).as("%s: %s", message.header().messageType(), result.resultCode())
                 .isEqualTo(ResponseStatus.APPLIED);
+        return result;
+    }
+
+    private static CoreResponse applyDirect(TradingCoreRuntime state, CoreMessage message) {
+        CoreResponse result = state.apply(message);
+        long directDeadline = System.nanoTime() + 5_000_000_000L;
+        while (result == null && state.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
+            result = state.pollDirectCommand();
+            if (result == null) Thread.onSpinWait();
+        }
+        if (result == null && state.hasPendingDirectCommand()) {
+            throw new AssertionError("Direct command timed out: " + message.header().messageType());
+        }
         return result;
     }
 }

@@ -7,6 +7,7 @@ import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.product.api.ProductLine;
@@ -24,7 +25,7 @@ class CoreRuntimeBalanceSurfaceTest {
                     CommandSource.OPERATIONS, 9, 1, 1001, 1_000, 1),
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
 
-            assertThat(state.apply(command).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(apply(state, command).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.tradingState().user(1001).totalUnits("USDT")).isEqualTo(10_000);
             assertThat(state.tradingState().revision()).isEqualTo(1);
             assertThat(state.tradingState()).isSameAs(state.tradingState());
@@ -43,7 +44,7 @@ class CoreRuntimeBalanceSurfaceTest {
             AtomicReference<Long> balance = new AtomicReference<>();
             Thread coreThread = new Thread(() -> {
                 try {
-                    status.set(state.apply(command).status());
+                    status.set(apply(state, command).status());
                     balance.set(state.tradingState().user(1001).totalUnits("USDT"));
                 } catch (Throwable throwable) {
                     failure.set(throwable);
@@ -59,5 +60,18 @@ class CoreRuntimeBalanceSurfaceTest {
             assertThat(status.get()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(balance.get()).isEqualTo(10_000);
         }
+    }
+
+    private static CoreResponse apply(TradingCoreRuntime state, CoreMessage command) {
+        CoreResponse response = state.apply(command);
+        long directDeadline = System.nanoTime() + 5_000_000_000L;
+        while (response == null && state.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
+            response = state.pollDirectCommand();
+            if (response == null) Thread.onSpinWait();
+        }
+        if (response == null && state.hasPendingDirectCommand()) {
+            throw new AssertionError("Direct command timed out: " + command.header().messageType());
+        }
+        return response;
     }
 }

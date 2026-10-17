@@ -153,9 +153,14 @@ class ParallelRiskScanTest {
             var scan = runtime.riskScan(ids.symbolId(SYMBOL));
             assertThat(scan.laneProgress().get(TOPOLOGY.accountLaneId(userId)).unrealizedPnlUnits()).isEqualTo(200);
             // 按平仓结算后的实际形态更新账户：200 盈利进入钱包，BTC 持仓消失，ETH 仍在。
-            runtime.replaceBalance(new BalanceRuntime(userId, ids.assetId("USDT"), 300, 0));
-            runtime.removePosition(ids.preparedPositionKey(userId, SYMBOL), userId);
-            runtime.advanceUserRevision(userId);
+            runtime.acquireOwnerLaneAccess();
+            try {
+                runtime.replaceBalance(new BalanceRuntime(userId, ids.assetId("USDT"), 300, 0));
+                runtime.removePosition(ids.preparedPositionKey(userId, SYMBOL), userId);
+                runtime.advanceUserRevision(userId);
+            } finally {
+                runtime.releaseOwnerLaneAccess();
+            }
             var changed = RuntimeStateMaterializer.materialize(runtime, ids);
             var index = new PositionUserIndex(changed, ids, TOPOLOGY);
             RuntimeDerivativeRiskProcessor.applyContinuationRuntime(2 * TOPOLOGY.accountLaneCount(),

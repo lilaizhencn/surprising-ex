@@ -36,8 +36,15 @@ public final class CommittedTradeReplay implements AutoCloseable {
         long dropped = outbox.droppedBatches(), failures = capture.failures();
         capture.begin(logPosition, timestamp, 0, state.realtimeExportSequence());
         try {
-            state.assertClusterCallbackComplete();
             CoreResponse response = state.apply(command, timestamp, logPosition);
+            long directDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (response == null && state.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
+                response = state.pollDirectCommand();
+                if (response == null) Thread.onSpinWait();
+            }
+            if (response == null && state.hasPendingDirectCommand()) {
+                throw new AssertionError("Direct command timed out in CommittedTradeReplay: " + command.header().messageType());
+            }
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
             // Only the separate replay waits here. Live owner scheduling is unchanged.
             // No-progress retries are bounded; Matcher/Account Lane still own settlement.

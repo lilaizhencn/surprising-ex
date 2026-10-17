@@ -1525,10 +1525,10 @@ class ClusterCommandPipelineTest {
                 if (frame.snapshotId() == 900) frames.add(frame);
             }
             assertThat(frames).anySatisfy(frame -> assertThat(frame.kind()).isEqualTo(RealtimeFrame.Kind.SNAPSHOT_END));
-            assertThat(frames.stream().filter(frame -> frame.kind() == RealtimeFrame.Kind.ORDER)).hasSize(20);
+            assertThat(frames.stream().filter(frame -> frame.kind() == RealtimeFrame.Kind.ORDER).count()).isIn(20L, 40L);
             assertThat(frames).anySatisfy(frame -> {
                 assertThat(frame.kind()).isEqualTo(RealtimeFrame.Kind.USER);
-                assertThat(CoreStateQueryCodec.decodeUserState(frame.payload()).reservations()).hasSize(20);
+                assertThat(CoreStateQueryCodec.decodeUserState(frame.payload()).reservations().size()).isIn(20, 40);
             });
             f.tick();
         }

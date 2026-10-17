@@ -1113,7 +1113,21 @@ public final class TradingCoreRuntime implements AutoCloseable {
         runtimeState.restoreFeePolicies(policies);
     }
     Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers() {
-        return runtimeState.pendingTransfersSnapshot();
+        boolean acquired = runtimeState.accountLanesStarted() && !runtimeState.ownerLaneAccess;
+        try {
+            if (acquired) {
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                while (!runtimeState.tryAcquireOwnerLaneAccess()) {
+                    if (System.nanoTime() - deadline >= 0) {
+                        throw new IllegalStateException("timed out waiting for owner lane access in pendingTransfers");
+                    }
+                    Thread.onSpinWait();
+                }
+            }
+            return runtimeState.pendingTransfersSnapshot();
+        } finally {
+            if (acquired) runtimeState.releaseOwnerLaneAccess();
+        }
     }
     void restorePendingTransfers(Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> transfers) {
         runtimeState.restorePendingTransfers(transfers);

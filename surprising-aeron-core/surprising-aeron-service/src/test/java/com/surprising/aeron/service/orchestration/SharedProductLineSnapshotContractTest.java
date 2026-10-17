@@ -183,6 +183,14 @@ class SharedProductLineSnapshotContractTest {
 
     private static CoreResponse applyTerminal(TradingCoreRuntime state, CoreMessage command) {
         CoreResponse response = state.apply(command);
+        long directDeadline = System.nanoTime() + 5_000_000_000L;
+        while (response == null && state.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
+            response = state.pollDirectCommand();
+            if (response == null) Thread.onSpinWait();
+        }
+        if (response == null && state.hasPendingDirectCommand()) {
+            throw new AssertionError("Direct command timed out: " + command.header().messageType());
+        }
         if (response.resultCode() != CoreResultCode.MATCHING_PENDING) return response;
         long matchingSequence = state.matchingSequence(command.header().commandId());
         return CoreTestCompletion.completeMatchingSynchronously(state, matchingSequence,

@@ -25,7 +25,12 @@ class RuntimeExecutionScopeTest {
                 });
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
                 // Only the execution context is exercised here; no Lane business state is read.
-                runtime.inLaneCommandScope(runtime.accountLanes[0], lane -> null);
+                runtime.ownerLaneAccess = true;
+                try {
+                    runtime.inLaneCommandScope(runtime.accountLanes[0], lane -> null);
+                } finally {
+                    runtime.ownerLaneAccess = false;
+                }
             } finally { ownerFinished.countDown(); }
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             while (!runtime.pollControlLanes()) {

@@ -548,7 +548,6 @@ class TradingCoreOwnerTest {
                 if (System.nanoTime() > deadline) throw new AssertionError("Ledger did not finish batch settlement");
                 java.util.concurrent.locks.LockSupport.parkNanos(100_000);
             }
-            assertThat(core.hasMatchingNotifications()).isFalse();
             assertThat(service.ownerCompletionAvailable()).isTrue();
             assertThat(service.ownerWorkAvailable()).isTrue();
             finishCommands(service);

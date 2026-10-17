@@ -90,6 +90,14 @@ class CoreSpotAssetUnitsTest {
         var message = new CoreMessage(CoreMessageHeader.command(type, UUID.randomUUID(), ProductLine.SPOT,
                 CommandSource.OPERATIONS, 991, seq, user, 1_700_000_000_000L + seq, seq), payload);
         var result = runtime.apply(message);
+        long directDeadline = System.nanoTime() + 5_000_000_000L;
+        while (result == null && runtime.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
+            result = runtime.pollDirectCommand();
+            if (result == null) Thread.onSpinWait();
+        }
+        if (result == null && runtime.hasPendingDirectCommand()) {
+            throw new AssertionError("Direct command timed out: " + type);
+        }
         if (result.resultCode() == CoreResultCode.MATCHING_PENDING) {
             result = com.surprising.aeron.service.orchestration.CoreTestCompletion.completeMatchingSynchronously(
                     runtime, runtime.matchingSequence(message.header().commandId()), 1_700_000_000_000L + seq, seq);

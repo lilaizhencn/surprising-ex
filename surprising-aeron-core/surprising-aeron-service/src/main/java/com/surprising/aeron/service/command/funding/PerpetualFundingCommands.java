@@ -33,6 +33,10 @@ public final class PerpetualFundingCommands {
         var result = RuntimePerpetualFundingProcessor.applyRuntime(command, indexedUserIds,
                 message.header().commandId(), owner.runtimeState(), owner.identities());
         complete(result);
+        notifyReplayObserver(result);
+    }
+
+    public void notifyReplayObserver(RuntimePerpetualFundingProcessor.FundingResult result) {
         if (replayObserver != null) replayObserver.accept(result);
     }
 

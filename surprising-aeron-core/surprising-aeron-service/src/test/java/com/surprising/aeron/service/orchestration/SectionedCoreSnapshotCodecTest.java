@@ -432,7 +432,16 @@ class SectionedCoreSnapshotCodecTest {
                 1_000, sequence),
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 25)));
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
-            assertThat(state.apply(adjustment).status()).isEqualTo(ResponseStatus.APPLIED);
+            var response = state.apply(adjustment);
+            long directDeadline = System.nanoTime() + 5_000_000_000L;
+            while (response == null && state.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
+                response = state.pollDirectCommand();
+                if (response == null) Thread.onSpinWait();
+            }
+            if (response == null && state.hasPendingDirectCommand()) {
+                throw new AssertionError("Direct command timed out: " + adjustment.header().messageType());
+            }
+            assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
             return state.snapshot(sequence);
         }
     }

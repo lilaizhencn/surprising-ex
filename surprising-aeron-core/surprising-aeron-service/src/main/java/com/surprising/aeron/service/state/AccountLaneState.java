@@ -147,6 +147,7 @@ public final class AccountLaneState {
     private int[] hashIntScratch = new int[16];
     private final LaneAdmissionOrderIndex admissionOrderIndex = new LaneAdmissionOrderIndex();
     boolean commandScopeActive;
+    boolean queryScopeActive;
     MatcherSettlementChanges matcherSettlementChanges;
 
     AccountLaneState(int laneId, int queueCapacity) {

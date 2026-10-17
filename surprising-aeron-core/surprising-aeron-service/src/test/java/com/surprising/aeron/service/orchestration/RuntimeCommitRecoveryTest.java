@@ -660,9 +660,13 @@ class RuntimeCommitRecoveryTest {
 
     private static CoreResponse apply(TradingCoreRuntime state, CoreMessage command) {
         CoreResponse response = state.apply(command);
-        while (response == null && state.hasPendingDirectCommand()) {
+        long directDeadline = System.nanoTime() + 5_000_000_000L;
+        while (response == null && state.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
             response = state.pollDirectCommand();
             if (response == null) Thread.onSpinWait();
+        }
+        if (response == null && state.hasPendingDirectCommand()) {
+            throw new AssertionError("Direct command timed out: " + command.header().messageType());
         }
         if (response != null && response.resultCode() != CoreResultCode.MATCHING_PENDING) {
             assertThat(response.status()).as(response.resultCode().name())

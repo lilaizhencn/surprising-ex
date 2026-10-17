@@ -139,16 +139,30 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
         RiskScanCoordinator c = new RiskScanCoordinator(maxWork, positionUsers, indexedUserIds, runtime, identities);
         c.prepare(runtime.riskScan(symbolId), c.budget);
         c.apply(null);
-        for (int lane = 0; lane < c.inputs.length; lane++) {
-            if ((c.laneMask & (1L << lane)) == 0) continue;
-            final int id = lane;
-            c.results[lane] = runtime.executeRiskLane(lane, () -> c.scanLane(id));
-        }
-        c.assignLiquidationIds();
-        for (int lane = 0; lane < c.inputs.length; lane++) {
-            if ((c.creationMask & (1L << lane)) == 0) continue;
-            final int id = lane;
-            runtime.executeRiskLane(lane, () -> c.applyLiquidations(id));
+        boolean acquired = runtime.accountLanesStarted() && !runtime.ownerLaneAccess();
+        try {
+            if (acquired) {
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                while (!runtime.tryAcquireOwnerLaneAccess()) {
+                    if (System.nanoTime() - deadline >= 0) {
+                        throw new IllegalStateException("timed out waiting for owner lane access in risk runSlice");
+                    }
+                    Thread.onSpinWait();
+                }
+            }
+            for (int lane = 0; lane < c.inputs.length; lane++) {
+                if ((c.laneMask & (1L << lane)) == 0) continue;
+                final int id = lane;
+                c.results[lane] = runtime.executeRiskLane(lane, () -> c.scanLane(id));
+            }
+            c.assignLiquidationIds();
+            for (int lane = 0; lane < c.inputs.length; lane++) {
+                if ((c.creationMask & (1L << lane)) == 0) continue;
+                final int id = lane;
+                runtime.executeRiskLane(lane, () -> c.applyLiquidations(id));
+            }
+        } finally {
+            if (acquired) runtime.releaseOwnerLaneAccess();
         }
         c.finish();
         return c.work;

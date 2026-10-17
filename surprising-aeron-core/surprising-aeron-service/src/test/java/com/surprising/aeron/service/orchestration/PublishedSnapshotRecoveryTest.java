@@ -48,9 +48,9 @@ class PublishedSnapshotRecoveryTest {
             var transfer = restored.pendingTransfers().get(8844L).command();
             assertThat(transfer.sourceUserId()).isEqualTo(1001);
             assertThat(transfer.targetUserId()).isEqualTo(1001);
-            assertThat(restored.apply(new CoreMessage(oldCommand.header(), TradingCommandCodec.encodeTransferFunds(transfer))).status())
+            assertThat(apply(restored, new CoreMessage(oldCommand.header(), TradingCommandCodec.encodeTransferFunds(transfer))).status())
                     .isEqualTo(ResponseStatus.DUPLICATE);
-            assertThat(restored.apply(oldCommand).status()).isEqualTo(ResponseStatus.DUPLICATE);
+            assertThat(apply(restored, oldCommand).status()).isEqualTo(ResponseStatus.DUPLICATE);
             long upgradedHash = restored.stateHash();
             try (var nextRestart = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, restored.snapshot())) {
                 assertThat(nextRestart.stateHash()).isEqualTo(upgradedHash);
@@ -58,7 +58,7 @@ class PublishedSnapshotRecoveryTest {
                 var complete = new CoreMessage(CoreMessageHeader.command(CoreMessageType.COMPLETE_TRANSFER,
                         new java.util.UUID(8844, 3), ProductLine.SPOT, CommandSource.GATEWAY, 7, 3, 1001, 1000, 3),
                         TradingCommandCodec.encodeCompleteTransfer(new CompleteTransferCommand(8844)));
-                assertThat(nextRestart.apply(complete).status()).isEqualTo(ResponseStatus.APPLIED);
+                assertThat(apply(nextRestart, complete).status()).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(nextRestart.pendingTransfers()).isEmpty();
                 assertThat(nextRestart.tradingState().user(1001).totalUnits("USDT")).isEqualTo(4750);
             }
@@ -99,5 +99,18 @@ class PublishedSnapshotRecoveryTest {
             if (input == null) throw new IOException("missing fixed recovery fixture: " + name);
             return input.readAllBytes();
         }
+    }
+
+    private static CoreResponse apply(TradingCoreRuntime state, CoreMessage command) {
+        CoreResponse response = state.apply(command);
+        long directDeadline = System.nanoTime() + 5_000_000_000L;
+        while (response == null && state.hasPendingDirectCommand() && System.nanoTime() < directDeadline) {
+            response = state.pollDirectCommand();
+            if (response == null) Thread.onSpinWait();
+        }
+        if (response == null && state.hasPendingDirectCommand()) {
+            throw new AssertionError("Direct command timed out: " + command.header().messageType());
+        }
+        return response;
     }
 }

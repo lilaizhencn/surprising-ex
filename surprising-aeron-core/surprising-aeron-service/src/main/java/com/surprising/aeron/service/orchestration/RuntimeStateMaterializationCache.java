@@ -20,10 +20,14 @@ final class RuntimeStateMaterializationCache {
         owner.runtimeState.requireSnapshotFenceReady();
         boolean acquired = owner.runtimeState.accountLanesStarted() && !owner.runtimeState.ownerLaneAccess;
         try {
-            if (acquired) while (!owner.runtimeState.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
-            if (owner.runtimeState.systemLedgerStarted()) {
-                state = null;
-                return RuntimeStateMaterializer.materialize(owner.runtimeState, owner.identities);
+            if (acquired) {
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                while (!owner.runtimeState.tryAcquireOwnerLaneAccess()) {
+                    if (System.nanoTime() - deadline >= 0) {
+                        throw new IllegalStateException("timed out waiting for owner lane access in current state materialization");
+                    }
+                    Thread.onSpinWait();
+                }
             }
             long currentRevision = owner.runtimeState.revision();
             long currentMarketRevision = owner.runtimeState.marketRevision();
@@ -46,8 +50,22 @@ final class RuntimeStateMaterializationCache {
     /** Hash all business facts under one cold read fence, including pending Account Lane transfers. */
     long businessStateHash() {
         owner.runtimeState.requireSnapshotFenceReady();
-        TradingCoreState current = current();
-        return TradingCoreRuntime.canonicalBusinessStateHash(current.businessStateHash(),
-                owner.runtimeState.feePoliciesSnapshot(), owner.runtimeState.pendingTransfersSnapshot());
+        boolean acquired = owner.runtimeState.accountLanesStarted() && !owner.runtimeState.ownerLaneAccess;
+        try {
+            if (acquired) {
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                while (!owner.runtimeState.tryAcquireOwnerLaneAccess()) {
+                    if (System.nanoTime() - deadline >= 0) {
+                        throw new IllegalStateException("timed out waiting for owner lane access in businessStateHash");
+                    }
+                    Thread.onSpinWait();
+                }
+            }
+            TradingCoreState current = current();
+            return TradingCoreRuntime.canonicalBusinessStateHash(current.businessStateHash(),
+                    owner.runtimeState.feePoliciesSnapshot(), owner.runtimeState.pendingTransfersSnapshot());
+        } finally {
+            if (acquired) owner.runtimeState.releaseOwnerLaneAccess();
+        }
     }
 }
