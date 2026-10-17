@@ -119,15 +119,15 @@ final class CoreMatchingFlow {
     }
 
     void putPendingMatching(CommandSlot pending) {
-        pending.clusterIndependent = owner.commandIngress.clusterPipelineAdmission();
+        pending.clusterIndependent = owner.clusterPipelineAdmission();
         if (owner.pendingMatching.size() >= owner.pendingMatching.capacity()) {
             throw new IllegalStateException("matching pending capacity is exhausted");
         }
         try {
-            if (owner.commandIngress.clusterPipelineAdmission()
-                    && owner.commandIngress.preparedRouteUserLaneBit() != 0
-                    && owner.commandIngress.preparedRouteMatcherShard() >= 0) {
-                pending.cachedMatcherShard(owner.commandIngress.preparedRouteMatcherShard());
+            if (owner.clusterPipelineAdmission()
+                    && owner.preparedRouteUserLaneBit() != 0
+                    && owner.preparedRouteMatcherShard() >= 0) {
+                pending.cachedMatcherShard(owner.preparedRouteMatcherShard());
             }
             owner.pendingMatching.put(pending);
             CoreMessageType type = pending.command().header().messageType();

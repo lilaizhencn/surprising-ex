@@ -130,8 +130,8 @@ final class DirectCommandSlot {
 
     private CoreResponse pollFundsCheck(TradingCoreRuntime owner) {
         if (!fundsIndexWork.poll(owner)) return null;
-        CoreResponse replay = owner.commandIngress.fundsReplayResponse(command, fingerprint, fundsIndexWork.retained());
-        if (replay == null) replay = owner.commandIngress.checkSourceSequence(command, fundsLastSourceSequence);
+        CoreResponse replay = owner.fundsReplayResponse(command, fingerprint, fundsIndexWork.retained());
+        if (replay == null) replay = owner.checkSourceSequence(command, fundsLastSourceSequence);
         CoreMessage checkedCommand = command;
         CommandFingerprint checkedFingerprint = fingerprint;
         TradingCoreRuntime.SourceKey checkedSource = sourceKey;

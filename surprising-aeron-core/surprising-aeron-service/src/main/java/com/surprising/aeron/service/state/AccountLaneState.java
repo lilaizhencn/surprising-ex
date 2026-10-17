@@ -877,7 +877,7 @@ public final class AccountLaneState {
         for (int index = 0; index < userIndex; index++) {
             long userId = userKeys[index];
             hash = mix(hash, userId);
-            hash = mixText(hash, users.get(userId));
+            hash = mixValue(hash, users.get(userId));
         }
         hash = mixMap(hash, orders);
         hash = mixMap(hash, reservations);
@@ -885,7 +885,7 @@ public final class AccountLaneState {
         hash = mixMap(hash, cold.liquidations);
         hash = mixMap(hash, cold.riskSnapshots);
         for (Map.Entry<CoreLeverageKey, Long> entry : cold.leverages.entrySet()) {
-            hash = mixText(hash, entry.getKey());
+            hash = mixValue(hash, entry.getKey());
             hash = mix(hash, entry.getValue());
         }
         hash = mixPrimitiveMap(hash, cold.algoOrders);
@@ -903,8 +903,7 @@ public final class AccountLaneState {
         for (int index = 0; index < keyIndex; index++) {
             long key = keys[index];
             mixed = mix(mixed, key);
-            Object value = values.get(key);
-            mixed = mixText(mixed, value);
+            mixed = mixValue(mixed, values.get(key));
         }
         return mixed;
     }
@@ -952,7 +951,7 @@ public final class AccountLaneState {
         for (int index = 0; index < keyIndex; index++) {
             long key = keys[index];
             mixed = mix(mixed, key);
-            mixed = mixText(mixed, values.get(key));
+            mixed = mixValue(mixed, values.get(key));
         }
         return mixed;
     }
@@ -967,7 +966,7 @@ public final class AccountLaneState {
         for (int index = 0; index < keyIndex; index++) {
             long key = keys[index];
             mixed = mix(mixed, key);
-            mixed = mixText(mixed, values.get(key));
+            mixed = mixValue(mixed, values.get(key));
         }
         return mixed;
     }
@@ -990,27 +989,21 @@ public final class AccountLaneState {
         return hashIntScratch;
     }
 
-    private static long mixText(long hash, Object value) {
-        String text = String.valueOf(value);
-        long mixed = mix(hash, text.length());
-        boolean ascii = true;
-        for (int index = 0; index < text.length(); index++) {
-            char character = text.charAt(index);
-            if (character > 0x7f) {
-                ascii = false;
-                break;
+    private static long mixValue(long hash, Object value) {
+        if (value == null) return mix(hash, 0);
+        if (value instanceof CharSequence seq) {
+            long mixed = mix(hash, seq.length());
+            for (int index = 0; index < seq.length(); index++) {
+                char character = seq.charAt(index);
+                mixed ^= (character & 0xff);
+                if (character > 0x7f) {
+                    mixed ^= (character >>> 8);
+                }
+                mixed *= 0x100000001b3L;
             }
-            mixed ^= character;
-            mixed *= 0x100000001b3L;
+            return mixed;
         }
-        if (ascii) return mixed;
-        byte[] bytes = text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        mixed = mix(hash, bytes.length);
-        for (byte item : bytes) {
-            mixed ^= Byte.toUnsignedInt(item);
-            mixed *= 0x100000001b3L;
-        }
-        return mixed;
+        return mix(hash, Integer.toUnsignedLong(value.hashCode()));
     }
 }
 

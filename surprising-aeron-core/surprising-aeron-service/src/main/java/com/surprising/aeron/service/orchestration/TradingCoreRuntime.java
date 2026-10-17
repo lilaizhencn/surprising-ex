@@ -142,8 +142,13 @@ public final class TradingCoreRuntime implements AutoCloseable {
             new TriggerCommandDispatcher(triggers));
     /** 直接控制命令的异步终结边界。 */
     final CoreDirectCommandFlow directCommandFlow = new CoreDirectCommandFlow(this);
-    /** 集群日志入口的幂等、来源序号与命令分流边界。 */
-    final CoreCommandIngress commandIngress = new CoreCommandIngress(this, directCommandFlow);
+    /** 集群日志入口的状态与暂存字段。 */
+    private boolean clusterPipelineAdmission;
+    private CoreMessage decodedIngressMessage;
+    private DecodedMatchingCommand decodedIngressCommand;
+    private CommandFingerprint preparedIngressFingerprint;
+    private long preparedRouteUserLaneBit;
+    private int preparedRouteMatcherShard = -1;
     /** 撮合在途命令、Matcher 提交及 Lane 结算事件的完整流程。 */
     final CoreMatchingFlow matchingFlow = new CoreMatchingFlow(this);
     /** 状态物化只读缓存。 */
@@ -779,40 +784,270 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return apply(message, message.header().submittedAtEpochMillis(), Math.addExact(appliedCommandCount, 1));
     }
 
-    public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
-        return commandIngress.apply(message, clusterTimestamp, clusterPosition);
+    boolean clusterPipelineAdmission() {
+        return clusterPipelineAdmission;
     }
 
+    long preparedRouteUserLaneBit() {
+        return preparedRouteUserLaneBit;
+    }
+
+    int preparedRouteMatcherShard() {
+        return preparedRouteMatcherShard;
+    }
+
+    public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
+        if (!activated()) activate();
+        assertOwner();
+        if (directCommand.active()) {
+            throw new IllegalStateException("asynchronous control command is still active");
+        }
+        admissionPreviousClusterTimestamp = currentClusterTimestamp;
+        admissionPreviousClusterPosition = currentClusterPosition;
+        currentClusterTimestamp = clusterTimestamp;
+        currentClusterPosition = clusterPosition;
+        assertHealthy();
+        if (snapshots.snapshotFence != null
+                && snapshots.snapshotFence.encodedSnapshot == null) {
+            throw new IllegalStateException("snapshot fence is active");
+        }
+        if (!pendingMatching.isEmpty()
+                && !isCommitCursorSafeWhileMatching(message)) {
+            long userId = message.header().userId();
+            if (userId <= 0 || pendingMatching.hasUser(userId)) {
+                throw new IllegalStateException("command or query crossed its account-lane matching cursor");
+            }
+        }
+        if (message.header().productLine() != productLine) {
+            return rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
+        }
+        if (message.header().kind() == WireMessageKind.QUERY
+                && requiresOwnerLaneAccessForPreparation(message)
+                && accountLaneReadQuery(message.header().messageType())) {
+            if (singleUserLaneQuery(message.header().messageType())
+                    && message.header().userId() > 0) {
+                runtimeState.readFence(message.header().userId(), committedCoreSequence);
+            } else {
+                runtimeState.readFenceAll(committedCoreSequence);
+            }
+        }
+        CoreResponse queryResponse = routeQuery(message, clusterTimestamp);
+        if (queryResponse != null) return queryResponse;
+        if (message.header().kind() != WireMessageKind.COMMAND) {
+            return rejected(CoreResultCode.INVALID_MESSAGE);
+        }
+        return applyCommandIngress(message, clusterTimestamp, clusterPosition);
+    }
+
+    /** Queries can borrow Lane state for a read fence; commands hand mutations to their Lane. */
     boolean requiresOwnerLaneAccessForPreparation(CoreMessage message) {
-        return commandIngress.requiresOwnerLaneAccessForPreparation(message);
+        if (message.header().kind() != WireMessageKind.QUERY) return false;
+        var type = message.header().messageType();
+        if (OrderBookQueryService.accountQuery(type) || OrderBookQueryService.riskAccountQuery(type)) return false;
+        if (type == CoreMessageType.ORDER_PREFLIGHT_QUERY || type == CoreMessageType.LANE_METRICS_QUERY) return false;
+        if (type == CoreMessageType.TRIGGER_ORDER_QUERY || type == CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY) return false;
+        if (type == CoreMessageType.TREASURY_STATE_QUERY || type == CoreMessageType.FUNDING_PROGRESS_QUERY
+                || type == CoreMessageType.SETTLEMENT_PROGRESS_QUERY) return false;
+        if (type == CoreMessageType.LIQUIDATION_WORK_QUERY || type == CoreMessageType.PENDING_TRANSFER_QUERY) return false;
+        if (type == CoreMessageType.OPEN_INTEREST_QUERY || type == CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY) return false;
+        return true;
     }
 
     CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position) {
-        return commandIngress.applyClusterCommand(message, timestamp, position);
+        return applyClusterCommand(message, timestamp, position, null);
     }
 
     CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position,
                                      DecodedMatchingCommand decoded) {
-        return commandIngress.applyClusterCommand(message, timestamp, position, decoded);
+        boolean entered = !runtimeState.asynchronousCommands();
+        if (entered) runtimeState.enterAsynchronousCommandScope();
+        try {
+            return applyDecodedCommand(message, timestamp, position, decoded, true);
+        } finally {
+            if (entered) runtimeState.exitAsynchronousCommandScope();
+        }
     }
 
     CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
                                      DecodedMatchingCommand decoded, boolean independent) {
-        return commandIngress.applyDecodedCommand(message, timestamp, position, decoded, independent);
+        return applyDecodedCommand(message, timestamp, position, decoded, independent, null);
     }
 
     CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
                                      DecodedMatchingCommand decoded, boolean independent,
                                      CommandFingerprint fingerprint) {
-        return commandIngress.applyDecodedCommand(message, timestamp, position, decoded, independent, fingerprint);
+        CommandFingerprint previousFingerprint = preparedIngressFingerprint;
+        preparedIngressFingerprint = fingerprint;
+        boolean previousAdmission = clusterPipelineAdmission;
+        CoreMessage previousMessage = decodedIngressMessage;
+        DecodedMatchingCommand previousCommand = decodedIngressCommand;
+        clusterPipelineAdmission = independent;
+        decodedIngressMessage = message;
+        decodedIngressCommand = decoded;
+        try {
+            return apply(message, timestamp, position);
+        } finally {
+            preparedIngressFingerprint = previousFingerprint;
+            clusterPipelineAdmission = previousAdmission;
+            decodedIngressMessage = previousMessage;
+            decodedIngressCommand = previousCommand;
+        }
     }
 
     DecodedMatchingCommand decodeMatchingCommand(CoreMessage message) {
-        return commandIngress.decodeMatchingCommand(message);
+        return message == decodedIngressMessage && decodedIngressCommand != null
+                ? decodedIngressCommand : DecodedMatchingCommand.decode(message);
     }
 
     boolean prepareClusterPipelineScope(CoreMessage message, ClusterCommandWindow window) {
-        return commandIngress.prepareClusterPipelineScope(message, window);
+        if (!activated()) activate();
+        assertOwner();
+        long user = message.header().userId();
+        if (message.header().productLine() != productLine || user <= 0) {
+            return rememberPipelineRoute(window, false);
+        }
+        window.resetCandidate(user);
+        try {
+            DecodedMatchingCommand decoded = window.decoded(message);
+            switch (message.header().messageType()) {
+                case PLACE_ORDER -> {
+                    var command = decoded.placeOrder();
+                    var instrument = runtimeState.instrument(command.instrumentId());
+                    if (instrument != null && instrument.usesOpenInterestForUserLimit() && !command.reduceOnly())
+                        return rememberPipelineRoute(window, false);
+                    window.route(decoded.matcherShard(matchingAdapter, command.instrumentId()),
+                            runtimeState.topology().accountLaneMask(user));
+                    return rememberPipelineRoute(window, true);
+                }
+                case CANCEL_ORDER -> {
+                    long orderId = decoded.cancelOrder().orderId();
+                    var route = activeOrderIndex.activeOrderRoute(orderId);
+                    if (route == null || route.userId() != user || route.instrumentId() == null
+                            || route.instrumentId().isBlank()) return rememberPipelineRoute(window, false);
+                    window.route(matchingAdapter.matcherShardId(route.instrumentId()),
+                            runtimeState.topology().accountLaneMask(user));
+                    return rememberPipelineRoute(window, true);
+                }
+                case PLACE_ORDER_BATCH -> {
+                    int shard = -1;
+                    for (var order : decoded.placeOrderBatch().orders()) {
+                        var instrument = runtimeState.instrument(order.instrumentId());
+                        if (instrument != null && instrument.usesOpenInterestForUserLimit() && !order.reduceOnly())
+                            return rememberPipelineRoute(window, false);
+                        int current = decoded.matcherShard(matchingAdapter, order.instrumentId());
+                        if (shard >= 0 && current != shard) return rememberPipelineRoute(window, false);
+                        if (shard < 0) {
+                            shard = current;
+                            window.route(shard, runtimeState.topology().accountLaneMask(user));
+                        }
+                    }
+                    return rememberPipelineRoute(window, shard >= 0);
+                }
+                case CANCEL_ORDER_BATCH -> {
+                    int shard = -1;
+                    for (var order : decoded.cancelOrderBatch().orders()) {
+                        var route = activeOrderIndex.activeOrderRoute(order.orderId());
+                        if (route == null || route.userId() != user || route.instrumentId() == null
+                                || route.instrumentId().isBlank()) return rememberPipelineRoute(window, false);
+                        int current = matchingAdapter.matcherShardId(route.instrumentId());
+                        if (shard >= 0 && current != shard) return rememberPipelineRoute(window, false);
+                        shard = current;
+                    }
+                    window.route(shard, runtimeState.topology().accountLaneMask(user));
+                    return rememberPipelineRoute(window, true);
+                }
+                default -> { return rememberPipelineRoute(window, false); }
+            }
+        } catch (IllegalArgumentException | java.nio.BufferUnderflowException invalid) {
+            return rememberPipelineRoute(window, false);
+        }
+    }
+
+    private boolean rememberPipelineRoute(ClusterCommandWindow window, boolean eligible) {
+        preparedRouteUserLaneBit = eligible ? window.routeUserLaneBit() : 0;
+        preparedRouteMatcherShard = eligible ? window.routeMatcherShard() : -1;
+        return eligible;
+    }
+
+    private CoreResponse applyCommandIngress(CoreMessage message, long clusterTimestamp, long clusterPosition) {
+        CommandFingerprint fingerprint = message == decodedIngressMessage && preparedIngressFingerprint != null
+                ? preparedIngressFingerprint : fingerprints.of(message);
+        CoreResponse replayResponse = checkCommandReplay(message, fingerprint);
+        if (replayResponse != null) return replayResponse;
+
+        long lastSourceSequence = lastSourceSequences.lookupOrDefault(
+                message.header().source(), message.header().sourceId(), -1);
+        SourceKey sourceKey = lastSourceSequences.lastLookupKey();
+        if (sourceKey == null) {
+            sourceKey = new SourceKey(message.header().source(), message.header().sourceId());
+        }
+        if (isFundsIdempotencyCommand(message.header().messageType())) {
+            directCommand.beginFundsCheck(message, fingerprint, sourceKey, clusterTimestamp,
+                    clusterPosition, lastSourceSequence, terminalRetention);
+            return null;
+        }
+        CoreResponse sourceSequenceResponse = checkSourceSequence(message, lastSourceSequence);
+        if (sourceSequenceResponse != null) return sourceSequenceResponse;
+
+        if (isMatchingCommand(message.header().messageType())) {
+            if (pendingMatching.size() >= pendingMatching.capacity()) {
+                throw new IllegalStateException("matcher dispatch window is exhausted after Cluster Log append");
+            }
+            if (isOrderBatchCommand(message.header().messageType())) {
+                return batches.beginOrderBatchMatching(message, clusterTimestamp, clusterPosition,
+                        sourceKey, fingerprint);
+            }
+            return admissions.beginMatching(message, clusterTimestamp, clusterPosition,
+                    sourceKey, fingerprint);
+        }
+        return directCommandFlow.apply(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint);
+    }
+
+    private CoreResponse checkCommandReplay(CoreMessage message, CommandFingerprint fingerprint) {
+        CommandResultLedger.StoredResult terminalDuplicate = resultLedger.get(message.header().commandId());
+        if (terminalDuplicate != null) {
+            return resultLedger.duplicateResponse(terminalDuplicate, message, fingerprint, appliedCommandCount);
+        }
+        CommandSlot pendingDuplicate = pendingMatching.findByCommandId(message.header().commandId());
+        if (pendingDuplicate != null) {
+            if (!pendingDuplicate.fingerprint().equals(fingerprint)) {
+                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
+                        com.surprising.aeron.protocol.ResponseStatus.REJECTED,
+                        CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount,
+                        EMPTY_RESPONSE_DATA);
+            }
+            return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
+                    com.surprising.aeron.protocol.ResponseStatus.OK, matchingPendingCode(),
+                    pendingDuplicate.sequence(),
+                    EMPTY_RESPONSE_DATA);
+        }
+        return null;
+    }
+
+    CoreResponse fundsReplayResponse(CoreMessage message, CommandFingerprint fingerprint, CommandFingerprint retained) {
+        if (retained == null) return null;
+        if (!retained.matchesCommittedCommand(message, fingerprint)) {
+            return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
+                    com.surprising.aeron.protocol.ResponseStatus.REJECTED,
+                    CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount,
+                    EMPTY_RESPONSE_DATA);
+        }
+        return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
+                com.surprising.aeron.protocol.ResponseStatus.APPLIED, CoreResultCode.NONE,
+                appliedCommandCount, EMPTY_RESPONSE_DATA);
+    }
+
+    CoreResponse checkSourceSequence(CoreMessage message, long lastSourceSequence) {
+        if (lastSourceSequence >= 0 && message.header().sourceSequence() <= lastSourceSequence) {
+            return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
+                    com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
+                    CoreResultCode.STALE_SOURCE_SEQUENCE, appliedCommandCount);
+        }
+        if (lastSourceSequence < 0
+                && lastSourceSequences.size() >= MAX_SOURCE_SEQUENCES) {
+            return rejected(CoreResultCode.SOURCE_SEQUENCE_TRACKING_FULL);
+        }
+        return null;
     }
     CoreResponse finishDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
             SourceKey sourceKey, CommandFingerprint fingerprint,

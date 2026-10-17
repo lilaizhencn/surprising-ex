@@ -53,9 +53,16 @@ class RuntimeChangeBuffer<V> {
         }
     }
 
+    private static int longHash(long key) {
+        key ^= key >>> 33;
+        key *= 0xff51afd7ed558ccdL;
+        key ^= key >>> 33;
+        return (int) key;
+    }
+
     int put(long key, V value) {
         int mask = indexSlots.length - 1;
-        int indexPosition = LaneLongCaptures.longHash(key) & mask;
+        int indexPosition = longHash(key) & mask;
         while (indexGenerations[indexPosition] == indexGeneration) {
             if (indexKeys[indexPosition] == key) {
                 int slot = indexSlots[indexPosition];
@@ -162,7 +169,7 @@ class RuntimeChangeBuffer<V> {
         // the retained index before there can be a matching key.
         if (size == 0) return -1;
         int mask = indexSlots.length - 1;
-        int position = LaneLongCaptures.longHash(key) & mask;
+        int position = longHash(key) & mask;
         while (indexGenerations[position] == indexGeneration) {
             if (indexKeys[position] == key) return indexSlots[position];
             position = (position + 1) & mask;
@@ -172,7 +179,7 @@ class RuntimeChangeBuffer<V> {
 
     int emptyIndexPosition(long key) {
         int mask = indexSlots.length - 1;
-        int position = LaneLongCaptures.longHash(key) & mask;
+        int position = longHash(key) & mask;
         while (indexGenerations[position] == indexGeneration) {
             position = (position + 1) & mask;
         }

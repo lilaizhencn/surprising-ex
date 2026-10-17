@@ -65,14 +65,14 @@ public final class TreasuryRuntime {
         owner = null;
     }
 
-    public long fee(int assetId) { assertOwner(); return feeBalances.get(assetId); }
-    public long insurance(int assetId) { assertOwner(); return insuranceBalances.get(assetId); }
-    public long insuranceDeficit(int assetId) { assertOwner(); return insuranceDeficits.get(assetId); }
-    public long deficit(int assetId) { assertOwner(); return insuranceDeficits.get(assetId); }
-    public long liquidationFee(int assetId) { assertOwner(); return liquidationFeeBalances.get(assetId); }
-    public long fundingResidual(int assetId) { assertOwner(); return fundingResidualBalances.get(assetId); }
-    public long roundingResidual(int assetId) { assertOwner(); return roundingResidualBalances.get(assetId); }
-    public long clearingPnl(int assetId) { assertOwner(); return clearingPnlBalances.get(assetId); }
+    public long fee(int assetId) { return feeBalances.get(assetId); }
+    public long insurance(int assetId) { return insuranceBalances.get(assetId); }
+    public long insuranceDeficit(int assetId) { return insuranceDeficits.get(assetId); }
+    public long deficit(int assetId) { return insuranceDeficits.get(assetId); }
+    public long liquidationFee(int assetId) { return liquidationFeeBalances.get(assetId); }
+    public long fundingResidual(int assetId) { return fundingResidualBalances.get(assetId); }
+    public long roundingResidual(int assetId) { return roundingResidualBalances.get(assetId); }
+    public long clearingPnl(int assetId) { return clearingPnlBalances.get(assetId); }
     public long fundingSettlement(int symbolId) { return settlementStatus(symbolId).fundingSettlementId(); }
     public FundingProgressRuntime fundingProgress(int symbolId) { return settlementStatus(symbolId).fundingProgress(); }
     public long lifecycleSettlement(int symbolId) { return settlementStatus(symbolId).lifecycleSettlementId(); }
@@ -320,14 +320,14 @@ public final class TreasuryRuntime {
         incompleteFundingCount = 0;
     }
 
-    public IntLongHashMap feeBalances() { assertOwner(); return new IntLongHashMap(feeBalances); }
-    public IntLongHashMap insuranceBalances() { assertOwner(); return new IntLongHashMap(insuranceBalances); }
-    public IntLongHashMap insuranceDeficits() { assertOwner(); return new IntLongHashMap(insuranceDeficits); }
-    public IntLongHashMap deficitBalances() { assertOwner(); return new IntLongHashMap(insuranceDeficits); }
-    public IntLongHashMap liquidationFeeBalances() { assertOwner(); return new IntLongHashMap(liquidationFeeBalances); }
-    public IntLongHashMap fundingResidualBalances() { assertOwner(); return new IntLongHashMap(fundingResidualBalances); }
-    public IntLongHashMap roundingResidualBalances() { assertOwner(); return new IntLongHashMap(roundingResidualBalances); }
-    public IntLongHashMap clearingPnlBalances() { assertOwner(); return new IntLongHashMap(clearingPnlBalances); }
+    public IntLongHashMap feeBalances() { return feeBalances; }
+    public IntLongHashMap insuranceBalances() { return insuranceBalances; }
+    public IntLongHashMap insuranceDeficits() { return insuranceDeficits; }
+    public IntLongHashMap deficitBalances() { return insuranceDeficits; }
+    public IntLongHashMap liquidationFeeBalances() { return liquidationFeeBalances; }
+    public IntLongHashMap fundingResidualBalances() { return fundingResidualBalances; }
+    public IntLongHashMap roundingResidualBalances() { return roundingResidualBalances; }
+    public IntLongHashMap clearingPnlBalances() { return clearingPnlBalances; }
     public IntLongHashMap fundingSettlements() {
         assertOwner();
         IntLongHashMap result = new IntLongHashMap();
