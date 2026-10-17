@@ -877,8 +877,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         try {
             List<InMemorySerializationProcessor.SerializedModule> modules =
                     serializationProcessor.exportSnapshot(snapshotId);
-            long matcherSequence = modules.stream()
-                    .mapToLong(InMemorySerializationProcessor.SerializedModule::sequence).max().orElseThrow();
+            long matcherSequence = maxMatcherSequence(modules);
             Set<Long> userSnapshot = snapshotUsers();
             return new MatcherSnapshot(state.productLine(), topology, snapshotId, coreSequence, matcherSequence,
                     matcherEvidence.snapshot(), businessStateHash, hashes.engineHash(),
@@ -937,9 +936,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                 try {
                                     List<InMemorySerializationProcessor.SerializedModule> modules =
                                             serializationProcessor.exportSnapshot(snapshotId);
-                                    long matcherSequence = modules.stream()
-                                            .mapToLong(InMemorySerializationProcessor.SerializedModule::sequence)
-                                            .max().orElseThrow();
+                                    long matcherSequence = maxMatcherSequence(modules);
                                     Set<Long> userSnapshot = snapshotUsers();
                                     return new MatcherSnapshot(state.productLine(), topology,
                                             snapshotId, coreSequence, matcherSequence,
@@ -1104,8 +1101,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             return CompletableFuture.failedFuture(new IllegalArgumentException("invalid bootstrap book depth"));
         }
         return currentStateHashesAsync().thenCompose(barrierComplete -> {
-            List<Map.Entry<String, Integer>> entries = symbols.entrySet().stream()
-                    .sorted(Map.Entry.comparingByKey()).toList();
+            List<Map.Entry<String, Integer>> entries = new ArrayList<>(symbols.entrySet());
+            entries.sort(Map.Entry.comparingByKey());
+            List<String> entrySymbols = new ArrayList<>(entries.size());
+            for (Map.Entry<String, Integer> entry : entries) {
+                entrySymbols.add(entry.getKey());
+            }
             List<CompletableFuture<BookResult>> requests = new ArrayList<>(entries.size());
             for (Map.Entry<String, Integer> entry : entries) {
                 requests.add(CompletableFuture.completedFuture(
@@ -1126,7 +1127,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 levels.sort(Comparator.comparing(CoreBookLevelView::instrumentId)
                         .thenComparing(CoreBookLevelView::side)
                         .thenComparingLong(CoreBookLevelView::priceTicks));
-                return new BookBootstrapSnapshot(entries.stream().map(Map.Entry::getKey).toList(), levels);
+                return new BookBootstrapSnapshot(entrySymbols, levels);
             });
         });
     }
@@ -1135,14 +1136,20 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || depth < 1 || depth > 100) {
             throw new IllegalArgumentException("invalid matcher shard bootstrap query");
         }
-        List<Map.Entry<String, Integer>> entries = symbols.entrySet().stream()
-                .filter(entry -> topology.matcherShardId(entry.getValue()) == shardId)
-                .sorted(Map.Entry.comparingByKey()).toList();
+        List<Map.Entry<String, Integer>> entries = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : symbols.entrySet()) {
+            if (topology.matcherShardId(entry.getValue()) == shardId) {
+                entries.add(entry);
+            }
+        }
+        entries.sort(Map.Entry.comparingByKey());
         ArrayList<CoreBookLevelView> levels = new ArrayList<>();
+        List<String> entrySymbols = new ArrayList<>(entries.size());
         for (Map.Entry<String, Integer> entry : entries) {
+            entrySymbols.add(entry.getKey());
             levels.addAll(bookLevels(entry.getKey(), engines[shardId].orderBook(entry.getValue(), depth)));
         }
-        return new BookBootstrapSnapshot(entries.stream().map(Map.Entry::getKey).toList(), levels);
+        return new BookBootstrapSnapshot(entrySymbols, levels);
     }
 
     public BookBootstrapSnapshot mergeBookBootstrapShards(List<BookBootstrapSnapshot> shards) {
@@ -1420,5 +1427,15 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         return new CoreMatchingResult(false, "NOT_SUBMITTED");
     }
 
-
+    private static long maxMatcherSequence(List<InMemorySerializationProcessor.SerializedModule> modules) {
+        if (modules.isEmpty()) throw new java.util.NoSuchElementException("modules is empty");
+        long max = Long.MIN_VALUE;
+        for (int i = 0; i < modules.size(); i++) {
+            long seq = modules.get(i).sequence();
+            if (seq > max) {
+                max = seq;
+            }
+        }
+        return max;
+    }
 }

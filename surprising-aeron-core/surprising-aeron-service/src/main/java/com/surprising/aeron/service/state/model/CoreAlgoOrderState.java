@@ -26,9 +26,14 @@ public record CoreAlgoOrderState(
         if (algoOrderId <= 0 || userId <= 0 || algoTypeCode < 0 || side == null || quantitySteps <= 0
                 || childQuantitySteps <= 0 || intervalSeconds <= 0 || durationSeconds <= 0 || marginMode == null
                 || positionSide == null || timeInForce == null || statusCode < 0 || startAtEpochMillis <= 0
-                || createdAtEpochMillis <= 0 || updatedAtEpochMillis <= 0 || revision < 0
-                || childOrderIds.stream().anyMatch(value -> value == null || value <= 0)) {
+                || createdAtEpochMillis <= 0 || updatedAtEpochMillis <= 0 || revision < 0) {
             throw new IllegalArgumentException("invalid algo order state");
+        }
+        for (int i = 0; i < childOrderIds.size(); i++) {
+            Long value = childOrderIds.get(i);
+            if (value == null || value <= 0) {
+                throw new IllegalArgumentException("invalid algo order state");
+            }
         }
     }
 

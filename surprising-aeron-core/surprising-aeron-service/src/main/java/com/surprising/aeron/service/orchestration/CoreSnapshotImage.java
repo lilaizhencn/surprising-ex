@@ -6,8 +6,6 @@ import com.surprising.aeron.service.state.model.CoreFeePolicyState;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.account.TransferRuntime;
 import com.surprising.product.api.ProductLine;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -34,16 +32,13 @@ record CoreSnapshotImage(
         List<AccountLaneSnapshot> accountLanes) {
 
     CoreSnapshotImage {
-        sourceSequences = Collections.unmodifiableMap(new LinkedHashMap<>(sourceSequences));
-        commandResults = Collections.unmodifiableMap(new LinkedHashMap<>(commandResults));
-        feePolicies = Collections.unmodifiableMap(new LinkedHashMap<>(feePolicies));
-        pendingTransfers = Collections.unmodifiableMap(new LinkedHashMap<>(pendingTransfers));
-        accountLanes = List.copyOf(accountLanes);
         if (productLine == null || appliedCommandCount < 0 || snapshotId <= 0 || projectionSequence < 0
                 || coreSequence != appliedCommandCount || clusterTimestamp < 0 || clusterPosition < 0
                 || businessStateHash == 0 || fundsStateHash == 0
                 || matcherSnapshot == null || tradingState == null
-                || terminalRetention == null || tradingState.productLine() != productLine) {
+                || terminalRetention == null || tradingState.productLine() != productLine
+                || sourceSequences == null || commandResults == null || feePolicies == null
+                || pendingTransfers == null || accountLanes == null) {
             throw new IllegalArgumentException("invalid core snapshot image");
         }
     }

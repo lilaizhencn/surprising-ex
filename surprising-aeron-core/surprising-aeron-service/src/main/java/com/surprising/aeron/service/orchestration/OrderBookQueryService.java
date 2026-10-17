@@ -670,8 +670,11 @@ final class OrderBookQueryService {
                     var totals = owner.openInterestIndex.totals();
                     if (totals.size() > RuntimeOperationalQueryService.MAX_QUERY_ENTITIES)
                         throw new RuntimeOperationalQueryService.QueryTooLargeException();
-                    var views = totals.entrySet().stream().map(entry -> new com.surprising.aeron.protocol.CoreOpenInterestView(
-                            entry.getKey(), entry.getValue().longQuantity(), entry.getValue().shortQuantity())).toList();
+                    var views = new ArrayList<com.surprising.aeron.protocol.CoreOpenInterestView>(totals.size());
+                    for (var entry : totals.entrySet()) {
+                        views.add(new com.surprising.aeron.protocol.CoreOpenInterestView(
+                                entry.getKey(), entry.getValue().longQuantity(), entry.getValue().shortQuantity()));
+                    }
                     encoded = com.surprising.aeron.protocol.CoreOpenInterestCodec.encode(views);
                 } else if (type == CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY) {
                     var users = new ArrayList<Long>(page.limit());
@@ -793,8 +796,12 @@ final class OrderBookQueryService {
         if (!query.symbolCursor().isEmpty() && !session.symbols().containsKey(query.symbolCursor())) {
             return owner.rejected(CoreResultCode.BOOK_BOOTSTRAP_CURSOR_INVALID);
         }
-        List<String> symbols = session.symbols().tailMap(query.symbolCursor(), false).keySet().stream()
-                .limit(query.limit()).toList();
+        var tailSymbols = session.symbols().tailMap(query.symbolCursor(), false).keySet();
+        List<String> symbols = new ArrayList<>(Math.min(query.limit(), tailSymbols.size()));
+        for (String symbol : tailSymbols) {
+            symbols.add(symbol);
+            if (symbols.size() >= query.limit()) break;
+        }
         int expectedLevels = 0;
         for (String instrumentId : symbols) {
             expectedLevels = Math.addExact(expectedLevels, session.symbols().get(instrumentId).size());

@@ -653,10 +653,13 @@ final class OrderedCommitCoordinator {
         // acknowledgements even when their balances and orders do not change.
         for (var action : batch.actions()) owner.resultBuilder.markUserChanged(action.userId());
         if (!matchingResult.accepted()) {
-            int obsolete = batch.actions().stream()
-                    .map(action -> owner.liquidationIndex.route(action.liquidationId()))
-                    .mapToInt(liquidation -> liquidation == null || !liquidation.executable() ? 1 : 0)
-                    .sum();
+            int obsolete = 0;
+            for (var action : batch.actions()) {
+                var liquidation = owner.liquidationIndex.route(action.liquidationId());
+                if (liquidation == null || !liquidation.executable()) {
+                    obsolete++;
+                }
+            }
             owner.resultBuilder.commandLiquidationBatchResult = new CoreLiquidationBatchResultView(batch.actions().size(), 0,
                     batch.actions().size() - obsolete, obsolete, 0, 0);
             return;

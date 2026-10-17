@@ -36,8 +36,21 @@ public final class TradingStateSnapshotCodec {
                 .bytes(9, writeMap(value.algoOrders(), key -> new SnapshotFields.Writer().number(1, key).encode(), TradingStateSnapshotCodec::writeCoreAlgoOrderState))
                 .list(10, value.cancelAllAfterTimers().values(), TradingStateSnapshotCodec::writeCoreCancelAllAfterState)
                 .list(11, value.triggerOrders().values(), item -> writeCoreTriggerOrderStateView(item.view()))
-                .number(12, value.instruments().values().stream().anyMatch(instrument -> !instrument.orderProtection().equals(com.surprising.aeron.protocol.CoreOrderProtection.initial())) ? 3 : value.instruments().values().stream().anyMatch(instrument -> instrument.quantityStepUnits() != 1) ? 2 : 1).encode();
+                .number(12, determineInstrumentVersion(value.instruments().values())).encode();
         return ByteBuffer.allocate(4 + fields.length).order(ByteOrder.LITTLE_ENDIAN).putInt(VERSION).put(fields).array();
+    }
+
+    private static int determineInstrumentVersion(Collection<CoreInstrument> instruments) {
+        boolean hasNonUnitStep = false;
+        for (CoreInstrument instrument : instruments) {
+            if (!instrument.orderProtection().equals(com.surprising.aeron.protocol.CoreOrderProtection.initial())) {
+                return 3;
+            }
+            if (instrument.quantityStepUnits() != 1) {
+                hasNonUnitStep = true;
+            }
+        }
+        return hasNonUnitStep ? 2 : 1;
     }
 
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {

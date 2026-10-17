@@ -159,10 +159,13 @@ final class CoreMatchingFlow {
     TradingCoreRuntime.LifecycleOrderChunk lifecycleOrders(
             long userId, String instrumentId, long cursorOrderId, int maxOrders) {
         var page = owner.activeOrderIndex.page(userId, instrumentId, cursorOrderId, maxOrders);
-        var selected = page.orderIds().stream().map(owner.activeOrderIndex::activeOrderRoute)
-                .filter(java.util.Objects::nonNull)
-                .map(route -> new CancellationOrder(
-                        route.orderId(), route.userId(), route.instrumentId())).toList();
+        List<CancellationOrder> selected = new ArrayList<>(page.orderIds().size());
+        for (Long orderId : page.orderIds()) {
+            var route = owner.activeOrderIndex.activeOrderRoute(orderId);
+            if (route != null) {
+                selected.add(new CancellationOrder(route.orderId(), route.userId(), route.instrumentId()));
+            }
+        }
         return new TradingCoreRuntime.LifecycleOrderChunk(selected, page.nextCursorOrderId());
     }
 

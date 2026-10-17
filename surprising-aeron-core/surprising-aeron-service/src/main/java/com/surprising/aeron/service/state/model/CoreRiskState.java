@@ -61,12 +61,25 @@ public record CoreRiskState(
     }
 
     public RiskScan scan() {
-        return scans.values().stream().filter(value -> !value.complete()).findFirst()
-                .orElseGet(() -> scans.values().stream().findFirst().orElseGet(RiskScan::idle));
+        RiskScan first = null;
+        for (RiskScan value : scans.values()) {
+            if (!value.complete()) {
+                return value;
+            }
+            if (first == null) {
+                first = value;
+            }
+        }
+        return first != null ? first : RiskScan.idle();
     }
 
     public boolean hasPendingScans() {
-        return scans.values().stream().anyMatch(value -> !value.complete());
+        for (RiskScan value : scans.values()) {
+            if (!value.complete()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @SuppressWarnings("unchecked")

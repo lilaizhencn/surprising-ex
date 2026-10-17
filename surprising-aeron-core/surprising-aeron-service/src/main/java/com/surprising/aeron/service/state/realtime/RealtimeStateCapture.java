@@ -118,51 +118,54 @@ public final class RealtimeStateCapture {
     }
 
     public void snapshot(long userId, RealtimeUserSnapshot snapshot, long exportSequence) {
-        var balances =
-                snapshot.balances().stream()
-                        .map(
-                                v ->
-                                        new CoreBalanceView(
-                                                identities.asset(v.assetId()),
-                                                v.available(),
-                                                v.locked()))
-                        .toList();
-        var reservations =
-                snapshot.reservations().stream()
-                        .map(
-                                v ->
-                                        new CoreReservationView(
-                                                v.orderId(),
-                                                identities.instrumentId(v.symbolId()),
-                                                v.kind(),
-                                                identities.asset(v.assetId()),
-                                                v.totalReservedUnits(),
-                                                v.releasedUnits(),
-                                                v.consumedUnits(),
-                                                v.orderQuantitySteps()))
-                        .toList();
-        var positions =
-                snapshot.positions().stream()
-                        .map(
-                                v ->
-                                        new CorePositionView(
-                                                identities.instrumentId(v.symbolId()),
-                                                identities.asset(v.assetId()),
-                                                v.marginMode(),
-                                                v.positionSide(),
-                                                v.signedQuantitySteps(),
-                                                v.entryPriceTicks(),
-                                                v.entryValueTicks(),
-                                                v.realizedPnlUnits(),
-                                                v.positionMarginUnits()))
-                        .toList();
-        var leverages =
-                snapshot.leverages().stream()
-                        .map(
-                                v ->
-                                        new CoreLeverageView(
-                                                v.key().instrumentId(), v.key().marginMode(), v.value()))
-                        .toList();
+        var rawBalances = snapshot.balances();
+        var balances = new java.util.ArrayList<CoreBalanceView>(rawBalances.size());
+        for (int i = 0; i < rawBalances.size(); i++) {
+            var v = rawBalances.get(i);
+            balances.add(new CoreBalanceView(
+                    identities.asset(v.assetId()),
+                    v.available(),
+                    v.locked()));
+        }
+
+        var rawReservations = snapshot.reservations();
+        var reservations = new java.util.ArrayList<CoreReservationView>(rawReservations.size());
+        for (int i = 0; i < rawReservations.size(); i++) {
+            var v = rawReservations.get(i);
+            reservations.add(new CoreReservationView(
+                    v.orderId(),
+                    identities.instrumentId(v.symbolId()),
+                    v.kind(),
+                    identities.asset(v.assetId()),
+                    v.totalReservedUnits(),
+                    v.releasedUnits(),
+                    v.consumedUnits(),
+                    v.orderQuantitySteps()));
+        }
+
+        var rawPositions = snapshot.positions();
+        var positions = new java.util.ArrayList<CorePositionView>(rawPositions.size());
+        for (int i = 0; i < rawPositions.size(); i++) {
+            var v = rawPositions.get(i);
+            positions.add(new CorePositionView(
+                    identities.instrumentId(v.symbolId()),
+                    identities.asset(v.assetId()),
+                    v.marginMode(),
+                    v.positionSide(),
+                    v.signedQuantitySteps(),
+                    v.entryPriceTicks(),
+                    v.entryValueTicks(),
+                    v.realizedPnlUnits(),
+                    v.positionMarginUnits()));
+        }
+
+        var rawLeverages = snapshot.leverages();
+        var leverages = new java.util.ArrayList<CoreLeverageView>(rawLeverages.size());
+        for (int i = 0; i < rawLeverages.size(); i++) {
+            var v = rawLeverages.get(i);
+            leverages.add(new CoreLeverageView(
+                    v.key().instrumentId(), v.key().marginMode(), v.value()));
+        }
         var u = snapshot.user();
         emit(RealtimeFrame.Kind.SNAPSHOT_BEGIN, userId, "", "", new byte[0]);
         user(

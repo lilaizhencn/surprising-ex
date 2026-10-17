@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.NavigableSet;
 import java.util.TreeSet;
+import com.surprising.aeron.service.state.model.CorePositionState;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
@@ -141,22 +142,24 @@ public final class PositionUserIndex {
         assertBusinessOwner();
         usersBySymbol.clear();
         positionCountsBySymbol.clear();
-        state.users().values().forEach(user -> user.positions().values()
-                .forEach(position -> addPosition(RuntimePositionIndexValue.from(user.userId(), position))));
+        for (CoreUserState user : state.users().values()) {
+            long userId = user.userId();
+            for (CorePositionState position : user.positions().values()) {
+                addPosition(userId, position.instrumentId());
+            }
+        }
     }
 
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
         assertBusinessOwner();
         usersBySymbol.clear();
         positionCountsBySymbol.clear();
-        state.users().values().forEach(user -> user.positions().forEach((key, position) -> {
-            RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(user.userId(), position);
-            addPosition(indexed);
-        }));
-    }
-
-    private void addPosition(RuntimePositionIndexValue position) {
-        addPosition(position.userId(), position.instrumentId());
+        for (CoreUserState user : state.users().values()) {
+            long userId = user.userId();
+            for (CorePositionState position : user.positions().values()) {
+                addPosition(userId, position.instrumentId());
+            }
+        }
     }
 
     private void addPosition(long userId, String instrumentId) {

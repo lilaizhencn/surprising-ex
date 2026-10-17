@@ -16,8 +16,6 @@ import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.service.state.model.CorePositionState;
 
-import java.util.List;
-
 /** 期权订单准入的权利金、卖方保证金和已有持仓风险计算。 */
 public final class OptionOrderAdmission {
     private OptionOrderAdmission() {
@@ -86,12 +84,16 @@ public final class OptionOrderAdmission {
                     Math.subtractExact(Math.addExact(premium, feeDebit), releasedMargin)));
         }
         if (openSteps == 0) return Math.max(1, feeDebit);
-        long pendingSell = userOrders(state, user).stream()
-                .filter(order -> order.status() == CoreOrderStatus.OPEN && !order.reduceOnly()
-                        && order.instrumentId().equals(instrument.instrumentId())
-                        && order.positionSide() == command.positionSide()
-                        && order.side() == CoreOrderSide.SELL)
-                .mapToLong(CoreOrderState::remainingQuantitySteps).reduce(0L, Math::addExact);
+        long pendingSell = 0;
+        for (Long orderId : user.reservations().keySet()) {
+            CoreOrderState order = state.orders().get(orderId);
+            if (order != null && order.status() == CoreOrderStatus.OPEN && !order.reduceOnly()
+                    && order.instrumentId().equals(instrument.instrumentId())
+                    && order.positionSide() == command.positionSide()
+                    && order.side() == CoreOrderSide.SELL) {
+                pendingSell = Math.addExact(pendingSell, order.remainingQuantitySteps());
+            }
+        }
         long totalSellOrders = Math.addExact(pendingSell, command.quantitySteps());
         long projectedSigned = Math.subtractExact(currentQuantity, totalSellOrders);
         long projectedRisk = Math.max(0, Math.negateExact(projectedSigned));
@@ -111,12 +113,5 @@ public final class OptionOrderAdmission {
     private static String positionKey(String instrumentId, CorePositionSide side) {
         String normalized = OrderReservation.requireInstrumentId(instrumentId);
         return side.hedgeSide() ? normalized + ':' + side.name() : normalized;
-    }
-
-    private static List<CoreOrderState> userOrders(TradingCoreState state, CoreUserState user) {
-        return user.reservations().keySet().stream()
-                .map(state.orders()::get)
-                .filter(java.util.Objects::nonNull)
-                .toList();
     }
 }

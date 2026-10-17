@@ -36,10 +36,16 @@ public record MatcherSnapshot(
         users = Collections.unmodifiableSet(new TreeSet<>(users));
         matcherShardProgress = List.copyOf(matcherShardProgress);
         modules = List.copyOf(modules);
-        if (symbols.values().stream().anyMatch(symbolId -> symbolId == null || symbolId <= 0)
-                || new java.util.HashSet<>(symbols.values()).size() != symbols.size()
-                || users.stream().anyMatch(userId -> userId == null || userId <= 0)) {
-            throw new IllegalArgumentException("invalid matcher registries");
+        java.util.HashSet<Integer> uniqueSymbolIds = new java.util.HashSet<>(symbols.size());
+        for (Integer symbolId : symbols.values()) {
+            if (symbolId == null || symbolId <= 0 || !uniqueSymbolIds.add(symbolId)) {
+                throw new IllegalArgumentException("invalid matcher registries");
+            }
+        }
+        for (Long userId : users) {
+            if (userId == null || userId <= 0) {
+                throw new IllegalArgumentException("invalid matcher registries");
+            }
         }
         if (matcherShardProgress.size() != topology.matchingEngineCount() + 1) {
             throw new IllegalArgumentException("incomplete matcher shard progress");

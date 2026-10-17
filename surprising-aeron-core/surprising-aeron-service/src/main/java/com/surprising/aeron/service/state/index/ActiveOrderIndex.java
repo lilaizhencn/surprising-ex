@@ -276,15 +276,14 @@ public final class ActiveOrderIndex {
         idsByUser.clear();
         idsBySymbol.clear();
         ordersById.clear();
-        state.orders().values().stream()
-                .filter(ActiveOrderIndex::isActive)
-                .forEach(order -> {
-                    CoreInstrument instrument = state.instruments().get(order.instrumentId());
-                    if (instrument == null) {
-                        throw new IllegalStateException("instrument is not registered: " + order.instrumentId());
-                    }
-                    applyRoute(order.orderId(), order.userId(), order.instrumentId());
-                });
+        for (CoreOrderState order : state.orders().values()) {
+            if (!isActive(order)) continue;
+            CoreInstrument instrument = state.instruments().get(order.instrumentId());
+            if (instrument == null) {
+                throw new IllegalStateException("instrument is not registered: " + order.instrumentId());
+            }
+            applyRoute(order.orderId(), order.userId(), order.instrumentId());
+        }
     }
 
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {

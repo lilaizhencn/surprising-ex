@@ -18,12 +18,12 @@ public final class InsuranceAllocationPolicy {
             .thenComparing(Claim::instrumentId)
             .thenComparingInt(claim -> claim.liquidation().positionSide().ordinal())
             .thenComparingLong(claim -> claim.liquidation().liquidationId());
-    private static final Comparator<CoreClaim> CORE_CLAIM_ORDER = Comparator
-            .comparingLong((CoreClaim claim) -> claim.liquidation().triggerPriceSequence())
-            .thenComparingLong(claim -> claim.liquidation().userId())
-            .thenComparing(claim -> claim.liquidation().instrumentId())
-            .thenComparingInt(claim -> claim.liquidation().positionSide().ordinal())
-            .thenComparingLong(claim -> claim.liquidation().liquidationId());
+    private static final Comparator<CoreLiquidationState> CORE_LIQUIDATION_ORDER = Comparator
+            .comparingLong(CoreLiquidationState::triggerPriceSequence)
+            .thenComparingLong(CoreLiquidationState::userId)
+            .thenComparing(CoreLiquidationState::instrumentId)
+            .thenComparingInt(claim -> claim.positionSide().ordinal())
+            .thenComparingLong(CoreLiquidationState::liquidationId);
 
     private InsuranceAllocationPolicy() {
     }
@@ -203,15 +203,15 @@ public final class InsuranceAllocationPolicy {
         CoreInstrument targetInstrument = state.instruments().get(target.instrumentId());
         if (targetInstrument == null) return 0;
         String asset = targetInstrument.settleAsset();
-        ArrayList<CoreClaim> claims = new ArrayList<>();
+        ArrayList<CoreLiquidationState> claims = new ArrayList<>();
         for (CoreLiquidationState liquidation : state.riskState().liquidations().values()) {
             if (liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) continue;
             CoreInstrument instrument = state.instruments().get(liquidation.instrumentId());
             if (instrument != null && asset.equals(instrument.settleAsset())) {
-                claims.add(new CoreClaim(liquidation));
+                claims.add(liquidation);
             }
         }
-        claims.sort(CORE_CLAIM_ORDER);
+        claims.sort(CORE_LIQUIDATION_ORDER);
         long available = state.treasuryState().insuranceBalances().getOrDefault(asset, 0L);
         return allocationForCore(Math.max(0, available), claims, liquidationId);
     }
@@ -222,16 +222,15 @@ public final class InsuranceAllocationPolicy {
         CoreInstrument targetInstrument = state.instruments().get(target.instrumentId());
         if (targetInstrument == null) return false;
         String targetAsset = targetInstrument.settleAsset();
-        CoreLiquidationState first = state.riskState().liquidations().values().stream()
-                .filter(liquidation -> liquidation.status() == CoreLiquidationState.Status.INSURANCE_REQUIRED)
-                .filter(liquidation -> {
-                    CoreInstrument instrument = state.instruments().get(liquidation.instrumentId());
-                    return instrument != null && targetAsset.equals(instrument.settleAsset());
-                })
-                .map(CoreClaim::new)
-                .min(CORE_CLAIM_ORDER)
-                .map(CoreClaim::liquidation)
-                .orElse(null);
+        CoreLiquidationState first = null;
+        for (CoreLiquidationState liquidation : state.riskState().liquidations().values()) {
+            if (liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) continue;
+            CoreInstrument instrument = state.instruments().get(liquidation.instrumentId());
+            if (instrument == null || !targetAsset.equals(instrument.settleAsset())) continue;
+            if (first == null || CORE_LIQUIDATION_ORDER.compare(liquidation, first) < 0) {
+                first = liquidation;
+            }
+        }
         return first != null && first.liquidationId() == liquidationId;
     }
 
@@ -259,15 +258,15 @@ public final class InsuranceAllocationPolicy {
         }
     }
 
-    private static long allocationForCore(long availableUnits, ArrayList<CoreClaim> claims, long targetId) {
+    private static long allocationForCore(long availableUnits, ArrayList<CoreLiquidationState> claims, long targetId) {
         BigInteger total = BigInteger.ZERO;
-        for (CoreClaim claim : claims) total = total.add(BigInteger.valueOf(claim.liquidation().deficitUnits()));
+        for (CoreLiquidationState liquidation : claims) total = total.add(BigInteger.valueOf(liquidation.deficitUnits()));
         BigInteger available = BigInteger.valueOf(availableUnits).min(total);
         BigInteger allocated = BigInteger.ZERO;
         long targetBase = 0;
         int targetIndex = -1;
         for (int index = 0; index < claims.size(); index++) {
-            CoreLiquidationState liquidation = claims.get(index).liquidation();
+            CoreLiquidationState liquidation = claims.get(index);
             BigInteger share = total.signum() == 0 ? BigInteger.ZERO
                     : available.multiply(BigInteger.valueOf(liquidation.deficitUnits())).divide(total);
             if (liquidation.liquidationId() == targetId) {
@@ -281,8 +280,5 @@ public final class InsuranceAllocationPolicy {
     }
 
     private record Claim(LiquidationRuntime liquidation, String instrumentId) {
-    }
-
-    private record CoreClaim(CoreLiquidationState liquidation) {
     }
 }
