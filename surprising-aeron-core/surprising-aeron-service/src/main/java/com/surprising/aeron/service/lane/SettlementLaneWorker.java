@@ -112,6 +112,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
     public boolean handoffReady(long epoch) { return completedHandoff == epoch; }
     public void resumeHandoff(long epoch) {
         resumedHandoff = epoch;
+        unparkIfParked();
     }
 
     public Thread thread() { return thread; }
@@ -127,6 +128,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
         }
         commands[(int) next & indexMask] = command;
         producerSequence.value = next + 1;
+        unparkIfParked();
         return next + 1;
     }
 
@@ -145,6 +147,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
         }
         admissionCommands[(int) next & admissionIndexMask] = command;
         admissionProducerSequence.value = next + 1;
+        unparkIfParked();
         return next + 1;
     }
 
@@ -161,7 +164,14 @@ public final class SettlementLaneWorker implements AutoCloseable {
             Thread.onSpinWait();
         }
         long position = ring.publish(event);
+        unparkIfParked();
         return position + 1;
+    }
+
+    private void unparkIfParked() {
+        if (parked) {
+            java.util.concurrent.locks.LockSupport.unpark(thread);
+        }
     }
 
     public int depth() {

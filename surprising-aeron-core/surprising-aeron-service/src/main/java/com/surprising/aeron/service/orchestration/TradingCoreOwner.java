@@ -26,8 +26,9 @@ import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
  * {@link com.surprising.aeron.service.cluster.AeronTradingClusterService} 持有；Owner 只接收已复制的不可变命令、
  * 推进交易状态并产生终态交接。</p>
  */
-@Slf4j
 public final class TradingCoreOwner {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TradingCoreOwner.class);
 
     /** 交易 Owner 的运行日志；仅记录生命周期和诊断信息，不进入交易状态计算。 */
 

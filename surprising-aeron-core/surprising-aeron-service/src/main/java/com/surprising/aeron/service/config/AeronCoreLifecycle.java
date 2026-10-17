@@ -30,8 +30,9 @@ import org.springframework.beans.factory.DisposableBean;
 
 /** Owns the Aeron resources and their shutdown order for one Core node. */
 @Component
-@Slf4j
 public final class AeronCoreLifecycle implements ApplicationListener<ContextClosedEvent>, DisposableBean {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AeronCoreLifecycle.class);
 
 
     private final ClusterTopology topology;

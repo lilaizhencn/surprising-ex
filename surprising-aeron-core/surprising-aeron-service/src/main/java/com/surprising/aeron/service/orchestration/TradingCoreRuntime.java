@@ -88,8 +88,9 @@ import java.util.concurrent.CompletableFuture;
  * 唯一交易执行入口，按集群日志顺序组织准入、撮合和有序提交。
  * 产品命令、批量执行、结果账本、查询及快照由所属组件管理；不持有旧探测运行时副本。
  */
-@Slf4j
 public final class TradingCoreRuntime implements AutoCloseable {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TradingCoreRuntime.class);
 
     final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
 

@@ -350,18 +350,28 @@ public final class StateMapSupport {
             return index < 0 ? base.containsKey(key) : presentByIndex[index];
         }
 
+        private static final Object RESERVING = new Object();
+
         private V resolvedValue(int index, K key) {
-            Object current = resolvedValues.get(index);
-            if (current != null) return (V) current;
-            synchronized (resolvedValues) {
-                current = resolvedValues.get(index);
-                if (current == null) {
-                    current = java.util.Objects.requireNonNull(loader.apply(key),
-                            "deferred state value is required");
-                    resolvedValues.set(index, current);
+            while (true) {
+                Object current = resolvedValues.get(index);
+                if (current != null && current != RESERVING) {
+                    return (V) current;
                 }
+                if (current == null && resolvedValues.compareAndSet(index, null, RESERVING)) {
+                    Object loaded;
+                    try {
+                        loaded = java.util.Objects.requireNonNull(loader.apply(key),
+                                "deferred state value is required");
+                    } catch (Throwable failure) {
+                        resolvedValues.set(index, null);
+                        throw failure;
+                    }
+                    resolvedValues.set(index, loaded);
+                    return (V) loaded;
+                }
+                Thread.onSpinWait();
             }
-            return (V) current;
         }
 
         private int changedIndex(Object key) {

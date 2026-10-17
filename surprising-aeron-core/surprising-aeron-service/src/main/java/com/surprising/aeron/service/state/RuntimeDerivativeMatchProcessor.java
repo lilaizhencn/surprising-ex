@@ -43,7 +43,7 @@ public final class RuntimeDerivativeMatchProcessor {
         }
         validateAndPrepare(takerOrderId, matches, runtime, identities);
         int settleAssetId = identities.assetId(instrument.settleAsset());
-        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        RuntimeTreasuryDelta treasuryDelta = runtime.scratchTreasuryDelta();
         for (int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
             MatcherEvent match = matches.get(matchIndex);
             if (match.eventType() != MatcherEventType.TRADE) continue;
@@ -75,6 +75,7 @@ public final class RuntimeDerivativeMatchProcessor {
             if (releaseUnits > 0) runtime.advanceUserRevision(runtime.order(takerOrderId).userId());
         }
         treasuryDelta.apply(runtime.treasury());
+        treasuryDelta.clear();
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
         return runtime;
     }

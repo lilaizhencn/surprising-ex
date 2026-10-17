@@ -720,20 +720,37 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     /** 控制命令按确定性顺序撤单；首次拒绝或异常后，余项保持 NOT_SUBMITTED。 */
     private CoreMatchingResult cancelRoutedBatch(List<CancellationOrder> orders) {
-        List<CoreMatchingResult> results = new ArrayList<>(java.util.Collections.nCopies(orders.size(), notSubmitted()));
-        if (orders.size() > 1_024) {
-            results.set(0, new CoreMatchingResult(false, "LIFECYCLE_BATCH_TOO_LARGE"));
-        } else {
-            for (int index = 0; index < orders.size(); index++) {
-                CancellationOrder order = orders.get(index);
-                CoreMatchingResult result;
-                try { result = cancelControlNative(order.userId(), order.orderId(), order.instrumentId()); }
-                catch (RuntimeException failure) {
-                    matcherFailure.compareAndSet(null, failure);
-                    throw failure;
+        int size = orders.size();
+        if (size > 1_024) {
+            return new CoreMatchingResult(false, "LIFECYCLE_BATCH_TOO_LARGE");
+        }
+        if (size == 1) {
+            CancellationOrder order = orders.get(0);
+            CoreMatchingResult result;
+            try {
+                result = cancelControlNative(order.userId(), order.orderId(), order.instrumentId());
+            } catch (RuntimeException failure) {
+                matcherFailure.compareAndSet(null, failure);
+                throw failure;
+            }
+            return aggregateRoutedCancellationResults(orders, List.of(result));
+        }
+        List<CoreMatchingResult> results = new ArrayList<>(size);
+        for (int index = 0; index < size; index++) {
+            CancellationOrder order = orders.get(index);
+            CoreMatchingResult result;
+            try {
+                result = cancelControlNative(order.userId(), order.orderId(), order.instrumentId());
+            } catch (RuntimeException failure) {
+                matcherFailure.compareAndSet(null, failure);
+                throw failure;
+            }
+            results.add(result);
+            if (!result.accepted()) {
+                while (results.size() < size) {
+                    results.add(notSubmitted());
                 }
-                results.set(index, result);
-                if (!result.accepted()) break;
+                break;
             }
         }
         return aggregateRoutedCancellationResults(orders, results);
@@ -753,8 +770,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             else if (failure == null) failure = result;
         }
         boolean accepted = failure == null;
-        // Each native sequence was checked on its executing book. A control aggregate has no
-        // single native book sequence: taking a max would compare unrelated partitions.
         return new CoreMatchingResult(accepted, accepted ? "SUCCESS" : failure.resultCode(), cancellations,
                 successfulPrefix, !accepted && successfulPrefix != 0,
                 0, 0, 0, 0, 0, 0, 0, -1,
@@ -1256,7 +1271,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         return existing != null ? existing : registerSymbolId(instrumentId);
     }
 
-    private synchronized int registerSymbolId(String instrumentId) {
+    private int registerSymbolId(String instrumentId) {
         Integer existing = symbols.get(instrumentId);
         if (existing != null) return existing;
         int symbolId = permanentInstrumentId(instrumentId);
@@ -1264,7 +1279,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (collision != null && !collision.equals(instrumentId)) {
             throw new IllegalStateException("stable matcher instrumentId id collision: " + instrumentId + '/' + collision);
         }
-        symbols.put(instrumentId, symbolId);
+        symbols.putIfAbsent(instrumentId, symbolId);
         return symbolId;
     }
 
