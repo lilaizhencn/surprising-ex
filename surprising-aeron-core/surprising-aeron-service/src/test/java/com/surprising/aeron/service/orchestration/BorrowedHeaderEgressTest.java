@@ -88,12 +88,13 @@ class BorrowedHeaderEgressTest {
                     }
                     return zero(method.getReturnType());
                 });
-        var publisher = new OwnerResponsePublisher((transport, header, response, sequence) ->
-                egress.publishResponse(processor, transport, header, response, sequence, 0));
+        TradingCoreOwner.ResponseSink publisherSink = (transport, header, response, sequence) ->
+                egress.publishResponse(processor, transport, header, response, sequence, 0);
         try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
             var response = message.ownedResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                     1, new byte[]{1, 2, 3}, 0, 3);
-            publisher.publish(egress.transportSession(session).id(), message, response, state);
+            TradingCoreOwner.publishResponse(publisherSink, egress.transportSession(session).id(),
+                    message, response, state.committedCoreSequence());
             message.releaseDecoderSlot();
             for (int i = 0; i < 1024; i++) {
                 var next = decoder.decodeBorrowed(new UnsafeBuffer(bytes), 0, bytes.length);
@@ -109,7 +110,7 @@ class BorrowedHeaderEgressTest {
                 var next = decoder.decodeBorrowed(new UnsafeBuffer(bytes), 0, bytes.length);
                 var reply = next.ownedResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                         i + 2, new byte[0], 0, 0);
-                publisher.publish(egress.transportSession(session).id(), next, reply, state);
+                TradingCoreOwner.publishResponse(publisherSink, egress.transportSession(session).id(), next, reply, state.committedCoreSequence());
                 next.releaseDecoderSlot();
                 egress.drainResponses(processor);
                 assertThat(CoreProtocol.decodeResponse(sent.get().payloadUnsafe()).appliedCommandCount()).isEqualTo(i + 2);

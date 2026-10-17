@@ -5,8 +5,10 @@ import com.surprising.aeron.client.RealtimeOutbox;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
+import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.RealtimeFrame;
+import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.service.state.realtime.RealtimeStateCapture;
 import com.surprising.aeron.service.orchestration.realtime.TradingRealtimeBoundary;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
@@ -43,7 +45,7 @@ public final class TradingCoreOwner {
     private static final int INPUT_BATCH_SIZE = configuredInputBatchSize();
 
     /** 已提交响应的交接边界，不参与业务状态计算。 */
-    private final OwnerResponsePublisher responsePublisher;
+    private final ResponseSink responseSink;
     /** 实时盘口和快照的独立传输边界，不阻塞撮合主流程。 */
     private final TradingRealtimeBoundary realtimeBoundary;
 
@@ -73,7 +75,7 @@ public final class TradingCoreOwner {
             throw new IllegalArgumentException("product line is required");
         }
         this.productLine = productLine;
-        this.responsePublisher = new OwnerResponsePublisher(responseSink);
+        this.responseSink = java.util.Objects.requireNonNull(responseSink, "response sink");
         this.realtimeBoundary = new TradingRealtimeBoundary(productLine);
     }
 
@@ -603,6 +605,34 @@ public final class TradingCoreOwner {
 
     /** 将已经提交的命令响应交给响应出口，不在交易 Owner 中编码网络协议。 */
     private void offerResponse(long sessionId, CoreMessage request, CoreResponse response) {
-        responsePublisher.publish(sessionId, request, response, state);
+        publishResponse(responseSink, sessionId, request, response, state.committedCoreSequence());
+    }
+
+    /** 发布响应辅助方法，供内部及测试/基准环境直接调用。 */
+    static void publishResponse(ResponseSink sink, long sessionId, CoreMessage request,
+                                CoreResponse response, long committedSequence) {
+        CoreMessageHeader header = request.responseHeader(responseType(request.header()));
+        sink.offer(sessionId, header, response, committedSequence);
+    }
+
+    /** 按请求类型计算协议层的响应消息类型。 */
+    static CoreMessageType responseType(CoreMessageHeader requestHeader) {
+        return switch (requestHeader.messageType()) {
+            case USER_STATE_QUERY -> CoreMessageType.USER_STATE_RESULT;
+            case ORDER_STATE_QUERY, CLIENT_ORDER_STATE_QUERY -> CoreMessageType.ORDER_STATE_RESULT;
+            case BOOK_STATE_QUERY -> CoreMessageType.BOOK_STATE_RESULT;
+            case ORDER_BOOK_BOOTSTRAP_QUERY -> CoreMessageType.ORDER_BOOK_BOOTSTRAP_RESULT;
+            case LIQUIDATION_WORK_QUERY -> CoreMessageType.LIQUIDATION_WORK_RESULT;
+            case USER_OPEN_ORDERS_QUERY -> CoreMessageType.USER_OPEN_ORDERS_RESULT;
+            case TRIGGER_ORDER_QUERY -> CoreMessageType.TRIGGER_ORDER_RESULT;
+            case USER_OPEN_TRIGGER_ORDERS_QUERY -> CoreMessageType.USER_OPEN_TRIGGER_ORDERS_RESULT;
+            case FUNDING_PROGRESS_QUERY -> CoreMessageType.FUNDING_PROGRESS_RESULT;
+            case SETTLEMENT_PROGRESS_QUERY -> CoreMessageType.SETTLEMENT_PROGRESS_RESULT;
+            case COMMAND_RESULT_QUERY -> CoreMessageType.COMMAND_RESULT_RESULT;
+            case RISK_SCAN_CONTROL_QUERY -> CoreMessageType.RISK_SCAN_CONTROL_RESULT;
+            case INSTRUMENT_MAINTENANCE_QUERY -> CoreMessageType.INSTRUMENT_MAINTENANCE_RESULT;
+            default -> requestHeader.kind() == WireMessageKind.QUERY
+                    ? CoreMessageType.STATE_HASH_RESULT : CoreMessageType.COMMAND_RESULT;
+        };
     }
 }

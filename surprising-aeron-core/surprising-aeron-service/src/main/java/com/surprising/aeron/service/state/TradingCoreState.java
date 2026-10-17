@@ -525,97 +525,6 @@ public record TradingCoreState(
         return treasuryState.changedAssets();
     }
 
-    public void requireIncrementalLineage(TradingCoreState before) {
-        if (before == null || before == this) return;
-        requireLineage("users", before.users, users);
-        requireLineage("orders", before.orders, orders);
-        requireLineage("instruments", before.instruments, instruments);
-        requireLineage("leverages", before.leverages, leverages);
-        requireLineage("algo orders", before.algoOrders, algoOrders);
-        requireLineage("cancel-all-after timers", before.cancelAllAfterTimers, cancelAllAfterTimers);
-        requireLineage("client order index", before.clientOrderIndex, clientOrderIndex);
-        requireLineage("trigger orders", before.triggerOrders, triggerOrders);
-        requireLineage("mark prices", before.riskState.markPrices(), riskState.markPrices());
-        requireLineage("risk snapshots", before.riskState.snapshots(), riskState.snapshots());
-        requireLineage("liquidations", before.riskState.liquidations(), riskState.liquidations());
-        requireLineage("risk scans", before.riskState.scans(), riskState.scans());
-        requireLineage("fee balances", before.treasuryState.feeBalances(), treasuryState.feeBalances());
-        requireLineage("insurance balances", before.treasuryState.insuranceBalances(), treasuryState.insuranceBalances());
-        requireLineage("insurance deficits", before.treasuryState.insuranceDeficits(), treasuryState.insuranceDeficits());
-        requireLineage("liquidation fee balances", before.treasuryState.liquidationFeeBalances(),
-                treasuryState.liquidationFeeBalances());
-        requireLineage("funding residual balances", before.treasuryState.fundingResidualBalances(),
-                treasuryState.fundingResidualBalances());
-        requireLineage("rounding residual balances", before.treasuryState.roundingResidualBalances(),
-                treasuryState.roundingResidualBalances());
-        requireLineage("clearing pnl balances", before.treasuryState.clearingPnlBalances(),
-                treasuryState.clearingPnlBalances());
-        requireLineage("funding settlements", before.treasuryState.fundingSettlements(), treasuryState.fundingSettlements());
-        requireLineage("lifecycle settlements", before.treasuryState.lifecycleSettlements(), treasuryState.lifecycleSettlements());
-        requireLineage("funding progress", before.treasuryState.fundingProgress(), treasuryState.fundingProgress());
-        requireLineage("lifecycle progress", before.treasuryState.lifecycleProgress(), treasuryState.lifecycleProgress());
-        for (Long userId : StateMapSupport.changedKeys(users)) {
-            CoreUserState previous = before.users.get(userId);
-            CoreUserState current = users.get(userId);
-            if (previous != null && current != null) current.requireIncrementalLineage(previous);
-        }
-    }
-
-    private static void requireLineage(String name, Map<?, ?> before, Map<?, ?> after) {
-        if (before != after && !StateMapSupport.isDeltaDescendantOf(before, after)) {
-            throw new IllegalStateException(name + " lineage is unavailable");
-        }
-    }
-
-    private static void requireOnlineLineage(String name, Map<?, ?> before, Map<?, ?> after) {
-        StateMapSupport.requireDeltaLineage(before, after, name);
-    }
-
-    private static void requireOnlineTreasuryLineage(String name, Map<?, ?> before, Map<?, ?> after) {
-        if (before == after || java.util.Objects.equals(before, after)) return;
-        if (!StateMapSupport.isDeltaDescendantOf(before, after)) {
-            throw new IllegalStateException("online treasury transition is not a delta: " + name);
-        }
-    }
-
-    public void requireOnlineDeltaLineage(TradingCoreState before) {
-        if (before == null || before.productLine() != productLine) {
-            throw new IllegalArgumentException("invalid online runtime transition");
-        }
-        requireOnlineLineage("users", before.users, users);
-        requireOnlineLineage("orders", before.orders, orders);
-        requireOnlineLineage("instruments", before.instruments, instruments);
-        requireOnlineLineage("leverages", before.leverages, leverages);
-        requireOnlineLineage("algo orders", before.algoOrders, algoOrders);
-        requireOnlineLineage("cancel-all-after timers", before.cancelAllAfterTimers, cancelAllAfterTimers);
-        requireOnlineLineage("client order index", before.clientOrderIndex, clientOrderIndex);
-        requireOnlineLineage("trigger orders", before.triggerOrders, triggerOrders);
-        requireOnlineLineage("mark prices", before.riskState.markPrices(), riskState.markPrices());
-        requireOnlineLineage("risk snapshots", before.riskState.snapshots(), riskState.snapshots());
-        requireOnlineLineage("liquidations", before.riskState.liquidations(), riskState.liquidations());
-        requireOnlineLineage("risk scans", before.riskState.scans(), riskState.scans());
-        requireOnlineTreasuryLineage("fee balances", before.treasuryState.feeBalances(), treasuryState.feeBalances());
-        requireOnlineTreasuryLineage("insurance balances", before.treasuryState.insuranceBalances(), treasuryState.insuranceBalances());
-        requireOnlineTreasuryLineage("insurance deficits", before.treasuryState.insuranceDeficits(), treasuryState.insuranceDeficits());
-        requireOnlineTreasuryLineage("liquidation fee balances", before.treasuryState.liquidationFeeBalances(),
-                treasuryState.liquidationFeeBalances());
-        requireOnlineTreasuryLineage("funding residual balances", before.treasuryState.fundingResidualBalances(),
-                treasuryState.fundingResidualBalances());
-        requireOnlineTreasuryLineage("rounding residual balances", before.treasuryState.roundingResidualBalances(),
-                treasuryState.roundingResidualBalances());
-        requireOnlineTreasuryLineage("clearing pnl balances", before.treasuryState.clearingPnlBalances(),
-                treasuryState.clearingPnlBalances());
-        requireOnlineTreasuryLineage("funding settlements", before.treasuryState.fundingSettlements(), treasuryState.fundingSettlements());
-        requireOnlineTreasuryLineage("lifecycle settlements", before.treasuryState.lifecycleSettlements(), treasuryState.lifecycleSettlements());
-        requireOnlineTreasuryLineage("funding progress", before.treasuryState.fundingProgress(), treasuryState.fundingProgress());
-        requireOnlineTreasuryLineage("lifecycle progress", before.treasuryState.lifecycleProgress(), treasuryState.lifecycleProgress());
-        for (Long userId : StateMapSupport.changedKeys(before.users, users)) {
-            CoreUserState previous = before.users.get(userId);
-            CoreUserState current = users.get(userId);
-            if (previous != null && current != null) current.requireIncrementalLineage(previous);
-        }
-    }
-
     static long hashUser(long initial, CoreUserState user) {
         long hash = CoreStateHash.mix(initial, com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(user.productLine()));
         hash = CoreStateHash.mix(hash, user.userId());
@@ -686,12 +595,14 @@ public record TradingCoreState(
     private static Map<ClientOrderKey, Long> deriveClientOrderIndex(Map<Long, CoreOrderState> orders) {
         Map<ClientOrderKey, Long> index = new TreeMap<>();
         if (orders != null) {
-            orders.values().stream().filter(order -> !order.clientOrderId().isEmpty()).forEach(order -> {
-                ClientOrderKey key = new ClientOrderKey(order.userId(), order.clientOrderId());
-                if (index.put(key, order.orderId()) != null) {
-                    throw new IllegalArgumentException("duplicate clientOrderId for user");
+            for (CoreOrderState order : orders.values()) {
+                if (!order.clientOrderId().isEmpty()) {
+                    ClientOrderKey key = new ClientOrderKey(order.userId(), order.clientOrderId());
+                    if (index.put(key, order.orderId()) != null) {
+                        throw new IllegalArgumentException("duplicate clientOrderId for user");
+                    }
                 }
-            });
+            }
         }
         return index;
     }

@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 
 /**
  * 撮合命令的在途生命周期。
@@ -232,13 +233,13 @@ final class CoreMatchingFlow {
                 return;
             }
             owner.matcherPipeline.submit(shardId < 0 ? matcherShard(pending) : shardId,
-                    pending.sequence(), owner.matcherCommands.prepareMatchingCommand(pending, null));
+                    pending.sequence(), prepareMatchingCommand(pending, null));
             pending.matchingSubmitted();
             owner.matchingProgress.submissionCompleted(pending);
             return;
         }
         var direct = owner.directMatcherSettlements.prepareForMatching(pending);
-        var command = owner.matcherCommands.prepareMatchingCommand(pending, direct);
+        var command = prepareMatchingCommand(pending, direct);
         java.util.function.Supplier<?> matcherSubmission = command;
         if (direct != null && pending.placeAdmission() != null) {
             matcherSubmission = pending.gateAdmission(owner, pending.placeAdmission(), matcherShard(pending),
@@ -462,5 +463,83 @@ final class CoreMatchingFlow {
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }
+    }
+
+    Supplier<?> prepareMatchingCommand(CommandSlot pending,
+            com.surprising.aeron.service.state.MatcherSettlementEvent direct) {
+        if (isControlCommand(pending)) return prepareControlCancellations(pending);
+        java.util.Objects.requireNonNull(direct, "trading command requires its direct settlement slot");
+        pending.matcherPreCancellations(pending.operation() == CommandSlot.Operation.PLACE
+                && pending.placeAdmission() != null ? List.of() : preMatchingCancellationOrders(pending));
+        long userId = pending.command().header().userId();
+        int shard = matcherShard(pending);
+        return switch (pending.operation()) {
+            case PLACE -> pending.preparePlaceMatching(owner, shard, userId,
+                    java.util.Objects.requireNonNull(pending.placeAdmission(), "place admission receipt").matchingOrder(),
+                    null, direct);
+            case CANCEL -> {
+                var command = pending.decodedCommand().cancelOrder();
+                var route = java.util.Objects.requireNonNull(owner.activeOrderIndex.activeOrderRoute(command.orderId()),
+                        "admitted cancellation route");
+                yield pending.prepareCancelMatching(owner, shard, command.orderId(), userId, route.instrumentId(), direct);
+            }
+            case REPLACE, AMEND -> {
+                var admission = owner.requireMatchingAdmission(pending);
+                yield pending.prepareReplaceMatching(owner, shard, admission.resolved().orderId(), userId,
+                        admission.originalOrderId(), admission.command().instrumentId(), admission.resolved(), direct);
+            }
+            case TRIGGER -> pending.preparePlaceMatching(owner, shard, userId, null,
+                    java.util.Objects.requireNonNull(pending.admittedMatchingOrder(), "trigger admission receipt"), direct);
+            default -> throw new IllegalStateException("unsupported trading operation " + pending.operation());
+        };
+    }
+
+    private boolean isControlCommand(CommandSlot pending) {
+        return pending.operation() == CommandSlot.Operation.LIQUIDATION
+                || pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
+                || pending.operation() == CommandSlot.Operation.SETTLEMENT;
+    }
+
+    private Supplier<?> prepareControlCancellations(CommandSlot pending) {
+        long logicalOrderId = 0;
+        List<CancellationOrder> orders;
+        switch (pending.operation()) {
+            case LIQUIDATION -> {
+                var command = pending.decodedCommand().liquidation();
+                logicalOrderId = command.liquidationId();
+                var liquidation = pending.liquidationCheck().liquidation(0);
+                orders = liquidation == null || !pending.liquidationCheck().executable(0) ? List.of()
+                        : lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
+                                command.cursorOrderId(), command.maxOrders()).orders();
+            }
+            case LIQUIDATION_BATCH -> orders = batchCancellationOrders(pending);
+            case SETTLEMENT -> {
+                var command = pending.decodedCommand().settlement();
+                var progress = owner.runtimeLifecycleProgress(command.instrumentId());
+                orders = progress != null && progress.ordersComplete() ? List.of()
+                        : lifecycleOrders(0, command.instrumentId(),
+                                command.cursorOrderId(), command.maxOrders()).orders();
+            }
+            default -> throw new IllegalStateException("unsupported cancellation control");
+        }
+        var prefix = preMatchingCancellationOrders(pending);
+        if (!prefix.isEmpty()) {
+            var combined = new ArrayList<CancellationOrder>(prefix.size() + orders.size());
+            combined.addAll(prefix); combined.addAll(orders); orders = combined;
+        }
+        return pending.prepareControlMatching(owner, logicalOrderId, orders);
+    }
+
+    List<CancellationOrder> preMatchingCancellationOrders(CommandSlot pending) {
+        List<Long> orderIds = pending.preMatchingCancellationOrderIds();
+        if (orderIds.isEmpty()) return List.of();
+        ArrayList<CancellationOrder> orders = new ArrayList<>(orderIds.size());
+        for (long orderId : orderIds) {
+            var order = owner.activeOrderIndex.activeOrderRoute(orderId);
+            if (order != null) {
+                orders.add(new CancellationOrder(order.orderId(), order.userId(), order.instrumentId()));
+            }
+        }
+        return orders.isEmpty() ? List.of() : orders;
     }
 }

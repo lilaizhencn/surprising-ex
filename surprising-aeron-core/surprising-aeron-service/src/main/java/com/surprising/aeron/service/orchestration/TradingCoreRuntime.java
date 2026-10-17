@@ -173,8 +173,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     final OrderBookQueryService bookQueries = new OrderBookQueryService(this);
     /** 撮合在途推进状态；拥有 Lane/Matcher 通知排空和队首唤醒规则。 */
     final MatchingPipelineProgress matchingProgress = new MatchingPipelineProgress(this);
-    /** 已准入命令到确定性 Matcher 输入的协议转换与证据包装。 */
-    final MatcherCommandSubmission matcherCommands = new MatcherCommandSubmission(this);
     /** 普通命令的 Matcher→Account Lane 直接结算事件准备。 */
     final DirectMatcherSettlementPreparation directMatcherSettlements =
             new DirectMatcherSettlementPreparation(this);

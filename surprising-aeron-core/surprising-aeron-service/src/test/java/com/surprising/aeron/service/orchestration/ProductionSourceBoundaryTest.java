@@ -92,9 +92,8 @@ class ProductionSourceBoundaryTest {
             root = root.getParent();
             if (root == null) throw new AssertionError("repository root unavailable");
         }
-        String submission = Files.readString(root.resolve("surprising-aeron-core/surprising-aeron-service/"
-                + "src/main/java/com/surprising/aeron/service/orchestration/MatcherCommandSubmission.java"));
-        assertThat(submission).doesNotContain("() ->", "MatchingSubmission", "owner.matchingOrder(");
+        assertThat(Files.exists(root.resolve("surprising-aeron-core/surprising-aeron-service/"
+                + "src/main/java/com/surprising/aeron/service/orchestration/MatcherCommandSubmission.java"))).isFalse();
     }
 
     @Test
@@ -127,7 +126,7 @@ class ProductionSourceBoundaryTest {
         Path orchestration = root.resolve("surprising-aeron-core/surprising-aeron-service/src/main/java/"
                 + "com/surprising/aeron/service/orchestration");
         for (String name : java.util.List.of("TradingCoreOwner", "TradingOwnerLoop", "OwnerIngressRing",
-                "ClusterCommandWindow", "OwnerResponsePublisher")) {
+                "ClusterCommandWindow")) {
             String source = Files.readString(orchestration.resolve(name + ".java"));
             assertThat(source).as("Owner session boundary in %s", name)
                     .doesNotContain("ClientSession", "TransportSession");

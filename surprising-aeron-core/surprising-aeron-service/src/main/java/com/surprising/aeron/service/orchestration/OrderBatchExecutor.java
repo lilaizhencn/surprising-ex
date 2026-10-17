@@ -1087,7 +1087,7 @@ final class OrderBatchExecutor {
             CommandSlot pending, OrderBatchPending batch, OrderBatchItem item, int shard,
             com.surprising.aeron.service.state.MatcherSettlementEvent direct) {
         java.util.Objects.requireNonNull(direct, "batch item requires its direct settlement");
-        pending.matcherPreCancellations(owner.matcherCommands.preMatchingCancellationOrders(pending));
+        pending.matcherPreCancellations(owner.matchingFlow.preMatchingCancellationOrders(pending));
         long userId = pending.command().header().userId();
         return switch (batch.kind) {
             case PLACE -> pending.prepareAdmittedPlaceMatching(owner, shard, userId,

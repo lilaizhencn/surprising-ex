@@ -31,7 +31,7 @@ public class ReplySlotAllocationBenchmark {
     private long sessionId;
     private TradingCoreRuntime runtime;
     private TradingCoreOwner processor;
-    private OwnerResponsePublisher publisher;
+    private TradingCoreOwner.ResponseSink publisher;
 
     @Setup public void setup() {
         runtime = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL);
@@ -51,8 +51,7 @@ public class ReplySlotAllocationBenchmark {
                     default -> throw new AssertionError(method.getName());
                 });
         sessionId = egress.transportSession(actual).id();
-        publisher = new OwnerResponsePublisher((s, h, r, sequence) ->
-                egress.publishResponse(processor, s, h, r, sequence, 0));
+        publisher = (s, h, r, sequence) -> egress.publishResponse(processor, s, h, r, sequence, 0);
         int[] counts = {1, 2, 4, 8, 20};
         for (int i = 0; i < WINDOW; i++) {
             int count = counts[i % counts.length];
@@ -74,7 +73,7 @@ public class ReplySlotAllocationBenchmark {
             var message = decoder.decodeBorrowed(frame, 0, frame.capacity());
             var response = message.ownedResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
                     CoreResultCode.NONE, i + 1, RESULT, 0, RESULT.length);
-            publisher.publish(sessionId, message, response, runtime);
+            TradingCoreOwner.publishResponse(publisher, sessionId, message, response, runtime.committedCoreSequence());
             message.releaseDecoderSlot();
         }
         if (egress.drainResponses(processor) != WINDOW) throw new IllegalStateException("response handoff did not drain");
