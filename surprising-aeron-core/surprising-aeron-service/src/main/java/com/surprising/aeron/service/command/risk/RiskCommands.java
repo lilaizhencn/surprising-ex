@@ -52,9 +52,10 @@ public final class RiskCommands {
         if (owner.asynchronousCommands()) {
             RiskScanCoordinator risk = null;
             if (!activeScan.riskComplete() && riskBudget > 0) {
-                risk = owner.reusableRiskScanCoordinator(riskBudget);
+                risk = owner.directCommand.reusableRiskScanCoordinator(
+                        riskBudget, owner.positionUserIndex(), owner.runtimeState(), owner.identities());
             }
-            owner.deferRiskScanControl(risk, activeScan.symbolId(), instrumentId, maxWork,
+            owner.directCommand.deferRiskScanControl(owner, risk, activeScan.symbolId(), instrumentId, maxWork,
                     pendingBefore, startedAt, beforeRevision);
             return;
         }

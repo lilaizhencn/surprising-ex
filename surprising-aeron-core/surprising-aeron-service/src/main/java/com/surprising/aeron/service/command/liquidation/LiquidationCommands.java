@@ -23,9 +23,9 @@ public final class LiquidationCommands {
     public void executeResolveLiquidation(CoreMessage message, long clusterTimestamp) {
         var command = TradingCommandCodec.decodeResolveLiquidation(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
-            var work = RuntimeLiquidationResolution.begin(owner.reusableLiquidationResolutionWork(), command,
+            var work = RuntimeLiquidationResolution.begin(owner.directCommand.reusableLiquidationResolutionWork(), command,
                     owner.runtimeState(), owner.identities(), owner.activeLiquidationIds());
-            owner.deferLiquidationResolutionControl(work);
+            owner.directCommand.deferLiquidationResolutionControl(owner, work);
         } else {
             RuntimeLiquidationResolution.applyRuntime(command, owner.runtimeState(),
                     owner.identities(), owner.activeLiquidationIds());

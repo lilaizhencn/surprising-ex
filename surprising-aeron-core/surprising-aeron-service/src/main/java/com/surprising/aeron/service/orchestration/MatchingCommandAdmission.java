@@ -44,12 +44,71 @@ final class MatchingCommandAdmission {
     private final PrimitiveLongChangeSet batchChangedOrders = new PrimitiveLongChangeSet();
 
     /** 在释放 Lane 访问权前绑定已冻结的子订单；仅存活到登记 CommandSlot，不建立第二份订单索引。 */
-    record QueuedTriggerMatching(CoreMessage command, OrderRuntime order,
-            com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger) { }
+    static final class QueuedTriggerMatching {
+        private CoreMessage command;
+        private OrderRuntime order;
+        private com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger;
+
+        public QueuedTriggerMatching() {}
+
+        public QueuedTriggerMatching(CoreMessage command, OrderRuntime order,
+                com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger) {
+            set(command, order, trigger);
+        }
+
+        public void set(CoreMessage command, OrderRuntime order,
+                com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger) {
+            this.command = command;
+            this.order = order;
+            this.trigger = trigger;
+        }
+
+        public void clear() {
+            this.command = null;
+            this.order = null;
+            this.trigger = null;
+        }
+
+        public CoreMessage command() { return command; }
+        public OrderRuntime order() { return order; }
+        public com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger() { return trigger; }
+    }
+
+    private final QueuedTriggerMatching[] queuedMatchingPool = new QueuedTriggerMatching[64];
+    private int queuedPoolIndex;
+
+    QueuedTriggerMatching borrowQueuedMatching(CoreMessage command, OrderRuntime order,
+            com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger) {
+        QueuedTriggerMatching entry;
+        if (queuedPoolIndex < queuedMatchingPool.length) {
+            entry = queuedMatchingPool[queuedPoolIndex];
+            if (entry == null) {
+                entry = new QueuedTriggerMatching();
+                queuedMatchingPool[queuedPoolIndex] = entry;
+            }
+            queuedPoolIndex++;
+            entry.set(command, order, trigger);
+        } else {
+            entry = new QueuedTriggerMatching(command, order, trigger);
+        }
+        queuedMatching.add(entry);
+        return entry;
+    }
+
+    void clearQueuedMatching() {
+        for (int i = 0; i < queuedMatching.size(); i++) {
+            QueuedTriggerMatching q = queuedMatching.get(i);
+            if (q != null) q.clear();
+        }
+        queuedMatching.clear();
+        queuedPoolIndex = 0;
+    }
 
     void appendQueuedMatching(long clusterTimestamp, long clusterPosition) {
         if (queuedMatching.isEmpty()) return;
-        for (QueuedTriggerMatching queued : queuedMatching) {
+        for (int i = 0; i < queuedMatching.size(); i++) {
+            QueuedTriggerMatching queued = queuedMatching.get(i);
+            if (queued == null) continue;
             CoreMessage command = queued.command();
             long sequence = owner.nextAppliedSequence();
             CommandSlot pending = newPendingMatching(sequence, CommandSlot.Operation.TRIGGER, command);
@@ -60,51 +119,36 @@ final class MatchingCommandAdmission {
             registerPendingLifecycle(pending);
             owner.recordAppliedSequence(sequence, null, 0L);
             owner.matchingFlow.submitMatching(pending);
+            queued.clear();
         }
         queuedMatching.clear();
+        queuedPoolIndex = 0;
     }
 
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
-                                               CoreMessage command) {
+                                   CoreMessage command) {
         return newPendingMatching(sequence, operation, command, owner.fingerprints.of(command));
     }
 
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
-                                               CoreMessage command, CommandFingerprint fingerprint) {
+                                   CoreMessage command, CommandFingerprint fingerprint) {
         return owner.pendingMatching.acquire(sequence, operation, command, fingerprint, List.of(),
                 com.surprising.aeron.service.state.RuntimeFundsDelta.empty(),
                 owner.decodeMatchingCommand(command), null);
     }
 
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
-                                               CoreMessage command, CommandFingerprint fingerprint,
-                                               DecodedMatchingCommand decodedCommand) {
+                                   CoreMessage command, CommandFingerprint fingerprint,
+                                   DecodedMatchingCommand decodedCommand) {
         return owner.pendingMatching.acquire(sequence, operation, command, fingerprint, List.of(),
                 com.surprising.aeron.service.state.RuntimeFundsDelta.empty(), decodedCommand, null);
     }
 
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
-                                               CoreMessage command, List<Long> preMatchingCancellations) {
-        return owner.pendingMatching.acquire(sequence, operation, command, owner.fingerprints.of(command),
-                preMatchingCancellations,
-                com.surprising.aeron.service.state.RuntimeFundsDelta.empty(),
-                owner.decodeMatchingCommand(command), null);
-    }
-
-    CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
-                                               CoreMessage command, List<Long> preMatchingCancellations,
-                                               DecodedMatchingCommand decodedCommand,
-                                               ResolvedMatchingAdmission admission) {
-        return owner.pendingMatching.acquire(sequence, operation, command, owner.fingerprints.of(command),
-                preMatchingCancellations,
-                owner.runtimeState.coldCommandFunds(), decodedCommand, admission);
-    }
-
-    CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
-                                               CoreMessage command, CommandFingerprint fingerprint,
-                                               List<Long> preMatchingCancellations,
-                                               DecodedMatchingCommand decodedCommand,
-                                               ResolvedMatchingAdmission admission) {
+                                   CoreMessage command, CommandFingerprint fingerprint,
+                                   List<Long> preMatchingCancellations,
+                                   DecodedMatchingCommand decodedCommand,
+                                   ResolvedMatchingAdmission admission) {
         return owner.pendingMatching.acquire(sequence, operation, command, fingerprint, preMatchingCancellations,
                 owner.runtimeState.coldCommandFunds(),
                 decodedCommand, admission);

@@ -35,7 +35,7 @@ import java.util.function.IntFunction;
  * It owns only that one-command continuation and its reusable low-frequency work objects. The
  * runtime remains the owner of business state, commit publication and rollback.</p>
  */
-final class DirectCommandSlot {
+public final class DirectCommandSlot {
     private CoreMessage command;
     private CommandFingerprint fingerprint;
     private TradingCoreRuntime.SourceKey sourceKey;
@@ -148,12 +148,12 @@ final class DirectCommandSlot {
     long commitFenceTimestamp() { return commitFenceTimestamp; }
     long checkpoint() { return checkpoint; }
 
-    void deferControl(BooleanSupplier work) {
+    public void deferControl(BooleanSupplier work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         controlWork = Objects.requireNonNull(work);
     }
 
-    void deferFundingControl(TradingCoreRuntime owner,
+    public void deferFundingControl(TradingCoreRuntime owner,
             RuntimePerpetualFundingProcessor.FundingWork work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         fundingControl.prepare(owner, work);
@@ -161,9 +161,9 @@ final class DirectCommandSlot {
         controlWork = fundingControl;
     }
 
-    RuntimePerpetualFundingProcessor.FundingWork reusableFundingWork() { return reusableFundingWork; }
+    public RuntimePerpetualFundingProcessor.FundingWork reusableFundingWork() { return reusableFundingWork; }
 
-    void deferRiskScanControl(TradingCoreRuntime owner, RiskScanCoordinator risk, int symbolId,
+    public void deferRiskScanControl(TradingCoreRuntime owner, RiskScanCoordinator risk, int symbolId,
             String instrumentId, int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         riskScanControl.prepare(owner, risk, symbolId, instrumentId, maxUsers, pendingBefore, startedAt,
@@ -171,7 +171,7 @@ final class DirectCommandSlot {
         controlWork = riskScanControl;
     }
 
-    void deferAdlControl(TradingCoreRuntime owner,
+    public void deferAdlControl(TradingCoreRuntime owner,
             RuntimeAdlExecution.AdlWork work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         adlControl.prepare(owner, work);
@@ -179,9 +179,9 @@ final class DirectCommandSlot {
         controlWork = adlControl;
     }
 
-    RuntimeAdlExecution.AdlWork reusableAdlWork() { return reusableAdlWork; }
+    public RuntimeAdlExecution.AdlWork reusableAdlWork() { return reusableAdlWork; }
 
-    void deferLiquidationResolutionControl(TradingCoreRuntime owner,
+    public void deferLiquidationResolutionControl(TradingCoreRuntime owner,
             RuntimeLiquidationResolution.ResolutionWork work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         liquidationResolutionControl.prepare(owner, work);
@@ -189,11 +189,11 @@ final class DirectCommandSlot {
         controlWork = liquidationResolutionControl;
     }
 
-    RuntimeLiquidationResolution.ResolutionWork reusableLiquidationResolutionWork() {
+    public RuntimeLiquidationResolution.ResolutionWork reusableLiquidationResolutionWork() {
         return reusableResolutionWork;
     }
 
-    RiskScanCoordinator reusableRiskScanCoordinator(int maxUsers,
+    public RiskScanCoordinator reusableRiskScanCoordinator(int maxUsers,
             com.surprising.aeron.service.state.PositionUserIndex positionUserIndex,
             com.surprising.aeron.service.state.TradingRuntimeState runtime,
             com.surprising.aeron.service.state.RuntimeIdentityRegistry identities) {
@@ -205,36 +205,36 @@ final class DirectCommandSlot {
         return reusableRiskCoordinator;
     }
 
-    com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment() {
+    public com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment() {
         return reusableInsuranceAdjustment;
     }
 
-    void rememberInsuranceAdjustment(com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork work) {
+    public void rememberInsuranceAdjustment(com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork work) {
         reusableInsuranceAdjustment = work;
     }
 
-    void deferBalanceAdjustment(TradingCoreRuntime owner, long userId, BalanceAdjustmentCommand command) {
+    public void deferBalanceAdjustment(TradingCoreRuntime owner, long userId, BalanceAdjustmentCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         this.ownerRef = owner;
         accountControl.prepareBalanceAdjustment(owner.runtimeState(), owner.identities(), userId, command);
         controlWork = accountControlWork;
     }
 
-    void deferTransferOut(TradingCoreRuntime owner, long userId, TransferFundsCommand command) {
+    public void deferTransferOut(TradingCoreRuntime owner, long userId, TransferFundsCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         this.ownerRef = owner;
         accountControl.prepareTransferOut(owner.runtimeState(), owner.identities(), userId, command);
         controlWork = accountControlWork;
     }
 
-    void deferTransferComplete(TradingCoreRuntime owner, long userId, long transferId) {
+    public void deferTransferComplete(TradingCoreRuntime owner, long userId, long transferId) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         this.ownerRef = owner;
         accountControl.prepareTransferCompletion(owner.runtimeState(), userId, transferId);
         controlWork = accountControlWork;
     }
 
-    void deferLeverageChange(TradingCoreRuntime owner, long userId, UpdateLeverageCommand command,
+    public void deferLeverageChange(TradingCoreRuntime owner, long userId, UpdateLeverageCommand command,
                              long beforeRevision) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         this.ownerRef = owner;
@@ -242,7 +242,7 @@ final class DirectCommandSlot {
         controlWork = accountControlWork;
     }
 
-    void deferPositionModeChange(TradingCoreRuntime owner, long userId, UpdatePositionModeCommand command,
+    public void deferPositionModeChange(TradingCoreRuntime owner, long userId, UpdatePositionModeCommand command,
                                  long beforeRevision) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         this.ownerRef = owner;
@@ -250,7 +250,7 @@ final class DirectCommandSlot {
         controlWork = accountControlWork;
     }
 
-    void deferPositionMarginAdjustment(TradingCoreRuntime owner, long userId,
+    public void deferPositionMarginAdjustment(TradingCoreRuntime owner, long userId,
                                        AdjustPositionMarginCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         this.ownerRef = owner;
@@ -258,7 +258,7 @@ final class DirectCommandSlot {
         controlWork = accountControlWork;
     }
 
-    void deferTriggerMutationControl(TradingCoreRuntime owner, long userId,
+    public void deferTriggerMutationControl(TradingCoreRuntime owner, long userId,
             TriggerOrderCommands.Mutation mutation, long triggerOrderId, long arg1, long arg2,
             long arg3, boolean flag, String text) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -269,7 +269,7 @@ final class DirectCommandSlot {
         controlWork = triggerControl;
     }
 
-    void deferTriggerUpsertControl(TradingCoreRuntime owner, long userId,
+    public void deferTriggerUpsertControl(TradingCoreRuntime owner, long userId,
             CoreTriggerOrderStateView trigger, int symbolId, long positionKey,
             boolean instrumentSettled) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -280,7 +280,7 @@ final class DirectCommandSlot {
         controlWork = triggerControl;
     }
 
-    void deferTriggerOcoPairControl(TradingCoreRuntime owner, long userId,
+    public void deferTriggerOcoPairControl(TradingCoreRuntime owner, long userId,
             CoreTriggerOrderStateView first, CoreTriggerOrderStateView second,
             int symbolId, long positionKey, boolean instrumentSettled) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -291,7 +291,7 @@ final class DirectCommandSlot {
         controlWork = triggerControl;
     }
 
-    void deferAlgoUpsertControl(TradingCoreRuntime owner, long userId, CoreAlgoOrderView algo,
+    public void deferAlgoUpsertControl(TradingCoreRuntime owner, long userId, CoreAlgoOrderView algo,
             int symbolId) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         triggerControl.prepareAlgoUpsert(owner, userId, algo, symbolId);

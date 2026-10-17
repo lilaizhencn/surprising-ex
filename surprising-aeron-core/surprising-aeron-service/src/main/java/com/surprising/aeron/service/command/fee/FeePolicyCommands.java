@@ -21,7 +21,7 @@ public final class FeePolicyCommands implements java.util.function.IntFunction<O
             pending = command;
             try { owner.runtimeState().dispatchControlLanes(1L, this); }
             catch (RuntimeException | Error failure) { pending = null; throw failure; }
-            owner.deferControl(this);
+            owner.directCommand.deferControl(this);
         } else {
             owner.runtimeState().upsertFeePolicy(command);
             owner.requestCommitPublication();

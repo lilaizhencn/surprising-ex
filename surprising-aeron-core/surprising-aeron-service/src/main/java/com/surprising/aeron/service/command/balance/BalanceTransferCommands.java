@@ -28,7 +28,7 @@ public final class BalanceTransferCommands {
 
     private void adjustBalance(long userId, BalanceAdjustmentCommand command) {
         if (owner.asynchronousCommands()) {
-            owner.deferBalanceAdjustment(userId, command);
+            owner.directCommand.deferBalanceAdjustment(owner, userId, command);
         } else {
             RuntimeAccountStateTransitions.adjustBalance(owner.runtimeState(), owner.identities(), userId, command);
             owner.requestCommitPublication();
@@ -39,7 +39,7 @@ public final class BalanceTransferCommands {
         owner.setSingleChangedUser(message.header().userId());
         var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe(), message.header().userId());
         if (owner.asynchronousCommands()) {
-            owner.deferTransferOut(message.header().userId(), command);
+            owner.directCommand.deferTransferOut(owner, message.header().userId(), command);
         } else {
             RuntimeAccountStateTransitions.transferOut(owner.runtimeState(), owner.identities(), message.header().userId(), command);
             completeTransferPublication();
@@ -65,7 +65,7 @@ public final class BalanceTransferCommands {
     public void executeCompleteTransfer(CoreMessage message, long clusterTimestamp) {
         long id = TradingCommandCodec.decodeCompleteTransfer(message.payloadUnsafe()).transferId();
         if (owner.asynchronousCommands()) {
-            owner.deferTransferComplete(message.header().userId(), id);
+            owner.directCommand.deferTransferComplete(owner, message.header().userId(), id);
         } else {
             RuntimeAccountStateTransitions.completeTransfer(owner.runtimeState(), message.header().userId(), id);
             owner.requestCommitPublication();

@@ -25,9 +25,9 @@ public final class PerpetualFundingCommands {
         var command = TradingCommandCodec.decodeApplyFunding(message.payloadUnsafe());
         Iterable<Long> indexedUserIds = owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId());
         if (owner.asynchronousCommands()) {
-            var work = RuntimePerpetualFundingProcessor.prepare(owner.reusableFundingWork(), command, indexedUserIds,
+            var work = RuntimePerpetualFundingProcessor.prepare(owner.directCommand.reusableFundingWork(), command, indexedUserIds,
                     message.header().commandId(), owner.runtimeState(), owner.identities());
-            owner.deferFundingControl(work);
+            owner.directCommand.deferFundingControl(owner, work);
             return;
         }
         var result = RuntimePerpetualFundingProcessor.applyRuntime(command, indexedUserIds,

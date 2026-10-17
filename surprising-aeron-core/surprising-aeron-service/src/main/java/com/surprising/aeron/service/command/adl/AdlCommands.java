@@ -18,9 +18,9 @@ public final class AdlCommands {
         var command = TradingCommandCodec.decodeExecuteAdl(message.payloadUnsafe());
         owner.setSingleChangedUser(command.targetUserId());
         if (owner.asynchronousCommands()) {
-            var work = RuntimeAdlExecution.begin(owner.reusableAdlWork(),
+            var work = RuntimeAdlExecution.begin(owner.directCommand.reusableAdlWork(),
                     command, owner.runtimeState(), owner.identities());
-            owner.deferAdlControl(work);
+            owner.directCommand.deferAdlControl(owner, work);
         } else {
             RuntimeAdlExecution.applyRuntime(
                     command, owner.runtimeState(), owner.identities());

@@ -17,7 +17,8 @@ public final class InsuranceFundCommands {
     public void executeAdjustInsuranceFund(CoreMessage message, long clusterTimestamp) {
         var command = TradingCommandCodec.decodeAdjustInsuranceFund(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
-            owner.deferControl(RuntimeInsuranceFundStateTransitions.prepare(owner.reusableInsuranceAdjustment(),
+            owner.directCommand.deferControl(RuntimeInsuranceFundStateTransitions.prepare(
+                    owner.directCommand.reusableInsuranceAdjustment(),
                     owner.runtimeState(), owner.identities(), command));
         } else {
             RuntimeInsuranceFundStateTransitions.adjust(owner.runtimeState(), owner.identities(), command);

@@ -172,9 +172,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     final OrderBookQueryService bookQueries = new OrderBookQueryService(this);
     /** 撮合在途推进状态；拥有 Lane/Matcher 通知排空和队首唤醒规则。 */
     final MatchingPipelineProgress matchingProgress = new MatchingPipelineProgress(this);
-    /** 普通命令的 Matcher→Account Lane 直接结算事件准备。 */
-    final DirectMatcherSettlementPreparation directMatcherSettlements =
-            new DirectMatcherSettlementPreparation(this);
 
     /** 实时事件编码出口；只能读取已提交或有快照屏障保护的值。 */
     com.surprising.aeron.service.state.realtime.RealtimeStateCapture realtimeCapture;
@@ -1009,10 +1006,26 @@ public final class TradingCoreRuntime implements AutoCloseable {
         directCommand.initialize(message, fingerprint, sourceKey, clusterTimestamp, clusterPosition,
                 beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
         resultBuilder.beginCommand();
-        admissions.queuedMatching.clear();
+        admissions.clearQueuedMatching();
         commits.beginCommitPublicationBatch();
         try {
-            status = applyCommand(message, clusterTimestamp);
+            if (directCommands.dispatch(message, clusterTimestamp)) {
+                status = ResponseStatus.APPLIED;
+            } else {
+                switch (message.header().messageType()) {
+                    case PROBE_INCREMENT -> {
+                        probeValue = Math.addExact(
+                                probeValue, CoreProtocol.decodeProbeDelta(message.payloadUnsafe()));
+                        status = ResponseStatus.APPLIED;
+                    }
+                    case VERIFY_STATE_HASH -> status = ResponseStatus.APPLIED;
+                    case PLACE_ORDER, CANCEL_ORDER, REPLACE_ORDER, AMEND_ORDER,
+                            PLACE_ORDER_BATCH, CANCEL_ORDER_BATCH, AMEND_ORDER_BATCH,
+                            EXECUTE_LIQUIDATION, SETTLE_INSTRUMENT ->
+                            throw new IllegalStateException("matching command must use async continuation");
+                    default -> status = null;
+                }
+            }
         } catch (CoreStateRejectedException exception) {
             status = ResponseStatus.REJECTED;
             resultCode = CoreResultCode.fromRejectionCode(exception.code());
@@ -1112,7 +1125,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 }
                 if (pendingMatching.size() + admissions.queuedMatching.size()
                         > pendingMatching.capacity()) {
-                    admissions.queuedMatching.clear();
+                    admissions.clearQueuedMatching();
                     if (deferFinalizationRejection(CoreResultCode.MATCHING_BACKPRESSURE)) return null;
                     rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
                             Math.incrementExact(appliedCommandCount));
@@ -1213,105 +1226,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return true;
     }
     /** 唯一直接控制命令的续步槽；与订单撮合序号槽分离。 */
-    final DirectCommandSlot directCommand = new DirectCommandSlot();
-
-    public com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment() {
-        return directCommand.reusableInsuranceAdjustment();
-    }
-
-    public void deferControl(java.util.function.BooleanSupplier continuation) {
-        if (continuation instanceof com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork work)
-            directCommand.rememberInsuranceAdjustment(work);
-        directCommand.deferControl(continuation);
-    }
-
-    public void deferFundingControl(
-            com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor.FundingWork work) {
-        directCommand.deferFundingControl(this, work);
-    }
-
-    public com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor.FundingWork
-            reusableFundingWork() {
-        return directCommand.reusableFundingWork();
-    }
-
-    public void deferRiskScanControl(
-            com.surprising.aeron.service.state.RiskScanCoordinator risk, int symbolId, String instrumentId,
-            int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
-        directCommand.deferRiskScanControl(this, risk, symbolId, instrumentId, maxUsers, pendingBefore,
-                startedAt, beforeRevision);
-    }
-
-    public void deferAdlControl(
-            com.surprising.aeron.service.state.RuntimeAdlExecution.AdlWork work) {
-        directCommand.deferAdlControl(this, work);
-    }
-
-    public com.surprising.aeron.service.state.RuntimeAdlExecution.AdlWork
-            reusableAdlWork() {
-        return directCommand.reusableAdlWork();
-    }
-
-    public void deferLiquidationResolutionControl(
-            com.surprising.aeron.service.state.RuntimeLiquidationResolution.ResolutionWork work) {
-        directCommand.deferLiquidationResolutionControl(this, work);
-    }
-
-    public com.surprising.aeron.service.state.RuntimeLiquidationResolution.ResolutionWork
-            reusableLiquidationResolutionWork() {
-        return directCommand.reusableLiquidationResolutionWork();
-    }
-
-    public com.surprising.aeron.service.state.RiskScanCoordinator
-            reusableRiskScanCoordinator(int maxUsers) {
-        return directCommand.reusableRiskScanCoordinator(maxUsers, positionUserIndex, runtimeState,
-                identities);
-    }
-
-    public void deferBalanceAdjustment(long userId, com.surprising.aeron.protocol.BalanceAdjustmentCommand command) {
-        directCommand.deferBalanceAdjustment(this, userId, command);
-    }
-
-    public void deferTransferOut(long userId, com.surprising.aeron.protocol.TransferFundsCommand command) {
-        directCommand.deferTransferOut(this, userId, command);
-    }
-
-    public void deferTransferComplete(long userId, long transferId) {
-        directCommand.deferTransferComplete(this, userId, transferId);
-    }
-
-    public void deferLeverageChange(long userId, com.surprising.aeron.protocol.UpdateLeverageCommand command,
-                                   long beforeRevision) {
-        directCommand.deferLeverageChange(this, userId, command, beforeRevision);
-    }
-
-    public void deferPositionModeChange(long userId, com.surprising.aeron.protocol.UpdatePositionModeCommand command,
-                                       long beforeRevision) {
-        directCommand.deferPositionModeChange(this, userId, command, beforeRevision);
-    }
-
-    public void deferPositionMarginAdjustment(long userId, com.surprising.aeron.protocol.AdjustPositionMarginCommand command) {
-        directCommand.deferPositionMarginAdjustment(this, userId, command);
-    }
-
-    public void deferTriggerMutation(long userId,
-            TriggerOrderCommands.Mutation mutation,
-            long triggerOrderId, long arg1, long arg2, long arg3, boolean flag, String text) {
-        directCommand.deferTriggerMutationControl(this, userId, mutation, triggerOrderId, arg1, arg2,
-                arg3, flag, text);
-    }
-
-    public void deferTriggerUpsert(long userId,
-            com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger, int symbolId,
-            long positionKey, boolean instrumentSettled) {
-        directCommand.deferTriggerUpsertControl(this, userId, trigger, symbolId, positionKey,
-                instrumentSettled);
-    }
-
-    public void deferAlgoUpsert(long userId,
-            com.surprising.aeron.protocol.CoreAlgoOrderView algo, int symbolId) {
-        directCommand.deferAlgoUpsertControl(this, userId, algo, symbolId);
-    }
+    public final DirectCommandSlot directCommand = new DirectCommandSlot();
 
     boolean hasPendingDirectCommand() { return directCommand.active(); }
 
@@ -1832,23 +1747,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return Collections.unmodifiableMap(lastSourceSequences.snapshot());
     }
 
-    ResponseStatus applyCommand(CoreMessage message, long clusterTimestamp) {
-        if (directCommands.dispatch(message, clusterTimestamp)) return ResponseStatus.APPLIED;
-        switch (message.header().messageType()) {
-            case PROBE_INCREMENT -> probeValue = Math.addExact(
-                    probeValue, CoreProtocol.decodeProbeDelta(message.payloadUnsafe()));
-            case VERIFY_STATE_HASH -> {
-            }
-            case PLACE_ORDER, CANCEL_ORDER, REPLACE_ORDER, AMEND_ORDER,
-                    PLACE_ORDER_BATCH, CANCEL_ORDER_BATCH, AMEND_ORDER_BATCH,
-                    EXECUTE_LIQUIDATION, SETTLE_INSTRUMENT ->
-                    throw new IllegalStateException("matching command must use async continuation");
-            default -> {
-                return null;
-            }
-        }
-        return ResponseStatus.APPLIED;
-    }
 
     public void cancelAllOcoSiblings(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger) {
         long cursor = Long.MAX_VALUE;
@@ -2055,10 +1953,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
         CoreMessageHeader header = CoreMessageHeader.command(CoreMessageType.EXECUTE_TRIGGER_ORDER, commandIdMsb, commandIdLsb,
                 productLine, com.surprising.aeron.protocol.CommandSource.OPERATIONS, trigger.userId(), 0,
                 trigger.userId(), triggeredAtEpochMillis, 0);
-        admissions.queuedMatching.add(new MatchingCommandAdmission.QueuedTriggerMatching(
+        admissions.borrowQueuedMatching(
                 new CoreMessage(header, com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeExecute(
                         trigger.triggerOrderId(), triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis)),
-                childOrder, trigger));
+                childOrder, trigger);
     }
 
     void setCommandFundsDelta(
@@ -2450,131 +2348,123 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
     }
 
-    static final class DirectMatcherSettlementPreparation {
-        private final TradingCoreRuntime owner;
-
-        DirectMatcherSettlementPreparation(TradingCoreRuntime owner) {
-            this.owner = java.util.Objects.requireNonNull(owner);
+    com.surprising.aeron.service.state.MatcherSettlementEvent prepareForMatching(CommandSlot pending) {
+        if (pending.operation() == CommandSlot.Operation.REPLACE
+                || pending.operation() == CommandSlot.Operation.AMEND) {
+            return prepareReplacement(pending);
         }
+        return switch (pending.operation()) {
+            case PLACE -> preparePlace(pending);
+            case TRIGGER -> prepareTrigger(pending);
+            case CANCEL -> prepareCancellation(pending);
+            default -> null;
+        };
+    }
 
-        com.surprising.aeron.service.state.MatcherSettlementEvent prepareForMatching(CommandSlot pending) {
-            if (pending.operation() == CommandSlot.Operation.REPLACE
-                    || pending.operation() == CommandSlot.Operation.AMEND) {
-                return prepareReplacement(pending);
-            }
-            return switch (pending.operation()) {
-                case PLACE -> preparePlace(pending);
-                case TRIGGER -> prepareTrigger(pending);
-                case CANCEL -> prepareCancellation(pending);
-                default -> null;
-            };
-        }
+    com.surprising.aeron.service.state.MatcherSettlementEvent preparePipelinedPlaceBatch(
+            CommandSlot pending, OrderBatchPending batch, int shard) {
+        com.surprising.aeron.service.state.MatcherSettlementEvent direct = runtimeState.prepareDirectMatcherSettlement(
+                pending.sequence(), commits.validAccountLaneMask(),
+                null, batch.preparedAdmittedOrders, batch.items.size(), pending.command().header().commandId(),
+                shard, identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                pending.preMatchingCancellationOrderIds(), batch);
+        reserveMatcherPublication(direct);
+        return direct;
+    }
 
-        com.surprising.aeron.service.state.MatcherSettlementEvent preparePipelinedPlaceBatch(
-                CommandSlot pending, OrderBatchPending batch, int shard) {
-            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectMatcherSettlement(
-                    pending.sequence(), owner.commits.validAccountLaneMask(),
-                    null, batch.preparedAdmittedOrders, batch.items.size(), pending.command().header().commandId(),
-                    shard, owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds(), batch);
-            reserveMatcherPublication(direct);
-            return direct;
-        }
+    com.surprising.aeron.service.state.MatcherSettlementEvent prepareBatchPlaceItem(
+            CommandSlot pending, OrderBatchPending batch, com.surprising.aeron.service.state.OrderRuntime admitted, int shard) {
+        com.surprising.aeron.service.state.MatcherSettlementEvent direct = runtimeState.prepareDirectMatcherSettlement(
+                pending.sequence(), 0, commits.validAccountLaneMask(), admitted, null, 1,
+                pending.command().header().commandId(), shard, identities,
+                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                pending.preMatchingCancellationOrderIds(), batch);
+        reserveMatcherPublication(direct);
+        return direct;
+    }
 
-        com.surprising.aeron.service.state.MatcherSettlementEvent prepareBatchPlaceItem(
-                CommandSlot pending, OrderBatchPending batch, com.surprising.aeron.service.state.OrderRuntime admitted, int shard) {
-            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectMatcherSettlement(
-                    pending.sequence(), 0, owner.commits.validAccountLaneMask(), admitted, null, 1,
-                    pending.command().header().commandId(), shard, owner.identities,
-                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds(), batch);
-            reserveMatcherPublication(direct);
-            return direct;
-        }
+    com.surprising.aeron.service.state.MatcherSettlementEvent prepareBatchAmend(
+            CommandSlot pending, ResolvedMatchingAdmission admission, int shard) {
+        com.surprising.aeron.service.state.MatcherSettlementEvent direct = runtimeState.prepareDirectReplacement(
+                pending.sequence(), 0, commits.validAccountLaneMask(), admission,
+                pending.command().header().commandId(), shard, identities,
+                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                pending.preMatchingCancellationOrderIds());
+        reserveMatcherPublication(direct);
+        return direct;
+    }
 
-        com.surprising.aeron.service.state.MatcherSettlementEvent prepareBatchAmend(
-                CommandSlot pending, ResolvedMatchingAdmission admission, int shard) {
-            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectReplacement(
-                    pending.sequence(), 0, owner.commits.validAccountLaneMask(), admission,
-                    pending.command().header().commandId(), shard, owner.identities,
-                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds());
-            reserveMatcherPublication(direct);
-            return direct;
-        }
+    com.surprising.aeron.service.state.MatcherSettlementEvent prepareCancelBatch(
+            CommandSlot pending, OrderBatchPending batch, int shard, boolean finalChunk, int count) {
+        com.surprising.aeron.service.state.MatcherSettlementEvent direct = runtimeState.prepareDirectCancelBatch(
+                pending.sequence(), finalChunk, pending.command().header().userId(),
+                batch.preparedCancellationOrderIds, count, pending.command().header().commandId(), shard,
+                identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), batch);
+        reserveMatcherPublication(direct);
+        return direct;
+    }
 
-        com.surprising.aeron.service.state.MatcherSettlementEvent prepareCancelBatch(
-                CommandSlot pending, OrderBatchPending batch, int shard, boolean finalChunk, int count) {
-            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectCancelBatch(
-                    pending.sequence(), finalChunk, pending.command().header().userId(),
-                    batch.preparedCancellationOrderIds, count, pending.command().header().commandId(), shard,
-                    owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), batch);
-            reserveMatcherPublication(direct);
-            return direct;
-        }
+    private com.surprising.aeron.service.state.MatcherSettlementEvent preparePlace(CommandSlot pending) {
+        var admission = java.util.Objects.requireNonNull(pending.placeAdmission(), "place admission receipt");
+        com.surprising.aeron.service.state.MatcherSettlementEvent direct = runtimeState.prepareDirectMatcherSettlement(
+                pending.sequence(), directInitialLaneMask(admission.userId()), admission,
+                pending.command().header().commandId(), matchingFlow.matcherShard(pending),
+                identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
+        reserveMatcherPublication(pending, direct);
+        return direct;
+    }
 
-        private com.surprising.aeron.service.state.MatcherSettlementEvent preparePlace(CommandSlot pending) {
-            var admission = java.util.Objects.requireNonNull(pending.placeAdmission(), "place admission receipt");
-            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectMatcherSettlement(
-                    pending.sequence(), directInitialLaneMask(admission.userId()), admission,
-                    pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending),
-                    owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
-            reserveMatcherPublication(pending, direct);
-            return direct;
-        }
+    private com.surprising.aeron.service.state.MatcherSettlementEvent prepareReplacement(CommandSlot pending) {
+        var admission = requireMatchingAdmission(pending);
+        com.surprising.aeron.service.state.MatcherSettlementEvent direct = runtimeState.prepareDirectReplacement(
+                pending.sequence(), pending.sequence(), directInitialLaneMask(admission.userId()), admission,
+                pending.command().header().commandId(), matchingFlow.matcherShard(pending), identities,
+                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
+        pending.settlement(direct, direct.plan());
+        reserveMatcherPublication(direct);
+        if (realtimeCapture != null) pending.realtimeTakerOrder = direct.admittedOrder();
+        return direct;
+    }
 
-        private com.surprising.aeron.service.state.MatcherSettlementEvent prepareReplacement(CommandSlot pending) {
-            var admission = owner.requireMatchingAdmission(pending);
-            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectReplacement(
-                    pending.sequence(), pending.sequence(), directInitialLaneMask(admission.userId()), admission,
-                    pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,
-                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
-            pending.settlement(direct, direct.plan());
-            reserveMatcherPublication(direct);
-            if (owner.realtimeCapture != null) pending.realtimeTakerOrder = direct.admittedOrder();
-            return direct;
-        }
+    private com.surprising.aeron.service.state.MatcherSettlementEvent prepareTrigger(CommandSlot pending) {
+        long[] execute = pending.decodedCommand().trigger();
+        var trigger = java.util.Objects.requireNonNull(pending.sourceTrigger(),
+                "admitted trigger is missing");
+        com.surprising.aeron.service.state.OrderRuntime triggerOrder = java.util.Objects.requireNonNull(pending.triggerAdmissionOrder(),
+                "trigger admission receipt is missing");
+        com.surprising.aeron.service.state.MatcherSettlementEvent direct = runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
+                directInitialLaneMask(triggerOrder.userId()), triggerOrder, null, 1,
+                pending.command().header().commandId(), matchingFlow.matcherShard(pending), identities,
+                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
+        direct.triggerCompletion(trigger, execute[3]);
+        reserveMatcherPublication(pending, direct);
+        if (realtimeCapture != null) pending.realtimeTakerOrder = triggerOrder;
+        return direct;
+    }
 
-        private com.surprising.aeron.service.state.MatcherSettlementEvent prepareTrigger(CommandSlot pending) {
-            long[] execute = pending.decodedCommand().trigger();
-            var trigger = java.util.Objects.requireNonNull(pending.sourceTrigger(),
-                    "admitted trigger is missing");
-            com.surprising.aeron.service.state.OrderRuntime triggerOrder = java.util.Objects.requireNonNull(pending.triggerAdmissionOrder(),
-                    "trigger admission receipt is missing");
-            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
-                    directInitialLaneMask(triggerOrder.userId()), triggerOrder, null, 1,
-                    pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,
-                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
-            direct.triggerCompletion(trigger, execute[3]);
-            reserveMatcherPublication(pending, direct);
-            if (owner.realtimeCapture != null) pending.realtimeTakerOrder = triggerOrder;
-            return direct;
-        }
+    private com.surprising.aeron.service.state.MatcherSettlementEvent prepareCancellation(CommandSlot pending) {
+        com.surprising.aeron.service.state.MatcherSettlementEvent direct = runtimeState.prepareDirectCancellation(pending.sequence(),
+                pending.command().header().userId(), pending.decodedCommand().cancelOrder().orderId(),
+                pending.command().header().commandId(), matchingFlow.matcherShard(pending), identities,
+                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), pending.laneResultTarget());
+        reserveMatcherPublication(pending, direct);
+        return direct;
+    }
 
-        private com.surprising.aeron.service.state.MatcherSettlementEvent prepareCancellation(CommandSlot pending) {
-            com.surprising.aeron.service.state.MatcherSettlementEvent direct = owner.runtimeState.prepareDirectCancellation(pending.sequence(),
-                    pending.command().header().userId(), pending.decodedCommand().cancelOrder().orderId(),
-                    pending.command().header().commandId(), owner.matchingFlow.matcherShard(pending), owner.identities,
-                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), pending.laneResultTarget());
-            reserveMatcherPublication(pending, direct);
-            return direct;
-        }
+    private void reserveMatcherPublication(CommandSlot pending, com.surprising.aeron.service.state.MatcherSettlementEvent direct) {
+        pending.settlement(direct, direct.plan());
+        reserveMatcherPublication(direct);
+    }
 
-        private void reserveMatcherPublication(CommandSlot pending, com.surprising.aeron.service.state.MatcherSettlementEvent direct) {
-            pending.settlement(direct, direct.plan());
-            reserveMatcherPublication(direct);
-        }
+    private void reserveMatcherPublication(com.surprising.aeron.service.state.MatcherSettlementEvent direct) {
+        direct.reserveMatcherPublication();
+    }
 
-        private void reserveMatcherPublication(com.surprising.aeron.service.state.MatcherSettlementEvent direct) {
-            direct.reserveMatcherPublication();
-        }
-
-        private long directInitialLaneMask(long userId) {
-            if (userId <= 0) throw new IllegalArgumentException("direct settlement user is required");
-            return owner.runtimeState.topology().accountLaneMask(userId);
-        }
+    private long directInitialLaneMask(long userId) {
+        if (userId <= 0) throw new IllegalArgumentException("direct settlement user is required");
+        return runtimeState.topology().accountLaneMask(userId);
     }
 }

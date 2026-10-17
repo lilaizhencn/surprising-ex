@@ -241,7 +241,7 @@ final class CoreMatchingFlow {
             owner.matchingProgress.submissionCompleted(pending);
             return;
         }
-        var direct = owner.directMatcherSettlements.prepareForMatching(pending);
+        var direct = owner.prepareForMatching(pending);
         var command = prepareMatchingCommand(pending, direct);
         java.util.function.Supplier<?> matcherSubmission = command;
         if (direct != null && pending.placeAdmission() != null) {

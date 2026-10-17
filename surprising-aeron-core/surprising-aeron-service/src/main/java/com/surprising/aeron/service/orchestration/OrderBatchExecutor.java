@@ -253,7 +253,7 @@ final class OrderBatchExecutor {
         pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
         long userId = pending.command().header().userId();
         int shard = owner.matchingAdapter.matcherShardId(batch.preparedSymbols.getFirst());
-        batch.settlementEvent = owner.directMatcherSettlements.preparePipelinedPlaceBatch(pending, batch, shard);
+        batch.settlementEvent = owner.preparePipelinedPlaceBatch(pending, batch, shard);
         owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
             owner.matchingAdapter.prepareOrderRoutes(userId, batch.preparedSymbols);
             return submitPreparedPipelinedPlaceBatch(pending, batch, userId, shard);
@@ -522,12 +522,12 @@ final class OrderBatchExecutor {
             OrderRuntime admitted = item.admittedOrder;
             if (admitted == null) throw new IllegalStateException("batch item admission order is missing");
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-            direct = owner.directMatcherSettlements.prepareBatchPlaceItem(pending, batch, admitted, shard);
+            direct = owner.prepareBatchPlaceItem(pending, batch, admitted, shard);
             batch.itemSettlementEvent = direct;
         }
         if (batch.kind == OrderBatchKind.AMEND) {
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-            direct = owner.directMatcherSettlements.prepareBatchAmend(pending,
+            direct = owner.prepareBatchAmend(pending,
                     java.util.Objects.requireNonNull(batch.replacementAdmission), shard);
             batch.itemSettlementEvent = direct;
             batch.items.get(batch.nextIndex).captureAdmittedOrder(direct.admittedOrder());
@@ -579,7 +579,7 @@ final class OrderBatchExecutor {
             }
         }
         pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-        var direct = owner.directMatcherSettlements.prepareCancelBatch(
+        var direct = owner.prepareCancelBatch(
                 pending, batch, shard, finalChunk, end - start);
         batch.itemSettlementEvent = direct;
         owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
@@ -727,7 +727,7 @@ final class OrderBatchExecutor {
         // stop every continuation, and roll back only the unpublished Product Core runtime command.
         owner.matchingAdapter.poisonFromOwner("fatal order batch divergence sequence=" + batch.sequence
                 + " detail=" + detail);
-        owner.admissions.queuedMatching.clear();
+        owner.admissions.clearQueuedMatching();
         owner.pendingMatching.forEach(value -> {
             if (value.claimed) {
                 value.resetMatchingContinuation();

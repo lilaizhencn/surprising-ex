@@ -20,7 +20,7 @@ public final class PositionCommands {
         var command = TradingCommandCodec.decodeUpdatePositionMode(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
             long beforeRevision = owner.runtimeState().revision();
-            owner.deferPositionModeChange(userId, command, beforeRevision);
+            owner.directCommand.deferPositionModeChange(owner, userId, command, beforeRevision);
         } else if (DerivativeAccountCommandProcessor.updatePositionMode(owner.runtimeState(), userId, command)) {
             owner.requestCommitPublication();
         }
@@ -31,7 +31,7 @@ public final class PositionCommands {
         owner.setSingleChangedUser(userId);
         var command = TradingCommandCodec.decodeAdjustPositionMargin(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
-            owner.deferPositionMarginAdjustment(userId, command);
+            owner.directCommand.deferPositionMarginAdjustment(owner, userId, command);
         } else {
             DerivativeAccountCommandProcessor.adjustPositionMargin(
                     owner.runtimeState(), owner.identities(), userId, command);
