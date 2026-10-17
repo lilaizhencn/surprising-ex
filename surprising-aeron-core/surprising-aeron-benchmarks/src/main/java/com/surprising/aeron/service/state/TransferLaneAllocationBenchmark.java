@@ -13,8 +13,7 @@ import org.openjdk.jmh.annotations.*;
 public class TransferLaneAllocationBenchmark {
     private TradingRuntimeState runtime;
     private RuntimeIdentityRegistry identities;
-    private AccountTransferOut outbound;
-    private final AccountTransferCompletion completion = new AccountTransferCompletion();
+    private final AccountControlTask task = new AccountControlTask();
     private final TransferFundsCommand command = new TransferFundsCommand(91, ProductLine.SPOT,
             ProductLine.LINEAR_PERPETUAL, "SPOT", "USDT_PERPETUAL", "USDT", 1, "benchmark", "", 7, 8);
     private long transfers;
@@ -33,15 +32,15 @@ public class TransferLaneAllocationBenchmark {
     /** One direct control fence is active at a time; this is not the 256-window throughput workload. */
     @Benchmark @OperationsPerInvocation(2)
     public long debitAndComplete() {
-        outbound = AccountTransferOut.prepare(outbound, runtime, identities, 7, command);
+        task.prepareTransferOut(runtime, identities, 7, command);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (!outbound.poll()) {
+        while (!task.poll()) {
             if (System.nanoTime() >= deadline) throw new IllegalStateException("transfer debit timed out");
             Thread.onSpinWait();
         }
         runtime.clearChangedKeys();
-        completion.prepare(runtime, 7, command.transferId());
-        while (!completion.getAsBoolean()) {
+        task.prepareTransferCompletion(runtime, 7, command.transferId());
+        while (!task.getAsBoolean()) {
             if (System.nanoTime() >= deadline) throw new IllegalStateException("transfer completion timed out");
             Thread.onSpinWait();
         }

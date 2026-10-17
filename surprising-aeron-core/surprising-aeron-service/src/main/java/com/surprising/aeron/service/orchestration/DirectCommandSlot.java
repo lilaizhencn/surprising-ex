@@ -9,18 +9,19 @@ import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.CoreResponse;
-import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.AccountBalanceAdjustment;
-import com.surprising.aeron.service.state.AccountLeverageChange;
-import com.surprising.aeron.service.state.AccountPositionMarginAdjustment;
-import com.surprising.aeron.service.state.AccountPositionModeChange;
-import com.surprising.aeron.service.state.AccountTransferOut;
+import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
+import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
+import com.surprising.aeron.protocol.TransferFundsCommand;
+import com.surprising.aeron.protocol.UpdateLeverageCommand;
+import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.service.state.RiskScanCoordinator;
+import com.surprising.aeron.service.state.AccountControlTask;
 import com.surprising.aeron.service.state.RuntimeTriggerOrderStateTransitions;
 import com.surprising.aeron.service.state.RuntimeAlgoOrderStateTransitions;
 import com.surprising.aeron.service.state.RuntimeAdlExecution;
 import com.surprising.aeron.service.state.RuntimeLiquidationResolution;
 import com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
 
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
@@ -60,7 +61,13 @@ final class DirectCommandSlot {
     private final AdlControlContinuation adlControl = new AdlControlContinuation();
     private final LiquidationResolutionControlContinuation liquidationResolutionControl =
             new LiquidationResolutionControlContinuation();
-    private final AccountControlContinuation accountControl = new AccountControlContinuation();
+    private final AccountControlTask accountControl = new AccountControlTask();
+    private TradingCoreRuntime ownerRef;
+    private final BooleanSupplier accountControlWork = () -> {
+        if (!accountControl.poll()) return false;
+        if (accountControl.stateChanged()) ownerRef.requestCommitPublication();
+        return true;
+    };
     private final TriggerControlContinuation triggerControl = new TriggerControlContinuation();
     private static final BooleanSupplier COMPLETE_CONTROL = () -> true;
 
@@ -69,11 +76,6 @@ final class DirectCommandSlot {
     private RuntimeLiquidationResolution.ResolutionWork reusableResolutionWork;
     private RiskScanCoordinator reusableRiskCoordinator;
     private com.surprising.aeron.service.state.RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment;
-    private AccountBalanceAdjustment reusableBalanceAdjustment;
-    private AccountTransferOut reusableTransferOut;
-    private AccountLeverageChange reusableLeverageChange;
-    private AccountPositionModeChange reusablePositionModeChange;
-    private AccountPositionMarginAdjustment reusablePositionMarginAdjustment;
 
     boolean active() { return active; }
 
@@ -137,7 +139,7 @@ final class DirectCommandSlot {
         TradingCoreRuntime.SourceKey checkedSource = sourceKey;
         long timestamp = commitFenceTimestamp, position = commitFenceClusterPosition;
         clear();
-        return replay != null ? replay : owner.directCommandFlow.apply(
+        return replay != null ? replay : owner.applyDirectCommand(
                 checkedCommand, timestamp, position, checkedSource, checkedFingerprint);
     }
     com.surprising.aeron.service.state.LaneCommitEvent commitEvent() { return commitEvent; }
@@ -211,48 +213,49 @@ final class DirectCommandSlot {
         reusableInsuranceAdjustment = work;
     }
 
-    AccountBalanceAdjustment reusableBalanceAdjustment() { return reusableBalanceAdjustment; }
-    AccountTransferOut reusableTransferOut() { return reusableTransferOut; }
-    AccountLeverageChange reusableLeverageChange() { return reusableLeverageChange; }
-    AccountPositionModeChange reusablePositionModeChange() { return reusablePositionModeChange; }
-    AccountPositionMarginAdjustment reusablePositionMarginAdjustment() { return reusablePositionMarginAdjustment; }
-
-    void deferBalanceAdjustmentControl(TradingCoreRuntime owner, AccountBalanceAdjustment work) {
+    void deferBalanceAdjustment(TradingCoreRuntime owner, long userId, BalanceAdjustmentCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        reusableBalanceAdjustment = Objects.requireNonNull(work);
-        accountControl.prepareBalance(owner, work);
-        controlWork = accountControl;
+        this.ownerRef = owner;
+        accountControl.prepareBalanceAdjustment(owner.runtimeState(), owner.identities(), userId, command);
+        controlWork = accountControlWork;
     }
 
-    void deferTransferOutControl(TradingCoreRuntime owner, AccountTransferOut work) {
+    void deferTransferOut(TradingCoreRuntime owner, long userId, TransferFundsCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        reusableTransferOut = Objects.requireNonNull(work);
-        accountControl.prepareTransfer(owner, work);
-        controlWork = accountControl;
+        this.ownerRef = owner;
+        accountControl.prepareTransferOut(owner.runtimeState(), owner.identities(), userId, command);
+        controlWork = accountControlWork;
     }
 
-    void deferLeverageChangeControl(TradingCoreRuntime owner, AccountLeverageChange work,
-            long beforeRevision) {
+    void deferTransferComplete(TradingCoreRuntime owner, long userId, long transferId) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        reusableLeverageChange = Objects.requireNonNull(work);
-        accountControl.prepareLeverage(owner, work, beforeRevision);
-        controlWork = accountControl;
+        this.ownerRef = owner;
+        accountControl.prepareTransferCompletion(owner.runtimeState(), userId, transferId);
+        controlWork = accountControlWork;
     }
 
-    void deferPositionModeChangeControl(TradingCoreRuntime owner, AccountPositionModeChange work,
-            long beforeRevision) {
+    void deferLeverageChange(TradingCoreRuntime owner, long userId, UpdateLeverageCommand command,
+                             long beforeRevision) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        reusablePositionModeChange = Objects.requireNonNull(work);
-        accountControl.preparePositionMode(owner, work, beforeRevision);
-        controlWork = accountControl;
+        this.ownerRef = owner;
+        accountControl.prepareLeverageChange(owner.runtimeState(), owner.identities(), userId, command, beforeRevision);
+        controlWork = accountControlWork;
     }
 
-    void deferPositionMarginAdjustmentControl(TradingCoreRuntime owner,
-            AccountPositionMarginAdjustment work) {
+    void deferPositionModeChange(TradingCoreRuntime owner, long userId, UpdatePositionModeCommand command,
+                                 long beforeRevision) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        reusablePositionMarginAdjustment = Objects.requireNonNull(work);
-        accountControl.preparePositionMargin(owner, work);
-        controlWork = accountControl;
+        this.ownerRef = owner;
+        accountControl.preparePositionModeChange(owner.runtimeState(), userId, command, beforeRevision);
+        controlWork = accountControlWork;
+    }
+
+    void deferPositionMarginAdjustment(TradingCoreRuntime owner, long userId,
+                                       AdjustPositionMarginCommand command) {
+        if (controlWork != null) throw new IllegalStateException("command already has pending work");
+        this.ownerRef = owner;
+        accountControl.preparePositionMarginAdjustment(owner.runtimeState(), owner.identities(), userId, command);
+        controlWork = accountControlWork;
     }
 
     void deferTriggerMutationControl(TradingCoreRuntime owner, long userId,
@@ -342,6 +345,7 @@ final class DirectCommandSlot {
         adlControl.clear();
         liquidationResolutionControl.clear();
         accountControl.clear();
+        ownerRef = null;
         triggerControl.clear();
         fundsIndexWork.clear();
         active = false;
@@ -455,80 +459,7 @@ final class DirectCommandSlot {
         }
     }
 
-    /** Single fixed-slot continuation for ordinary account control commands. */
-    private final class AccountControlContinuation implements BooleanSupplier {
-        private static final byte BALANCE = 1;
-        private static final byte TRANSFER = 2;
-        private static final byte LEVERAGE = 3;
-        private static final byte POSITION_MODE = 4;
-        private static final byte POSITION_MARGIN = 5;
-        private byte kind;
-        private TradingCoreRuntime owner;
-        private AccountBalanceAdjustment balance;
-        private AccountTransferOut transfer;
-        private AccountLeverageChange leverage;
-        private AccountPositionModeChange positionMode;
-        private AccountPositionMarginAdjustment positionMargin;
-        private long beforeRevision;
 
-        void prepareBalance(TradingCoreRuntime owner, AccountBalanceAdjustment work) {
-            clear(); kind = BALANCE; balance = work; this.owner = Objects.requireNonNull(owner);
-        }
-        void prepareTransfer(TradingCoreRuntime owner, AccountTransferOut work) {
-            clear(); kind = TRANSFER; transfer = work; this.owner = Objects.requireNonNull(owner);
-        }
-        void prepareLeverage(TradingCoreRuntime owner, AccountLeverageChange work,
-                long beforeRevision) {
-            clear(); kind = LEVERAGE; leverage = work; this.owner = Objects.requireNonNull(owner);
-            this.beforeRevision = beforeRevision;
-        }
-        void preparePositionMode(TradingCoreRuntime owner, AccountPositionModeChange work,
-                long beforeRevision) {
-            clear(); kind = POSITION_MODE; positionMode = work; this.owner = Objects.requireNonNull(owner);
-            this.beforeRevision = beforeRevision;
-        }
-        void preparePositionMargin(TradingCoreRuntime owner,
-                AccountPositionMarginAdjustment work) {
-            clear(); kind = POSITION_MARGIN; positionMargin = work; this.owner = Objects.requireNonNull(owner);
-        }
-        void clear() {
-            kind = 0; owner = null; balance = null; transfer = null; leverage = null;
-            positionMode = null; positionMargin = null; beforeRevision = 0;
-        }
-
-        @Override public boolean getAsBoolean() {
-            if (owner == null) throw new IllegalStateException("account continuation owner is missing");
-            boolean complete;
-            switch (kind) {
-                case BALANCE -> {
-                    complete = balance.poll();
-                    if (complete) owner.requestCommitPublication();
-                }
-                case TRANSFER -> {
-                    complete = transfer.poll();
-                    if (complete) {
-                        owner.requestCommitPublication();
-                    }
-                }
-                case LEVERAGE -> {
-                    complete = leverage.poll();
-                    if (complete && owner.runtimeState().revision() != beforeRevision)
-                        owner.requestCommitPublication();
-                }
-                case POSITION_MODE -> {
-                    complete = positionMode.poll();
-                    if (complete && owner.runtimeState().revision() != beforeRevision)
-                        owner.requestCommitPublication();
-                }
-                case POSITION_MARGIN -> {
-                    complete = positionMargin.poll();
-                    if (complete) owner.requestCommitPublication();
-                }
-                default -> throw new IllegalStateException("unknown account continuation");
-            }
-            return complete;
-        }
-    }
 
     /** Fixed-slot Lane operation and completion for direct trigger/algo commands. */
     private final class TriggerControlContinuation

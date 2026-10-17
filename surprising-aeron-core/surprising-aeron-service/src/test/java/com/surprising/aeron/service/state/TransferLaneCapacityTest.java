@@ -19,16 +19,17 @@ class TransferLaneCapacityTest {
             runtime.startAccountLanes();
             assertThat(runtime.hasPendingTransferCapacity()).isFalse();
             var next = command(TradingRuntimeState.MAX_PENDING_TRANSFERS + 1L);
-            assertThatThrownBy(() -> AccountTransferOut.prepare(null, runtime, identities, 7, next))
+            var task = new AccountControlTask();
+            assertThatThrownBy(() -> task.prepareTransferOut(runtime, identities, 7, next))
                     .hasMessageContaining("capacity is full");
-            var duplicate = AccountTransferOut.prepare(null, runtime, identities, 7, first);
-            LedgerControlTestSupport.await(runtime, duplicate::poll);
+            task.prepareTransferOut(runtime, identities, 7, first);
+            LedgerControlTestSupport.await(runtime, task::poll);
             assertThat(runtime.pendingTransferUser(1)).isEqualTo(7);
-            var completion = new AccountTransferCompletion().prepare(runtime, 7, 1);
+            var completion = new AccountControlTask().prepareTransferCompletion(runtime, 7, 1);
             LedgerControlTestSupport.await(runtime, completion);
             assertThat(runtime.hasPendingTransferCapacity()).isTrue();
-            var accepted = AccountTransferOut.prepare(duplicate, runtime, identities, 7, next);
-            LedgerControlTestSupport.await(runtime, accepted::poll);
+            task.prepareTransferOut(runtime, identities, 7, next);
+            LedgerControlTestSupport.await(runtime, task::poll);
             assertThat(runtime.hasPendingTransferCapacity()).isFalse();
             assertThat(runtime.pendingTransferUser(next.transferId())).isEqualTo(7);
             int asset = identities.assetId("USDT");

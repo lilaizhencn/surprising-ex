@@ -3,9 +3,29 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
+import java.util.List;
 
 /** Owns runtime order commit metadata and terminal-state cleanup. */
 public final class RuntimeOrderCommitStateTransitions {
+
+    public record TerminalPruneBatch(
+            List<Long> orderIds,
+            List<Long> algoOrderIds,
+            List<Long> triggerOrderIds,
+            List<Long> liquidationIds) {
+
+        public static TerminalPruneBatch empty() {
+            return new TerminalPruneBatch(List.of(), List.of(), List.of(), List.of());
+        }
+
+        public int size() {
+            return orderIds.size() + algoOrderIds.size() + triggerOrderIds.size() + liquidationIds.size();
+        }
+
+        public boolean isEmpty() {
+            return size() == 0;
+        }
+    }
 
     private RuntimeOrderCommitStateTransitions() {
     }

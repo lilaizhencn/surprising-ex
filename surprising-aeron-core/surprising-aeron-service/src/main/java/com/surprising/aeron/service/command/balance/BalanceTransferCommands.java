@@ -5,8 +5,6 @@ import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.state.AccountBalanceAdjustment;
-import com.surprising.aeron.service.state.AccountTransferOut;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.RuntimeAccountStateTransitions;
 
@@ -17,8 +15,6 @@ import com.surprising.aeron.service.state.RuntimeAccountStateTransitions;
  */
 public final class BalanceTransferCommands {
     private final TradingCoreRuntime owner;
-    private final com.surprising.aeron.service.state.AccountTransferCompletion completion =
-            new com.surprising.aeron.service.state.AccountTransferCompletion();
 
     public BalanceTransferCommands(TradingCoreRuntime owner) {
         if (owner == null) throw new IllegalArgumentException("owner context is required");
@@ -32,9 +28,7 @@ public final class BalanceTransferCommands {
 
     private void adjustBalance(long userId, BalanceAdjustmentCommand command) {
         if (owner.asynchronousCommands()) {
-            var work = AccountBalanceAdjustment.prepare(owner.reusableBalanceAdjustment(),
-                    owner.runtimeState(), owner.identities(), userId, command);
-            owner.deferBalanceAdjustmentControl(work);
+            owner.deferBalanceAdjustment(userId, command);
         } else {
             RuntimeAccountStateTransitions.adjustBalance(owner.runtimeState(), owner.identities(), userId, command);
             owner.requestCommitPublication();
@@ -45,9 +39,7 @@ public final class BalanceTransferCommands {
         owner.setSingleChangedUser(message.header().userId());
         var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe(), message.header().userId());
         if (owner.asynchronousCommands()) {
-            var work = AccountTransferOut.prepare(owner.reusableTransferOut(), owner.runtimeState(),
-                    owner.identities(), message.header().userId(), command);
-            owner.deferTransferOutControl(work);
+            owner.deferTransferOut(message.header().userId(), command);
         } else {
             RuntimeAccountStateTransitions.transferOut(owner.runtimeState(), owner.identities(), message.header().userId(), command);
             completeTransferPublication();
@@ -73,12 +65,7 @@ public final class BalanceTransferCommands {
     public void executeCompleteTransfer(CoreMessage message, long clusterTimestamp) {
         long id = TradingCommandCodec.decodeCompleteTransfer(message.payloadUnsafe()).transferId();
         if (owner.asynchronousCommands()) {
-            completion.prepare(owner.runtimeState(), message.header().userId(), id);
-            owner.deferControl(() -> {
-                if (!completion.getAsBoolean()) return false;
-                owner.requestCommitPublication();
-                return true;
-            });
+            owner.deferTransferComplete(message.header().userId(), id);
         } else {
             RuntimeAccountStateTransitions.completeTransfer(owner.runtimeState(), message.header().userId(), id);
             owner.requestCommitPublication();

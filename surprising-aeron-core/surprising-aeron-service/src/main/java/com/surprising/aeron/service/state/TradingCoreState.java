@@ -473,7 +473,9 @@ public record TradingCoreState(
         if (user == null) return 0;
         long hash = hashUser(CoreStateHash.start(), user);
         for (Map.Entry<CoreLeverageKey, Long> entry : leverages.entrySet()) {
-            if (entry.getKey().userId() != userId) continue;
+            long entryUserId = entry.getKey().userId();
+            if (entryUserId < userId) continue;
+            if (entryUserId > userId) break;
             hash = CoreStateHash.mix(hash, entry.getKey().instrumentId());
             hash = CoreStateHash.mix(hash, entry.getKey().marginMode().wireCode());
             hash = CoreStateHash.mix(hash, entry.getValue());

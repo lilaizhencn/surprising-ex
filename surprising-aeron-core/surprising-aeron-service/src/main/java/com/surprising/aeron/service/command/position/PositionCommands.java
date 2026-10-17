@@ -4,8 +4,6 @@ import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.state.AccountPositionMarginAdjustment;
-import com.surprising.aeron.service.state.AccountPositionModeChange;
 import com.surprising.aeron.service.state.DerivativeAccountCommandProcessor;
 
 /** 衍生品持仓模式和持仓保证金命令；不处理现货资金冻结或杠杆变更。 */
@@ -22,9 +20,7 @@ public final class PositionCommands {
         var command = TradingCommandCodec.decodeUpdatePositionMode(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
             long beforeRevision = owner.runtimeState().revision();
-            var work = AccountPositionModeChange.prepare(owner.reusablePositionModeChange(),
-                    owner.runtimeState(), userId, command);
-            owner.deferPositionModeChangeControl(work, beforeRevision);
+            owner.deferPositionModeChange(userId, command, beforeRevision);
         } else if (DerivativeAccountCommandProcessor.updatePositionMode(owner.runtimeState(), userId, command)) {
             owner.requestCommitPublication();
         }
@@ -35,9 +31,7 @@ public final class PositionCommands {
         owner.setSingleChangedUser(userId);
         var command = TradingCommandCodec.decodeAdjustPositionMargin(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
-            var work = AccountPositionMarginAdjustment.prepare(owner.reusablePositionMarginAdjustment(),
-                    owner.runtimeState(), owner.identities(), userId, command);
-            owner.deferPositionMarginAdjustmentControl(work);
+            owner.deferPositionMarginAdjustment(userId, command);
         } else {
             DerivativeAccountCommandProcessor.adjustPositionMargin(
                     owner.runtimeState(), owner.identities(), userId, command);

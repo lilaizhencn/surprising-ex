@@ -9,7 +9,7 @@ import com.surprising.aeron.service.state.LiquidationRuntime;
 import com.surprising.aeron.service.state.LaneCommitDelta;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.ReservationRuntime;
-import com.surprising.aeron.service.state.TerminalPruneBatch;
+import com.surprising.aeron.service.state.RuntimeOrderCommitStateTransitions.TerminalPruneBatch;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import java.io.ByteArrayInputStream;

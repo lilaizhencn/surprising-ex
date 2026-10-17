@@ -447,7 +447,7 @@ class RuntimeStateBusinessRulesTest {
         var identities = new RuntimeIdentityRegistry();
         try (var runtime = RuntimeStateProjector.project(before, identities)) {
             runtime.startAccountLanes();
-            var work = new AccountLeverageChange(runtime, identities, 101, command);
+            var work = new AccountControlTask().prepareLeverageChange(runtime, identities, 101, command);
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             boolean done = false;
             while (!(done = work.poll()) && System.nanoTime() < deadline) Thread.onSpinWait();

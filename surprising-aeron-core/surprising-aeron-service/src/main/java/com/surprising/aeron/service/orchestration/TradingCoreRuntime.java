@@ -140,8 +140,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
             balances, instruments, funding, risk, liquidations, adl, insurance,
             positions, leverage, instrumentSettlement, new FeePolicyCommands(this),
             new TriggerCommandDispatcher(triggers));
-    /** 直接控制命令的异步终结边界。 */
-    final CoreDirectCommandFlow directCommandFlow = new CoreDirectCommandFlow(this);
     /** 集群日志入口的状态与暂存字段。 */
     private boolean clusterPipelineAdmission;
     private CoreMessage decodedIngressMessage;
@@ -1000,7 +998,38 @@ public final class TradingCoreRuntime implements AutoCloseable {
             return admissions.beginMatching(message, clusterTimestamp, clusterPosition,
                     sourceKey, fingerprint);
         }
-        return directCommandFlow.apply(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint);
+        return applyDirectCommand(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint);
+    }
+
+    CoreResponse applyDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
+                                    SourceKey sourceKey, CommandFingerprint fingerprint) {
+        ResponseStatus status;
+        CoreResultCode resultCode = CoreResultCode.NONE;
+        activateFactContext(message, fingerprint);
+        long beforeRuntimeRevision = runtimeState.revision();
+        long runtimeCommandCheckpoint = runtimeState.commandRevisionCheckpoint();
+        long positionIdentityCheckpoint = identities.positionCheckpoint();
+        directCommand.initialize(message, fingerprint, sourceKey, clusterTimestamp, clusterPosition,
+                beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
+        resultBuilder.beginCommand();
+        admissions.queuedMatching.clear();
+        commits.beginCommitPublicationBatch();
+        try {
+            status = applyCommand(message, clusterTimestamp);
+        } catch (CoreStateRejectedException exception) {
+            status = ResponseStatus.REJECTED;
+            resultCode = CoreResultCode.fromRejectionCode(exception.code());
+        } catch (ArithmeticException exception) {
+            status = ResponseStatus.REJECTED;
+            resultCode = CoreResultCode.ARITHMETIC_OVERFLOW;
+        } catch (IllegalArgumentException exception) {
+            status = ResponseStatus.REJECTED;
+            resultCode = CoreResultCode.INVALID_COMMAND;
+        }
+        if (directCommand.hasControlWork()) return null;
+        return finishDirectCommand(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint,
+                beforeRuntimeRevision, runtimeCommandCheckpoint,
+                positionIdentityCheckpoint, status, resultCode);
     }
 
     private CoreResponse checkCommandReplay(CoreMessage message, CommandFingerprint fingerprint) {
@@ -1033,8 +1062,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     EMPTY_RESPONSE_DATA);
         }
         return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
-                com.surprising.aeron.protocol.ResponseStatus.APPLIED, CoreResultCode.NONE,
-                appliedCommandCount, EMPTY_RESPONSE_DATA);
+                    com.surprising.aeron.protocol.ResponseStatus.APPLIED, CoreResultCode.NONE,
+                    appliedCommandCount, EMPTY_RESPONSE_DATA);
     }
 
     CoreResponse checkSourceSequence(CoreMessage message, long lastSourceSequence) {
@@ -1049,13 +1078,142 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
         return null;
     }
+
     CoreResponse finishDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
             SourceKey sourceKey, CommandFingerprint fingerprint,
             long beforeRuntimeRevision, long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
             ResponseStatus status, CoreResultCode resultCode) {
-        return directCommandFlow.finish(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint,
-                beforeRuntimeRevision, runtimeCommandCheckpoint,
-                positionIdentityCheckpoint, status, resultCode);
+        long nextAppliedCommandCount = Math.incrementExact(appliedCommandCount);
+        if (directCommand.publicationComplete()) {
+            return finishResponseAfterFundsRetention(message, clusterTimestamp, clusterPosition,
+                    sourceKey, fingerprint, status, resultCode, nextAppliedCommandCount);
+        }
+        if (!directCommand.finalizationPrepared()) {
+            if (status != ResponseStatus.APPLIED
+                    && (commits.commitPublicationDirty()
+                    || runtimeState.revision() != beforeRuntimeRevision
+                    || runtimeState.hasUncommittedCommandChanges())) {
+                rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
+                        Math.incrementExact(appliedCommandCount));
+            }
+            if (status == null) {
+                commits.abortCommitPublicationBatch();
+                return finishDirectCommandContext(rejected(CoreResultCode.INVALID_MESSAGE));
+            }
+            if (status == ResponseStatus.APPLIED) {
+                if (runtimeState.asynchronousCommands()) {
+                    try {
+                        if (!triggers.collectClosingTriggerIds().isEmpty()) {
+                            commits.requestCommitPublication();
+                        }
+                    } catch (ArithmeticException failure) {
+                        if (deferFinalizationRejection(CoreResultCode.ARITHMETIC_OVERFLOW)) return null;
+                        throw failure;
+                    }
+                } else {
+                    triggers.cancelTriggersForClosedPositions();
+                }
+                if (pendingMatching.size() + admissions.queuedMatching.size()
+                        > pendingMatching.capacity()) {
+                    admissions.queuedMatching.clear();
+                    if (deferFinalizationRejection(CoreResultCode.MATCHING_BACKPRESSURE)) return null;
+                    rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
+                            Math.incrementExact(appliedCommandCount));
+                    return finishDirectCommandContext(rejected(CoreResultCode.MATCHING_BACKPRESSURE));
+                }
+            }
+            if (status == ResponseStatus.APPLIED) {
+                java.util.List<Long> changedOrderIds = resultBuilder.commandChangedOrderIds == null
+                        ? java.util.List.of() : resultBuilder.commandChangedOrderIds;
+                try {
+                    if (runtimeState.asynchronousCommands()) {
+                        com.surprising.aeron.service.state.RuntimeOrderCommitStateTransitions.validateStampInputs(
+                                clusterTimestamp, clusterPosition, changedOrderIds);
+                    } else {
+                        stampOrderChangesRuntime(clusterTimestamp, clusterPosition, changedOrderIds);
+                    }
+                } catch (IllegalStateException exception) {
+                    if (deferFinalizationRejection(CoreResultCode.INVALID_COMMAND)) return null;
+                    rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
+                            Math.incrementExact(appliedCommandCount));
+                    return finishDirectCommandContext(rejected(CoreResultCode.INVALID_COMMAND));
+                }
+            }
+            resultBuilder.materializeDirectChangeAccumulators();
+            if (status == ResponseStatus.APPLIED && !resultBuilder.commandChangedUserIds.isEmpty()) {
+                if (runtimeState.asynchronousCommands()) {
+                    runtimeState.releaseCompletedSequentialLaneStage();
+                    directCommand.commitEvent(runtimeState.dispatchLaneMutation(
+                            nextAppliedCommandCount, resultBuilder.commandChangedUserIds,
+                            resultBuilder.commandChangedOrderIds, triggers.closingTriggerIds(),
+                            clusterTimestamp, clusterPosition));
+                } else {
+                    runtimeState.stageLaneMutation(nextAppliedCommandCount,
+                            resultBuilder.commandChangedUserIds);
+                }
+            }
+            directCommand.markFinalizationPrepared();
+        }
+        if (directCommand.commitEvent() != null) {
+            if (!runtimeState.laneCommitComplete(directCommand.commitEvent())) {
+                directCommand.result(status, resultCode);
+                return null;
+            }
+            runtimeState.releaseLaneCommit(directCommand.commitEvent());
+            directCommand.clearCommitEvent();
+        }
+        if (status == ResponseStatus.APPLIED && !runtimeState.pollControlFundsValidation(
+                message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ADJUST_BALANCE
+                || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TRANSFER_OUT
+                || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TRANSFER_IN
+                || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ADJUST_INSURANCE_FUND)) {
+            directCommand.result(status, resultCode);
+            return null;
+        }
+        directCommand.clearFinalizationPrepared();
+        commits.completeCommitPublicationBatch();
+        if (status == ResponseStatus.APPLIED) validateFundsConservation(message);
+        directCommand.markPublicationComplete();
+        return finishResponseAfterFundsRetention(message, clusterTimestamp, clusterPosition,
+                sourceKey, fingerprint, status, resultCode, nextAppliedCommandCount);
+    }
+
+    private CoreResponse finishResponseAfterFundsRetention(CoreMessage message, long clusterTimestamp,
+            long clusterPosition, SourceKey sourceKey, CommandFingerprint fingerprint,
+            ResponseStatus status, CoreResultCode resultCode, long nextAppliedCommandCount) {
+        if (isFundsIdempotencyCommand(message.header().messageType())
+                && status == ResponseStatus.APPLIED) {
+            if (!directCommand.retainFundsOnLedger(this)) {
+                directCommand.result(status, resultCode);
+                return null;
+            }
+        }
+        recordAppliedSequence(nextAppliedCommandCount, sourceKey, message.header().sourceSequence());
+        admissions.appendQueuedMatching(clusterTimestamp, clusterPosition);
+        byte[] responseData = resultBuilder.commandResultData();
+        int responseOffset = resultBuilder.responseDataOffset();
+        int responseLength = resultBuilder.responseDataLength();
+        resultLedger.storeOwnedResult(message.header().commandId(), fingerprint, status, resultCode,
+                appliedCommandCount, responseData,
+                responseOffset, responseLength);
+        CoreResponse response = message.ownedResponse(status, status, resultCode, appliedCommandCount,
+                responseData, responseOffset, responseLength);
+        resultBuilder.transferResponseOwnership();
+        return finishDirectCommandContext(response);
+    }
+
+    private CoreResponse finishDirectCommandContext(CoreResponse response) {
+        directCommand.clear();
+        return finishFactContext(response);
+    }
+
+    private boolean deferFinalizationRejection(CoreResultCode code) {
+        if (!runtimeState.asynchronousCommands()) return false;
+        if (!directCommand.active()) {
+            throw new IllegalStateException("asynchronous finalization has no command context");
+        }
+        directCommand.result(ResponseStatus.REJECTED, code);
+        return true;
     }
     /** 唯一直接控制命令的续步槽；与订单撮合序号槽分离。 */
     final DirectCommandSlot directCommand = new DirectCommandSlot();
@@ -1113,51 +1271,30 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 identities);
     }
 
-    public com.surprising.aeron.service.state.AccountBalanceAdjustment
-            reusableBalanceAdjustment() {
-        return directCommand.reusableBalanceAdjustment();
+    public void deferBalanceAdjustment(long userId, com.surprising.aeron.protocol.BalanceAdjustmentCommand command) {
+        directCommand.deferBalanceAdjustment(this, userId, command);
     }
 
-    public com.surprising.aeron.service.state.AccountTransferOut reusableTransferOut() {
-        return directCommand.reusableTransferOut();
+    public void deferTransferOut(long userId, com.surprising.aeron.protocol.TransferFundsCommand command) {
+        directCommand.deferTransferOut(this, userId, command);
     }
 
-    public com.surprising.aeron.service.state.AccountLeverageChange reusableLeverageChange() {
-        return directCommand.reusableLeverageChange();
+    public void deferTransferComplete(long userId, long transferId) {
+        directCommand.deferTransferComplete(this, userId, transferId);
     }
 
-    public com.surprising.aeron.service.state.AccountPositionModeChange reusablePositionModeChange() {
-        return directCommand.reusablePositionModeChange();
+    public void deferLeverageChange(long userId, com.surprising.aeron.protocol.UpdateLeverageCommand command,
+                                   long beforeRevision) {
+        directCommand.deferLeverageChange(this, userId, command, beforeRevision);
     }
 
-    public com.surprising.aeron.service.state.AccountPositionMarginAdjustment
-            reusablePositionMarginAdjustment() {
-        return directCommand.reusablePositionMarginAdjustment();
+    public void deferPositionModeChange(long userId, com.surprising.aeron.protocol.UpdatePositionModeCommand command,
+                                       long beforeRevision) {
+        directCommand.deferPositionModeChange(this, userId, command, beforeRevision);
     }
 
-    public void deferBalanceAdjustmentControl(
-            com.surprising.aeron.service.state.AccountBalanceAdjustment work) {
-        directCommand.deferBalanceAdjustmentControl(this, work);
-    }
-
-    public void deferTransferOutControl(
-            com.surprising.aeron.service.state.AccountTransferOut work) {
-        directCommand.deferTransferOutControl(this, work);
-    }
-
-    public void deferLeverageChangeControl(
-            com.surprising.aeron.service.state.AccountLeverageChange work, long beforeRevision) {
-        directCommand.deferLeverageChangeControl(this, work, beforeRevision);
-    }
-
-    public void deferPositionModeChangeControl(
-            com.surprising.aeron.service.state.AccountPositionModeChange work, long beforeRevision) {
-        directCommand.deferPositionModeChangeControl(this, work, beforeRevision);
-    }
-
-    public void deferPositionMarginAdjustmentControl(
-            com.surprising.aeron.service.state.AccountPositionMarginAdjustment work) {
-        directCommand.deferPositionMarginAdjustmentControl(this, work);
+    public void deferPositionMarginAdjustment(long userId, com.surprising.aeron.protocol.AdjustPositionMarginCommand command) {
+        directCommand.deferPositionMarginAdjustment(this, userId, command);
     }
 
     public void deferTriggerMutation(long userId,
