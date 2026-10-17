@@ -56,6 +56,18 @@ class SettlementLaneWorkerTest {
         }
     }
 
+    private static java.lang.reflect.Field findField(Class<?> type, String name) {
+        Class<?> current = type;
+        while (current != null) {
+            try {
+                return current.getDeclaredField(name);
+            } catch (NoSuchFieldException ignored) {
+                current = current.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldError(name);
+    }
+
     @ParameterizedTest
     @ValueSource(ints = {0, 256})
     void admissionPublishedAfterParkingAnnouncementKeepsMakingProgress(int spins) throws Exception {
@@ -65,13 +77,13 @@ class SettlementLaneWorkerTest {
         System.setProperty(strategyKey, "BLOCKING");
         System.setProperty(spinKey, Integer.toString(spins));
         try (var worker = new SettlementLaneWorker("admission-wakeup", new AccountLaneState(0, 8), 8)) {
-            var parked = SettlementLaneWorker.class.getDeclaredField("parked");
+            var parked = findField(SettlementLaneWorker.class, "parked");
             parked.setAccessible(true);
             var executed = new AtomicInteger();
             for (int round = 0; round < 512; round++) {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
                 boolean announced = false;
-                while (!(announced = parked.getBoolean(worker)) && System.nanoTime() < deadline) Thread.onSpinWait();
+                while (!(announced = worker.isParked() || parked.getBoolean(worker)) && System.nanoTime() < deadline) Thread.onSpinWait();
                 assertThat(announced).isTrue();
                 var completed = new CountDownLatch(1);
                 int expected = round;

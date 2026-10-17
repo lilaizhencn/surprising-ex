@@ -10,9 +10,54 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
+abstract class SettlementLaneWorkerLhsPadding {
+    @SuppressWarnings("unused")
+    private long p00, p01, p02, p03, p04, p05, p06, p07;
+}
+
+abstract class SettlementLaneWorkerHandoffRequested extends SettlementLaneWorkerLhsPadding {
+    /** owner 请求的交接代次；同一代次只派发一次预分配任务。 */
+    protected volatile long requestedHandoff;
+}
+
+abstract class SettlementLaneWorkerMidPadding1 extends SettlementLaneWorkerHandoffRequested {
+    @SuppressWarnings("unused")
+    private long p10, p11, p12, p13, p14, p15, p16, p17;
+}
+
+abstract class SettlementLaneWorkerHandoffCompleted extends SettlementLaneWorkerMidPadding1 {
+    /** Lane 完成此前所有任务并释放所有权后发布的代次。 */
+    protected volatile long completedHandoff;
+}
+
+abstract class SettlementLaneWorkerMidPadding2 extends SettlementLaneWorkerHandoffCompleted {
+    @SuppressWarnings("unused")
+    private long p20, p21, p22, p23, p24, p25, p26, p27;
+}
+
+abstract class SettlementLaneWorkerHandoffResumed extends SettlementLaneWorkerMidPadding2 {
+    /** owner 释放临时所有权后发布的恢复代次。 */
+    protected volatile long resumedHandoff;
+}
+
+abstract class SettlementLaneWorkerMidPadding3 extends SettlementLaneWorkerHandoffResumed {
+    @SuppressWarnings("unused")
+    private long p30, p31, p32, p33, p34, p35, p36, p37;
+}
+
+abstract class SettlementLaneWorkerParked extends SettlementLaneWorkerMidPadding3 {
+    /** Announced before every park and before rechecking all publication sources. */
+    protected volatile boolean parked;
+}
+
+abstract class SettlementLaneWorkerRhsPadding extends SettlementLaneWorkerParked {
+    @SuppressWarnings("unused")
+    private long p40, p41, p42, p43, p44, p45, p46, p47;
+}
+
 /** Permanent SPSC event loop for one Account Lane. */
 @Slf4j
-public final class SettlementLaneWorker implements AutoCloseable {
+public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding implements AutoCloseable {
     private static final String WAIT_STRATEGY_PROPERTY = "surprising.aeron.settlement-wait-strategy";
     private static final String SPIN_LIMIT_PROPERTY = "surprising.aeron.settlement-spin-limit";
     /**
@@ -53,8 +98,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
     private volatile boolean started;
     private volatile boolean running = true;
     private volatile Throwable failure;
-    /** Announced before every park and before rechecking all publication sources. */
-    private volatile boolean parked;
     public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity) {
         this(role, lane, requestedCapacity, ignored -> { });
     }
@@ -93,12 +136,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
         rethrowFailure();
     }
 
-    /** owner 请求的交接代次；同一代次只派发一次预分配任务。 */
-    private volatile long requestedHandoff;
-    /** Lane 完成此前所有任务并释放所有权后发布的代次。 */
-    private volatile long completedHandoff;
-    /** owner 释放临时所有权后发布的恢复代次。 */
-    private volatile long resumedHandoff;
     /** 控制阶段交接任务不修改资金，仅转移唯一写入权。 */
     private final Command handoffCommand = lane -> {
         lane.releaseOwnerForHandoff();
@@ -116,6 +153,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
     }
 
     public Thread thread() { return thread; }
+    public boolean isParked() { return parked; }
 
     public long submit(Command command) {
         if (command == null) throw new IllegalArgumentException("settlement command is required");

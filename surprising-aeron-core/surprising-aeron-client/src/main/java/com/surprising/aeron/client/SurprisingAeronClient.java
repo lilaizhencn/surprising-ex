@@ -50,6 +50,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     private final ClusterOperations cluster;
     /** Pool sessions are confined to their existing dispatcher; standalone sessions serialize shared callers. */
     private final Thread ioOwner;
+    private final java.util.concurrent.locks.ReentrantLock clientLock = new java.util.concurrent.locks.ReentrantLock();
     private final ScheduledExecutorService keepAliveExecutor;
     private final IdleStrategy idleStrategy = new BackoffIdleStrategy();
     private final Map<Long, CoreResponse> responses = new ConcurrentHashMap<>();
@@ -227,7 +228,12 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     @Override
     public long offer(CoreMessage message) {
         if (ioOwner != null) { requireIoOwner(); return offerToCluster(message); }
-        synchronized (this) { return offerToCluster(message); }
+        clientLock.lock();
+        try {
+            return offerToCluster(message);
+        } finally {
+            clientLock.unlock();
+        }
     }
 
     private long offerToCluster(CoreMessage message) {
@@ -254,7 +260,12 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     @Override
     public int pollEgress(int fragmentLimit) {
         if (ioOwner != null) { requireIoOwner(); return pollClusterEgress(fragmentLimit); }
-        synchronized (this) { return pollClusterEgress(fragmentLimit); }
+        clientLock.lock();
+        try {
+            return pollClusterEgress(fragmentLimit);
+        } finally {
+            clientLock.unlock();
+        }
     }
 
     private int pollClusterEgress(int fragmentLimit) {
@@ -312,7 +323,12 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     @Override
     public boolean keepAlive() {
         if (ioOwner != null) { requireIoOwner(); return keepClusterAlive(); }
-        synchronized (this) { return keepClusterAlive(); }
+        clientLock.lock();
+        try {
+            return keepClusterAlive();
+        } finally {
+            clientLock.unlock();
+        }
     }
 
     private boolean keepClusterAlive() {
@@ -429,7 +445,12 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     @Override
     public void close() {
         if (ioOwner != null) { requireIoOwner(); closeCluster(); return; }
-        synchronized (this) { closeCluster(); }
+        clientLock.lock();
+        try {
+            closeCluster();
+        } finally {
+            clientLock.unlock();
+        }
     }
 
     private void closeCluster() {

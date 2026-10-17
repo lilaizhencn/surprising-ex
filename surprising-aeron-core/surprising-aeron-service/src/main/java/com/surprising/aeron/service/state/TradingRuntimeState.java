@@ -152,24 +152,44 @@ public final class TradingRuntimeState implements AutoCloseable {
     private int publishedPositions;
     /** 已派发到各 Lane 的提交序号，防止重复派发。 */
     final long[] dispatchedLaneCommitSequences;
+    private static final int EVENT_POOL_INITIAL_CAPACITY = 1024;
+    private static final int EVENT_POOL_PREALLOCATE_COUNT = 512;
     /** 可复用的 laneCommitEvent 对象池；仅在消费者完成后回收。 */
-    final java.util.ArrayDeque<LaneCommitEvent> laneCommitEventPool = new java.util.ArrayDeque<>();
+    final java.util.ArrayDeque<LaneCommitEvent> laneCommitEventPool = new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
 
-    public static final class PaddedReadyMask {
+    private static class PaddedReadyMaskLhsPadding {
         @SuppressWarnings("unused")
-        private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p10, p11, p12, p13, p14;
-        private final java.util.concurrent.atomic.AtomicLong mask = new java.util.concurrent.atomic.AtomicLong();
+        private long p00, p01, p02, p03, p04, p05, p06, p07;
+    }
+
+    private static class PaddedReadyMaskValue extends PaddedReadyMaskLhsPadding {
+        protected volatile long mask;
+    }
+
+    private static class PaddedReadyMaskRhsPadding extends PaddedReadyMaskValue {
         @SuppressWarnings("unused")
-        private long p20, p21, p22, p23, p24, p25, p26, p27, p28, p29, p30, p31, p32, p33, p34;
+        private long p10, p11, p12, p13, p14, p15, p16, p17;
+    }
+
+    public static final class PaddedReadyMask extends PaddedReadyMaskRhsPadding {
+        private static final java.lang.invoke.VarHandle MASK_VH;
+        static {
+            try {
+                MASK_VH = java.lang.invoke.MethodHandles.lookup()
+                        .findVarHandle(PaddedReadyMaskValue.class, "mask", long.class);
+            } catch (ReflectiveOperationException e) {
+                throw new ExceptionInInitializerError(e);
+            }
+        }
 
         public boolean setBit(int bitIndex) {
             long bit = 1L << bitIndex;
             while (true) {
-                long current = mask.get();
+                long current = (long) MASK_VH.getVolatile(this);
                 if ((current & bit) != 0) {
                     return false;
                 }
-                if (mask.compareAndSet(current, current | bit)) {
+                if (MASK_VH.compareAndSet(this, current, current | bit)) {
                     return true;
                 }
             }
@@ -178,11 +198,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         public void clearBit(int bitIndex) {
             long bit = 1L << bitIndex;
             while (true) {
-                long current = mask.get();
+                long current = (long) MASK_VH.getVolatile(this);
                 if ((current & bit) == 0) {
                     return;
                 }
-                if (mask.compareAndSet(current, current & ~bit)) {
+                if (MASK_VH.compareAndSet(this, current, current & ~bit)) {
                     return;
                 }
             }
@@ -190,22 +210,22 @@ public final class TradingRuntimeState implements AutoCloseable {
 
         public void clearBits(long bitsToClear) {
             while (true) {
-                long current = mask.get();
+                long current = (long) MASK_VH.getVolatile(this);
                 if ((current & bitsToClear) == 0) {
                     return;
                 }
-                if (mask.compareAndSet(current, current & ~bitsToClear)) {
+                if (MASK_VH.compareAndSet(this, current, current & ~bitsToClear)) {
                     return;
                 }
             }
         }
 
         public long get() {
-            return mask.get();
+            return (long) MASK_VH.getVolatile(this);
         }
 
         public long getAndClear() {
-            return mask.getAndSet(0L);
+            return (long) MASK_VH.getAndSet(this, 0L);
         }
     }
 
@@ -225,12 +245,12 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** 可复用的 placeAdmissionEvent 对象池；仅在消费者完成后回收。 */
     final java.util.ArrayDeque<PlaceAdmissionEvent> placeAdmissionEventPool =
-            new java.util.ArrayDeque<>();
+            new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
     private final java.util.ArrayDeque<ReplacementAdmissionEvent> replacementAdmissionEventPool =
-            new java.util.ArrayDeque<>();
+            new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
     /** 可复用的 placeBatchAdmissionEvent 对象池；仅在消费者完成后回收。 */
     final java.util.ArrayDeque<PlaceBatchAdmissionEvent> placeBatchAdmissionEventPool =
-            new java.util.ArrayDeque<>();
+            new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
     /** 账户 Lane 是否已初始化。 */
     boolean accountLanesStarted;
 
@@ -329,7 +349,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final int[] freeMatcherSettlementChangeSlots;
     private int freeMatcherSettlementChangeCount;
     /** 可复用的 laneCancelEvent 对象池；仅在消费者完成后回收。 */
-    final java.util.ArrayDeque<LaneCancelEvent> laneCancelEventPool = new java.util.ArrayDeque<>();
+    final java.util.ArrayDeque<LaneCancelEvent> laneCancelEventPool = new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
     /** 可复用的 laneReplaceEvent 对象池；仅在消费者完成后回收。 */
 
     /** 拥有当前执行上下文的唯一 owner；不得在其他线程直接修改其状态。 */
@@ -382,6 +402,13 @@ public final class TradingRuntimeState implements AutoCloseable {
             publishLaneCommittedSequence(accountLanes[laneId]);
             laneUserScratch[laneId] = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(4);
             laneDeltas[laneId] = new LaneCommitDelta();
+        }
+        for (int i = 0; i < EVENT_POOL_PREALLOCATE_COUNT; i++) {
+            laneCommitEventPool.addFirst(new LaneCommitEvent(accountLanes.length));
+            placeAdmissionEventPool.addFirst(new PlaceAdmissionEvent());
+            replacementAdmissionEventPool.addFirst(new ReplacementAdmissionEvent());
+            placeBatchAdmissionEventPool.addFirst(new PlaceBatchAdmissionEvent());
+            laneCancelEventPool.addFirst(new LaneCancelEvent());
         }
     }
 
@@ -1424,20 +1451,17 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public void releaseLaneCommit(LaneCommitEvent event) {
-        assertOwner();
         if (event == null) throw new IllegalArgumentException("Account Lane commit event is required");
         event.publishAndClear();
         laneCommitEventPool.addFirst(event);
     }
 
     public PlaceAdmissionEvent acquirePlaceAdmission() {
-        assertOwner();
         PlaceAdmissionEvent event = placeAdmissionEventPool.pollFirst();
         return event == null ? new PlaceAdmissionEvent() : event;
     }
 
     public void discardPlaceAdmission(PlaceAdmissionEvent event) {
-        assertOwner();
         if (event == null) return;
         event.discard();
         placeAdmissionEventPool.addFirst(event);
@@ -1478,7 +1502,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public void releasePlaceAdmission(PlaceAdmissionEvent event) {
-        assertOwner();
         if (event == null) return;
         event.clear();
         placeAdmissionEventPool.addFirst(event);
