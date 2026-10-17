@@ -759,10 +759,10 @@ public final class RuntimeIdentityRegistry {
                            Map<ClientIdentity, Long> clientKeys, Map<PositionIdentity, Long> positionKeys,
                            int nextAssetId, int nextSymbolId, long nextClientKey, long nextPositionKey) {
         public Snapshot {
-            assetIds = Collections.unmodifiableMap(new TreeMap<>(assetIds));
-            symbolIds = Collections.unmodifiableMap(new TreeMap<>(symbolIds));
-            clientKeys = Collections.unmodifiableMap(new TreeMap<>(clientKeys));
-            positionKeys = Collections.unmodifiableMap(new TreeMap<>(positionKeys));
+            assetIds = Collections.unmodifiableMap(assetIds instanceof java.util.NavigableMap<?, ?> ? assetIds : new java.util.LinkedHashMap<>(assetIds));
+            symbolIds = Collections.unmodifiableMap(symbolIds instanceof java.util.NavigableMap<?, ?> ? symbolIds : new java.util.LinkedHashMap<>(symbolIds));
+            clientKeys = Collections.unmodifiableMap(clientKeys);
+            positionKeys = Collections.unmodifiableMap(positionKeys);
             if (nextAssetId < assetIds.size() || nextSymbolId < symbolIds.size()
                     || nextClientKey <= clientKeys.size() || nextPositionKey <= positionKeys.size()) {
                 throw new IllegalArgumentException("invalid identity snapshot cursors");

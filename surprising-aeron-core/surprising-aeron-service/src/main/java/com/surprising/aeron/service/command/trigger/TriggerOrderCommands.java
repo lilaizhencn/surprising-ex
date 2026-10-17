@@ -101,8 +101,11 @@ public final class TriggerOrderCommands {
             this.instrumentId = instrumentId;
             this.scan = scan;
             this.remaining = remaining;
-            commandId = UUID.nameUUIDFromBytes((owner.productLine().name() + ":MARK_PRICE:" + instrumentId + ":"
-                    + scan.priceSequence()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            long msb = ((long) owner.productLine().ordinal() << 48)
+                    ^ (instrumentId == null ? 0L : ((long) instrumentId.hashCode() << 16))
+                    ^ 0x4d41524b50524943L; // "MARKPRIC"
+            long lsb = scan.priceSequence();
+            commandId = new UUID(msb, lsb);
             candidate = 0;
             page = null;
             pending = null;

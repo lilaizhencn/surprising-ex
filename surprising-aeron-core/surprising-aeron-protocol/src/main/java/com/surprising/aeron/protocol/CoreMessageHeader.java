@@ -19,6 +19,7 @@ public final class CoreMessageHeader {
     private long userId;
     private long submittedAtEpochMillis;
     private long correlationId;
+    private UUID cachedCommandId;
 
     public CoreMessageHeader(
         int schemaVersion,
@@ -55,6 +56,7 @@ public final class CoreMessageHeader {
                 Objects.requireNonNull(commandId, "commandId").getMostSignificantBits(),
                 commandId.getLeastSignificantBits(),
                 productLine, route, source, sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId);
+        this.cachedCommandId = commandId;
     }
 
     CoreMessageHeader(CoreMessage decoderOwner) { this.decoderOwner = decoderOwner; }
@@ -103,6 +105,7 @@ public final class CoreMessageHeader {
         this.userId = userId;
         this.submittedAtEpochMillis = submittedAtEpochMillis;
         this.correlationId = correlationId;
+        this.cachedCommandId = null;
     }
 
     void assign(
@@ -122,6 +125,7 @@ public final class CoreMessageHeader {
         assign(schemaVersion, kind, messageType, commandId.getMostSignificantBits(),
                 commandId.getLeastSignificantBits(), productLine, route, source, sourceId,
                 sourceSequence, userId, submittedAtEpochMillis, correlationId);
+        this.cachedCommandId = commandId;
     }
 
     public int schemaVersion() { return schemaVersion; }
@@ -129,7 +133,14 @@ public final class CoreMessageHeader {
     public CoreMessageType messageType() { return messageType; }
     public long commandIdMsb() { return commandIdMsb; }
     public long commandIdLsb() { return commandIdLsb; }
-    public UUID commandId() { return new UUID(commandIdMsb, commandIdLsb); }
+    public UUID commandId() {
+        UUID id = cachedCommandId;
+        if (id == null) {
+            id = new UUID(commandIdMsb, commandIdLsb);
+            cachedCommandId = id;
+        }
+        return id;
+    }
     public ProductLine productLine() { return productLine; }
     public CoreRoute route() { return route; }
     public CommandSource source() { return source; }
@@ -144,12 +155,15 @@ public final class CoreMessageHeader {
     public void releaseFromEgress() { if (decoderOwner != null) decoderOwner.releaseDecoderReader(); }
 
     public CoreMessageHeader immutableValue() {
-        return decoderOwner == null ? this : new CoreMessageHeader(schemaVersion, kind, messageType, commandIdMsb, commandIdLsb, productLine, route, source, sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId);
+        if (decoderOwner == null) return this;
+        CoreMessageHeader copy = new CoreMessageHeader(schemaVersion, kind, messageType, commandIdMsb, commandIdLsb, productLine, route, source, sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId);
+        copy.cachedCommandId = this.cachedCommandId;
+        return copy;
     }
 
     void clearDecoderReferences() {
         kind = null; messageType = null; commandIdMsb = 0L; commandIdLsb = 0L; productLine = null;
-        route = null; source = null;
+        route = null; source = null; cachedCommandId = null;
     }
 
     public static CoreMessageHeader command(
@@ -179,8 +193,10 @@ public final class CoreMessageHeader {
             long submittedAtEpochMillis,
             long correlationId) {
         Objects.requireNonNull(commandId, "commandId");
-        return command(messageType, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
+        CoreMessageHeader header = command(messageType, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
                 productLine, source, sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId);
+        header.cachedCommandId = commandId;
+        return header;
     }
 
     public static CoreMessageHeader query(

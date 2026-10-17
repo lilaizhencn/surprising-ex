@@ -32,8 +32,8 @@ public record MatcherSnapshot(
                 || modules == null || modules.isEmpty()) {
             throw new IllegalArgumentException("invalid matcher snapshot manifest");
         }
-        symbols = Collections.unmodifiableMap(new TreeMap<>(symbols));
-        users = Collections.unmodifiableSet(new TreeSet<>(users));
+        symbols = Collections.unmodifiableMap(symbols instanceof java.util.NavigableMap<?, ?> ? symbols : new TreeMap<>(symbols));
+        users = Collections.unmodifiableSet(users instanceof java.util.NavigableSet<?> ? users : new TreeSet<>(users));
         matcherShardProgress = List.copyOf(matcherShardProgress);
         modules = List.copyOf(modules);
         java.util.HashSet<Integer> uniqueSymbolIds = new java.util.HashSet<>(symbols.size());

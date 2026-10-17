@@ -12,7 +12,7 @@ import com.surprising.aeron.service.command.liquidation.LiquidationCommands;
 import com.surprising.aeron.service.command.position.PositionCommands;
 import com.surprising.aeron.service.command.risk.RiskCommands;
 import com.surprising.aeron.service.command.settlement.InstrumentSettlementCommands;
-import com.surprising.aeron.service.command.trigger.TriggerCommandDispatcher;
+import com.surprising.aeron.service.command.trigger.TriggerOrderCommands;
 
 /** Dispatches commands that complete through one direct business command handler. */
 public final class DirectCommandDispatcher {
@@ -27,7 +27,7 @@ public final class DirectCommandDispatcher {
     private final LeverageCommands leverage;
     private final InstrumentSettlementCommands settlements;
     private final FeePolicyCommands fees;
-    private final TriggerCommandDispatcher triggers;
+    private final TriggerOrderCommands triggers;
 
     public DirectCommandDispatcher(BalanceTransferCommands balances,
                                    InstrumentConfigurationCommands instruments,
@@ -40,7 +40,7 @@ public final class DirectCommandDispatcher {
                                    LeverageCommands leverage,
                                    InstrumentSettlementCommands settlements,
                                    FeePolicyCommands fees,
-                                   TriggerCommandDispatcher triggers) {
+                                   TriggerOrderCommands triggers) {
         this.balances = java.util.Objects.requireNonNull(balances);
         this.instruments = java.util.Objects.requireNonNull(instruments);
         this.funding = java.util.Objects.requireNonNull(funding);
@@ -78,7 +78,18 @@ public final class DirectCommandDispatcher {
             case ADJUST_POSITION_MARGIN -> positions.executeAdjustPositionMargin(message, clusterTimestamp);
             case ADJUST_INSURANCE_FUND -> insurance.executeAdjustInsuranceFund(message, clusterTimestamp);
             case UPDATE_LEVERAGE -> leverage.executeUpdateLeverage(message, clusterTimestamp);
-            default -> { return triggers.dispatch(message, clusterTimestamp); }
+            case UPSERT_ALGO_ORDER -> triggers.executeUpsertAlgoOrder(message, clusterTimestamp);
+            case UPDATE_CANCEL_ALL_AFTER -> triggers.executeUpdateCancelAllAfter(message, clusterTimestamp);
+            case PLACE_TRIGGER_OCO_PAIR -> triggers.executePlaceTriggerOcoPair(message, clusterTimestamp);
+            case PLACE_TRIGGER_ORDER -> triggers.executePlaceTriggerOrder(message, clusterTimestamp);
+            case CANCEL_TRIGGER_ORDER -> triggers.executeCancelTriggerOrder(message, clusterTimestamp);
+            case CLAIM_TRIGGER_ORDER -> triggers.executeClaimTriggerOrder(message, clusterTimestamp);
+            case COMPLETE_TRIGGER_ORDER -> triggers.executeCompleteTriggerOrder(message, clusterTimestamp);
+            case UPDATE_TRIGGER_TRAILING -> triggers.executeUpdateTriggerTrailing(message, clusterTimestamp);
+            case EXPIRE_TRIGGER_ORDER -> triggers.executeExpireTriggerOrder(message, clusterTimestamp);
+            case RETRY_TRIGGER_ORDER -> triggers.executeRetryTriggerOrder(message, clusterTimestamp);
+            case EXECUTE_TRIGGER_ORDER -> triggers.executeExecuteTriggerOrder(message, clusterTimestamp);
+            default -> { return false; }
         }
         return true;
     }

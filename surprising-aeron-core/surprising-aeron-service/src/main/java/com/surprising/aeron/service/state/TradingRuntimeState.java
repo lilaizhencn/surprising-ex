@@ -2340,7 +2340,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public ProductLine productLine() {
-        assertOwner();
         return productLine;
     }
 

@@ -25,7 +25,6 @@ import com.surprising.aeron.service.command.insurance.InsuranceFundCommands;
 import com.surprising.aeron.service.command.funding.PerpetualFundingCommands;
 import com.surprising.aeron.service.command.settlement.InstrumentSettlementCommands;
 import com.surprising.aeron.service.command.fee.FeePolicyCommands;
-import com.surprising.aeron.service.command.trigger.TriggerCommandDispatcher;
 import com.surprising.aeron.service.command.trigger.TriggerOrderCommands;
 import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
@@ -139,7 +138,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     final DirectCommandDispatcher directCommands = new DirectCommandDispatcher(
             balances, instruments, funding, risk, liquidations, adl, insurance,
             positions, leverage, instrumentSettlement, new FeePolicyCommands(this),
-            new TriggerCommandDispatcher(triggers));
+            triggers);
     /** 集群日志入口的状态与暂存字段。 */
     private boolean clusterPipelineAdmission;
     private CoreMessage decodedIngressMessage;
@@ -2049,9 +2048,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
                                       long triggeredAtEpochMillis, UUID parentCommandId, OrderRuntime childOrder) {
         if (childOrder == null || childOrder.userId() != trigger.userId())
             throw new IllegalStateException("trigger child admission receipt is missing");
-        UUID commandId = UUID.nameUUIDFromBytes((parentCommandId + ":trigger:" + trigger.triggerOrderId())
-                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        CoreMessageHeader header = CoreMessageHeader.command(CoreMessageType.EXECUTE_TRIGGER_ORDER, commandId,
+        long parentMsb = parentCommandId == null ? 0L : parentCommandId.getMostSignificantBits();
+        long parentLsb = parentCommandId == null ? 0L : parentCommandId.getLeastSignificantBits();
+        long commandIdMsb = parentMsb ^ 0x545249474745524cL; // "TRIGGER"
+        long commandIdLsb = parentLsb ^ trigger.triggerOrderId();
+        CoreMessageHeader header = CoreMessageHeader.command(CoreMessageType.EXECUTE_TRIGGER_ORDER, commandIdMsb, commandIdLsb,
                 productLine, com.surprising.aeron.protocol.CommandSource.OPERATIONS, trigger.userId(), 0,
                 trigger.userId(), triggeredAtEpochMillis, 0);
         admissions.queuedMatching.add(new MatchingCommandAdmission.QueuedTriggerMatching(
@@ -2261,11 +2262,66 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     static long mixText(long hash, String value) {
-        byte[] encoded = value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        long result = mix(hash, encoded.length);
-        for (byte item : encoded) {
-            result ^= Byte.toUnsignedInt(item);
-            result *= HASH_PRIME;
+        if (value == null || value.isEmpty()) return mix(hash, 0);
+        int length = value.length();
+        boolean isAscii = true;
+        for (int i = 0; i < length; i++) {
+            if (value.charAt(i) >= 0x80) {
+                isAscii = false;
+                break;
+            }
+        }
+        if (isAscii) {
+            long result = mix(hash, length);
+            for (int i = 0; i < length; i++) {
+                result ^= value.charAt(i);
+                result *= HASH_PRIME;
+            }
+            return result;
+        }
+        int utf8Len = 0;
+        for (int i = 0; i < length; i++) {
+            char c = value.charAt(i);
+            if (c < 0x80) utf8Len++;
+            else if (c < 0x800) utf8Len += 2;
+            else if (Character.isHighSurrogate(c) && i + 1 < length && Character.isLowSurrogate(value.charAt(i + 1))) {
+                utf8Len += 4;
+                i++;
+            } else if (!Character.isSurrogate(c)) utf8Len += 3;
+            else utf8Len += 1;
+        }
+        long result = mix(hash, utf8Len);
+        for (int i = 0; i < length; i++) {
+            char c = value.charAt(i);
+            if (c < 0x80) {
+                result ^= c;
+                result *= HASH_PRIME;
+            } else if (c < 0x800) {
+                result ^= (0xc0 | (c >>> 6));
+                result *= HASH_PRIME;
+                result ^= (0x80 | (c & 0x3f));
+                result *= HASH_PRIME;
+            } else if (!Character.isSurrogate(c)) {
+                result ^= (0xe0 | (c >>> 12));
+                result *= HASH_PRIME;
+                result ^= (0x80 | ((c >>> 6) & 0x3f));
+                result *= HASH_PRIME;
+                result ^= (0x80 | (c & 0x3f));
+                result *= HASH_PRIME;
+            } else if (Character.isHighSurrogate(c) && i + 1 < length && Character.isLowSurrogate(value.charAt(i + 1))) {
+                int point = Character.toCodePoint(c, value.charAt(++i));
+                result ^= (0xf0 | (point >>> 18));
+                result *= HASH_PRIME;
+                result ^= (0x80 | ((point >>> 12) & 0x3f));
+                result *= HASH_PRIME;
+                result ^= (0x80 | ((point >>> 6) & 0x3f));
+                result *= HASH_PRIME;
+                result ^= (0x80 | (point & 0x3f));
+                result *= HASH_PRIME;
+            } else {
+                result ^= '?';
+                result *= HASH_PRIME;
+            }
         }
         return result;
     }
