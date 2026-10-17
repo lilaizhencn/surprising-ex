@@ -856,7 +856,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             lane.assertOwner();
         }
         if (current == owner) ownerLaneScope = lane;
-        else lane.commandScopeActive = true;
+        lane.commandScopeActive = true;
     }
 
     void enterMatcherSettlementScope(AccountLaneState lane, MatcherSettlementChanges changes) {
@@ -885,7 +885,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (captureRetirementProof) laneDeltas[lane.laneId()].preparePositionRetirement(lane);
         }
         if (current == owner) ownerLaneScope = null;
-        else lane.commandScopeActive = false;
+        lane.commandScopeActive = false;
         if (current == owner) flushPublishedChanges(lane.laneId());
     }
 
@@ -4870,7 +4870,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                                       CoreInstrument instrument, OrderRuntime order) {
         if (!productLine.isDerivative()) return;
         MatcherSettlementChanges changes = lane.matcherSettlementChanges;
-        if (changes == null || !changes.directPositionIdentities || !lane.commandScopeActive)
+        if (changes == null || !changes.directPositionIdentities || (!lane.commandScopeActive && ownerLaneScope != lane))
             throw new IllegalStateException("direct position identity requires its settlement Lane");
         long key = RuntimeIdentityRegistry.positionIdentityKey(order.userId(), instrument.instrumentId(), order.positionSide());
         var output = changes.laneDeltas[lane.laneId()].positions;

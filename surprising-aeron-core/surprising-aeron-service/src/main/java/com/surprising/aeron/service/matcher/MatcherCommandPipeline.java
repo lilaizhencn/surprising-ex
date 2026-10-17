@@ -39,6 +39,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private final int mask;
     private final WaitStrategy waitStrategy;
     private volatile Thread worker;
+    /** 融合模式下唯一的撮合写入线程；不启动队列消费者线程。 */
+    private Thread inlineOwner;
     private Runnable startupAction;
     private final PaddedSequence submittedPosition = new PaddedSequence();
     private final PaddedSequence consumedPosition = new PaddedSequence();
@@ -60,8 +62,20 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private volatile Runnable completionSignal;
     public void completionSignal(Runnable signal) { completionSignal = signal; }
     public <T> java.util.concurrent.CompletableFuture<T> readAtSubmissionFence(Supplier<T> read) {
+        if (!accepting) {
+            return java.util.concurrent.CompletableFuture.failedFuture(
+                    new RejectedExecutionException("matcher read mailbox unavailable"));
+        }
+        if (inlineOwner != null) {
+            assertInlineOwner();
+            try {
+                return java.util.concurrent.CompletableFuture.completedFuture(read.get());
+            } catch (RuntimeException failure) {
+                return java.util.concurrent.CompletableFuture.failedFuture(failure);
+            }
+        }
         var future = new java.util.concurrent.CompletableFuture<T>();
-        if (!accepting || !backgroundReads.offer(new BackgroundRead<>(submittedPosition.value, read, future))) {
+        if (!backgroundReads.offer(new BackgroundRead<>(submittedPosition.value, read, future))) {
             future.completeExceptionally(new RejectedExecutionException("matcher read mailbox unavailable"));
         } else if (waitStrategy != WaitStrategy.BUSY_SPIN && wakeup.requested != 0L
                 && PARK_REQUESTED.compareAndSet(wakeup, 1L, 0L)) {
@@ -93,6 +107,23 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         for (int index = 0; index < requestedCapacity; index++) slots[index] = new Slot();
         mask = requestedCapacity - 1;
         if (startImmediately) start(null);
+    }
+
+    /** 在交易线程激活撮合；完成槽只保留本线程内的有序消费边界。 */
+    public synchronized void startInline(Runnable action) {
+        if (worker != null || started || inlineOwner != null) {
+            throw new IllegalStateException("matcher pipeline is already started");
+        }
+        inlineOwner = Thread.currentThread();
+        started = true;
+        if (action != null) action.run();
+        accepting = true;
+    }
+
+    private void assertInlineOwner() {
+        if (inlineOwner != Thread.currentThread()) {
+            throw new IllegalStateException("fused matcher is bound to another thread");
+        }
     }
 
     public synchronized void start(Runnable action) {
@@ -168,6 +199,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         if (token == 0 || command == null) throw new IllegalArgumentException("matcher command is invalid");
         rethrowPublicationFailure();
         if (!accepting) throw new RejectedExecutionException("matcher pipeline is closed");
+        if (inlineOwner != null) assertInlineOwner();
         skipReadyDirectSlots();
         long position = submittedPosition.value;
         if (position - consumedPosition.value >= slots.length) {
@@ -187,7 +219,38 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         if (depth > submissionHighWaterMark) {
             submissionHighWaterMark = depth;
         }
-        if (waitStrategy != WaitStrategy.BUSY_SPIN && wakeup.requested != 0L
+        if (inlineOwner != null) {
+            if (settlement != null && settlement.direct()) settlement.beginMatcherPublication();
+            try {
+                Object result = command.get();
+                slot.result = slot.token > 0 && result instanceof CoreMatchingResult matchingResult
+                        ? matchingResult.withCoreSequenceInPlace(slot.token) : result;
+                if (settlement != null && !settlement.resultPrepared()) {
+                    throw new IllegalStateException("direct matcher did not publish its native result");
+                }
+            } catch (Throwable failure) {
+                if (settlement != null) settlement.failDirect(failure);
+                slot.failure = failure;
+            } finally {
+                if (settlement != null && settlement.direct()) settlement.completeMatcherPublication();
+            }
+            CommandSlot target = slot.resultTarget;
+            CoreMatchingResult routedResult = target != null && slot.failure == null
+                    ? (CoreMatchingResult) slot.result : null;
+            completedPosition.value = position + 1;
+            if (routedResult != null) {
+                try { target.publishMatcherResult(workerId, routedResult); }
+                catch (Throwable failure) {
+                    publicationFailure = failure;
+                    accepting = false;
+                }
+            }
+            Runnable signal = completionSignal;
+            if (signal != null) signal.run();
+            if (depth > completionHighWaterMark) {
+                completionHighWaterMark = depth;
+            }
+        } else if (waitStrategy != WaitStrategy.BUSY_SPIN && wakeup.requested != 0L
                 && PARK_REQUESTED.compareAndSet(wakeup, 1L, 0L)) {
             LockSupport.unpark(worker);
         }
@@ -225,6 +288,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private Object pollResult(long expectedToken) {
         rethrowPublicationFailure();
         if (expectedToken == 0) throw new IllegalArgumentException("matcher token must be non-zero");
+        if (inlineOwner != null) assertInlineOwner();
         long position = consumedPosition.value;
         if (position >= completedPosition.value) return null;
         Slot slot = slots[(int) position & mask];
@@ -466,7 +530,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         close(null);
     }
 
-    void close(Runnable action) {
+    public void close(Runnable action) {
+        if (inlineOwner != null) assertInlineOwner();
         Thread activeWorker = worker;
         if (activeWorker == null) {
             accepting = false;

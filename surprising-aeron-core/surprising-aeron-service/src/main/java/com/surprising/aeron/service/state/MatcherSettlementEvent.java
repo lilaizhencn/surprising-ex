@@ -209,7 +209,7 @@ public final class MatcherSettlementEvent implements
             throw new IllegalArgumentException("invalid direct settlement reservation");
         direct = true; cancellation = false; directPublished = false; matcherPublicationDeferred = false;
         dispatched = false; queuedLaneMask = 0;
-        expandLaneRoute = runtime.asynchronousCommands() && Long.bitCount(laneMask) == 1;
+        expandLaneRoute = Long.bitCount(laneMask) == 1;
         directFailure = null;
         admissionRequired = false;
         admissionOrder = null;
@@ -606,9 +606,9 @@ public final class MatcherSettlementEvent implements
         TradingRuntimeState completionRuntime = runtime;
         // Complete every producer access before the readiness release. The Owner polls this
         // flag and may apply, clear and reuse the pooled event without waiting for our signal.
+        directPublished = true;
         completionRuntime.settlements.publishMatcherOwned(this);
         releaseMatcherCompletionBeforeSignal();
-        directPublished = true;
         // Only captured values may be used after the release; even failure handling must not
         // write back to an event which may now belong to the next command.
         completionRuntime.signalOwnerCompletion();
