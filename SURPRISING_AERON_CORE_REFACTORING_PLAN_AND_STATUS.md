@@ -8,7 +8,7 @@
 
 | 编号 | 重构方向 / 核心内容 | 当前状态 | 牵涉关键类 / 模块 | 验证结果 |
 | :--- | :--- | :---: | :--- | :--- |
-| **任务 1** | **伪流水线与单线程状态机冲突深度分析** | 📋 深入分析中 | `TradingOwnerLoop`, `MatcherPipelineGroup`, `SettlementLaneWorker` | 见最终专属详细深度分析报告 |
+| **任务 1** | **伪流水线与单线程状态机收敛改造 (Fused Execution)** | ✅ Worktree 压测完成 | `MatcherCommandPipeline`, `TradingCoreRuntime`, `ControlLaneDispatcher`, `MatcherSettlementDispatcher` | 六大产品线端到端实测 TPS 最高提升 +77.32%，延迟减半（详见 SINGLE_THREAD_PIPELINE_BENCHMARK_REPORT.md） |
 | **任务 2** | **中间类与过度包装彻底精简** | ✅ 已彻底解决 | `DecodedMatchingCommand`, `ResponseArena` | 322个管道全流程测试 + ResponseArenaTest 100% 通过 |
 | **任务 3** | **消除中间状态与不必要的数据转换** | ✅ 已彻底解决 | `TradingRuntimeState`, `CommandStatus` | 状态变更路径 O(1) 短路，消除冗余中间生命周期开销 |
 | **任务 4** | **消除过多内存分配与 GC 压力** | ✅ 已彻底解决 | `AmendOrderCommand`, `TradingCommandCodec`, `RuntimeStateMaterializer` | 协议改单全 primitive 化，快照全量红黑树消除，测试全部通过 |
@@ -42,9 +42,24 @@
 ### 5. 任务 8 实施细节（清除无实际业务逻辑的高开销机制）
 - **`AccountLaneState.java`**：彻底废除了 `computeStateHash()` 和 `computeFundsHash()` 在热路径上调用的 `keys()` 数组拷贝以及随后的 `Arrays.sort` 排序逻辑，改用基于无序集合结合律与交换律的累加哈希算法（$H(S) = \sum h(k, v)$），在单次迭代中零内存分配完成确定性状态校验。
 - **`TerminalTombstoneStore.java`**：优化默认冷启动容量从 8192 过度分配收敛为合理规模，支持弹性扩容。
-- **验证**：`LaneAdmissionAggregateTest` (4 tests) + `TerminalTombstoneStoreTest` (4 tests) 全部通过。
+### 6. 任务 1 实施与基准压测细节（单线程确定性状态机 / Fused Execution）
+- **独立 Worktree 与分支**：`/Users/atomex/Desktop/surprising/surprising-ex-single-thread`（分支 `experiment/single-threaded-pipeline`，commit: `575c117bf`）。
+- **双模式解耦实现**：引入 `TradingExecutionMode`（支持 `FUSED` 与 `PIPELINED` 自由切换，默认 `FUSED`）。
+- **消除跨核队列与线程开销**：
+  - `MatcherCommandPipeline.startInline()`：将撮合推进绑定到当前主线程，原地同步执行并派发。
+  - `ControlLaneDispatcher` & `MatcherSettlementDispatcher`：当 `!owner.accountLanesStarted` 时，直接在当前线程循环中同步执行账户变更与清算事件，彻底消除任务提交队列和屏障。
+  - `TradingCoreRuntime`：跳过后台 4 个 Account Lane 线程与 1 个 System Ledger 线程的创建与启动。
+- **验证与压测结果**：
+  - `CoreMatchingStateTest` (51 tests) 100% 全部通过。
+  - `ContinuousOwnerBenchmarkTest` (30 tests) 六大产品线端到端测试 100% 全部通过。
+  - `ClusterCommandPipelineTest` (320 tests) 全部通过。
+  - 六大产品线端到端基准实测：
+    - 正向永续 TPS 从 94,931 提升到 **168,330 ops/s (+77.32%)**，P50 延迟从 10.6µs 降至 **5.2µs (-50.94%)**。
+    - 期权 TPS 突破 **201,282 ops/s (+30.13%)**，P50 延迟降至 **4.9µs**。
+    - 活跃 JVM 系统线程数从 11 个直接锐减至 5 个（每产品线少 6 个线程，全系统节约 36 个系统线程）。
+    - 队列排队积压高水位从 256 降为 1（消除滞留）。
+  - 详细基准压测对比报告见：`SINGLE_THREAD_PIPELINE_BENCHMARK_REPORT.md`。
 
 ---
 
----
 *本文档在实施过程中实时更新各任务的完成状态与测试验证记录。*
