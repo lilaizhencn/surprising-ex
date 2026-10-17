@@ -1283,6 +1283,11 @@ final class LinearPerpetualBenchmarkSupport {
                         command.header().correlationId(), clusterCommandWindow.decoded(command));
             } else {
                 response = state.apply(command);
+                if (response == null && state.hasPendingDirectCommand()) {
+                    do {
+                        response = state.pollDirectCommand();
+                    } while (response == null);
+                }
             }
             if (businessLatencies != null) businessLatencies.accepted(businessLatency);
             long acceptedAtNanos = submittedAtNanos == 0 ? 0 : System.nanoTime();
