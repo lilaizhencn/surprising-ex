@@ -237,6 +237,8 @@ public final class OrderBookQueryService {
 
     CoreResponse beginTriggerQuery(CoreMessage message) {
         var requested = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeQuery(message.payloadUnsafe());
+        int requestedInstrument = requested.instrumentId().isEmpty() ? 0
+                : com.surprising.product.api.InstrumentIds.parse(requested.instrumentId());
         long before = requested.beforeTriggerOrderId() == 0 ? Long.MAX_VALUE : requested.beforeTriggerOrderId();
         Iterable<Long> source = requested.expiresBeforeEpochMillis() > 0
                 ? owner.triggerOrderIndex.expired(requested.expiresBeforeEpochMillis(), requested.limit())
@@ -255,7 +257,7 @@ public final class OrderBookQueryService {
             var route = owner.triggerOrderIndex.route(id);
             if (route == null || id >= before || requested.triggerOrderId() != 0 && requested.triggerOrderId() != id
                     || message.header().userId() != 0 && message.header().userId() != route.userId()
-                    || !requested.instrumentId().isEmpty() && !requested.instrumentId().equals(route.instrumentId())
+                    || requestedInstrument != 0 && requestedInstrument != route.instrumentId()
                     || requested.status() != null && requested.status() != route.status()
                     || message.header().messageType() == CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY && !route.status().open()) continue;
             selected.add(id); users.add(route.userId());

@@ -16,7 +16,9 @@ import java.util.List;
 import java.util.Objects;
 
 public final class CoreInstrument {
+    // Canonical protocol text is retained once; core identity and indices use instrumentIdValue.
     private final String instrumentId;
+    private final int instrumentIdValue;
     private volatile Configuration configuration;
     private volatile CoreInstrumentMaintenance maintenance;
 
@@ -77,7 +79,8 @@ public final class CoreInstrument {
             InstrumentStatus instrumentStatus, boolean marketOrderEnabled, boolean postOnlyEnabled,
             boolean reduceOnlyEnabled, int supportedOrderTypeMask, int supportedTimeInForceMask,
             long quantityStepUnits, CoreOrderProtection orderProtection) {
-        this.instrumentId = OrderReservation.requireInstrumentId(instrumentId);
+        this.instrumentIdValue = com.surprising.product.api.InstrumentIds.parse(instrumentId);
+        this.instrumentId = instrumentId;
         this.configuration = new Configuration(Objects.requireNonNull(contractType, "contractType"),
                 AssetBalance.normalizeAsset(baseAsset), AssetBalance.normalizeAsset(quoteAsset),
                 AssetBalance.normalizeAsset(settleAsset), notionalMultiplierUnits, priceTickUnits,
@@ -106,6 +109,7 @@ public final class CoreInstrument {
                 CoreInstrumentMaintenance.TRADING);
     }
 
+    public int instrumentIdValue() { return instrumentIdValue; }
     public String instrumentId() { return instrumentId; }
     public Configuration configuration() { return configuration; }
 
@@ -116,12 +120,13 @@ public final class CoreInstrument {
 
     private CoreInstrument(String instrumentId, Configuration configuration, CoreInstrumentMaintenance maintenance) {
         this.instrumentId = instrumentId;
+        this.instrumentIdValue = com.surprising.product.api.InstrumentIds.parse(instrumentId);
         this.configuration = configuration;
         this.maintenance = maintenance;
     }
 
     public void updateConfiguration(CoreInstrument updated) {
-        if (updated == null || !instrumentId.equals(updated.instrumentId)) throw new IllegalArgumentException("instrument instrumentId mismatch");
+        if (updated == null || instrumentIdValue != updated.instrumentIdValue) throw new IllegalArgumentException("instrument instrumentId mismatch");
         this.configuration = updated.configuration;
     }
     public void restoreConfiguration(Configuration configuration) { this.configuration = Objects.requireNonNull(configuration); }

@@ -25,12 +25,12 @@ public final class DirectMatcherTestInputs {
         try (var runtime = new TradingRuntimeState()) {
             var identities = new RuntimeIdentityRegistry();
             var instrument = CoreInstrument.from(ProductLine.SPOT,
-                    new RegisterInstrumentCommand(order.instrumentId(), ContractType.SPOT.ordinal(),
+                    new RegisterInstrumentCommand(Integer.toString(order.instrumentId()), ContractType.SPOT.ordinal(),
                             "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
             runtime.setMetadata(ProductLine.SPOT, 0);
             runtime.registerInstrument(instrument);
             var admitted = new OrderRuntime(order.orderId(), ProductLine.SPOT, userId,
-                    identities.symbolId(order.instrumentId()), instrument, order.side(), order.matchingPriceTicks(),
+                    identities.symbolId(Integer.toString(order.instrumentId())), instrument, order.side(), order.matchingPriceTicks(),
                     order.matchingPriceTicks(), order.quantitySteps(), 0, order.quantitySteps(), false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, order.orderType(), order.timeInForce(),
                     order.timeInForce() == CoreTimeInForce.GTX, "", commandId, 0, 0, 0,
@@ -38,7 +38,7 @@ public final class DirectMatcherTestInputs {
             long lanes = runtime.topology().accountLaneCount() == 64 ? -1L
                     : (1L << runtime.topology().accountLaneCount()) - 1;
             var target = runtime.prepareDirectMatcherSettlement(sequence, lanes, admitted, null, 1,
-                    commandId, adapter.matcherShardId(order.instrumentId()), identities, timestamp, 0, cancellations, null);
+                    commandId, adapter.matcherShardId(Integer.toString(order.instrumentId())), identities, timestamp, 0, cancellations, null);
             target.reserveMatcherPublication();
             return target;
         }
@@ -47,7 +47,7 @@ public final class DirectMatcherTestInputs {
     public static MatcherSettlementEvent placeDirect(DeterministicExchangeCoreAdapter adapter,
             long sequence, UUID commandId, long timestamp, long userId, CoreMatchingOrder order) {
         var target = preparePlace(adapter, sequence, commandId, timestamp, userId, order);
-        adapter.placeDirect(adapter.matcherShardId(order.instrumentId()), sequence, commandId,
+        adapter.placeDirect(adapter.matcherShardId(Integer.toString(order.instrumentId())), sequence, commandId,
                 timestamp, userId, order, target);
         return target;
     }

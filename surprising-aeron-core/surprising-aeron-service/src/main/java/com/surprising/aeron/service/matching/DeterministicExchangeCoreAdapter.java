@@ -303,7 +303,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private exchange.core2.core.common.MatcherResult placeNative(long userId, ResolvedPlaceOrder command, exchange.core2.core.common.MatcherResult target) {
-        int symbolId = ensureSymbol(command.instrumentId());
+        int symbolId = ensureSymbol(command.instrument().instrumentIdValue());
         recordUser(userId);
         long price = protectedMarketPrice(symbolId, command.side(), command.orderType(),
                 command.matchingPriceTicks(), CoreMatchingOrder.slippagePpm(command.instrument().contractType().productLine()));
@@ -317,7 +317,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     /** Matcher converts the batch item's frozen admission without constructing a CoreMatchingOrder. */
     private exchange.core2.core.common.MatcherResult placeNativeAdmitted(long userId,
             com.surprising.aeron.service.state.OrderRuntime command, exchange.core2.core.common.MatcherResult target) {
-        int symbolId = ensureSymbol(command.instrument().instrumentId());
+        int symbolId = ensureSymbol(command.instrument().instrumentIdValue());
         recordUser(userId);
         long price = protectedMarketPrice(symbolId, command.side(), command.orderType(),
                 command.matchingPriceTicks(), CoreMatchingOrder.slippagePpm(command.productLine()));
@@ -1318,9 +1318,15 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private int ensureSymbol(String instrumentId) {
-        int symbolId = reserveSymbolId(instrumentId);
+        return ensureSymbol(permanentInstrumentId(instrumentId));
+    }
+
+    private int ensureSymbol(int symbolId) {
+        if (symbolId <= 0) throw new IllegalArgumentException("positive instrumentId is required");
         var registeredSymbols = currentCommandScope().registeredSymbols;
         if (registeredSymbols.contains(symbolId)) return symbolId;
+        String instrumentId = Integer.toString(symbolId);
+        registerSymbolId(instrumentId);
         CoreSymbolSpecification specification = CoreSymbolSpecification.builder()
                 .symbolId(symbolId).type(SymbolType.CURRENCY_EXCHANGE_PAIR)
                 .baseCurrency(stableId("BASE:" + instrumentId)).quoteCurrency(stableId("QUOTE:" + instrumentId))

@@ -50,7 +50,7 @@ public final class RuntimeLifecycleSettlement {
         }
         if (runtime.systemLedgerStarted()) throw new IllegalStateException("active lifecycle settlement requires its asynchronous continuation");
         CoreInstrument instrument = requireInstrument(runtime, command);
-        int symbolId = identities.symbolId(instrument.instrumentId());
+        int symbolId = identities.symbolId(instrument.instrumentIdValue());
         long previousSettlement = runtime.treasury().lifecycleSettlement(symbolId);
         if (command.settlementId() < previousSettlement) {
             throw new CoreStateRejectedException("STALE_SETTLEMENT_ID", "lifecycle settlement id must increase");
@@ -173,7 +173,7 @@ public final class RuntimeLifecycleSettlement {
         CoreInstrument instrument = requireInstrument(runtime, command);
         ProductTradingRulesRegistry.forInstrument(instrument)
                 .validateLifecycleSettlement(instrument, command);
-        int symbolId = identities.symbolId(instrument.instrumentId());
+        int symbolId = identities.symbolId(instrument.instrumentIdValue());
         TreasuryRuntime.LifecycleProgressRuntime progress = runtime.treasury().lifecycleProgress(symbolId);
         validateProgress(progress, command, true);
         cancelOrders(runtime, orders);

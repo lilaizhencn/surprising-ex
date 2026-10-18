@@ -33,8 +33,8 @@ public final class CoreOrderDecisionResolver {
         runtime.assertOwner();
         CoreInstrument instrument = runtime.instrument(intent.instrumentId());
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        Integer symbolId = identities.findSymbolId(instrument.instrumentId());
-        if (symbolId == null) throw new IllegalStateException("instrument instrumentId identity is missing");
+        int symbolId = identities.findSymbolIdValue(instrument.instrumentIdValue());
+        if (symbolId < 0) throw new IllegalStateException("instrument instrumentId identity is missing");
         return resolveValues(null, instrument, symbolId, runtime.markPrice(symbolId),
                 runtime.feePolicyBook(), userId,
                 clusterTimestamp, runtime.treasury().lifecycleSettlement(symbolId) != 0, intent);
@@ -48,8 +48,8 @@ public final class CoreOrderDecisionResolver {
         runtime.assertOwner();
         CoreInstrument instrument = runtime.instrument(intent.instrumentId());
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        Integer symbolId = identities.findSymbolId(instrument.instrumentId());
-        if (symbolId == null) throw new IllegalStateException("instrument instrumentId identity is missing");
+        int symbolId = identities.findSymbolIdValue(instrument.instrumentIdValue());
+        if (symbolId < 0) throw new IllegalStateException("instrument instrumentId identity is missing");
         instrument.requireOrderEnabled(intent);
         if (instrument.expiryEpochMillis() > 0 && clusterTimestamp >= instrument.expiryEpochMillis()) {
             boolean lifecycleSettled = runtime.treasury().lifecycleSettlement(symbolId) != 0;
@@ -81,11 +81,16 @@ public final class CoreOrderDecisionResolver {
 
     public static Context context(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                   long userId, String instrumentId, long clusterTimestamp) {
+        return context(runtime, identities, userId, com.surprising.product.api.InstrumentIds.parse(instrumentId), clusterTimestamp);
+    }
+
+    public static Context context(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                  long userId, int instrumentId, long clusterTimestamp) {
         runtime.assertOwner();
         CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        Integer symbolId = identities.findSymbolId(instrument.instrumentId());
-        if (symbolId == null) throw new IllegalStateException("instrument instrumentId identity is missing");
+        int symbolId = identities.findSymbolIdValue(instrument.instrumentIdValue());
+        if (symbolId < 0) throw new IllegalStateException("instrument instrumentId identity is missing");
         return new Context(instrument, symbolId, runtime.markPrice(symbolId),
                 runtime.feePolicyBook(), clusterTimestamp, runtime.treasury().settlementStatus(symbolId));
     }

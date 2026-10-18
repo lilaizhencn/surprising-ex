@@ -60,7 +60,11 @@ final class CommandResultLedger {
         nextResultRetentionSequence = nextRetentionSequence(results);
     }
 
+    boolean isEmpty() { return size == 0; }
+    int size() { return size; }
+
     StoredResult get(long most, long least) {
+        if (size == 0) return null;
         return results[locate(most, least)];
     }
 

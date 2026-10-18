@@ -476,7 +476,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         if (operation != Operation.TRIGGER || order == null || admittedMatchingOrder != null)
             throw new IllegalStateException("invalid trigger admission");
         trigger.admissionOrder(order);
-        admittedMatchingOrder = new CoreMatchingOrder(order.orderId(), order.instrument().instrumentId(),
+        admittedMatchingOrder = new CoreMatchingOrder(order.orderId(), order.instrument().instrumentIdValue(),
                 order.side(), order.orderType(), order.timeInForce(), order.matchingPriceTicks(),
                 order.remainingQuantitySteps(), CoreMatchingOrder.slippagePpm(order.productLine()));
     }

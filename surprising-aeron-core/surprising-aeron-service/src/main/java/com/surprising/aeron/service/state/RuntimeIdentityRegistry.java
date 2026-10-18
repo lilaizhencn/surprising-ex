@@ -49,7 +49,7 @@ public final class RuntimeIdentityRegistry {
     // identities remain concurrent for asynchronous Core Fact materializers.
     private final Map<String, Integer> assetIds = new HashMap<>();
     private volatile String[] assets = new String[16];
-    private final Map<String, Integer> symbolIds = new HashMap<>();
+    private final org.eclipse.collections.impl.map.mutable.primitive.IntIntHashMap symbolIds = new org.eclipse.collections.impl.map.mutable.primitive.IntIntHashMap();
     private volatile String[] symbols = new String[16];
     /** 校验异步身份准备确实在所属账户 Lane 执行。 */
     private LaneTopology clientTopology = LaneTopology.configured(false);
@@ -213,24 +213,30 @@ public final class RuntimeIdentityRegistry {
     }
 
     public int symbolId(String instrumentId) {
+        return symbolId(com.surprising.product.api.InstrumentIds.parse(instrumentId));
+    }
+
+    public int symbolId(int instrumentId) {
         assertOwner();
-        Integer known = symbolIds.get(instrumentId);
-        if (known != null) return known;
-        String normalized = OrderReservation.requireInstrumentId(instrumentId);
-        Integer existing = symbolIds.get(normalized);
-        if (existing != null) return existing;
+        if (instrumentId <= 0) throw new IllegalArgumentException("positive instrumentId is required");
+        int existing = symbolIds.getIfAbsent(instrumentId, -1);
+        if (existing >= 0) return existing;
         int id = nextSymbolId++;
-        symbolIds.put(normalized, id);
-        symbols = storeIdentity(symbols, id, normalized);
+        symbolIds.put(instrumentId, id);
+        symbols = storeIdentity(symbols, id, Integer.toString(instrumentId));
         dictionaryVersion = Math.incrementExact(dictionaryVersion);
         return id;
     }
 
     public Integer findSymbolId(String instrumentId) {
+        int id = findSymbolIdValue(com.surprising.product.api.InstrumentIds.parse(instrumentId));
+        return id < 0 ? null : id;
+    }
+
+    /** Dense runtime ID; -1 denotes an unregistered permanent ID, since runtime ID 0 is valid. */
+    public int findSymbolIdValue(int instrumentId) {
         assertOwner();
-        Integer known = symbolIds.get(instrumentId);
-        if (known != null) return known;
-        return symbolIds.get(OrderReservation.requireInstrumentId(instrumentId));
+        return symbolIds.getIfAbsent(instrumentId, -1);
     }
 
     public String instrumentId(int symbolId) {
@@ -656,7 +662,9 @@ public final class RuntimeIdentityRegistry {
         if (clientRuntime != null) {
             for (AccountLaneState lane : clientRuntime.accountLanes) lane.clientIdentities.exportTo(clientKeys);
         } else if (unboundClients != null) unboundClients.forEachValue(table -> table.exportTo(clientKeys));
-        return new Snapshot(assetIds, symbolIds, clientKeys, positionKeys,
+        Map<String, Integer> exportedSymbols = new HashMap<>(symbolIds.size());
+        symbolIds.forEachKeyValue((permanentId, runtimeId) -> exportedSymbols.put(symbols[runtimeId], runtimeId));
+        return new Snapshot(assetIds, exportedSymbols, clientKeys, positionKeys,
                 nextAssetId, nextSymbolId, clientKeys.size() + 1L, positionKeys.size() + 1L);
     }
 
@@ -736,7 +744,7 @@ public final class RuntimeIdentityRegistry {
             registry.assets = storeIdentity(registry.assets, id, name);
         });
         snapshot.symbolIds().forEach((name, id) -> {
-            registry.symbolIds.put(name, id);
+            registry.symbolIds.put(com.surprising.product.api.InstrumentIds.parse(name), id);
             registry.symbols = storeIdentity(registry.symbols, id, name);
         });
         snapshot.clientKeys().forEach((identity, key) -> {

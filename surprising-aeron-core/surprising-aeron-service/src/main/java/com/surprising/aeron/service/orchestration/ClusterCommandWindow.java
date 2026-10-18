@@ -30,12 +30,6 @@ public final class ClusterCommandWindow {
     private final int indexMask;
     private int head;
     private int size;
-    /** Order ID to newest physical slot + 1. */
-    private final org.agrona.collections.Long2LongHashMap orderSlots =
-            new org.agrona.collections.Long2LongHashMap(0);
-    /** User ID to newest physical slot + 1. */
-    private final org.agrona.collections.Long2LongHashMap userSlots =
-            new org.agrona.collections.Long2LongHashMap(0);
     private long lastMatchingSequence;
     private int lastMatchingPhysical = -1;
 
@@ -100,19 +94,17 @@ public final class ClusterCommandWindow {
         conflict = Conflict.NONE;
         int exactPrefix = 0;
         exactPrefix = exactOrderPrefix(exactPrefix);
-        // A Lane is a FIFO executor shared by many users.  It is not a command
-        // dependency: fencing the whole lane here reduces a 256-slot window to
-        // roughly one in-flight command per lane.  Only the same user's Owner
-        // preparation must wait for its prior terminal state; the Lane queue
-        // already serializes different users on the same lane.
         long candidateUserId = candidateRouted ? candidateUser : 0;
         if (candidateUserId != 0) {
-            long slot = userSlots.get(candidateUserId);
-            if (slot != 0) {
-                int userPrefix = (((int) slot - 1 - head) & indexMask) + 1;
-                if (userPrefix > exactPrefix && userPrefix <= size) {
-                    conflict = Conflict.ACCOUNT;
-                    return userPrefix;
+            for (int i = size - 1; i >= 0; i--) {
+                Entry entry = get(i);
+                if (entry.routePresent && entry.routeUserId == candidateUserId) {
+                    int userPrefix = i + 1;
+                    if (userPrefix > exactPrefix) {
+                        conflict = Conflict.ACCOUNT;
+                        return userPrefix;
+                    }
+                    break;
                 }
             }
         }
@@ -125,7 +117,7 @@ public final class ClusterCommandWindow {
      * no longer keeps a second candidate-order scratch collection for the current ingress item.
      */
     private int exactOrderPrefix(int prefix) {
-        if (routedSource == null || routedSource != decodedSource || decoded == null) return prefix;
+        if (routedSource == null || routedSource != decodedSource || decoded == null || size == 0) return prefix;
         CoreMessageType type = decodedSource.header().messageType();
         switch (type) {
             case PLACE_ORDER -> prefix = maxOrderPrefix(prefix, decoded.placeOrder().orderId());
@@ -144,8 +136,16 @@ public final class ClusterCommandWindow {
     }
 
     private int maxOrderPrefix(int prefix, long orderId) {
-        long slot = orderSlots.get(orderId);
-        return slot == 0 ? prefix : Math.max(prefix, (((int) slot - 1 - head) & indexMask) + 1);
+        if (orderId <= 0) return prefix;
+        for (int i = size - 1; i >= 0; i--) {
+            Entry entry = get(i);
+            for (int k = 0; k < entry.orderCount; k++) {
+                if (entry.orders[k] == orderId) {
+                    return Math.max(prefix, i + 1);
+                }
+            }
+        }
+        return prefix;
     }
 
     public DecodedMatchingCommand decoded(CoreMessage request) {
@@ -191,44 +191,40 @@ public final class ClusterCommandWindow {
         entry.routeUserLaneBit = candidateUserLaneBit;
         entry.routePresent = true;
         int physical = (head + size - 1) & indexMask;
-        entry.orderCount = copyTrackedOrderIds(entry, physical);
+        entry.orderCount = copyTrackedOrderIds(entry);
         if (decodedSource == request && decoded == candidateDecoder) {
             var spare = entry.decodedSlot;
             entry.decodedSlot = candidateDecoder;
             candidateDecoder = spare;
         }
         entry.physicalSlot = physical;
-        if (candidateUser > 0) {
-            userSlots.put(candidateUser, physical + 1L);
-        }
         return entry;
     }
 
     /** Store only exact identities belonging to this admitted command entry. */
-    private int copyTrackedOrderIds(Entry entry, int physical) {
+    private int copyTrackedOrderIds(Entry entry) {
         if (routedSource == null || routedSource != decodedSource || decoded == null) return 0;
         int count = 0;
         switch (decodedSource.header().messageType()) {
-            case PLACE_ORDER -> count = trackOrderId(entry, count, decoded.placeOrder().orderId(), physical);
-            case CANCEL_ORDER -> count = trackOrderId(entry, count, decoded.cancelOrder().orderId(), physical);
+            case PLACE_ORDER -> count = trackOrderId(entry, count, decoded.placeOrder().orderId());
+            case CANCEL_ORDER -> count = trackOrderId(entry, count, decoded.cancelOrder().orderId());
             case PLACE_ORDER_BATCH -> {
                 for (var order : decoded.placeOrderBatch().orders())
-                    count = trackOrderId(entry, count, order.orderId(), physical);
+                    count = trackOrderId(entry, count, order.orderId());
             }
             case CANCEL_ORDER_BATCH -> {
                 for (var order : decoded.cancelOrderBatch().orders())
-                    count = trackOrderId(entry, count, order.orderId(), physical);
+                    count = trackOrderId(entry, count, order.orderId());
             }
             default -> { }
         }
         return count;
     }
 
-    private int trackOrderId(Entry entry, int count, long orderId, int physical) {
+    private int trackOrderId(Entry entry, int count, long orderId) {
         if (orderId <= 0) return count;
         if (count >= MAX_TRACKED_ORDER_IDS) throw new IllegalArgumentException("too many tracked order IDs");
         entry.orders[count] = orderId;
-        orderSlots.put(orderId, physical + 1L);
         return count + 1;
     }
 
@@ -248,8 +244,6 @@ public final class ClusterCommandWindow {
 
     public void clear() {
         removePrefix(size);
-        orderSlots.clear();
-        userSlots.clear();
         resetCandidate(0);
         releaseDecoded();
     }
@@ -261,16 +255,7 @@ public final class ClusterCommandWindow {
             Entry entry = get(i);
             int physical = (head + i) & indexMask;
             for (int k = 0; k < entry.orderCount; k++) {
-                long id = entry.orders[k];
-                long removedSlot = orderSlots.remove(id);
-                if (removedSlot != 0 && removedSlot != physical + 1L) orderSlots.put(id, removedSlot);
                 entry.orders[k] = 0;
-            }
-            if (entry.routePresent && entry.routeUserId > 0) {
-                long removedUserSlot = userSlots.remove(entry.routeUserId);
-                if (removedUserSlot != 0 && removedUserSlot != physical + 1L) {
-                    userSlots.put(entry.routeUserId, removedUserSlot);
-                }
             }
             if (entry.sequence != 0) {
                 removedLastMatching |= physical == lastMatchingPhysical;

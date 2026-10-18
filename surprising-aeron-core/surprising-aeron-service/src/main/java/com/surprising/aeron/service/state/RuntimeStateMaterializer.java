@@ -145,7 +145,7 @@ public final class RuntimeStateMaterializer {
                 }));
         return new TradingCoreState(runtime.productLine(),
                 Math.subtractExact(runtime.revision(), runtime.pendingReservations.pendingReservationCount()), users, orders,
-                new TreeMap<>(runtime.instrumentsForRuntime()), risk, treasury,
+                runtime.instrumentsForRuntime(), risk, treasury,
                 new TreeMap<>(runtime.leveragesForRuntime()), new TreeMap<>(runtime.algoOrdersForRuntime()),
                 new TreeMap<>(runtime.cancelAllAfterTimersForRuntime()), clientIndex,
                 new TreeMap<>(runtime.triggerOrdersForRuntime()));

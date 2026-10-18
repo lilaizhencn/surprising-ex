@@ -998,22 +998,29 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     private CoreResponse checkCommandReplay(CoreMessage message, CommandFingerprint fingerprint) {
-        CommandResultLedger.StoredResult terminalDuplicate = resultLedger.get(message.header().commandId());
-        if (terminalDuplicate != null) {
-            return resultLedger.duplicateResponse(terminalDuplicate, message, fingerprint, appliedCommandCount);
+        if (resultLedger.isEmpty() && pendingMatching.isEmpty()) return null;
+        long msb = message.header().commandIdMsb();
+        long lsb = message.header().commandIdLsb();
+        if (!resultLedger.isEmpty()) {
+            CommandResultLedger.StoredResult terminalDuplicate = resultLedger.get(msb, lsb);
+            if (terminalDuplicate != null) {
+                return resultLedger.duplicateResponse(terminalDuplicate, message, fingerprint, appliedCommandCount);
+            }
         }
-        CommandSlot pendingDuplicate = pendingMatching.findByCommandId(message.header().commandId());
-        if (pendingDuplicate != null) {
-            if (!pendingDuplicate.fingerprint().equals(fingerprint)) {
-                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
-                        com.surprising.aeron.protocol.ResponseStatus.REJECTED,
-                        CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount,
+        if (!pendingMatching.isEmpty()) {
+            CommandSlot pendingDuplicate = pendingMatching.findByCommandId(msb, lsb);
+            if (pendingDuplicate != null) {
+                if (!pendingDuplicate.fingerprint().equals(fingerprint)) {
+                    return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
+                            com.surprising.aeron.protocol.ResponseStatus.REJECTED,
+                            CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount,
+                            EMPTY_RESPONSE_DATA);
+                }
+                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
+                        com.surprising.aeron.protocol.ResponseStatus.OK, matchingPendingCode(),
+                        pendingDuplicate.sequence(),
                         EMPTY_RESPONSE_DATA);
             }
-            return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
-                    com.surprising.aeron.protocol.ResponseStatus.OK, matchingPendingCode(),
-                    pendingDuplicate.sequence(),
-                    EMPTY_RESPONSE_DATA);
         }
         return null;
     }

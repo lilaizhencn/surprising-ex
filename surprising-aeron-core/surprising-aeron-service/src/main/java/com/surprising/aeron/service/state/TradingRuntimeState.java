@@ -270,7 +270,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 当前唯一控制命令的财务交接槽；匹配事件各用自身已有财务槽。 */
     private SystemLedgerCommand ledgerControl;
     /** 配置命令在控制栅栏内热注册；同一 instrumentId 的对象身份保持稳定。 */
-    final Map<String, CoreInstrument> instruments = new HashMap<>();
+    final org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<CoreInstrument> instruments = new org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<>();
     /** 用户自动撤单定时器状态。 */
     final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new HashMap<>();
     /** 用户手续费策略状态，参与持久化与恢复。 */
@@ -3257,35 +3257,43 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     /** Borrowed configuration names, consumed on Owner at the explicit query-input boundary. */
-    public Iterable<String> instrumentIdsForQuery() { assertOwner(); return instruments.keySet(); }
+    public Iterable<String> instrumentIdsForQuery() {
+        assertOwner();
+        return () -> new java.util.Iterator<>() {
+            private final java.util.Iterator<CoreInstrument> values = instruments.values().iterator();
+            public boolean hasNext() { return values.hasNext(); }
+            public String next() { return values.next().instrumentId(); }
+        };
+    }
 
     public CoreInstrument instrument(String instrumentId) {
+        return instrument(com.surprising.product.api.InstrumentIds.parse(instrumentId));
+    }
+
+    public CoreInstrument instrument(int instrumentId) {
         assertOwner();
-        CoreInstrument known = instrumentId == null ? null : instruments.get(instrumentId);
-        if (known != null) return known;
-        return instruments.get(OrderReservation.requireInstrumentId(instrumentId));
+        return instruments.get(instrumentId);
     }
 
     CoreInstrument instrument(AccountLaneState lane, String instrumentId) {
         lane.assertOwner();
-        CoreInstrument known = instrumentId == null ? null : instruments.get(instrumentId);
-        return known != null ? known : instruments.get(OrderReservation.requireInstrumentId(instrumentId));
+        return instruments.get(com.surprising.product.api.InstrumentIds.parse(instrumentId));
     }
 
     void registerInstrument(CoreInstrument instrument) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("instrument registry");
-        if (instrument == null || instruments.containsKey(instrument.instrumentId())) {
+        if (instrument == null || instruments.containsKey(instrument.instrumentIdValue())) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "instrument is already registered");
         }
-        instruments.put(instrument.instrumentId(), instrument);
+        instruments.put(instrument.instrumentIdValue(), instrument);
     }
 
     void updateInstrumentConfiguration(CoreInstrument instrument, CoreInstrument updated) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("instrument configuration");
-        if (instrument == null || updated == null || instruments.get(instrument.instrumentId()) != instrument
-                || !instrument.instrumentId().equals(updated.instrumentId())) {
+        if (instrument == null || updated == null || instruments.get(instrument.instrumentIdValue()) != instrument
+                || instrument.instrumentIdValue() != updated.instrumentIdValue()) {
             throw new IllegalArgumentException("invalid canonical instrument configuration update");
         }
         instrument.updateConfiguration(updated);
@@ -3296,7 +3304,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("instrument operation");
-        if (instrument == null || maintenance == null || instruments.get(instrument.instrumentId()) != instrument) {
+        if (instrument == null || maintenance == null || instruments.get(instrument.instrumentIdValue()) != instrument) {
             throw new IllegalArgumentException("invalid canonical instrument operation");
         }
         instrument.updateMaintenance(maintenance);
@@ -3501,7 +3509,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     Map<String, CoreInstrument> instrumentsForRuntime() {
         assertOwner();
-        return instruments;
+        Map<String, CoreInstrument> exported = new TreeMap<>();
+        instruments.forEachValue(instrument -> exported.put(instrument.instrumentId(), instrument));
+        return exported;
     }
 
     Map<CoreLeverageKey, Long> leveragesForRuntime() {
@@ -3734,7 +3744,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         setMetadata(source.productLine(), source.revision());
         setRiskScanControl(source.riskState().scanControl());
         instruments.clear();
-        instruments.putAll(source.instruments());
+        source.instruments().values().forEach(instrument -> instruments.put(instrument.instrumentIdValue(), instrument));
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             onLane(laneId, lane -> {
                 lane.cold.leverages.clear();

@@ -630,7 +630,12 @@ final class MatchingCommandAdmission {
             case TRIGGER -> {
                 long[] execute = decodedCommand.trigger();
                 var trigger = owner.triggerOrderIndex.route(execute[0]);
-                yield trigger == null ? "" : trigger.instrumentId();
+                if (trigger == null) yield "";
+                var instrument = owner.runtimeState.instrument(trigger.instrumentId());
+                if (instrument == null)
+                    throw new com.surprising.aeron.service.exception.CoreStateRejectedException(
+                            "INSTRUMENT_NOT_FOUND", "trigger instrument state is missing");
+                yield instrument.instrumentId();
             }
             case LIQUIDATION, SETTLEMENT -> "";
             case LIQUIDATION_BATCH -> {

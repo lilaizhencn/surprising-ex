@@ -46,7 +46,7 @@ public final class RuntimeLifecycleSettlementContinuation {
             throw new IllegalArgumentException("invalid asynchronous runtime settlement");
         }
         CoreInstrument instrument = RuntimeLifecycleSettlement.requireInstrument(runtime, command);
-        int symbolId = identities.symbolId(instrument.instrumentId());
+        int symbolId = identities.symbolId(instrument.instrumentIdValue());
         long previousSettlement = runtime.treasury().lifecycleSettlement(symbolId);
         if (command.settlementId() < previousSettlement) {
             throw new CoreStateRejectedException("STALE_SETTLEMENT_ID", "settlement id must increase");

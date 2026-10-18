@@ -18,7 +18,7 @@ public final class RuntimeInstrumentStateTransitions {
         }
         runtime.assertOwner();
         CoreInstrument instrument = CoreInstrument.from(runtime.productLine(), command);
-        int symbolId = identities.symbolId(instrument.instrumentId());
+        int symbolId = identities.symbolId(instrument.instrumentIdValue());
         if (runtime.treasury().fundingProgress(symbolId) != null
                 || runtime.treasury().lifecycleProgress(symbolId) != null) {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "instrument lifecycle is in progress");

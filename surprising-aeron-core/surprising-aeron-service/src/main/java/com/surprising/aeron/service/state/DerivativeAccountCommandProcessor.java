@@ -71,7 +71,7 @@ public final class DerivativeAccountCommandProcessor {
         if (instrument.contractType().isOption())
             throw new CoreStateRejectedException("OPTION_LEVERAGE_UNSUPPORTED", "non-portfolio option margin is not leverage based");
         if (command.repriceCrossMargin()) {
-            int symbolId = identities.symbolId(instrument.instrumentId());
+            int symbolId = identities.symbolId(instrument.instrumentIdValue());
             if (runtime.treasury().fundingProgress(symbolId) != null
                     || runtime.treasury().lifecycleSettlement(symbolId) != 0)
                 throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "position settlement blocks margin repricing");

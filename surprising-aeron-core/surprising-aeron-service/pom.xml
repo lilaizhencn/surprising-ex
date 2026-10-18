@@ -17,6 +17,11 @@
 
     <dependencies>
         <dependency>
+            <groupId>it.unimi.dsi</groupId>
+            <artifactId>fastutil-core</artifactId>
+            <version>8.5.18</version>
+        </dependency>
+        <dependency>
             <groupId>net.openhft</groupId>
             <artifactId>affinity</artifactId>
             <version>2026.2</version>

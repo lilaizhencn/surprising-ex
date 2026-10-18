@@ -1,19 +1,23 @@
 package com.surprising.aeron.service.state.index;
 
-import com.surprising.aeron.service.state.OrderReservation;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 
-import java.util.Collections;
+import com.surprising.product.api.InstrumentIds;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectAVLTreeMap;
+import it.unimi.dsi.fastutil.longs.LongAVLTreeSet;
+import it.unimi.dsi.fastutil.longs.LongSortedSet;
+import it.unimi.dsi.fastutil.longs.LongSortedSets;
+import it.unimi.dsi.fastutil.longs.LongComparators;
+import it.unimi.dsi.fastutil.longs.LongBidirectionalIterator;
+import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NavigableMap;
-import java.util.NavigableSet;
 import java.util.Set;
-import java.util.TreeMap;
-import java.util.TreeSet;
 
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
@@ -23,23 +27,25 @@ import com.surprising.aeron.protocol.CoreTriggerPriceSource;
 
 public final class TriggerOrderIndex {
 
-    private final Map<String, NavigableSet<Long>> idsBySymbol = new TreeMap<>();
-    private final Map<String, Map<CoreTriggerOrderStatus, NavigableSet<Long>>> idsBySymbolStatus = new TreeMap<>();
-    private final Map<CoreTriggerOrderStatus, NavigableSet<Long>> idsByStatus = new java.util.EnumMap<>(CoreTriggerOrderStatus.class);
-    private final Map<Long, NavigableSet<Long>> idsByUser = new TreeMap<>();
-    private final NavigableSet<Long> allIds = new TreeSet<>();
-    private final Map<ClientTriggerKey, Long> idsByClient = new java.util.HashMap<>();
-    private final Map<TriggerPositionKey, NavigableSet<Long>> idsByPosition = new java.util.HashMap<>();
-    private final Map<TriggerOcoKey, NavigableSet<Long>> idsByOco = new java.util.HashMap<>();
-    private final Map<PriceKey, NavigableMapByPrice> idsByPrice = new TreeMap<>((left, right) -> {
-        int symbol = left.instrumentId().compareTo(right.instrumentId());
-        return symbol == 0 ? left.source().compareTo(right.source()) : symbol;
-    });
-    private final NavigableMap<Long, NavigableSet<Long>> idsByExpiry = new TreeMap<>();
-    private final Map<Long, TriggerRoute> valuesById = new TreeMap<>();
+    // Owner-owned derived indices; apply/remove/rebuild follow the committed Lane state.
+    private final Int2ObjectOpenHashMap<LongSortedSet> idsBySymbol = new Int2ObjectOpenHashMap<>();
+    private final Int2ObjectOpenHashMap<Map<CoreTriggerOrderStatus, LongSortedSet>> idsBySymbolStatus = new Int2ObjectOpenHashMap<>();
+    private final Map<CoreTriggerOrderStatus, LongSortedSet> idsByStatus = new java.util.EnumMap<>(CoreTriggerOrderStatus.class);
+    private final Long2ObjectOpenHashMap<LongSortedSet> idsByUser = new Long2ObjectOpenHashMap<>();
+    private final LongSortedSet allIds = descendingIds();
+    private final Object2LongOpenHashMap<ClientTriggerKey> idsByClient = new Object2LongOpenHashMap<>();
+    private final Map<TriggerPositionKey, LongSortedSet> idsByPosition = new java.util.HashMap<>();
+    private final Map<TriggerOcoKey, LongSortedSet> idsByOco = new java.util.HashMap<>();
+    private final Map<PriceKey, TriggerPriceBuckets> idsByPrice = new java.util.HashMap<>();
+    private final Long2ObjectAVLTreeMap<LongSortedSet> idsByExpiry = new Long2ObjectAVLTreeMap<>();
+    private final Long2ObjectOpenHashMap<TriggerRoute> valuesById = new Long2ObjectOpenHashMap<>();
+
+    private static LongSortedSet descendingIds() {
+        return new LongAVLTreeSet(LongComparators.OPPOSITE_COMPARATOR);
+    }
 
     /** Identity and candidate-index keys; order size, fees and execution state remain in Lane. */
-    public record TriggerRoute(long triggerOrderId, long userId, String instrumentId,
+    public record TriggerRoute(long triggerOrderId, long userId, int instrumentId,
             String clientTriggerOrderId, String ocoGroupId, CoreMarginMode marginMode,
             CorePositionSide positionSide, CoreTriggerOrderStatus status, long expiresAtEpochMillis,
             CoreTriggerPriceSource priceSource, CoreTriggerOrderType triggerType,
@@ -48,7 +54,7 @@ public final class TriggerOrderIndex {
             long callbackRatePpm, long highestPriceTicks, long lowestPriceTicks, long activatedAtEpochMillis,
             boolean cancelRevisionAvailable) {
         public static TriggerRoute from(CoreTriggerOrderState value) {
-            return new TriggerRoute(value.triggerOrderId(), value.userId(), value.instrumentId(),
+            return new TriggerRoute(value.triggerOrderId(), value.userId(), value.instrument().instrumentIdValue(),
                     value.clientTriggerOrderId(), value.ocoGroupId(), value.marginMode(), value.positionSide(),
                     value.status(), value.expiresAtEpochMillis(), value.priceSource(), value.triggerType(),
                     value.triggerCondition(), value.triggerPriceTicks(), value.side(), value.activationPriceTicks(),
@@ -64,36 +70,36 @@ public final class TriggerOrderIndex {
     }
 
     public Set<Long> ids(String instrumentId) {
-        NavigableSet<Long> ids = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
-        return ids == null ? Set.of() : Collections.unmodifiableNavigableSet(ids.descendingSet());
+        LongSortedSet ids = idsBySymbol.get(InstrumentIds.parse(instrumentId));
+        return ids == null ? LongSortedSets.EMPTY_SET : LongSortedSets.unmodifiable(ids);
     }
 
     public Set<Long> ids() {
-        return Collections.unmodifiableNavigableSet(allIds.descendingSet());
+        return LongSortedSets.unmodifiable(allIds);
     }
 
     public Set<Long> ids(CoreTriggerOrderStatus status) {
-        NavigableSet<Long> ids = idsByStatus.get(status);
-        return ids == null ? Set.of() : Collections.unmodifiableNavigableSet(ids.descendingSet());
+        LongSortedSet ids = idsByStatus.get(status);
+        return ids == null ? LongSortedSets.EMPTY_SET : LongSortedSets.unmodifiable(ids);
     }
 
     public Set<Long> ids(String instrumentId, CoreTriggerOrderStatus status) {
-        Map<CoreTriggerOrderStatus, NavigableSet<Long>> byStatus = idsBySymbolStatus.get(
-                OrderReservation.requireInstrumentId(instrumentId));
-        NavigableSet<Long> ids = byStatus == null ? null : byStatus.get(status);
-        return ids == null ? Set.of() : Collections.unmodifiableNavigableSet(ids.descendingSet());
+        Map<CoreTriggerOrderStatus, LongSortedSet> byStatus = idsBySymbolStatus.get(
+                InstrumentIds.parse(instrumentId));
+        LongSortedSet ids = byStatus == null ? null : byStatus.get(status);
+        return ids == null ? LongSortedSets.EMPTY_SET : LongSortedSets.unmodifiable(ids);
     }
 
-    public Set<Long> ids(long userId) {
-        NavigableSet<Long> ids = idsByUser.get(userId);
-        return ids == null ? Set.of() : Collections.unmodifiableNavigableSet(ids.descendingSet());
+    public LongSortedSet ids(long userId) {
+        LongSortedSet ids = idsByUser.get(userId);
+        return ids == null ? LongSortedSets.EMPTY_SET : LongSortedSets.unmodifiable(ids);
     }
 
     public long maxPendingId(String instrumentId) {
-        Map<CoreTriggerOrderStatus, NavigableSet<Long>> byStatus = idsBySymbolStatus.get(
-                OrderReservation.requireInstrumentId(instrumentId));
-        NavigableSet<Long> pending = byStatus == null ? null : byStatus.get(CoreTriggerOrderStatus.PENDING);
-        return pending == null || pending.isEmpty() ? 0 : pending.last();
+        Map<CoreTriggerOrderStatus, LongSortedSet> byStatus = idsBySymbolStatus.get(
+                InstrumentIds.parse(instrumentId));
+        LongSortedSet pending = byStatus == null ? null : byStatus.get(CoreTriggerOrderStatus.PENDING);
+        return pending == null || pending.isEmpty() ? 0 : pending.firstLong();
     }
 
     public TriggerCandidatePage candidatesPage(String instrumentId, long markPriceTicks,
@@ -106,11 +112,17 @@ public final class TriggerOrderIndex {
     public TriggerCandidatePage candidatesPage(String instrumentId, CoreTriggerPriceSource source,
                                                 long markPriceTicks, int phase, long priceCursor,
                                                 long orderCursor, long upperTriggerId, int limit) {
+        return candidatesPage(InstrumentIds.parse(instrumentId), source, markPriceTicks, phase,
+                priceCursor, orderCursor, upperTriggerId, limit);
+    }
+
+    public TriggerCandidatePage candidatesPage(int instrumentId, CoreTriggerPriceSource source,
+                                                long markPriceTicks, int phase, long priceCursor,
+                                                long orderCursor, long upperTriggerId, int limit) {
         if (limit <= 0 || limit > 4_096) {
             throw new IllegalArgumentException("candidate page limit must be in [1,4096]");
         }
-        String normalized = OrderReservation.requireInstrumentId(instrumentId);
-        NavigableMapByPrice price = idsByPrice.get(new PriceKey(normalized, source));
+        TriggerPriceBuckets price = idsByPrice.get(new PriceKey(instrumentId, source));
         if (price == null || markPriceTicks <= 0 || upperTriggerId <= 0 || phase >= PHASE_COMPLETE) {
             return TriggerCandidatePage.emptyPage();
         }
@@ -121,80 +133,27 @@ public final class TriggerOrderIndex {
         // scanning a large trigger index does not build a boxed Long list and a
         // second defensive copy for every page.
         ImmutableLongArrayList.Builder result = new ImmutableLongArrayList.Builder(limit);
-        while (result.size() < limit && nextPhase < PHASE_COMPLETE) {
-            if (nextPhase == PHASE_GREATER_OR_EQUAL) {
-                Map.Entry<Long, NavigableSet<Long>> bucket = nextGreaterOrEqualBucket(
-                        price.greaterOrEqual, markPriceTicks, nextPrice, nextOrder);
-                if (bucket == null) {
-                    nextPhase = PHASE_LESS_OR_EQUAL;
-                    nextPrice = 0;
-                    nextOrder = Long.MAX_VALUE;
-                    continue;
-                }
-                long last = appendBucket(result, bucket.getValue(), upperTriggerId, nextOrder, limit);
-                if (result.size() >= limit) {
-                    return page(result, nextPhase, bucket.getKey(), last, false);
-                }
-                nextPrice = bucket.getKey();
+        for (; nextPhase < PHASE_TRAILING_ALWAYS; nextPhase++) {
+            Long2ObjectAVLTreeMap<LongSortedSet> buckets = switch (nextPhase) {
+                case PHASE_GREATER_OR_EQUAL -> price.greaterOrEqual;
+                case PHASE_LESS_OR_EQUAL -> price.lessOrEqual;
+                case PHASE_TRAILING_GREATER_OR_EQUAL -> price.trailingGreaterOrEqual;
+                default -> price.trailingLessOrEqual;
+            };
+            boolean ascending = nextPhase == PHASE_LESS_OR_EQUAL || nextPhase == PHASE_TRAILING_GREATER_OR_EQUAL;
+            LongBidirectionalIterator prices = priceIterator(buckets, markPriceTicks, nextPhase, nextPrice, nextOrder);
+            while (ascending ? prices.hasNext() : prices.hasPrevious()) {
+                long bucketPrice = ascending ? prices.nextLong() : prices.previousLong();
+                long last = appendBucket(result, buckets.get(bucketPrice), upperTriggerId, nextOrder, limit);
+                if (result.size() >= limit) return page(result, nextPhase, bucketPrice, last, false);
                 nextOrder = Long.MAX_VALUE;
-                continue;
             }
-            if (nextPhase == PHASE_LESS_OR_EQUAL) {
-                Map.Entry<Long, NavigableSet<Long>> bucket = nextLessOrEqualBucket(
-                        price.lessOrEqual, markPriceTicks, nextPrice, nextOrder);
-                if (bucket == null) {
-                    nextPhase = PHASE_TRAILING_GREATER_OR_EQUAL;
-                    nextPrice = 0;
-                    nextOrder = Long.MAX_VALUE;
-                    continue;
-                }
-                long last = appendBucket(result, bucket.getValue(), upperTriggerId, nextOrder, limit);
-                if (result.size() >= limit) {
-                    return page(result, nextPhase, bucket.getKey(), last, false);
-                }
-                nextPrice = bucket.getKey();
-                nextOrder = Long.MAX_VALUE;
-                continue;
-            }
-            if (nextPhase == PHASE_TRAILING_GREATER_OR_EQUAL) {
-                Map.Entry<Long, NavigableSet<Long>> bucket = nextTrailingGreaterOrEqualBucket(
-                        price.trailingGreaterOrEqual, markPriceTicks, nextPrice, nextOrder);
-                if (bucket == null) {
-                    nextPhase = PHASE_TRAILING_LESS_OR_EQUAL;
-                    nextPrice = 0;
-                    nextOrder = Long.MAX_VALUE;
-                    continue;
-                }
-                long last = appendBucket(result, bucket.getValue(), upperTriggerId, nextOrder, limit);
-                if (result.size() >= limit) {
-                    return page(result, nextPhase, bucket.getKey(), last, false);
-                }
-                nextPrice = bucket.getKey();
-                nextOrder = Long.MAX_VALUE;
-                continue;
-            }
-            if (nextPhase == PHASE_TRAILING_LESS_OR_EQUAL) {
-                Map.Entry<Long, NavigableSet<Long>> bucket = nextTrailingLessOrEqualBucket(
-                        price.trailingLessOrEqual, markPriceTicks, nextPrice, nextOrder);
-                if (bucket == null) {
-                    nextPhase = PHASE_TRAILING_ALWAYS;
-                    nextPrice = 0;
-                    nextOrder = Long.MAX_VALUE;
-                    continue;
-                }
-                long last = appendBucket(result, bucket.getValue(), upperTriggerId, nextOrder, limit);
-                if (result.size() >= limit) {
-                    return page(result, nextPhase, bucket.getKey(), last, false);
-                }
-                nextPrice = bucket.getKey();
-                nextOrder = Long.MAX_VALUE;
-                continue;
-            }
+            nextPrice = 0;
+            nextOrder = Long.MAX_VALUE;
+        }
+        if (nextPhase == PHASE_TRAILING_ALWAYS) {
             long last = appendBucket(result, price.trailingAlways, upperTriggerId, nextOrder, limit);
-            if (result.size() >= limit) {
-                return page(result, PHASE_TRAILING_ALWAYS, 0, last, false);
-            }
-            nextPhase = PHASE_COMPLETE;
+            if (result.size() >= limit) return page(result, PHASE_TRAILING_ALWAYS, 0, last, false);
         }
         return page(result, PHASE_COMPLETE, 0, 0, true);
     }
@@ -206,58 +165,34 @@ public final class TriggerOrderIndex {
     public static final int PHASE_TRAILING_ALWAYS = 4;
     public static final int PHASE_COMPLETE = 5;
 
-    private static Map.Entry<Long, NavigableSet<Long>> nextGreaterOrEqualBucket(
-            NavigableMap<Long, NavigableSet<Long>> buckets, long markPriceTicks, long cursor,
-            long orderCursor) {
-        NavigableMap<Long, NavigableSet<Long>> eligible = buckets.headMap(markPriceTicks, true);
-        if (eligible.isEmpty()) return null;
-        if (orderCursor != Long.MAX_VALUE && eligible.containsKey(cursor)) {
-            return Map.entry(cursor, eligible.get(cursor));
+    /** Seek once per phase, then walk only eligible price buckets, including a partially consumed bucket. */
+    private static LongBidirectionalIterator priceIterator(Long2ObjectAVLTreeMap<LongSortedSet> buckets,
+            long mark, int phase, long cursor, long orderCursor) {
+        boolean ascending = phase == PHASE_LESS_OR_EQUAL || phase == PHASE_TRAILING_GREATER_OR_EQUAL;
+        long initialCursor = phase == PHASE_GREATER_OR_EQUAL || phase == PHASE_TRAILING_GREATER_OR_EQUAL
+                ? Long.MAX_VALUE : 0;
+        boolean initial = cursor == initialCursor && orderCursor == Long.MAX_VALUE;
+        if (ascending) {
+            if (initial) return buckets.tailMap(mark).keySet().iterator();
+            if (orderCursor != Long.MAX_VALUE) return buckets.tailMap(Math.max(mark, cursor)).keySet().iterator();
+            return buckets.tailMap(mark).keySet().iterator(cursor);
         }
-        return cursor == Long.MAX_VALUE ? eligible.lastEntry() : eligible.lowerEntry(cursor);
+        long upper = initial ? mark : Math.min(mark, cursor);
+        LongBidirectionalIterator iterator = buckets.keySet().iterator(upper);
+        if (!initial && orderCursor == Long.MAX_VALUE && upper == cursor && buckets.containsKey(cursor))
+            iterator.previousLong();
+        return iterator;
     }
 
-    private static Map.Entry<Long, NavigableSet<Long>> nextLessOrEqualBucket(
-            NavigableMap<Long, NavigableSet<Long>> buckets, long markPriceTicks, long cursor,
-            long orderCursor) {
-        NavigableMap<Long, NavigableSet<Long>> eligible = buckets.tailMap(markPriceTicks, true);
-        if (eligible.isEmpty()) return null;
-        if (orderCursor != Long.MAX_VALUE && eligible.containsKey(cursor)) {
-            return Map.entry(cursor, eligible.get(cursor));
-        }
-        return cursor == 0 ? eligible.firstEntry() : eligible.higherEntry(cursor);
-    }
-
-    private static Map.Entry<Long, NavigableSet<Long>> nextTrailingGreaterOrEqualBucket(
-            NavigableMap<Long, NavigableSet<Long>> buckets, long markPriceTicks, long cursor,
-            long orderCursor) {
-        NavigableMap<Long, NavigableSet<Long>> eligible = buckets.tailMap(markPriceTicks, true);
-        if (eligible.isEmpty()) return null;
-        if (orderCursor != Long.MAX_VALUE && eligible.containsKey(cursor)) {
-            return Map.entry(cursor, eligible.get(cursor));
-        }
-        return cursor == Long.MAX_VALUE ? eligible.firstEntry() : eligible.higherEntry(cursor);
-    }
-
-    private static Map.Entry<Long, NavigableSet<Long>> nextTrailingLessOrEqualBucket(
-            NavigableMap<Long, NavigableSet<Long>> buckets, long markPriceTicks, long cursor,
-            long orderCursor) {
-        NavigableMap<Long, NavigableSet<Long>> eligible = buckets.headMap(markPriceTicks, true);
-        if (eligible.isEmpty()) return null;
-        if (orderCursor != Long.MAX_VALUE && eligible.containsKey(cursor)) {
-            return Map.entry(cursor, eligible.get(cursor));
-        }
-        return cursor == 0 ? eligible.lastEntry() : eligible.lowerEntry(cursor);
-    }
-
-    private static long appendBucket(ImmutableLongArrayList.Builder result, NavigableSet<Long> ids,
+    private static long appendBucket(ImmutableLongArrayList.Builder result, LongSortedSet ids,
                                      long upperTriggerId, long orderCursor, int limit) {
+        if (orderCursor <= 0) return 0;
+        long start = Math.min(upperTriggerId, orderCursor - 1);
+        var iterator = ids.tailSet(start).iterator();
         long last = 0;
-        for (Long id : ids.descendingSet()) {
-            if (id == null || id > upperTriggerId || id >= orderCursor) continue;
-            result.add(id.longValue());
-            last = id;
-            if (result.size() >= limit) break;
+        while (iterator.hasNext() && result.size() < limit) {
+            last = iterator.nextLong();
+            result.add(last);
         }
         return last;
     }
@@ -290,38 +225,38 @@ public final class TriggerOrderIndex {
 
     public Set<Long> expired(long epochMillis, int limit) {
         if (epochMillis <= 0 || limit <= 0) return Set.of();
-        TreeSet<Long> result = new TreeSet<>();
-        for (NavigableSet<Long> ids : idsByExpiry.headMap(epochMillis, true).values()) {
-            for (Long id : ids) {
-                result.add(id);
-                if (result.size() >= limit) {
-                    return Collections.unmodifiableNavigableSet(result);
-                }
+        LongSortedSet result = new LongAVLTreeSet();
+        var buckets = epochMillis == Long.MAX_VALUE ? idsByExpiry : idsByExpiry.headMap(epochMillis + 1);
+        for (LongSortedSet ids : buckets.values()) {
+            var iterator = ids.iterator();
+            while (iterator.hasNext()) {
+                result.add(iterator.nextLong());
+                if (result.size() >= limit) return LongSortedSets.unmodifiable(result);
             }
         }
-        return Collections.unmodifiableNavigableSet(result);
+        return LongSortedSets.unmodifiable(result);
     }
 
     public Set<Long> ids(long userId, String instrumentId, CoreMarginMode marginMode, CorePositionSide positionSide) {
-        NavigableSet<Long> ids = idsByPosition.get(new TriggerPositionKey(userId,
-                OrderReservation.requireInstrumentId(instrumentId), marginMode, positionSide));
-        return ids == null ? Collections.emptyNavigableSet() : Collections.unmodifiableNavigableSet(ids);
+        LongSortedSet ids = idsByPosition.get(new TriggerPositionKey(userId,
+                InstrumentIds.parse(instrumentId), marginMode, positionSide));
+        return ids == null ? LongSortedSets.EMPTY_SET : LongSortedSets.unmodifiable(ids);
     }
 
-    public NavigableSet<Long> ocoSiblings(CoreTriggerOrderState order) {
-        if (order.ocoGroupId().isEmpty()) return Collections.emptyNavigableSet();
-        NavigableSet<Long> ids = idsByOco.get(new TriggerOcoKey(order.userId(),
-                OrderReservation.requireInstrumentId(order.instrumentId()), order.marginMode(), order.positionSide(),
+    public LongSortedSet ocoSiblingsDescending(CoreTriggerOrderState order) {
+        if (order.ocoGroupId().isEmpty()) return LongSortedSets.EMPTY_SET;
+        LongSortedSet ids = idsByOco.get(new TriggerOcoKey(order.userId(),
+                order.instrument().instrumentIdValue(), order.marginMode(), order.positionSide(),
                 order.ocoGroupId()));
-        return ids == null ? Collections.emptyNavigableSet() : Collections.unmodifiableNavigableSet(ids);
+        return ids == null ? LongSortedSets.EMPTY_SET : LongSortedSets.unmodifiable(ids);
     }
 
-    public NavigableSet<Long> ocoSiblings(TriggerRoute order) {
-        if (order.ocoGroupId().isEmpty()) return Collections.emptyNavigableSet();
-        NavigableSet<Long> ids = idsByOco.get(new TriggerOcoKey(order.userId(),
-                OrderReservation.requireInstrumentId(order.instrumentId()), order.marginMode(), order.positionSide(),
+    public LongSortedSet ocoSiblingsDescending(TriggerRoute order) {
+        if (order.ocoGroupId().isEmpty()) return LongSortedSets.EMPTY_SET;
+        LongSortedSet ids = idsByOco.get(new TriggerOcoKey(order.userId(),
+                order.instrumentId(), order.marginMode(), order.positionSide(),
                 order.ocoGroupId()));
-        return ids == null ? Collections.emptyNavigableSet() : Collections.unmodifiableNavigableSet(ids);
+        return ids == null ? LongSortedSets.EMPTY_SET : LongSortedSets.unmodifiable(ids);
     }
 
     public boolean containsClient(long userId, String clientTriggerOrderId) {
@@ -334,7 +269,7 @@ public final class TriggerOrderIndex {
         if (previous != null) {
             remove(previous, id);
             if (!previous.clientTriggerOrderId().isEmpty()) {
-                idsByClient.remove(new ClientTriggerKey(previous.userId(), previous.clientTriggerOrderId()));
+                idsByClient.removeLong(new ClientTriggerKey(previous.userId(), previous.clientTriggerOrderId()));
             }
         }
         if (current != null) {
@@ -369,35 +304,35 @@ public final class TriggerOrderIndex {
 
     private void add(TriggerRoute order) {
         long userId = order.userId();
-        String instrumentId = order.instrumentId();
+        int instrumentId = order.instrumentId();
         long id = order.triggerOrderId();
         valuesById.put(id, order);
         allIds.add(id);
-        idsBySymbol.computeIfAbsent(OrderReservation.requireInstrumentId(instrumentId), ignored -> new TreeSet<>()).add(id);
-        idsBySymbolStatus.computeIfAbsent(OrderReservation.requireInstrumentId(instrumentId), ignored -> new java.util.EnumMap<>(CoreTriggerOrderStatus.class))
-                .computeIfAbsent(order.status(), ignored -> new TreeSet<>()).add(id);
-        idsByStatus.computeIfAbsent(order.status(), ignored -> new TreeSet<>()).add(id);
-        idsByUser.computeIfAbsent(userId, ignored -> new TreeSet<>()).add(id);
+        idsBySymbol.computeIfAbsent(instrumentId, ignored -> descendingIds()).add(id);
+        idsBySymbolStatus.computeIfAbsent(instrumentId, ignored -> new java.util.EnumMap<>(CoreTriggerOrderStatus.class))
+                .computeIfAbsent(order.status(), ignored -> descendingIds()).add(id);
+        idsByStatus.computeIfAbsent(order.status(), ignored -> descendingIds()).add(id);
+        idsByUser.computeIfAbsent(userId, ignored -> descendingIds()).add(id);
         idsByPosition.computeIfAbsent(new TriggerPositionKey(userId,
-                OrderReservation.requireInstrumentId(instrumentId), order.marginMode(), order.positionSide()),
-                ignored -> new TreeSet<>()).add(id);
+                instrumentId, order.marginMode(), order.positionSide()),
+                ignored -> new LongAVLTreeSet()).add(id);
         if (order.status() == CoreTriggerOrderStatus.PENDING && !order.ocoGroupId().isEmpty()) {
-            idsByOco.computeIfAbsent(new TriggerOcoKey(userId, OrderReservation.requireInstrumentId(instrumentId),
-                    order.marginMode(), order.positionSide(), order.ocoGroupId()), ignored -> new TreeSet<>()).add(id);
+            idsByOco.computeIfAbsent(new TriggerOcoKey(userId, instrumentId,
+                    order.marginMode(), order.positionSide(), order.ocoGroupId()), ignored -> descendingIds()).add(id);
         }
         if (order.status() == CoreTriggerOrderStatus.PENDING) {
             if (order.expiresAtEpochMillis() > 0) {
-                idsByExpiry.computeIfAbsent(order.expiresAtEpochMillis(), ignored -> new TreeSet<>()).add(id);
+                idsByExpiry.computeIfAbsent(order.expiresAtEpochMillis(), ignored -> new LongAVLTreeSet()).add(id);
             }
-            NavigableMapByPrice price = idsByPrice.computeIfAbsent(new PriceKey(OrderReservation.requireInstrumentId(instrumentId), order.priceSource()),
-                    ignored -> new NavigableMapByPrice());
+            TriggerPriceBuckets price = idsByPrice.computeIfAbsent(new PriceKey(instrumentId, order.priceSource()),
+                    ignored -> new TriggerPriceBuckets());
             if (order.triggerType() == CoreTriggerOrderType.TRAILING_STOP) {
                 indexTrailing(price, order);
             } else if (order.triggerPriceTicks() > 0) {
                 if (order.triggerCondition() == com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL) {
-                    price.greaterOrEqual.computeIfAbsent(order.triggerPriceTicks(), ignored -> new TreeSet<>()).add(id);
+                    price.greaterOrEqual.computeIfAbsent(order.triggerPriceTicks(), ignored -> descendingIds()).add(id);
                 } else {
-                    price.lessOrEqual.computeIfAbsent(order.triggerPriceTicks(), ignored -> new TreeSet<>()).add(id);
+                    price.lessOrEqual.computeIfAbsent(order.triggerPriceTicks(), ignored -> descendingIds()).add(id);
                 }
             }
         }
@@ -406,67 +341,67 @@ public final class TriggerOrderIndex {
     private void remove(TriggerRoute order, long id) {
         valuesById.remove(id);
         long userId = order.userId();
-        String instrumentId = order.instrumentId();
+        int instrumentId = order.instrumentId();
         allIds.remove(id);
-        NavigableSet<Long> userIds = idsByUser.get(userId);
+        LongSortedSet userIds = idsByUser.get(userId);
         if (userIds != null) {
             userIds.remove(id);
             if (userIds.isEmpty()) idsByUser.remove(userId);
         }
-        NavigableSet<Long> ids = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
+        LongSortedSet ids = idsBySymbol.get(instrumentId);
         if (ids != null) {
             ids.remove(id);
-            if (ids.isEmpty()) idsBySymbol.remove(OrderReservation.requireInstrumentId(instrumentId));
+            if (ids.isEmpty()) idsBySymbol.remove(instrumentId);
         }
 
-        Map<CoreTriggerOrderStatus, NavigableSet<Long>> byStatus = idsBySymbolStatus.get(
-                OrderReservation.requireInstrumentId(instrumentId));
+        Map<CoreTriggerOrderStatus, LongSortedSet> byStatus = idsBySymbolStatus.get(
+                instrumentId);
         if (byStatus != null) {
-            NavigableSet<Long> statusIds = byStatus.get(order.status());
+            LongSortedSet statusIds = byStatus.get(order.status());
             if (statusIds != null) {
                 statusIds.remove(id);
                 if (statusIds.isEmpty()) byStatus.remove(order.status());
             }
-            if (byStatus.isEmpty()) idsBySymbolStatus.remove(OrderReservation.requireInstrumentId(instrumentId));
+            if (byStatus.isEmpty()) idsBySymbolStatus.remove(instrumentId);
         }
-        NavigableSet<Long> statusIds = idsByStatus.get(order.status());
+        LongSortedSet statusIds = idsByStatus.get(order.status());
         if (statusIds != null) {
             statusIds.remove(id);
             if (statusIds.isEmpty()) idsByStatus.remove(order.status());
         }
 
         TriggerPositionKey positionKey = new TriggerPositionKey(userId,
-                OrderReservation.requireInstrumentId(instrumentId), order.marginMode(), order.positionSide());
-        NavigableSet<Long> positionIds = idsByPosition.get(positionKey);
+                instrumentId, order.marginMode(), order.positionSide());
+        LongSortedSet positionIds = idsByPosition.get(positionKey);
         if (positionIds != null) {
             positionIds.remove(id);
             if (positionIds.isEmpty()) idsByPosition.remove(positionKey);
         }
         if (!order.ocoGroupId().isEmpty()) {
-            TriggerOcoKey ocoKey = new TriggerOcoKey(userId, OrderReservation.requireInstrumentId(instrumentId),
+            TriggerOcoKey ocoKey = new TriggerOcoKey(userId, instrumentId,
                     order.marginMode(), order.positionSide(), order.ocoGroupId());
-            NavigableSet<Long> ocoIds = idsByOco.get(ocoKey);
+            LongSortedSet ocoIds = idsByOco.get(ocoKey);
             if (ocoIds != null) {
                 ocoIds.remove(id);
                 if (ocoIds.isEmpty()) idsByOco.remove(ocoKey);
             }
         }
         if (order.status() == CoreTriggerOrderStatus.PENDING && order.expiresAtEpochMillis() > 0) {
-            NavigableSet<Long> expiryIds = idsByExpiry.get(order.expiresAtEpochMillis());
+            LongSortedSet expiryIds = idsByExpiry.get(order.expiresAtEpochMillis());
             if (expiryIds != null) {
                 expiryIds.remove(id);
                 if (expiryIds.isEmpty()) idsByExpiry.remove(order.expiresAtEpochMillis());
             }
         }
-        PriceKey priceKey = new PriceKey(OrderReservation.requireInstrumentId(instrumentId), order.priceSource());
-        NavigableMapByPrice price = idsByPrice.get(priceKey);
+        PriceKey priceKey = new PriceKey(instrumentId, order.priceSource());
+        TriggerPriceBuckets price = idsByPrice.get(priceKey);
         if (price == null) return;
         removeTrailing(price, order, id);
         if (order.triggerPriceTicks() > 0) {
-            NavigableMap<Long, NavigableSet<Long>> map = order.triggerCondition()
+            Long2ObjectAVLTreeMap<LongSortedSet> map = order.triggerCondition()
                     == com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL
                     ? price.greaterOrEqual : price.lessOrEqual;
-            NavigableSet<Long> priceIds = map.get(order.triggerPriceTicks());
+            LongSortedSet priceIds = map.get(order.triggerPriceTicks());
             if (priceIds != null) {
                 priceIds.remove(id);
                 if (priceIds.isEmpty()) map.remove(order.triggerPriceTicks());
@@ -479,15 +414,15 @@ public final class TriggerOrderIndex {
         }
     }
 
-    private static final class NavigableMapByPrice {
-        private final NavigableMap<Long, NavigableSet<Long>> greaterOrEqual = new TreeMap<>();
-        private final NavigableMap<Long, NavigableSet<Long>> lessOrEqual = new TreeMap<>();
-        private final NavigableMap<Long, NavigableSet<Long>> trailingGreaterOrEqual = new TreeMap<>();
-        private final NavigableMap<Long, NavigableSet<Long>> trailingLessOrEqual = new TreeMap<>();
-        private final NavigableSet<Long> trailingAlways = new TreeSet<>();
+    private static final class TriggerPriceBuckets {
+        private final Long2ObjectAVLTreeMap<LongSortedSet> greaterOrEqual = new Long2ObjectAVLTreeMap<>();
+        private final Long2ObjectAVLTreeMap<LongSortedSet> lessOrEqual = new Long2ObjectAVLTreeMap<>();
+        private final Long2ObjectAVLTreeMap<LongSortedSet> trailingGreaterOrEqual = new Long2ObjectAVLTreeMap<>();
+        private final Long2ObjectAVLTreeMap<LongSortedSet> trailingLessOrEqual = new Long2ObjectAVLTreeMap<>();
+        private final LongSortedSet trailingAlways = descendingIds();
     }
 
-    private static void indexTrailing(NavigableMapByPrice price, TriggerRoute order) {
+    private static void indexTrailing(TriggerPriceBuckets price, TriggerRoute order) {
         boolean sell = order.side() == com.surprising.aeron.protocol.CoreOrderSide.SELL;
         if (order.activatedAtEpochMillis() > 0) {
             long base = sell ? order.highestPriceTicks() : order.lowestPriceTicks();
@@ -507,7 +442,7 @@ public final class TriggerOrderIndex {
         price.trailingAlways.add(order.triggerOrderId());
     }
 
-    private static void removeTrailing(NavigableMapByPrice price, TriggerRoute order, long id) {
+    private static void removeTrailing(TriggerPriceBuckets price, TriggerRoute order, long id) {
         boolean sell = order.side() == com.surprising.aeron.protocol.CoreOrderSide.SELL;
         if (order.activatedAtEpochMillis() > 0) {
             long base = sell ? order.highestPriceTicks() : order.lowestPriceTicks();
@@ -526,28 +461,28 @@ public final class TriggerOrderIndex {
         price.trailingAlways.remove(id);
     }
 
-    private static void addPriceId(NavigableMap<Long, NavigableSet<Long>> map, long price, long id) {
-        map.computeIfAbsent(price, ignored -> new TreeSet<>()).add(id);
+    private static void addPriceId(Long2ObjectAVLTreeMap<LongSortedSet> map, long price, long id) {
+        map.computeIfAbsent(price, ignored -> descendingIds()).add(id);
     }
 
-    private static void removePriceId(NavigableMap<Long, NavigableSet<Long>> map, long price, long id) {
-        NavigableSet<Long> ids = map.get(price);
+    private static void removePriceId(Long2ObjectAVLTreeMap<LongSortedSet> map, long price, long id) {
+        LongSortedSet ids = map.get(price);
         if (ids == null) return;
         ids.remove(id);
         if (ids.isEmpty()) map.remove(price);
     }
 
-    private record TriggerPositionKey(long userId, String instrumentId, CoreMarginMode marginMode,
+    private record TriggerPositionKey(long userId, int instrumentId, CoreMarginMode marginMode,
                                       CorePositionSide positionSide) {
     }
 
-    private record TriggerOcoKey(long userId, String instrumentId, CoreMarginMode marginMode,
+    private record TriggerOcoKey(long userId, int instrumentId, CoreMarginMode marginMode,
                                  CorePositionSide positionSide, String groupId) {
     }
 
     private record ClientTriggerKey(long userId, String clientTriggerOrderId) {
     }
 
-    private record PriceKey(String instrumentId, CoreTriggerPriceSource source) {
+    private record PriceKey(int instrumentId, CoreTriggerPriceSource source) {
     }
 }

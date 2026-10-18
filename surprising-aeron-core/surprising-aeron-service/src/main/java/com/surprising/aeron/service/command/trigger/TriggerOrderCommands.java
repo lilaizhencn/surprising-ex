@@ -84,7 +84,7 @@ public final class TriggerOrderCommands {
     }
 
     private final class PendingTriggerScan implements java.util.function.BooleanSupplier {
-        private String instrumentId;
+        private int instrumentId;
         private UUID commandId;
         private RiskScanRuntime scan;
         private int remaining;
@@ -98,7 +98,7 @@ public final class TriggerOrderCommands {
         }
 
         PendingTriggerScan prepare(String instrumentId, RiskScanRuntime scan, int remaining) {
-            this.instrumentId = instrumentId;
+            this.instrumentId = com.surprising.product.api.InstrumentIds.parse(instrumentId);
             this.scan = scan;
             this.remaining = remaining;
             long msb = ((long) owner.productLine().ordinal() << 48)
@@ -134,7 +134,7 @@ public final class TriggerOrderCommands {
                     if (remaining <= 0) return true;
                     int sourceIndex = scan.triggerPhase() / TriggerOrderIndex.PHASE_COMPLETE;
                     var source = com.surprising.aeron.protocol.CoreTriggerPriceSource.values()[sourceIndex];
-                    var mark = owner.runtimeState().markPrice(owner.identities().findSymbolId(instrumentId));
+                    var mark = owner.runtimeState().markPrice(scan.symbolId());
                     long sourcePrice = source == com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK
                             ? scan.triggerMarkPriceTicks()
                             : mark == null || mark.priceSequence() != scan.priceSequence() ? 0
@@ -166,7 +166,7 @@ public final class TriggerOrderCommands {
                 }
                 var source = com.surprising.aeron.protocol.CoreTriggerPriceSource.values()[
                         scan.triggerPhase() / TriggerOrderIndex.PHASE_COMPLETE];
-                var mark = owner.runtimeState().markPrice(owner.identities().findSymbolId(instrumentId));
+                var mark = owner.runtimeState().markPrice(scan.symbolId());
                 long price = source == com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK
                         ? scan.triggerMarkPriceTicks()
                         : source == com.surprising.aeron.protocol.CoreTriggerPriceSource.LAST
@@ -221,11 +221,12 @@ public final class TriggerOrderCommands {
                                     long cursor, boolean resumed) {
             // The control fence keeps the Owner index stable until Lane publication is collected.
             // Pass the bounded ID range, not a copied list of sibling identities.
-            var siblings = owner.triggerOrderIndex().ocoSiblings(trigger).descendingSet();
+            var siblings = owner.triggerOrderIndex().ocoSiblingsDescending(trigger);
             int count = 0;
             long last = cursor;
             boolean more = false;
-            for (long id : siblings) {
+            for (var siblingIds = siblings.iterator(); siblingIds.hasNext();) {
+                long id = siblingIds.nextLong();
                 if (id == trigger.triggerOrderId() || id >= cursor) continue;
                 if (count == remaining) { more = true; break; }
                 count++;
@@ -273,7 +274,7 @@ public final class TriggerOrderCommands {
             private int work;
             private boolean complete, resumed;
             private TriggerOrderIndex.TriggerRoute trigger;
-            private java.util.NavigableSet<Long> siblings;
+            private it.unimi.dsi.fastutil.longs.LongSortedSet siblings;
 
             void prepareExpire(long triggerId, long at) {
                 clear(); kind = EXPIRE; this.triggerId = triggerId; arg1 = at;
@@ -286,7 +287,7 @@ public final class TriggerOrderCommands {
 
             void prepareSiblings(TriggerOrderIndex.TriggerRoute trigger,
                                  long cursor, long next, int work, boolean complete, boolean resumed,
-                                 java.util.NavigableSet<Long> siblings) {
+                                 it.unimi.dsi.fastutil.longs.LongSortedSet siblings) {
                 clear(); kind = SIBLINGS; this.trigger = trigger; this.cursor = cursor; this.next = next;
                 this.work = work; this.complete = complete; this.resumed = resumed; this.siblings = siblings;
             }
@@ -304,7 +305,8 @@ public final class TriggerOrderCommands {
                             arg1, arg2, arg3);
                     case SIBLINGS -> {
                         boolean changed = false;
-                        for (long id : siblings) {
+                        for (var siblingIds = siblings.iterator(); siblingIds.hasNext();) {
+                            long id = siblingIds.nextLong();
                             if (id == trigger.triggerOrderId() || id >= cursor) continue;
                             if (id < next) break;
                             var sibling = owner.runtimeState().triggerOrder(id);
@@ -396,13 +398,14 @@ public final class TriggerOrderCommands {
         if (limit <= 0) return new OcoCancellationPage(false, cursor, 0);
         ocoSiblingPage.clear();
         boolean more = false;
-        for (Long siblingId : owner.triggerOrderIndex().ocoSiblings(trigger).descendingSet()) {
-            if (siblingId == null || siblingId == trigger.triggerOrderId() || siblingId >= cursor) continue;
+        for (var siblingIds = owner.triggerOrderIndex().ocoSiblingsDescending(trigger).iterator(); siblingIds.hasNext();) {
+            long siblingId = siblingIds.nextLong();
+            if (siblingId == trigger.triggerOrderId() || siblingId >= cursor) continue;
             if (ocoSiblingPage.size() >= limit) {
                 more = true;
                 break;
             }
-            ocoSiblingPage.add(siblingId.longValue());
+            ocoSiblingPage.add(siblingId);
         }
         long nextCursor = cursor;
         int work = 0;
@@ -755,7 +758,7 @@ public final class TriggerOrderCommands {
         private long openInterest;
         private volatile boolean inputReady;
         private boolean inputQueued, accountDispatched;
-        private java.util.NavigableSet<Long> siblings;
+        private it.unimi.dsi.fastutil.longs.LongSortedSet siblings;
 
         java.util.function.BooleanSupplier prepare(TriggerOrderIndex.TriggerRoute route,
                 long triggerId, long triggerSequence, long price, long triggeredAt, UUID commandId,
@@ -775,8 +778,8 @@ public final class TriggerOrderCommands {
             inputReady = !decision.instrument().usesOpenInterestForUserLimit();
             inputQueued = accountDispatched = false;
             childSequence = Math.addExact(Math.addExact(owner.appliedCommandCount(), 2), owner.queuedMatchingCount());
-            siblings = cancelOco ? owner.triggerOrderIndex().ocoSiblings(route).descendingSet()
-                    : java.util.Collections.emptyNavigableSet();
+            siblings = cancelOco ? owner.triggerOrderIndex().ocoSiblingsDescending(route)
+                    : it.unimi.dsi.fastutil.longs.LongSortedSets.EMPTY_SET;
             laneId = owner.runtimeState().topology().accountLaneId(route.userId());
             return this;
         }
@@ -798,7 +801,8 @@ public final class TriggerOrderCommands {
             } catch (CoreStateRejectedException rejected) { failureReason = rejected.code(); }
             assetId = order == null ? 0 : order.reservationAsset().equals(decision.instrument().baseAsset()) ? baseAssetId
                     : order.reservationAsset().equals(decision.instrument().quoteAsset()) ? quoteAssetId : settleAssetId;
-            for (long siblingId : siblings) {
+            for (var siblingIds = siblings.iterator(); siblingIds.hasNext();) {
+                long siblingId = siblingIds.nextLong();
                 if (siblingId == triggerId) continue;
                 var sibling = owner.runtimeState().triggerOrder(siblingId);
                 if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
@@ -878,13 +882,14 @@ public final class TriggerOrderCommands {
             if (previous == null || previous.signedQuantitySteps() == 0) continue;
             var current = owner.runtimeState().changedPositionValue(positionKey);
             if (current != null && current.signedQuantitySteps() != 0) continue;
-            String instrumentId = owner.identities().instrumentId(previous.symbolId());
+            int instrumentId = previous.instrument().instrumentIdValue();
             var previousMarginMode = previous.marginMode();
-            for (long triggerOrderId : owner.triggerOrderIndex().ids(previous.userId())) {
+            for (var triggerIds = owner.triggerOrderIndex().ids(previous.userId()).iterator(); triggerIds.hasNext();) {
+                long triggerOrderId = triggerIds.nextLong();
                 var trigger = currentTriggerRoute(triggerOrderId);
                 if (trigger == null || trigger.status()
                         != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) continue;
-                if (!instrumentId.equals(trigger.instrumentId()) || trigger.positionSide() != previous.positionSide()
+                if (instrumentId != trigger.instrumentId() || trigger.positionSide() != previous.positionSide()
                         || trigger.marginMode() != previousMarginMode) continue;
                 selected.accept(triggerOrderId);
             }

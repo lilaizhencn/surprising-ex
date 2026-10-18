@@ -39,7 +39,7 @@ public final class RuntimeDerivativeRiskProcessor {
             throw new IllegalArgumentException("invalid perpetual risk apply");
         }
         CoreInstrument instrument = requireInstrument(runtime, command.instrumentId());
-        int symbolId = identities.symbolId(instrument.instrumentId());
+        int symbolId = identities.symbolId(instrument.instrumentIdValue());
         MarkPriceRuntime current = runtime.markPrice(symbolId);
         if (current != null && command.priceSequence() <= current.priceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price sequence must increase");
@@ -179,7 +179,7 @@ public final class RuntimeDerivativeRiskProcessor {
     private static int continueScan(TradingRuntimeState runtime, CoreInstrument instrument,
             long priceSequence, int maxWork, PositionUserIndex positionUsers, Iterable<Long> indexedUserIds,
             RuntimeIdentityRegistry identities) {
-        return RiskScanCoordinator.runSlice(maxWork, identities.symbolId(instrument.instrumentId()), positionUsers,
+        return RiskScanCoordinator.runSlice(maxWork, identities.symbolId(instrument.instrumentIdValue()), positionUsers,
                 indexedUserIds, runtime, identities);
     }
 

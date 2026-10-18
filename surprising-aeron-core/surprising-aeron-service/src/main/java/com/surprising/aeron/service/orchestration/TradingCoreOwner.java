@@ -184,9 +184,11 @@ public final class TradingCoreOwner {
             if (!commandPipeline.hasCommittingHead() && window.size() != 0) beginCommandCommit();
             // 本轮未收到完成时仍准入独立命令；不为每个新准入项重跑整套完成收集。
             if (commandPipeline.hasCommittingHead() && !awaitingCompletion) {
-                // 先提交已经就绪的结果；本轮预算限制单次 Owner 调度时间。
-                if (pollCommandCommit(advanceMatching)) {
+                // 先提交已经就绪的结果；支持批量连续退休以加速滑动窗口排空。
+                int committed = pollCommandCommitBatch(advanceMatching, OwnerCommandPipelineState.COMPLETION_BATCH_SIZE - work);
+                if (committed > 0) {
                     advanceMatching = false;
+                    work += committed - 1;
                     continue;
                 }
                 awaitingCompletion = true;
@@ -274,41 +276,62 @@ public final class TradingCoreOwner {
 
     /** 公共推进按需执行；每条队首仍独立完成捕获、发布、响应和退休。 */
     private boolean pollCommandCommit(boolean advanceMatching) {
+        return pollCommandCommitBatch(advanceMatching, 1) > 0;
+    }
+
+    /** 批量推进已就绪的队首命令提交；减少滑动窗口反压阻塞。 */
+    private int pollCommandCommitBatch(boolean advanceMatching, int maxBatch) {
+        int committedCount = 0;
         ClusterCommandWindow window = commandPipeline.commandWindow();
-        var last = commandPipeline.committingHead();
-        long dispatchThrough = Math.max(last.sequence, window.lastMatchingSequence());
-        long progressBefore = state.pendingMatching.dispatchRevision();
-        if (commandPipeline.waitingForMatchingNotification()
-                && commandPipeline.canSkipMatchingPoll(dispatchThrough, progressBefore,
-                state.matchingProgress.hasNotifications() || state.hasCompletedLaneCommit())) {
-            checkProgressDeadline();
-            return false;
-        }
-        commandPipeline.beginMatchingPoll();
-        // 新队首可能需要激活批量、派发结算或收取队列通知；不能因本轮已收集过而饿死续接。
-        if (!advanceMatching && last.sequence != 0) {
-            advanceMatching = !state.commits.matchingCommitReady(state.pendingMatching.get(last.sequence));
-        }
-        if (last.sequence != 0) {
-            CoreResponse terminalResponse = state.commits.commitReadyMatchingHead(
-                    last.timestamp, last.position, last.sequence, dispatchThrough, advanceMatching);
-            if (terminalResponse == null) {
-                commandPipeline.rememberMatchingWait(dispatchThrough, state.pendingMatching.dispatchRevision(),
-                        progressBefore, state.matchingProgress.hasLocalMatchingWork());
-                checkProgressDeadline();
-                return false;
+        while (committedCount < maxBatch) {
+            if (!commandPipeline.hasCommittingHead()) {
+                if (window.size() == 0) break;
+                beginCommandCommit();
             }
-            if (last.response != null) throw new IllegalStateException("duplicate pipeline terminal response");
-            last.response = terminalResponse;
+            var last = commandPipeline.committingHead();
+            long dispatchThrough = Math.max(last.sequence, window.lastMatchingSequence());
+            long progressBefore = state.pendingMatching.dispatchRevision();
+            if (committedCount == 0 && commandPipeline.waitingForMatchingNotification()
+                    && commandPipeline.canSkipMatchingPoll(dispatchThrough, progressBefore,
+                    state.matchingProgress.hasNotifications() || state.hasCompletedLaneCommit())) {
+                checkProgressDeadline();
+                break;
+            }
+            if (committedCount == 0) {
+                commandPipeline.beginMatchingPoll();
+            }
+            boolean adv = advanceMatching || committedCount == 0;
+            if (!adv && last.sequence != 0) {
+                adv = !state.commits.matchingCommitReady(state.pendingMatching.get(last.sequence));
+            }
+            if (last.sequence != 0) {
+                if (committedCount > 0 && !adv && !state.commits.matchingCommitReady(state.pendingMatching.get(last.sequence))) {
+                    break;
+                }
+                CoreResponse terminalResponse = state.commits.commitReadyMatchingHead(
+                        last.timestamp, last.position, last.sequence, dispatchThrough, adv);
+                if (terminalResponse == null) {
+                    if (committedCount == 0) {
+                        commandPipeline.rememberMatchingWait(dispatchThrough, state.pendingMatching.dispatchRevision(),
+                                progressBefore, state.matchingProgress.hasLocalMatchingWork());
+                        checkProgressDeadline();
+                    }
+                    break;
+                }
+                if (last.response != null) throw new IllegalStateException("duplicate pipeline terminal response");
+                last.response = terminalResponse;
+            }
+            if (window.size() == 1) state.assertClusterCallbackComplete();
+            realtimeBoundary.commit(state, last.position);
+            if (last.response == null) throw new IllegalStateException("missing pipeline terminal response");
+            if (last.sessionId != NO_SESSION_ID) offerResponse(last.sessionId, last.request, last.response);
+            commandPipeline.finishHeadCommit();
+            state.runtimeState.releaseCompletedSequentialLaneStage();
+            committedCount++;
+            advanceMatching = false;
         }
-        if (window.size() == 1) state.assertClusterCallbackComplete();
-        realtimeBoundary.commit(state, last.position);
-        if (last.response == null) throw new IllegalStateException("missing pipeline terminal response");
-        if (last.sessionId != NO_SESSION_ID) offerResponse(last.sessionId, last.request, last.response);
-        commandPipeline.finishHeadCommit();
-        state.runtimeState.releaseCompletedSequentialLaneStage();
         if (window.size() == 0 && realtimeBoundary.enabled()) progressRealtimeReads(System.nanoTime());
-        return true;
+        return committedCount;
     }
 
     /** 推进单条控制命令的异步子任务、查询结果和终态提交。 */

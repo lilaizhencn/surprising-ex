@@ -28,7 +28,7 @@ public final class RuntimeStateProjector {
         identities.bindClientLanes(runtime);
         runtime.replaceAuxiliaryState(source);
         source.instruments().values().forEach(instrument -> {
-            identities.symbolId(instrument.instrumentId());
+            identities.symbolId(instrument.instrumentIdValue());
             identities.assetId(instrument.baseAsset());
             identities.assetId(instrument.quoteAsset());
             identities.assetId(instrument.settleAsset());

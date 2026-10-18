@@ -7,6 +7,24 @@ import org.junit.jupiter.api.Test;
 
 class RuntimeIdentityRegistryTest {
     @Test
+    void nativePermanentIdsKeepDenseZeroAndSnapshotProtocolSpellings() {
+        var registry = new RuntimeIdentityRegistry();
+        assertThat(registry.symbolId(Integer.MAX_VALUE)).isZero();
+        assertThat(registry.symbolId("2147483647")).isZero();
+        assertThat(registry.symbolId(10000)).isEqualTo(1);
+        assertThat(registry.findSymbolIdValue(Integer.MAX_VALUE)).isZero();
+        assertThat(registry.findSymbolIdValue(9999)).isEqualTo(-1);
+        assertThat(registry.findSymbolId("9999")).isNull();
+        var snapshot = registry.snapshot();
+        assertThat(snapshot.symbolIds()).containsEntry("2147483647", 0).containsEntry("10000", 1);
+        var restored = RuntimeIdentityRegistry.restore(snapshot);
+        assertThat(restored.symbolId(Integer.MAX_VALUE)).isZero();
+        assertThat(restored.symbolId(10000)).isEqualTo(1);
+        assertThat(restored.symbolId(9999)).isEqualTo(2);
+        assertThat(restored.instrumentId(0)).isEqualTo("2147483647");
+    }
+
+    @Test
     void preparedDerivativePositionProbeMatchesStringIdentityWithoutRebuildingItsName() throws Exception {
         var registry = new RuntimeIdentityRegistry();
         long user = 17;

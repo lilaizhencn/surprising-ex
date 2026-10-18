@@ -1,18 +1,17 @@
 package com.surprising.aeron.service.state.index;
 
-import com.surprising.aeron.service.state.OrderReservation;
 import com.surprising.aeron.service.state.TradingCoreState;
 
 import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
 
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.NavigableSet;
-import java.util.Set;
-import java.util.TreeMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
+import com.surprising.product.api.InstrumentIds;
+import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import java.util.TreeSet;
 
 public final class AlgoOrderIndex {
@@ -21,14 +20,14 @@ public final class AlgoOrderIndex {
             .comparingLong(AlgoDueKey::nextSliceAtEpochMillis)
             .thenComparingLong(AlgoDueKey::algoOrderId);
 
-    private final Map<Long, NavigableSet<AlgoDueKey>> idsByUser = new TreeMap<>();
-    private final Map<String, NavigableSet<AlgoDueKey>> idsBySymbol = new TreeMap<>();
+    private final Long2ObjectOpenHashMap<NavigableSet<AlgoDueKey>> idsByUser = new Long2ObjectOpenHashMap<>();
+    private final Int2ObjectOpenHashMap<NavigableSet<AlgoDueKey>> idsBySymbol = new Int2ObjectOpenHashMap<>();
     private final NavigableSet<AlgoDueKey> allDue = new TreeSet<>(DUE_ORDER);
-    private final Map<AlgoClientKey, Long> idsByClient = new java.util.HashMap<>();
-    private final Map<Long, AlgoRoute> valuesById = new TreeMap<>();
+    private final Object2LongOpenHashMap<AlgoClientKey> idsByClient = new Object2LongOpenHashMap<>();
+    private final Long2ObjectOpenHashMap<AlgoRoute> valuesById = new Long2ObjectOpenHashMap<>();
 
     /** Scheduling and identity keys only; quantities, status and child orders stay in Lane. */
-    public record AlgoRoute(long algoOrderId, long userId, String instrumentId,
+    public record AlgoRoute(long algoOrderId, long userId, int instrumentId,
                             long nextSliceAtEpochMillis, String clientAlgoOrderId) { }
 
     public AlgoOrderIndex(TradingCoreState state) {
@@ -45,18 +44,18 @@ public final class AlgoOrderIndex {
 
     public List<Long> query(long userId, String instrumentId, long dueAtEpochMillis, int limit) {
         int boundedLimit = Math.max(1, Math.min(limit, 10_000));
-        String normalizedSymbol = instrumentId == null || instrumentId.isEmpty()
-                ? "" : OrderReservation.requireInstrumentId(instrumentId);
+        int normalizedSymbol = instrumentId == null || instrumentId.isEmpty()
+                ? 0 : InstrumentIds.parse(instrumentId);
         NavigableSet<AlgoDueKey> candidates = candidateSet(userId, normalizedSymbol);
         if (candidates == null) candidates = allDue;
         NavigableSet<AlgoDueKey> dueCandidates = dueAtEpochMillis == 0
                 ? candidates
                 : candidates.headSet(new AlgoDueKey(dueAtEpochMillis, Long.MAX_VALUE), true);
-        List<Long> result = new ArrayList<>(Math.min(boundedLimit, dueCandidates.size()));
+        var result = new ImmutableLongArrayList.Builder(Math.min(boundedLimit, candidates.size()));
         for (AlgoDueKey key : dueCandidates) {
             AlgoRoute value = valuesById.get(key.algoOrderId());
             if (value == null || (userId != 0 && value.userId() != userId)
-                    || (!normalizedSymbol.isEmpty() && !value.instrumentId().equals(normalizedSymbol))
+                    || (normalizedSymbol != 0 && value.instrumentId() != normalizedSymbol)
                     || (dueAtEpochMillis != 0 && (value.nextSliceAtEpochMillis() == 0
                     || value.nextSliceAtEpochMillis() > dueAtEpochMillis))) {
                 continue;
@@ -64,7 +63,7 @@ public final class AlgoOrderIndex {
             result.add(key.algoOrderId());
             if (result.size() == boundedLimit) break;
         }
-        return List.copyOf(result);
+        return result.freeze();
     }
 
     public void apply(long algoOrderId, CoreAlgoOrderState after) {
@@ -82,28 +81,23 @@ public final class AlgoOrderIndex {
         state.algoOrders().values().forEach(this::add);
     }
 
-    private NavigableSet<AlgoDueKey> candidateSet(long userId, String instrumentId) {
+    private NavigableSet<AlgoDueKey> candidateSet(long userId, int instrumentId) {
         NavigableSet<AlgoDueKey> userSet = userId == 0 ? null : idsByUser.get(userId);
-        NavigableSet<AlgoDueKey> symbolSet = instrumentId.isEmpty() ? null : idsBySymbol.get(instrumentId);
+        NavigableSet<AlgoDueKey> symbolSet = instrumentId == 0 ? null : idsBySymbol.get(instrumentId);
         if (userSet == null) return symbolSet;
         if (symbolSet == null) return userSet;
-        NavigableSet<AlgoDueKey> smaller = userSet.size() <= symbolSet.size() ? userSet : symbolSet;
-        NavigableSet<AlgoDueKey> other = smaller == userSet ? symbolSet : userSet;
-        TreeSet<AlgoDueKey> intersection = new TreeSet<>(DUE_ORDER);
-        for (AlgoDueKey key : smaller) {
-            if (other.contains(key)) intersection.add(key);
-        }
-        return intersection;
+        // Route filters in query apply the other criterion without materializing an intersection.
+        return userSet.size() <= symbolSet.size() ? userSet : symbolSet;
     }
 
     private void add(CoreAlgoOrderState value) {
-        AlgoRoute route = new AlgoRoute(value.algoOrderId(), value.userId(), value.instrumentId(),
+        AlgoRoute route = new AlgoRoute(value.algoOrderId(), value.userId(), InstrumentIds.parse(value.instrumentId()),
                 value.nextSliceAtEpochMillis(), value.clientAlgoOrderId());
         valuesById.put(value.algoOrderId(), route);
         AlgoDueKey key = new AlgoDueKey(value.nextSliceAtEpochMillis(), value.algoOrderId());
         allDue.add(key);
         idsByUser.computeIfAbsent(value.userId(), ignored -> new TreeSet<>(DUE_ORDER)).add(key);
-        idsBySymbol.computeIfAbsent(value.instrumentId(), ignored -> new TreeSet<>(DUE_ORDER)).add(key);
+        idsBySymbol.computeIfAbsent(route.instrumentId(), ignored -> new TreeSet<>(DUE_ORDER)).add(key);
         if (!value.clientAlgoOrderId().isEmpty()) {
             idsByClient.put(new AlgoClientKey(value.userId(), value.clientAlgoOrderId()), value.algoOrderId());
         }
@@ -116,11 +110,18 @@ public final class AlgoOrderIndex {
         remove(idsByUser, value.userId(), key);
         remove(idsBySymbol, value.instrumentId(), key);
         if (!value.clientAlgoOrderId().isEmpty()) {
-            idsByClient.remove(new AlgoClientKey(value.userId(), value.clientAlgoOrderId()));
+            idsByClient.removeLong(new AlgoClientKey(value.userId(), value.clientAlgoOrderId()));
         }
     }
 
-    private static <K> void remove(Map<K, NavigableSet<AlgoDueKey>> values, K key, AlgoDueKey dueKey) {
+    private static void remove(Long2ObjectOpenHashMap<NavigableSet<AlgoDueKey>> values, long key, AlgoDueKey dueKey) {
+        NavigableSet<AlgoDueKey> ids = values.get(key);
+        if (ids == null) return;
+        ids.remove(dueKey);
+        if (ids.isEmpty()) values.remove(key);
+    }
+
+    private static void remove(Int2ObjectOpenHashMap<NavigableSet<AlgoDueKey>> values, int key, AlgoDueKey dueKey) {
         NavigableSet<AlgoDueKey> ids = values.get(key);
         if (ids == null) return;
         ids.remove(dueKey);

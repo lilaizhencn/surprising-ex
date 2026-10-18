@@ -70,7 +70,7 @@ public final class RuntimePerpetualFundingProcessor {
                 || instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED) {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "fixed-price clearance has stopped funding");
         }
-        int symbolId = identities.symbolId(instrument.instrumentId());
+        int symbolId = identities.symbolId(instrument.instrumentIdValue());
         MarkPriceRuntime mark = runtime.markPrice(symbolId);
         if (mark == null) {
             throw new CoreStateRejectedException("MARK_PRICE_NOT_FOUND", "funding requires mark price");

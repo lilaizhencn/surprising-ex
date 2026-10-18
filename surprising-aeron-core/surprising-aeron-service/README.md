@@ -489,3 +489,15 @@ surprising:
 **macOS 开启此开关仍跳过绑核并输出 `Trading CPU affinity skipped on macOS`，不校验 CPU 编号、不调用原生绑核 API。** 该功能不配置 `isolcpus` 或系统中断亲和性。
 
 功能验证覆盖配置校验、macOS 跳过、Matcher/Lane 生命周期、六产品快照及资金幂等；FUSED/PIPELINED 各 98 项回归、0 失败，每轮 1 项 Linux 原生绑定用例在 macOS 上跳过，需在 Linux 验证实际 mask。验证记录见 [CPU 亲和性功能验证](../../docs/validation/core-cpu-affinity-20261018.json)。本次不执行压测、JMH、JFR，不据此承诺 P99 改善。
+
+### 核心币对身份与条件单索引的 primitive 存储（2026-10-18）
+
+数据库永久 `instrumentId` 是正 int；之前的文本来自线协议、查询及快照契约。`CoreInstrument.instrumentIdValue()` 现在在注册入口固定数值，原 `instrumentId()` 只复用已校验的规范文本。HTTP/WebSocket、协议和快照字段不改格式，不在逐笔路径重新生成文本。`TradingRuntimeState` 的规范 instrument 注册表使用 `IntObjectHashMap`；`RuntimeIdentityRegistry` 使用 `IntIntHashMap` 把永久 ID 映射到原有稠密 `symbolId`，保留运行时 ID 0 的合法性和 -1 未命中语义。稠密数组不按数据库最大 ID 分配，支持大 ID。查询和恢复边界才导出文本键的有序视图。
+
+`CoreMatchingOrder` 直接保存 int ID；普通和批量撮合从规范 instrument 取数值，并先检查 Matcher 所属执行作用域已有的 primitive 注册集合。首次注册仍维护原协议/快照字典，后续撮合不再逐笔查 String→Integer 并发字典。资金费、风险和到期结算在取得规范 instrument 后也直接使用数值身份。
+
+`TriggerOrderIndex` 的币对、用户和订单主索引用 primitive hash map；订单 ID、价格和到期桶使用 fastutil 的 primitive AVL 集合/映射，取消 `TreeMap<Long,...>`、`TreeSet<Long>` 以及客户端 ID 映射中的 Long 值装箱。现有 Eclipse Collections 提供 primitive hash map，但此处还需要有序价格范围和分页续扫，因此使用标准库 `fastutil-core:8.5.18`，没有自建树、排序全表或新增索引副本。触发价格、到期时间仍可定位到范围；同一价格下按订单 ID 降序，持仓关联查询和到期输出保持原升序，OCO 撤单保持降序。分页对已删除价格桶续扫，并正确跨过 Long.MAX_VALUE 价格桶。
+
+`AlgoOrderIndex` 的币对路由使用 int，用户/订单键和客户端映射使用 primitive hash map；组合筛选直接遍历较小索引并核对路由，不再临时构造交集树。`CancelAllAfterIndex` 的用户索引也去掉 Long 键装箱，未被遍历的状态字典改为 hash map。算法调度的 `(时间,订单ID)` 和撤单定时器的 `(时间,用户,scope)` 保留复合业务键的有序集合，scope 的文本语义及原有字典序不变。
+
+这些均为原 Owner 持有的派生索引，只随已提交 Lane 回执增删；权威订单和账户状态仍由原 Lane 持有，快照恢复时重建索引。没有新增线程、事件阶段、逐命令状态副本或第二份权威字典。协议/恢复模型及组合业务键仍有对象和文本表示，本次不声称全链路零对象。按用户要求只执行功能回归，不运行压测、JMH 或 JFR，也不据此声称吞吐或 P99 改善。

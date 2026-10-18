@@ -9,16 +9,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
-import java.util.Set;
-import java.util.TreeMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.util.TreeSet;
 import java.util.function.Function;
 
 public final class CancelAllAfterIndex {
 
-    private final Map<Long, NavigableSet<TimerKey>> idsByUser = new TreeMap<>();
+    private final Long2ObjectOpenHashMap<NavigableSet<TimerKey>> idsByUser = new Long2ObjectOpenHashMap<>();
     private final NavigableSet<TimerKey> allDue = new TreeSet<>();
-    private final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> valuesByKey = new TreeMap<>();
+    private final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> valuesByKey = new java.util.HashMap<>();
 
     public CancelAllAfterIndex(TradingCoreState state) {
         rebuild(state);
