@@ -433,6 +433,10 @@ D1 补充审查：`ClusterServiceEgress.TransportSession` 仍实现 `ClientSessi
 
 ### 交易链路精简与并发修复（2026-10-18，验收中）
 
+币对ID解析修正：`DeterministicExchangeCoreAdapter.reserveSymbolId` 直接读取已有 `symbols` 注册表，未注册时仍通过 `registerSymbolId` 校验永久正整数ID及反向映射冲突。删除只覆盖1–1023的两个重复数组及四位数字解析捷径，`10000`、`10127`、正整数上界与小ID使用同一注册流程。恢复时仍重建原注册表；每个Matcher作用域的native注册集合继续控制订单簿首次注册，不新增状态、快照字段或执行阶段。
+
+`TradingCommandCodec` 使用已有有界内容缓存复用币对文本，移除大ID每次重建String的分支；无生产调用的 `InstrumentIds.canonicalString` 小ID缓存一并删除，VarHandle数值解码保留。产品API15项、协议249项、客户端66项，以及FUSED/PIPELINED各113项服务回归全部通过；覆盖大ID注册与快照恢复、六产品线快照、现货资产、永续/交割/期权财务矩阵、资金幂等及提交恢复。完整结果和未测范围见 [币对缓存修复验证](../../docs/validation/symbol-id-cache-fix-20261018.json)。按用户要求，本次不执行压测、JMH或JFR，不宣称吞吐或P99改善。
+
 `TradingCoreOwner` 在FUSED模式直接推进输入环队首，直到撮合、结算、确定性提交及回包交接完成；不创建 `ClusterCommandWindow` 或维护其依赖索引。解码在幂等/来源检查之后进入原准入异常处理，畸形载荷仍产生业务拒绝。`MatcherCommandPipeline.startInline` 不创建跨线程提交环或读请求队列，同步结果直接交给既有命令槽；只有控制调用需要保留一个本线程结果。PIPELINED保留Matcher、Account Lane与账本线程的原交接边界。
 
 FUSED的权威订单和冻结槽沿用Lane池，并受已提交序号的退休栅栏约束。Matcher的原生币对注册集合改为所属执行作用域的primitive集合。Lane就绪提示按Lane/分片间隔存放，各Lane回执计数放在自身 `LaneCommitDelta` 中；队列及事件完成位仍是完成事实，提示位不替代业务栅栏。直达结算仅允许发布已就绪事实，移除不可达的未就绪等待分支。
