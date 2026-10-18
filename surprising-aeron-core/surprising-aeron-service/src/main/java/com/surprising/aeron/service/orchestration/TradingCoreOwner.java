@@ -164,8 +164,8 @@ public final class TradingCoreOwner {
             boolean matching = TradingCoreRuntime.isMatchingCommand(next.command.header().messageType());
             commandPipeline.controlResponse(state.applyDecodedCommand(next.command, next.timestamp,
                     next.position, matching ? fusedDecoder : null, false, next.fingerprint));
-            commandPipeline.rememberMatchingResponseSequence(state.matchingSequence(
-                    next.command.header().commandIdMsb(), next.command.header().commandIdLsb()));
+            commandPipeline.rememberMatchingResponseSequence(matching ? state.matchingSequence(
+                    next.command.header().commandIdMsb(), next.command.header().commandIdLsb()) : 0L);
             commandPipeline.recordAdmission();
             if (!pollControl()) return;
         }
@@ -207,7 +207,8 @@ public final class TradingCoreOwner {
                 next.ownerObserved = true;
             }
             boolean eligible = state.prepareClusterPipelineScope(next.command, window);
-            boolean retry = eligible && state.matchingSequence(next.command.header().commandIdMsb(), next.command.header().commandIdLsb()) != 0;
+            boolean retry = eligible && !state.pendingMatching.isEmpty()
+                    && state.matchingSequence(next.command.header().commandIdMsb(), next.command.header().commandIdLsb()) != 0;
             int prefix = !eligible || retry ? window.size() : window.conflictingPrefixSize();
             if (prefix != 0) {
                 commandPipeline.rememberBlockedIngress(next.command, prefix);
@@ -228,8 +229,9 @@ public final class TradingCoreOwner {
                 commandPipeline.controlResponse(state.applyDecodedCommand(next.command, next.timestamp, next.position,
                         window.decodedIfPresent(next.command), false, next.fingerprint));
                 commandPipeline.recordControlProgress();
-                commandPipeline.rememberMatchingResponseSequence(
-                        state.matchingSequence(next.command.header().commandIdMsb(), next.command.header().commandIdLsb()));
+                boolean matching = TradingCoreRuntime.isMatchingCommand(next.command.header().messageType());
+                commandPipeline.rememberMatchingResponseSequence(matching ? state.matchingSequence(
+                        next.command.header().commandIdMsb(), next.command.header().commandIdLsb()) : 0L);
                 continue;
             }
             if (window.size() == 0) state.assertClusterCallbackComplete();
@@ -238,13 +240,10 @@ public final class TradingCoreOwner {
             ingress.remove(); // The window now owns this command and its decoder lease.
             CoreResponse result = state.applyDecodedCommand(entry.request, entry.timestamp, entry.position,
                     window.decoded(entry.request), true, fingerprint);
-            window.bindSequence(entry, state.matchingSequence(entry.request.header().commandIdMsb(), entry.request.header().commandIdLsb()));
-            if (entry.sequence != 0) {
-                var pending = state.pendingMatching.get(entry.sequence);
-                pending.establishCommitFence(entry.timestamp, entry.position);
-                state.pendingMatching.progressChanged();
-            }
-            entry.response = entry.sequence == 0 ? result : null;
+            long sequence = result != null && result.resultCode() == TradingCoreRuntime.matchingPendingCode()
+                    ? result.committedCoreSequence() : 0;
+            window.bindSequence(entry, sequence);
+            entry.response = sequence == 0 ? result : null;
             admittedInputs++;
             commandPipeline.recordAdmission();
             advanceMatching = true;
@@ -308,7 +307,7 @@ public final class TradingCoreOwner {
         if (last.sessionId != NO_SESSION_ID) offerResponse(last.sessionId, last.request, last.response);
         commandPipeline.finishHeadCommit();
         state.runtimeState.releaseCompletedSequentialLaneStage();
-        if (window.size() == 0) progressRealtimeReads(System.nanoTime());
+        if (window.size() == 0 && realtimeBoundary.enabled()) progressRealtimeReads(System.nanoTime());
         return true;
     }
 
@@ -584,7 +583,8 @@ public final class TradingCoreOwner {
         processingLogCallback = true;
         try {
             progressCommands();
-            int realtimeWork = pendingCommandCount() == 0 ? progressRealtimeReads(System.nanoTime()) : 0;
+            int realtimeWork = pendingCommandCount() == 0 && realtimeBoundary.enabled()
+                    ? progressRealtimeReads(System.nanoTime()) : 0;
             return (before != commandPipeline.commandProgress()
                     || matchingBefore != state.pendingMatching.dispatchRevision() ? 1 : 0)
                     + realtimeWork;
