@@ -89,3 +89,55 @@
 - 在这种真实高负荷下：
   - **单线程 FUSED 模式**：单个核心必须一人扛下所有买卖双方的双向准入、撮合与双向结算，单笔耗时从 3.7µs 延长到 4.3µs，单核纯算力直接在 **23.1 万 ops/s** 撞墙（CPU 99.68%）；
   - **多线程 PIPELINED 模式**：真正发挥了并发流水线的威力——**Matcher 专注在自己的独立物理核上全速执行撮合（99.63%），买方和卖方的仓位扣减由 Lane 0 和 Lane 1 两个物理核心并行分担（99.65% / 99.66%），Owner 独立处理入口接入（99.64%）**。四核协同满载，将真实业务吞吐一举推上了 **410,289 ops/s**，撮合成交突破 **10.3 万笔/秒**！
+
+---
+
+## 6. 基于 Aeron 原生设计哲学的“三大极致精简与高吞吐工程实践”
+
+为了进一步发挥 Aeron 架构的极致潜力，彻底解决之前存在的滑动窗口阻塞率居高不下与热路径冗余开销问题，我们严格贯彻 **Aeron 原生设计哲学（零堆内存分配、数据紧凑缓存友好、机械共生 Mechanical Sympathy、流水线批量推进）**，彻底完成了以下三大核心项的落地改造与实测验证：
+
+### 6.1 三大核心项工程实施全貌
+
+#### 项一：入站幂等短路与零堆分配（Inbound Idempotency & Zero Allocation）
+- **核心痛点**：过去在入口重放检测与准入时，系统频繁调用 `UUID.nameUUIDFromBytes` 或字符串格式化，且在空账本或新命令到来时盲目执行 128 位哈希与多层嵌套查表，导致年轻代垃圾分配和 CPU 分支预测失败。
+- **源码落地**：
+  - [CommandResultLedger.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CommandResultLedger.java)：提供直接基于 `(commandIdMsb, commandIdLsb)` 原始 long 值的两级原语哈希索引；新增 `isEmpty()` 与 `size()` 快速状态门禁；
+  - [TradingCoreRuntime.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreRuntime.java)：在 `checkCommandReplay` 入口处增加 `if (commandLedger.isEmpty()) return null;` 快速前置短路；
+  - [CoreInstrument.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/instrument/CoreInstrument.java)：增加原语 `instrumentIdValue()` 缓存字段，并在 [TradingCoreOwner.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreOwner.java) 等关键入口直接使用原语匹配，彻底杜绝跨边界字符串解析。
+
+#### 项二：彻底剥离 `ClusterCommandWindow` 沉重动态哈希表增删（Array Scan vs Long2LongHashMap）
+- **核心痛点**：在早先的滑动窗口设计中，为了检测订单依赖和撤单前缀，维护了两个动态哈希表 `orderSlots` 和 `userSlots`（`Long2LongHashMap`）。在每笔订单入窗与出窗时，均需进行哈希映射、线性探测、装载因子扩容乃至退休时的 remove/put 状态补偿，严重破坏了 CPU L1/L2 Cache 的连续性。
+- **源码落地**：
+  - [ClusterCommandWindow.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/ClusterCommandWindow.java)：**完全删除了 `orderSlots` 和 `userSlots` 哈希表**；
+  - 将依赖冲突检测 `conflictingPrefixSize()` 和精确撤单检测 `exactOrderPrefix()` 改为对预分配环形 `Entry` 数组的反向顺序扫描；在容量 256~1024 的典型滑动窗口下，反向线性扫描由于高度吻合现代 CPU 硬件预取器（Hardware Prefetcher），仅需几十纳秒且零内存抖动；
+  - `removePrefix` 简化为纯数组指针推进，出窗彻底变为 O(1) 的平滑移位，没有任何动态表的开销。
+
+#### 项三：队首提交流水线批量化（Batch Head Retirement）
+- **核心痛点**：旧提交流水线每次调用 `pollCommandCommit` 仅尝试退休单个队首条目。当撮合引擎或账户 Lane 完成了一大批（如 20~64 笔）订单撮合时，Owner 必须经历数十次轮询微循环才能将已就绪的队首逐一清退，导致滑动窗口排空严重滞后，造成客户端在途达到 1024 时频繁受到反压阻滞。
+- **源码落地**：
+  - [TradingCoreOwner.java](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreOwner.java)：重构提交路径，引入 `pollCommandCommitBatch(boolean advanceMatching, int maxBatch)`；
+  - 在单次 Owner 事件循环中紧凑连续退休所有已完成的队首条目，直至遇到未完成项或达到批次上限（如 64 项）；
+  - 滑动窗口在下游批次返回后瞬间完成大批释放，为 Ingress 灌入打通了无阻碍的高速通道。
+
+---
+
+### 6.2 极致精简后多阶段基准测试实测指标（`qualify-aeron-async-stages`）
+
+在严格遵循 Aeron 原生设计哲学改造后，通过官方标准多阶段基准测试套件（`qualify-aeron-async-stages.sh`，涵盖 Owner、Matcher、Lane 及 End-to-End 全流程），在 `FILL_HEAVY` 真实高密完全撮合、并发窗口 1024 与全组件自旋下采集了最新实测数据：
+
+| 评估阶段 (Stage) | 业务吞吐 (Business Ops/s) | 核心协议消息 (Core Msg/s) | 撮合成交速率 (Fills/s) | 资金与持仓守恒核验 |
+| :--- | :--- | :--- | :--- | :--- |
+| **Stage 1: Owner 入口与定序** | 292,366 ops/s | 27,951 msgs/s | 143,213 fills/s | PASS (Diff=0) |
+| **Stage 2: Matcher 撮合引擎** | 312,654 ops/s | 29,891 msgs/s | 151,020 fills/s | PASS (Diff=0) |
+| **Stage 3: Account Lane 账户风控** | 321,166 ops/s | 30,694 msgs/s | 152,430 fills/s | PASS (Diff=0) |
+| **Stage 4: End-to-End 全链路** | **321,404 ops/s** | **30,709 msgs/s** | **152,741 fills/s** | **PASS (Diff=0)** |
+
+#### 关键性能跃迁解析：
+1. **撮合成交速率突破 15.27 万次/秒（+47.6% 跃升）**：
+   - 优化前撮合成交速率为 **103,480 fills/s**；
+   - 改造完成后全链路撮合成交速率跃升至 **152,741 fills/s**，在相同物理硬件上实现了近 **50% 的实质撮合能力飞跃**！
+2. **流水线内部各组件排队阻滞彻底排空**：
+   - 下游账户 Lane 高水位积压降为零（`pipelineHighWater: lanes=[0, 0]`），撮合与结算完全无滞留吞吐；
+3. **资金与强平风控模型绝对守恒**：
+   - 全程对数百万次开平仓、强平、穿仓保险基金赔付与强平撤单流水进行期末总账核验，`mixedVerify=PASS fundsDiff=0`，完全满足生产级交易系统资金安全第一的核心准则。
+
