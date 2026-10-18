@@ -751,6 +751,10 @@ public final class OrderBookQueryService {
                 owner.appliedCommandCount);
     }
 
+    public boolean hasPendingQueries() {
+        return !queryIds.isEmpty();
+    }
+
     public long querySequence(UUID queryId) {
         return queryIds.getOrDefault(queryId, 0L);
     }

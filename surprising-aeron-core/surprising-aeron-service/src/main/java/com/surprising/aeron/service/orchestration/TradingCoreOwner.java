@@ -329,11 +329,13 @@ public final class TradingCoreOwner {
             }
             commandPipeline.controlResponse(commandPipeline.matchingResponse());
         }
-        long querySequence = state.bookQueries.querySequence(request.header().commandId());
-        if (querySequence != 0) {
-            CoreResponse result = state.bookQueries.takeQueryResult(querySequence);
-            if (result == null) { checkProgressDeadline(); return false; }
-            commandPipeline.controlResponse(result);
+        if (state.bookQueries.hasPendingQueries()) {
+            long querySequence = state.bookQueries.querySequence(request.header().commandId());
+            if (querySequence != 0) {
+                CoreResponse result = state.bookQueries.takeQueryResult(querySequence);
+                if (result == null) { checkProgressDeadline(); return false; }
+                commandPipeline.controlResponse(result);
+            }
         }
         state.assertClusterCallbackComplete();
         realtimeBoundary.commit(state, activeControl.position);

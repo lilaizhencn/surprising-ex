@@ -348,14 +348,17 @@ class DeterministicExchangeCoreAdapterTest {
         }
     }
 
-    @Test
-    void nativeSnapshotRoundTripRestoresTheOnlyExecutableBook() {
-        TradingCoreState state = stateWithOpenBid(100);
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "1", "1023", "1024", "10000", "10127", "2147483647"})
+    void nativeSnapshotRoundTripRestoresTheOnlyExecutableBook(String instrumentId) {
+        TradingCoreState state = stateWithOpenBid(100, instrumentId);
         MatcherSnapshot snapshot;
         int bookHash;
         MatchingResult beforeSnapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            beforeSnapshot = placeDirect(adapter, 1, new java.util.UUID(0, 100), 1000, 7, bid(100));
+            beforeSnapshot = placeDirect(adapter, 1, new java.util.UUID(0, 100), 1000, 7,
+                    bid(1, instrumentId, 100));
             assertThat(beforeSnapshot.accepted()).isTrue();
             snapshot = adapter.snapshotAsync(
                     91, 1, state.businessStateHash(), state, activeOrders(state)).join();
@@ -364,6 +367,7 @@ class DeterministicExchangeCoreAdapterTest {
 
         byte[] encoded = MatcherSnapshotCodec.encode(snapshot);
         MatcherSnapshot decoded = MatcherSnapshotCodec.decode(encoded);
+        assertThat(decoded.symbols()).containsEntry(instrumentId, Integer.parseInt(instrumentId));
         assertThat(decoded.matcherShardProgress()).isEqualTo(snapshot.matcherShardProgress());
         assertThat(decoded.symbols()).containsExactlyEntriesOf(snapshot.symbols());
         assertThat(decoded.users()).containsExactlyElementsOf(snapshot.users());
@@ -384,7 +388,10 @@ class DeterministicExchangeCoreAdapterTest {
         try (DeterministicExchangeCoreAdapter restored =
                      new DeterministicExchangeCoreAdapter(state, activeOrders(state), 1, decoded)) {
             assertThat(restored.orderBooksStateHashAsync().join()).isEqualTo(bookHash);
-            var afterRestore = placeDirect(restored, 2, new java.util.UUID(0, 101), 1001, 8, bid(101, 90));
+            var afterRestore = placeDirect(restored, 2, new java.util.UUID(0, 101), 1001, 8,
+                    bid(101, instrumentId, 90));
+            assertThat(afterRestore.accepted()).isTrue();
+            assertThat(restored.orderBookLevelsAsync(instrumentId, 30).join()).hasSize(2);
             assertThat(afterRestore.nativeMatcherSequence()).isGreaterThan(
                     snapshot.progress(afterRestore.nativeMatcherShardId()).matcherSequence());
         }
@@ -496,12 +503,16 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     private static TradingCoreState stateWithOpenBid(long priceTicks) {
-        CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, "1",
+        return stateWithOpenBid(priceTicks, "1");
+    }
+
+    private static TradingCoreState stateWithOpenBid(long priceTicks, String instrumentId) {
+        CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, instrumentId,
                 CoreOrderSide.BUY, priceTicks, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
         return new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order),
-                Map.of("1", CoreInstrument.from(ProductLine.SPOT,
-                        new RegisterInstrumentCommand("1", ContractType.SPOT.ordinal(),
+                Map.of(instrumentId, CoreInstrument.from(ProductLine.SPOT,
+                        new RegisterInstrumentCommand(instrumentId, ContractType.SPOT.ordinal(),
                                 "BTC", "USDT", "USDT", 1, 1, 1,
                                 100_000, 50_000, 0, 0, 0, -1, 0))),
                 CoreRiskState.empty(), CoreTreasuryState.empty());

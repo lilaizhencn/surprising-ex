@@ -44,23 +44,7 @@ public final class TradingCommandCodec {
         if (length == 0) {
             return "";
         }
-        if (length <= 10 && bytes[offset] >= '1' && bytes[offset] <= '9') {
-            boolean allDigits = true;
-            for (int i = 1; i < length; i++) {
-                byte b = bytes[offset + i];
-                if (b < '0' || b > '9') {
-                    allDigits = false;
-                    break;
-                }
-            }
-            if (allDigits) {
-                try {
-                    int symbolId = com.surprising.product.api.InstrumentIds.parse(bytes, offset, length);
-                    return com.surprising.product.api.InstrumentIds.canonicalString(symbolId);
-                } catch (IllegalArgumentException ignored) {
-                }
-            }
-        }
+        // Cache the exact wire text for every ID range; canonicalization belongs to admission.
         int hash = 0;
         for (int i = 0; i < length; i++) {
             hash = 31 * hash + bytes[offset + i];

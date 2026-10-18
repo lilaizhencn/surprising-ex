@@ -11,6 +11,37 @@ import org.junit.jupiter.api.Test;
 class TradingCommandCodecTest {
 
     @Test
+    void collidingInstrumentTextRemainsDistinctAndDoesNotRetainInputBytes() {
+        // Both decimal IDs select the same slot of the bounded text cache.
+        byte[] first = "10000".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        byte[] second = "10088".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        String retained = TradingCommandCodec.decodeAsciiSymbol(first, 0, first.length);
+        java.util.Arrays.fill(first, (byte) '9');
+        assertThat(TradingCommandCodec.decodeAsciiSymbol(second, 0, second.length)).isEqualTo("10088");
+        byte[] original = "10000".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        assertThat(TradingCommandCodec.decodeAsciiSymbol(original, 0, original.length)).isEqualTo("10000");
+        assertThat(retained).isEqualTo("10000");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "1", "1023", "1024", "10000", "10127", "999999", "2147483647"})
+    void reusesInstrumentTextAcrossOwnedAndBorrowedOrderDecoding(String instrumentId) {
+        var command = new PlaceOrderCommand(71, instrumentId, CoreOrderSide.BUY, 101, 6,
+                false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                CoreTimeInForce.GTC, false, "");
+        byte[] encoded = TradingCommandCodec.encodePlaceOrder(command);
+        String retained = TradingCommandCodec.decodePlaceOrder(encoded).instrumentId();
+        var slot = PlaceOrderCommand.commandSlot();
+        TradingCommandCodec.decodePlaceOrderInto(encoded, 0, encoded.length, slot);
+        assertThat(slot.instrumentId()).isSameAs(retained);
+        assertThat(TradingCommandCodec.decodePlaceOrder(encoded).instrumentId()).isSameAs(retained);
+        java.util.Arrays.fill(encoded, (byte) 0);
+        assertThat(retained).isEqualTo(instrumentId);
+        assertThat(slot.instrumentId()).isEqualTo(instrumentId);
+    }
+
+    @Test
     void leverageRepricingRequiresAnExplicitVersionAndKeepsOldJournalBytes() {
         byte[] original = java.nio.ByteBuffer.allocate(15).order(java.nio.ByteOrder.LITTLE_ENDIAN)
                 .putShort((short) 1).put((byte) '1').putInt(CoreMarginMode.CROSS.wireCode())

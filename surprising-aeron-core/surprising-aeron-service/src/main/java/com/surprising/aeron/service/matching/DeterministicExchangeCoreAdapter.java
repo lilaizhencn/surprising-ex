@@ -57,12 +57,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             new InMemorySerializationProcessor();
     private final Map<String, Integer> symbols = new ConcurrentHashMap<>();
     private final Map<Integer, String> symbolNames = new ConcurrentHashMap<>();
-    private static final int FAST_SYMBOL_TABLE_SIZE = 1024;
-    private final int[] fastSymbolTable = new int[FAST_SYMBOL_TABLE_SIZE];
-    private final String[] fastSymbolNameTable = new String[FAST_SYMBOL_TABLE_SIZE];
-    {
-        java.util.Arrays.fill(fastSymbolTable, -1);
-    }
     private final ConcurrentHashMap<Long, SnapshotOperation> snapshotOperations = new ConcurrentHashMap<>();
     private final LaneTopology topology;
     private final AtomicReference<Throwable> matcherFailure = new AtomicReference<>();
@@ -200,10 +194,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                     throw new IllegalArgumentException("matcher instrumentId registry collision");
                 }
                 symbols.put(instrumentId, symbolId);
-                if (symbolId > 0 && symbolId < FAST_SYMBOL_TABLE_SIZE) {
-                    fastSymbolTable[symbolId] = symbolId;
-                    fastSymbolNameTable[symbolId] = instrumentId;
-                }
             });
             // 路由表也含尚未创建订单簿的 instrumentId，不能作为 native 注册完成的证据。
             // 恢复后的首次使用仍经 ensureSymbol；native 对已有订单簿的注册是幂等操作。
@@ -1349,27 +1339,9 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private int reserveSymbolId(String instrumentId) {
-        int fastId = fastParseDecimal(instrumentId);
-        if (fastId > 0 && fastId < FAST_SYMBOL_TABLE_SIZE) {
-            int cached = fastSymbolTable[fastId];
-            if (cached > 0) return cached;
-        }
         // 已注册币对走并发字典只读路径；新币对仍串行检查稳定 ID 冲突。
         Integer existing = symbols.get(instrumentId);
         return existing != null ? existing : registerSymbolId(instrumentId);
-    }
-
-    private static int fastParseDecimal(String value) {
-        if (value == null || value.isEmpty() || value.length() > 4) return -1;
-        int first = value.charAt(0);
-        if (first < '1' || first > '9') return -1;
-        int result = first - '0';
-        for (int i = 1; i < value.length(); i++) {
-            int c = value.charAt(i);
-            if (c < '0' || c > '9') return -1;
-            result = result * 10 + c - '0';
-        }
-        return result;
     }
 
     private int registerSymbolId(String instrumentId) {
@@ -1381,10 +1353,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             throw new IllegalStateException("stable matcher instrumentId id collision: " + instrumentId + '/' + collision);
         }
         symbols.putIfAbsent(instrumentId, symbolId);
-        if (symbolId > 0 && symbolId < FAST_SYMBOL_TABLE_SIZE) {
-            fastSymbolTable[symbolId] = symbolId;
-            fastSymbolNameTable[symbolId] = instrumentId;
-        }
         return symbolId;
     }
 
