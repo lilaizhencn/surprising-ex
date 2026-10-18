@@ -4,21 +4,6 @@ package com.surprising.product.api;
 public final class InstrumentIds {
     private InstrumentIds() { }
 
-    private static final int CANONICAL_CACHE_SIZE = 1024;
-    private static final String[] CANONICAL_STRINGS = new String[CANONICAL_CACHE_SIZE];
-    static {
-        for (int i = 1; i < CANONICAL_CACHE_SIZE; i++) {
-            CANONICAL_STRINGS[i] = Integer.toString(i);
-        }
-    }
-
-    public static String canonicalString(int id) {
-        if (id > 0 && id < CANONICAL_CACHE_SIZE) {
-            return CANONICAL_STRINGS[id];
-        }
-        return Integer.toString(id);
-    }
-
     public static boolean valid(String value) {
         try { parse(value); return true; }
         catch (IllegalArgumentException invalid) { return false; }

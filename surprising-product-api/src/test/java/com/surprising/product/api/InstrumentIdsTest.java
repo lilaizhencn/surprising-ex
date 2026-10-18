@@ -25,8 +25,7 @@ class InstrumentIdsTest {
     @Test void acceptsByteArrayDecimalIds() {
         byte[] buffer = "prefix_12345_suffix".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         assertThat(InstrumentIds.parse(buffer, 7, 5)).isEqualTo(12345);
-        assertThat(InstrumentIds.canonicalString(123)).isEqualTo("123");
-        assertThat(InstrumentIds.canonicalString(123)).isSameAs(InstrumentIds.canonicalString(123));
-        assertThat(InstrumentIds.canonicalString(999999)).isEqualTo("999999");
+        byte[] maximum = "2147483647".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        assertThat(InstrumentIds.parse(maximum, 0, maximum.length)).isEqualTo(Integer.MAX_VALUE);
     }
 }
