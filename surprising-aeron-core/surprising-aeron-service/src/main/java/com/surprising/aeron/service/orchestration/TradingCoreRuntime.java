@@ -139,7 +139,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 直接业务命令路由；匹配和控制流水线由本编排器继续处理。 */
     final DirectCommandDispatcher directCommands = new DirectCommandDispatcher(
             balances, instruments, funding, risk, liquidations, adl, insurance,
-            positions, leverage, instrumentSettlement, new FeePolicyCommands(this),
+            positions, leverage, new FeePolicyCommands(this),
             triggers);
     /** 集群日志入口的状态与暂存字段。 */
     private boolean clusterPipelineAdmission;

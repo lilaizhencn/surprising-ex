@@ -242,9 +242,7 @@ final class OrderBatchExecutor {
                 : batch.decodedCommand.matcherShard(owner.matchingAdapter, batch.preparedSymbols.getFirst());
         batch.placeBatchAdmissionEvent = owner.runtimeState.dispatchPlaceBatchAdmission(
                 pending.sequence(), pending.command().header().userId(), pending.command().header().commandId(),
-                batch.preparedOrders, batch.preparedOpenInterestSteps,
-                batch.preparedLifecycleSettled, batch.preparedFundingInProgress,
-                batch.preparedClientKeyValues, batch.preparedSymbolIds, batch.preparedAssetIds,
+                batch.preparedOrders, batch.preparedClientKeyValues,
                 batch.preparedAdmittedOrders,
                 batch.items.size(), shard, owner.identities, batch,
                 batch.clusterTimestamp, batch.clusterPosition);
@@ -282,7 +280,6 @@ final class OrderBatchExecutor {
                         pending.command().header().submittedAtEpochMillis(), userId, matchingOrder,
                         batch.settlementEvent);
                 if (firstNative == null) firstNative = result;
-                item.captureAdmittedOrder(batch.preparedAdmittedOrders[index]);
                 item.realtimeTakerOrder = item.admittedOrder;
                 item.captureExecutions(result.events());
                 item.executionTakerUserId = userId;
@@ -742,9 +739,6 @@ final class OrderBatchExecutor {
     void applyOrderBatchMatcherResult(
             OrderBatchPending batch, OrderBatchItem item, CommandSlot pending,
             MatchingResult matchingResult) {
-        if (item.admittedOrder == null && batch.kind == OrderBatchKind.PLACE && batch.pipelined) {
-            item.captureAdmittedOrder(batch.preparedAdmittedOrders[batch.nextIndex]);
-        }
         if (item.admittedOrder == null && batch.kind == OrderBatchKind.PLACE)
             throw new IllegalStateException("batch place admission receipt is missing");
         if (item.realtimeTakerOrder == null && owner.realtimeCapture != null

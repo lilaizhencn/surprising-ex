@@ -11,7 +11,6 @@ import com.surprising.aeron.service.command.leverage.LeverageCommands;
 import com.surprising.aeron.service.command.liquidation.LiquidationCommands;
 import com.surprising.aeron.service.command.position.PositionCommands;
 import com.surprising.aeron.service.command.risk.RiskCommands;
-import com.surprising.aeron.service.command.settlement.InstrumentSettlementCommands;
 import com.surprising.aeron.service.command.trigger.TriggerOrderCommands;
 
 /** Dispatches commands that complete through one direct business command handler. */
@@ -25,7 +24,6 @@ public final class DirectCommandDispatcher {
     private final InsuranceFundCommands insurance;
     private final PositionCommands positions;
     private final LeverageCommands leverage;
-    private final InstrumentSettlementCommands settlements;
     private final FeePolicyCommands fees;
     private final TriggerOrderCommands triggers;
 
@@ -38,7 +36,6 @@ public final class DirectCommandDispatcher {
                                    InsuranceFundCommands insurance,
                                    PositionCommands positions,
                                    LeverageCommands leverage,
-                                   InstrumentSettlementCommands settlements,
                                    FeePolicyCommands fees,
                                    TriggerOrderCommands triggers) {
         this.balances = java.util.Objects.requireNonNull(balances);
@@ -50,7 +47,6 @@ public final class DirectCommandDispatcher {
         this.insurance = java.util.Objects.requireNonNull(insurance);
         this.positions = java.util.Objects.requireNonNull(positions);
         this.leverage = java.util.Objects.requireNonNull(leverage);
-        this.settlements = java.util.Objects.requireNonNull(settlements);
         this.fees = java.util.Objects.requireNonNull(fees);
         this.triggers = java.util.Objects.requireNonNull(triggers);
     }
@@ -74,8 +70,8 @@ public final class DirectCommandDispatcher {
             case UPDATE_RISK_SCAN_CONTROL -> risk.executeUpdateRiskScanControl(message, clusterTimestamp);
             case UPDATE_INSTRUMENT_MAINTENANCE -> instruments.executeUpdateInstrumentMaintenance(message, clusterTimestamp);
             case UPSERT_FEE_POLICY -> fees.executeUpsertFeePolicy(message, clusterTimestamp);
-            case UPDATE_POSITION_MODE -> positions.executeUpdatePositionMode(message, clusterTimestamp);
-            case ADJUST_POSITION_MARGIN -> positions.executeAdjustPositionMargin(message, clusterTimestamp);
+            case UPDATE_POSITION_MODE -> positions.executeUpdatePositionMode(message);
+            case ADJUST_POSITION_MARGIN -> positions.executeAdjustPositionMargin(message);
             case ADJUST_INSURANCE_FUND -> insurance.executeAdjustInsuranceFund(message, clusterTimestamp);
             case UPDATE_LEVERAGE -> leverage.executeUpdateLeverage(message, clusterTimestamp);
             case UPSERT_ALGO_ORDER -> triggers.executeUpsertAlgoOrder(message, clusterTimestamp);

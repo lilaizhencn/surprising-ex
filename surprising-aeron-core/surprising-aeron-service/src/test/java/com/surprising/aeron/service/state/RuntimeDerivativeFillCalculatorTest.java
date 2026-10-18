@@ -24,6 +24,15 @@ import org.junit.jupiter.api.Test;
 
 class RuntimeDerivativeFillCalculatorTest {
 
+    private static void applyFill(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+            CoreInstrument instrument, OrderRuntime order, long positionKey, long price, long quantity,
+            boolean taker, long leverage, int assetId) {
+        var treasury = new RuntimeTreasuryDelta();
+        RuntimeDerivativeFillCalculator.apply(runtime, runtime.accountLaneForUser(order.userId()), identities,
+                instrument, order, positionKey, price, quantity, taker, leverage, assetId, treasury, -1, -1);
+        treasury.apply(runtime.treasury());
+    }
+
     @Test
     void takerCursorPreservesPerFillRoundingReversalAndRevisionCounts() {
         var identities = new RuntimeIdentityRegistry();
@@ -34,17 +43,18 @@ class RuntimeDerivativeFillCalculatorTest {
              var batched = runtimeWithPosition(instrumentId, asset, key, CoreOrderSide.SELL, 4, false, 10_000, 120, 100)) {
             var expectedTreasury = new RuntimeTreasuryDelta();
             var actualTreasury = new RuntimeTreasuryDelta();
-            var cursor = RuntimeDerivativeFillCalculator.beginTaker(batched, instrument, batched.order(11),
+            var cursor = new RuntimeDerivativeFillCalculator.FillCursor();
+            RuntimeDerivativeFillCalculator.begin(cursor, batched, batched.accountLaneForUser(7), instrument, batched.order(11),
                     key, 10_000_000, asset, 555, 999);
             var before = RuntimeSnapshotBuilder.capture(batched, 1);
             try {
                 for (long price : new long[]{111, 109, 113, 107}) {
                     RuntimeDerivativeFillCalculator.apply(sequential, sequential.accountLaneForUser(7), identities, instrument, sequential.order(11),
                             key, price, 1, true, 10_000_000, asset, expectedTreasury, 555, 999);
-                    cursor.applyNext(price, 1, actualTreasury);
+                    cursor.applyNext(price, 1, true, actualTreasury);
                 }
                 assertThat(RuntimeSnapshotBuilder.capture(batched, 1)).as("intermediate scalar state must not escape").isEqualTo(before);
-                cursor.publish(batched);
+                cursor.publish(batched, batched.accountLaneForUser(7), key, null);
             } finally { cursor.clear(); }
             expectedTreasury.apply(sequential.treasury());
             actualTreasury.apply(batched.treasury());
@@ -67,20 +77,21 @@ class RuntimeDerivativeFillCalculatorTest {
         long key = identities.positionKey(7, instrument.instrumentId());
         try (var runtime = runtime(instrumentId, asset, 200)) {
             var before = RuntimeSnapshotBuilder.capture(runtime, 1);
-            var cursor = RuntimeDerivativeFillCalculator.beginTaker(runtime, instrument, runtime.order(11),
+            var cursor = new RuntimeDerivativeFillCalculator.FillCursor();
+            RuntimeDerivativeFillCalculator.begin(cursor, runtime, runtime.accountLaneForUser(7), instrument, runtime.order(11),
                     key, 10_000_000, asset, 555, 999);
             try {
-                cursor.applyNext(100, 1, new RuntimeTreasuryDelta());
-                assertThatThrownBy(() -> cursor.applyNext(100, 2, new RuntimeTreasuryDelta()))
+                cursor.applyNext(100, 1, true, new RuntimeTreasuryDelta());
+                assertThatThrownBy(() -> cursor.applyNext(100, 2, true, new RuntimeTreasuryDelta()))
                         .isInstanceOf(IllegalArgumentException.class);
             } finally { cursor.clear(); }
             assertThat(RuntimeSnapshotBuilder.capture(runtime, 1)).isEqualTo(before);
-            var retry = RuntimeDerivativeFillCalculator.beginTaker(runtime, instrument, runtime.order(11),
+            RuntimeDerivativeFillCalculator.begin(cursor, runtime, runtime.accountLaneForUser(7), instrument, runtime.order(11),
                     key, 10_000_000, asset, 555, 999);
             try {
-                retry.applyNext(100, 2, new RuntimeTreasuryDelta());
-                retry.publish(runtime);
-            } finally { retry.clear(); }
+                cursor.applyNext(100, 2, true, new RuntimeTreasuryDelta());
+                cursor.publish(runtime, runtime.accountLaneForUser(7), key, null);
+            } finally { cursor.clear(); }
             assertThat(runtime.order(11).executedQuantitySteps()).isEqualTo(2);
             assertThat(runtime.user(7).revision()).isEqualTo(1);
         }
@@ -96,7 +107,7 @@ class RuntimeDerivativeFillCalculatorTest {
         TradingRuntimeState runtime = runtime(symbolId, assetId, 200);
         OrderRuntime order = runtime.order(11);
 
-        RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument, order,
+        applyFill(runtime, identities, instrument, order,
                 positionKey, 100, 2, true, 10_000_000, assetId);
         runtime.releaseTerminalReservation(11);
 
@@ -124,7 +135,7 @@ class RuntimeDerivativeFillCalculatorTest {
         TradingRuntimeState runtime = runtime(symbolId, assetId, 21);
         TradingRuntimeSnapshot before = RuntimeSnapshotBuilder.capture(runtime, 1);
 
-        assertThatThrownBy(() -> RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument,
+        assertThatThrownBy(() -> applyFill(runtime, identities, instrument,
                 runtime.order(11), positionKey, 100, 2, true, 10_000_000, assetId))
                 .isInstanceOf(CoreStateRejectedException.class);
 
@@ -141,7 +152,7 @@ class RuntimeDerivativeFillCalculatorTest {
         TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.SELL, 1, false, 800, 120, 100);
 
-        RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument, runtime.order(11),
+        applyFill(runtime, identities, instrument, runtime.order(11),
                 positionKey, 110, 1, true, 10_000_000, assetId);
         runtime.releaseTerminalReservation(11);
 
@@ -168,7 +179,7 @@ class RuntimeDerivativeFillCalculatorTest {
         TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.BUY, 1, false, 800, 40, 20);
 
-        RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument, runtime.order(11),
+        applyFill(runtime, identities, instrument, runtime.order(11),
                 positionKey, 120, 1, true, 10_000_000, assetId);
         runtime.releaseTerminalReservation(11);
 
@@ -190,7 +201,7 @@ class RuntimeDerivativeFillCalculatorTest {
         TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.SELL, 3, false, 800, 220, 200);
 
-        RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument, runtime.order(11),
+        applyFill(runtime, identities, instrument, runtime.order(11),
                 positionKey, 120, 3, true, 10_000_000, assetId);
         runtime.releaseTerminalReservation(11);
 
@@ -218,7 +229,7 @@ class RuntimeDerivativeFillCalculatorTest {
                 CoreOrderSide.SELL, 3, true, 800, 220, 200);
         TradingRuntimeSnapshot before = RuntimeSnapshotBuilder.capture(runtime, 1);
 
-        assertThatThrownBy(() -> RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument,
+        assertThatThrownBy(() -> applyFill(runtime, identities, instrument,
                 runtime.order(11), positionKey, 120, 3, true, 10_000_000, assetId))
                 .isInstanceOf(CoreStateRejectedException.class);
         assertThat(RuntimeSnapshotBuilder.capture(runtime, 1)).isEqualTo(before);

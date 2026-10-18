@@ -14,7 +14,7 @@ public final class PositionCommands {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 
-    public void executeUpdatePositionMode(CoreMessage message, long clusterTimestamp) {
+    public void executeUpdatePositionMode(CoreMessage message) {
         long userId = message.header().userId();
         owner.resultBuilder.setSingleChangedUser(userId);
         var command = TradingCommandCodec.decodeUpdatePositionMode(message.payloadUnsafe());
@@ -26,7 +26,7 @@ public final class PositionCommands {
         }
     }
 
-    public void executeAdjustPositionMargin(CoreMessage message, long clusterTimestamp) {
+    public void executeAdjustPositionMargin(CoreMessage message) {
         long userId = message.header().userId();
         owner.resultBuilder.setSingleChangedUser(userId);
         var command = TradingCommandCodec.decodeAdjustPositionMargin(message.payloadUnsafe());

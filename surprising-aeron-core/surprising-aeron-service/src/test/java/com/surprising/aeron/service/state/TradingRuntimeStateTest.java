@@ -36,10 +36,15 @@ class TradingRuntimeStateTest {
             changes.balancePatches[lane].add(7, 3, new BalanceRuntime(7, 3, 1000, 0), 0);
             changes.balancePatches[lane].after(7, 3, new BalanceRuntime(7, 3, 800, 200), 200);
             var admission = new PlaceBatchAdmissionEvent().prepare(2, 7, java.util.UUID.randomUUID(),
-                    new ResolvedPlaceOrder[1], new long[1], new boolean[1], new boolean[1],
-                    new long[1], new int[1], new int[1],
+                    new ResolvedPlaceOrder[1], new long[1],
                     new OrderRuntime[]{CoreStateTestFixtures.order(11, 7, 5, 2)},
-                    1, lane, 0, state, changes, null, null, 0, 0);
+                    1, lane, 0, state, changes, new RuntimeIdentityRegistry(),
+                    new PlaceBatchIntentSource() {
+                        public com.surprising.aeron.protocol.PlaceOrderCommand intent(int index) { throw new AssertionError("unexpected execution"); }
+                        public Decision decision(int index) { throw new AssertionError("unexpected execution"); }
+                        public ResolvedPlaceOrder resolvedOrderSlot(int index) { throw new AssertionError("unexpected execution"); }
+                        public OrderRuntime captureAdmittedOrder(int index, OrderRuntime order) { throw new AssertionError("unexpected execution"); }
+                    }, 0, 0);
             var complete = PlaceBatchAdmissionEvent.class.getDeclaredField("completed");
             complete.setAccessible(true);
             complete.setBoolean(admission, true);

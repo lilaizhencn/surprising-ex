@@ -15,29 +15,10 @@ import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
 
-/** Calculates one derivative fill against the owner-thread Runtime. */
+/** Calculates derivative fills against the owning Account Lane. */
 public final class RuntimeDerivativeFillCalculator {
 
     private RuntimeDerivativeFillCalculator() {
-    }
-
-    public static void apply(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                             CoreInstrument instrument, OrderRuntime order,
-                             long positionKey, long fillPriceTicks, long fillQuantitySteps,
-                             boolean taker, long leveragePpm, int settleAssetId) {
-        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
-        apply(runtime, identities, instrument, order, positionKey, fillPriceTicks, fillQuantitySteps,
-                taker, leveragePpm, settleAssetId, treasuryDelta);
-        treasuryDelta.apply(runtime.treasury());
-    }
-
-    static void apply(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                      CoreInstrument instrument, OrderRuntime order,
-                      long positionKey, long fillPriceTicks, long fillQuantitySteps,
-                      boolean taker, long leveragePpm, int settleAssetId,
-                      RuntimeTreasuryDelta treasuryDelta) {
-        apply(runtime, runtime.accountLaneForUser(order.userId()), identities, instrument, order, positionKey, fillPriceTicks, fillQuantitySteps,
-                taker, leveragePpm, settleAssetId, treasuryDelta, -1, -1);
     }
 
     static void apply(TradingRuntimeState runtime, AccountLaneState lane, RuntimeIdentityRegistry identities,
@@ -126,9 +107,6 @@ public final class RuntimeDerivativeFillCalculator {
         void step(long price, long size, boolean taker, long leverage, long timestamp, long position) {
             calculateInto(this, price, size, taker, leverage, timestamp, position);
         }
-        void applyNext(long price, long size, RuntimeTreasuryDelta treasury) {
-            applyNext(price, size, true, treasury);
-        }
         void applyNext(long price, long size, boolean taker, RuntimeTreasuryDelta treasury) {
             step(price, size, taker, leveragePpm, timestamp, clusterPosition);
             // Preserve the exact per-fill interleaving with maker treasury deltas.
@@ -154,33 +132,13 @@ public final class RuntimeDerivativeFillCalculator {
             runtime.advanceUserRevision(lane, originalOrder.userId(), fills);
             return nextOrder;
         }
-        OrderRuntime publish(TradingRuntimeState runtime) { return publish(runtime, runtime.accountLaneForUser(originalOrder.userId()), positionKey, null); }
         void clear() {
             instrument = null; originalOrder = null; originalReservation = null; riskMark = null;
             fills = 0; positionKey = 0; leveragePpm = 0;
         }
     }
 
-    static FillCursor beginTaker(TradingRuntimeState runtime, CoreInstrument instrument,
-                                OrderRuntime order, long positionKey, long leverage, int assetId,
-                                long timestamp, long position) {
-        int laneId = runtime.accountLaneId(order.userId());
-        FillCursor cursor = runtime.accountLanes[laneId].takerFillCursor;
-        if (cursor.originalOrder != null) throw new IllegalStateException("nested taker fill cursor");
-        try {
-            begin(cursor, runtime, instrument, order, positionKey, leverage, assetId, timestamp, position);
-            return cursor;
-        } catch (RuntimeException | Error failure) { cursor.clear(); throw failure; }
-    }
-
     /** Initializes a caller-owned cursor for a settlement-level order accumulator. */
-    static void begin(FillCursor cursor, TradingRuntimeState runtime, CoreInstrument instrument,
-                      OrderRuntime order, long positionKey, long leverage, int assetId,
-                      long timestamp, long position) {
-        begin(cursor, runtime, runtime.accountLaneForUser(order.userId()), instrument, order,
-                positionKey, leverage, assetId, timestamp, position);
-    }
-
     static void begin(FillCursor cursor, TradingRuntimeState runtime, AccountLaneState lane, CoreInstrument instrument,
                       OrderRuntime order, long positionKey, long leverage, int assetId,
                       long timestamp, long position) {

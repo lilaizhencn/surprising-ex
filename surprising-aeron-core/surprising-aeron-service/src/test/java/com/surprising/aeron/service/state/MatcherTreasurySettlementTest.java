@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.model.*;
 import com.surprising.instrument.api.model.ContractType;
@@ -91,12 +90,10 @@ class MatcherTreasurySettlementTest {
         var identities = new RuntimeIdentityRegistry();
         try (var runtime = RuntimeStateProjector.project(before, identities)) {
             OrderRuntime originalTaker = runtime.order(11);
-            var result = new CoreMatchingResult(true, "SUCCESS", List.of(), 0, true,
-                    0, 0, 0, 0, 0, 0, 0, -1, null,
-                    List.of(trade(12, makerUser, 100, 1, true, true)),
-                    new MatcherResult.MarketData(List.of(), List.of(), 0, 0)).withCoreSequenceInPlace(1);
-            var plan = MatcherSettlementPlan.buildInto(new MatcherSettlementPlan(), 1,
-                    11, takerUser, 11, 0, result, runtime, identities);
+            UUID commandId = new UUID(1, 2);
+            long laneMask = topology.accountLaneMask(takerUser) | topology.accountLaneMask(makerUser);
+            var event = runtime.prepareDirectMatcherSettlement(1, laneMask, originalTaker, null, 1,
+                    commandId, 0, identities, 10, 20, List.of(), null);
             TreasuryRuntime original = runtime.treasury();
             var failure = new AtomicReference<Throwable>();
             runtime.startAccountLanes();
@@ -126,12 +123,17 @@ class MatcherTreasurySettlementTest {
                     @Override public boolean ready() { return releaseLedgerHead.get(); }
                     @Override public void apply(TreasuryRuntime treasury) { }
                 })).isTrue();
-                MatcherSettlementEvent event;
-                runtime.enterAsynchronousCommandScope();
-                try {
-                    event = runtime.dispatchMatcherSettlement(1, plan.requiredLaneMask(), 1,
-                            10, 20, plan, result, identities);
-                } finally { runtime.exitAsynchronousCommandScope(); }
+                event.reserveMatcherPublication();
+                event.beginMatcherPublication();
+                event.publishDirectNativeResult(new MatcherResult(1,
+                        exchange.core2.core.common.cmd.OrderCommandType.PLACE_ORDER, 11, identities.symbolId("1"),
+                        100, 1, 100, exchange.core2.core.common.OrderAction.BID,
+                        exchange.core2.core.common.OrderType.GTC, takerUser, 1_000, 0,
+                        exchange.core2.core.common.cmd.CommandResultCode.SUCCESS,
+                        List.of(trade(12, makerUser, 100, 1, true, true)),
+                        new MatcherResult.MarketData(List.of(), List.of(), 0, 0)),
+                        1, 1, 2, 11, 1, 0);
+                event.completeMatcherPublication();
                 try {
                     assertThat(event.submitTreasurySettlement(ledger)).isFalse();
                     assertThat(takerFinished.await(3, TimeUnit.SECONDS)).isTrue();

@@ -1602,9 +1602,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public PlaceBatchAdmissionEvent dispatchPlaceBatchAdmission(
             long coreSequence, long userId, java.util.UUID commandId,
-            ResolvedPlaceOrder[] orders, long[] openInterestSteps,
-            boolean[] lifecycleSettled, boolean[] fundingInProgress,
-            long[] clientKeys, int[] symbolIds, int[] assetIds,
+            ResolvedPlaceOrder[] orders, long[] clientKeys,
             OrderRuntime[] admittedOrders, int itemCount,
             int matcherShard, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source,
             long timestamp, long position) {
@@ -1614,8 +1612,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         changes.ensureAdmissionCapacity(laneId, itemCount);
         PlaceBatchAdmissionEvent event = placeBatchAdmissionEventPool.pollFirst();
         if (event == null) event = new PlaceBatchAdmissionEvent();
-        event.prepare(coreSequence, userId, commandId, orders, openInterestSteps, lifecycleSettled, fundingInProgress,
-                clientKeys, symbolIds, assetIds, admittedOrders,
+        event.prepare(coreSequence, userId, commandId, orders, clientKeys, admittedOrders,
                 itemCount, laneId, matcherShard, this, changes, identities, source,
                 timestamp, position);
         try {
@@ -1934,43 +1931,35 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (event.plan(index).completedTrigger() != null) revision = Math.incrementExact(revision);
         }
         long laneMask = event.requiredLaneMask();
-        MatcherSettlementChanges changes = event.commitSequence() != 0 || event.hasIsolatedChanges()
-                ? event.takeChanges() : null;
+        MatcherSettlementChanges changes = event.takeChanges();
         try {
             long remainingLanes = laneMask;
             int completed = 0;
             while (remainingLanes != 0) {
                 int laneId = Long.numberOfTrailingZeros(remainingLanes);
                 remainingLanes &= remainingLanes - 1;
-                if (changes == null) {
-                    flushPublishedChanges(laneId, changedUsers, changedOrders);
+                completed += changes.laneDeltas[laneId].completedPending;
+                if (fundsAccumulator != null && !ledgerFunds) fundsAccumulator.add(changes.laneFundsDeltas[laneId]);
+                if (changes.directPositionIdentities) {
+                    var positions = changes.laneDeltas[laneId].positions;
+                    for (int index = 0; index < positions.size; index++)
+                        event.identities().releasePublishedPosition(positions.keyAt(index));
                 }
-                else {
-                    completed += changes.laneDeltas[laneId].completedPending;
-                    if (fundsAccumulator != null && !ledgerFunds) fundsAccumulator.add(changes.laneFundsDeltas[laneId]);
-                    if (changes.directPositionIdentities) {
-                        var positions = changes.laneDeltas[laneId].positions;
-                        for (int index = 0; index < positions.size; index++)
-                            event.identities().releasePublishedPosition(positions.keyAt(index));
-                    }
-                    changes.laneDeltas[laneId].commitTerminalToOwner(
-                            this, laneId, terminalOrderSink, event.plan().coreSequence(),
-                            changedUsers, changedOrders);
-                    LaneBalancePatches balances = changes.balancePatches[laneId];
-                    for (int index = 0; index < balances.size(); index++) {
-                        balances.publishAvailableAt(this, index);
-                        if (changedUsers != null) changedUsers.add(balances.userId(index));
-                        markBalancesChanged();
-                    }
+                changes.laneDeltas[laneId].commitTerminalToOwner(
+                        this, laneId, terminalOrderSink, event.plan().coreSequence(),
+                        changedUsers, changedOrders);
+                LaneBalancePatches balances = changes.balancePatches[laneId];
+                for (int index = 0; index < balances.size(); index++) {
+                    balances.publishAvailableAt(this, index);
+                    if (changedUsers != null) changedUsers.add(balances.userId(index));
+                    markBalancesChanged();
                 }
             }
             if (terminalOrderSink != null) terminalOrderSink.completeSequence();
-            if (changes != null) {
-                pendingReservations.completedBatchItems(event.plan().coreSequence(), completed);
-            }
+            pendingReservations.completedBatchItems(event.plan().coreSequence(), completed);
             return aggregate;
         } finally {
-            if (changes != null) releaseMatcherSettlementChanges(changes);
+            releaseMatcherSettlementChanges(changes);
         }
     }
 
@@ -5569,11 +5558,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                 identities, timestamp, position, resultTarget);
     }
 
-    public MatcherSettlementEvent dispatchMatcherSettlement(
-            long coreSequence, long expectedLaneMask, long commitSequence,
-            long commitTimestamp, long commitClusterPosition,
-            MatcherSettlementPlan plan, com.surprising.aeron.service.matching.MatchingResult matchingResult,
-            RuntimeIdentityRegistry identities) { return settlements.dispatchMatcherSettlement(coreSequence, expectedLaneMask, commitSequence, commitTimestamp, commitClusterPosition, plan, matchingResult, identities); }
     public void releaseMatcherSettlement(MatcherSettlementEvent event) { settlements.releaseMatcherSettlement(event); }
     public void discardMatcherSettlement(MatcherSettlementEvent event) { settlements.discardMatcherSettlement(event); }
     public RuntimeTreasuryDelta collectOrderBatchMatcherSettlement(

@@ -1,0 +1,3146 @@
+{
+  "date": "2026-10-18",
+  "scope": "局部 JVM 分配对照；不是端到端吞吐或延迟验收。before/after 仅替换两个目标生产类，其他依赖完全相同。",
+  "java": "HotSpot Corretto 27+33-FR",
+  "maven": "3.9.16",
+  "jmh": "1.37",
+  "baselineSourceCommit": "d7fc29a7de63839f9e2d13339cdde96081969dd0",
+  "isolatedCandidate": "git archive d7fc29a7d，叠加本轮源码；共享 TradingRuntimeState 仅应用四个本轮修改块，TradingCoreRuntime 仅应用构造接线修改。",
+  "baselineCompilation": "从基线 git show 取得 RuntimeAccountStateTransitions.java、OrderBatchPending.java；javac --release 27 -g -parameters -proc:none -cp <candidate Surefire classpath> -d baseline-measured-classes <two sources>。before classpath 最前为此目录，after 不包含它。",
+  "classpathRecipe": "读取隔离候选 service Surefire XML 的 java.class.path，追加本机 Maven 缓存 JMH 1.37、jopt-simple、commons-math3。javac --release 27 -cp <classpath> -processorpath <jmh-generator-annprocess-1.37.jar>:<jmh-core-1.37.jar> -d classes <embedded sources>；classes 置于候选 classpath 前。",
+  "jmhArguments": [
+    "-f",
+    "1",
+    "-wi",
+    "2",
+    "-i",
+    "3",
+    "-w",
+    "1s",
+    "-r",
+    "1s",
+    "-prof",
+    "gc",
+    "-rf",
+    "json",
+    "-foe",
+    "true"
+  ],
+  "sources": {
+    "com/surprising/aeron/service/orchestration/BatchWorkspaceSimplificationBenchmark.java": "package com.surprising.aeron.service.orchestration;\nimport java.util.concurrent.TimeUnit;\nimport org.openjdk.jmh.annotations.*;\n@State(Scope.Thread) @BenchmarkMode(Mode.AverageTime) @OutputTimeUnit(TimeUnit.NANOSECONDS)\n@Fork(value=1,jvmArgsAppend={\"-Xms256m\",\"-Xmx256m\",\"-XX:+UseG1GC\"})\npublic class BatchWorkspaceSimplificationBenchmark {\n private ResponseArena arena;\n @Setup public void setup(){arena=new ResponseArena(1,4096);}\n @Benchmark public Object createBatch20(){return new OrderBatchPending(20,arena);}\n}\n",
+    "com/surprising/aeron/service/state/AccountWriteSimplificationBenchmark.java": "package com.surprising.aeron.service.state;\nimport com.surprising.aeron.protocol.*;\nimport com.surprising.product.api.ProductLine;\nimport java.util.concurrent.TimeUnit;\nimport org.openjdk.jmh.annotations.*;\n@State(Scope.Thread) @BenchmarkMode(Mode.AverageTime) @OutputTimeUnit(TimeUnit.NANOSECONDS)\n@Fork(value=1,jvmArgsAppend={\"-Xms256m\",\"-Xmx256m\",\"-XX:+UseG1GC\",\"--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED\"})\npublic class AccountWriteSimplificationBenchmark {\n private TradingRuntimeState runtime; private int asset; private boolean increase;\n @Setup public void setup() {\n  var ids=new RuntimeIdentityRegistry();\n  runtime=RuntimeStateProjector.project(TradingCoreState.empty(ProductLine.SPOT),ids);\n  RuntimeAccountStateTransitions.adjustBalance(runtime,ids,7,new BalanceAdjustmentCommand(\"USDT\",1_000_000_000_000L));\n  asset=ids.assetId(\"USDT\"); runtime.clearChangedKeys();\n }\n @Benchmark public long adjustExisting() {\n  increase=!increase;\n  RuntimeAccountStateTransitions.adjustAccountBalance(runtime,7,asset,increase?1:-1);\n  long value=runtime.balance(7,asset).availableUnits(); runtime.clearChangedKeys(); return value;\n }\n @Benchmark public long debitExisting() {\n  RuntimeAccountStateTransitions.debitTransferAccount(runtime,7,asset,1);\n  long value=runtime.balance(7,asset).availableUnits(); runtime.clearChangedKeys(); return value;\n }\n @TearDown public void close(){runtime.close();}\n}\n"
+  },
+  "sourceSha256": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/DirectCommandDispatcher.java": "d52e6f38d0e9c3bf58cff2b0c73a4a0f308a3738ca37c79f85451d3a1aa12666",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/position/PositionCommands.java": "991bdd34f5effcdf82ebdb3e15b2905c5fa00797fa2de4c34615eb93b9a5aaa3",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBatchExecutor.java": "2ea3aeb12cf8d61efe15abeb6c20cd1831523932a6b9f7b41e567afcbe5a8ae7",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBatchPending.java": "a21993a0481b73d83583858455aecf24477624d791b1191bc34c92a00680bcc6",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderedCommitCoordinator.java": "08dcbc2aa5b96dda8d8d0a92f6e138af41b401c25defeb0d6426b59a5748b24f",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/AccountLaneState.java": "9f49f675c1490d2b6d540a7cb10adca09afa4843d82ae2c60c23d30c1e8a75ba",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/MatcherSettlementDispatcher.java": "64fe2e58aa7664530fcf9043b3941f6bde9c21ddaa57a07d3d4ff1ad5bd08295",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/MatcherSettlementEvent.java": "d5b3191b277ab09b3f5245848e7288b151d1321480ecb03217629032bd2bb309",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/PlaceBatchAdmissionEvent.java": "1184072a172d865c8ca3a1e2f41c18de12972f4fd2aec6bd9a2d0cb3742d608f",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeAccountStateTransitions.java": "0d4cac1a319d4e9ebbd1f4f77c47010b363d392cd237e7e7c8db68738278cd2c",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeDerivativeFillCalculator.java": "03c5ebcc0e8003aa2857cfdddeb3892f698e596b133a48a87cfece7dbacc0b79",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java": "a08190125c8d5c489369dd0377b29a0eeb96739ab66f2ed9021f79734eaadf61",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/OrderBatchSlotReuseTest.java": "78c1b7388c7f8b397a92afcef237c54d22ddbd496def1a519cb28a5c5799c6c7",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/MatcherTreasurySettlementTest.java": "569c11ab8cda80ddf7d6d5d5eb1197cbf8011a76adbd51abc051f89dad480d77",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/OrderBatchSettlementWaitTest.java": "3622a2f7f868f8dcde9f76ce39a4f4ee96573c78016043ebac2a433d63fad2c2",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/RuntimeDerivativeFillCalculatorTest.java": "f6dc758ac25ca14b738bf9c8f5788e3d6985599be1b51480467fc846012520d5",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/TradingRuntimeStateTest.java": "f66570fb8ee838c0731e070880e0cd4639b1695222492fc1d87de1e078b5d842",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreOrderedOrderBatchTest.java": "30989716fbcbc2ec806406922361f32b3f48ab241efb08a71e58a0c05c9ea796",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreRuntime.java": "f85c59896fcb13db552c3439a78b9149c87b0827beb641068e69129cdc007cc8"
+  },
+  "classSha256": {
+    "before": {
+      "com/surprising/aeron/service/state/RuntimeAccountStateTransitions.class": "a41421e6d8b8e8b86262a8900333d6d0b838a340c304a08f368da632564427b9",
+      "com/surprising/aeron/service/orchestration/OrderBatchPending.class": "204d6b25f487d0d47ae89f987d9cada7d9b807d12a259b71d8ebf9e85809b788",
+      "com/surprising/aeron/service/orchestration/OrderBatchItem.class": "3c26b9f9107d395d4468985b860689940bb1c334d08a7d15f698e69ab5709dee"
+    },
+    "after": {
+      "com/surprising/aeron/service/state/RuntimeAccountStateTransitions.class": "edc59473696a50a9e4b2476c283cc1f47f334f68c7bf15f5823e565287bb889e",
+      "com/surprising/aeron/service/orchestration/OrderBatchPending.class": "9d0fce3e64d20c13fc8bdaf7e0d296c82f39412b75509455bf8767a39cf50845",
+      "com/surprising/aeron/service/orchestration/OrderBatchItem.class": "19209f0f5fab5d466fe9ed82db637f24b8eec47d36e4cb5aa31fb2ab869be198"
+    }
+  },
+  "results": {
+    "before": [
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.aeron.service.orchestration.BatchWorkspaceSimplificationBenchmark.createBatch20",
+        "mode": "avgt",
+        "threads": 1,
+        "forks": 1,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms256m",
+          "-Xmx256m",
+          "-XX:+UseG1GC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 2,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 3,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "primaryMetric": {
+          "score": 1093.7254477307686,
+          "scoreError": 256.9012132062326,
+          "scoreConfidence": [
+            836.824234524536,
+            1350.6266609370011
+          ],
+          "scorePercentiles": {
+            "0.0": 1082.8088954426842,
+            "50.0": 1088.7475486567685,
+            "90.0": 1109.6198990928526,
+            "95.0": 1109.6198990928526,
+            "99.0": 1109.6198990928526,
+            "99.9": 1109.6198990928526,
+            "99.99": 1109.6198990928526,
+            "99.999": 1109.6198990928526,
+            "99.9999": 1109.6198990928526,
+            "100.0": 1109.6198990928526
+          },
+          "scoreUnit": "ns/op",
+          "rawData": [
+            [
+              1109.6198990928526,
+              1088.7475486567685,
+              1082.8088954426842
+            ]
+          ]
+        },
+        "secondaryMetrics": {
+          "gc.alloc.rate": {
+            "score": 9673.967321371929,
+            "scoreError": 2273.1758618531167,
+            "scoreConfidence": [
+              7400.791459518812,
+              11947.143183225046
+            ],
+            "scorePercentiles": {
+              "0.0": 9533.402259519817,
+              "50.0": 9717.67228548619,
+              "90.0": 9770.827419109783,
+              "95.0": 9770.827419109783,
+              "99.0": 9770.827419109783,
+              "99.9": 9770.827419109783,
+              "99.99": 9770.827419109783,
+              "99.999": 9770.827419109783,
+              "99.9999": 9770.827419109783,
+              "100.0": 9770.827419109783
+            },
+            "scoreUnit": "MB/sec",
+            "rawData": [
+              [
+                9533.402259519817,
+                9717.67228548619,
+                9770.827419109783
+              ]
+            ]
+          },
+          "gc.alloc.rate.norm": {
+            "score": 11096.006962310834,
+            "scoreError": 0.001414888580724481,
+            "scoreConfidence": [
+              11096.005547422254,
+              11096.008377199414
+            ],
+            "scorePercentiles": {
+              "0.0": 11096.00689807382,
+              "50.0": 11096.006940392737,
+              "90.0": 11096.00704846594,
+              "95.0": 11096.00704846594,
+              "99.0": 11096.00704846594,
+              "99.9": 11096.00704846594,
+              "99.99": 11096.00704846594,
+              "99.999": 11096.00704846594,
+              "99.9999": 11096.00704846594,
+              "100.0": 11096.00704846594
+            },
+            "scoreUnit": "B/op",
+            "rawData": [
+              [
+                11096.00704846594,
+                11096.006940392737,
+                11096.00689807382
+              ]
+            ]
+          },
+          "gc.count": {
+            "score": 192.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              192.0,
+              192.0
+            ],
+            "scorePercentiles": {
+              "0.0": 63.0,
+              "50.0": 64.0,
+              "90.0": 65.0,
+              "95.0": 65.0,
+              "99.0": 65.0,
+              "99.9": 65.0,
+              "99.99": 65.0,
+              "99.999": 65.0,
+              "99.9999": 65.0,
+              "100.0": 65.0
+            },
+            "scoreUnit": "counts",
+            "rawData": [
+              [
+                63.0,
+                65.0,
+                64.0
+              ]
+            ]
+          },
+          "gc.time": {
+            "score": 258.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              258.0,
+              258.0
+            ],
+            "scorePercentiles": {
+              "0.0": 71.0,
+              "50.0": 76.0,
+              "90.0": 111.0,
+              "95.0": 111.0,
+              "99.0": 111.0,
+              "99.9": 111.0,
+              "99.99": 111.0,
+              "99.999": 111.0,
+              "99.9999": 111.0,
+              "100.0": 111.0
+            },
+            "scoreUnit": "ms",
+            "rawData": [
+              [
+                76.0,
+                71.0,
+                111.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.aeron.service.state.AccountWriteSimplificationBenchmark.adjustExisting",
+        "mode": "avgt",
+        "threads": 1,
+        "forks": 1,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms256m",
+          "-Xmx256m",
+          "-XX:+UseG1GC",
+          "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 2,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 3,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "primaryMetric": {
+          "score": 561.645934488848,
+          "scoreError": 275.6494973291183,
+          "scoreConfidence": [
+            285.9964371597297,
+            837.2954318179662
+          ],
+          "scorePercentiles": {
+            "0.0": 544.3108294940886,
+            "50.0": 568.6073464235831,
+            "90.0": 572.0196275488723,
+            "95.0": 572.0196275488723,
+            "99.0": 572.0196275488723,
+            "99.9": 572.0196275488723,
+            "99.99": 572.0196275488723,
+            "99.999": 572.0196275488723,
+            "99.9999": 572.0196275488723,
+            "100.0": 572.0196275488723
+          },
+          "scoreUnit": "ns/op",
+          "rawData": [
+            [
+              572.0196275488723,
+              568.6073464235831,
+              544.3108294940886
+            ]
+          ]
+        },
+        "secondaryMetrics": {
+          "gc.alloc.rate": {
+            "score": 203.64216026377713,
+            "scoreError": 103.30516497843387,
+            "scoreConfidence": [
+              100.33699528534326,
+              306.947325242211
+            ],
+            "scorePercentiles": {
+              "0.0": 199.57892152069496,
+              "50.0": 201.2373928803025,
+              "90.0": 210.1101663903339,
+              "95.0": 210.1101663903339,
+              "99.0": 210.1101663903339,
+              "99.9": 210.1101663903339,
+              "99.99": 210.1101663903339,
+              "99.999": 210.1101663903339,
+              "99.9999": 210.1101663903339,
+              "100.0": 210.1101663903339
+            },
+            "scoreUnit": "MB/sec",
+            "rawData": [
+              [
+                199.57892152069496,
+                201.2373928803025,
+                210.1101663903339
+              ]
+            ]
+          },
+          "gc.alloc.rate.norm": {
+            "score": 120.00357120276283,
+            "scoreError": 0.0017240125431916317,
+            "scoreConfidence": [
+              120.00184719021964,
+              120.00529521530602
+            ],
+            "scorePercentiles": {
+              "0.0": 120.0034623797453,
+              "50.0": 120.00361867066067,
+              "90.0": 120.0036325578825,
+              "95.0": 120.0036325578825,
+              "99.0": 120.0036325578825,
+              "99.9": 120.0036325578825,
+              "99.99": 120.0036325578825,
+              "99.999": 120.0036325578825,
+              "99.9999": 120.0036325578825,
+              "100.0": 120.0036325578825
+            },
+            "scoreUnit": "B/op",
+            "rawData": [
+              [
+                120.0036325578825,
+                120.00361867066067,
+                120.0034623797453
+              ]
+            ]
+          },
+          "gc.count": {
+            "score": 4.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              4.0,
+              4.0
+            ],
+            "scorePercentiles": {
+              "0.0": 1.0,
+              "50.0": 1.0,
+              "90.0": 2.0,
+              "95.0": 2.0,
+              "99.0": 2.0,
+              "99.9": 2.0,
+              "99.99": 2.0,
+              "99.999": 2.0,
+              "99.9999": 2.0,
+              "100.0": 2.0
+            },
+            "scoreUnit": "counts",
+            "rawData": [
+              [
+                1.0,
+                2.0,
+                1.0
+              ]
+            ]
+          },
+          "gc.time": {
+            "score": 10.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              10.0,
+              10.0
+            ],
+            "scorePercentiles": {
+              "0.0": 2.0,
+              "50.0": 3.0,
+              "90.0": 5.0,
+              "95.0": 5.0,
+              "99.0": 5.0,
+              "99.9": 5.0,
+              "99.99": 5.0,
+              "99.999": 5.0,
+              "99.9999": 5.0,
+              "100.0": 5.0
+            },
+            "scoreUnit": "ms",
+            "rawData": [
+              [
+                3.0,
+                5.0,
+                2.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.aeron.service.state.AccountWriteSimplificationBenchmark.debitExisting",
+        "mode": "avgt",
+        "threads": 1,
+        "forks": 1,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms256m",
+          "-Xmx256m",
+          "-XX:+UseG1GC",
+          "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 2,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 3,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "primaryMetric": {
+          "score": 559.2784386235847,
+          "scoreError": 730.7829181937326,
+          "scoreConfidence": [
+            -171.50447957014785,
+            1290.0613568173173
+          ],
+          "scorePercentiles": {
+            "0.0": 518.6069339176572,
+            "50.0": 560.5377931485785,
+            "90.0": 598.6905888045185,
+            "95.0": 598.6905888045185,
+            "99.0": 598.6905888045185,
+            "99.9": 598.6905888045185,
+            "99.99": 598.6905888045185,
+            "99.999": 598.6905888045185,
+            "99.9999": 598.6905888045185,
+            "100.0": 598.6905888045185
+          },
+          "scoreUnit": "ns/op",
+          "rawData": [
+            [
+              518.6069339176572,
+              598.6905888045185,
+              560.5377931485785
+            ]
+          ]
+        },
+        "secondaryMetrics": {
+          "gc.alloc.rate": {
+            "score": 205.21330425577526,
+            "scoreError": 269.42437495465117,
+            "scoreConfidence": [
+              -64.21107069887591,
+              474.6376792104264
+            ],
+            "scorePercentiles": {
+              "0.0": 191.06376770587724,
+              "50.0": 204.0455891773499,
+              "90.0": 220.53055588409862,
+              "95.0": 220.53055588409862,
+              "99.0": 220.53055588409862,
+              "99.9": 220.53055588409862,
+              "99.99": 220.53055588409862,
+              "99.999": 220.53055588409862,
+              "99.9999": 220.53055588409862,
+              "100.0": 220.53055588409862
+            },
+            "scoreUnit": "MB/sec",
+            "rawData": [
+              [
+                220.53055588409862,
+                191.06376770587724,
+                204.0455891773499
+              ]
+            ]
+          },
+          "gc.alloc.rate.norm": {
+            "score": 120.00352469322085,
+            "scoreError": 0.003878352563504231,
+            "scoreConfidence": [
+              119.99964634065735,
+              120.00740304578436
+            ],
+            "scorePercentiles": {
+              "0.0": 120.00329664591096,
+              "50.0": 120.0035600501623,
+              "90.0": 120.00371738358926,
+              "95.0": 120.00371738358926,
+              "99.0": 120.00371738358926,
+              "99.9": 120.00371738358926,
+              "99.99": 120.00371738358926,
+              "99.999": 120.00371738358926,
+              "99.9999": 120.00371738358926,
+              "100.0": 120.00371738358926
+            },
+            "scoreUnit": "B/op",
+            "rawData": [
+              [
+                120.00329664591096,
+                120.00371738358926,
+                120.0035600501623
+              ]
+            ]
+          },
+          "gc.count": {
+            "score": 4.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              4.0,
+              4.0
+            ],
+            "scorePercentiles": {
+              "0.0": 1.0,
+              "50.0": 1.0,
+              "90.0": 2.0,
+              "95.0": 2.0,
+              "99.0": 2.0,
+              "99.9": 2.0,
+              "99.99": 2.0,
+              "99.999": 2.0,
+              "99.9999": 2.0,
+              "100.0": 2.0
+            },
+            "scoreUnit": "counts",
+            "rawData": [
+              [
+                1.0,
+                2.0,
+                1.0
+              ]
+            ]
+          },
+          "gc.time": {
+            "score": 16.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              16.0,
+              16.0
+            ],
+            "scorePercentiles": {
+              "0.0": 3.0,
+              "50.0": 4.0,
+              "90.0": 9.0,
+              "95.0": 9.0,
+              "99.0": 9.0,
+              "99.9": 9.0,
+              "99.99": 9.0,
+              "99.999": 9.0,
+              "99.9999": 9.0,
+              "100.0": 9.0
+            },
+            "scoreUnit": "ms",
+            "rawData": [
+              [
+                3.0,
+                4.0,
+                9.0
+              ]
+            ]
+          }
+        }
+      }
+    ],
+    "after": [
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.aeron.service.orchestration.BatchWorkspaceSimplificationBenchmark.createBatch20",
+        "mode": "avgt",
+        "threads": 1,
+        "forks": 1,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms256m",
+          "-Xmx256m",
+          "-XX:+UseG1GC"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 2,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 3,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "primaryMetric": {
+          "score": 1016.2130442818794,
+          "scoreError": 1993.8159738309344,
+          "scoreConfidence": [
+            -977.6029295490549,
+            3010.029018112814
+          ],
+          "scorePercentiles": {
+            "0.0": 929.1257232360844,
+            "50.0": 980.6639236007276,
+            "90.0": 1138.8494860088267,
+            "95.0": 1138.8494860088267,
+            "99.0": 1138.8494860088267,
+            "99.9": 1138.8494860088267,
+            "99.99": 1138.8494860088267,
+            "99.999": 1138.8494860088267,
+            "99.9999": 1138.8494860088267,
+            "100.0": 1138.8494860088267
+          },
+          "scoreUnit": "ns/op",
+          "rawData": [
+            [
+              980.6639236007276,
+              929.1257232360844,
+              1138.8494860088267
+            ]
+          ]
+        },
+        "secondaryMetrics": {
+          "gc.alloc.rate": {
+            "score": 9965.470860641091,
+            "scoreError": 18769.27493169261,
+            "scoreConfidence": [
+              -8803.804071051518,
+              28734.7457923337
+            ],
+            "scorePercentiles": {
+              "0.0": 8823.831582923463,
+              "50.0": 10251.792228873182,
+              "90.0": 10820.78877012663,
+              "95.0": 10820.78877012663,
+              "99.0": 10820.78877012663,
+              "99.9": 10820.78877012663,
+              "99.99": 10820.78877012663,
+              "99.999": 10820.78877012663,
+              "99.9999": 10820.78877012663,
+              "100.0": 10820.78877012663
+            },
+            "scoreUnit": "MB/sec",
+            "rawData": [
+              [
+                10251.792228873182,
+                10820.78877012663,
+                8823.831582923463
+              ]
+            ]
+          },
+          "gc.alloc.rate.norm": {
+            "score": 10544.006446715184,
+            "scoreError": 0.011739822358909064,
+            "scoreConfidence": [
+              10543.994706892825,
+              10544.018186537543
+            ],
+            "scorePercentiles": {
+              "0.0": 10544.005923382496,
+              "50.0": 10544.006251562645,
+              "90.0": 10544.007165200414,
+              "95.0": 10544.007165200414,
+              "99.0": 10544.007165200414,
+              "99.9": 10544.007165200414,
+              "99.99": 10544.007165200414,
+              "99.999": 10544.007165200414,
+              "99.9999": 10544.007165200414,
+              "100.0": 10544.007165200414
+            },
+            "scoreUnit": "B/op",
+            "rawData": [
+              [
+                10544.006251562645,
+                10544.005923382496,
+                10544.007165200414
+              ]
+            ]
+          },
+          "gc.count": {
+            "score": 198.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              198.0,
+              198.0
+            ],
+            "scorePercentiles": {
+              "0.0": 60.0,
+              "50.0": 67.0,
+              "90.0": 71.0,
+              "95.0": 71.0,
+              "99.0": 71.0,
+              "99.9": 71.0,
+              "99.99": 71.0,
+              "99.999": 71.0,
+              "99.9999": 71.0,
+              "100.0": 71.0
+            },
+            "scoreUnit": "counts",
+            "rawData": [
+              [
+                67.0,
+                71.0,
+                60.0
+              ]
+            ]
+          },
+          "gc.time": {
+            "score": 189.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              189.0,
+              189.0
+            ],
+            "scorePercentiles": {
+              "0.0": 31.0,
+              "50.0": 75.0,
+              "90.0": 83.0,
+              "95.0": 83.0,
+              "99.0": 83.0,
+              "99.9": 83.0,
+              "99.99": 83.0,
+              "99.999": 83.0,
+              "99.9999": 83.0,
+              "100.0": 83.0
+            },
+            "scoreUnit": "ms",
+            "rawData": [
+              [
+                83.0,
+                31.0,
+                75.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.aeron.service.state.AccountWriteSimplificationBenchmark.adjustExisting",
+        "mode": "avgt",
+        "threads": 1,
+        "forks": 1,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms256m",
+          "-Xmx256m",
+          "-XX:+UseG1GC",
+          "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 2,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 3,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "primaryMetric": {
+          "score": 449.63747267129503,
+          "scoreError": 565.4601001627491,
+          "scoreConfidence": [
+            -115.82262749145406,
+            1015.0975728340441
+          ],
+          "scorePercentiles": {
+            "0.0": 428.9438014412623,
+            "50.0": 434.69586968624566,
+            "90.0": 485.2727468863771,
+            "95.0": 485.2727468863771,
+            "99.0": 485.2727468863771,
+            "99.9": 485.2727468863771,
+            "99.99": 485.2727468863771,
+            "99.999": 485.2727468863771,
+            "99.9999": 485.2727468863771,
+            "100.0": 485.2727468863771
+          },
+          "scoreUnit": "ns/op",
+          "rawData": [
+            [
+              485.2727468863771,
+              428.9438014412623,
+              434.69586968624566
+            ]
+          ]
+        },
+        "secondaryMetrics": {
+          "gc.alloc.rate": {
+            "score": 170.16693555114443,
+            "scoreError": 206.05834522735054,
+            "scoreConfidence": [
+              -35.89140967620611,
+              376.22528077849495
+            ],
+            "scorePercentiles": {
+              "0.0": 157.19703774557064,
+              "50.0": 175.46539241237474,
+              "90.0": 177.8383764954879,
+              "95.0": 177.8383764954879,
+              "99.0": 177.8383764954879,
+              "99.9": 177.8383764954879,
+              "99.99": 177.8383764954879,
+              "99.999": 177.8383764954879,
+              "99.9999": 177.8383764954879,
+              "100.0": 177.8383764954879
+            },
+            "scoreUnit": "MB/sec",
+            "rawData": [
+              [
+                157.19703774557064,
+                177.8383764954879,
+                175.46539241237474
+              ]
+            ]
+          },
+          "gc.alloc.rate.norm": {
+            "score": 80.00285456099381,
+            "scoreError": 0.0036462523419462842,
+            "scoreConfidence": [
+              79.99920830865186,
+              80.00650081333576
+            ],
+            "scorePercentiles": {
+              "0.0": 80.00272119876146,
+              "50.0": 80.00275812784719,
+              "90.0": 80.00308435637281,
+              "95.0": 80.00308435637281,
+              "99.0": 80.00308435637281,
+              "99.9": 80.00308435637281,
+              "99.99": 80.00308435637281,
+              "99.999": 80.00308435637281,
+              "99.9999": 80.00308435637281,
+              "100.0": 80.00308435637281
+            },
+            "scoreUnit": "B/op",
+            "rawData": [
+              [
+                80.00308435637281,
+                80.00272119876146,
+                80.00275812784719
+              ]
+            ]
+          },
+          "gc.count": {
+            "score": 4.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              4.0,
+              4.0
+            ],
+            "scorePercentiles": {
+              "0.0": 1.0,
+              "50.0": 1.0,
+              "90.0": 2.0,
+              "95.0": 2.0,
+              "99.0": 2.0,
+              "99.9": 2.0,
+              "99.99": 2.0,
+              "99.999": 2.0,
+              "99.9999": 2.0,
+              "100.0": 2.0
+            },
+            "scoreUnit": "counts",
+            "rawData": [
+              [
+                1.0,
+                2.0,
+                1.0
+              ]
+            ]
+          },
+          "gc.time": {
+            "score": 12.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              12.0,
+              12.0
+            ],
+            "scorePercentiles": {
+              "0.0": 3.0,
+              "50.0": 3.0,
+              "90.0": 6.0,
+              "95.0": 6.0,
+              "99.0": 6.0,
+              "99.9": 6.0,
+              "99.99": 6.0,
+              "99.999": 6.0,
+              "99.9999": 6.0,
+              "100.0": 6.0
+            },
+            "scoreUnit": "ms",
+            "rawData": [
+              [
+                3.0,
+                6.0,
+                3.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "jmhVersion": "1.37",
+        "benchmark": "com.surprising.aeron.service.state.AccountWriteSimplificationBenchmark.debitExisting",
+        "mode": "avgt",
+        "threads": 1,
+        "forks": 1,
+        "jvm": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/bin/java",
+        "jvmArgs": [
+          "-Xms256m",
+          "-Xmx256m",
+          "-XX:+UseG1GC",
+          "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
+        ],
+        "jdkVersion": "27",
+        "vmName": "OpenJDK 64-Bit Server VM",
+        "vmVersion": "27+33-FR",
+        "warmupIterations": 2,
+        "warmupTime": "1 s",
+        "warmupBatchSize": 1,
+        "measurementIterations": 3,
+        "measurementTime": "1 s",
+        "measurementBatchSize": 1,
+        "primaryMetric": {
+          "score": 617.622190725997,
+          "scoreError": 639.4326323835544,
+          "scoreConfidence": [
+            -21.810441657557362,
+            1257.0548231095513
+          ],
+          "scorePercentiles": {
+            "0.0": 591.9043281200992,
+            "50.0": 603.4180785741748,
+            "90.0": 657.5441654837172,
+            "95.0": 657.5441654837172,
+            "99.0": 657.5441654837172,
+            "99.9": 657.5441654837172,
+            "99.99": 657.5441654837172,
+            "99.999": 657.5441654837172,
+            "99.9999": 657.5441654837172,
+            "100.0": 657.5441654837172
+          },
+          "scoreUnit": "ns/op",
+          "rawData": [
+            [
+              591.9043281200992,
+              603.4180785741748,
+              657.5441654837172
+            ]
+          ]
+        },
+        "secondaryMetrics": {
+          "gc.alloc.rate": {
+            "score": 184.58184774442967,
+            "scoreError": 180.09177186305828,
+            "scoreConfidence": [
+              4.490075881371382,
+              364.6736196074879
+            ],
+            "scorePercentiles": {
+              "0.0": 173.75654236302765,
+              "50.0": 186.90340758987378,
+              "90.0": 193.08559328038763,
+              "95.0": 193.08559328038763,
+              "99.0": 193.08559328038763,
+              "99.9": 193.08559328038763,
+              "99.99": 193.08559328038763,
+              "99.999": 193.08559328038763,
+              "99.9999": 193.08559328038763,
+              "100.0": 193.08559328038763
+            },
+            "scoreUnit": "MB/sec",
+            "rawData": [
+              [
+                193.08559328038763,
+                186.90340758987378,
+                173.75654236302765
+              ]
+            ]
+          },
+          "gc.alloc.rate.norm": {
+            "score": 120.00392020099531,
+            "scoreError": 0.00405206075778604,
+            "scoreConfidence": [
+              119.99986814023752,
+              120.0079722617531
+            ],
+            "scorePercentiles": {
+              "0.0": 120.00376619242066,
+              "50.0": 120.00381960293645,
+              "90.0": 120.00417480762884,
+              "95.0": 120.00417480762884,
+              "99.0": 120.00417480762884,
+              "99.9": 120.00417480762884,
+              "99.99": 120.00417480762884,
+              "99.999": 120.00417480762884,
+              "99.9999": 120.00417480762884,
+              "100.0": 120.00417480762884
+            },
+            "scoreUnit": "B/op",
+            "rawData": [
+              [
+                120.00376619242066,
+                120.00381960293645,
+                120.00417480762884
+              ]
+            ]
+          },
+          "gc.count": {
+            "score": 4.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              4.0,
+              4.0
+            ],
+            "scorePercentiles": {
+              "0.0": 1.0,
+              "50.0": 1.0,
+              "90.0": 2.0,
+              "95.0": 2.0,
+              "99.0": 2.0,
+              "99.9": 2.0,
+              "99.99": 2.0,
+              "99.999": 2.0,
+              "99.9999": 2.0,
+              "100.0": 2.0
+            },
+            "scoreUnit": "counts",
+            "rawData": [
+              [
+                2.0,
+                1.0,
+                1.0
+              ]
+            ]
+          },
+          "gc.time": {
+            "score": 10.0,
+            "scoreError": "NaN",
+            "scoreConfidence": [
+              10.0,
+              10.0
+            ],
+            "scorePercentiles": {
+              "0.0": 2.0,
+              "50.0": 3.0,
+              "90.0": 5.0,
+              "95.0": 5.0,
+              "99.0": 5.0,
+              "99.9": 5.0,
+              "99.99": 5.0,
+              "99.999": 5.0,
+              "99.9999": 5.0,
+              "100.0": 5.0
+            },
+            "scoreUnit": "ms",
+            "rawData": [
+              [
+                5.0,
+                3.0,
+                2.0
+              ]
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "fullTestModules": [
+    {
+      "module": "surprising-aeron-core/surprising-aeron-client",
+      "totals": {
+        "tests": 66,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "skips": [],
+      "suites": [
+        {
+          "name": "com.surprising.aeron.client.AeronClientAgentTest",
+          "tests": 23,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.client.AeronClientCapacityTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.client.AeronClientPoolTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.client.AeronRealtimeTransportTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.client.AeronRequestLeaseTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.client.BorrowedMediaDriverTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.client.CoreCommandOutcomeTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.client.CoreQueryClassTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.client.RealtimeOutboxTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.client.SurprisingAeronClientConcurrencyTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.client.SurprisingAeronClientMediaDriverTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.client.SurprisingAeronClientThreadingModeTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ]
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-protocol",
+      "totals": {
+        "tests": 249,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "skips": [],
+      "suites": [
+        {
+          "name": "com.surprising.aeron.protocol.BorrowedResponseSlotTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CommandFingerprintLeaseTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreAlgoOrderCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreCancelAllAfterCodecTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreCommandResultCodecTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreInputEventCodecTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreLaneMetricsCodecTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreLiquidationBatchCodecTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreLiquidationWorkCodecTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreMaintenanceCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreMessageCodecTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreOpenInterestCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreOrderPreflightCodecTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreResponseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreResultCodeTest",
+          "tests": 114,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreRiskQueryCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreRiskScanControlCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreSettlementProgressCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreStateQueryCodecTest",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.CoreTriggerOrderCodecTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.OrderDecoderSlotTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.OrderExecutionValueTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.ProductLineClusterLayoutTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.RealtimeFrameCodecTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.RealtimeWireCompatibilityTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.TradingCommandCodecTest",
+          "tests": 22,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.TradingOrderBatchCodecTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.protocol.WireCodeLookupTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ]
+    },
+    {
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "totals": {
+        "tests": 1495,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 2
+      },
+      "skips": [
+        {
+          "class": "com.surprising.aeron.service.config.TradingCpuAffinityTest",
+          "test": "linuxBindsEachRoleToTheRequestedCpuAndRestoresItsOriginalMask",
+          "reason": "Disabled on operating system: Mac OS X"
+        },
+        {
+          "class": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+          "test": "singleCancelFlushesMatchingPhaseStatisticsAndReleasesFunds",
+          "reason": "System property [surprising.aeron.matching-phase-log-interval] does not exist"
+        }
+      ],
+      "suites": [
+        {
+          "name": "com.surprising.aeron.service.CoreBusinessRejectionCodeTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.SurprisingCoreApplicationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.config.ClusterFatalErrorTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.config.SurprisingCoreApplicationIdleStrategyTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.config.SurprisingCoreApplicationThreadingModeTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.config.TradingCpuAffinityTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1
+        },
+        {
+          "name": "com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest",
+          "tests": 28,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.AsyncAccountBalanceCommandTest",
+          "tests": 24,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.AsyncFundingCommandTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.BatchDecisionCaptureTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.BorrowedHeaderEgressTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest",
+          "tests": 320,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.ClusterCommandWindowRoutingTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CommandSlotRingTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CommandSlotTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CommittedFundingReplayTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CommittedTradeReplayTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreAccountLaneQueryTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreActiveLaneIngressTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreAdmissionInputOwnershipTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreAlgoLaneQueryTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreAuditHashQueryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreBusinessStateHashTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreCommandFingerprintTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreFundsIdempotencyTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreFundsLedgerIndexTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreLaneMetricsBoundaryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreLedgerQueryTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreLifecycleWorkTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreLiquidationLaneCheckTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreMaintenanceTest",
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreMatcherLedgerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreMatchingStateTest",
+          "tests": 51,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreMessageFlyweightDecoderTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreNativeSnapshotProductLineTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreOptionPremiumFeeFundingTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+          "tests": 42,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CorePreflightLaneQueryTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreResultLedgerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreRiskLaneQueryTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreRuntimeBalanceSurfaceTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreSelfTradePrefixTest",
+          "tests": 42,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreSpotAssetUnitsTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreTransferLaneLifecycleTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CoreUserRevisionTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.CrossShardCancellationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.DeferredSessionResponsesTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.FundsCommandIndexTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.LaneReplacementResponseTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.MatcherCommandPipelineTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.MatcherPipelineGroupTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.OrderBatchSlotReuseTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.OrdinaryLifecycleOverlapTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.OwnerCommandPipelineStateTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.OwnerIdleStrategyTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.OwnerIngressRingTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.OwnerLogContextTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.OwnerPositionRetirementTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.OwnerSessionBoundaryTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.PendingMatchingRingTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.PrimitiveLongChangeSetTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.ProductRecoveryLifecycleTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.ProductionSourceBoundaryTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.PublishedSnapshotRecoveryTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.RealtimeTerminalEmissionTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.ResponseArenaTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.RiskBatchBudgetTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.RuntimeCommitRecoveryTest",
+          "tests": 18,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.SectionedCoreSnapshotCodecTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.SharedProductLineSnapshotContractTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.TerminalStateRetentionTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.TerminalTombstoneStoreTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.TradingCoreOwnerTest",
+          "tests": 45,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.TradingOwnerInputReuseTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.TradingOwnerLoopTimeoutConfigurationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.orchestration.TradingRuntimeOwnershipTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.AccountLaneOwnershipTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.AccountLanePendingReservationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.AdlPositionIndexTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.AdmissionSettlementFactTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CaptureBufferReuseTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CommittedIndexVisitTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.ControlLaneDispatcherTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.ControlOrderMetadataLeaseTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreContractMathTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreDeliveryOptionFinancialMatrixTest",
+          "tests": 29,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreFeePolicySnapshotCodecTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreLifecycleStateTest",
+          "tests": 20,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreOrderDecisionResolverTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CorePerpetualFinancialMatrixTest",
+          "tests": 18,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreProductLineArchitectureContractTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreRiskStateTest",
+          "tests": 18,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreTreasuryStateTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreUserStateTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.CoreValueValidationTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.ExplicitLaneAccessTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.FeePolicyBookTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.FrozenMatcherInputTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.LaneAdmissionAggregateTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.LaneAdmissionReuseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.LaneClientIdentitiesTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.LaneCloseCapacityTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.LaneEntityMembershipTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.LaneSequenceQueueTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.LaneTerminalSummaryTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.LaneTopologyTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.LedgerPositionPublicationTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.MatcherSettlementPlanTest",
+          "tests": 16,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.MatcherTreasurySettlementTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.MatchingNotificationProbeTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.OrderBatchSettlementWaitTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.OrderClientKeyIndexTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.OrderRuntimeTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.OrderSlotReuseTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.OwnerIndexChurnTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.OwnerIndexedChangesTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.ParallelRiskScanTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.PlaceLaneDecisionTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.PositionPublicationReuseTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.PositionUserIndexTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.PublishedPositionCountTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.ReadyLaneNotificationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.ReplacementAdmissionEventTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.ReservationPublicationLeaseTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.ReservationRuntimeTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeChangeBufferTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeChangedIndexCommitTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeDerivativeFillCalculatorTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeDerivativeMatchProcessorTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeExecutionScopeTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeFundsAccumulatorTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeIdentityRegistryTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeIndexedChangeBufferTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeLeverageLookupTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimePerpetualFundingProcessorTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeRiskQueryServiceTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeStateBusinessRulesTest",
+          "tests": 36,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeStateQueryServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeStateTransitionsTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.RuntimeTreasuryDeltaTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.SettlementChangesReuseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.SettlementLaneWorkerTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.StateMapSupportTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.SystemLedgerControlTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.SystemLedgerFundsValidationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.SystemLedgerLaneTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.TerminalClientReleaseTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.TradingRuntimeStateTest",
+          "tests": 62,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.TradingStateSnapshotCodecTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.TransferLaneCapacityTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.TreasuryProgressOwnershipTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.TriggerOrderIndexTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.UserRevisionReuseTest",
+          "tests": 18,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.index.ActiveOrderIndexTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.snapshot.PublishedEmbeddedSnapshotTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.snapshot.SnapshotFieldEvolutionTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ]
+    },
+    {
+      "module": "surprising-instrument/surprising-instrument-api",
+      "totals": {
+        "tests": 14,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "skips": [],
+      "suites": [
+        {
+          "name": "com.surprising.instrument.api.InstrumentEventKeysTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.instrument.api.cache.InstrumentSnapshotSupportTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.instrument.api.math.PerpetualContractMathTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.instrument.api.model.ContractTypeProductLineTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ]
+    },
+    {
+      "module": "surprising-product-api",
+      "totals": {
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "skips": [],
+      "suites": [
+        {
+          "name": "com.surprising.product.api.InstrumentIdsTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.product.api.ProductLineTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.product.api.ProductTopicNamesTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "historicalLog": "baseline-compile.log",
+      "exitCode": 0,
+      "sha256": "c8a627ff7d7064c869e67bdf560c2899a633289b81c5cf7959120686c48fd206",
+      "summary": [
+        "[INFO] BUILD SUCCESS",
+        "[INFO] Total time:  1.374 s",
+        "[INFO] Finished at: 2026-10-18T21:39:50+08:00"
+      ]
+    },
+    {
+      "historicalLog": "core-full-test.log",
+      "exitCode": 1,
+      "sha256": "306b2db0383b37be7092a8963f9e5a0a03ace0180f0c0bcfe493b5aad398746e",
+      "summary": [
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.086 s -- in com.surprising.product.api.ProductTopicNamesTest",
+        "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.030 s -- in com.surprising.product.api.ProductLineTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in com.surprising.product.api.InstrumentIdsTest",
+        "[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.084 s -- in com.surprising.aeron.protocol.WireCodeLookupTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.surprising.aeron.protocol.CoreRiskScanControlCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 s -- in com.surprising.aeron.protocol.CoreOpenInterestCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.surprising.aeron.protocol.CoreMaintenanceCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.surprising.aeron.protocol.BorrowedResponseSlotTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.026 s -- in com.surprising.aeron.protocol.CoreLiquidationBatchCodecTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.protocol.CoreOrderPreflightCodecTest",
+        "[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.069 s -- in com.surprising.aeron.protocol.CoreStateQueryCodecTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.058 s -- in com.surprising.aeron.protocol.OrderDecoderSlotTest",
+        "[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.053 s -- in com.surprising.aeron.protocol.TradingOrderBatchCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in com.surprising.aeron.protocol.CoreRiskQueryCodecTest",
+        "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.037 s -- in com.surprising.aeron.protocol.CoreMessageCodecTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.aeron.protocol.CoreCancelAllAfterCodecTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.200 s -- in com.surprising.aeron.protocol.RealtimeFrameCodecTest",
+        "[INFO] Tests run: 22, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.092 s -- in com.surprising.aeron.protocol.TradingCommandCodecTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.039 s -- in com.surprising.aeron.protocol.RealtimeWireCompatibilityTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.aeron.protocol.CoreCommandResultCodecTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in com.surprising.aeron.protocol.CoreLiquidationWorkCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.protocol.CoreAlgoOrderCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.protocol.CoreSettlementProgressCodecTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.surprising.aeron.protocol.CoreTriggerOrderCodecTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.015 s -- in com.surprising.aeron.protocol.CoreLaneMetricsCodecTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.protocol.CoreResponseTest",
+        "[INFO] Tests run: 114, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.168 s -- in com.surprising.aeron.protocol.CoreResultCodeTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.protocol.CoreInputEventCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.protocol.OrderExecutionValueTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.protocol.ProductLineClusterLayoutTest",
+        "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.088 s -- in com.surprising.aeron.protocol.CommandFingerprintLeaseTest",
+        "[INFO] Tests run: 249, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.222 s -- in com.surprising.aeron.client.SurprisingAeronClientConcurrencyTest",
+        "[INFO] Tests run: 23, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.530 s -- in com.surprising.aeron.client.AeronClientAgentTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.022 s -- in com.surprising.aeron.client.RealtimeOutboxTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.686 s -- in com.surprising.aeron.client.AeronClientPoolTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.013 s -- in com.surprising.aeron.client.SurprisingAeronClientMediaDriverTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.client.SurprisingAeronClientThreadingModeTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 5.453 s -- in com.surprising.aeron.client.AeronRealtimeTransportTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.surprising.aeron.client.AeronClientCapacityTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.client.CoreQueryClassTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.047 s -- in com.surprising.aeron.client.AeronRequestLeaseTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in com.surprising.aeron.client.CoreCommandOutcomeTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.515 s -- in com.surprising.aeron.client.BorrowedMediaDriverTest",
+        "[INFO] Tests run: 66, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.091 s -- in com.surprising.instrument.api.InstrumentEventKeysTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.394 s -- in com.surprising.instrument.api.cache.InstrumentSnapshotSupportTest",
+        "[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.074 s -- in com.surprising.instrument.api.math.PerpetualContractMathTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.instrument.api.model.ContractTypeProductLineTest",
+        "[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 28, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.737 s -- in com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest",
+        "[ERROR] Tests run: 6, Failures: 2, Errors: 0, Skipped: 1, Time elapsed: 1.269 s <<< FAILURE! -- in com.surprising.aeron.service.config.TradingCpuAffinityTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in com.surprising.aeron.service.config.ClusterFatalErrorTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.925 s -- in com.surprising.aeron.service.config.SurprisingCoreApplicationThreadingModeTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in com.surprising.aeron.service.config.SurprisingCoreApplicationIdleStrategyTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.service.state.PositionPublicationReuseTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in com.surprising.aeron.service.state.LaneTerminalSummaryTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.021 s -- in com.surprising.aeron.service.state.ControlOrderMetadataLeaseTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.service.state.SystemLedgerFundsValidationTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.service.state.FrozenMatcherInputTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.024 s -- in com.surprising.aeron.service.state.snapshot.SnapshotFieldEvolutionTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.aeron.service.state.snapshot.PublishedEmbeddedSnapshotTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.state.LaneTopologyTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.028 s -- in com.surprising.aeron.service.state.AdmissionSettlementFactTest",
+        "[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.314 s -- in com.surprising.aeron.service.state.CoreLifecycleStateTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in com.surprising.aeron.service.state.RuntimePerpetualFundingProcessorTest",
+        "[INFO] Tests run: 36, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.275 s -- in com.surprising.aeron.service.state.RuntimeStateBusinessRulesTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.035 s -- in com.surprising.aeron.service.state.RuntimeChangeBufferTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.104 s -- in com.surprising.aeron.service.state.ParallelRiskScanTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.015 s -- in com.surprising.aeron.service.state.RuntimeStateQueryServiceTest",
+        "[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.029 s -- in com.surprising.aeron.service.state.PublishedPositionCountTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in com.surprising.aeron.service.state.RuntimeChangedIndexCommitTest",
+        "[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.040 s -- in com.surprising.aeron.service.state.RuntimeRiskQueryServiceTest",
+        "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.403 s -- in com.surprising.aeron.service.state.CorePerpetualFinancialMatrixTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in com.surprising.aeron.service.state.ReservationPublicationLeaseTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.surprising.aeron.service.state.LedgerPositionPublicationTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.aeron.service.state.TreasuryProgressOwnershipTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.061 s -- in com.surprising.aeron.service.state.AccountLaneOwnershipTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in com.surprising.aeron.service.state.RuntimeExecutionScopeTest",
+        "[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.132 s -- in com.surprising.aeron.service.state.LaneEntityMembershipTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.035 s -- in com.surprising.aeron.service.state.LaneClientIdentitiesTest",
+        "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.017 s -- in com.surprising.aeron.service.state.StateMapSupportTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.service.state.LaneCloseCapacityTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.035 s -- in com.surprising.aeron.service.state.TriggerOrderIndexTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.service.state.CoreFeePolicySnapshotCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.surprising.aeron.service.state.MatcherTreasurySettlementTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.service.state.AdlPositionIndexTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.service.state.CommittedIndexVisitTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.030 s -- in com.surprising.aeron.service.state.RuntimeDerivativeMatchProcessorTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.state.FeePolicyBookTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.050 s -- in com.surprising.aeron.service.state.CoreOrderDecisionResolverTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.state.PositionUserIndexTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in com.surprising.aeron.service.state.MatchingNotificationProbeTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in com.surprising.aeron.service.state.CoreValueValidationTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.service.state.OrderSlotReuseTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in com.surprising.aeron.service.state.TerminalClientReleaseTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in com.surprising.aeron.service.state.ReservationRuntimeTest",
+        "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 15.06 s -- in com.surprising.aeron.service.state.CoreRiskStateTest",
+        "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.099 s -- in com.surprising.aeron.service.state.SystemLedgerLaneTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in com.surprising.aeron.service.state.CoreUserStateTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.019 s -- in com.surprising.aeron.service.state.ReplacementAdmissionEventTest",
+        "[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.242 s -- in com.surprising.aeron.service.state.SettlementLaneWorkerTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.surprising.aeron.service.state.TradingStateSnapshotCodecTest",
+        "[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.154 s -- in com.surprising.aeron.service.state.RuntimeIdentityRegistryTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.020 s -- in com.surprising.aeron.service.state.CoreProductLineArchitectureContractTest",
+        "[INFO] Tests run: 62, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.044 s -- in com.surprising.aeron.service.state.TradingRuntimeStateTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.069 s -- in com.surprising.aeron.service.state.ReadyLaneNotificationTest",
+        "[INFO] Tests run: 29, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.578 s -- in com.surprising.aeron.service.state.CoreDeliveryOptionFinancialMatrixTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.state.CoreTreasuryStateTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.026 s -- in com.surprising.aeron.service.state.LaneAdmissionAggregateTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.state.OwnerIndexedChangesTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.019 s -- in com.surprising.aeron.service.state.AccountLanePendingReservationTest",
+        "[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.112 s -- in com.surprising.aeron.service.state.index.ActiveOrderIndexTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.state.CoreContractMathTest",
+        "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.041 s -- in com.surprising.aeron.service.state.RuntimeStateTransitionsTest",
+        "[ERROR] Tests run: 5, Failures: 2, Errors: 0, Skipped: 0, Time elapsed: 3.028 s <<< FAILURE! -- in com.surprising.aeron.service.state.OrderBatchSettlementWaitTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in com.surprising.aeron.service.state.SettlementChangesReuseTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.state.OwnerIndexChurnTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 s -- in com.surprising.aeron.service.state.ControlLaneDispatcherTest",
+        "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.031 s -- in com.surprising.aeron.service.state.UserRevisionReuseTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.surprising.aeron.service.state.LaneAdmissionReuseTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.110 s -- in com.surprising.aeron.service.state.TransferLaneCapacityTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.state.OrderRuntimeTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.service.state.CaptureBufferReuseTest",
+        "[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.044 s -- in com.surprising.aeron.service.state.MatcherSettlementPlanTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in com.surprising.aeron.service.state.RuntimeFundsAccumulatorTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.027 s -- in com.surprising.aeron.service.state.RuntimeDerivativeFillCalculatorTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.service.state.LaneSequenceQueueTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.037 s -- in com.surprising.aeron.service.state.ExplicitLaneAccessTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.aeron.service.state.RuntimeIndexedChangeBufferTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.service.state.PlaceLaneDecisionTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.020 s -- in com.surprising.aeron.service.state.RuntimeLeverageLookupTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.029 s -- in com.surprising.aeron.service.state.SystemLedgerControlTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in com.surprising.aeron.service.state.OrderClientKeyIndexTest",
+        "[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.039 s -- in com.surprising.aeron.service.state.RuntimeTreasuryDeltaTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.788 s -- in com.surprising.aeron.service.SurprisingCoreApplicationTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.028 s -- in com.surprising.aeron.service.orchestration.CommandSlotTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.025 s -- in com.surprising.aeron.service.orchestration.LaneReplacementResponseTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.154 s -- in com.surprising.aeron.service.orchestration.CoreLedgerQueryTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.030 s -- in com.surprising.aeron.service.orchestration.MatcherPipelineGroupTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.orchestration.TradingOwnerLoopTimeoutConfigurationTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.343 s -- in com.surprising.aeron.service.orchestration.CoreResultLedgerTest",
+        "[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.265 s -- in com.surprising.aeron.service.orchestration.PublishedSnapshotRecoveryTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.831 s -- in com.surprising.aeron.service.orchestration.CoreCommandFingerprintTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.680 s -- in com.surprising.aeron.service.orchestration.CoreAccountLaneQueryTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.574 s -- in com.surprising.aeron.service.orchestration.CoreUserRevisionTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 6.718 s -- in com.surprising.aeron.service.orchestration.CoreFundsIdempotencyTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.842 s -- in com.surprising.aeron.service.orchestration.CoreMatcherLedgerTest",
+        "[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.465 s -- in com.surprising.aeron.service.orchestration.SectionedCoreSnapshotCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.930 s -- in com.surprising.aeron.service.orchestration.CoreOptionPremiumFeeFundingTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.087 s -- in com.surprising.aeron.service.orchestration.CoreLiquidationLaneCheckTest",
+        "[INFO] Tests run: 42, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 14.10 s -- in com.surprising.aeron.service.orchestration.CoreSelfTradePrefixTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.service.orchestration.OwnerCommandPipelineStateTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.surprising.aeron.service.orchestration.PrimitiveLongChangeSetTest",
+        "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 5.367 s -- in com.surprising.aeron.service.orchestration.CoreFundsLedgerIndexTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.806 s -- in com.surprising.aeron.service.orchestration.OwnerSessionBoundaryTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in com.surprising.aeron.service.orchestration.DeferredSessionResponsesTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.orchestration.ResponseArenaTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in com.surprising.aeron.service.orchestration.CoreLaneMetricsBoundaryTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.069 s -- in com.surprising.aeron.service.orchestration.CoreNativeSnapshotProductLineTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.033 s -- in com.surprising.aeron.service.orchestration.CoreAlgoLaneQueryTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 5.451 s -- in com.surprising.aeron.service.orchestration.CommittedTradeReplayTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in com.surprising.aeron.service.orchestration.OwnerPositionRetirementTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.974 s -- in com.surprising.aeron.service.orchestration.AsyncFundingCommandTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.036 s -- in com.surprising.aeron.service.orchestration.OrdinaryLifecycleOverlapTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.969 s -- in com.surprising.aeron.service.orchestration.CommittedFundingReplayTest",
+        "[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 13.15 s -- in com.surprising.aeron.service.orchestration.RiskBatchBudgetTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 4.640 s -- in com.surprising.aeron.service.orchestration.SharedProductLineSnapshotContractTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.567 s -- in com.surprising.aeron.service.orchestration.CoreActiveLaneIngressTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.263 s -- in com.surprising.aeron.service.orchestration.FundsCommandIndexTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 5.227 s -- in com.surprising.aeron.service.orchestration.TerminalStateRetentionTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.337 s -- in com.surprising.aeron.service.orchestration.TerminalTombstoneStoreTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.532 s -- in com.surprising.aeron.service.orchestration.CoreRuntimeBalanceSurfaceTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.032 s -- in com.surprising.aeron.service.orchestration.TradingRuntimeOwnershipTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 14.59 s -- in com.surprising.aeron.service.orchestration.ProductRecoveryLifecycleTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in com.surprising.aeron.service.orchestration.BatchDecisionCaptureTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.143 s -- in com.surprising.aeron.service.orchestration.OwnerLogContextTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.019 s -- in com.surprising.aeron.service.orchestration.CoreLifecycleWorkTest",
+        "[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.870 s -- in com.surprising.aeron.service.orchestration.CoreAdmissionInputOwnershipTest",
+        "[INFO] Tests run: 24, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 35.54 s -- in com.surprising.aeron.service.orchestration.AsyncAccountBalanceCommandTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.orchestration.PendingMatchingRingTest",
+        "[INFO] Tests run: 320, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 350.3 s -- in com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.784 s -- in com.surprising.aeron.service.orchestration.CoreBusinessStateHashTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.442 s -- in com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.526 s -- in com.surprising.aeron.service.orchestration.CoreAuditHashQueryTest",
+        "[ERROR] Tests run: 10, Failures: 0, Errors: 7, Skipped: 0, Time elapsed: 5.168 s <<< FAILURE! -- in com.surprising.aeron.service.orchestration.CoreRiskLaneQueryTest",
+        "[WARNING] Tests run: 42, Failures: 0, Errors: 0, Skipped: 1, Time elapsed: 17.38 s -- in com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.304 s -- in com.surprising.aeron.service.orchestration.OwnerIngressRingTest",
+        "[ERROR] Tests run: 45, Failures: 1, Errors: 1, Skipped: 0, Time elapsed: 14.61 s <<< FAILURE! -- in com.surprising.aeron.service.orchestration.TradingCoreOwnerTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.486 s -- in com.surprising.aeron.service.orchestration.CoreTransferLaneLifecycleTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in com.surprising.aeron.service.orchestration.ClusterCommandWindowRoutingTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.047 s -- in com.surprising.aeron.service.orchestration.BorrowedHeaderEgressTest",
+        "[INFO] Tests run: 17, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 8.889 s -- in com.surprising.aeron.service.orchestration.CoreMaintenanceTest",
+        "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.053 s -- in com.surprising.aeron.service.orchestration.CommandSlotRingTest",
+        "[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.120 s -- in com.surprising.aeron.service.orchestration.RealtimeTerminalEmissionTest",
+        "[ERROR] Tests run: 8, Failures: 0, Errors: 2, Skipped: 0, Time elapsed: 0.739 s <<< FAILURE! -- in com.surprising.aeron.service.orchestration.ProductionSourceBoundaryTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.orchestration.OwnerIdleStrategyTest",
+        "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 20.07 s -- in com.surprising.aeron.service.orchestration.RuntimeCommitRecoveryTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.orchestration.OrderBatchSlotReuseTest",
+        "[ERROR] Tests run: 2, Failures: 0, Errors: 2, Skipped: 0, Time elapsed: 10.50 s <<< FAILURE! -- in com.surprising.aeron.service.orchestration.CrossShardCancellationTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.061 s -- in com.surprising.aeron.service.orchestration.CoreMessageFlyweightDecoderTest",
+        "[ERROR] Tests run: 4, Failures: 0, Errors: 2, Skipped: 0, Time elapsed: 1.577 s <<< FAILURE! -- in com.surprising.aeron.service.orchestration.CoreSpotAssetUnitsTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.973 s -- in com.surprising.aeron.service.orchestration.TradingOwnerInputReuseTest",
+        "[INFO] Tests run: 51, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 17.65 s -- in com.surprising.aeron.service.orchestration.CoreMatchingStateTest",
+        "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.421 s -- in com.surprising.aeron.service.orchestration.CorePreflightLaneQueryTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.036 s -- in com.surprising.aeron.service.orchestration.MatcherCommandPipelineTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.075 s -- in com.surprising.aeron.service.CoreBusinessRejectionCodeTest",
+        "[ERROR] Tests run: 1495, Failures: 5, Errors: 14, Skipped: 2",
+        "[INFO] BUILD FAILURE",
+        "[INFO] Total time:  10:51 min",
+        "[INFO] Finished at: 2026-10-18T21:57:13+08:00"
+      ]
+    },
+    {
+      "historicalLog": "core-isolated-full-test.log",
+      "exitCode": 1,
+      "sha256": "5db452c8c3904a1cfb1419a514aee8b62cf3019feeb067d887a3a2f789d60e59",
+      "summary": [
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.086 s -- in com.surprising.product.api.ProductTopicNamesTest",
+        "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.037 s -- in com.surprising.product.api.ProductLineTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.surprising.product.api.InstrumentIdsTest",
+        "[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.086 s -- in com.surprising.aeron.protocol.WireCodeLookupTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 s -- in com.surprising.aeron.protocol.CoreRiskScanControlCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 s -- in com.surprising.aeron.protocol.CoreOpenInterestCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in com.surprising.aeron.protocol.CoreMaintenanceCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in com.surprising.aeron.protocol.BorrowedResponseSlotTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.027 s -- in com.surprising.aeron.protocol.CoreLiquidationBatchCodecTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.protocol.CoreOrderPreflightCodecTest",
+        "[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.069 s -- in com.surprising.aeron.protocol.CoreStateQueryCodecTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.059 s -- in com.surprising.aeron.protocol.OrderDecoderSlotTest",
+        "[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.058 s -- in com.surprising.aeron.protocol.TradingOrderBatchCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.aeron.protocol.CoreRiskQueryCodecTest",
+        "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.044 s -- in com.surprising.aeron.protocol.CoreMessageCodecTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in com.surprising.aeron.protocol.CoreCancelAllAfterCodecTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.195 s -- in com.surprising.aeron.protocol.RealtimeFrameCodecTest",
+        "[INFO] Tests run: 22, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.091 s -- in com.surprising.aeron.protocol.TradingCommandCodecTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.049 s -- in com.surprising.aeron.protocol.RealtimeWireCompatibilityTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.aeron.protocol.CoreCommandResultCodecTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in com.surprising.aeron.protocol.CoreLiquidationWorkCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.protocol.CoreAlgoOrderCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.protocol.CoreSettlementProgressCodecTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in com.surprising.aeron.protocol.CoreTriggerOrderCodecTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.016 s -- in com.surprising.aeron.protocol.CoreLaneMetricsCodecTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.protocol.CoreResponseTest",
+        "[INFO] Tests run: 114, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.173 s -- in com.surprising.aeron.protocol.CoreResultCodeTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.protocol.CoreInputEventCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.protocol.OrderExecutionValueTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.protocol.ProductLineClusterLayoutTest",
+        "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.076 s -- in com.surprising.aeron.protocol.CommandFingerprintLeaseTest",
+        "[INFO] Tests run: 249, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.227 s -- in com.surprising.aeron.client.SurprisingAeronClientConcurrencyTest",
+        "[INFO] Tests run: 23, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.533 s -- in com.surprising.aeron.client.AeronClientAgentTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.023 s -- in com.surprising.aeron.client.RealtimeOutboxTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.565 s -- in com.surprising.aeron.client.AeronClientPoolTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.923 s -- in com.surprising.aeron.client.SurprisingAeronClientMediaDriverTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.client.SurprisingAeronClientThreadingModeTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 5.440 s -- in com.surprising.aeron.client.AeronRealtimeTransportTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.surprising.aeron.client.AeronClientCapacityTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.client.CoreQueryClassTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.041 s -- in com.surprising.aeron.client.AeronRequestLeaseTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in com.surprising.aeron.client.CoreCommandOutcomeTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.433 s -- in com.surprising.aeron.client.BorrowedMediaDriverTest",
+        "[INFO] Tests run: 66, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.084 s -- in com.surprising.instrument.api.InstrumentEventKeysTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.347 s -- in com.surprising.instrument.api.cache.InstrumentSnapshotSupportTest",
+        "[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.080 s -- in com.surprising.instrument.api.math.PerpetualContractMathTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.instrument.api.model.ContractTypeProductLineTest",
+        "[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] BUILD FAILURE",
+        "[INFO] Total time:  27.167 s",
+        "[INFO] Finished at: 2026-10-18T21:58:13+08:00"
+      ]
+    },
+    {
+      "historicalLog": "core-isolated-full-final-test.log",
+      "exitCode": 0,
+      "sha256": "544f1defffdd9a4b5a48927abd4d5fd46f5305f36a9b729dde757d89a6cbcbd9",
+      "summary": [
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.080 s -- in com.surprising.product.api.ProductTopicNamesTest",
+        "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.034 s -- in com.surprising.product.api.ProductLineTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in com.surprising.product.api.InstrumentIdsTest",
+        "[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.083 s -- in com.surprising.aeron.protocol.WireCodeLookupTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in com.surprising.aeron.protocol.CoreRiskScanControlCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 s -- in com.surprising.aeron.protocol.CoreOpenInterestCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.surprising.aeron.protocol.CoreMaintenanceCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in com.surprising.aeron.protocol.BorrowedResponseSlotTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.028 s -- in com.surprising.aeron.protocol.CoreLiquidationBatchCodecTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.protocol.CoreOrderPreflightCodecTest",
+        "[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.069 s -- in com.surprising.aeron.protocol.CoreStateQueryCodecTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.058 s -- in com.surprising.aeron.protocol.OrderDecoderSlotTest",
+        "[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.058 s -- in com.surprising.aeron.protocol.TradingOrderBatchCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in com.surprising.aeron.protocol.CoreRiskQueryCodecTest",
+        "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.040 s -- in com.surprising.aeron.protocol.CoreMessageCodecTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in com.surprising.aeron.protocol.CoreCancelAllAfterCodecTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.190 s -- in com.surprising.aeron.protocol.RealtimeFrameCodecTest",
+        "[INFO] Tests run: 22, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.093 s -- in com.surprising.aeron.protocol.TradingCommandCodecTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.039 s -- in com.surprising.aeron.protocol.RealtimeWireCompatibilityTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.aeron.protocol.CoreCommandResultCodecTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in com.surprising.aeron.protocol.CoreLiquidationWorkCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.protocol.CoreAlgoOrderCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.protocol.CoreSettlementProgressCodecTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in com.surprising.aeron.protocol.CoreTriggerOrderCodecTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.015 s -- in com.surprising.aeron.protocol.CoreLaneMetricsCodecTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.protocol.CoreResponseTest",
+        "[INFO] Tests run: 114, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.149 s -- in com.surprising.aeron.protocol.CoreResultCodeTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.protocol.CoreInputEventCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.protocol.OrderExecutionValueTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.protocol.ProductLineClusterLayoutTest",
+        "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.089 s -- in com.surprising.aeron.protocol.CommandFingerprintLeaseTest",
+        "[INFO] Tests run: 249, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.226 s -- in com.surprising.aeron.client.SurprisingAeronClientConcurrencyTest",
+        "[INFO] Tests run: 23, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.534 s -- in com.surprising.aeron.client.AeronClientAgentTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.022 s -- in com.surprising.aeron.client.RealtimeOutboxTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.669 s -- in com.surprising.aeron.client.AeronClientPoolTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.924 s -- in com.surprising.aeron.client.SurprisingAeronClientMediaDriverTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.aeron.client.SurprisingAeronClientThreadingModeTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 5.936 s -- in com.surprising.aeron.client.AeronRealtimeTransportTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.028 s -- in com.surprising.aeron.client.AeronClientCapacityTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in com.surprising.aeron.client.CoreQueryClassTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.099 s -- in com.surprising.aeron.client.AeronRequestLeaseTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.client.CoreCommandOutcomeTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.700 s -- in com.surprising.aeron.client.BorrowedMediaDriverTest",
+        "[INFO] Tests run: 66, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.127 s -- in com.surprising.instrument.api.InstrumentEventKeysTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.530 s -- in com.surprising.instrument.api.cache.InstrumentSnapshotSupportTest",
+        "[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.194 s -- in com.surprising.instrument.api.math.PerpetualContractMathTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.surprising.instrument.api.model.ContractTypeProductLineTest",
+        "[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 28, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.830 s -- in com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest",
+        "[WARNING] Tests run: 6, Failures: 0, Errors: 0, Skipped: 1, Time elapsed: 2.377 s -- in com.surprising.aeron.service.config.TradingCpuAffinityTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in com.surprising.aeron.service.config.ClusterFatalErrorTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.937 s -- in com.surprising.aeron.service.config.SurprisingCoreApplicationThreadingModeTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in com.surprising.aeron.service.config.SurprisingCoreApplicationIdleStrategyTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.service.state.PositionPublicationReuseTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in com.surprising.aeron.service.state.LaneTerminalSummaryTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.022 s -- in com.surprising.aeron.service.state.ControlOrderMetadataLeaseTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.state.SystemLedgerFundsValidationTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.state.FrozenMatcherInputTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.026 s -- in com.surprising.aeron.service.state.snapshot.SnapshotFieldEvolutionTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in com.surprising.aeron.service.state.snapshot.PublishedEmbeddedSnapshotTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.state.LaneTopologyTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.026 s -- in com.surprising.aeron.service.state.AdmissionSettlementFactTest",
+        "[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.233 s -- in com.surprising.aeron.service.state.CoreLifecycleStateTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in com.surprising.aeron.service.state.RuntimePerpetualFundingProcessorTest",
+        "[INFO] Tests run: 36, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.246 s -- in com.surprising.aeron.service.state.RuntimeStateBusinessRulesTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.041 s -- in com.surprising.aeron.service.state.RuntimeChangeBufferTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.107 s -- in com.surprising.aeron.service.state.ParallelRiskScanTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.016 s -- in com.surprising.aeron.service.state.RuntimeStateQueryServiceTest",
+        "[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.030 s -- in com.surprising.aeron.service.state.PublishedPositionCountTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 s -- in com.surprising.aeron.service.state.RuntimeChangedIndexCommitTest",
+        "[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.039 s -- in com.surprising.aeron.service.state.RuntimeRiskQueryServiceTest",
+        "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.349 s -- in com.surprising.aeron.service.state.CorePerpetualFinancialMatrixTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in com.surprising.aeron.service.state.ReservationPublicationLeaseTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in com.surprising.aeron.service.state.LedgerPositionPublicationTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in com.surprising.aeron.service.state.TreasuryProgressOwnershipTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.061 s -- in com.surprising.aeron.service.state.AccountLaneOwnershipTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.state.RuntimeExecutionScopeTest",
+        "[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.138 s -- in com.surprising.aeron.service.state.LaneEntityMembershipTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.035 s -- in com.surprising.aeron.service.state.LaneClientIdentitiesTest",
+        "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.018 s -- in com.surprising.aeron.service.state.StateMapSupportTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.state.LaneCloseCapacityTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.037 s -- in com.surprising.aeron.service.state.TriggerOrderIndexTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.service.state.CoreFeePolicySnapshotCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 s -- in com.surprising.aeron.service.state.MatcherTreasurySettlementTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.service.state.AdlPositionIndexTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in com.surprising.aeron.service.state.CommittedIndexVisitTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.030 s -- in com.surprising.aeron.service.state.RuntimeDerivativeMatchProcessorTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.service.state.FeePolicyBookTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.044 s -- in com.surprising.aeron.service.state.CoreOrderDecisionResolverTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.aeron.service.state.PositionUserIndexTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 s -- in com.surprising.aeron.service.state.MatchingNotificationProbeTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.aeron.service.state.CoreValueValidationTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.service.state.OrderSlotReuseTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in com.surprising.aeron.service.state.TerminalClientReleaseTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in com.surprising.aeron.service.state.ReservationRuntimeTest",
+        "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 15.03 s -- in com.surprising.aeron.service.state.CoreRiskStateTest",
+        "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.060 s -- in com.surprising.aeron.service.state.SystemLedgerLaneTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.state.CoreUserStateTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in com.surprising.aeron.service.state.ReplacementAdmissionEventTest",
+        "[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.186 s -- in com.surprising.aeron.service.state.SettlementLaneWorkerTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.aeron.service.state.TradingStateSnapshotCodecTest",
+        "[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.086 s -- in com.surprising.aeron.service.state.RuntimeIdentityRegistryTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.state.CoreProductLineArchitectureContractTest",
+        "[INFO] Tests run: 62, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.623 s -- in com.surprising.aeron.service.state.TradingRuntimeStateTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.058 s -- in com.surprising.aeron.service.state.ReadyLaneNotificationTest",
+        "[INFO] Tests run: 29, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.260 s -- in com.surprising.aeron.service.state.CoreDeliveryOptionFinancialMatrixTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.service.state.CoreTreasuryStateTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in com.surprising.aeron.service.state.LaneAdmissionAggregateTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.service.state.OwnerIndexedChangesTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.aeron.service.state.AccountLanePendingReservationTest",
+        "[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.059 s -- in com.surprising.aeron.service.state.index.ActiveOrderIndexTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.state.CoreContractMathTest",
+        "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.020 s -- in com.surprising.aeron.service.state.RuntimeStateTransitionsTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.surprising.aeron.service.state.OrderBatchSettlementWaitTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.service.state.SettlementChangesReuseTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.state.OwnerIndexChurnTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in com.surprising.aeron.service.state.ControlLaneDispatcherTest",
+        "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.017 s -- in com.surprising.aeron.service.state.UserRevisionReuseTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in com.surprising.aeron.service.state.LaneAdmissionReuseTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.067 s -- in com.surprising.aeron.service.state.TransferLaneCapacityTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in com.surprising.aeron.service.state.OrderRuntimeTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in com.surprising.aeron.service.state.CaptureBufferReuseTest",
+        "[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.022 s -- in com.surprising.aeron.service.state.MatcherSettlementPlanTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 s -- in com.surprising.aeron.service.state.RuntimeFundsAccumulatorTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.015 s -- in com.surprising.aeron.service.state.RuntimeDerivativeFillCalculatorTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in com.surprising.aeron.service.state.LaneSequenceQueueTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.016 s -- in com.surprising.aeron.service.state.ExplicitLaneAccessTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.state.RuntimeIndexedChangeBufferTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.service.state.PlaceLaneDecisionTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in com.surprising.aeron.service.state.RuntimeLeverageLookupTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in com.surprising.aeron.service.state.SystemLedgerControlTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.state.OrderClientKeyIndexTest",
+        "[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.020 s -- in com.surprising.aeron.service.state.RuntimeTreasuryDeltaTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.080 s -- in com.surprising.aeron.service.SurprisingCoreApplicationTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.018 s -- in com.surprising.aeron.service.orchestration.CommandSlotTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.017 s -- in com.surprising.aeron.service.orchestration.LaneReplacementResponseTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.108 s -- in com.surprising.aeron.service.orchestration.CoreLedgerQueryTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.020 s -- in com.surprising.aeron.service.orchestration.MatcherPipelineGroupTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.surprising.aeron.service.orchestration.TradingOwnerLoopTimeoutConfigurationTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.262 s -- in com.surprising.aeron.service.orchestration.CoreResultLedgerTest",
+        "[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.231 s -- in com.surprising.aeron.service.orchestration.PublishedSnapshotRecoveryTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.916 s -- in com.surprising.aeron.service.orchestration.CoreCommandFingerprintTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.683 s -- in com.surprising.aeron.service.orchestration.CoreAccountLaneQueryTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.537 s -- in com.surprising.aeron.service.orchestration.CoreUserRevisionTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 6.239 s -- in com.surprising.aeron.service.orchestration.CoreFundsIdempotencyTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.802 s -- in com.surprising.aeron.service.orchestration.CoreMatcherLedgerTest",
+        "[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.374 s -- in com.surprising.aeron.service.orchestration.SectionedCoreSnapshotCodecTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.775 s -- in com.surprising.aeron.service.orchestration.CoreOptionPremiumFeeFundingTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.066 s -- in com.surprising.aeron.service.orchestration.CoreLiquidationLaneCheckTest",
+        "[INFO] Tests run: 42, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 11.49 s -- in com.surprising.aeron.service.orchestration.CoreSelfTradePrefixTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.orchestration.OwnerCommandPipelineStateTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in com.surprising.aeron.service.orchestration.PrimitiveLongChangeSetTest",
+        "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.761 s -- in com.surprising.aeron.service.orchestration.CoreFundsLedgerIndexTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.621 s -- in com.surprising.aeron.service.orchestration.OwnerSessionBoundaryTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.orchestration.DeferredSessionResponsesTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.orchestration.ResponseArenaTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in com.surprising.aeron.service.orchestration.CoreLaneMetricsBoundaryTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.077 s -- in com.surprising.aeron.service.orchestration.CoreNativeSnapshotProductLineTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.031 s -- in com.surprising.aeron.service.orchestration.CoreAlgoLaneQueryTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.241 s -- in com.surprising.aeron.service.orchestration.CommittedTradeReplayTest",
+        "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in com.surprising.aeron.service.orchestration.OwnerPositionRetirementTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.642 s -- in com.surprising.aeron.service.orchestration.AsyncFundingCommandTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.025 s -- in com.surprising.aeron.service.orchestration.OrdinaryLifecycleOverlapTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.882 s -- in com.surprising.aeron.service.orchestration.CommittedFundingReplayTest",
+        "[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 17.79 s -- in com.surprising.aeron.service.orchestration.RiskBatchBudgetTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 7.489 s -- in com.surprising.aeron.service.orchestration.SharedProductLineSnapshotContractTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.663 s -- in com.surprising.aeron.service.orchestration.CoreActiveLaneIngressTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.271 s -- in com.surprising.aeron.service.orchestration.FundsCommandIndexTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 4.998 s -- in com.surprising.aeron.service.orchestration.TerminalStateRetentionTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.250 s -- in com.surprising.aeron.service.orchestration.TerminalTombstoneStoreTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.523 s -- in com.surprising.aeron.service.orchestration.CoreRuntimeBalanceSurfaceTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.036 s -- in com.surprising.aeron.service.orchestration.TradingRuntimeOwnershipTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 16.87 s -- in com.surprising.aeron.service.orchestration.ProductRecoveryLifecycleTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.orchestration.BatchDecisionCaptureTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.721 s -- in com.surprising.aeron.service.orchestration.OwnerLogContextTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.021 s -- in com.surprising.aeron.service.orchestration.CoreLifecycleWorkTest",
+        "[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.940 s -- in com.surprising.aeron.service.orchestration.CoreAdmissionInputOwnershipTest",
+        "[INFO] Tests run: 24, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 32.54 s -- in com.surprising.aeron.service.orchestration.AsyncAccountBalanceCommandTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.orchestration.PendingMatchingRingTest",
+        "[INFO] Tests run: 320, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 517.2 s -- in com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 4.845 s -- in com.surprising.aeron.service.orchestration.CoreBusinessStateHashTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.830 s -- in com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.993 s -- in com.surprising.aeron.service.orchestration.CoreAuditHashQueryTest",
+        "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.405 s -- in com.surprising.aeron.service.orchestration.CoreRiskLaneQueryTest",
+        "[WARNING] Tests run: 42, Failures: 0, Errors: 0, Skipped: 1, Time elapsed: 30.79 s -- in com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.512 s -- in com.surprising.aeron.service.orchestration.OwnerIngressRingTest",
+        "[INFO] Tests run: 45, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 20.89 s -- in com.surprising.aeron.service.orchestration.TradingCoreOwnerTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 6.946 s -- in com.surprising.aeron.service.orchestration.CoreTransferLaneLifecycleTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in com.surprising.aeron.service.orchestration.ClusterCommandWindowRoutingTest",
+        "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.086 s -- in com.surprising.aeron.service.orchestration.BorrowedHeaderEgressTest",
+        "[INFO] Tests run: 17, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 16.90 s -- in com.surprising.aeron.service.orchestration.CoreMaintenanceTest",
+        "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.069 s -- in com.surprising.aeron.service.orchestration.CommandSlotRingTest",
+        "[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 5.907 s -- in com.surprising.aeron.service.orchestration.RealtimeTerminalEmissionTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.557 s -- in com.surprising.aeron.service.orchestration.ProductionSourceBoundaryTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.378 s -- in com.surprising.aeron.service.orchestration.OwnerIdleStrategyTest",
+        "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 48.44 s -- in com.surprising.aeron.service.orchestration.RuntimeCommitRecoveryTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in com.surprising.aeron.service.orchestration.OrderBatchSlotReuseTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.332 s -- in com.surprising.aeron.service.orchestration.CrossShardCancellationTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.070 s -- in com.surprising.aeron.service.orchestration.CoreMessageFlyweightDecoderTest",
+        "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 4.161 s -- in com.surprising.aeron.service.orchestration.CoreSpotAssetUnitsTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.359 s -- in com.surprising.aeron.service.orchestration.TradingOwnerInputReuseTest",
+        "[INFO] Tests run: 51, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 46.66 s -- in com.surprising.aeron.service.orchestration.CoreMatchingStateTest",
+        "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 6.405 s -- in com.surprising.aeron.service.orchestration.CorePreflightLaneQueryTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.063 s -- in com.surprising.aeron.service.orchestration.MatcherCommandPipelineTest",
+        "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.106 s -- in com.surprising.aeron.service.CoreBusinessRejectionCodeTest",
+        "[INFO] Tests run: 1495, Failures: 0, Errors: 0, Skipped: 2",
+        "[INFO] BUILD SUCCESS",
+        "[INFO] Total time:  15:20 min",
+        "[INFO] Finished at: 2026-10-18T22:15:27+08:00"
+      ]
+    },
+    {
+      "historicalLog": "final-integration-test.log",
+      "exitCode": 1,
+      "sha256": "200c000acc587662c09ab010335b7a3e300dfe2317d51cfb39a896dbbebdaba1",
+      "summary": [
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.528 s -- in com.surprising.aeron.service.state.MatcherTreasurySettlementTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.021 s -- in com.surprising.aeron.service.state.OrderBatchSettlementWaitTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.089 s -- in com.surprising.aeron.service.state.RuntimeDerivativeFillCalculatorTest",
+        "[ERROR] Tests run: 42, Failures: 1, Errors: 0, Skipped: 1, Time elapsed: 44.76 s <<< FAILURE! -- in com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.905 s -- in com.surprising.aeron.service.orchestration.ProductionSourceBoundaryTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in com.surprising.aeron.service.orchestration.OrderBatchSlotReuseTest",
+        "[ERROR] Tests run: 70, Failures: 1, Errors: 0, Skipped: 1",
+        "[INFO] BUILD FAILURE",
+        "[INFO] Total time:  01:25 min",
+        "[INFO] Finished at: 2026-10-18T22:17:22+08:00"
+      ]
+    },
+    {
+      "historicalLog": "final-integration-repaired-test.log",
+      "exitCode": 0,
+      "sha256": "4c21dd2ef2ad92b720be0d9a7326325f5909a9f0e2e4d25311747d1d323a5d5d",
+      "summary": [
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.791 s -- in com.surprising.aeron.service.state.MatcherTreasurySettlementTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.021 s -- in com.surprising.aeron.service.state.OrderBatchSettlementWaitTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.115 s -- in com.surprising.aeron.service.state.RuntimeDerivativeFillCalculatorTest",
+        "[WARNING] Tests run: 42, Failures: 0, Errors: 0, Skipped: 1, Time elapsed: 30.34 s -- in com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+        "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.849 s -- in com.surprising.aeron.service.orchestration.ProductionSourceBoundaryTest",
+        "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in com.surprising.aeron.service.orchestration.OrderBatchSlotReuseTest",
+        "[INFO] Tests run: 70, Failures: 0, Errors: 0, Skipped: 1",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 25.54 s -- in com.surprising.aeron.service.orchestration.DerivativeMixedWorkloadTest",
+        "[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 12.22 s -- in com.surprising.aeron.service.orchestration.RealtimeWorkloadTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.222 s -- in com.surprising.aeron.service.orchestration.CorePerpetualEndToEndBenchmarkTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.714 s -- in com.surprising.aeron.service.orchestration.SpotMixedWorkloadTest",
+        "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] BUILD SUCCESS",
+        "[INFO] Total time:  02:21 min",
+        "[INFO] Finished at: 2026-10-18T22:21:08+08:00"
+      ]
+    },
+    {
+      "historicalLog": "diagnostic-and-fatal-test.log",
+      "exitCode": 0,
+      "sha256": "e44cc73528b70154403324f43b78a301a7706b27d142608e5662922f80783e27",
+      "summary": [
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.875 s -- in com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest",
+        "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] BUILD SUCCESS",
+        "[INFO] Total time:  26.666 s",
+        "[INFO] Finished at: 2026-10-18T22:21:49+08:00"
+      ]
+    },
+    {
+      "historicalLog": "before-jmh.log",
+      "exitCode": 0,
+      "sha256": "622a54dea28e51ff6230271ae3d3f8c33ffef878dc56154e53b0e88f45167ea5",
+      "summary": [
+        "# Run complete. Total time: 00:00:17"
+      ]
+    },
+    {
+      "historicalLog": "after-jmh.log",
+      "exitCode": 0,
+      "sha256": "07d536277ffb7d2099f159ab06ba2bfd74ce08b23af8631d27c124da3bd64385",
+      "summary": [
+        "# Run complete. Total time: 00:00:17"
+      ]
+    }
+  ],
+  "limitations": [
+    "仅 1 fork 短测，无温控，无部署后网络负载，耗时不作提升结论。",
+    "createBatch20 是批次工作区创建成本，非每单成本；快照复用不虚构分配收益。",
+    "debitExisting 未测得分配下降，不能声称每次划转节约40字节。",
+    "未启动 wallet、独立常驻做市、外部 HTTP/WebSocket/UDP/Consensus/Archive 容量或长稳。"
+  ],
+  "cleanup": "本轮进程已退出。原始临时源码、class、日志与隔离 checkout 在本记录入档后删除；仓库常规 target 与其他任务数据保留。"
+}

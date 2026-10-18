@@ -50,6 +50,12 @@ Core 内部账户、触发、算法及强平执行/保险/ADL 分页查询读取
 提交数值。八项简化的源码入口、六产品线回归和局部分配数据见
 [验证记录](docs/validation/order-simplification-20261018.md)。
 
+Core 批量准入进一步按当前业务项使用局部数值，只保留跨阶段和回滚所需的订单、client key 及结果。
+每项的准入快照由 `OrderBatchItem` 持有，Matcher 与实时发布借用同一份稳定值；
+`MatcherSettlementEvent` 统一经 Direct 原生成交交接、实际 Lane/Ledger 完成后收集，删除旧结算入口及重复状态。
+提交收尾、调账划转和旧测试游标一并收敛，源码入口与验证范围见
+[Core 八项简化验证](docs/validation/aeron-core-simplification-20261018.md)。
+
 ## 风险查询口径
 
 `RuntimeRiskQueryService.snapshots` 在查询边界使用当前仓位、钱包和标记价，统一计算名义价值、未实现盈亏、维持保证金、权益、保证金率和风险状态；返回的价格序号对应本次估值价格。全仓按用户及结算资产汇总，扣除逐仓占用；逐仓仅使用本仓保证金，期权权益使用期权市值。

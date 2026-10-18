@@ -53,6 +53,8 @@ class OrderBatchSettlementWaitTest {
         var event = incompleteEvent();
         var mask = MatcherSettlementEvent.class.getDeclaredField("requiredLaneMask"); mask.setAccessible(true);
         mask.setLong(event, 3);
+        var route = MatcherSettlementEvent.class.getDeclaredField("routedLaneMask"); route.setAccessible(true);
+        route.setLong(event, 3);
         var reset = MatcherSettlementEvent.class.getDeclaredMethod("resetCompletions", int.class); reset.setAccessible(true);
         reset.invoke(event, 2);
         var slotsField = MatcherSettlementEvent.class.getDeclaredField("completedLanes"); slotsField.setAccessible(true);
@@ -91,6 +93,8 @@ class OrderBatchSettlementWaitTest {
         var event = incompleteEvent();
         var mask = MatcherSettlementEvent.class.getDeclaredField("requiredLaneMask"); mask.setAccessible(true);
         mask.setLong(event, 3);
+        var route = MatcherSettlementEvent.class.getDeclaredField("routedLaneMask"); route.setAccessible(true);
+        route.setLong(event, 3);
         var slotsField = MatcherSettlementEvent.class.getDeclaredField("completedLanes"); slotsField.setAccessible(true);
         var reset = MatcherSettlementEvent.class.getDeclaredMethod("resetCompletions", int.class); reset.setAccessible(true);
         reset.invoke(event, 2);
@@ -118,10 +122,18 @@ class OrderBatchSettlementWaitTest {
     }
 
     private static MatcherSettlementEvent incompleteEvent() throws Exception {
+        // Isolate the Direct completion-marker/cache contract. Business execution and Ledger
+        // publication are covered through real native facts in MatcherTreasurySettlementTest.
         var event = new MatcherSettlementEvent();
         var mask = MatcherSettlementEvent.class.getDeclaredField("requiredLaneMask");
         mask.setAccessible(true);
         mask.setLong(event, 1);
+        var route = MatcherSettlementEvent.class.getDeclaredField("routedLaneMask");
+        route.setAccessible(true);
+        route.setLong(event, 1);
+        var published = MatcherSettlementEvent.class.getDeclaredField("directPublished");
+        published.setAccessible(true);
+        published.setBoolean(event, true);
         var completed = MatcherSettlementEvent.class.getDeclaredField("completedLanes");
         completed.setAccessible(true);
         completed.set(event, new long[16]);

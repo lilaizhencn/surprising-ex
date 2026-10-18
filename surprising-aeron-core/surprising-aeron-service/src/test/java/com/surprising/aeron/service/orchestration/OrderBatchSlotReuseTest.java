@@ -4,6 +4,44 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrderBatchSlotReuseTest {
+    @Test void admissionReceiptBelongsToItsItemAndSurvivesOtherBatchesAndReuse() {
+        var first = new OrderBatchPending(1, new ResponseArena(1, 4096));
+        var second = new OrderBatchPending(1, new ResponseArena(1, 4096));
+        first.addItem(11, 0, 0, new Object());
+        second.addItem(12, 0, 0, new Object());
+        var live = order(11, 2);
+        var receipt = first.captureAdmittedOrder(0, live);
+        assertThat(receipt).isSameAs(first.items.getFirst().admittedOrder).isNotSameAs(live);
+        var other = second.captureAdmittedOrder(0, live);
+        assertThat(other).isNotSameAs(receipt);
+        first.clear();
+        assertThat(second.items.getFirst().admittedOrder).isSameAs(other);
+        assertThat(other.orderId()).isEqualTo(11);
+        first.addItem(13, 0, 0, new Object());
+        var nextLive = order(13, 3);
+        var reused = first.captureAdmittedOrder(0, nextLive);
+        assertThat(reused).isSameAs(receipt);
+        assertThat(reused.orderId()).isEqualTo(13);
+        assertThat(reused.quantitySteps()).isEqualTo(3);
+        assertThat(other.orderId()).isEqualTo(11);
+        assertThat(live.orderId()).isEqualTo(11);
+        first.clear();
+        second.clear();
+    }
+
+    private static com.surprising.aeron.service.state.OrderRuntime order(long id, long quantity) {
+        var instrument = com.surprising.aeron.service.state.instrument.CoreInstrument.from(
+                com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,
+                new com.surprising.aeron.protocol.RegisterInstrumentCommand("1",
+                        com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(),
+                        "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+        return new com.surprising.aeron.service.state.OrderRuntime(id, 7, 1, instrument,
+                com.surprising.aeron.protocol.CoreOrderSide.BUY, 0, false,
+                com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET,
+                com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC,
+                0, 0, quantity, 0, quantity, false);
+    }
+
     @Test void failedBatchReencodingDropsOldPayloadAndReturnsItsLease() {
         var arena = new ResponseArena(1, 4096);
         var batch = new OrderBatchPending(1, arena);

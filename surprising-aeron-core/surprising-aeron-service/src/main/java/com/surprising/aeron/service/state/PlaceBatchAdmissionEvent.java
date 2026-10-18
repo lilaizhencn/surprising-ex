@@ -12,15 +12,10 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private long timestamp, position;
     private long userId;
     private UUID commandId;
-    /** 有值时由 Lane 解析意图；直接状态调用可传入已解析订单。 */
+    /** 稳定批次输入由 Owner 交接，只有所属 Lane 解析并冻结。 */
     private PlaceBatchIntentSource source;
     private ResolvedPlaceOrder[] orders;
-    private long[] openInterestSteps;
-    private boolean[] lifecycleSettled;
-    private boolean[] fundingInProgress;
     private long[] clientKeys;
-    private int[] symbolIds;
-    private int[] assetIds;
     private OrderRuntime[] admittedOrders;
     private int itemCount;
     private int admittedCount;
@@ -39,19 +34,13 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
 
     PlaceBatchAdmissionEvent prepare(
             long coreSequence, long userId, UUID commandId, ResolvedPlaceOrder[] orders,
-            long[] openInterestSteps, boolean[] lifecycleSettled, boolean[] fundingInProgress,
             long[] clientKeys,
-            int[] symbolIds, int[] assetIds,
             OrderRuntime[] admittedOrders,
             int itemCount, int laneId, int matcherShard,
             TradingRuntimeState runtime, MatcherSettlementChanges changes, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source, long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || commandId == null || orders == null
-                || openInterestSteps == null || lifecycleSettled == null || fundingInProgress == null
-                || clientKeys == null || symbolIds == null
-                || assetIds == null || admittedOrders == null || itemCount <= 0
-                || itemCount > orders.length || itemCount > openInterestSteps.length
-                || itemCount > lifecycleSettled.length || itemCount > fundingInProgress.length
-                || itemCount > clientKeys.length || itemCount > symbolIds.length || itemCount > assetIds.length
+                || source == null || identities == null || clientKeys == null || admittedOrders == null || itemCount <= 0
+                || itemCount > orders.length || itemCount > clientKeys.length
                 || itemCount > admittedOrders.length
                 || laneId < 0 || matcherShard < 0
                 || runtime == null || matcherShard >= runtime.topology().matchingEngineCount() || changes == null) {
@@ -64,12 +53,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         this.commandId = commandId;
         this.orders = orders;
         this.source = source;
-        this.openInterestSteps = openInterestSteps;
-        this.lifecycleSettled = lifecycleSettled;
-        this.fundingInProgress = fundingInProgress;
         this.clientKeys = clientKeys;
-        this.symbolIds = symbolIds;
-        this.assetIds = assetIds;
         this.admittedOrders = admittedOrders;
         this.itemCount = itemCount;
         this.laneId = laneId;
@@ -97,29 +81,24 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             lane.admissionIndexCapacity = Math.max(2, itemCount);
             try {
                 for (int index = 0; index < itemCount; index++) {
-                    if (source != null) {
-                        var decision = source.decision(index);
-                        var resolved = CoreOrderDecisionResolver.resolveInto(source.resolvedOrderSlot(index), decision.context(), userId, source.intent(index));
-                        orders[index] = resolved;
-                        symbolIds[index] = resolved.symbolId();
-                        assetIds[index] = runtime.productLine().isDerivative() ? decision.settleAssetId()
-                                : resolved.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
-                                ? decision.quoteAssetId() : decision.baseAssetId();
-                        lifecycleSettled[index] = decision.context().lifecycleSettled();
-                        fundingInProgress[index] = decision.context().fundingInProgress();
-                        openInterestSteps[index] = decision.openInterestSteps();
-                    }
-                    ResolvedPlaceOrder order = orders[index];
+                    var decision = source.decision(index);
+                    ResolvedPlaceOrder order = CoreOrderDecisionResolver.resolveInto(
+                            source.resolvedOrderSlot(index), decision.context(), userId, source.intent(index));
+                    orders[index] = order;
+                    int symbolId = order.symbolId();
+                    int assetId = runtime.productLine().isDerivative() ? decision.settleAssetId()
+                            : order.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
+                            ? decision.quoteAssetId() : decision.baseAssetId();
                     long key = RuntimeIdentityRegistry.clientKeyValue(
                             identities.prepareClientKeyInLane(lane, userId, order.clientOrderId()));
                     clientKeys[index] = key;
                     long positionKey = identities.findPositionKeyValueInLane(
                             lane, userId, order.instrument(), order.positionSide());
-                    if (source != null && runtime.productLine().isDerivative() && positionKey != 0) {
+                    if (runtime.productLine().isDerivative() && positionKey != 0) {
                         var position = lane.positions.get(positionKey);
                         if (position != null && position.signedQuantitySteps() != 0
                                 && (position.signedQuantitySteps() > 0) != (order.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
-                            var summary = lane.admissionOrderIndex(symbolIds[index]).inspect(userId, order.instrumentId(),
+                            var summary = lane.admissionOrderIndex(symbolId).inspect(userId, order.instrumentId(),
                                     order.positionSide(), order.side(), order.marginMode());
                             if (summary.reduceOnlyQuantity() > 0 && Math.addExact(Math.addExact(summary.pendingQuantity(), summary.reduceOnlyQuantity()), order.quantitySteps())
                                     > Math.absExact(position.signedQuantitySteps()))
@@ -127,16 +106,14 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                         }
                     }
                     long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
-                            runtime, lane, userId, order, openInterestSteps[index],
-                            lane.admissionOrderIndex(symbolIds[index]), key, symbolIds[index], positionKey,
-                            lifecycleSettled[index], fundingInProgress[index]);
+                            runtime, lane, userId, order, decision.openInterestSteps(),
+                            lane.admissionOrderIndex(symbolId), key, symbolId, positionKey,
+                            decision.context().lifecycleSettled(), decision.context().fundingInProgress());
                     runtime.placeOrderInLane(lane, userId, order, commandId,
-                            requiredReservation, clientKeys[index], symbolIds[index], assetIds[index],
+                            requiredReservation, clientKeys[index], symbolId, assetId,
                             coreSequence, null, timestamp, position);
                     OrderRuntime live = lane.orders.get(order.orderId());
-                    admittedOrders[index] = source == null
-                            ? (live == null ? null : live.copyIntoCommandSlot(admittedOrders[index]))
-                            : source.captureAdmittedOrder(index, live);
+                    admittedOrders[index] = source.captureAdmittedOrder(index, live);
                     admittedCount++;
                 }
                 changes.prepareAdmissionLane(laneId, runtime);
@@ -167,12 +144,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         }
         source = null;
         orders = null;
-        openInterestSteps = null;
-        lifecycleSettled = null;
-        fundingInProgress = null;
         clientKeys = null;
-        symbolIds = null;
-        assetIds = null;
         admittedOrders = null;
         userBefore = null;
         if (userBeforeSlot != null) userBeforeSlot.clearCommandSlot();

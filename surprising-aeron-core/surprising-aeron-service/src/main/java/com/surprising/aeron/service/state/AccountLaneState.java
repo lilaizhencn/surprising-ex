@@ -93,7 +93,6 @@ public final class AccountLaneState {
             new RuntimeSpotMatchProcessor.SpotSettlementAccumulator();
     final RiskLaneProcessor.PositionRiskScratch positionRiskScratch = new RiskLaneProcessor.PositionRiskScratch();
     final RuntimeDerivativeFillCalculator.FillCursor singleFillCursor = new RuntimeDerivativeFillCalculator.FillCursor();
-    final RuntimeDerivativeFillCalculator.FillCursor takerFillCursor = new RuntimeDerivativeFillCalculator.FillCursor();
 
     private volatile int queueHighWaterMark;
 

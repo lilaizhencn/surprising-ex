@@ -191,7 +191,7 @@ public final class OrderedCommitCoordinator {
                 }
                 pending.controlWork = null;
                 pending.controlPending = false;
-                return finishAppliedMatching(pending, matchingResult, null, true);
+                return finishAppliedMatching(pending, matchingResult, true);
             } catch (RuntimeException failure) {
                 throw owner.failMatching(pending, "control Lane continuation failed", failure);
             }
@@ -326,7 +326,6 @@ public final class OrderedCommitCoordinator {
         owner.setCommandFunds(pending.fundsAccumulator());
         owner.activateFactContext(pending.command(), pending.fingerprint());
         publication.begin();
-        com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta = null;
         try {
             switch (pending.operation()) {
                 case PLACE, CANCEL, REPLACE, AMEND, TRIGGER ->
@@ -392,7 +391,7 @@ public final class OrderedCommitCoordinator {
         } catch (ArithmeticException | IllegalArgumentException exception) {
             throw owner.failMatching(pending, "Core and matcher state diverged", exception);
         }
-        return finishAppliedMatching(pending, matchingResult, settlementTreasuryDelta, false);
+        return finishAppliedMatching(pending, matchingResult, false);
     }
 
     /**
@@ -408,7 +407,6 @@ public final class OrderedCommitCoordinator {
         // Control continuations may have prepared the response into resultData before the
         // terminal commit.  That byte slice still belongs to the reusable result builder until
         // this response is handed to the command window, even though it is not encoded here.
-        boolean builderResponseOwned = builderEncoded || pending.resultData != null;
         byte[] responseData = builderEncoded
                 ? owner.resultBuilder.commandResultData(pending, matchingResult) : pending.resultData;
         int responseOffset = builderEncoded ? owner.resultBuilder.responseDataOffset() : 0;
@@ -422,7 +420,7 @@ public final class OrderedCommitCoordinator {
                 responseOffset, responseLength);
         CoreResponse response = pending.command().ownedResponse(status, status, resultCode, applied,
                 responseData, responseOffset, responseLength);
-        if (builderResponseOwned) owner.resultBuilder.transferResponseOwnership();
+        owner.resultBuilder.transferResponseOwnership();
         if (laneResponse) pending.transferLaneResponseOwnership();
         return response;
     }
@@ -457,19 +455,10 @@ public final class OrderedCommitCoordinator {
     }
 
     private CoreResponse finishAppliedMatching(CommandSlot pending, MatchingResult matchingResult,
-            RuntimeTreasuryDelta settlementTreasuryDelta,
             boolean lanesCommitted) {
         long sequence = pending.sequence();
         long clusterTimestamp = pending.commitFenceTimestamp();
         long clusterPosition = pending.commitFenceClusterPosition();
-        RuntimeTreasuryDelta settledTreasuryDelta = settlementTreasuryDelta;
-        if (settledTreasuryDelta != null) {
-            owner.runtimeState.applyCollectedTreasuryBeforeActivation(settledTreasuryDelta);
-            owner.runtimeState.setMetadata(owner.productLine,
-                    Math.addExact(owner.runtimeState.revision(),
-                            pending.operation() == CommandSlot.Operation.TRIGGER && !matchingResult.accepted() ? 2 : 1));
-            publication.request();
-        }
         if (!lanesCommitted && pending.settlementEvent() == null) {
             owner.resultBuilder.materializeChangeAccumulators();
             pending.commitEvent = owner.runtimeState.dispatchLaneMutation(sequence,

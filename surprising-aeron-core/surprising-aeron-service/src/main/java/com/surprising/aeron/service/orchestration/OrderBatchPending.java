@@ -26,14 +26,17 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     public com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision decision(int index) { return preparedDecisions[index]; }
     /** 每项只引用本批按币对共享的上下文，Lane 接管后填充准入输出。 */
     private final ResolvedPlaceOrder[] resolvedOrderSlots;
-    private final OrderRuntime[] admittedOrderCopies;
     public ResolvedPlaceOrder resolvedOrderSlot(int index) {
         var slot = resolvedOrderSlots[index];
         if (slot == null) resolvedOrderSlots[index] = slot = new ResolvedPlaceOrder();
         return slot;
     }
     public OrderRuntime captureAdmittedOrder(int index, OrderRuntime order) {
-        return admittedOrderCopies[index] = order.copyIntoCommandSlot(admittedOrderCopies[index]);
+        // The item owns this immutable receipt until the whole batch retires; Matcher and
+        // realtime publication borrow the same copy rather than capturing it again.
+        OrderBatchItem item = items.get(index);
+        item.captureAdmittedOrder(order);
+        return item.admittedOrder;
     }
 
     final com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision[] preparedDecisions;
@@ -228,15 +231,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     final ResolvedPlaceOrder[] preparedOrders;
     /** 本批预备的 ClientKeyValues 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final long[] preparedClientKeyValues;
-    /** 本批预备的 OpenInterestSteps 缓冲；派发后必须等待完成交接才能清空或复用。 */
-    final long[] preparedOpenInterestSteps;
-    /** 本批准入生命周期旗标；用 primitive 数组避免每项创建中间身份对象。 */
-    final boolean[] preparedLifecycleSettled;
-    final boolean[] preparedFundingInProgress;
-    /** 本批预备的 SymbolIds 缓冲；派发后必须等待完成交接才能清空或复用。 */
-    final int[] preparedSymbolIds;
-    /** 本批预备的 AssetIds 缓冲；派发后必须等待完成交接才能清空或复用。 */
-    final int[] preparedAssetIds;
     /** 本批预备的 AdmittedOrders 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final OrderRuntime[] preparedAdmittedOrders;
     long[] preparedCancellationOrderIds;
@@ -312,14 +306,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         preparedClientKeys = new long[capacity];
         preparedOrders = new ResolvedPlaceOrder[capacity];
         resolvedOrderSlots = new ResolvedPlaceOrder[capacity];
-        admittedOrderCopies = new OrderRuntime[capacity];
         preparedDecisions = new com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision[capacity];
         preparedClientKeyValues = new long[capacity];
-        preparedOpenInterestSteps = new long[capacity];
-        preparedLifecycleSettled = new boolean[capacity];
-        preparedFundingInProgress = new boolean[capacity];
-        preparedSymbolIds = new int[capacity];
-        preparedAssetIds = new int[capacity];
         preparedAdmittedOrders = new OrderRuntime[capacity];
         preparedCancellationOrderIds = new long[preparedAdmittedOrders.length];
         preparedSymbols = new ArrayList<>(capacity);
@@ -388,12 +376,9 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         placeBatchAdmissionEvent = null;
         java.util.Arrays.fill(preparedOrders, 0, preparedCount, null);
         java.util.Arrays.fill(preparedDecisions, 0, preparedCount, null);
-        java.util.Arrays.fill(preparedLifecycleSettled, 0, preparedCount, false);
-        java.util.Arrays.fill(preparedFundingInProgress, 0, preparedCount, false);
         java.util.Arrays.fill(preparedClientKeyValues, 0, preparedCount, 0);
         java.util.Arrays.fill(preparedAdmittedOrders, 0, preparedCount, null);
         for (int index = 0; index < preparedCount; index++) {
-            if (admittedOrderCopies[index] != null) admittedOrderCopies[index].clearCommandSlot();
             if (resolvedOrderSlots[index] != null) resolvedOrderSlots[index].clear();
         }
         clearPreparedDecisionCache();

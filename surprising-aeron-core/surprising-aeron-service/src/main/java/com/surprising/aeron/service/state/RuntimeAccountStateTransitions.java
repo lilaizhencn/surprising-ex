@@ -37,11 +37,10 @@ public final class RuntimeAccountStateTransitions {
         // Complete arithmetic validation before the first account write to avoid partial mutation on overflow.
         long userRevision = user == null ? 1 : Math.incrementExact(user.revision());
         var mode = user == null ? com.surprising.aeron.protocol.CorePositionMode.ONE_WAY : user.positionMode();
-        BalanceRuntime nextBalance = new BalanceRuntime(userId, assetId, nextAvailable,
-                current == null ? 0 : current.lockedUnits());
+        BalanceRuntime initialBalance = current == null ? new BalanceRuntime(userId, assetId, nextAvailable, 0) : null;
         runtime.setUserState(userId, userRevision, mode);
-        if (current == null) runtime.putBalance(nextBalance);
-        else runtime.replaceBalance(nextBalance);
+        if (initialBalance != null) runtime.putBalance(initialBalance);
+        else runtime.replaceBalance(userId, assetId, nextAvailable, current.lockedUnits());
     }
 
     public static boolean transferOut(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
@@ -88,10 +87,9 @@ public final class RuntimeAccountStateTransitions {
             throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE", "transfer available balance is insufficient");
         UserRuntime user = runtime.requireUser(userId);
         long userRevision = Math.incrementExact(user.revision());
-        BalanceRuntime debited = new BalanceRuntime(userId, assetId,
-                Math.subtractExact(balance.availableUnits(), amountUnits), balance.lockedUnits());
+        long nextAvailable = Math.subtractExact(balance.availableUnits(), amountUnits);
         runtime.setUserState(userId, userRevision, user.positionMode());
-        runtime.replaceBalance(debited);
+        runtime.replaceBalance(userId, assetId, nextAvailable, balance.lockedUnits());
     }
 
     public static void transferIn(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,

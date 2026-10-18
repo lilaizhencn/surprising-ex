@@ -948,6 +948,9 @@ class CoreOrderedOrderBatchTest {
                 Thread.onSpinWait();
             }
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(11_004))).isNotNull();
+            // Inject divergence only after the second item's admission and Matcher hand-off;
+            // otherwise poisoning can precede its reservation and invalidate the assertions below.
+            assertThat(awaitMatching(state, fatalSequence).accepted()).isTrue();
             CommandSlot claimedContext = state.pendingMatching.required(fatalSequence);
             long[] matcherAfterFirst = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
             assertThat(matcherAfterFirst).isNotEqualTo(matcherBeforeFatal);

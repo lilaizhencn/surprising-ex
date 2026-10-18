@@ -170,63 +170,6 @@ final class MatcherSettlementDispatcher {
     final java.util.ArrayDeque<MatcherSettlementEvent> matcherSettlementEventPool =
             new java.util.ArrayDeque<>();
 
-    public MatcherSettlementEvent dispatchMatcherSettlement(
-            long coreSequence, long expectedLaneMask, long commitSequence,
-            long commitTimestamp, long commitClusterPosition,
-            MatcherSettlementPlan plan, MatchingResult matchingResult,
-            RuntimeIdentityRegistry identities) {
-        return dispatchMatcherSettlement(coreSequence, expectedLaneMask, commitSequence,
-                commitTimestamp, commitClusterPosition, plan, matchingResult, identities, false);
-    }
-
-    MatcherSettlementEvent dispatchMatcherSettlement(
-            long coreSequence, long expectedLaneMask, long commitSequence,
-            long commitTimestamp, long commitClusterPosition,
-            MatcherSettlementPlan plan, MatchingResult matchingResult,
-            RuntimeIdentityRegistry identities, boolean captureIsolatedChanges) {
-        owner.assertOwner();
-        long validMask = owner.accountLanes.length == Long.SIZE ? -1L : (1L << owner.accountLanes.length) - 1L;
-        if (coreSequence <= 0 || commitSequence < 0 || expectedLaneMask == 0
-                || (expectedLaneMask & ~validMask) != 0
-                || matchingResult == null || matchingResult.nativeCoreSequence() != coreSequence
-                || plan == null || plan.coreSequence() != coreSequence
-                || plan.requiredLaneMask() != expectedLaneMask || identities == null) {
-            throw new IllegalArgumentException("invalid matcher settlement lane command");
-        }
-        long takerOrderId = plan.takerOrderId();
-        OrderRuntime taker = plan.admittedTaker();
-        if (taker == null) taker = owner.order(takerOrderId);
-        ResolvedPlaceOrder resolved = plan.resolvedTaker();
-        if (taker == null && resolved == null) throw new IllegalStateException("taker order is missing");
-        CoreInstrument instrument = taker == null ? resolved.instrument() : taker.instrument();
-        if (instrument == null) throw new IllegalStateException("match instrument is missing");
-        owner.ensureMatcherSettlementDispatchCapacity(expectedLaneMask);
-        int baseAssetId = identities.assetId(instrument.baseAsset());
-        int quoteAssetId = identities.assetId(instrument.quoteAsset());
-        int settleAssetId = identities.assetId(instrument.settleAsset());
-        MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
-        if (event == null) event = new MatcherSettlementEvent();
-        event.prepare(
-                commitSequence, expectedLaneMask, commitTimestamp, commitClusterPosition,
-                plan, owner, identities, instrument,
-                baseAssetId, quoteAssetId, settleAssetId, owner.accountLanes.length,
-                captureIsolatedChanges);
-        long lanes = expectedLaneMask;
-        while (lanes != 0) {
-            int laneId = Long.numberOfTrailingZeros(lanes);
-            lanes &= lanes - 1;
-            if (!owner.accountLanesStarted) {
-                event.execute(owner.accountLanes[laneId]);
-            } else {
-                owner.releaseOwnerLaneAccess();
-                int highWater = owner.accountLanes[laneId].updateQueueHighWaterMark(owner.laneWorkers[laneId].depth() + 1);
-                owner.accountLaneQueueHighWaterMarks[laneId] = highWater;
-                owner.laneWorkers[laneId].submit(event);
-            }
-        }
-        return event;
-    }
-
     public void releaseMatcherSettlement(MatcherSettlementEvent event) {
         owner.assertOwner();
         if (event == null) return;
