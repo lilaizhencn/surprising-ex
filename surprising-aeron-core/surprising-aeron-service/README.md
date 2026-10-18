@@ -1,3 +1,15 @@
+# 保证金写入简化（2026-10-18）
+
+`DerivativeAccountCommandProcessor.adjustAccountPositionMargin` 按“校验逐仓持仓与余额 →
+计算新的可用、冻结、仓位保证金与版本 → 写入余额、持仓及用户版本”顺序执行。
+全仓降低杠杆的保证金重定价也先完成算术校验再写入。
+两处直接调用现有 `TradingRuntimeState.replaceBalance(userId, assetId, available, locked)`，
+删除构造后立即拆开的临时 `BalanceRuntime`；余额权威单元、所属 Lane 和回滚捕获仍由该入口负责。
+
+五条衍生产品线逐仓增减与四条期货线杠杆重定价均有实际 Account Lane、资金及快照核对。
+局部 JMH 保证金操作测到约 40 B/次分配减少，不能推断整链路吞吐或零分配。
+已测范围、环境缺口与采样边界见 [八项简化验证](../../docs/validation/order-simplification-20261018.md)。
+
 # 核心提交日志回放
 
 `CommittedTradeReplay` 由独立导出进程持有核心状态，只应用 Archive 已提交的命令；不会向在线 Cluster 发送交易命令。订单和成交沿用实时捕获，资金费通过 `PerpetualFundingCommands` 的回放观察接口交出实际支付结果，形成不可变的 `CommittedFundingPage`。该对象的生命周期仅为当前完整命令，下一次 apply 清空；没有第二份资金账本或长期支付缓存。

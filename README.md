@@ -42,6 +42,14 @@ The Maven modules follow these boundaries: [`surprising-aeron-core`](surprising-
 
 Core 内部账户、触发、算法及强平执行/保险/ADL 分页查询读取实际 Lane，通过已有异步查询槽响应；保险预算由 Ledger 计算。外部 Redis/Valkey 投影链路沿用现有机制。完整状态物化仅在显式冷态检查屏障借用所有权，生产运行不缓存完整业务视图。符号缓存、DirectBuffer 读取和事件缓冲复用继续保留。本轮仅做必要功能回归及直接受影响基准模块的编译，不执行压测、JMH/JFR、快照恢复或 wallet；功能通过不表示吞吐或零分配已重新验收。见 [Owner 状态边界验证](docs/validation/owner-shared-state-20261013.json)。下文的日期记录描述各阶段当时的状态。
 
+## 订单与保证金链路简化
+
+订单入口的标准化、校验和提交已合并为顺序业务步骤：`OrderService` 不再传递无用途的校验对象，
+`AeronOrderCommandService` 每次只读取一次命令结果载荷。单订单 Valkey 查询由
+`ValkeyUserQueries.order` 直接读取目标 ORDER 与元数据；保证金调整直接向既有 Core 余额写入口
+提交数值。八项简化的源码入口、六产品线回归和局部分配数据见
+[验证记录](docs/validation/order-simplification-20261018.md)。
+
 ## 风险查询口径
 
 `RuntimeRiskQueryService.snapshots` 在查询边界使用当前仓位、钱包和标记价，统一计算名义价值、未实现盈亏、维持保证金、权益、保证金率和风险状态；返回的价格序号对应本次估值价格。全仓按用户及结算资产汇总，扣除逐仓占用；逐仓仅使用本仓保证金，期权权益使用期权市值。

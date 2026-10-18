@@ -374,13 +374,15 @@ class RuntimeStateBusinessRulesTest {
                         exception -> assertThat(exception.code()).isEqualTo("POSITION_MODE_SWITCH_BLOCKED"));
     }
 
-    @Test
-    void isolatedMarginAdjustmentMovesFundsWithoutChangingEquity() {
-        TradingCoreState funded = funded(ProductLine.LINEAR_PERPETUAL, "USDT", 10_000);
+    @ParameterizedTest
+    @MethodSource("derivativeProductLines")
+    void isolatedMarginAdjustmentMovesFundsWithoutChangingEquity(ProductLine product) {
+        String asset = CoreStateTestFixtures.settleAsset(product);
+        TradingCoreState funded = funded(product, asset, 10_000);
         CoreUserState current = funded.user(101);
         Map<String, AssetBalance> balances = new TreeMap<>(current.balances());
-        balances.put("USDT", new AssetBalance("USDT", 9_000, 1_000));
-        CorePositionState position = new CorePositionState("1", "USDT", CoreMarginMode.ISOLATED,
+        balances.put(asset, new AssetBalance(asset, 9_000, 1_000));
+        CorePositionState position = new CorePositionState("1", asset, CoreMarginMode.ISOLATED,
                 CorePositionSide.NET, 10, 10, 100, 0, 1_000);
         CoreUserState user = new CoreUserState(current.productLine(), current.userId(), current.revision() + 1,
                 balances, current.reservations(), Map.of(position.key(), position), current.positionMode());
@@ -397,12 +399,32 @@ class RuntimeStateBusinessRulesTest {
                 new AdjustPositionMarginCommand("1", CoreMarginMode.ISOLATED,
                         CorePositionSide.NET, -300));
 
-        assertThat(added.user(101).totalUnits("USDT")).isEqualTo(10_000);
+        assertThat(added.user(101).totalUnits(asset)).isEqualTo(10_000);
         assertThat(added.user(101).positions().get("1").positionMarginUnits()).isEqualTo(1_500);
-        assertBalance(removed, "USDT", 8_800, 1_200);
+        assertBalance(removed, asset, 8_800, 1_200);
         assertThat(removed.user(101).positions().get("1").positionMarginUnits()).isEqualTo(1_200);
         assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(removed),
-                ProductLine.LINEAR_PERPETUAL)).isEqualTo(removed);
+                product)).isEqualTo(removed);
+
+        var identities = new RuntimeIdentityRegistry();
+        try (var runtime = RuntimeStateProjector.project(withPosition, identities)) {
+            for (long rejected : new long[] {9_001, -1_001, Long.MIN_VALUE}) {
+                assertThatThrownBy(() -> DerivativeAccountCommandProcessor.adjustPositionMargin(runtime, identities, 101,
+                        new AdjustPositionMarginCommand("1", CoreMarginMode.ISOLATED, CorePositionSide.NET, rejected)))
+                        .isInstanceOf(RuntimeException.class);
+                assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(withPosition);
+            }
+            runtime.startAccountLanes();
+            for (long amount : new long[] {500, -300}) {
+                var work = new AccountControlTask().preparePositionMarginAdjustment(runtime, identities, 101,
+                        new AdjustPositionMarginCommand("1", CoreMarginMode.ISOLATED, CorePositionSide.NET, amount));
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                boolean done = false;
+                while (!(done = work.poll()) && System.nanoTime() < deadline) Thread.onSpinWait();
+                assertThat(done).isTrue();
+            }
+            assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(removed);
+        }
     }
 
     @Test

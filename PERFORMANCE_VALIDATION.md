@@ -1,5 +1,18 @@
 # 性能验证记录
 
+## 2026-10-18：八项简化的局部分配观测
+
+仅比较实际保证金方法和 Valkey 订单查询，非端到端容量验收。HotSpot Corretto 27、JMH 1.37，
+G1/256MiB、1线程/1fork、2×1s预热、3×1s测量、`-prof gc`。
+保证金以修改前 processor class 作基线，直接调用同一业务方法：256.004→216.005 B/次。
+真实本机 Redis 单订单查询由完整用户物化改为目标字段读取：用户1个订单时12096.713→9365.608 B/次，
+100个订单时282746.013→9222.807 B/次。原始夹具与完整指标已归档，未将 Redis 服务端内存算入 JVM 分配。
+
+短采样未监控热控且耗时误差大，不判定吞吐/延迟收益，不与上次单成员容量数字比较。
+功能验证另执行 Gateway、Redis、Core 和六产品线混合夹具；未运行部署后的HTTP/WebSocket及独立做市。
+命令、边界、缺口及清理状态见 [验证记录](docs/validation/order-simplification-20261018.md)，
+采样源码、class SHA256 和数据见 [JMH归档](docs/validation/order-simplification-20261018-jmh.json)。
+
 ## 2026-10-18 19:22：最新 master 两模式复测
 
 用户要求再跑一轮，并明确使用最新代码。执行 `git fetch origin master` 后确认本地及远端均为 `8f2beeea994bf08449414a3b11ae8ef9999cd1e5`（symbol ID解析及VarHandle数值解码优化），工作区干净。核对HotSpot Corretto 27和Maven 3.9.16后，执行 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am -DskipTests clean package`，20个reactor模块全部成功；两模式使用本次干净构建的同一份service/benchmark产物，SHA256见验证JSON。

@@ -164,12 +164,12 @@ public final class DerivativeAccountCommandProcessor {
             BalanceRuntime balance = runtime.balance(key.userId(), assetId);
             if (balance == null || balance.availableUnits() < additional)
                 throw new CoreStateRejectedException("INSUFFICIENT_BALANCE", "insufficient available funds for lower leverage");
-            BalanceRuntime next = new BalanceRuntime(key.userId(), assetId,
-                    Math.subtractExact(balance.availableUnits(), additional), Math.addExact(balance.lockedUnits(), additional));
+            long nextAvailable = Math.subtractExact(balance.availableUnits(), additional);
+            long nextLocked = Math.addExact(balance.lockedUnits(), additional);
             UserRuntime user = runtime.requireUser(key.userId());
             long userRevision = Math.incrementExact(user.revision());
             // All business rejection and arithmetic checks precede the first mutation.
-            runtime.replaceBalance(next);
+            runtime.replaceBalance(key.userId(), assetId, nextAvailable, nextLocked);
             for (var position : positions) runtime.replacePosition(position.getKey(), position.getValue());
             runtime.setUserState(user.userId(), userRevision, user.positionMode());
         }
@@ -210,26 +210,27 @@ public final class DerivativeAccountCommandProcessor {
         if (balance == null) throw new IllegalStateException("position margin balance is missing");
         long units = Math.absExact(command.amountUnits());
         long nextMargin;
-        BalanceRuntime nextBalance;
+        long nextAvailable;
+        long nextLocked;
         if (command.amountUnits() > 0) {
             if (balance.availableUnits() < units) throw new IllegalArgumentException("insufficient runtime balance");
             nextMargin = Math.addExact(position.positionMarginUnits(), units);
-            nextBalance = new BalanceRuntime(userId, position.assetId(),
-                    balance.availableUnits() - units, Math.addExact(balance.lockedUnits(), units));
+            nextAvailable = Math.subtractExact(balance.availableUnits(), units);
+            nextLocked = Math.addExact(balance.lockedUnits(), units);
         } else {
             if (position.positionMarginUnits() < units)
                 throw new CoreStateRejectedException("POSITION_MARGIN_INSUFFICIENT", "position margin is insufficient");
             if (balance.lockedUnits() < units) throw new IllegalArgumentException("invalid runtime release");
             nextMargin = Math.subtractExact(position.positionMarginUnits(), units);
-            nextBalance = new BalanceRuntime(userId, position.assetId(),
-                    Math.addExact(balance.availableUnits(), units), balance.lockedUnits() - units);
+            nextAvailable = Math.addExact(balance.availableUnits(), units);
+            nextLocked = Math.subtractExact(balance.lockedUnits(), units);
         }
         PositionRuntime nextPosition = new PositionRuntime(position.userId(), position.symbolId(), position.assetId(),
                 position.marginMode(), position.positionSide(), position.instrument(), position.signedQuantitySteps(),
                 position.entryPriceTicks(), position.entryValueTicks(), position.realizedPnlUnits(), nextMargin);
         UserRuntime user = runtime.requireUser(userId);
         long userRevision = Math.incrementExact(user.revision());
-        runtime.replaceBalance(nextBalance);
+        runtime.replaceBalance(userId, position.assetId(), nextAvailable, nextLocked);
         runtime.replacePosition(positionKey, nextPosition);
         runtime.setUserState(userId, userRevision, user.positionMode());
         return position.assetId();
