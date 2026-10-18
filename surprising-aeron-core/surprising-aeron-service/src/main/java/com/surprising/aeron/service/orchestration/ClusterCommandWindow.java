@@ -55,8 +55,8 @@ public final class ClusterCommandWindow {
     }
 
     public ClusterCommandWindow(int capacity) {
-        if (capacity < 64 || capacity > 1024 || Integer.bitCount(capacity) != 1)
-            throw new IllegalArgumentException("owner command window must be a power of two in [64,1024]");
+        if (capacity < 64 || capacity > 4096 || Integer.bitCount(capacity) != 1)
+            throw new IllegalArgumentException("owner command window must be a power of two in [64,4096]");
         entries = new Entry[capacity];
         indexMask = capacity - 1;
         for (int i = 0; i < entries.length; i++) entries[i] = new Entry();
