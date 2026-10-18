@@ -44,6 +44,135 @@ public class ExecutionModeComparisonTest {
         printFinalSummaryTable(results);
     }
 
+    @Test
+    void runBatch20Comparison() {
+        System.out.println("==========================================================================================");
+        System.out.println("          BATCH MODE (batchSize=20, 相同历史40万口径) PIPELINED vs FUSED BENCHMARK         ");
+        System.out.println("==========================================================================================");
+
+        ProductLine product = ProductLine.LINEAR_PERPETUAL;
+        BenchmarkStats pipelinedStats = measureBatch20Mode(product, TradingExecutionMode.PIPELINED, 10, 40);
+        BenchmarkStats fusedStats = measureBatch20Mode(product, TradingExecutionMode.FUSED, 10, 40);
+
+        printDetailComparison("LINEAR_PERPETUAL (batchSize=20)", pipelinedStats, fusedStats);
+    }
+
+    @Test
+    void runProductionMixedWorkloadComparison() {
+        System.out.println("==========================================================================================");
+        System.out.println("     PRODUCTION MIXED WORKLOAD (综合混合场景: 批量吃挂单/真实成交/撤单/资金费/标记价) BENCHMARK      ");
+        System.out.println("==========================================================================================");
+
+        var template = LinearPerpetualMixedWorkload.template(4, 1000, 4);
+
+        // 1. Pipelined mode
+        BenchmarkStats pipelined = measureMixedScenario(template, TradingExecutionMode.PIPELINED, 2, 8);
+
+        // 2. Fused mode
+        BenchmarkStats fused = measureMixedScenario(template, TradingExecutionMode.FUSED, 2, 8);
+
+        printDetailComparison("PRODUCTION_MIXED_WORKLOAD (LINEAR_PERPETUAL)", pipelined, fused);
+    }
+
+    private BenchmarkStats measureMixedScenario(LinearPerpetualMixedWorkload.Template template, TradingExecutionMode mode,
+                                                int warmupRounds, int measureRounds) {
+        System.setProperty("surprising.aeron.execution-mode", mode.name());
+
+        ThreadMXBean threadBean = (ThreadMXBean) ManagementFactory.getThreadMXBean();
+        long threadId = Thread.currentThread().threadId();
+
+        try (var scenario = LinearPerpetualMixedWorkload.productionScenario(template, 96, 20)) {
+            int threadCount = Thread.activeCount();
+
+            // Warmup
+            for (int i = 0; i < warmupRounds; i++) {
+                scenario.run();
+                scenario.verify();
+            }
+
+            // Measurement
+            long[] latenciesNanos = new long[measureRounds];
+            long totalOps = 0;
+            long startAlloc = threadBean.getThreadAllocatedBytes(threadId);
+            long startTimeNanos = System.nanoTime();
+
+            for (int i = 0; i < measureRounds; i++) {
+                long iterStart = System.nanoTime();
+                scenario.run();
+                long iterEnd = System.nanoTime();
+                scenario.verify();
+                latenciesNanos[i] = iterEnd - iterStart;
+                totalOps += scenario.terminalOperations();
+            }
+
+            long totalElapsedNanos = System.nanoTime() - startTimeNanos;
+            long endAlloc = threadBean.getThreadAllocatedBytes(threadId);
+
+            Arrays.sort(latenciesNanos);
+            double throughputOpsPerSec = (double) totalOps / (totalElapsedNanos / 1_000_000_000.0);
+            double avgLatencyMicros = (double) (totalElapsedNanos / totalOps) / 1_000.0;
+            double p50Micros = (latenciesNanos[(int) (measureRounds * 0.50)] / (double) (totalOps / measureRounds)) / 1_000.0;
+            double p95Micros = (latenciesNanos[(int) (measureRounds * 0.95)] / (double) (totalOps / measureRounds)) / 1_000.0;
+            double p99Micros = (latenciesNanos[(int) (measureRounds * 0.99)] / (double) (totalOps / measureRounds)) / 1_000.0;
+            long allocatedBytesPerOp = (endAlloc - startAlloc) / totalOps;
+
+            return new BenchmarkStats(
+                mode, throughputOpsPerSec, avgLatencyMicros, p50Micros, p95Micros, p99Micros, allocatedBytesPerOp, threadCount
+            );
+        }
+    }
+
+    private BenchmarkStats measureBatch20Mode(ProductLine product, TradingExecutionMode mode, int warmupRounds, int measureRounds) {
+        System.setProperty("surprising.aeron.execution-mode", mode.name());
+
+        ThreadMXBean threadBean = (ThreadMXBean) ManagementFactory.getThreadMXBean();
+        long threadId = Thread.currentThread().threadId();
+
+        try (var workload = new ContinuousOwnerBenchmark()) {
+            workload.productLine = product;
+            workload.batchSize = 20; // 历史 40万+ 的完全相同批量口径
+            workload.accountPattern = "DISTINCT";
+            workload.setup();
+
+            int threadCount = Thread.activeCount();
+            var counters = new ContinuousOwnerBenchmark.Counters();
+
+            // Warmup
+            for (int i = 0; i < warmupRounds; i++) {
+                workload.placeCancelWithoutTimers(counters);
+            }
+
+            // Measurement
+            long[] latenciesNanos = new long[measureRounds];
+            long totalOps = 0;
+            long startAlloc = threadBean.getThreadAllocatedBytes(threadId);
+            long startTimeNanos = System.nanoTime();
+
+            for (int i = 0; i < measureRounds; i++) {
+                long iterStart = System.nanoTime();
+                workload.placeCancelWithoutTimers(counters);
+                long iterEnd = System.nanoTime();
+                latenciesNanos[i] = iterEnd - iterStart;
+                totalOps += 512 * 20; // 256 place * 20 + 256 cancel * 20 = 10,240 业务项
+            }
+
+            long totalElapsedNanos = System.nanoTime() - startTimeNanos;
+            long endAlloc = threadBean.getThreadAllocatedBytes(threadId);
+
+            Arrays.sort(latenciesNanos);
+            double throughputOpsPerSec = (double) totalOps / (totalElapsedNanos / 1_000_000_000.0);
+            double avgLatencyMicros = (double) (totalElapsedNanos / totalOps) / 1_000.0;
+            double p50Micros = (latenciesNanos[(int) (measureRounds * 0.50)] / (512.0 * 20)) / 1_000.0;
+            double p95Micros = (latenciesNanos[(int) (measureRounds * 0.95)] / (512.0 * 20)) / 1_000.0;
+            double p99Micros = (latenciesNanos[(int) (measureRounds * 0.99)] / (512.0 * 20)) / 1_000.0;
+            long allocatedBytesPerOp = (endAlloc - startAlloc) / totalOps;
+
+            return new BenchmarkStats(
+                mode, throughputOpsPerSec, avgLatencyMicros, p50Micros, p95Micros, p99Micros, allocatedBytesPerOp, threadCount
+            );
+        }
+    }
+
     private BenchmarkStats measureMode(ProductLine product, TradingExecutionMode mode, int warmupRounds, int measureRounds) {
         System.setProperty("surprising.aeron.execution-mode", mode.name());
 
