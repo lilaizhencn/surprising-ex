@@ -75,6 +75,11 @@ public final class TradingCoreOwner {
     /** Matcher 完成通知使用的统一回调，最终结果回到命令流水线状态。 */
     private final TradingCoreRuntime.MatchingCommitHandler matchingCommitHandler;
 
+    /** 检查命令截止时间的分频掩码（每 1024 次自旋调用一次系统时钟）。 */
+    private static final int DEADLINE_CHECK_MASK = 0x3FF;
+    /** 命令截止时间检查分频计数器，仅在 Owner 线程内无锁自增。 */
+    private int deadlineCheckCounter;
+
     TradingCoreOwner(ProductLine productLine, ResponseSink responseSink) {
         if (productLine == null) {
             throw new IllegalArgumentException("product line is required");
@@ -174,7 +179,6 @@ public final class TradingCoreOwner {
     /** 按“队首提交、异步控制、命令准入”的业务顺序执行一轮流水线。 */
     private void progressCommandsInScope() {
         boolean awaitingCompletion = false;
-        int admissionsSinceHeadCheck = 0;
         int admittedInputs = 0;
         // 每轮先推进异步工作；随后连续 ready 的队首直接退休，不重复收集整个窗口。
         boolean advanceMatching = true;
@@ -192,7 +196,6 @@ public final class TradingCoreOwner {
                     continue;
                 }
                 awaitingCompletion = true;
-                admissionsSinceHeadCheck = 0;
             }
             if (window.size() == window.capacity()) return;
             if (commandPipeline.hasActiveControl()) {
@@ -249,21 +252,20 @@ public final class TradingCoreOwner {
             admittedInputs++;
             commandPipeline.recordAdmission();
             advanceMatching = true;
-            // 等待时每8次准入只检查队首完成条件；ready 才复查提交，不重扫整个窗口。
-            if (awaitingCompletion && ++admissionsSinceHeadCheck == 8) {
-                admissionsSinceHeadCheck = 0;
-                if (state.commits.matchingCommitReady(
-                        state.pendingMatching.get(commandPipeline.committingHead().sequence))) {
-                    awaitingCompletion = false;
-                    advanceMatching = false;
-                }
+            // 准入命令后，如果刚才在等待完成，一旦当前队首就绪即刻放行，消除固定的滞后探测
+            if (awaitingCompletion && state.commits.matchingCommitReady(
+                    state.pendingMatching.get(commandPipeline.committingHead().sequence))) {
+                awaitingCompletion = false;
+                advanceMatching = false;
             }
         }
     }
 
-    /** 在命令开始改变业务状态前建立实时事件捕获边界。 */
+    /** 在命令开始改变业务状态前建立实时事件捕获边界。未启用行情时快速短路。 */
     private void beginCapture(long position, long timestamp, CoreMessageHeader header) {
-        realtimeBoundary.beginCapture(state, position, timestamp, header);
+        if (realtimeBoundary.enabled()) {
+            realtimeBoundary.beginCapture(state, position, timestamp, header);
+        }
     }
 
     /** 每条命令有固定提交边界，不能让各副本的线程完成速度改变推送分组。 */
@@ -290,16 +292,6 @@ public final class TradingCoreOwner {
             }
             var last = commandPipeline.committingHead();
             long dispatchThrough = Math.max(last.sequence, window.lastMatchingSequence());
-            long progressBefore = state.pendingMatching.dispatchRevision();
-            if (committedCount == 0 && commandPipeline.waitingForMatchingNotification()
-                    && commandPipeline.canSkipMatchingPoll(dispatchThrough, progressBefore,
-                    state.matchingProgress.hasNotifications() || state.hasCompletedLaneCommit())) {
-                checkProgressDeadline();
-                break;
-            }
-            if (committedCount == 0) {
-                commandPipeline.beginMatchingPoll();
-            }
             boolean adv = advanceMatching || committedCount == 0;
             if (!adv && last.sequence != 0) {
                 adv = !state.commits.matchingCommitReady(state.pendingMatching.get(last.sequence));
@@ -311,18 +303,16 @@ public final class TradingCoreOwner {
                 CoreResponse terminalResponse = state.commits.commitReadyMatchingHead(
                         last.timestamp, last.position, last.sequence, dispatchThrough, adv);
                 if (terminalResponse == null) {
-                    if (committedCount == 0) {
-                        commandPipeline.rememberMatchingWait(dispatchThrough, state.pendingMatching.dispatchRevision(),
-                                progressBefore, state.matchingProgress.hasLocalMatchingWork());
-                        checkProgressDeadline();
-                    }
+                    checkProgressDeadline();
                     break;
                 }
                 if (last.response != null) throw new IllegalStateException("duplicate pipeline terminal response");
                 last.response = terminalResponse;
             }
             if (window.size() == 1) state.assertClusterCallbackComplete();
-            realtimeBoundary.commit(state, last.position);
+            if (realtimeBoundary.enabled()) {
+                realtimeBoundary.commit(state, last.position);
+            }
             if (last.response == null) throw new IllegalStateException("missing pipeline terminal response");
             if (last.sessionId != NO_SESSION_ID) offerResponse(last.sessionId, last.request, last.response);
             commandPipeline.finishHeadCommit();
@@ -360,7 +350,9 @@ public final class TradingCoreOwner {
             }
         }
         state.assertClusterCallbackComplete();
-        realtimeBoundary.commit(state, activeControl.position);
+        if (realtimeBoundary.enabled()) {
+            realtimeBoundary.commit(state, activeControl.position);
+        }
         if (activeControl.sessionId != NO_SESSION_ID) {
             offerResponse(activeControl.sessionId, request, commandPipeline.controlResponse());
         }
@@ -375,12 +367,17 @@ public final class TradingCoreOwner {
         return true;
     }
 
-    /** 检查异步命令是否被中断或超过允许的等待时间。 */
+    /** 检查异步命令是否被中断或超过允许的等待时间。采用分频采样减少高频系统时钟调用。 */
     private void checkProgressDeadline() {
-        if (Thread.currentThread().isInterrupted()
-                || System.nanoTime() - commandPipeline.progressDeadline() >= 0)
-            throw new IllegalStateException("asynchronous command progress interrupted or timed out: "
+        if (Thread.currentThread().isInterrupted()) {
+            throw new IllegalStateException("asynchronous command progress interrupted: "
                     + stalledCommandDiagnostics());
+        }
+        if ((deadlineCheckCounter++ & DEADLINE_CHECK_MASK) == 0
+                && System.nanoTime() - commandPipeline.progressDeadline() >= 0) {
+            throw new IllegalStateException("asynchronous command progress timed out: "
+                    + stalledCommandDiagnostics());
+        }
     }
 
     /** Capture the existing Owner and worker state only when progress has already failed. */
