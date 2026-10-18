@@ -1,5 +1,45 @@
 # 性能验证记录
 
+## 2026-10-18 19:22：最新 master 两模式复测
+
+用户要求再跑一轮，并明确使用最新代码。执行 `git fetch origin master` 后确认本地及远端均为 `8f2beeea994bf08449414a3b11ae8ef9999cd1e5`（symbol ID解析及VarHandle数值解码优化），工作区干净。核对HotSpot Corretto 27和Maven 3.9.16后，执行 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am -DskipTests clean package`，20个reactor模块全部成功；两模式使用本次干净构建的同一份service/benchmark产物，SHA256见验证JSON。
+
+### 固定场景与边界
+
+入口为 `surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh` 的 `end_to_end` 阶段，经 `ClusterOperationalBenchmark.continuousOperations` / `ClusterMixedCapacityMain`，保留真实UDP、单成员Consensus、Archive和Core。先初始化零售/做市资金及持仓、挂单，并执行一次强平/保险/ADL边界；随后持续异步挂撤单与IOC成交，排空后核对账户、国库及请求完成性。
+
+仅LINEAR_PERPETUAL/MIXED，1 matcher、2 Account Lane、128 symbols、1000零售用户、batch20、全局及命令session窗口256、seed25620；顺序FUSED→PIPELINED，各预热30秒/正式60秒，中间冷却60秒，无profiler。G1，节点Xms512m/Xmx1536m、客户端Xms128m/Xmx512m，沿用基线等待策略。执行前锁定参数，运行时每5秒采样CPU/RSS、热控、swap、磁盘及目录大小；磁盘低于20GiB、目录超过8GiB或单日志超过128MiB时停止，本轮未触发。
+
+### 结果
+
+| 指标 | FUSED | PIPELINED |
+|---|---:|---:|
+| 正式窗口（本地时间） | 19:25:00.618–19:26:00.637 | 19:27:58.590–19:28:58.617 |
+| 稳定终态业务项/s | 274,711.710 | 359,221.041 |
+| 稳定终态Core消息/s | 26,278.794 | 34,327.316 |
+| 稳定成交fills/s | 65,387.747 | 85,509.011 |
+| 普通下单P99 / ms | 17.039 | 16.383 |
+| 普通撤单P99 / ms | 17.907 | 15.384 |
+| 批量下单P99 / ms | 19.988 | 22.200 |
+| 批量撤单P99 / ms | 26.214 | 24.281 |
+| 标记价P99 / ms | 43.155 | 27.525 |
+| 节点CPU（100%=1逻辑CPU） | 614.4% | 851.0% |
+| 发压fork CPU | 295.3% | 293.4% |
+| 节点RSS最大采样 / MiB | 1,762.5 | 1,767.7 |
+| 正式窗口CPU频率上限 | 75–77% | 70–75% |
+| 测量边界包络swap-in/out页数 | 0 / 0 | 0 / 0 |
+| 排空后offered=terminal业务项 | 16,490,496 | 21,565,442 |
+| 排空后offered=terminal Core消息 | 1,577,472 | 2,060,802 |
+| 期末unfinished / 资金差额 | 0 / 0 | 0 / 0 |
+
+业务正确性2/2通过：两轮均 `mixedCapacity=PASS`、`mixedVerify=PASS`，零售/做市持仓、挂单、预约和国库合计核对通过，初始资金1,384,000,000,125单位USDT。初始化强平/保险/ADL校验通过；夹具手续费为0，不代表非零手续费验证。
+
+本机观测PIPELINED业务吞吐高约30.76%，节点CPU也更高；普通下单P99略低，批量下单P99反而较高。**两轮都有热控，性能验收无效，仅作受限宿主上的观测对比。** 每模式只有1轮，未做旧提交同机A/B，不能从历史数字差异认定解码优化收益或回归。吞吐排除窗口结束后的排空量；业务项按batch item展开，并非HTTP请求数。延迟为实际提交→终态，含排空时取得的本轮请求终态；整批延迟不除以20。负载由窗口背压调节，没有固定到达率或coordinated omission校正，`saturationGate=UNCONFIRMED`。CPU取正式窗口内首末累计CPU时间差，含忙等、网络和Archive，不能等同有效业务计算。
+
+本轮未改生产代码；未执行JFR/GC诊断、长稳、恢复、持续资金费/止盈止损、其他五产品线和HTTP/WebSocket在线链路，未启动wallet。构建跳过Maven测试，业务验证由此次真实节点夹具完成，不替代全产品功能回归。完整预锁参数、产物SHA、逐轮分位数/计数、模式日志及线程、NMT、资源样本和清理清单见 [本轮验证JSON](docs/validation/execution-modes-latest-20261018-1922.json)。
+
+清理：两轮节点和客户端均已正常结束，确认本轮无存活Java进程后清理隔离集群、Archive、临时日志及报告/采样工具；保留本记录、验证JSON和标准Maven构建产物。JSON中原始文件路径仅作历史定位，清理状态已追加。
+
 ## 2026-10-18：修复后 FUSED / PIPELINED 复测（用户要求提前结束）
 
 基准为 master `5ca4f206a454637477969eb6d94c480a245b9e0e`，20 个直接依赖 reactor 模块构建成功；两种模式使用同一份产物和 HotSpot Corretto 27。未修改交易代码。入口为 `surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh` 的 `end_to_end` 阶段，经 `ClusterOperationalBenchmark.continuousOperations` / `ClusterMixedCapacityMain` 运行真实单成员 Aeron、UDP、Consensus、Archive。先建立资金、持仓和做市挂单并核对强平/保险/ADL，然后持续挂撤单与成交，排空后核对账户和国库。
