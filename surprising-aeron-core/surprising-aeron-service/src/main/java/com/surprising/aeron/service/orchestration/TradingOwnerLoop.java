@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.service.config.TradingCpuAffinity;
+
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
@@ -34,15 +36,28 @@ public final class TradingOwnerLoop implements Runnable {
     private volatile Throwable failure;
     private boolean stopping;
     private Thread ownerThread;
+    private final TradingCpuAffinity affinityConfiguration;
+    private TradingCpuAffinity.Binding cpuAffinity;
     private Cluster cluster;
     private OwnerLogContext logContext;
     private long ownerEpoch;
-    @Autowired
     public TradingOwnerLoop(ClusterTopology topology, ClusterServiceEgress egress) {
         this(topology.productLine(), egress);
     }
 
+    @Autowired
+    public TradingOwnerLoop(ClusterTopology topology, ClusterServiceEgress egress,
+            TradingCpuAffinity affinity) {
+        this(topology.productLine(), egress, affinity);
+    }
+
     public TradingOwnerLoop(ProductLine productLine, ClusterServiceEgress egress) {
+        this(productLine, egress, TradingCpuAffinity.disabled());
+    }
+
+    public TradingOwnerLoop(ProductLine productLine, ClusterServiceEgress egress,
+            TradingCpuAffinity affinity) {
+        this.affinityConfiguration = java.util.Objects.requireNonNull(affinity);
         this.egress = egress;
         coreOwner = new TradingCoreOwner(productLine, this::publishResponse);
         input = coreOwner.ingress();
@@ -62,6 +77,9 @@ public final class TradingOwnerLoop implements Runnable {
             coreOwner.start(logContext);
             if (restored != null) coreOwner.restoreSnapshot(restored);
             coreOwner.ownerCompletionSignal(ownerIdle::signal);
+            // Start all workers before narrowing Owner's mask so Ledger and other threads stay unbound.
+            coreOwner.state().activate(affinityConfiguration);
+            cpuAffinity = affinityConfiguration.owner();
             return null;
         }, false);
     }
@@ -161,6 +179,12 @@ public final class TradingOwnerLoop implements Runnable {
                 coreOwner.terminate();
             } catch (Throwable fatal) {
                 if (failure == null) failure = fatal;
+            } finally {
+                if (cpuAffinity != null) {
+                    try { cpuAffinity.close(); }
+                    catch (Throwable fatal) { if (failure == null) failure = fatal; }
+                    cpuAffinity = null;
+                }
             }
         }
     }

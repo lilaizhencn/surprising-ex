@@ -1,4 +1,6 @@
 package com.surprising.aeron.service.matcher;
+import com.surprising.aeron.service.config.TradingCpuAffinity;
+
 import com.surprising.aeron.service.orchestration.CommandSlot;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
@@ -52,10 +54,15 @@ public final class MatcherPipelineGroup implements AutoCloseable {
     }
 
     public void start(IntConsumer shardActivation) {
+        start(shardActivation, TradingCpuAffinity.disabled());
+    }
+
+    public void start(IntConsumer shardActivation,
+            TradingCpuAffinity affinity) {
         for (int shardId = 0; shardId < shards.length; shardId++) {
             int currentShardId = shardId;
             shards[shardId].start(shardActivation == null ? null
-                    : () -> shardActivation.accept(currentShardId));
+                    : () -> shardActivation.accept(currentShardId), affinity);
         }
     }
 

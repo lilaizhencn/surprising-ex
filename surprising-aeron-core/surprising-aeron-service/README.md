@@ -466,3 +466,26 @@ FUSED比例OI准入通过既有事件等待Ledger发布输入，再在Owner执�
 `surprising-aeron-tools` 的 `OfflineReplayMain` 按输入顺序等待控制命令、撮合/账户/账本完成及查询结果。它直接使用Owner现有的有序完成收集入口和回调契约，不再自行拼装Matcher与Lane提交；正常和异常退出均关闭运行时。该入口及回调只扩大可见性，没有新增执行框架、状态镜像或提交阶段。
 
 验收中的256项强平撤单暴露了冻结变更缓冲的边界错误：就地执行可累计超过8个原始删除项，但发布副本数组无需随之扩容。`RuntimeReservationChangeBuffer.clear` 现在只清理实际可用的副本，再通过原缓冲清理全部键和值；没有为纯删除创建副本。新增回归在修复前稳定越界，覆盖0/1/8/9/256/1024项及冻结/就地复用，强平业务夹具同时覆盖两种执行模式。改单准入使用has/raw字段读取可选修改，避免重复数值装箱。
+
+### 交易线程固定 CPU（2026-10-18）
+
+`TradingOwnerLoop.start` 先完成恢复并启动原有交易 worker，再绑定 Owner，避免 Linux 的线程亲和性继承把 Ledger 限制到 Owner 的单个 CPU。`TradingCpuAffinity` 使用 Java-Thread-Affinity 的原生 mask API，只有 Owner、Matcher 0、Account Lane 0/1 参与绑定，线程退出恢复原 mask。Driver、Archive、Ledger 等线程没有新增绑核设置。
+
+配置文件 [application.yml](src/main/resources/application.yml) 的 `surprising.aeron.cpu-affinity.enabled` 默认 `false`，关闭时不校验 CPU 编号、不调用原生绑核 API。开启时在同一文件为四个角色配置 OS CPU 编号，例如：
+
+```yaml
+surprising:
+  aeron:
+    cpu-affinity:
+      enabled: true
+      owner-cpu: 2
+      matcher-cpu: 4
+      lane0-cpu: 6
+      lane1-cpu: 8
+```
+
+编号必须按部署机替换，使用 `lscpu -e=CPU,CORE,SOCKET,ONLINE` 确认四个不同物理核，并核对容器/cgroup 的允许 CPU；默认编号 `-1` 表示尚未配置。`CoreConfiguration` 绑定文件内容，启动时把不可变配置传给 Owner、Matcher 和 Account Lane，没有自定义环境变量或 `-D` 参数读取。Linux 开启后要求一个 Matcher、两个 Account Lane、四个不同且在允许 mask 内的 CPU，绑定失败直接报错。PIPELINED 四个线程分别绑定；FUSED 只有 Owner 执行交易计算，因此只绑定 Owner，不额外创建 Matcher/Lane 线程。
+
+**macOS 开启此开关仍跳过绑核并输出 `Trading CPU affinity skipped on macOS`，不校验 CPU 编号、不调用原生绑核 API。** 该功能不配置 `isolcpus` 或系统中断亲和性。
+
+功能验证覆盖配置校验、macOS 跳过、Matcher/Lane 生命周期、六产品快照及资金幂等；FUSED/PIPELINED 各 98 项回归、0 失败，每轮 1 项 Linux 原生绑定用例在 macOS 上跳过，需在 Linux 验证实际 mask。验证记录见 [CPU 亲和性功能验证](../../docs/validation/core-cpu-affinity-20261018.json)。本次不执行压测、JMH、JFR，不据此承诺 P99 改善。

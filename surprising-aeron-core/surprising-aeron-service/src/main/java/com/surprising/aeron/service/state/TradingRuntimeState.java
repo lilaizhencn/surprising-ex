@@ -1,4 +1,6 @@
 package com.surprising.aeron.service.state;
+import com.surprising.aeron.service.config.TradingCpuAffinity;
+
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.lane.LaneThread;
 import com.surprising.aeron.service.command.AccountLaneOperationType;
@@ -487,6 +489,10 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public void startAccountLanes() {
+        startAccountLanes(TradingCpuAffinity.disabled());
+    }
+
+    public void startAccountLanes(TradingCpuAffinity affinity) {
         assertOwner();
         if (accountLanesStarted) throw new IllegalStateException("account lanes are already started");
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
@@ -497,7 +503,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                         accountLaneFailure.compareAndSet(null, failure);
                         signalOwnerCompletion();
                     },
-                    topology.matchingEngineCount());
+                    topology.matchingEngineCount(), affinity);
         }
         accountLanesStarted = true;
         ownerLaneAccess = false;

@@ -1,0 +1,10 @@
+surprising:
+  aeron:
+    cpu-affinity:
+      # 仅绑定 Owner、Matcher 0、Account Lane 0/1；macOS 始终跳过。
+      enabled: false
+      # 开启前按部署机填写四个不同的 OS CPU 编号；-1 表示尚未配置。
+      owner-cpu: -1
+      matcher-cpu: -1
+      lane0-cpu: -1
+      lane1-cpu: -1

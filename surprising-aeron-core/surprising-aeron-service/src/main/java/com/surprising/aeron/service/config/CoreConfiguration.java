@@ -15,6 +15,35 @@ import org.springframework.context.annotation.Configuration;
 @ConfigurationProperties(prefix = "surprising.aeron")
 public class CoreConfiguration {
 
+    private final CpuAffinity cpuAffinity = new CpuAffinity();
+
+    public CpuAffinity getCpuAffinity() { return cpuAffinity; }
+
+    public static final class CpuAffinity {
+        private boolean enabled;
+        private int ownerCpu = -1;
+        private int matcherCpu = -1;
+        private int lane0Cpu = -1;
+        private int lane1Cpu = -1;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public int getOwnerCpu() { return ownerCpu; }
+        public void setOwnerCpu(int cpu) { ownerCpu = cpu; }
+        public int getMatcherCpu() { return matcherCpu; }
+        public void setMatcherCpu(int cpu) { matcherCpu = cpu; }
+        public int getLane0Cpu() { return lane0Cpu; }
+        public void setLane0Cpu(int cpu) { lane0Cpu = cpu; }
+        public int getLane1Cpu() { return lane1Cpu; }
+        public void setLane1Cpu(int cpu) { lane1Cpu = cpu; }
+    }
+
+    @Bean
+    public TradingCpuAffinity tradingCpuAffinity() {
+        return new TradingCpuAffinity(cpuAffinity.enabled, cpuAffinity.ownerCpu,
+                cpuAffinity.matcherCpu, cpuAffinity.lane0Cpu, cpuAffinity.lane1Cpu);
+    }
+
     private String productLine;
     private int nodeId;
     private String hostnames = "localhost,localhost,localhost";

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.lane;
 
+import com.surprising.aeron.service.config.TradingCpuAffinity;
+
 import lombok.extern.slf4j.Slf4j;
 
 import com.surprising.aeron.service.state.AccountLaneState;
@@ -103,6 +105,13 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
     public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity,
                          java.util.function.Consumer<Throwable> failurePublisher,
                          int matcherShardCount) {
+        this(role, lane, requestedCapacity, failurePublisher, matcherShardCount,
+                TradingCpuAffinity.disabled());
+    }
+
+    public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity,
+                         java.util.function.Consumer<Throwable> failurePublisher,
+                         int matcherShardCount, TradingCpuAffinity affinity) {
         this.failurePublisher = java.util.Objects.requireNonNull(failurePublisher);
         if (role == null || role.isBlank() || lane == null || requestedCapacity <= 0
                 || matcherShardCount <= 0) {
@@ -122,7 +131,7 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
         if (spinLimit < 0 || spinLimit > 4096)
             throw new IllegalArgumentException("settlement spin limit must be in [0,4096]");
         this.lane = lane;
-        thread = new LaneThread("core-" + role + "-lane-" + lane.laneId(), this::run, lane);
+        thread = new LaneThread("core-" + role + "-lane-" + lane.laneId(), () -> run(affinity), lane);
         lane.bindWorker(thread);
         thread.start();
         while (!started && failure == null) Thread.onSpinWait();
@@ -242,11 +251,11 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
         rethrowFailure();
     }
 
-    private void run() {
+    private void run(TradingCpuAffinity configuration) {
         long next = consumerSequence.value;
         long admissionNext = admissionConsumerSequence.value;
         int idleSpins = 0;
-        try {
+        try (var affinity = configuration.accountLane(lane.laneId())) {
             lane.bindOwner();
             started = true;
             long reboundHandoff = 0;

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.matcher;
 
+import com.surprising.aeron.service.config.TradingCpuAffinity;
+
 import lombok.extern.slf4j.Slf4j;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
@@ -129,7 +131,12 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         }
     }
 
-    public synchronized void start(Runnable action) {
+    public void start(Runnable action) {
+        start(action, TradingCpuAffinity.disabled());
+    }
+
+    public synchronized void start(Runnable action,
+            TradingCpuAffinity affinity) {
         if (worker != null) return;
         if (started || startupFailure != null) {
             throw new IllegalStateException("matcher pipeline cannot be restarted");
@@ -139,7 +146,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         for (int index = 0; index < requestedCapacity; index++) slots[index] = new Slot();
         startupAction = action;
         accepting = true;
-        MatcherThread matcherWorker = new MatcherThread(this::run, "core-matcher-" + workerId, workerId);
+        MatcherThread matcherWorker = new MatcherThread(() -> run(affinity), "core-matcher-" + workerId, workerId);
         worker = matcherWorker;
         matcherWorker.start();
         awaitStartup();
@@ -407,7 +414,23 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         return completionHighWaterMark;
     }
 
-    private void run() {
+    private void run(TradingCpuAffinity configuration) {
+        try (var affinity = configuration.matcher(workerId)) {
+            runMatching();
+        } catch (Throwable failure) {
+            if (!started) {
+                startupFailure = failure;
+                started = true;
+            } else {
+                publicationFailure = failure;
+                Runnable signal = completionSignal;
+                if (signal != null) signal.run();
+            }
+            accepting = false;
+        }
+    }
+
+    private void runMatching() {
         try {
             if (startupAction != null) startupAction.run();
         } catch (Throwable failure) {

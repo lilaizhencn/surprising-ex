@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.service.config.TradingCpuAffinity;
+
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
 
 import com.surprising.aeron.service.command.instrument.InstrumentConfigurationCommands;
@@ -1373,18 +1375,23 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     void activate() {
+        activate(TradingCpuAffinity.disabled());
+    }
+
+    void activate(TradingCpuAffinity affinity) {
         if (activated) return;
         if (closed) throw new IllegalStateException("cannot activate closed core state");
+        affinity.validateConfiguration(laneTopology());
         try {
             boolean fused = TradingExecutionMode.configured() == TradingExecutionMode.FUSED;
             if (fused) {
                 runtimeState.enableFusedExecution();
                 matcherPipeline.startInline(matchingAdapter::activateShard);
             } else {
-                matcherPipeline.start(matchingAdapter::activateShard);
+                matcherPipeline.start(matchingAdapter::activateShard, affinity);
             }
             bindOwner();
-            if (!fused) runtimeState.startAccountLanes();
+            if (!fused) runtimeState.startAccountLanes(affinity);
             // Fusing matching/account execution does not move persistent funds-index I/O
             // onto the trading Owner. Both modes retain the existing Ledger ownership boundary.
             runtimeState.startSystemLedgerLane();
