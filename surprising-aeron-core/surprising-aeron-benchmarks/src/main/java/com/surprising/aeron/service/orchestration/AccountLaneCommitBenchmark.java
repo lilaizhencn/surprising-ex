@@ -63,7 +63,7 @@ public class AccountLaneCommitBenchmark {
 
     @State(Scope.Thread)
     public static class CommitState {
-        @Param("4")
+        @Param("2")
         public int accountLanes;
 
         @Param("256")

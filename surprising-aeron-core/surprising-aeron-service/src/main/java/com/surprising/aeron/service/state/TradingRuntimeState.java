@@ -787,6 +787,19 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** 查询只在实际Lane线程读原表；不能由Owner借用作用域执行。 */
     public <T> T readAccountLane(AccountLaneState lane, java.util.function.Function<AccountLaneState, T> query) {
+        if (!accountLanesStarted) {
+            if (lane == null || query == null || lane.laneId() >= accountLanes.length
+                    || accountLanes[lane.laneId()] != lane) {
+                throw new IllegalArgumentException("invalid account lane read scope");
+            }
+            enterLaneCommandScope(lane);
+            lane.queryScopeActive = true;
+            try { return query.apply(lane); }
+            finally {
+                lane.queryScopeActive = false;
+                exitLaneCommandScope(lane, false);
+            }
+        }
         if (lane == null || query == null || lane.laneId() >= laneWorkers.length
                 || accountLanes[lane.laneId()] != lane || laneWorkers[lane.laneId()] == null) {
             throw new IllegalArgumentException("invalid account lane read scope");
@@ -813,10 +826,18 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         if (Thread.currentThread() != owner)
             throw new IllegalStateException("account query producer must be Owner");
-        assertAccountLanesHealthy();
         long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1;
-        if (!accountLanesStarted || query == null || laneMask == 0 || (laneMask & ~validMask) != 0)
+        if (query == null || laneMask == 0 || (laneMask & ~validMask) != 0)
             throw new IllegalArgumentException("invalid account query dispatch");
+        if (!accountLanesStarted) {
+            long lanes = laneMask;
+            while (lanes != 0) {
+                int laneId = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
+                query.execute(accountLanes[laneId]);
+            }
+            return true;
+        }
+        assertAccountLanesHealthy();
         long lanes = laneMask;
         while (lanes != 0) {
             int laneId = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;

@@ -63,7 +63,7 @@ public class ExecutionModeComparisonTest {
         System.out.println("     PRODUCTION MIXED WORKLOAD (综合混合场景: 批量吃挂单/真实成交/撤单/资金费/标记价) BENCHMARK      ");
         System.out.println("==========================================================================================");
 
-        var template = LinearPerpetualMixedWorkload.template(4, 1000, 4);
+        var template = LinearPerpetualMixedWorkload.template(2, 1000, 4);
 
         // 1. Pipelined mode
         BenchmarkStats pipelined = measureMixedScenario(template, TradingExecutionMode.PIPELINED, 2, 8);
@@ -76,6 +76,7 @@ public class ExecutionModeComparisonTest {
 
     private BenchmarkStats measureMixedScenario(LinearPerpetualMixedWorkload.Template template, TradingExecutionMode mode,
                                                 int warmupRounds, int measureRounds) {
+        String prevMode = System.getProperty("surprising.aeron.execution-mode");
         System.setProperty("surprising.aeron.execution-mode", mode.name());
 
         ThreadMXBean threadBean = (ThreadMXBean) ManagementFactory.getThreadMXBean();
@@ -119,10 +120,14 @@ public class ExecutionModeComparisonTest {
             return new BenchmarkStats(
                 mode, throughputOpsPerSec, avgLatencyMicros, p50Micros, p95Micros, p99Micros, allocatedBytesPerOp, threadCount
             );
+        } finally {
+            if (prevMode == null) System.clearProperty("surprising.aeron.execution-mode");
+            else System.setProperty("surprising.aeron.execution-mode", prevMode);
         }
     }
 
     private BenchmarkStats measureBatch20Mode(ProductLine product, TradingExecutionMode mode, int warmupRounds, int measureRounds) {
+        String prevMode = System.getProperty("surprising.aeron.execution-mode");
         System.setProperty("surprising.aeron.execution-mode", mode.name());
 
         ThreadMXBean threadBean = (ThreadMXBean) ManagementFactory.getThreadMXBean();
@@ -170,10 +175,14 @@ public class ExecutionModeComparisonTest {
             return new BenchmarkStats(
                 mode, throughputOpsPerSec, avgLatencyMicros, p50Micros, p95Micros, p99Micros, allocatedBytesPerOp, threadCount
             );
+        } finally {
+            if (prevMode == null) System.clearProperty("surprising.aeron.execution-mode");
+            else System.setProperty("surprising.aeron.execution-mode", prevMode);
         }
     }
 
     private BenchmarkStats measureMode(ProductLine product, TradingExecutionMode mode, int warmupRounds, int measureRounds) {
+        String prevMode = System.getProperty("surprising.aeron.execution-mode");
         System.setProperty("surprising.aeron.execution-mode", mode.name());
 
         ThreadMXBean threadBean = (ThreadMXBean) ManagementFactory.getThreadMXBean();
@@ -221,6 +230,9 @@ public class ExecutionModeComparisonTest {
             return new BenchmarkStats(
                 mode, throughputOpsPerSec, avgLatencyMicros, p50Micros, p95Micros, p99Micros, allocatedBytesPerOp, threadCount
             );
+        } finally {
+            if (prevMode == null) System.clearProperty("surprising.aeron.execution-mode");
+            else System.setProperty("surprising.aeron.execution-mode", prevMode);
         }
     }
 

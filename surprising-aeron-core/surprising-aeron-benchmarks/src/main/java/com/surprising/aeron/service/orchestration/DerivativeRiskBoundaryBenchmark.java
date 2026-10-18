@@ -50,7 +50,7 @@ public class DerivativeRiskBoundaryBenchmark {
         @Param({"LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
         public ProductLine productLine;
         @Param("256") public int maxInFlight;
-        @Param("4") public int accountLanes;
+        @Param("2") public int accountLanes;
         private LinearPerpetualBenchmarkSupport.Harness harness;
         private String asset;
         private long sequence = 1;
@@ -120,10 +120,20 @@ public class DerivativeRiskBoundaryBenchmark {
         }
 
         private void queryCandidates() {
-            var response = harness.state().apply(new CoreMessage(CoreMessageHeader.query(
+            var request = new CoreMessage(CoreMessageHeader.query(
                     CoreMessageType.ADL_CANDIDATE_QUERY, new UUID(411, sequence), productLine,
                     CommandSource.OPERATIONS, 1, 1, 0, harness.nextCommandTimestamp(), sequence),
-                    CoreAdlQueryCodec.encodeQuery(asset, 256)));
+                    CoreAdlQueryCodec.encodeQuery(asset, 256));
+            var response = harness.state().apply(request);
+            if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
+                long id = harness.state().bookQueries.querySequence(request.header().commandId());
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                while ((response = harness.state().bookQueries.takeQueryResult(id)) == null) {
+                    harness.state().assertHealthy();
+                    if (System.nanoTime() >= deadline) throw new AssertionError("ADL query timeout");
+                    Thread.onSpinWait();
+                }
+            }
             if (response.status() != ResponseStatus.OK
                     || CoreAdlQueryCodec.decodeCandidates(response.data()).stream()
                     .noneMatch(candidate -> candidate.userId() >= 1000 && candidate.instrumentId().equals("27"))) {

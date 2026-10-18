@@ -125,7 +125,7 @@ package_benchmarks() {
 run_throughput() {
   "${JAVA}" -jar "${BENCHMARK_JAR}" \
     'LinearPerpetualCoreBenchmark.productionMixedWorkload' \
-    -p accountLanes=4 -p activeUsers=1000,10000 -p symbols=4 \
+    -p accountLanes=2 -p activeUsers=1000,10000 -p symbols=4 \
     -p hftRounds=96 -p hftBatchSize=20 \
     -wi "${THROUGHPUT_WARMUP_ITERATIONS}" -w "${THROUGHPUT_WARMUP_SECONDS}s" \
     -i "${THROUGHPUT_MEASUREMENT_ITERATIONS}" -r "${THROUGHPUT_MEASUREMENT_SECONDS}s" \
@@ -145,7 +145,7 @@ run_throughput() {
 run_gc_attribution() {
   "${JAVA}" -jar "${BENCHMARK_JAR}" \
     'LinearPerpetualCoreBenchmark.productionMixedWorkload' \
-    -p accountLanes=4 -p activeUsers=1000,10000 -p symbols=4 \
+    -p accountLanes=2 -p activeUsers=1000,10000 -p symbols=4 \
     -p hftRounds=96 -p hftBatchSize=20 \
     -wi "${ATTRIBUTION_WARMUP_ITERATIONS}" -w "${ATTRIBUTION_WARMUP_SECONDS}s" \
     -i "${ATTRIBUTION_MEASUREMENT_ITERATIONS}" -r "${ATTRIBUTION_MEASUREMENT_SECONDS}s" \
@@ -164,7 +164,7 @@ run_profile() {
   local profile_args="${PROFILE_JVM_ARGS_STRING} -XX:StartFlightRecording=filename=${ARTIFACT_DIR}/linear-perpetual.jfr,settings=profile,dumponexit=true -Xlog:gc*,safepoint:file=${ARTIFACT_DIR}/gc.log:time,uptime,level,tags:filecount=5,filesize=20m"
   "${JAVA}" -jar "${BENCHMARK_JAR}" \
     'LinearPerpetualCoreBenchmark.productionMixedWorkload' \
-    -p accountLanes=4 -p activeUsers=10000 -p symbols=4 \
+    -p accountLanes=2 -p activeUsers=10000 -p symbols=4 \
     -p hftRounds=96 -p hftBatchSize=20 \
     -wi "${PROFILE_WARMUP_ITERATIONS}" -w "${PROFILE_WARMUP_SECONDS}s" \
     -i 1 -r "${PROFILE_MEASUREMENT_SECONDS}s" -f 1 \

@@ -25,7 +25,7 @@ import org.openjdk.jmh.annotations.*;
 })
 @Threads(1)
 public class TriggerCommitBenchmark {
-    @Param("4") public int accountLanes;
+    @Param("2") public int accountLanes;
     private TradingRuntimeState runtime;
     private TriggerOrderIndex triggerIndex;
     private List<Long> users, triggerIds;

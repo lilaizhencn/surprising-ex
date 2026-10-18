@@ -12,7 +12,7 @@ class RealtimeWorkloadTest {
             throws Exception {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.productLine = product;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.batchSize = 20;
         workload.maxInFlight = 256;
         workload.realtime = false;
@@ -63,7 +63,7 @@ class RealtimeWorkloadTest {
     void roundTripTradesKeepFundsAndSnapshotCorrectWithRealtimeEnabled(ProductLine product) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.productLine = product;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.batchSize = 20;
         workload.maxInFlight = 256;
         workload.realtime = true;

@@ -15,7 +15,7 @@ class LaneTopologyTest {
         assertThat(topology.matchingEngineCount()).isEqualTo(1);
         assertThat(topology.riskEngineCount()).isZero();
         assertThat(topology.matcherShardMask()).isZero();
-        assertThat(topology.accountLaneCount()).isEqualTo(4);
+        assertThat(topology.accountLaneCount()).isEqualTo(2);
     }
 
     @Test

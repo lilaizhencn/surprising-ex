@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit;
 @Fork(value = 1, jvmArgsAppend = {"-Xms512m", "-Xmx1g", "-XX:+UseG1GC"})
 @State(Scope.Thread)
 public class MatcherTreasuryReceiptBenchmark {
-    @Param({"1", "4"}) public int laneCount;
+    @Param({"1", "2"}) public int laneCount;
     private TradingRuntimeState runtime;
     private RuntimeIdentityRegistry identities;
     private SystemLedgerLane ledger;

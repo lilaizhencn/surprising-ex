@@ -15,13 +15,13 @@ public final class LinearPerpetualScaleProbeMain {
 
     public static void main(String[] args) {
         ProbeConfig probe = ProbeConfig.parse(args);
-        LinearPerpetualBenchmarkSupport.configureAccountLanes(4);
+        LinearPerpetualBenchmarkSupport.configureAccountLanes(2);
         LinearPerpetualScaleConfig scale = LinearPerpetualScaleConfig.scale(
                 probe.listedSymbols(), probe.activeSymbols(), probe.maxPositionsPerUser(),
                 probe.maxOpenOrdersPerUser(), probe.trafficProfile(), probe.lifecycleSymbolsPerRun());
 
         long setupStart = System.nanoTime();
-        var template = LinearPerpetualMixedWorkload.template(4, probe.activeUsers(), scale);
+        var template = LinearPerpetualMixedWorkload.template(2, probe.activeUsers(), scale);
         long setupNanos = System.nanoTime() - setupStart;
         for (int cycle = 0; cycle < probe.warmupCycles(); cycle++) runCycle(template, probe, null, false);
 

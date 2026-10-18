@@ -20,7 +20,7 @@ public record LaneTopology(
     public static final int ROUTE_VERSION = 3;
     public static final int DEFAULT_MATCHING_ENGINE_COUNT = 1;
     public static final int DEFAULT_RISK_ENGINE_COUNT = 0;
-    public static final int DEFAULT_ACCOUNT_LANE_COUNT = 4;
+    public static final int DEFAULT_ACCOUNT_LANE_COUNT = 2;
     public static final long DEFAULT_ACCOUNT_LANE_SEED = 0x6a09e667f3bcc909L;
     public static final int DEFAULT_MATCHER_WINDOW_SIZE = 4_096;
     public static final int DEFAULT_QUEUE_CAPACITY = 4_096;

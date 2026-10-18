@@ -37,7 +37,7 @@ import org.openjdk.jmh.infra.IterationParams;
 @Warmup(iterations = 3, time = 10) @Measurement(iterations = 3, time = 5)
 @Fork(value = 1, jvmArgsAppend = {"--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
         "--enable-native-access=ALL-UNNAMED", "-Xms1g", "-Xmx1g", "-XX:+UseG1GC",
-        "-Dsurprising.aeron.matching-engines=1", "-Dsurprising.aeron.account-lanes=4",
+        "-Dsurprising.aeron.matching-engines=1", "-Dsurprising.aeron.account-lanes=2",
         "-Dsurprising.aeron.owner-command-window=256", "-Dsurprising.aeron.matcher-window-size=256",
         "-Dsurprising.aeron.owner-wait-strategy=BUSY_SPIN", "-Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN",
         "-Dsurprising.aeron.matcher-pipeline-wait-strategy=BUSY_SPIN", "-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN"})
@@ -61,7 +61,7 @@ public class InProcessTradingAllocationBenchmark {
 
     @Param({"FIXED", "PROPORTIONAL"}) public String oiLimitMode;
     @Param({"1"}) public int symbols;
-    @Param({"4"}) public int accountLanes;
+    @Param({"2"}) public int accountLanes;
     private String previousAccountLanes;
 
     @Setup public void setup() {

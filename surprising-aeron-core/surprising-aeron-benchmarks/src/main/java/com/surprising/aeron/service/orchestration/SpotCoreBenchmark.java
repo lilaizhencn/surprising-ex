@@ -51,7 +51,7 @@ public class SpotCoreBenchmark {
 
     @State(Scope.Thread)
     public static class ProductionMixedState {
-        @Param("4")
+        @Param("2")
         public int accountLanes;
 
         @Param({"1000", "10000"})

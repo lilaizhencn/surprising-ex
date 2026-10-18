@@ -29,13 +29,13 @@ public final class LinearPerpetualScaleSoakMain {
 
     public static void main(String[] args) {
         SoakConfig config = SoakConfig.parse(args);
-        LinearPerpetualBenchmarkSupport.configureAccountLanes(4);
+        LinearPerpetualBenchmarkSupport.configureAccountLanes(2);
         LinearPerpetualScaleConfig scale = LinearPerpetualScaleConfig.scale(
                 config.listedSymbols(), config.activeSymbols(), config.maxPositionsPerUser(),
                 config.maxOpenOrdersPerUser(), config.trafficProfile(), config.lifecycleSymbolsPerRun());
         long setupStart = System.nanoTime();
         LinearPerpetualMixedWorkload.Template template =
-                LinearPerpetualMixedWorkload.template(4, config.activeUsers(), scale);
+                LinearPerpetualMixedWorkload.template(2, config.activeUsers(), scale);
         long setupNanos = System.nanoTime() - setupStart;
         PrimitiveLatencies latencies = new PrimitiveLatencies();
         MemoryMXBean memory = ManagementFactory.getMemoryMXBean();

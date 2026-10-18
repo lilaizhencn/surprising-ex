@@ -53,7 +53,7 @@ public class DerivativeCoreBenchmark {
         @Param({"LINEAR_PERPETUAL", "INVERSE_PERPETUAL", "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
         public ProductLine productLine;
 
-        @Param("4")
+        @Param("2")
         public int accountLanes;
 
         @Param({"1000", "10000"})

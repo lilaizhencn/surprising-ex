@@ -43,7 +43,11 @@ public final class CommandSlotRing {
     void release(long coreSequence) {
         CommandSlot context = required(coreSequence);
         if (!context.complete() || context.submittedMatcherShard() != -1)
-            throw new IllegalStateException("incomplete lane command context");
+            throw new IllegalStateException("incomplete lane command context complete=" + context.complete()
+                    + " submittedMatcherShard=" + context.submittedMatcherShard()
+                    + " matchingResult=" + (context.matchingResult() != null)
+                    + " completedLaneMask=" + context.completedLaneMask()
+                    + " expectedLaneMask=" + context.expectedLaneMask());
         context.clear();
         inFlight--;
     }

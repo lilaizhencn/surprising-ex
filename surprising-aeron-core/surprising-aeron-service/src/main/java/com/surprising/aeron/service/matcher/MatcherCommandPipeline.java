@@ -237,7 +237,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             CommandSlot target = slot.resultTarget;
             CoreMatchingResult routedResult = target != null && slot.failure == null
                     ? (CoreMatchingResult) slot.result : null;
-            completedPosition.value = position + 1;
             if (routedResult != null) {
                 try { target.publishMatcherResult(workerId, routedResult); }
                 catch (Throwable failure) {
@@ -245,6 +244,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                     accepting = false;
                 }
             }
+            completedPosition.value = position + 1;
             Runnable signal = completionSignal;
             if (signal != null) signal.run();
             if (depth > completionHighWaterMark) {
@@ -448,8 +448,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                 CommandSlot target = slot.resultTarget;
                 CoreMatchingResult routedResult = target != null && slot.failure == null
                         ? (CoreMatchingResult) slot.result : null;
-                position++;
-                completedPosition.value = position;
                 if (routedResult != null) {
                     try { target.publishMatcherResult(workerId, routedResult); }
                     catch (Throwable failure) {
@@ -457,6 +455,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                         accepting = false;
                     }
                 }
+                position++;
+                completedPosition.value = position;
                 Runnable signal = completionSignal;
                 if (signal != null) signal.run();
                 int compDepth = Math.toIntExact(position - consumedPosition.value);

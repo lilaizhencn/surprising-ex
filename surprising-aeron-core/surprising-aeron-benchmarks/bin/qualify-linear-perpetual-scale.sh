@@ -67,7 +67,7 @@ JVM_ARGS=(
   "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
   "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED"
   "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
-  "-Dsurprising.aeron.account-lanes=4"
+  "-Dsurprising.aeron.account-lanes=2"
   "-Dsurprising.aeron.matching-engines=${MATCHING_ENGINES}"
   "-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN"
   "-Dsurprising.aeron.commit-journal-capacity=65536"
@@ -237,7 +237,7 @@ run_jmh_case() {
   local lifecycle_budget="${9:-${LIFECYCLE_SYMBOL_BUDGET}}"
   local result="${ARTIFACT_DIR}/jmh-${case_id}.json"
   "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.scaleMixedWorkload' \
-    -p accountLanes=4 -p activeUsers="${users}" -p listedSymbols="${listed}" \
+    -p accountLanes=2 -p activeUsers="${users}" -p listedSymbols="${listed}" \
     -p activeSymbols="${active}" -p maxPositionsPerUser="${positions}" \
     -p maxOpenOrdersPerUser="${orders}" -p trafficProfile="${profile}" \
     -p hftRounds="${rounds}" -p hftBatchSize=4 \
@@ -260,7 +260,7 @@ run_jmh_matrix() {
 
 run_gc() {
   "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.scaleMixedWorkload' \
-    -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 \
+    -p accountLanes=2 -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 -p trafficProfile=UNIFORM \
     -p hftRounds=1 -p hftBatchSize=4 -p lifecycleSymbolsPerRun="${LIFECYCLE_SYMBOL_BUDGET}" \
     -wi 2 -w 2s -i 3 -r 3s -f 1 -prof gc \
@@ -274,7 +274,7 @@ run_gc() {
 run_profile() {
   local profile_jvm_args="${JVM_ARGS_STRING} -XX:+UnlockDiagnosticVMOptions -XX:NativeMemoryTracking=summary -XX:+PrintNMTStatistics -XX:StartFlightRecording=filename=${ARTIFACT_DIR}/scale.jfr,settings=${JFR_SETTINGS_FILE},dumponexit=true -Xlog:gc*,safepoint:file=${ARTIFACT_DIR}/scale-profile-gc.log:time,uptime,level,tags"
   "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.scaleMixedWorkload' \
-    -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 \
+    -p accountLanes=2 -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 -p trafficProfile=UNIFORM \
     -p hftRounds=1 -p hftBatchSize=4 -p lifecycleSymbolsPerRun="${LIFECYCLE_SYMBOL_BUDGET}" \
     -wi 2 -w 2s -i 1 -r 10s -f 1 -jvmArgsAppend "${profile_jvm_args}" \
@@ -366,7 +366,7 @@ run_saturation_case() {
   local result="${ARTIFACT_DIR}/saturation-${case_id}.json"
   local saturation_args="${JVM_ARGS_STRING} -Dsurprising.benchmark.export-ack-interval=1024"
   "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.saturatedMatchingWorkload' \
-    -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 \
+    -p accountLanes=2 -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 \
     -p matchingEngines="${MATCHING_ENGINES}" \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 \
     -p maxInFlight="${in_flight}" -p operationsPerInvocation="${SATURATION_OPERATIONS}" \
@@ -382,7 +382,7 @@ run_saturation_case() {
 run_saturation_profile() {
   local profile_jvm_args="${JVM_ARGS_STRING} -Dsurprising.benchmark.export-ack-interval=1024 -XX:+UnlockDiagnosticVMOptions -XX:NativeMemoryTracking=summary -XX:+PrintNMTStatistics -XX:StartFlightRecording=filename=${ARTIFACT_DIR}/saturation.jfr,settings=${JFR_SETTINGS_FILE},dumponexit=true -Xlog:gc*,safepoint:file=${ARTIFACT_DIR}/saturation-gc.log:time,uptime,level,tags"
   "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.saturatedMatchingWorkload' \
-    -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 \
+    -p accountLanes=2 -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 \
     -p matchingEngines="${MATCHING_ENGINES}" \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 \
     -p maxInFlight=256 -p operationsPerInvocation="${SATURATION_OPERATIONS}" \
@@ -417,7 +417,7 @@ validate_owner_commit_jmh() {
     .params.activeUsers == "10000" and
     .params.listedSymbols == "128" and
     .params.activeSymbols == "128" and
-    .params.accountLanes == "4" and
+    .params.accountLanes == "2" and
     .params.maxPositionsPerUser == "5" and
     .params.maxOpenOrdersPerUser == "10" and
     .params.trafficProfile == "UNIFORM" and
@@ -430,7 +430,7 @@ run_owner_commit() {
   # Keep this mode as the focused owner/commit workload using the current runtime.
   local benchmark='LinearPerpetualCoreBenchmark.scaleMixedWorkload'
   local params=(
-    -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 -p accountLanes=4
+    -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 -p accountLanes=2
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 -p trafficProfile=UNIFORM
     -p hftRounds=1 -p hftBatchSize=4 -p lifecycleSymbolsPerRun="${LIFECYCLE_SYMBOL_BUDGET}"
   )

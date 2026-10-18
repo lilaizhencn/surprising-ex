@@ -25,7 +25,7 @@ class D1BenchmarkBoundaryTest {
         workload.clientIdMode = "ASCII";
         workload.oiLimitMode = "FIXED";
         workload.symbols = 1;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         try {
             workload.setup();
             assertThat(workload.continuousMatchStream()).isEqualTo(4096);

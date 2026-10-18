@@ -366,7 +366,7 @@ public class LinearPerpetualCoreBenchmark {
 
     @State(Scope.Thread)
     public abstract static class InvocationState {
-        @Param("4")
+        @Param("2")
         public int accountLanes;
 
         LinearPerpetualBenchmarkSupport.Scenario scenario;
@@ -419,7 +419,7 @@ public class LinearPerpetualCoreBenchmark {
 
     @State(Scope.Thread)
     public static class DenseResidentBookState {
-        @Param("4")
+        @Param("2")
         public int accountLanes;
 
         @Param("200")
@@ -769,7 +769,7 @@ public class LinearPerpetualCoreBenchmark {
         @Param("1")
         public int matchingEngines;
 
-        @Param("4")
+        @Param("2")
         public int accountLanes;
 
         @Param("10000")

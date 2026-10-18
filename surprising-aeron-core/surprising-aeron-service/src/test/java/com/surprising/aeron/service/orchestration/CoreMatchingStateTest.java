@@ -205,11 +205,11 @@ class CoreMatchingStateTest {
             applyInstrument(state);
             apply(state, 1, 7, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2)));
-            apply(state, 2, 8, CoreMessageType.ADJUST_BALANCE,
+            apply(state, 2, 9, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
             apply(state, 3, 7, CoreMessageType.PLACE_ORDER,
                     place(101, CoreOrderSide.SELL, 100, 2, ReservationKind.SPOT_ASSET, "BTC", 2));
-            CoreMessage crossing = message(state, 4, 8, CoreMessageType.PLACE_ORDER,
+            CoreMessage crossing = message(state, 4, 9, CoreMessageType.PLACE_ORDER,
                     place(202, CoreOrderSide.BUY, 100, 5, ReservationKind.SPOT_ASSET, "USDT", 500,
                             CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100, false));
             long committedBefore = state.committedCoreSequence();
@@ -222,22 +222,25 @@ class CoreMatchingStateTest {
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
 
             assertThat(state.tradingState().order(202)).isNull();
-            assertThat(state.terminalRetention().containsOrder(202, 8, "client-202")).isTrue();
-            CoreMessage duplicateClientId = message(state, 5, 8, CoreMessageType.PLACE_ORDER,
+            assertThat(state.terminalRetention().containsOrder(202, 9, "client-202")).isTrue();
+            CoreMessage duplicateClientId = message(state, 5, 9, CoreMessageType.PLACE_ORDER,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
                             203, "1", CoreOrderSide.BUY, 100, 1, false,
                             com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                             com.surprising.aeron.protocol.CorePositionSide.NET,
                             CoreOrderType.LIMIT, CoreTimeInForce.IOC, false, "client-202")));
             assertThat(submit(state, duplicateClientId).status()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(state.tradingState().user(8).balances().get("USDT").availableUnits()).isEqualTo(300);
-            assertThat(state.tradingState().user(8).balances().get("USDT").lockedUnits()).isZero();
-            assertThat(state.tradingState().user(8).totalUnits("BTC")).isEqualTo(2);
+            assertThat(state.tradingState().user(9).balances().get("USDT").availableUnits()).isEqualTo(300);
+            assertThat(state.tradingState().user(9).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(state.tradingState().user(9).totalUnits("BTC")).isEqualTo(2);
+            int makerLane = state.runtimeState.topology().accountLaneId(7);
+            int takerLane = state.runtimeState.topology().accountLaneId(9);
+            assertThat(makerLane).isNotEqualTo(takerLane);
             CoreLaneMetrics metrics = state.laneMetrics();
-            assertThat(metrics.accountLaneAppliedSequences()[0]).isEqualTo(state.snapshotProjectionSequence());
-            assertThat(metrics.accountLaneCommittedSequences()[0]).isEqualTo(state.snapshotProjectionSequence());
-            assertThat(metrics.accountLaneAppliedSequences()[2]).isEqualTo(state.snapshotProjectionSequence());
-            assertThat(metrics.accountLaneCommittedSequences()[2]).isEqualTo(state.snapshotProjectionSequence());
+            assertThat(metrics.accountLaneAppliedSequences()[makerLane]).isEqualTo(state.snapshotProjectionSequence());
+            assertThat(metrics.accountLaneCommittedSequences()[makerLane]).isEqualTo(state.snapshotProjectionSequence());
+            assertThat(metrics.accountLaneAppliedSequences()[takerLane]).isEqualTo(state.snapshotProjectionSequence());
+            assertThat(metrics.accountLaneCommittedSequences()[takerLane]).isEqualTo(state.snapshotProjectionSequence());
             assertThat(state.tradingState().orders().values())
                     .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
         }

@@ -383,7 +383,7 @@ public class ClusteredBatchTradingBenchmark {
         private final com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder messageDecoder =
                 new com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder();
         @Param({"LINEAR_PERPETUAL", "SPOT"}) public ProductLine productLine;
-        @Param("4") public int accountLanes;
+        @Param("2") public int accountLanes;
         /** 订单簿分区数；账户路由和资金共享规则独立于该参数。 */
         @Param({"1", "2", "4"}) public int matchingEngines = 1;
         private String previousMatchingEngines;
@@ -683,6 +683,14 @@ public class ClusteredBatchTradingBenchmark {
             try {
                 if (owner.applyDecodedCommand(request, 1_700_000_000_000L, sequence, null, false) != null)
                     throw new IllegalStateException("fault command did not enter continuation");
+                long preparationDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (!owner.directCommand.hasControlWork()) {
+                    if (owner.directCommand.poll(owner) != null)
+                        throw new AssertionError("funds preflight did not reach Account Lane work");
+                    if (System.nanoTime() >= preparationDeadline)
+                        throw new AssertionError("funds preflight did not reach Account Lane work");
+                    Thread.onSpinWait();
+                }
                 var business = owner.directCommand.controlWork();
                 owner.directCommand.replaceControlWork(() -> {
                     if (!business.getAsBoolean()) return false;
@@ -921,7 +929,8 @@ public class ClusteredBatchTradingBenchmark {
                 for (int user = 0; user < 256; user++) send(command(CoreMessageType.CANCEL_ORDER, 1_000 + user,
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(firstOrders[user]))));
                 drain();
-                if (terminal - before != 512 || service.commandWindowHighWaterMark() < 2)
+                boolean pipelined = TradingExecutionMode.configured() == TradingExecutionMode.PIPELINED;
+                if (terminal - before != 512 || (pipelined && service.commandWindowHighWaterMark() < 2))
                     throw new IllegalStateException("independent commands did not pipeline and complete");
             } finally { singleResponses = false; }
         }
@@ -974,7 +983,8 @@ public class ClusteredBatchTradingBenchmark {
                         TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders))));
             }
             drain();
-            if (terminal - before != 512 || service.commandWindowHighWaterMark() < 2)
+            boolean pipelined = TradingExecutionMode.configured() == TradingExecutionMode.PIPELINED;
+            if (terminal - before != 512 || (pipelined && service.commandWindowHighWaterMark() < 2))
                 throw new IllegalStateException("independent batches did not pipeline and complete");
         }
 
@@ -1085,7 +1095,14 @@ public class ClusteredBatchTradingBenchmark {
         }
 
         private void apply(CoreMessageType type, long user, byte[] payload) {
-            if (service.state().apply(command(type, user, payload)).status() != ResponseStatus.APPLIED) {
+            CoreResponse response = service.state().apply(command(type, user, payload));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (service.state().directCommand.active()) {
+                response = service.state().directCommand.poll(service.state());
+                if (System.nanoTime() >= deadline) throw new AssertionError("direct command timeout: " + type);
+                Thread.onSpinWait();
+            }
+            if (response == null || response.status() != ResponseStatus.APPLIED) {
                 throw new IllegalStateException("fixture command failed: " + type);
             }
         }

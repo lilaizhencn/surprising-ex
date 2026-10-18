@@ -50,6 +50,7 @@ import java.util.UUID;
 import java.lang.reflect.Modifier;
 import org.junit.jupiter.api.Test;
 
+@org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
 class CoreOrderedOrderBatchTest {
 
     @Test
@@ -284,7 +285,7 @@ class CoreOrderedOrderBatchTest {
 
     private void verifySharedMakerBatch(boolean recovery) throws Exception {
         String priorLanes = System.getProperty("surprising.aeron.account-lanes");
-        System.setProperty("surprising.aeron.account-lanes", "4");
+        System.setProperty("surprising.aeron.account-lanes", "2");
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000);
@@ -1293,7 +1294,7 @@ class CoreOrderedOrderBatchTest {
 
     private void sequentialPlaceOwnerGuard(boolean ledger) throws Exception {
         String previous = System.getProperty("surprising.aeron.account-lanes");
-        System.setProperty("surprising.aeron.account-lanes", "4");
+        System.setProperty("surprising.aeron.account-lanes", "2");
         try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 1_000, 1);

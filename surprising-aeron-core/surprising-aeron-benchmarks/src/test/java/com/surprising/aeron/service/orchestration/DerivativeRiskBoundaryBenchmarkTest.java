@@ -12,7 +12,7 @@ class DerivativeRiskBoundaryBenchmarkTest {
         var state = new DerivativeRiskBoundaryBenchmark.BoundaryState();
         state.productLine = line;
         state.maxInFlight = 256;
-        state.accountLanes = 4;
+        state.accountLanes = 2;
         state.setup();
         try {
             var counters = new DerivativeRiskBoundaryBenchmark.Counters();
