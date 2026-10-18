@@ -169,7 +169,10 @@ public final class RuntimeOrderAdmission {
 
     private static void validateReservation(
             boolean derivative, CoreInstrument instrument, ResolvedPlaceOrder order) {
-        String asset = AssetBalance.normalizeAsset(order.reservationAsset());
+        String asset = order.reservationAsset();
+        if (asset == null) {
+            throw rejected("INVALID_RESERVATION_ASSET", "reservation asset is required");
+        }
         if (derivative) {
             if (order.reservationKind() != ReservationKind.DERIVATIVE_MARGIN) {
                 throw rejected("INVALID_RESERVATION_KIND", "derivative order must reserve margin");
@@ -290,6 +293,7 @@ public final class RuntimeOrderAdmission {
             AccountLaneState lane, CoreInstrument instrument,
             ResolvedPlaceOrder order, long userId) {
         if (!instrument.contractType().productLine().isDerivative()) return instrument.maxLeveragePpm();
+        if (lane.cold.leverages.isEmpty()) return instrument.maxLeveragePpm();
         var lookup = lane.leverageLookup;
         lookup.set(userId, instrument.instrumentId(), order.marginMode());
         Long configured;

@@ -40,6 +40,7 @@ OWNER_INPUT_BATCH_SIZE="${ASYNC_OWNER_INPUT_BATCH_SIZE:-64}"
 SERVICE_IDLE_STRATEGY="${ASYNC_SERVICE_IDLE_STRATEGY:-YIELDING}"
 COLLECTOR="${ASYNC_COLLECTOR:-${AERON_BASELINE_GC}}"
 ENABLE_JFR="${ASYNC_ENABLE_JFR:-false}"
+EXECUTION_MODE="${ASYNC_EXECUTION_MODE:-${AERON_BASELINE_EXECUTION_MODE:-PIPELINED}}"
 # Optional single-factor UDP receive-buffer diagnostic, applied to both drivers.
 # Empty preserves Aeron's own default; no global OS socket setting is changed.
 SOCKET_RCVBUF_BYTES="${ASYNC_SOCKET_RCVBUF_BYTES:-}"
@@ -123,6 +124,7 @@ start_node() {
     "-Dsurprising.aeron.settlement-spin-limit=${SETTLEMENT_SPIN_LIMIT}"
     "-Dsurprising.aeron.owner-wait-strategy=${OWNER_WAIT_STRATEGY}"
     "-Dsurprising.aeron.owner-input-batch-size=${OWNER_INPUT_BATCH_SIZE}"
+    "-Dsurprising.aeron.execution-mode=${EXECUTION_MODE}"
     -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK "-Dsurprising.aeron.service.idle-strategy=${SERVICE_IDLE_STRATEGY}"
     "-Dsurprising.aeron.data-dir=${dir}/data" "-Daeron.dir=${dir}/aeron" "-Djava.io.tmpdir=${dir}/tmp")
   if [[ -n "${SOCKET_RCVBUF_BYTES}" ]]; then args+=("-Daeron.socket.so_rcvbuf=${SOCKET_RCVBUF_BYTES}"); fi
@@ -147,6 +149,7 @@ run_stage() {
   if [[ "${ISOLATE_STAGE}" == true && ( "${stage}" == lane || "${stage}" == matcher ) ]]; then NODE_LANES="${LANE_STAGE_LANES}"; fi
   if [[ "${ISOLATE_STAGE}" == true && "${stage}" == matcher ]]; then NODE_LANES="${MATCHER_STAGE_LANES}"; fi
   printf 'target=%s\nnodeLanes=%s\nnodeMatchers=%s\nrequestedWindow=%s\ntradingProfile=%s\nbatchSize=%s\nenableJfr=%s\nownerWaitStrategy=%s\nownerInputBatchSize=%s\n' "${stage}" "${NODE_LANES}" "${NODE_MATCHERS}" "${window}" "${profile}" "${batch}" "${ENABLE_JFR}" "${OWNER_WAIT_STRATEGY}" "${OWNER_INPUT_BATCH_SIZE}" > "${dir}/stage-config.txt"
+  printf 'executionMode=%s\n' "${EXECUTION_MODE}" >> "${dir}/stage-config.txt"
   printf 'socketRcvbufBytes=%s\n' "${SOCKET_RCVBUF_BYTES:-aeron-default}" >> "${dir}/stage-config.txt"
   start_node "${dir}"
   "${JCMD}" "${NODE_PID}" VM.native_memory baseline > "${dir}/nmt-baseline.txt" 2>&1 || true
