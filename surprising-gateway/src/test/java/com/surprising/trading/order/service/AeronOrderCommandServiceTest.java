@@ -28,8 +28,6 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReplaceOrderCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.instrument.api.model.ContractType;
-import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.AmendOrderRequest;
@@ -39,9 +37,10 @@ import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.InstrumentRule;
-import com.surprising.trading.order.model.ValidationResult;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -78,8 +77,7 @@ class AeronOrderCommandServiceTest {
             return new CoreCommandOutcome.Terminal(commandResponse(orderView(command.orderId(), request), List.of()));
         });
 
-        assertThat(service.place(request,
-                ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL)).status())
+        assertThat(service.place(request).status())
                 .isEqualTo(OrderStatus.ACCEPTED);
 
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
@@ -98,8 +96,7 @@ class AeronOrderCommandServiceTest {
         PlaceOrderRequest request = new PlaceOrderRequest(1001, "spot-limit", "1", OrderSide.SELL,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET,
                 false, false);
-        service.preflight(request,
-                ValidationResult.ok(7, InstrumentType.SPOT, ContractType.SPOT));
+        service.preflight(request);
 
         ArgumentCaptor<PlaceOrderCommand> command = ArgumentCaptor.forClass(PlaceOrderCommand.class);
         verify(aeron).preflight(eq(1001L), command.capture());
@@ -117,8 +114,7 @@ class AeronOrderCommandServiceTest {
             return new CoreCommandOutcome.Terminal(commandResponse(orderView(command.orderId(), request), List.of()));
         });
 
-        assertThat(service.place(request,
-                ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL)).orderId())
+        assertThat(service.place(request).orderId())
                 .isPositive();
 
         verify(aeron, times(1)).commandOutcome(eq(CoreMessageType.PLACE_ORDER),
@@ -137,8 +133,7 @@ class AeronOrderCommandServiceTest {
                         ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                         CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE, 0L, new byte[0])));
 
-        AeronOrderCommandService.CommandExecution execution = service.placeCommand(request,
-                ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL));
+        AeronOrderCommandService.CommandExecution execution = service.placeCommand(request);
 
         assertThat(execution.outcome()).isInstanceOf(CoreCommandOutcome.Terminal.class);
         assertThat(((CoreCommandOutcome.Terminal) execution.outcome()).response().resultCode())
@@ -163,10 +158,9 @@ class AeronOrderCommandServiceTest {
             return new CoreCommandOutcome.Terminal(commandResponse(orderView(command.orderId(), viewRequest), List.of()));
         });
 
-        ValidationResult validation = ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL);
-        service.place(request, validation);
-        service.place(request, validation);
-        service.place(changed, validation);
+        service.place(request);
+        service.place(request);
+        service.place(changed);
 
         ArgumentCaptor<UUID> commandIds = ArgumentCaptor.forClass(UUID.class);
         verify(aeron, times(3)).commandOutcome(eq(CoreMessageType.PLACE_ORDER), commandIds.capture(), eq(1001L),
@@ -234,8 +228,7 @@ class AeronOrderCommandServiceTest {
                             orderView(command.replacement().orderId(), replacementRequest)), List.of()))));
         });
 
-        assertThat(service.replace(original, replacementRequest,
-                ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL))
+        assertThat(service.replace(original, replacementRequest)
                 .replacementOrder().clientOrderId()).isEqualTo("new");
 
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);

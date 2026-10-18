@@ -8,7 +8,6 @@ import static org.mockito.Mockito.when;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.model.PositionMode;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import com.surprising.aeron.protocol.CorePositionView;
@@ -37,7 +36,7 @@ class OrderPlacementStateServiceTest {
         var result = service.requireClosePosition(ProductLine.LINEAR_PERPETUAL, 1001, "1",
                 MarginMode.ISOLATED, PositionSide.SHORT);
 
-        assertThat(result.signedQuantitySteps()).isEqualTo(-5);
+        assertThat(result).isEqualTo(-5);
         verify(aeron).userState(1001);
         verifyNoMoreInteractions(aeron);
     }
@@ -76,27 +75,12 @@ class OrderPlacementStateServiceTest {
     }
 
     @Test
-    void perpetualPositionModeComesFromAeronUserState() {
-        OrderAeronGateway aeron = mock(OrderAeronGateway.class);
-        when(aeron.userState(1001L)).thenReturn(new CoreUserStateView(
-                ProductLine.LINEAR_PERPETUAL, 1001L, 7L, CorePositionMode.HEDGE,
-                List.of(), List.of(), List.of()));
-
-        OrderPlacementStateService service = new OrderPlacementStateService(aeron);
-
-        assertThat(service.positionMode(ProductLine.LINEAR_PERPETUAL, 1001L)).isEqualTo(PositionMode.HEDGE);
-    }
-
-    @Test
     void mismatchedProductLineFailsClosed() {
         OrderAeronGateway aeron = mock(OrderAeronGateway.class);
         when(aeron.userState(1001L)).thenReturn(new CoreUserStateView(
                 ProductLine.LINEAR_PERPETUAL, 1001L, 7L, List.of(), List.of(), List.of()));
         OrderPlacementStateService service = new OrderPlacementStateService(aeron);
 
-        assertThatThrownBy(() -> service.positionMode(ProductLine.LINEAR_DELIVERY, 1001L))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("product line mismatch");
         assertThatThrownBy(() -> service.requireClosePosition(ProductLine.LINEAR_DELIVERY, 1001L,
                 "1", null, null)).hasMessageContaining("product line mismatch");
     }
@@ -106,9 +90,6 @@ class OrderPlacementStateServiceTest {
         OrderAeronGateway aeron = mock(OrderAeronGateway.class);
         OrderPlacementStateService service = new OrderPlacementStateService(aeron);
 
-        assertThatThrownBy(() -> service.positionMode(ProductLine.LINEAR_PERPETUAL, 1001L))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Aeron user state not found");
         assertThatThrownBy(() -> service.requireClosePosition(ProductLine.LINEAR_PERPETUAL, 1001L,
                 "1", null, null)).hasMessageContaining("Aeron user state not found");
     }

@@ -12,6 +12,18 @@ Core 仍独立。公共接口继续经过 Gateway 的身份、审批与审计，
 
 面向前端和 BFF 的无状态 REST API 网关。
 
+## 订单入口简化
+
+`OrderService.place/placeCommand/placeCommandAsync` 在入口一次完成请求标准化、BBO 解析、
+产品线/对冲方向与订单规则校验，再把最终请求交给 `AeronOrderCommandService` 编码提交。
+校验通过后不再传递 `ValidationResult`、包装准备结果或维护平行校验结果列表；批量请求在
+全部本地校验通过后才提交。试单继续返回规则版本及 Core 预检结果。
+
+`OrderPlacementStateService.requireClosePosition` 从同一份 Core 用户状态校验产品线、仓位模式、
+保证金模式与方向，直接返回非零有符号数量；平仓入口据此构造 reduce-only 订单。
+`OrderMarginMath` 仅保留实际订单名义价值校验使用的价格上下界，资金及保证金裁决继续由 Core 承担。
+同步命令结果的防御性载荷只读取一次，用于空值检查和解码，不改变命令 ID、回执或未知结果语义。
+
 ## 用户安全与设备限制
 
 `AuthService` 在登录、二次验证、刷新令牌和签发会话时校验当前账户的设备 ID 与客户端 IP。Web 客户端以 `X-Device-Id` 发送浏览器安装 ID；`GatewayRefreshSessionRepository` 将它保存在 `gateway_refresh_sessions.device_id`。历史会话没有设备 ID 时仍可按会话踢出。`ClientIpResolver` 仅信任配置的代理地址发送的转发头。部署新 Gateway 前，应先执行 `init.sql` 中 `gateway_refresh_sessions.device_id` 和 `gateway_user_access_blocks` 的增量 DDL，并配置可信代理 IP 列表。

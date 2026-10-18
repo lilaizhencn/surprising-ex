@@ -18,8 +18,6 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.OrderCommandReceipt;
-import com.surprising.instrument.api.model.ContractType;
-import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AmendOrderRequest;
 import com.surprising.trading.api.model.CancelOrderRequest;
@@ -30,7 +28,6 @@ import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.ValidationResult;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,8 +54,6 @@ class OrderBatchServiceTest {
     void usesOneRoundTripAndReplaysOriginalAggregate() {
         List<PlaceOrderRequest> requests = java.util.stream.IntStream.range(0, 20)
                 .mapToObj(index -> place("place-" + index)).toList();
-        ValidationResult validation = ValidationResult.ok(7L, InstrumentType.PERPETUAL,
-                ContractType.LINEAR_PERPETUAL);
         CoreOrderBatchResult aggregate = new CoreOrderBatchResult(java.util.stream.IntStream.range(0, 20)
                 .mapToObj(index -> new CoreOrderBatchResult.Item(index, 30_000L + index, 0L, 0L,
                         ResponseStatus.APPLIED, CoreResultCode.NONE, null, List.of()))
@@ -68,10 +63,8 @@ class OrderBatchServiceTest {
                 ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                 1L, com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResult(aggregate))));
 
-        AeronOrderCommandService.CommandExecution first = service.placeBatchCommand("place-batch", requests,
-                java.util.Collections.nCopies(20, validation));
-        AeronOrderCommandService.CommandExecution second = service.placeBatchCommand("place-batch", requests,
-                java.util.Collections.nCopies(20, validation));
+        AeronOrderCommandService.CommandExecution first = service.placeBatchCommand("place-batch", requests);
+        AeronOrderCommandService.CommandExecution second = service.placeBatchCommand("place-batch", requests);
 
         assertThat(first.commandId()).isEqualTo(second.commandId());
         OrderCommandReceipt firstReceipt = service.receipt(first);

@@ -35,7 +35,7 @@ class BboOrderServiceTest {
             boolean buyBook = (side == OrderSide.BUY) == mode.sameSide();
             long expected = buyBook ? 101 - mode.depth() : 100 + mode.depth();
             verify(commands).place(argThat(r -> r.side() == side && r.priceTicks() == expected
-                    && r.bboPriceMode() == null && r.quantitySteps() == 2 && r.orderType() == OrderType.LIMIT), any());
+                    && r.bboPriceMode() == null && r.quantitySteps() == 2 && r.orderType() == OrderType.LIMIT));
         }
         verify(gateway, times(4)).orderBook(new CoreOrderBookQuery("1", 1));
         verify(gateway, times(4)).orderBook(new CoreOrderBookQuery("1", 5));

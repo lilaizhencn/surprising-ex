@@ -38,7 +38,6 @@ import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.ValidationResult;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -57,22 +56,20 @@ public class AeronOrderCommandService {
     }
 
     public OrderResponse place(
-            com.surprising.trading.api.model.PlaceOrderRequest request,
-            ValidationResult validation) {
-        CommandExecution execution = placeCommand(request, validation);
+            com.surprising.trading.api.model.PlaceOrderRequest request) {
+        CommandExecution execution = placeCommand(request);
         return requireOrder(commandOrder(terminalResponse(execution), execution.prospectiveOrderIds().getFirst()),
                 "placed order missing");
     }
 
     public com.surprising.trading.api.model.AmendOrderResponse replace(
             OrderResponse original,
-            com.surprising.trading.api.model.PlaceOrderRequest replacement,
-            ValidationResult validation) {
+            com.surprising.trading.api.model.PlaceOrderRequest replacement) {
         String clientOrderId = requireClientKey(replacement.clientOrderId(), "clientOrderId");
         ProductLine productLine = configuredProductLine();
         long replacementOrderId = StableOrderIdentity.replacementOrderId(
                 productLine, replacement.userId(), clientOrderId);
-        PlaceOrderCommand replacementCommand = buildPlaceCommand(replacementOrderId, replacement, validation);
+        PlaceOrderCommand replacementCommand = buildPlaceCommand(replacementOrderId, replacement);
         UUID commandId = StableOrderIdentity.replacementCommandId(productLine, replacement.userId(), clientOrderId);
         var response = aeron.commandOutcome(CoreMessageType.REPLACE_ORDER, commandId, replacement.userId(),
                 TradingCommandCodec.encodeReplaceOrder(new ReplaceOrderCommand(original.orderId(), replacementCommand)));
@@ -136,8 +133,7 @@ public class AeronOrderCommandService {
 
     private PlaceOrderCommand buildPlaceCommand(
             long orderId,
-            com.surprising.trading.api.model.PlaceOrderRequest request,
-            ValidationResult validation) {
+            com.surprising.trading.api.model.PlaceOrderRequest request) {
         long limitPriceTicks = request.orderType() == OrderType.LIMIT ? request.priceTicks() : 0;
         return new PlaceOrderCommand(orderId, request.instrumentId(),
                 side(request.side()), limitPriceTicks, request.quantitySteps(), request.reduceOnly(),
@@ -147,12 +143,11 @@ public class AeronOrderCommandService {
     }
 
     public OrderAeronGateway.PreflightResult preflight(
-            com.surprising.trading.api.model.PlaceOrderRequest request,
-            ValidationResult validation) {
+            com.surprising.trading.api.model.PlaceOrderRequest request) {
         ProductLine productLine = configuredProductLine();
         long orderId = StableOrderIdentity.orderId(productLine, request.userId(),
                 requireClientKey(request.clientOrderId(), "clientOrderId"));
-        return aeron.preflight(request.userId(), buildPlaceCommand(orderId, request, validation));
+        return aeron.preflight(request.userId(), buildPlaceCommand(orderId, request));
     }
 
     public OrderResponse cancel(long userId, long orderId) {
@@ -177,12 +172,11 @@ public class AeronOrderCommandService {
     }
 
     public CommandExecution placeCommand(
-            com.surprising.trading.api.model.PlaceOrderRequest request,
-            ValidationResult validation) {
+            com.surprising.trading.api.model.PlaceOrderRequest request) {
         String clientOrderId = requireClientKey(request.clientOrderId(), "clientOrderId");
         ProductLine productLine = configuredProductLine();
         long orderId = StableOrderIdentity.orderId(productLine, request.userId(), clientOrderId);
-        PlaceOrderCommand command = buildPlaceCommand(orderId, request, validation);
+        PlaceOrderCommand command = buildPlaceCommand(orderId, request);
         UUID commandId = StableOrderIdentity.commandId(productLine, request.userId(), clientOrderId);
         CoreCommandOutcome outcome = aeron.commandOutcome(CoreMessageType.PLACE_ORDER, commandId, request.userId(),
                 TradingCommandCodec.encodePlaceOrder(command));
@@ -190,12 +184,11 @@ public class AeronOrderCommandService {
     }
 
     public CompletionStage<CommandExecution> placeCommandAsync(
-            com.surprising.trading.api.model.PlaceOrderRequest request,
-            ValidationResult validation) {
+            com.surprising.trading.api.model.PlaceOrderRequest request) {
         String clientOrderId = requireClientKey(request.clientOrderId(), "clientOrderId");
         ProductLine productLine = configuredProductLine();
         long orderId = StableOrderIdentity.orderId(productLine, request.userId(), clientOrderId);
-        PlaceOrderCommand command = buildPlaceCommand(orderId, request, validation);
+        PlaceOrderCommand command = buildPlaceCommand(orderId, request);
         UUID commandId = StableOrderIdentity.commandId(productLine, request.userId(), clientOrderId);
         return aeron.commandOutcomeAsync(CoreMessageType.PLACE_ORDER, commandId, request.userId(),
                         TradingCommandCodec.encodePlaceOrder(command))
@@ -203,13 +196,9 @@ public class AeronOrderCommandService {
     }
 
     public CommandExecution placeBatchCommand(String batchKey,
-                                               List<com.surprising.trading.api.model.PlaceOrderRequest> requests,
-                                               List<ValidationResult> validations) {
+                                               List<com.surprising.trading.api.model.PlaceOrderRequest> requests) {
         requireBatchKey(batchKey);
         requireBatchSize(requests, com.surprising.aeron.protocol.PlaceOrderBatchCommand.MAX_ORDERS, "orders");
-        if (validations == null || validations.size() != requests.size()) {
-            throw new IllegalArgumentException("batch validation count must match orders");
-        }
         ProductLine productLine = configuredProductLine();
         long userId = requireSingleUser(requests);
         List<PlaceOrderCommand> commands = new java.util.ArrayList<>(requests.size());
@@ -219,7 +208,7 @@ public class AeronOrderCommandService {
             String clientOrderId = requireClientKey(request.clientOrderId(), "clientOrderId");
             long orderId = StableOrderIdentity.orderId(productLine, userId, clientOrderId);
             prospectiveIds.add(orderId);
-            commands.add(buildPlaceCommand(orderId, request, validations.get(index)));
+            commands.add(buildPlaceCommand(orderId, request));
         }
         UUID commandId = batchCommandId(productLine, userId, "place", batchKey);
         CoreCommandOutcome outcome = aeron.commandOutcome(CoreMessageType.PLACE_ORDER_BATCH, commandId, userId,
@@ -228,13 +217,9 @@ public class AeronOrderCommandService {
     }
 
     public CompletionStage<CommandExecution> placeBatchCommandAsync(
-            String batchKey, List<com.surprising.trading.api.model.PlaceOrderRequest> requests,
-            List<ValidationResult> validations) {
+            String batchKey, List<com.surprising.trading.api.model.PlaceOrderRequest> requests) {
         requireBatchKey(batchKey);
         requireBatchSize(requests, com.surprising.aeron.protocol.PlaceOrderBatchCommand.MAX_ORDERS, "orders");
-        if (validations == null || validations.size() != requests.size()) {
-            throw new IllegalArgumentException("batch validation count must match orders");
-        }
         ProductLine productLine = configuredProductLine();
         long userId = requireSingleUser(requests);
         List<PlaceOrderCommand> commands = new java.util.ArrayList<>(requests.size());
@@ -244,7 +229,7 @@ public class AeronOrderCommandService {
             long orderId = StableOrderIdentity.orderId(productLine, userId,
                     requireClientKey(request.clientOrderId(), "clientOrderId"));
             prospectiveIds.add(orderId);
-            commands.add(buildPlaceCommand(orderId, request, validations.get(index)));
+            commands.add(buildPlaceCommand(orderId, request));
         }
         UUID commandId = batchCommandId(productLine, userId, "place", batchKey);
         byte[] payload = TradingOrderBatchCodec.encodePlaceOrderBatch(
@@ -454,10 +439,11 @@ public class AeronOrderCommandService {
         if (response != null && response.status() == ResponseStatus.REJECTED) {
             throw new OrderCommandRejectedException(response.resultCode());
         }
-        if (response == null || response.data().length == 0) {
+        byte[] data = response == null ? null : response.data();
+        if (data == null || data.length == 0) {
             throw new IllegalStateException("command response is missing result payload");
         }
-        return CoreCommandResultCodec.decode(response.data());
+        return CoreCommandResultCodec.decode(data);
     }
 
     private static CoreResponse terminalResponse(CommandExecution execution) {

@@ -19,8 +19,6 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.instrument.api.model.ContractType;
-import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
@@ -29,7 +27,6 @@ import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.ValidationResult;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -76,13 +73,13 @@ class StableOrderIdentityTest {
                 });
 
         AeronOrderCommandService first = service(aeron, properties);
-        first.place(request(), validation());
+        first.place(request());
         long firstTimestamp = System.currentTimeMillis();
         while (System.currentTimeMillis() == firstTimestamp) {
             Thread.onSpinWait();
         }
         AeronOrderCommandService reconstructed = service(aeron, properties);
-        reconstructed.place(request(), validation());
+        reconstructed.place(request());
 
         ArgumentCaptor<UUID> commandIds = ArgumentCaptor.forClass(UUID.class);
         ArgumentCaptor<byte[]> payloads = ArgumentCaptor.forClass(byte[].class);
@@ -100,10 +97,6 @@ class StableOrderIdentityTest {
     private static PlaceOrderRequest request() {
         return new PlaceOrderRequest(1001, "stable-client", "1", OrderSide.BUY, OrderType.LIMIT,
                 TimeInForce.GTC, 60_000, 2, MarginMode.CROSS, PositionSide.NET, false, false);
-    }
-
-    private static ValidationResult validation() {
-        return ValidationResult.ok(7, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL);
     }
 
     private static CoreResponse commandResponse(PlaceOrderCommand command, String clientOrderId) {

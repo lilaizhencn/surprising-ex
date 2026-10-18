@@ -126,13 +126,13 @@ class OrderServiceTest {
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         var service = new OrderService(properties, orderValidator, new OrderPlacementStateService(gateway),
                 aeronOrders, projection);
-        when(aeronOrders.place(any(), any())).thenReturn(response(91, "close-1", OrderStatus.ACCEPTED));
+        when(aeronOrders.place(any())).thenReturn(response(91, "close-1", OrderStatus.ACCEPTED));
 
         service.closePosition(new ClosePositionRequest(1001L, "close-1", "1",
                 MarginMode.CROSS, PositionSide.NET));
 
         ArgumentCaptor<PlaceOrderRequest> request = ArgumentCaptor.forClass(PlaceOrderRequest.class);
-        verify(aeronOrders).place(request.capture(), any());
+        verify(aeronOrders).place(request.capture());
         assertThat(request.getValue().clientOrderId()).isEqualTo("close-1");
         assertThat(request.getValue().side()).isEqualTo(quantity > 0 ? OrderSide.SELL : OrderSide.BUY);
         assertThat(request.getValue().quantitySteps()).isEqualTo(Math.absExact(quantity));
@@ -149,14 +149,51 @@ class OrderServiceTest {
                         .map(quantity -> org.junit.jupiter.params.provider.Arguments.of(line, quantity)));
     }
 
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void normalizesProductPositionSemanticsBeforeSubmittingTheOrder(ProductLine product) {
+        var service = service(product, aeronOrders);
+        for (PositionSide position : List.of(PositionSide.LONG, PositionSide.SHORT)) {
+            for (OrderSide side : OrderSide.values()) {
+                var request = new PlaceOrderRequest(1001L, " client-normalized ", " 1 ", side,
+                        OrderType.LIMIT, TimeInForce.GTC, 100, 2, MarginMode.ISOLATED,
+                        position, false, true);
+                if (product == ProductLine.SPOT) {
+                    assertThatThrownBy(() -> service.place(request)).isInstanceOf(IllegalArgumentException.class);
+                } else {
+                    service.place(request);
+                    boolean closing = position == PositionSide.LONG && side == OrderSide.SELL
+                            || position == PositionSide.SHORT && side == OrderSide.BUY;
+                    verify(aeronOrders).place(new PlaceOrderRequest(1001L, "client-normalized", "1", side,
+                            OrderType.LIMIT, TimeInForce.GTC, 100, 2, MarginMode.ISOLATED,
+                            position, closing, true));
+                }
+            }
+        }
+        if (product == ProductLine.SPOT) verifyNoInteractions(aeronOrders);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void rejectsTheWholeBatchBeforeSubmittingWhenAnItemFailsValidation(ProductLine product) {
+        var service = service(product, aeronOrders);
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L),
+                ValidationResult.reject("quantity exceeds limit", 7L));
+        var batch = new com.surprising.trading.api.model.BatchPlaceOrderRequest("batch-validation",
+                List.of(request("first"), request("second")));
+        assertThatThrownBy(() -> service.placeBatchCommand(batch))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("quantity exceeds limit");
+        verifyNoInteractions(aeronOrders);
+    }
+
     @Test
     void placeDelegatesFundsAndFeeDecisionToCore() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
-        when(aeronOrders.place(any(), any())).thenReturn(response(91, "core-fee", OrderStatus.ACCEPTED));
+        when(aeronOrders.place(any())).thenReturn(response(91, "core-fee", OrderStatus.ACCEPTED));
 
         assertThat(service.place(request("core-fee")).orderId()).isEqualTo(91);
 
-        verify(aeronOrders).place(any(), any());
+        verify(aeronOrders).place(any());
     }
 
     @Test

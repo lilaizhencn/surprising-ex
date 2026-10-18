@@ -1,148 +1,14 @@
 package com.surprising.trading.order.service;
 
-import com.surprising.instrument.api.model.ContractType;
-import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import java.math.BigInteger;
 
-/**
- * 订单准入使用的初始保证金公式。
- * 全部公开输入输出均使用与 exchange-core 兼容的 long 单位；BigInteger 只用于乘除中间步骤，
- * 使超大配置明确失败而不是发生溢出。
- */
+/** 市价订单名义价值校验使用的价格上下界；保证金裁决由 Core 承担。 */
 public final class OrderMarginMath {
-
     private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);
-    private static final BigInteger PPM_SQUARED = PPM.multiply(PPM);
     private static final long MAX_MARKET_SLIPPAGE_PPM = 999_999L;
 
-    private OrderMarginMath() {
-    }
-
-    public static long initialMarginUnits(ContractType contractType,
-                                          OrderSide side,
-                                          OrderType orderType,
-                                          long priceTicks,
-                                          long quantitySteps,
-                                          Long markPriceTicks,
-                                          long marketMaxSlippagePpm,
-                                          long notionalMultiplierUnits,
-                                          long priceTickUnits,
-                                          long settleScaleUnits,
-                                          long initialMarginRatePpm) {
-        return initialMarginUnits(contractType, side, orderType, priceTicks, quantitySteps, markPriceTicks,
-                marketMaxSlippagePpm, notionalMultiplierUnits, priceTickUnits, settleScaleUnits,
-                initialMarginRatePpm, true);
-    }
-
-    public static long initialMarginUnits(ContractType contractType,
-                                          OrderSide side,
-                                          OrderType orderType,
-                                          long priceTicks,
-                                          long quantitySteps,
-                                          Long markPriceTicks,
-                                          long marketMaxSlippagePpm,
-                                          long notionalMultiplierUnits,
-                                          long priceTickUnits,
-                                          long settleScaleUnits,
-                                          long initialMarginRatePpm,
-                                          boolean protectAdverseFillPrice) {
-        requireLinearOrInverse(contractType);
-        requirePositive(quantitySteps, "quantitySteps");
-        requirePositive(notionalMultiplierUnits, "notionalMultiplierUnits");
-        requirePositive(priceTickUnits, "priceTickUnits");
-        requirePositive(settleScaleUnits, "settleScaleUnits");
-        requirePositive(initialMarginRatePpm, "initialMarginRatePpm");
-        long effectivePriceTicks = collateralPriceTicks(side, orderType, priceTicks, markPriceTicks,
-                marketMaxSlippagePpm, contractType, protectAdverseFillPrice);
-        if (contractType.isOption()) {
-            BigInteger premium = optionPremiumUnits(quantitySteps, effectivePriceTicks, notionalMultiplierUnits);
-            if (side == OrderSide.BUY) {
-                return premium.longValueExact();
-            }
-            BigInteger sellerRisk = linearInitialMargin(quantitySteps, effectivePriceTicks, notionalMultiplierUnits,
-                    initialMarginRatePpm);
-            return premium.add(sellerRisk).longValueExact();
-        }
-        BigInteger margin = contractType.isInverse()
-                ? inverseInitialMargin(quantitySteps, notionalMultiplierUnits, settleScaleUnits,
-                effectivePriceTicks, priceTickUnits, initialMarginRatePpm)
-                : linearInitialMargin(quantitySteps, effectivePriceTicks, notionalMultiplierUnits,
-                initialMarginRatePpm);
-        return margin.longValueExact();
-    }
-
-    public static long notionalUnits(ContractType contractType,
-                                     long quantitySteps,
-                                     long effectivePriceTicks,
-                                     long notionalMultiplierUnits,
-                                     long priceTickUnits,
-                                     long settleScaleUnits) {
-        requireLinearOrInverse(contractType);
-        requirePositive(quantitySteps, "quantitySteps");
-        requirePositive(effectivePriceTicks, "effectivePriceTicks");
-        requirePositive(notionalMultiplierUnits, "notionalMultiplierUnits");
-        requirePositive(priceTickUnits, "priceTickUnits");
-        requirePositive(settleScaleUnits, "settleScaleUnits");
-        if (contractType.isInverse()) {
-            BigInteger numerator = big(quantitySteps)
-                    .multiply(big(notionalMultiplierUnits))
-                    .multiply(big(settleScaleUnits));
-            BigInteger denominator = big(effectivePriceTicks).multiply(big(priceTickUnits));
-            return divideCeilingToLong(numerator, denominator);
-        }
-        return big(quantitySteps)
-                .multiply(big(effectivePriceTicks))
-                .multiply(big(notionalMultiplierUnits))
-                .longValueExact();
-    }
-
-    public static long initialMarginRateFromLeveragePpm(long leveragePpm) {
-        requirePositive(leveragePpm, "leveragePpm");
-        if (leveragePpm < 1_000_000L) {
-            throw new IllegalArgumentException("leveragePpm must be at least 1x");
-        }
-        return divideCeilingToLong(PPM_SQUARED, big(leveragePpm));
-    }
-
-    public static long collateralPriceTicks(OrderSide side,
-                                            OrderType orderType,
-                                            long priceTicks,
-                                            Long markPriceTicks,
-                                            long marketMaxSlippagePpm,
-                                            ContractType contractType) {
-        return collateralPriceTicks(side, orderType, priceTicks, markPriceTicks, marketMaxSlippagePpm,
-                contractType, true);
-    }
-
-    public static long collateralPriceTicks(OrderSide side,
-                                            OrderType orderType,
-                                            long priceTicks,
-                                            Long markPriceTicks,
-                                            long marketMaxSlippagePpm,
-                                            ContractType contractType,
-                                            boolean protectAdverseFillPrice) {
-        requireLinearOrInverse(contractType);
-        if (orderType == OrderType.MARKET) {
-            if (contractType.isInverse()) {
-                return lowerBoundPriceTicks(orderType, priceTicks, markPriceTicks, marketMaxSlippagePpm);
-            }
-            return upperBoundPriceTicks(orderType, priceTicks, markPriceTicks, marketMaxSlippagePpm);
-        }
-        requirePositive(priceTicks, "priceTicks");
-        if (!protectAdverseFillPrice) {
-            return priceTicks;
-        }
-        if (contractType.isInverse() && side == OrderSide.BUY) {
-            return Math.min(priceTicks, lowerBoundPriceTicks(OrderType.MARKET, 0L, markPriceTicks,
-                    marketMaxSlippagePpm));
-        }
-        if (contractType.isLinear() && side == OrderSide.SELL) {
-            return Math.max(priceTicks, upperBoundPriceTicks(OrderType.MARKET, 0L, markPriceTicks,
-                    marketMaxSlippagePpm));
-        }
-        return priceTicks;
-    }
+    private OrderMarginMath() { }
 
     public static long lowerBoundPriceTicks(OrderType orderType,
                                             long priceTicks,
@@ -171,41 +37,6 @@ public final class OrderMarginMath {
         return divideCeilingToLong(big(markPriceTicks).multiply(big(1_000_000L + slippagePpm)), PPM);
     }
 
-    private static BigInteger linearInitialMargin(long quantitySteps,
-                                                  long effectivePriceTicks,
-                                                  long notionalMultiplierUnits,
-                                                  long initialMarginRatePpm) {
-        BigInteger numerator = big(quantitySteps)
-                .multiply(big(effectivePriceTicks))
-                .multiply(big(notionalMultiplierUnits))
-                .multiply(big(initialMarginRatePpm));
-        return divideCeilingBig(numerator, PPM);
-    }
-
-    private static BigInteger optionPremiumUnits(long quantitySteps,
-                                                 long effectivePriceTicks,
-                                                 long notionalMultiplierUnits) {
-        return big(quantitySteps)
-                .multiply(big(effectivePriceTicks))
-                .multiply(big(notionalMultiplierUnits));
-    }
-
-    private static BigInteger inverseInitialMargin(long quantitySteps,
-                                                   long notionalMultiplierUnits,
-                                                   long settleScaleUnits,
-                                                   long effectivePriceTicks,
-                                                   long priceTickUnits,
-                                                   long initialMarginRatePpm) {
-        BigInteger numerator = big(quantitySteps)
-                .multiply(big(notionalMultiplierUnits))
-                .multiply(big(settleScaleUnits))
-                .multiply(big(initialMarginRatePpm));
-        BigInteger denominator = big(effectivePriceTicks)
-                .multiply(big(priceTickUnits))
-                .multiply(PPM);
-        return divideCeilingBig(numerator, denominator);
-    }
-
     private static long divideCeilingToLong(BigInteger numerator, BigInteger denominator) {
         return divideCeilingBig(numerator, denominator).longValueExact();
     }
@@ -218,12 +49,6 @@ public final class OrderMarginMath {
         return quotientAndRemainder[1].signum() == 0
                 ? quotientAndRemainder[0]
                 : quotientAndRemainder[0].add(BigInteger.ONE);
-    }
-
-    private static void requireLinearOrInverse(ContractType contractType) {
-        if (contractType == null || (!contractType.isLinear() && !contractType.isInverse())) {
-            throw new IllegalArgumentException("unsupported contract type: " + contractType);
-        }
     }
 
     private static long divideFloor(BigInteger numerator, BigInteger denominator) {

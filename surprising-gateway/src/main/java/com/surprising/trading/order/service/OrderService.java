@@ -30,7 +30,6 @@ import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TestOrderResponse;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.ValidationResult;
 import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
@@ -89,38 +88,31 @@ public class OrderService {
     }
 
     public OrderResponse place(PlaceOrderRequest request) {
-        return placeAeron(request);
+        requireAeron();
+        return aeronOrders.place(prepareOrder(request));
     }
 
     public OrderCommandReceipt placeCommand(PlaceOrderRequest request) {
         requireAeron();
-        PreparedAeronOrder prepared = prepareAeronOrder(normalize(request));
-        var execution = aeronOrders.placeCommand(prepared.request(), prepared.validation());
+        PlaceOrderRequest prepared = prepareOrder(request);
+        var execution = aeronOrders.placeCommand(prepared);
         return aeronOrders.receipt(execution);
     }
 
     public CompletionStage<OrderCommandReceipt> placeCommandAsync(PlaceOrderRequest request) {
         requireAeron();
-        PreparedAeronOrder prepared = prepareAeronOrder(normalize(request));
-        return aeronOrders.placeCommandAsync(prepared.request(), prepared.validation()).thenApply(aeronOrders::receipt);
+        PlaceOrderRequest prepared = prepareOrder(request);
+        return aeronOrders.placeCommandAsync(prepared).thenApply(aeronOrders::receipt);
     }
 
-    private OrderResponse placeAeron(PlaceOrderRequest request) {
-        requireAeron();
+    private PlaceOrderRequest prepareOrder(PlaceOrderRequest request) {
         PlaceOrderRequest normalized = normalize(request);
-        PreparedAeronOrder prepared = prepareAeronOrder(normalized);
-        return aeronOrders.place(prepared.request(), prepared.validation());
-    }
-
-    private PreparedAeronOrder prepareAeronOrder(PlaceOrderRequest normalized) {
-        ProductLine productLine = currentProductLine();
-        normalized = normalizePositionSemantics(normalized, productLine);
         InstrumentRule instrument = orderValidator.currentRule(normalized.instrumentId()).orElse(null);
         ValidationResult validation = instrument == null
                 ? orderValidator.validate(normalized)
                 : orderValidator.validate(normalized, instrument);
         if (!validation.accepted()) throw new IllegalArgumentException(validation.rejectReason());
-        return new PreparedAeronOrder(normalized, validation);
+        return normalized;
     }
 
     public OrderBatchResponse placeBatch(BatchPlaceOrderRequest request) {
@@ -128,44 +120,27 @@ public class OrderService {
     }
 
     public OrderCommandReceipt placeBatchCommand(BatchPlaceOrderRequest request) {
-        if (request == null) {
-            throw new IllegalArgumentException("place batch request is required");
-        }
-        List<PlaceOrderRequest> normalized = new ArrayList<>();
-        List<ValidationResult> validations = new ArrayList<>();
-        requireBatchSize(request.orders().size(), 20, "orders");
-        for (PlaceOrderRequest order : request.orders()) {
-            PreparedAeronOrder prepared = prepareAeronOrder(normalize(order));
-            normalized.add(prepared.request());
-            validations.add(prepared.validation());
-        }
+        List<PlaceOrderRequest> orders = prepareBatchOrders(request);
         requireAeron();
-        return aeronOrders.receipt(aeronOrders.placeBatchCommand(request.batchKey(), normalized, validations));
+        return aeronOrders.receipt(aeronOrders.placeBatchCommand(request.batchKey(), orders));
     }
 
     public CompletionStage<OrderCommandReceipt> placeBatchCommandAsync(BatchPlaceOrderRequest request) {
-        if (request == null) throw new IllegalArgumentException("place batch request is required");
-        List<PlaceOrderRequest> normalized = new ArrayList<>();
-        List<ValidationResult> validations = new ArrayList<>();
-        requireBatchSize(request.orders().size(), 20, "orders");
-        for (PlaceOrderRequest order : request.orders()) {
-            PreparedAeronOrder prepared = prepareAeronOrder(normalize(order));
-            normalized.add(prepared.request());
-            validations.add(prepared.validation());
-        }
+        List<PlaceOrderRequest> orders = prepareBatchOrders(request);
         requireAeron();
-        return aeronOrders.placeBatchCommandAsync(request.batchKey(), normalized, validations)
-                .thenApply(aeronOrders::receipt);
+        return aeronOrders.placeBatchCommandAsync(request.batchKey(), orders).thenApply(aeronOrders::receipt);
+    }
+
+    private List<PlaceOrderRequest> prepareBatchOrders(BatchPlaceOrderRequest request) {
+        if (request == null) throw new IllegalArgumentException("place batch request is required");
+        requireBatchSize(request.orders().size(), 20, "orders");
+        List<PlaceOrderRequest> orders = new ArrayList<>(request.orders().size());
+        for (PlaceOrderRequest order : request.orders()) orders.add(prepareOrder(order));
+        return orders;
     }
 
     public TestOrderResponse test(PlaceOrderRequest request) {
-        return testLocal(request);
-    }
-
-    private TestOrderResponse testLocal(PlaceOrderRequest request) {
         PlaceOrderRequest normalized = normalize(request);
-        ProductLine productLine = currentProductLine();
-        normalized = normalizePositionSemantics(normalized, productLine);
         ValidationResult validation = orderValidator.validate(normalized);
         if (!validation.accepted()) {
             return testRejected(validation, "ORDER_RULES");
@@ -174,7 +149,8 @@ public class OrderService {
     }
 
     public AmendOrderResponse amend(AmendOrderRequest request) {
-        return amendAeron(request);
+        requireAeron();
+        return aeronOrders.replace(normalizeAmend(request));
     }
 
     public OrderCommandReceipt amendCommand(AmendOrderRequest request) {
@@ -185,12 +161,6 @@ public class OrderService {
     public CompletionStage<OrderCommandReceipt> amendCommandAsync(AmendOrderRequest request) {
         requireAeron();
         return aeronOrders.replaceCommandAsync(normalizeAmend(request)).thenApply(aeronOrders::receipt);
-    }
-
-    private AmendOrderResponse amendAeron(AmendOrderRequest request) {
-        requireAeron();
-        AmendOrderRequest normalized = normalizeAmend(request);
-        return aeronOrders.replace(normalized);
     }
 
     public AmendOrderBatchResponse amendBatch(BatchAmendOrdersRequest request) {
@@ -227,12 +197,12 @@ public class OrderService {
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
         ProductLine productLine = currentProductLine();
-        ReduceOnlyPosition position = placementStateService.requireClosePosition(
+        long quantity = placementStateService.requireClosePosition(
                 productLine, request.userId(), instrumentId, marginMode, positionSide);
-        if (position.signedQuantitySteps() == 0L) {
+        if (quantity == 0L) {
             throw new IllegalStateException("open position not found");
         }
-        OrderSide closeSide = position.signedQuantitySteps() > 0L ? OrderSide.SELL : OrderSide.BUY;
+        OrderSide closeSide = quantity > 0L ? OrderSide.SELL : OrderSide.BUY;
         PlaceOrderRequest closeOrder = new PlaceOrderRequest(
                 request.userId(),
                 clientOrderId,
@@ -241,7 +211,7 @@ public class OrderService {
                 OrderType.MARKET,
                 TimeInForce.IOC,
                 0L,
-                Math.absExact(position.signedQuantitySteps()),
+                Math.absExact(quantity),
                 marginMode,
                 positionSide,
                 true,
@@ -251,7 +221,7 @@ public class OrderService {
 
     private TestOrderResponse dryRunOpeningFunds(PlaceOrderRequest request,
                                                  ValidationResult validation) {
-        OrderAeronGateway.PreflightResult result = requireAeron().preflight(request, validation);
+        OrderAeronGateway.PreflightResult result = requireAeron().preflight(request);
         if (!result.accepted()) {
             return new TestOrderResponse(false, result.resultCode().name(), validation.instrumentChangeId(),
                     "CORE_PREFLIGHT", currentProductLine().accountTypeCode(), null, 0L);
@@ -740,9 +710,6 @@ public class OrderService {
     private record IndexedCancelRequest(int index, CancelOrderRequest request) {
     }
 
-    private record PreparedAeronOrder(PlaceOrderRequest request, ValidationResult validation) {
-    }
-
     private PlaceOrderRequest normalize(PlaceOrderRequest request) {
         if (request == null) {
             throw new IllegalArgumentException("order request is required");
@@ -760,6 +727,14 @@ public class OrderService {
         String instrumentId = normalizeSymbol(request.instrumentId());
         long priceTicks = resolveLimitPrice(request, instrumentId);
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
+        if (currentProductLine() == ProductLine.SPOT && positionSide.isHedgeSide()) {
+            throw new IllegalArgumentException("现货订单不支持 LONG/SHORT 仓位方向");
+        }
+        boolean reduceOnly = request.reduceOnly()
+                || positionSide.isHedgeSide() && positionSide.isClosingSide(request.side());
+        if (request.bboPriceMode() == null && clientOrderId.equals(request.clientOrderId())
+                && instrumentId.equals(request.instrumentId()) && priceTicks == request.priceTicks()
+                && reduceOnly == request.reduceOnly()) return request;
         return new PlaceOrderRequest(
                 request.userId(),
                 clientOrderId,
@@ -771,7 +746,7 @@ public class OrderService {
                 request.quantitySteps(),
                 MarginMode.defaultIfNull(request.marginMode()),
                 positionSide,
-                request.reduceOnly(),
+                reduceOnly,
                 request.postOnly());
     }
 
@@ -822,31 +797,6 @@ public class OrderService {
         return new AmendOrderRequest(request.userId(), request.orderId(), newClientOrderId,
                 request.priceTicks(), request.quantitySteps(), request.timeInForce(), request.postOnly(),
                 request.clientRequestId());
-    }
-
-    private PlaceOrderRequest normalizePositionSemantics(PlaceOrderRequest request, ProductLine productLine) {
-        if (productLine == ProductLine.SPOT) {
-            if (PositionSide.defaultIfNull(request.positionSide()).isHedgeSide()) {
-                throw new IllegalArgumentException("现货订单不支持 LONG/SHORT 仓位方向");
-            }
-            return request;
-        }
-        PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
-        if (!positionSide.isHedgeSide()) return request;
-        boolean reduceOnly = request.reduceOnly() || positionSide.isClosingSide(request.side());
-        return new PlaceOrderRequest(
-                request.userId(),
-                request.clientOrderId(),
-                request.instrumentId(),
-                request.side(),
-                request.orderType(),
-                request.timeInForce(),
-                request.priceTicks(),
-                request.quantitySteps(),
-                request.marginMode(),
-                positionSide,
-                reduceOnly,
-                request.postOnly());
     }
 
     private String normalizeSymbol(String instrumentId) {

@@ -4,10 +4,7 @@ import com.surprising.aeron.protocol.CorePositionView;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
-import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
-import com.surprising.trading.order.model.ReduceOnlyPosition;
-import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -19,28 +16,7 @@ public class OrderPlacementStateService {
         this.aeron = aeron;
     }
 
-    public PositionMode positionMode(ProductLine line, long userId) {
-        if (line == ProductLine.SPOT) return PositionMode.ONE_WAY;
-        CoreUserStateView state = state(line, userId);
-        return PositionMode.valueOf(state.positionMode().name());
-    }
-
-    public boolean positionMarginModeConflict(ProductLine line, long userId, String instrumentId, MarginMode marginMode) {
-        if (line == ProductLine.SPOT) return false;
-        MarginMode normalized = MarginMode.defaultIfNull(marginMode);
-        return state(line, userId).positions().stream()
-                .filter(position -> position.instrumentId().equalsIgnoreCase(instrumentId))
-                .filter(position -> position.signedQuantitySteps() != 0)
-                .anyMatch(position -> !position.marginMode().name().equals(normalized.name()));
-    }
-
-    public Optional<ReduceOnlyPosition> position(ProductLine line, long userId, String instrumentId,
-                                                 MarginMode mode, PositionSide side) {
-        if (line == ProductLine.SPOT) return Optional.empty();
-        return position(state(line, userId), instrumentId, mode, side);
-    }
-
-    public ReduceOnlyPosition requireClosePosition(ProductLine line, long userId, String instrumentId,
+    public long requireClosePosition(ProductLine line, long userId, String instrumentId,
                                                    MarginMode mode, PositionSide side) {
         if (line == ProductLine.SPOT) throw new IllegalStateException("open position not found");
         CoreUserStateView state = state(line, userId);
@@ -48,21 +24,15 @@ public class OrderPlacementStateService {
                 && !PositionSide.defaultIfNull(side).isHedgeSide()) {
             throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
         }
-        return position(state, instrumentId, mode, side)
-                .orElseThrow(() -> new IllegalStateException("open position not found"));
-    }
-
-    private static Optional<ReduceOnlyPosition> position(CoreUserStateView state, String instrumentId,
-                                                        MarginMode mode, PositionSide side) {
         MarginMode normalizedMode = MarginMode.defaultIfNull(mode);
         PositionSide normalizedSide = PositionSide.defaultIfNull(side);
-        return state.positions().stream()
-                .filter(position -> position.instrumentId().equalsIgnoreCase(instrumentId))
-                .filter(position -> position.marginMode().name().equals(normalizedMode.name()))
-                .filter(position -> position.positionSide().name().equals(normalizedSide.name()))
-                .filter(position -> position.signedQuantitySteps() != 0)
-                .map(OrderPlacementStateService::position)
-                .findFirst();
+        for (CorePositionView position : state.positions()) {
+            if (position.instrumentId().equalsIgnoreCase(instrumentId)
+                    && position.marginMode().name().equals(normalizedMode.name())
+                    && position.positionSide().name().equals(normalizedSide.name())
+                    && position.signedQuantitySteps() != 0) return position.signedQuantitySteps();
+        }
+        throw new IllegalStateException("open position not found");
     }
 
     private CoreUserStateView state(ProductLine line, long userId) {
@@ -73,7 +43,4 @@ public class OrderPlacementStateService {
         return value;
     }
 
-    private static ReduceOnlyPosition position(CorePositionView value) {
-        return new ReduceOnlyPosition(value.signedQuantitySteps());
-    }
 }
