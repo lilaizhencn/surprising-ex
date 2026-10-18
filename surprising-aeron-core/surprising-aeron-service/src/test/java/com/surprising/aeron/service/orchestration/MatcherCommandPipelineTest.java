@@ -24,19 +24,21 @@ class MatcherCommandPipelineTest {
                 return new CoreMatchingResult(true, "ONE");
             });
             var read = pipeline.readAtSubmissionFence(value::get);
-            pipeline.submit(2, () -> { value.set(2); return new CoreMatchingResult(true, "TWO"); });
             assertThat(read.get()).isEqualTo(1);
             assertThat(pipeline.submissionDepth()).isZero();
-            assertThat(pipeline.completionDepth()).isEqualTo(2);
+            assertThat(pipeline.completionDepth()).isOne();
             assertThat(pipeline.poll(2)).isNull();
+            assertThatThrownBy(() -> pipeline.submit(2, () -> new CoreMatchingResult(true, "TWO")))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("not collected");
             assertThat(pipeline.poll(1).resultCode()).isEqualTo("ONE");
+            pipeline.submit(2, () -> { value.set(2); return new CoreMatchingResult(true, "TWO"); });
             assertThat(pipeline.poll(2).resultCode()).isEqualTo("TWO");
             pipeline.close(() -> assertThat(Thread.currentThread()).isSameAs(owner));
         }
     }
 
     @Test
-    void fusedMatcherRejectsForeignWritersAndConsumesFailuresInOrder() throws Exception {
+    void fusedMatcherRejectsForeignWritersAndPropagatesSynchronousFailures() throws Exception {
         try (var pipeline = new MatcherCommandPipeline(2, false)) {
             pipeline.startInline(null);
             var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
@@ -47,9 +49,9 @@ class MatcherCommandPipelineTest {
             thread.join(5_000);
             assertThat(thread.isAlive()).isFalse();
             assertThat(failure.get()).isInstanceOf(IllegalStateException.class);
-            pipeline.submit(1, () -> { throw new IllegalArgumentException("invalid order"); });
+            assertThatThrownBy(() -> pipeline.submit(1, () -> { throw new IllegalArgumentException("invalid order"); }))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessage("invalid order");
             pipeline.submit(2, () -> new CoreMatchingResult(true, "TWO"));
-            assertThatThrownBy(() -> pipeline.poll(1)).isInstanceOf(IllegalArgumentException.class);
             assertThat(pipeline.poll(2).resultCode()).isEqualTo("TWO");
             assertThat(pipeline.inFlight()).isZero();
         }

@@ -281,7 +281,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
         if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
                 && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.LANE_METRICS_QUERY) {
-            if (message.payloadUnsafe().length != 0) return rejected(CoreResultCode.INVALID_COMMAND);
+            if (message.payloadLength() != 0) return rejected(CoreResultCode.INVALID_COMMAND);
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount, encodeLaneMetrics());
         }
         if (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY) {
@@ -383,7 +383,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
         if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
                 && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.RISK_SCAN_CONTROL_QUERY) {
-            if (message.payloadUnsafe().length != 0) return rejected(CoreResultCode.INVALID_COMMAND);
+            if (message.payloadLength() != 0) return rejected(CoreResultCode.INVALID_COMMAND);
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
                     com.surprising.aeron.protocol.CoreRiskScanControlCodec.encodeView(runtimeState.riskScanControl()));
         }
@@ -547,7 +547,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 确定性业务变更后发布失败；要求从快照和日志恢复。 */
     RuntimeException commitPublicationFailure;
     /** 协议探测命令的持久化值；不参与订单或资金计算。 */
-    long probeValue;
     /**
      * Owner-only materialized read view.  The live runtime is authoritative; callers that ask
      * for a TradingCoreState read view must not rebuild the complete immutable graph repeatedly
@@ -611,20 +610,20 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     public TradingCoreRuntime(ProductLine productLine) {
-        this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
+        this(productLine, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
                 TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
                 0, Map.of(), Map.of(), null, null);
     }
 
     TradingCoreRuntime(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture) {
-        this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
+        this(productLine, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
                 TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
                 0, Map.of(), Map.of(), matcherSnapshotCapture, null);
     }
 
     TradingCoreRuntime(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture,
                    SnapshotEncoder snapshotEncoder) {
-        this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
+        this(productLine, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
                 TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
                 0, Map.of(), Map.of(), matcherSnapshotCapture, snapshotEncoder);
     }
@@ -632,7 +631,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     TradingCoreRuntime(
             ProductLine productLine,
             long appliedCommandCount,
-            long probeValue,
             LinkedHashMap<UUID, StoredResult> commandResults,
             LinkedHashMap<SourceKey, Long> lastSourceSequences,
             TradingCoreState snapshotState,
@@ -646,7 +644,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.productLine = productLine;
         this.appliedCommandCount = appliedCommandCount;
         this.committedCoreSequence = appliedCommandCount;
-        this.probeValue = probeValue;
         this.resultLedger = new CommandResultLedger(commandResults, responseArena);
         this.lastSourceSequences = new SourceSequenceIndex(lastSourceSequences);
         admissions.pendingLifecycleScopes = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
@@ -706,7 +703,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     static TradingCoreRuntime prepareRestore(
             ProductLine productLine,
             long appliedCommandCount,
-            long probeValue,
             Map<UUID, StoredResult> commandResults,
             Map<SourceKey, Long> lastSourceSequences,
             TradingCoreState snapshotState,
@@ -721,10 +717,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 || matcherSnapshot == null || snapshotState == null
                 || snapshotState.productLine() != productLine
                 || terminalRetention == null || feePolicies == null || pendingTransfers == null) {
-            throw new IllegalArgumentException("invalid passive restored probe state");
+            throw new IllegalArgumentException("invalid passive restored trading state");
         }
         CommandResultLedger.validateResultLedger(commandResults);
-        return new TradingCoreRuntime(productLine, appliedCommandCount, probeValue,
+        return new TradingCoreRuntime(productLine, appliedCommandCount,
                 new LinkedHashMap<>(commandResults), new LinkedHashMap<>(lastSourceSequences),
                 snapshotState, terminalRetention, matcherSnapshot, projectionSequence,
                 feePolicies, pendingTransfers, null, null);
@@ -845,8 +841,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     DecodedMatchingCommand decodeMatchingCommand(CoreMessage message) {
-        return message == decodedIngressMessage && decodedIngressCommand != null
-                ? decodedIngressCommand : DecodedMatchingCommand.decode(message);
+        if (message != decodedIngressMessage || decodedIngressCommand == null)
+            return DecodedMatchingCommand.decode(message);
+        // Decode after idempotency/source checks and inside admission's rejection handling.
+        // FUSED passes its empty serial slot; PIPELINED already decoded its window entry.
+        if (!decodedIngressCommand.isDecoded()) decodedIngressCommand.decodeInto(message);
+        return decodedIngressCommand;
     }
 
     boolean prepareClusterPipelineScope(CoreMessage message, ClusterCommandWindow window) {
@@ -971,11 +971,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 status = ResponseStatus.APPLIED;
             } else {
                 switch (message.header().messageType()) {
-                    case PROBE_INCREMENT -> {
-                        probeValue = Math.addExact(
-                                probeValue, CoreProtocol.decodeProbeDelta(message.payloadUnsafe()));
-                        status = ResponseStatus.APPLIED;
-                    }
                     case VERIFY_STATE_HASH -> status = ResponseStatus.APPLIED;
                     case PLACE_ORDER, CANCEL_ORDER, REPLACE_ORDER, AMEND_ORDER,
                             PLACE_ORDER_BATCH, CANCEL_ORDER_BATCH, AMEND_ORDER_BATCH,
@@ -1317,7 +1312,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
 
     @FunctionalInterface
-    interface MatchingCommitHandler {
+    public interface MatchingCommitHandler {
         void onCommitted(long sequence, CoreResponse response);
     }
 
@@ -1382,13 +1377,17 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (closed) throw new IllegalStateException("cannot activate closed core state");
         try {
             boolean fused = TradingExecutionMode.configured() == TradingExecutionMode.FUSED;
-            if (fused) matcherPipeline.startInline(matchingAdapter::activateShard);
-            else matcherPipeline.start(matchingAdapter::activateShard);
-            bindOwner();
-            if (!fused) {
-                runtimeState.startAccountLanes();
-                runtimeState.startSystemLedgerLane();
+            if (fused) {
+                runtimeState.enableFusedExecution();
+                matcherPipeline.startInline(matchingAdapter::activateShard);
+            } else {
+                matcherPipeline.start(matchingAdapter::activateShard);
             }
+            bindOwner();
+            if (!fused) runtimeState.startAccountLanes();
+            // Fusing matching/account execution does not move persistent funds-index I/O
+            // onto the trading Owner. Both modes retain the existing Ledger ownership boundary.
+            runtimeState.startSystemLedgerLane();
             matchingAdapter.activate();
             commits.publication.activate();
             activated = true;
@@ -1554,10 +1553,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     long committedProjectionSequence() {
         return commits.publication.publishedSequence();
-    }
-
-    public long probeValue() {
-        return probeValue;
     }
 
     public TradingCoreState tradingState() {

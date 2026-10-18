@@ -102,12 +102,20 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
 
     private PlaceOrderCommand amendCommand(OrderRuntime original) {
         return new PlaceOrderCommand(amend.replacementOrderId(), decision.instrument().instrumentId(),
-                original.side(), amend.priceTicks() == null ? original.priceTicks() : amend.priceTicks(),
-                amend.quantitySteps() == null ? original.remainingQuantitySteps() : amend.quantitySteps(),
+                original.side(), amend.hasPriceTicks() ? amend.rawPriceTicks() : original.priceTicks(),
+                amend.hasQuantitySteps() ? amend.rawQuantitySteps() : original.remainingQuantitySteps(),
                 original.reduceOnly(), original.marginMode(), original.positionSide(), original.orderType(),
                 amend.timeInForce() == null ? original.timeInForce() : amend.timeInForce(),
-                amend.postOnly() == null ? original.postOnly() : amend.postOnly(),
+                amend.hasPostOnly() ? amend.isPostOnly() : original.postOnly(),
                 amend.newClientOrderId() == null ? "" : amend.newClientOrderId());
+    }
+
+    /** FUSED resumes this existing admission after the Ledger publishes its immutable OI input. */
+    public void executeInlineIfReady() {
+        if (runtime == null || !runtime.isFusedExecution())
+            throw new IllegalStateException("inline admission requires the fused trading Owner");
+        runtime.assertOwner();
+        if (!completed && inputReady) execute(runtime.accountLanes[runtime.topology().accountLaneId(userId)]);
     }
 
     public boolean complete() { return completed; }

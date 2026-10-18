@@ -16,7 +16,6 @@ final class TradingCoreRuntimeRestoreTestSupport {
     static TradingCoreRuntime restore(
             ProductLine productLine,
             long appliedCommandCount,
-            long probeValue,
             Map<UUID, CommandResultLedger.StoredResult> commandResults,
             Map<TradingCoreRuntime.SourceKey, Long> lastSourceSequences,
             TradingCoreState snapshotState) {
@@ -28,19 +27,18 @@ final class TradingCoreRuntimeRestoreTestSupport {
             matcherSnapshot = adapter.snapshotAsync(1, appliedCommandCount,
                     snapshotState.businessStateHash(), snapshotState, List.of()).join();
         }
-        return restore(productLine, appliedCommandCount, probeValue, commandResults, lastSourceSequences,
+        return restore(productLine, appliedCommandCount, commandResults, lastSourceSequences,
                 snapshotState, matcherSnapshot);
     }
 
     static TradingCoreRuntime restore(
             ProductLine productLine,
             long appliedCommandCount,
-            long probeValue,
             Map<UUID, CommandResultLedger.StoredResult> commandResults,
             Map<TradingCoreRuntime.SourceKey, Long> lastSourceSequences,
             TradingCoreState snapshotState,
             MatcherSnapshot matcherSnapshot) {
-        TradingCoreRuntime candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount, probeValue,
+        TradingCoreRuntime candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount,
                 commandResults, lastSourceSequences, snapshotState, new TerminalStateRetention(),
                 matcherSnapshot, appliedCommandCount, Map.of(), Map.of());
         try {

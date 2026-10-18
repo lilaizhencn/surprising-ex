@@ -206,7 +206,8 @@ public final class CoreMatchingFlow {
         if (!collectReplacementAdmissionIfReady(pending) || hasPendingMatchingRejection(pending.sequence())) return;
         if (!collectLiquidationChecksIfReady(pending) || pending.hasMatchingRejection()) return;
         pending.prepareLaneResultTarget(owner.responseArena);
-        if (pending.placeAdmission() != null && !owner.runtimeState.asynchronousCommands()) {
+        if (pending.placeAdmission() != null
+                && (owner.runtimeState.isFusedExecution() || !owner.runtimeState.asynchronousCommands())) {
             if (!collectPlaceAdmissionIfReady(pending)
                     || hasPendingMatchingRejection(pending.sequence())) return;
         }
@@ -275,9 +276,9 @@ public final class CoreMatchingFlow {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
         }
         if (message.header().messageType() == CoreMessageType.REPLACE_ORDER) {
-            return TradingCommandCodec.decodeReplaceOrder(message.payloadUnsafe()).replacement();
+            return TradingCommandCodec.decodeReplaceOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), null).replacement();
         }
-        var command = TradingCommandCodec.decodeAmendOrder(message.payloadUnsafe());
+        var command = TradingCommandCodec.decodeAmendOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), null);
         return replacementForAmend(command, order);
     }
 
@@ -356,6 +357,7 @@ public final class CoreMatchingFlow {
     boolean collectReplacementAdmissionIfReady(CommandSlot pending) {
         var event = pending.replacementAdmission();
         if (event == null || pending.matchingAdmission() != null || pending.hasMatchingRejection()) return true;
+        if (owner.runtimeState.isFusedExecution()) event.executeInlineIfReady();
         if (!event.complete()) { owner.runtimeState.assertAccountLanesHealthy(); return false; }
         RuntimeException rejection = event.rejection();
         try {
@@ -404,6 +406,7 @@ public final class CoreMatchingFlow {
     boolean collectPlaceAdmissionIfReady(CommandSlot pending) {
         if (pending == null || pending.placeAdmission() == null) return true;
         var admission = pending.placeAdmission();
+        if (owner.runtimeState.isFusedExecution()) admission.executeInlineIfReady();
         if (!admission.complete()) return false;
         RuntimeException rejection = admission.rejection();
         if (!pending.placeAdmissionOwnerCollected()) {

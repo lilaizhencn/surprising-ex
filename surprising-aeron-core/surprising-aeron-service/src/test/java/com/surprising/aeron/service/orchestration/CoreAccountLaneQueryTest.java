@@ -135,6 +135,7 @@ class CoreAccountLaneQueryTest {
     }
 
     @Test
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void ownerReturnsWhileTargetLaneIsBlockedAndConsumesResultOnceLater() throws Exception {
         var release = new CountDownLatch(1);
         try (var core = prepared()) {
@@ -160,6 +161,7 @@ class CoreAccountLaneQueryTest {
     }
 
     @Test
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void readScopeDoesNotPrepareOrTouchUncollectedControlChanges() throws Exception {
         try (var core = prepared()) {
             var instrument = core.runtimeState.instrument("1");
@@ -230,7 +232,7 @@ class CoreAccountLaneQueryTest {
     }
 
     private TradingCoreRuntime initial(TradingCoreState state) {
-        return new TradingCoreRuntime(LINE, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
+        return new TradingCoreRuntime(LINE, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
                 new TerminalStateRetention(), null, 0, Map.of(), Map.of(), null, null);
     }
 

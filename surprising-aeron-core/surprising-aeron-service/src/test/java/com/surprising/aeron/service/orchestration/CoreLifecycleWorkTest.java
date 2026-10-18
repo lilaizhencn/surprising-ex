@@ -107,7 +107,7 @@ class CoreLifecycleWorkTest {
                         UUID.fromString("00000000-0000-0000-0000-000000000012"))));
         TradingCoreState trading = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(), Map.of(), Map.of("1", instrument), risk, treasury);
-        return TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.LINEAR_PERPETUAL, 0, 0,
+        return TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.LINEAR_PERPETUAL, 0,
                 Map.of(), Map.of(), trading);
     }
 

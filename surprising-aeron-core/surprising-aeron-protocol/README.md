@@ -23,3 +23,11 @@ HotSpot JDK 27 单线程组件采样：同一解码器读取直接缓冲区，�
 `TradingCommandCodec.decodePlaceOrderInto` 保留原帧范围、64 字节文本上限及订单字段校验。仅解码槽中的 `PlaceOrderCommand` 在首次遇到非 ASCII 订单号时，取得自身的标准 UTF8 decoder、64 字节及 64 字符工作缓冲；随后复用这些转码缓冲，并创建独立的不可变 `String`。ASCII 及独立值入口沿用原 String 解码，不新增名称缓存、ThreadLocal 或线程。最终 String 存储及 JDK 的 compact-string 转换仍会分配，不能称为零分配。
 
 29 个协议用例和 166 个直接受影响的服务用例通过。随机字节验证在一个用例内比较 5,000 组输入与 JDK 原解码结果，另覆盖非法代理编码、截断多字节、空值、最大长度、保留旧值和槽位复用；跨服务验证覆盖六产品线及身份、查询、成交、风险、资金、批量、划转和实时输出。见 [UTF8 解码功能验证](../../docs/validation/utf8-command-text-20261015.json)。未运行快照/恢复、wallet 或真实节点压测；分配诊断数值仅保留本地，完整 Owner 迁移及 Core 百字节目标仍未完成。
+
+### 交易命令槽与变长载荷（2026-10-18，验收中）
+
+`CancelOrderCommand`、`AmendOrderCommand`、`ReplaceOrderCommand` 及撤单/改单批次沿用下单命令的显式借用槽。独立构造的公开值不可变；从借用项构造公开批次或替换单时复制为稳定值。`DecodedMatchingCommand` 只保存一份当前载荷引用，命令终态及所有消费者完成前不得清槽。单笔改单按原始数组范围解码，批次直接读取每项范围，不创建分帧数组或临时项集合。
+
+`CoreMessage.payloadLength()` 是唯一有效载荷长度，`payloadUnsafe()` 可能包含未使用容量，调用者必须同时传入逻辑长度。`payload()`、编码、指纹、相等比较与哈希均只处理有效字节。`CoreMessageFlyweightDecoder` 对普通交易命令使用最大16KiB的2次幂容量桶，行政命令仍按精确长度复用；总共最多512个借用槽。Aeron回调到Owner的首次复制仍保留，不能借用回调结束即失效的传输缓冲。
+
+删除非业务递增命令的线码1，后续消息线码不变，旧命令直接拒绝。集群探测工具只支持状态哈希查询或Lane指标查询。功能、分配和实际节点结果在根 `PERFORMANCE_VALIDATION.md` 中按本轮计划记录；本节不预先宣称验收通过。

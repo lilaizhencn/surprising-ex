@@ -245,13 +245,16 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
                 stateChanged = true;
             }
             case KIND_TRANSFER_OUT -> {
-                if (transferCreated) runtime.registerPendingTransferRoute(transferCommand.transferId(), userId);
+                // Inline execution already registered the route while applying the transfer.
+                // With workers, only Owner publishes this route after the Lane receipt.
+                if (transferCreated && runtime.accountLanesStarted)
+                    runtime.registerPendingTransferRoute(transferCommand.transferId(), userId);
                 transferCommand = null;
                 stateChanged = true;
             }
             case KIND_TRANSFER_COMPLETE -> {
                 if (!transferRemoved) throw new IllegalStateException("pending transfer route has no Lane identity");
-                runtime.completePendingTransferRoute(transferId, userId);
+                if (runtime.accountLanesStarted) runtime.completePendingTransferRoute(transferId, userId);
                 stateChanged = true;
             }
             case KIND_LEVERAGE -> {

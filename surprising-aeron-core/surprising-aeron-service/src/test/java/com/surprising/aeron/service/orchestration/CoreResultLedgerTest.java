@@ -31,7 +31,7 @@ class CoreResultLedgerTest {
         com.surprising.aeron.protocol.CommandFingerprint firstExpected = null;
         for (int sequence = 1; sequence <= 2048; sequence++) {
             UUID id = new UUID(18, sequence);
-            var owned = probe(id, sequence, sequence);
+            var owned = checkpoint(id, sequence, sequence);
             byte[] frame = com.surprising.aeron.protocol.CoreMessageCodec.encode(owned);
             var input = decoder.decodeBorrowed(new org.agrona.concurrent.UnsafeBuffer(frame), 0, frame.length);
             var fingerprint = calculator.ofBorrowed(input);
@@ -50,7 +50,7 @@ class CoreResultLedgerTest {
                 assertThat(ledger.get(entry.getKey()).fingerprint()).isEqualTo(entry.getValue());
             assertThat(ledger.duplicateResponse(ledger.get(id), owned, stable, sequence).status())
                     .isEqualTo(ResponseStatus.DUPLICATE);
-            var changed = new CoreMessage(owned.header(), CoreProtocol.probePayload(sequence + 1));
+            var changed = new CoreMessage(owned.header(), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", sequence + 1)));
             assertThat(ledger.duplicateResponse(ledger.get(id), changed, calculator.of(changed), sequence).resultCode())
                     .isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
         }
@@ -91,7 +91,7 @@ class CoreResultLedgerTest {
     void ownedInsertionPreservesSequenceAndPriorResultWhenReplacing() {
         var ledger = new CommandResultLedger(new LinkedHashMap<>());
         UUID first = UUID.randomUUID(), second = UUID.randomUUID();
-        var fingerprint = com.surprising.aeron.protocol.CommandFingerprint.of(probe(first, 1, 1));
+        var fingerprint = com.surprising.aeron.protocol.CommandFingerprint.of(checkpoint(first, 1, 1));
         byte[] originalBytes = {1, 2};
         ledger.storeOwnedResult(first, fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE,
                 1, originalBytes);
@@ -129,9 +129,9 @@ class CoreResultLedgerTest {
     void evictedCommandResultIsExplicitlyOutsideRetention() {
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             UUID firstCommandId = UUID.randomUUID();
-            state.apply(probe(firstCommandId, 1, 1));
+            state.apply(checkpoint(firstCommandId, 1, 1));
             for (int sequence = 2; sequence <= TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS + 1; sequence++) {
-                assertThat(state.apply(probe(UUID.randomUUID(), sequence, 1)).status())
+                assertThat(state.apply(checkpoint(UUID.randomUUID(), sequence, 1)).status())
                         .isEqualTo(ResponseStatus.APPLIED);
             }
 
@@ -154,7 +154,7 @@ class CoreResultLedgerTest {
         }
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> TradingCoreRuntimeRestoreTestSupport.restore(
-                        ProductLine.SPOT, 70, 0, results, Map.of(),
+                        ProductLine.SPOT, 70, results, Map.of(),
                         com.surprising.aeron.service.state.TradingCoreState.empty(ProductLine.SPOT)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("result ledger");
@@ -181,8 +181,7 @@ class CoreResultLedgerTest {
             assertThat(state.commandResults()).doesNotContainKey(first);
             assertThat(state.commandResults()).containsKeys(second, third);
             try (TradingCoreRuntime restored = TradingCoreRuntimeRestoreTestSupport.restore(
-                    ProductLine.SPOT, state.appliedCommandCount(),
-                    state.probeValue(), state.commandResults(), state.lastSourceSequences(), state.tradingState())) {
+                    ProductLine.SPOT, state.appliedCommandCount(), state.commandResults(), state.lastSourceSequences(), state.tradingState())) {
                 assertThat(restored.stateHash()).isEqualTo(state.stateHash());
             }
         }
@@ -218,17 +217,16 @@ class CoreResultLedgerTest {
             assertThat(state.commandResults().get(pending).responseData()).hasSize(fourMiB.length);
             assertThat(state.commandResults().get(pending).retentionSequence()).isEqualTo(pendingRetention);
             try (TradingCoreRuntime restored = TradingCoreRuntimeRestoreTestSupport.restore(
-                    ProductLine.SPOT, state.appliedCommandCount(),
-                    state.probeValue(), state.commandResults(), state.lastSourceSequences(), state.tradingState())) {
+                    ProductLine.SPOT, state.appliedCommandCount(), state.commandResults(), state.lastSourceSequences(), state.tradingState())) {
                 assertThat(restored.stateHash()).isEqualTo(state.stateHash());
             }
         }
     }
 
-    private static CoreMessage probe(UUID commandId, long sourceSequence, long delta) {
-        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, commandId,
+    private static CoreMessage checkpoint(UUID commandId, long sourceSequence, long delta) {
+        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.VERIFY_STATE_HASH, commandId,
                 ProductLine.SPOT, CommandSource.GATEWAY, 7, sourceSequence, 1001,
-                1_000 + sourceSequence, sourceSequence), CoreProtocol.probePayload(delta));
+                1_000 + sourceSequence, sourceSequence), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", delta)));
     }
 
     private static CommandResultLedger.StoredResult stored(
@@ -239,7 +237,7 @@ class CoreResultLedgerTest {
             byte[] response,
             long retentionSequence) {
         long sourceSequence = Math.max(1, appliedCommandCount);
-        CoreMessage command = probe(new UUID(appliedCommandCount, resultIdentity), sourceSequence, 1);
+        CoreMessage command = checkpoint(new UUID(appliedCommandCount, resultIdentity), sourceSequence, 1);
         return new CommandResultLedger.StoredResult(
                 com.surprising.aeron.protocol.CommandFingerprint.of(command), status, resultCode,
                 appliedCommandCount, response, retentionSequence);

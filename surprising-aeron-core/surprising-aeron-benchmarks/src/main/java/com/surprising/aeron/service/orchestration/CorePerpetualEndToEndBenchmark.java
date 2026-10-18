@@ -138,6 +138,14 @@ public final class CorePerpetualEndToEndBenchmark {
         if (sequence == 0) throw new IllegalStateException("matching was not queued");
         MatchingResult matching = BenchmarkMatchingAwait.awaitMatchingResult(state, sequence, 30_000_000_000L);
         if (matching == null) throw new IllegalStateException("matching timed out");
+        // The Matcher fact is borrowed until terminal retirement. Retain only the scalar result.
+        long matchedQuantity = 0;
+        var events = matching.matcherEvents();
+        for (int index = 0; index < events.size(); index++) {
+            var event = events.get(index);
+            if (event.eventType() == MatcherEventType.TRADE)
+                matchedQuantity = Math.addExact(matchedQuantity, event.size());
+        }
         CoreResponse completed = null;
         long completionDeadline = System.nanoTime() + 30_000_000_000L;
         while (completed == null && System.nanoTime() < completionDeadline) {
@@ -147,9 +155,6 @@ public final class CorePerpetualEndToEndBenchmark {
         if (completed == null || completed.status() != ResponseStatus.APPLIED) {
             throw new IllegalStateException("matching was not applied");
         }
-        long matchedQuantity = matching.matcherEvents().stream()
-                .filter(event -> event.eventType() == MatcherEventType.TRADE)
-                .mapToLong(exchange.core2.core.common.MatcherResult.MatcherEvent::size).sum();
         return new Completion(matchedQuantity);
     }
 
@@ -169,6 +174,15 @@ public final class CorePerpetualEndToEndBenchmark {
                 ProductLine.LINEAR_PERPETUAL, source, sourceId,
                 sourceSequence, userId, 1_000L, sequences.clusterPosition++), payload);
         CoreResponse response = state.apply(message);
+        long deadline = System.nanoTime() + 30_000_000_000L;
+        while (state.directCommand.active()) {
+            state.assertHealthy();
+            response = state.directCommand.poll(state);
+            if (System.nanoTime() >= deadline)
+                throw new IllegalStateException("direct command timed out: " + type);
+            if (response == null) Thread.onSpinWait();
+        }
+        if (response == null) throw new IllegalStateException("command has no response: " + type);
         if (response.status() != ResponseStatus.APPLIED && response.status() != ResponseStatus.OK) {
             throw new IllegalStateException("command rejected type=" + type + " status=" + response.status());
         }

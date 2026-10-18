@@ -13,7 +13,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 class PublishedSnapshotRecoveryTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void restoresPublishedSnapshotAndRetainsFundsCommandIdempotency(ProductLine product) throws Exception {
+    void restoresCurrentFixedSnapshotAndRetainsFundsCommandIdempotency(ProductLine product) throws Exception {
         byte[] snapshot = resource(product, ".snapshot");
         String[] expected = new String(resource(product, ".expected"), StandardCharsets.UTF_8).split("\\n");
         long hash = Long.parseUnsignedLong(expected[0], 16);
@@ -24,7 +24,7 @@ class PublishedSnapshotRecoveryTest {
             assertThat(FundsStateHash.compute(restored.snapshotTradingState())).isEqualTo(fundsHash);
             assertThat(restored.apply(duplicate).status()).isEqualTo(ResponseStatus.DUPLICATE);
             assertThat(restored.stateHash()).isEqualTo(hash);
-            // Writing the new field format must preserve the old financial state across another restart.
+            // A second snapshot preserves the same financial state and command idempotency.
             try (var upgraded = TradingCoreRuntime.fromSnapshot(product, restored.snapshot())) {
                 assertThat(upgraded.stateHash()).isEqualTo(hash);
                 assertThat(FundsStateHash.compute(upgraded.snapshotTradingState())).isEqualTo(fundsHash);
@@ -33,56 +33,20 @@ class PublishedSnapshotRecoveryTest {
             }
         }
     }
-    @org.junit.jupiter.api.Test
-    void restoresActualPublishedV1PendingTransferBeforeCompletingIt() throws Exception {
-        String prefix = "/recovery/a8df45ae/published-v1-transfer";
-        byte[] snapshot = read(prefix + ".snapshot");
-        var oldCommand = CoreMessageCodec.decode(read(prefix + ".command"));
-        String[] expected = new String(read(prefix + ".expected"), StandardCharsets.UTF_8).split("\\n");
-        long fundsHash = Long.parseUnsignedLong(expected[1], 16);
-        // Original bytes and their original business hash are verified before the in-memory field upgrade.
-        TradingCoreRuntime.inspectSnapshot(ProductLine.SPOT, snapshot);
-        try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, snapshot)) {
-            assertThat(FundsStateHash.compute(restored.snapshotTradingState())).isEqualTo(fundsHash);
-            assertThat(restored.tradingState().user(1001).totalUnits("USDT")).isEqualTo(4750);
-            var transfer = restored.pendingTransfers().get(8844L).command();
-            assertThat(transfer.sourceUserId()).isEqualTo(1001);
-            assertThat(transfer.targetUserId()).isEqualTo(1001);
-            assertThat(apply(restored, new CoreMessage(oldCommand.header(), TradingCommandCodec.encodeTransferFunds(transfer))).status())
-                    .isEqualTo(ResponseStatus.DUPLICATE);
-            assertThat(apply(restored, oldCommand).status()).isEqualTo(ResponseStatus.DUPLICATE);
-            long upgradedHash = restored.stateHash();
-            try (var nextRestart = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, restored.snapshot())) {
-                assertThat(nextRestart.stateHash()).isEqualTo(upgradedHash);
-                assertThat(nextRestart.pendingTransfers().get(8844L).command()).isEqualTo(transfer);
-                var complete = new CoreMessage(CoreMessageHeader.command(CoreMessageType.COMPLETE_TRANSFER,
-                        new java.util.UUID(8844, 3), ProductLine.SPOT, CommandSource.GATEWAY, 7, 3, 1001, 1000, 3),
-                        TradingCommandCodec.encodeCompleteTransfer(new CompleteTransferCommand(8844)));
-                assertThat(apply(nextRestart, complete).status()).isEqualTo(ResponseStatus.APPLIED);
-                assertThat(nextRestart.pendingTransfers()).isEmpty();
-                assertThat(nextRestart.tradingState().user(1001).totalUnits("USDT")).isEqualTo(4750);
-            }
-        }
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void rejectsRetiredProbeContainingSnapshotSchema(ProductLine product) throws Exception {
+        byte[] old = read("/recovery/v26-v36-274495ae/" + product.name() + ".snapshot");
+        assertThatThrownBy(() -> TradingCoreRuntime.fromSnapshot(product, old))
+                .isInstanceOf(ProtocolException.class).hasMessageContaining("unsupported snapshot version: 26");
     }
 
     @org.junit.jupiter.api.Test
-    void restoresPublishedMultipleFeesAndPendingTransfersInDeterministicOrder() throws Exception {
-        String prefix = "/recovery/a8df45ae/published-v1-multi";
-        String[] expected = new String(read(prefix + ".expected"), StandardCharsets.UTF_8).split("\\n");
-        long fundsHash = Long.parseUnsignedLong(expected[1], 16);
-        try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, read(prefix + ".snapshot"))) {
-            assertThat(restored.feePolicies().keySet()).containsExactly(7L, 9L);
-            assertThat(restored.pendingTransfers().keySet()).containsExactly(1L, 9L, 17L, 257L, 8844L);
-            assertThat(restored.tradingState().user(1001).totalUnits("USDT")).isEqualTo(4710);
-            assertThat(FundsStateHash.compute(restored.snapshotTradingState())).isEqualTo(fundsHash);
-            assertThat(restored.apply(CoreMessageCodec.decode(read(prefix + ".command"))).status())
-                    .isEqualTo(ResponseStatus.DUPLICATE);
-            try (var next = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, restored.snapshot())) {
-                assertThat(next.stateHash()).isEqualTo(restored.stateHash());
-                assertThat(next.feePolicies()).isEqualTo(restored.feePolicies());
-                assertThat(next.pendingTransfers()).isEqualTo(restored.pendingTransfers());
-                assertThat(FundsStateHash.compute(next.snapshotTradingState())).isEqualTo(fundsHash);
-            }
+    void rejectsOldTransferSnapshotsAtTheSchemaBoundary() throws Exception {
+        for (String name : new String[]{"published-v1-transfer", "published-v1-multi"}) {
+            byte[] old = read("/recovery/a8df45ae/" + name + ".snapshot");
+            assertThatThrownBy(() -> TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, old))
+                    .isInstanceOf(ProtocolException.class).hasMessageContaining("unsupported snapshot version: 26");
         }
     }
 
@@ -94,23 +58,11 @@ class PublishedSnapshotRecoveryTest {
     }
 
     private static byte[] resource(ProductLine product, String suffix) throws IOException {
-        String name = "/recovery/v26-v36-274495ae/" + product.name() + suffix;
+        String name = "/recovery/v27-probe-removal-20261018/" + product.name() + suffix;
         try (var input = PublishedSnapshotRecoveryTest.class.getResourceAsStream(name)) {
             if (input == null) throw new IOException("missing fixed recovery fixture: " + name);
             return input.readAllBytes();
         }
     }
 
-    private static CoreResponse apply(TradingCoreRuntime state, CoreMessage command) {
-        CoreResponse response = state.apply(command);
-        long directDeadline = System.nanoTime() + 5_000_000_000L;
-        while (response == null && state.directCommand.active() && System.nanoTime() < directDeadline) {
-            response = state.directCommand.poll(state);
-            if (response == null) Thread.onSpinWait();
-        }
-        if (response == null && state.directCommand.active()) {
-            throw new AssertionError("Direct command timed out: " + command.header().messageType());
-        }
-        return response;
-    }
 }

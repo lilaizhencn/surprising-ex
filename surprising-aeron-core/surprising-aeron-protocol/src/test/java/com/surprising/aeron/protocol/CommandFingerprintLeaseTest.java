@@ -9,10 +9,10 @@ import static org.assertj.core.api.Assertions.*;
 
 class CommandFingerprintLeaseTest {
     @Test void canonicalDigestMatchesThePublishedWireFieldVector() {
-        // Canonical-v1: schema8, PROBE1, SPOT1, shard0/route3, gateway1, user7,
-        // payloadLength8 then LE delta1. Expected MurmurHash3_x64_128 was computed independently.
+        // Canonical-v1: schema8, ADJUST_BALANCE10, SPOT1, shard0/route3, gateway1, user7,
+        // payloadLength14 then LE text-length4, ASCII USDT, LE delta1. SHA-256 computed independently.
         var expected = java.util.HexFormat.of().parseHex(
-                "520c06b17d62b44983c6e5c3afaa1140b584c443bea8a9445303c65814834ffa");
+                "821956c4fba0c4d4111e9c3212ae02bd7bddfc346638835de7e0adc6c5cc4686");
         var calculator = new CommandFingerprint.Calculator();
         var message = probe(ProductLine.SPOT, 1);
         assertThat(calculator.of(message).bytes()).containsExactly(expected);
@@ -94,8 +94,8 @@ class CommandFingerprintLeaseTest {
     }
 
     private static CoreMessage probe(ProductLine line, long id) {
-        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, new UUID(16, id),
-                line, CommandSource.GATEWAY, 16, id, 7, 1, id), CoreProtocol.probePayload(id));
+        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE, new UUID(16, id),
+                line, CommandSource.GATEWAY, 16, id, 7, 1, id), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", id)));
     }
 
     private static void load(CoreMessage target, CoreMessage source) {

@@ -19,7 +19,7 @@ public final class CoreMessageFlyweightDecoder {
     private static final int MAX_CACHED_FRAME_BYTES = 16_384;
     /** Owned by one serial ingress callback or benchmark producer. */
     private final CoreMessage[] commandSlots = new CoreMessage[CACHE_SLOTS];
-    /** Circular lists of exact-length buffers; metadata is written only by the ingress producer. */
+    /** Capacity buckets for hot orders; exact lengths for administrative commands. Ingress owns metadata. */
     private final int[] lengthHeads = new int[MAX_CACHED_FRAME_BYTES + 1];
     private final int[] next = new int[CACHE_SLOTS];
     private final int[] previous = new int[CACHE_SLOTS];
@@ -43,10 +43,21 @@ public final class CoreMessageFlyweightDecoder {
     /** Bounded reuse cache. Busy slots remain untouched, even when ingress exceeds the command window. */
     public CoreMessage decodeBorrowed(DirectBuffer buffer, int offset, int length) {
         DirectMessageReader reader = reader(buffer, offset, length);
-        CoreMessage slot = length > MAX_CACHED_FRAME_BYTES ? null : acquire(reader.payloadLength());
+        int capacity = payloadCapacity(reader.messageType(), reader.payloadLength());
+        CoreMessage slot = length > MAX_CACHED_FRAME_BYTES ? null : acquire(capacity);
         if (slot == null) return decodeInto(buffer, reader, null);
         try { return decodeInto(buffer, reader, slot); }
         catch (RuntimeException invalid) { slot.releaseDecoderSlot(); throw invalid; }
+    }
+
+    private static int payloadCapacity(CoreMessageType type, int length) {
+        return switch (type) {
+            case PLACE_ORDER, PLACE_ORDER_BATCH, CANCEL_ORDER, CANCEL_ORDER_BATCH,
+                    AMEND_ORDER, AMEND_ORDER_BATCH, REPLACE_ORDER ->
+                    length == 0 || length > MAX_CACHED_FRAME_BYTES ? length
+                            : Math.max(8, Integer.highestOneBit(length - 1) << 1);
+            default -> length;
+        };
     }
 
     private CoreMessage acquire(int payloadLength) {
@@ -61,8 +72,8 @@ public final class CoreMessageFlyweightDecoder {
                 index = next[index];
             } while (index != head);
         }
-        // A new size may replace only an unleased slot. The cache remains at most 512
-        // exact-length arrays (8 MiB), even for an unbounded stream of different sizes.
+        // Replace only unleased slots. Power-of-two order buckets reuse variable text/frame sizes;
+        // all payload storage remains bounded by 512 * 16 KiB, independently of incoming sizes.
         for (int checked = 0; checked < CACHE_SLOTS; checked++) {
             int index = replacementCursor++ & (CACHE_SLOTS - 1);
             CoreMessage slot = commandSlots[index];
@@ -106,10 +117,10 @@ public final class CoreMessageFlyweightDecoder {
         long commandIdLsb = reader.commandIdLsb();
         CoreRoute route = CoreRoute.fromWireCodes(reader.shardCode(), reader.routeVersion());
         int payloadLen = reader.payloadLength();
-        byte[] payload = slot != null ? slot.decoderPayloadBuffer(payloadLen)
+        byte[] payload = slot != null ? slot.decoderPayloadBuffer(payloadLen, payloadCapacity(reader.messageType(), payloadLen))
                 : payloadLen == 0 ? CoreMessage.EMPTY_PAYLOAD : new byte[payloadLen];
         if (payloadLen > 0) {
-            buffer.getBytes(reader.payloadOffset(), payload);
+            buffer.getBytes(reader.payloadOffset(), payload, 0, payloadLen);
         }
         if (slot == null) return CoreMessage.owned(new CoreMessageHeader(
                 reader.schemaVersion(), reader.kind(), reader.messageType(),

@@ -232,8 +232,8 @@ class RuntimeCommitRecoveryTest {
             byte[] corruptChecksum = snapshot.clone();
             corruptChecksum[SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
                     + SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH + 20] ^= 1;
-            byte[] corruptBusinessHash = mutateLongInSection(snapshot, 1, 109, 1);
-            byte[] corruptProjectionSequence = mutateLongInSection(snapshot, 1, 69, 1);
+            byte[] corruptBusinessHash = mutateLongInSection(snapshot, 1, 101, 1);
+            byte[] corruptProjectionSequence = mutateLongInSection(snapshot, 1, 61, 1);
             byte[] corruptMatcherPayload = mutateLongInSection(snapshot, 4, Long.BYTES, 1);
 
             assertThatThrownBy(() -> published.set(SectionedCoreSnapshotCodec.decode(
@@ -1204,7 +1204,7 @@ class RuntimeCommitRecoveryTest {
             int sectionId = buffer.getInt();
             int length = buffer.getInt();
             int payloadOffset = buffer.position();
-            if (!changed && sectionId >= 10) {
+            if (!changed && sectionId >= 9) {
                 int laneId = buffer.getInt(payloadOffset);
                 int userCount = buffer.getInt(payloadOffset + Integer.BYTES + Long.BYTES * 5);
                 if (userCount > 0) {
@@ -1229,7 +1229,7 @@ class RuntimeCommitRecoveryTest {
             int length = buffer.getInt();
             int payloadOffset = buffer.position();
             if (sectionId == 1) {
-                buffer.putLong(payloadOffset + 85, digest);
+                buffer.putLong(payloadOffset + 77, digest);
                 rewriteChecksum(mutated);
                 return mutated;
             }

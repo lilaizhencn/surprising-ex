@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.api.parallel.Resources;
 
+@org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
 class CrossShardCancellationTest {
     private static final long TIME = 1_700_000_000_000L;
     private long sequence;

@@ -1055,7 +1055,7 @@ public final class OrderedCommitCoordinator {
         return completeMatching(pending.sequence(), matching, clusterTimestamp, clusterPosition);
     }
 
-    int commitReadyMatching(int maxCompletions, long clusterTimestamp, long clusterPosition,
+    public int commitReadyMatching(int maxCompletions, long clusterTimestamp, long clusterPosition,
                             boolean awaitFirst, TradingCoreRuntime.MatchingCommitHandler handler) {
         return commitReadyMatching(maxCompletions, clusterTimestamp, clusterPosition, awaitFirst, Long.MAX_VALUE, handler);
     }

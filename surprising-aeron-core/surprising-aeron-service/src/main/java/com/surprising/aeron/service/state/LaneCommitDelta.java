@@ -16,6 +16,8 @@ public final class LaneCommitDelta {
     private int terminalOrderCount;
     /** Lane-owned count captured at this receipt's boundary, never read from a later command. */
     private int positionCount = -1;
+    /** This Lane writes its own pending-reservation receipt, then publishes completion. */
+    int completedPending;
 
     private OrderRuntime[] retiredOrders = new OrderRuntime[4];
     private int retiredOrderCount;
@@ -319,6 +321,7 @@ public final class LaneCommitDelta {
     }
 
     void clear() {
+        completedPending = 0;
         positionCount = -1;
         closedTriggerCount = 0;
         java.util.Arrays.fill(retiredOrders, 0, retiredOrderCount, null);

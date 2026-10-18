@@ -13,7 +13,6 @@ import java.util.UUID;
 record CoreSnapshotImage(
         ProductLine productLine,
         long appliedCommandCount,
-        long probeValue,
         long sourceSequenceDigest,
         long snapshotId,
         long coreSequence,

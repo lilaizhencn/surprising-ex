@@ -57,6 +57,7 @@ class TradingCoreOwnerTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.EnumSource(value = ProductLine.class,
             names = {"SPOT", "LINEAR_PERPETUAL"})
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void ledgerCompletionResumesOrderedHeadWithoutAnotherMatcherNotification(ProductLine line) throws Exception {
         var service = new TradingOwnerTestSupport(line);
         var responses = new CopyOnWriteArrayList<byte[]>();
@@ -163,6 +164,7 @@ class TradingCoreOwnerTest {
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.MethodSource("ledgerPipelineCases")
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void ledgerSettlesIndependentCommandsBeforeOwnerRetiresTheFirstResponse(
             ProductLine line, boolean batchCommands) throws Exception {
         var service = new TradingOwnerTestSupport(line);
@@ -323,6 +325,7 @@ class TradingCoreOwnerTest {
     }
 
     @Test
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void fullLedgerMailboxKeepsItsDispatchCursorAndRetriesWithoutNewMatcherNotifications() throws Exception {
         var line = ProductLine.LINEAR_PERPETUAL;
         var service = new TradingOwnerTestSupport(line);
@@ -456,6 +459,7 @@ class TradingCoreOwnerTest {
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.MethodSource("batchLedgerCompletionCases")
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void batchLedgerCompletionResumesOrderedHeadWithoutAnotherMatcherNotification(
             ProductLine line, CoreMessageType type) throws Exception {
         var service = new TradingOwnerTestSupport(line);
@@ -726,7 +730,7 @@ class TradingCoreOwnerTest {
             epoch.setAccessible(true);
             long before = epoch.getLong(runtime);
             onSessionMessage(service, responses,
-                    command(CoreMessageType.PROBE_INCREMENT, 1, 1001, CoreProtocol.probePayload(3)));
+                    command(CoreMessageType.ADJUST_BALANCE, 1, 1001, com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 3))));
             finishCommands(service);
             onSessionMessage(service, responses,
                     command(CoreMessageType.VERIFY_STATE_HASH, 2, 1001, new byte[0]));
@@ -738,7 +742,7 @@ class TradingCoreOwnerTest {
                     com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeCommand(timer)));
             finishCommands(service);
             assertThat(epoch.getLong(runtime)).isEqualTo(before);
-            assertThat(service.state().probeValue()).isEqualTo(3);
+            assertThat(testBalance(service.state(), 1001)).isEqualTo(3);
             assertThat(runtime.cancelAllAfterTimer(new com.surprising.aeron.service.state.model.CoreCancelAllAfterKey(
                     1001, "1")).revision()).isEqualTo(1);
             assertThat(service.state().appliedCommandCount()).isEqualTo(3);
@@ -748,6 +752,7 @@ class TradingCoreOwnerTest {
     }
 
     @Test
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void preflightQueryWaitsForLaneOnLoggedCallbacksWithoutOwnerAccountReads() throws Exception {
         var service = service();
         var responses = new CopyOnWriteArrayList<byte[]>();
@@ -795,6 +800,7 @@ class TradingCoreOwnerTest {
     }
 
     @Test
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void bookQueryDoesNotWaitForBlockedMatcherAndCompletesOnLaterLoggedCallback() throws Exception {
         var service = service();
         var responses = new CopyOnWriteArrayList<byte[]>();
@@ -865,6 +871,7 @@ class TradingCoreOwnerTest {
     }
 
     @Test
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void stageProgressAndReentrantBackgroundDeferSnapshotUntilSettlementCompletes() throws Exception {
         var service = service();
         var responses = new CopyOnWriteArrayList<byte[]>();
@@ -1101,7 +1108,7 @@ class TradingCoreOwnerTest {
                 });
         service.onStart(cluster(), null);
         try {
-            CoreMessage command = command(CoreMessageType.PROBE_INCREMENT, 1, 1001, CoreProtocol.probePayload(3));
+            CoreMessage command = command(CoreMessageType.ADJUST_BALANCE, 1, 1001, com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 3)));
             byte[] encoded = CoreMessageCodec.encode(command);
             service.onSessionMessage(session, 1234, new UnsafeBuffer(encoded), 0, encoded.length, aeronHeader());
             finishCommands(service);
@@ -1112,7 +1119,7 @@ class TradingCoreOwnerTest {
             while (offers.get() < 3) service.pollCommands();
             assertThat(offers).hasValue(3);
             assertThat(closes).hasValue(0);
-            assertThat(service.state().probeValue()).isEqualTo(3);
+            assertThat(testBalance(service.state(), 1001)).isEqualTo(3);
             assertThat(service.state().appliedCommandCount()).isEqualTo(1);
         } finally {
             service.onTerminate(null);
@@ -1125,11 +1132,16 @@ class TradingCoreOwnerTest {
         service.onStart(cluster(), null);
         try {
             preparePendingPlace(service.state(), 30_001);
-            assertThatThrownBy(() -> replayWithoutSession(service,
-                    command(CoreMessageType.PROBE_INCREMENT, 3, 1001, CoreProtocol.probePayload(1))))
+            var attempted = command(CoreMessageType.ADJUST_BALANCE, 3, 1001,
+                    com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(
+                            new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 1)));
+            long appliedBefore = service.state().appliedCommandCount();
+            assertThatThrownBy(() -> replayWithoutSession(service, attempted))
                     .isInstanceOf(org.agrona.concurrent.AgentTerminationException.class)
                     .hasCauseInstanceOf(IllegalStateException.class);
-            assertThat(service.state().probeValue()).isZero();
+            // The deliberately broken reservation cannot be fenced for a state query.
+            assertThat(service.state().appliedCommandCount()).isEqualTo(appliedBefore);
+            assertThat(service.state().resultLedger.get(attempted.header().commandId())).isNull();
         } finally {
             service.onTerminate(null);
         }
@@ -1179,8 +1191,8 @@ class TradingCoreOwnerTest {
         Thread serviceThread = new Thread(() -> {
             try {
                 service.onStart(cluster(), null);
-                response.set(CoreTestCompletion.applyAsynchronously(service.state(), command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
-                        CoreProtocol.probePayload(1))));
+                response.set(CoreTestCompletion.applyAsynchronously(service.state(), command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+                        com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 1)))));
             } catch (Throwable throwable) {
                 failure.set(throwable);
             } finally {
@@ -1245,8 +1257,8 @@ class TradingCoreOwnerTest {
             assertThat(state.pendingMatching.size()).isZero();
             assertThat(responses).hasSize(1);
 
-            onSessionMessage(service, responses, command(CoreMessageType.PROBE_INCREMENT, 3, 1001,
-                    CoreProtocol.probePayload(1),
+            onSessionMessage(service, responses, command(CoreMessageType.ADJUST_BALANCE, 3, 1001,
+                    com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 1)),
                     UUID.fromString("00000000-0000-0000-0000-000000000014")));
             assertThat(service.doBackgroundWork(0)).isZero();
 
@@ -1265,8 +1277,8 @@ class TradingCoreOwnerTest {
         TradingOwnerTestSupport target = service();
         try {
             source.onStart(cluster(), null);
-            assertThat(source.state().apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
-                    CoreProtocol.probePayload(9))).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(CoreTestCompletion.applyAsynchronously(source.state(), command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+                    com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 9)))).status()).isEqualTo(ResponseStatus.APPLIED);
             byte[] snapshot = source.state().snapshot(45);
             AtomicInteger offset = new AtomicInteger();
             UnsafeBuffer buffer = new UnsafeBuffer(snapshot);
@@ -1279,7 +1291,7 @@ class TradingCoreOwnerTest {
 
             target.loadSnapshot(fragments, () -> offset.get() == snapshot.length);
 
-            assertThat(target.state().probeValue()).isEqualTo(9);
+            assertThat(testBalance(target.state(), 1001)).isEqualTo(9);
             assertThat(target.state().stateHash()).isEqualTo(source.state().stateHash());
             assertThat(offset).hasValue(snapshot.length);
         } finally {
@@ -1347,14 +1359,14 @@ class TradingCoreOwnerTest {
         try {
             service.onStart(cluster(), null);
             TradingCoreRuntime before = service.state();
-            assertThat(before.apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
-                    CoreProtocol.probePayload(9))).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(CoreTestCompletion.applyAsynchronously(before, command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+                    com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 9)))).status()).isEqualTo(ResponseStatus.APPLIED);
             long beforeHash = before.stateHash();
             long beforeSequence = before.appliedCommandCount();
             byte[] snapshot = before.snapshot(75);
             ByteBuffer manifest = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
             int snapshotIdOffset = SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
-                    + SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH + 53;
+                    + SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH + 45;
             manifest.putLong(snapshotIdOffset, manifest.getLong(snapshotIdOffset) + 1);
             CRC32C checksum = new CRC32C();
             checksum.update(snapshot, 0, snapshot.length - 16);
@@ -1433,8 +1445,8 @@ class TradingCoreOwnerTest {
         service.onStart(cluster(), null);
         try {
             assertThat(service.captureSnapshot(7)).isNotEmpty();
-            assertThat(service.state().apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
-                    CoreProtocol.probePayload(7))).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(CoreTestCompletion.applyAsynchronously(service.state(), command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+                    com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 7)))).status()).isEqualTo(ResponseStatus.APPLIED);
         } finally {
             service.onTerminate(null);
         }
@@ -1488,8 +1500,8 @@ class TradingCoreOwnerTest {
         try {
             service.onStart(cluster(), null);
             TradingCoreRuntime before = service.state();
-            assertThat(before.apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
-                    CoreProtocol.probePayload(7))).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(CoreTestCompletion.applyAsynchronously(before, command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+                    com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 7)))).status()).isEqualTo(ResponseStatus.APPLIED);
             byte[] snapshot = before.snapshot(11);
 
             // When
@@ -1497,7 +1509,7 @@ class TradingCoreOwnerTest {
 
             // Then
             assertThat(service.state()).isNotSameAs(before);
-            assertThat(service.state().probeValue()).isEqualTo(7);
+            assertThat(testBalance(service.state(), 1001)).isEqualTo(7);
             assertThat(service.state().appliedCommandCount()).isEqualTo(1);
         } finally {
             service.onTerminate(null);
@@ -1666,5 +1678,9 @@ class TradingCoreOwnerTest {
         if (type == double.class) return 0D;
         if (type == char.class) return '\0';
         return null;
+    }
+    private static long testBalance(TradingCoreRuntime state, long userId) {
+        var user = state.tradingState().user(userId);
+        return user == null ? 0 : user.totalUnits("USDT");
     }
 }

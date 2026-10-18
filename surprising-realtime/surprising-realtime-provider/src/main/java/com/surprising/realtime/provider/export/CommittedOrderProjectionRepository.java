@@ -43,7 +43,7 @@ public class CommittedOrderProjectionRepository {
      * completed interval is published only after the full cursor chain is present. Funding
      * projection export_sequence uses the immutable cluster log position, including pages
      * which emit no order/trade frame; it is not the trade-export sequence namespace. */
-    void persistFunding(com.surprising.aeron.service.orchestration.CommittedFundingPage page) {
+    void persistFunding(com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedFundingPage page) {
         transaction.executeWithoutResult(tx -> {
             var command = page.command();
             jdbc.queryForList("SELECT pg_advisory_xact_lock(hashtextextended(?,0))",

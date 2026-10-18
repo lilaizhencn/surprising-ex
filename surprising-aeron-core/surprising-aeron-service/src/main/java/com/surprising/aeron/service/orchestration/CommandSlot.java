@@ -942,13 +942,15 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                     : resolvedOrder != null ? resolvedOrder.orderId() : matchingOrder.orderId();
             var failure = applyMatcherPreCancellations(owner, matcherShard, orderId, direct);
             if (failure != null) return failure;
+            long msb = command.header().commandIdMsb();
+            long lsb = command.header().commandIdLsb();
             if (admittedOrder != null)
-                return owner.matchingAdapter.placeAdmittedDirect(matcherShard, coreSequence, command.header().commandId(),
+                return owner.matchingAdapter.placeAdmittedDirect(matcherShard, coreSequence, msb, lsb,
                         command.header().submittedAtEpochMillis(), userId, admittedOrder, direct);
             if (resolvedOrder != null)
-                return owner.matchingAdapter.placeDirect(matcherShard, coreSequence, command.header().commandId(),
+                return owner.matchingAdapter.placeDirect(matcherShard, coreSequence, msb, lsb,
                         command.header().submittedAtEpochMillis(), userId, resolvedOrder, direct);
-            return owner.matchingAdapter.placeDirect(matcherShard, coreSequence, command.header().commandId(),
+            return owner.matchingAdapter.placeDirect(matcherShard, coreSequence, msb, lsb,
                     command.header().submittedAtEpochMillis(), userId, matchingOrder, direct);
         }
     }
@@ -983,7 +985,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         @Override public Object get() {
             var failure = applyMatcherPreCancellations(owner, matcherShard, orderId, direct);
             if (failure != null) return failure;
-            return owner.matchingAdapter.cancelDirect(matcherShard, coreSequence, command.header().commandId(), orderId,
+            return owner.matchingAdapter.cancelDirect(matcherShard, coreSequence,
+                    command.header().commandIdMsb(), command.header().commandIdLsb(), orderId,
                     command.header().submittedAtEpochMillis(), userId, instrumentId, direct);
         }
     }
@@ -1025,7 +1028,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         @Override public Object get() {
             var failure = applyMatcherPreCancellations(owner, matcherShard, orderId, direct);
             if (failure != null) return failure;
-            return owner.matchingAdapter.replaceDirect(matcherShard, coreSequence, command.header().commandId(), orderId,
+            return owner.matchingAdapter.replaceDirect(matcherShard, coreSequence,
+                    command.header().commandIdMsb(), command.header().commandIdLsb(), orderId,
                     command.header().submittedAtEpochMillis(), userId, originalOrderId, instrumentId, resolvedReplacement, direct);
         }
     }

@@ -1812,8 +1812,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             assertThat(state.takeMatchingResult(sequence)).isNull();
             assertThatThrownBy(() -> state.apply(command(ProductLine.LINEAR_PERPETUAL,
-                    CoreMessageType.PROBE_INCREMENT, UUID.randomUUID(), 5,
-                    com.surprising.aeron.protocol.CoreProtocol.probePayload(1), 1001))).isSameAs(divergence);
+                    CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 5,
+                    com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 1)), 1001))).isSameAs(divergence);
         }
     }
 
@@ -2085,7 +2085,7 @@ class CoreOrderedOrderBatchTest {
     }
 
     private static CoreMessage probe(UUID commandId, long sequence) {
-        return command(CoreMessageType.PROBE_INCREMENT, commandId, sequence,
-                com.surprising.aeron.protocol.CoreProtocol.probePayload(1));
+        return command(CoreMessageType.ADJUST_BALANCE, commandId, sequence,
+                com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 1)));
     }
 }

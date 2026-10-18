@@ -58,7 +58,7 @@ final class ReliableTradeKafkaSink implements AutoCloseable {
                                 price,
                                 quantity,
                                 Instant.ofEpochMilli(frame.timestamp()),
-                                frame.traceId().isEmpty() ? "core-" + product + "-" + frame.sequence() : frame.traceId());
+                                "core-" + product + "-" + frame.sequence());
                 tradeSequence = event.sequence();
                 var record = new ProducerRecord<String, String>(topic, frame.instrumentId(), mapper.writeValueAsString(event));
                 record.headers().add("X-Trace-Id", event.traceId().getBytes(java.nio.charset.StandardCharsets.US_ASCII));
@@ -67,12 +67,12 @@ final class ReliableTradeKafkaSink implements AutoCloseable {
             producer.commitTransaction();
             // Log success only after the transaction is committed, never in the send callback.
             for (var frame : frames)
-                log.info("trade.kafka.committed traceId={} productLine={} tradeId={} topic={} logPosition={}",
-                        frame.traceId(), product, frame.entityId(), topic, frame.sequence());
+                log.info("trade.kafka.committed productLine={} tradeId={} topic={} logPosition={}",
+                        product, frame.entityId(), topic, frame.sequence());
         } catch (RuntimeException failure) {
             for (var frame : frames)
-                log.warn("trade.kafka.failed traceId={} productLine={} tradeId={} error={}",
-                        frame.traceId(), product, frame.entityId(), failure.getClass().getSimpleName());
+                log.warn("trade.kafka.failed productLine={} tradeId={} logPosition={} error={}",
+                        product, frame.entityId(), frame.sequence(), failure.getClass().getSimpleName());
             try {
                 producer.abortTransaction();
             } catch (RuntimeException abortFailure) {

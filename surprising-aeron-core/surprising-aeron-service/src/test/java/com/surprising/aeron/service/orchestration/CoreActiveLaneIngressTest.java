@@ -11,6 +11,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import static org.assertj.core.api.Assertions.*;
 
 /** 普通apply入口也必须使用实际Lane；等待仅在功能测试边界。 */
+@org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
 class CoreActiveLaneIngressTest {
     private static final long TIME = 1_700_000_000_000L;
     private long sequence;

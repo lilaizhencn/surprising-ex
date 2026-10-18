@@ -5,6 +5,20 @@ import org.junit.jupiter.api.Test;
 
 class RuntimeChangeBufferTest {
     @Test
+    void largeInlineReservationDeletesClearAcrossFrozenAndLiveReuse() {
+        var buffer = new RuntimeReservationChangeBuffer();
+        for (int count : new int[]{0, 1, 8, 9, 256, 1024, 3}) {
+            for (int index = 0; index < count; index++) buffer.putLive(index + 1, null);
+            assertThat(buffer.size()).isEqualTo(count);
+            if (count == 8 || count == 256) buffer.freezeValues();
+            buffer.clear();
+            assertThat(buffer.isEmpty()).isTrue();
+            for (int index = 0; index < count; index++)
+                assertThat(buffer.containsKey(index + 1)).isFalse();
+        }
+    }
+
+    @Test
     void eclipseDrainDeletesOverwritesAndReleasesSlotsAcrossReuse() throws Exception {
         var buffer = new RuntimeChangeBuffer<String>();
         var target = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<String>();

@@ -11,6 +11,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import static org.assertj.core.api.Assertions.*;
 
 /** The public cold business hash includes facts from every Lane and returns ownership afterwards. */
+@org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
 class CoreBusinessStateHashTest {
     private static final long TIME = 1_700_000_000_000L;
     private long sequence;

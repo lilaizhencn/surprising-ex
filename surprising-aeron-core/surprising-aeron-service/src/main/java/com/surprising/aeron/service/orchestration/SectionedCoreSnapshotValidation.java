@@ -32,7 +32,6 @@ final class SectionedCoreSnapshotValidation {
             throw new ProtocolException("snapshot route mismatch: " + exception.getMessage());
         }
         long appliedCommandCount = header.getLong();
-        long probeValue = header.getLong();
         long snapshotId = header.getLong();
         long coreSequence = header.getLong();
         long projectionSequence = header.getLong();
@@ -54,7 +53,7 @@ final class SectionedCoreSnapshotValidation {
         }
         return new HeaderManifest(productLine, topology, snapshotId, coreSequence,
                 projectionSequence, accountLaneDigest,
-                clusterTimestamp, clusterPosition, appliedCommandCount, probeValue,
+                clusterTimestamp, clusterPosition, appliedCommandCount,
                 businessStateHash, globalFundsHash, sourceSequenceDigest);
     }
 
@@ -135,7 +134,7 @@ final class SectionedCoreSnapshotValidation {
     record HeaderManifest(
             ProductLine productLine, LaneTopology topology, long snapshotId, long coreSequence,
             long projectionSequence, long accountLaneDigest,
-            long clusterTimestamp, long clusterPosition, long appliedCommandCount, long probeValue,
+            long clusterTimestamp, long clusterPosition, long appliedCommandCount,
             long businessStateHash, long globalFundsHash,
             long sourceSequenceDigest) {
     }

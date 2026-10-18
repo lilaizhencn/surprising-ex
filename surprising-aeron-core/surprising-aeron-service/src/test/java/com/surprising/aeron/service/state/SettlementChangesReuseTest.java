@@ -97,10 +97,10 @@ class SettlementChangesReuseTest {
                 var changes = runtime.acquireMatcherSettlementChanges(1L << lane);
                 for (int i = 0; i < 4; i++) {
                     assertThat(changes.laneDeltas[i].orders.isEmpty()).isTrue();
-                    assertThat(changes.completedPending[i]).isZero();
+                    assertThat(changes.laneDeltas[i].completedPending).isZero();
                 }
                 changes.laneDeltas[lane].putOrder(turn + 1, CoreStateTestFixtures.order(turn + 1, 7, 0, 1, true));
-                changes.completedPending[lane] = 3;
+                changes.laneDeltas[lane].completedPending = 3;
                 runtime.releaseMatcherSettlementChanges(changes);
             }
         }

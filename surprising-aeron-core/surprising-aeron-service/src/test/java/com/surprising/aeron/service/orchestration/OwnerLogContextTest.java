@@ -47,8 +47,8 @@ class OwnerLogContextTest {
     }
 
     private static CoreMessage probe(ProductLine product, long sequence) {
-        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
                 new UUID(45, sequence), product, CommandSource.OPERATIONS, 45, sequence, 7, 1, sequence),
-                CoreProtocol.probePayload(1));
+                com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 1)));
     }
 }

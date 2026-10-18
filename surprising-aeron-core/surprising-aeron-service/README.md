@@ -430,3 +430,23 @@ D1 补充审查：`ClusterServiceEgress.TransportSession` 仍实现 `ClientSessi
 `TerminalStateRetention` 已删除无调用的旧 `observe` / `observeAcknowledgedOrders` 及其专用观察、排序、候选更新方法，共 12 个方法，并移除排序缓冲。实际终态仍从 Lane 提交事实进入 `TerminalOrderSink`；去重标记、候选裁剪、资金幂等及编解码方法保持原实现，没有增加替代流程。
 
 21 项必要功能回归通过，覆盖六产品线资金幂等与手续费资金守恒、跨 Lane IOC 和终态发布，见 [D6 功能验证](../../docs/validation/d6-complete-20261015.json)。本轮不执行快照/恢复、压测、JMH/JFR 或 wallet。审计文档 D2–D6 已标记完成；D6 原报告中的序号冗余和“仅测试使用”判断已按实际用途纠正。
+
+### 交易链路精简与并发修复（2026-10-18，验收中）
+
+`TradingCoreOwner` 在FUSED模式直接推进输入环队首，直到撮合、结算、确定性提交及回包交接完成；不创建 `ClusterCommandWindow` 或维护其依赖索引。解码在幂等/来源检查之后进入原准入异常处理，畸形载荷仍产生业务拒绝。`MatcherCommandPipeline.startInline` 不创建跨线程提交环或读请求队列，同步结果直接交给既有命令槽；只有控制调用需要保留一个本线程结果。PIPELINED保留Matcher、Account Lane与账本线程的原交接边界。
+
+FUSED的权威订单和冻结槽沿用Lane池，并受已提交序号的退休栅栏约束。Matcher的原生币对注册集合改为所属执行作用域的primitive集合。Lane就绪提示按Lane/分片间隔存放，各Lane回执计数放在自身 `LaneCommitDelta` 中；队列及事件完成位仍是完成事实，提示位不替代业务栅栏。直达结算仅允许发布已就绪事实，移除不可达的未就绪等待分支。
+
+`MatcherSettlementEvent` 直接访问自身批次存储，删除重复数组引用和首项元数据副本。财库delta只在实际有成交时分配容量，事实构造完成时统一清理一次；`MatcherSettlementPlan` 的去重scratch只在构建finally清理一次。`ClusterServiceEgress` 的异常会话关闭请求改为并发去重集合，Aeron逐项消费，避免清空时丢失Owner并发追加的请求。正常回包不为该集合分配节点，仍保留跨线程Header/响应租约。
+
+快照格式升至27，头部125字节；删除递增探针字段，不持久化非业务测试状态，旧格式明确拒绝，不加入恢复兼容分支。资金、持仓、来源序号、命令幂等、Matcher及Lane配对检查保留。协议变动影响六产品线，需完成共享协议、交易/风控/资金与快照恢复、实时推送和Gateway回归后验收。
+
+直达事件区分Lane可消费事实与Owner可退休条件：先释放Matcher提交路由，再发布事实并完成所有Lane投递，最后释放已有生产者生命周期标记；此后只能用提前捕获的runtime发出通知，不再访问可能已经被复用的事件。FUSED资金划转沿用就地执行时已登记的路由，控制续接不再重复登记或删除；PIPELINED仍由Owner在Lane回执后维护路由。
+
+FUSED融合的是交易计算与账户Lane；两种模式都启动已有 `SystemLedgerLane`，资金幂等索引和财库仍使用该所有权/I/O边界。不能把“单一交易线程”解释为允许Owner同步访问持久化索引。已有控制续接负责等待账本结果，无需恢复FUSED命令窗口或Matcher队列。
+
+FUSED比例OI准入通过既有事件等待Ledger发布输入，再在Owner执行所属账户检查；撮合不会在同线程等待尚未执行的准入。用户元数据和冻结记录统一从已提交Lane回执导出，避免融合模式再按变更集合重复发送。实时推送回归覆盖两模式×六产品，并校验单次元数据、冻结、订单、成交和执行记录。
+
+`surprising-aeron-tools` 的 `OfflineReplayMain` 按输入顺序等待控制命令、撮合/账户/账本完成及查询结果。它直接使用Owner现有的有序完成收集入口和回调契约，不再自行拼装Matcher与Lane提交；正常和异常退出均关闭运行时。该入口及回调只扩大可见性，没有新增执行框架、状态镜像或提交阶段。
+
+验收中的256项强平撤单暴露了冻结变更缓冲的边界错误：就地执行可累计超过8个原始删除项，但发布副本数组无需随之扩容。`RuntimeReservationChangeBuffer.clear` 现在只清理实际可用的副本，再通过原缓冲清理全部键和值；没有为纯删除创建副本。新增回归在修复前稳定越界，覆盖0/1/8/9/256/1024项及冻结/就地复用，强平业务夹具同时覆盖两种执行模式。改单准入使用has/raw字段读取可选修改，避免重复数值装箱。

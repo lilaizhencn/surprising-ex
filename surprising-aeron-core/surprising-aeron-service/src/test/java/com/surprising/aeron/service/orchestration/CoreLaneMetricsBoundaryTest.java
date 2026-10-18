@@ -16,6 +16,7 @@ class CoreLaneMetricsBoundaryTest {
     private static final long TIME = 1_700_000_000_000L;
 
     @Test
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void metricsCannotEnterAccountScopeOrCollectAnUnfinishedRiskDeletion() throws Exception {
         var release = new CountDownLatch(1);
         try (var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {

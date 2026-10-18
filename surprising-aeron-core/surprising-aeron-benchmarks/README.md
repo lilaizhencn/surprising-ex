@@ -108,3 +108,9 @@ D2 复审中，`MatcherTreasuryReceiptBenchmark` 移除发布模式标记，统�
 `ClusteredBatchTradingBenchmark.Workload` 改为向 Owner 共用的实际输入环发布；环满时推进原 Owner 后重试，不再调用已删除的中继方法。基准源码及直接依赖编译通过，该夹具自身包含快照的场景本轮未执行。
 
 `D1BenchmarkBoundaryTest` 的两项有限检查通过，包含真实 `TradingOwnerLoop` 连续交易及终态资金核对；服务端满环、绕回、字节预算、中断和角色边界等必要用例合计 83 项通过。详见 [D4 功能验证](../../docs/validation/d4-complete-20261015.json)。本次不执行 JMH 计时、JFR 或压测，不追加性能记录。
+
+## 交易命令与Lane通知组件验收（2026-10-18）
+
+`TradingCommandDecodeBenchmark.decodeRetainedCommandWindow` 同时保留256个真实输入租约，解码并读取每个撤单/改单/替换项，再终态释放。固定和变长输入各使用三组256帧；变长改单批次有768种有效长度，均落在2048字节容量桶，用于覆盖原512精确长度缓存的淘汰边界。返回校验和消费实际字段和文本，防止只测空壳引用。JMH分数及 `gc.alloc.rate.norm` 均按**每条Core消息**归一；改单批次20项，固定撤单批次20项，变长撤单批次平均10.375项，换算每业务项时必须注明分母。
+
+`ReadyLaneMaskBenchmark.laneNotifications` 是两个真实并发通知发布者和一个Owner收集者，共三线程。JMH group操作数不能解释为成交吞吐，也不能据此声称硬件缓存失效率改善。两项基准已编译并可被JMH发现；正式采样等待同机其他测试停止后按根 `PERFORMANCE_VALIDATION.md` 锁定计划进行。

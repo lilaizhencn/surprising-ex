@@ -130,8 +130,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 永久运行的各账户 Lane 工作线程；承担所有多核真并发结算。 */
     public final SettlementLaneWorker[] laneWorkers;
     /** 批量准入完成的 shard 唤醒位；批上下文本身保存唯一完成事实。 */
-    private final PaddedReadyMask accountAdmissionReadyShards =
-            new PaddedReadyMask();
+    private final PaddedReadyMask accountAdmissionReadyShards;
     /** Admission payload stays in its command event; this queue only wakes the exact Owner slot. */
     final LaneSequenceQueue[] placeAdmissionReadyQueues;
     /** 各 Lane 到 owner 的结算完成通知队列。 */
@@ -157,75 +156,68 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 可复用的 laneCommitEvent 对象池；仅在消费者完成后回收。 */
     final java.util.ArrayDeque<LaneCommitEvent> laneCommitEventPool = new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
 
-    private static class PaddedReadyMaskLhsPadding {
-        @SuppressWarnings("unused")
-        private long p00, p01, p02, p03, p04, p05, p06, p07;
-    }
+    /**
+     * Coalesced wake-up hints, not business completion state. Each bit has its own
+     * cache-line-separated cell; publishing one Lane never rewrites another Lane's word.
+     * Multiple producers of the same bit coalesce through a single exchange, without CAS retries.
+     * Queue cursors and event release markers remain the authoritative completion fences.
+     */
+    public static final class PaddedReadyMask {
+        private static final int STRIDE = 16;
+        private static final java.lang.invoke.VarHandle CELLS =
+                java.lang.invoke.MethodHandles.arrayElementVarHandle(long[].class);
+        private final long[] cells;
+        private final int bitCount;
 
-    private static class PaddedReadyMaskValue extends PaddedReadyMaskLhsPadding {
-        protected volatile long mask;
-    }
+        public PaddedReadyMask() { this(Long.SIZE); }
 
-    private static class PaddedReadyMaskRhsPadding extends PaddedReadyMaskValue {
-        @SuppressWarnings("unused")
-        private long p10, p11, p12, p13, p14, p15, p16, p17;
-    }
+        public PaddedReadyMask(int bitCount) {
+            if (bitCount <= 0 || bitCount > Long.SIZE)
+                throw new IllegalArgumentException("ready bit count must be in [1,64]");
+            this.bitCount = bitCount;
+            cells = new long[Math.multiplyExact(bitCount, STRIDE)];
+        }
 
-    public static final class PaddedReadyMask extends PaddedReadyMaskRhsPadding {
-        private static final java.lang.invoke.VarHandle MASK_VH;
-        static {
-            try {
-                MASK_VH = java.lang.invoke.MethodHandles.lookup()
-                        .findVarHandle(PaddedReadyMaskValue.class, "mask", long.class);
-            } catch (ReflectiveOperationException e) {
-                throw new ExceptionInInitializerError(e);
-            }
+        private int offset(int bitIndex) {
+            if (bitIndex < 0 || bitIndex >= bitCount)
+                throw new IllegalArgumentException("ready bit is outside its topology");
+            return bitIndex * STRIDE;
         }
 
         public boolean setBit(int bitIndex) {
-            long bit = 1L << bitIndex;
-            while (true) {
-                long current = (long) MASK_VH.getVolatile(this);
-                if ((current & bit) != 0) {
-                    return false;
-                }
-                if (MASK_VH.compareAndSet(this, current, current | bit)) {
-                    return true;
-                }
-            }
+            int offset = offset(bitIndex);
+            if ((long) CELLS.getAcquire(cells, offset) != 0) return false;
+            return (long) CELLS.getAndSet(cells, offset, 1L) == 0;
         }
 
         public void clearBit(int bitIndex) {
-            long bit = 1L << bitIndex;
-            while (true) {
-                long current = (long) MASK_VH.getVolatile(this);
-                if ((current & bit) == 0) {
-                    return;
-                }
-                if (MASK_VH.compareAndSet(this, current, current & ~bit)) {
-                    return;
-                }
-            }
+            CELLS.getAndSet(cells, offset(bitIndex), 0L);
         }
 
         public void clearBits(long bitsToClear) {
-            while (true) {
-                long current = (long) MASK_VH.getVolatile(this);
-                if ((current & bitsToClear) == 0) {
-                    return;
-                }
-                if (MASK_VH.compareAndSet(this, current, current & ~bitsToClear)) {
-                    return;
-                }
+            while (bitsToClear != 0) {
+                int bit = Long.numberOfTrailingZeros(bitsToClear);
+                bitsToClear &= bitsToClear - 1;
+                clearBit(bit);
             }
         }
 
         public long get() {
-            return (long) MASK_VH.getVolatile(this);
+            long ready = 0;
+            for (int bit = 0; bit < bitCount; bit++)
+                if ((long) CELLS.getAcquire(cells, bit * STRIDE) != 0) ready |= 1L << bit;
+            return ready;
         }
 
         public long getAndClear() {
-            return (long) MASK_VH.getAndSet(this, 0L);
+            long ready = 0;
+            for (int bit = 0; bit < bitCount; bit++) {
+                int offset = bit * STRIDE;
+                // Empty polling reads a shared line; only an actual receipt takes write ownership.
+                if ((long) CELLS.getAcquire(cells, offset) != 0
+                        && (long) CELLS.getAndSet(cells, offset, 0L) != 0) ready |= 1L << bit;
+            }
+            return ready;
         }
     }
 
@@ -253,6 +245,16 @@ public final class TradingRuntimeState implements AutoCloseable {
             new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
     /** 账户 Lane 是否已初始化。 */
     boolean accountLanesStarted;
+    private boolean fusedExecutionActive;
+
+    public void enableFusedExecution() {
+        assertOwner();
+        this.fusedExecutionActive = true;
+    }
+
+    public boolean isFusedExecution() {
+        return fusedExecutionActive;
+    }
 
     /** 各币对当前标记价，由所属产品运行时独立维护。 */
     final IntObjectHashMap<MarkPriceRuntime> markPrices = new IntObjectHashMap<>();
@@ -367,6 +369,10 @@ public final class TradingRuntimeState implements AutoCloseable {
     public TradingRuntimeState(LaneTopology topology) {
         if (topology == null) throw new IllegalArgumentException("lane topology is required");
         this.topology = topology;
+        accountAdmissionReadyShards = new PaddedReadyMask(topology.matchingEngineCount());
+        settlementReadyLanes = new PaddedReadyMask(topology.accountLaneCount());
+        directSettlementReadyLanes = new PaddedReadyMask(topology.accountLaneCount());
+        placeAdmissionReadyLanes = new PaddedReadyMask(topology.accountLaneCount());
         this.accountLanes = new AccountLaneState[topology.accountLaneCount()];
         int deltaRingCapacity = Math.max(64,
                 Integer.getInteger("surprising.aeron.max-pending-matching", 4_096));
@@ -648,7 +654,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     /** 启动worker后的所有入口都派发真实Lane；显式作用域只用于尚未启动的命令边界。 */
-    public boolean asynchronousCommands() { assertOwner(); return accountLanesStarted || asynchronousCommandScope; }
+    public boolean asynchronousCommands() { assertOwner(); return accountLanesStarted || systemLedger != null || asynchronousCommandScope; }
     public boolean accountLanesStarted() { return accountLanesStarted; }
 
     /** 控制账户任务的唯一派发/收集入口，与账户业务处理器分离。 */
@@ -876,8 +882,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (current != owner || !accountLanesStarted) {
             lane.assertOwner();
         }
-        if (current == owner) ownerLaneScope = lane;
-        lane.commandScopeActive = true;
+        if (current == owner) {
+            ownerLaneScope = lane;
+            if (!accountLanesStarted) lane.commandScopeActive = true;
+        } else {
+            lane.commandScopeActive = true;
+        }
     }
 
     void enterMatcherSettlementScope(AccountLaneState lane, MatcherSettlementChanges changes) {
@@ -905,9 +915,13 @@ public final class TradingRuntimeState implements AutoCloseable {
             lane.assertOwner();
             if (captureRetirementProof) laneDeltas[lane.laneId()].preparePositionRetirement(lane);
         }
-        if (current == owner) ownerLaneScope = null;
-        lane.commandScopeActive = false;
-        if (current == owner) flushPublishedChanges(lane.laneId());
+        if (current == owner) {
+            ownerLaneScope = null;
+            if (!accountLanesStarted) lane.commandScopeActive = false;
+            flushPublishedChanges(lane.laneId());
+        } else {
+            lane.commandScopeActive = false;
+        }
     }
 
     void exitMatcherSettlementScope(AccountLaneState lane, MatcherSettlementChanges changes) {
@@ -1520,7 +1534,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 event.inputQueued();
             }
             if (!accountLanesStarted) {
-                event.execute(accountLanes[laneId]);
+                if (event.accountReady()) event.execute(accountLanes[laneId]);
             } else {
                 releaseOwnerLaneAccess();
                 laneWorkers[laneId].submitAdmission(event);
@@ -1558,8 +1572,9 @@ public final class TradingRuntimeState implements AutoCloseable {
                     throw new java.util.concurrent.RejectedExecutionException("Ledger replacement mailbox is full");
                 event.inputQueued();
             }
-            if (!accountLanesStarted) event.execute(accountLanes[laneId]);
-            else {
+            if (!accountLanesStarted) {
+                if (event.accountReady()) event.execute(accountLanes[laneId]);
+            } else {
                 releaseOwnerLaneAccess();
                 laneWorkers[laneId].submit(event);
             }
@@ -1697,15 +1712,15 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** Owner 登记的 matcher 结算通知范围；其序号仍由各 Lane 的 SPSC 队列承载。 */
     private long expectedSettlementLanes;
-    private final PaddedReadyMask settlementReadyLanes = new PaddedReadyMask();
+    private final PaddedReadyMask settlementReadyLanes;
     /**
      * Direct Matcher->Lane settlements do not need an Owner-consumed sequence queue.  The
      * settlement event already owns the per-Lane completion bits; this mask is only a wake-up
      * hint so the Owner retries its ordered head.  Keeping it separate avoids allocating and
      * draining one notification record for every Lane touched by every matching result.
      */
-    private final PaddedReadyMask directSettlementReadyLanes = new PaddedReadyMask();
-    private final PaddedReadyMask placeAdmissionReadyLanes = new PaddedReadyMask();
+    private final PaddedReadyMask directSettlementReadyLanes;
+    private final PaddedReadyMask placeAdmissionReadyLanes;
     private final int[] expectedSettlements = new int[64];
     void releaseSettlementExpectation(int laneId) {
         assertOwner();
@@ -1925,7 +1940,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                     flushPublishedChanges(laneId, changedUsers, changedOrders);
                 }
                 else {
-                    completed += changes.completedPending[laneId];
+                    completed += changes.laneDeltas[laneId].completedPending;
                     if (fundsAccumulator != null && !ledgerFunds) fundsAccumulator.add(changes.laneFundsDeltas[laneId]);
                     if (changes.directPositionIdentities) {
                         var positions = changes.laneDeltas[laneId].positions;
@@ -2131,7 +2146,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             accountRollback.captureBalanceBefore(lane, reservation.userId(), reservation.assetId());
             lane.completePendingReservation(orderId, plan.coreSequence());
-            if (changes != null) changes.completedPending[lane.laneId()]++;
+            if (changes != null) changes.laneDeltas[lane.laneId()].completedPending++;
             // Completion still contributes a changed ID, but an unchanged admission already
             // has an immutable version. Reuse it instead of freezing the Lane value again.
             // Compare all fields: commit metadata may change without incrementing revision.
@@ -4691,7 +4706,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (capture == null || !capture.privateStateEnabled()) return;
         try {
             changedRiskSnapshots.forEach((id,value) -> capture.risk(value));
-            if (!accountLanesStarted) {
+            // Live execution exports metadata and reservations from the committed Lane delta,
+            // including when the Owner executes the Lane inline. Cold direct application
+            // has no delta handoff and still exports its change sets here.
+            if (!accountLanesStarted && !fusedExecutionActive) {
                 changedUsers.forEach(id -> capture.metadata(user(id)));
                 changedReservations.forEach(id -> capture.reservation(reservation(id)));
             }
@@ -5247,7 +5265,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** Control admission shares the same retirement fence as ordinary Lane admission. */
     OrderRuntime prepareControlOrder(long userId, ResolvedPlaceOrder command, java.util.UUID commandId, int symbolId) {
-        if (!accountLanesStarted) return preparedOrder(productLine, userId, command, commandId, symbolId, 0, 0);
+        if (!accountLanesStarted && !fusedExecutionActive)
+            return preparedOrder(productLine, userId, command, commandId, symbolId, 0, 0);
         AccountLaneState lane = currentLaneCommandScope();
         if (lane == null || lane.laneId() != topology.accountLaneId(userId))
             throw new IllegalStateException("active order creation requires its Account Lane");
@@ -5279,7 +5298,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
                     "available balance is insufficient");
         }
-        OrderRuntime order = prepared != null && !prepared.commandSlotValue() ? prepared : accountLanesStarted
+        OrderRuntime order = prepared != null && !prepared.commandSlotValue() ? prepared
+                : accountLanesStarted || fusedExecutionActive
                 ? lane.preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position, retiredOwnerSequence)
                 : preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position);
         ReservationRuntime reservation = order.prepareReservation(

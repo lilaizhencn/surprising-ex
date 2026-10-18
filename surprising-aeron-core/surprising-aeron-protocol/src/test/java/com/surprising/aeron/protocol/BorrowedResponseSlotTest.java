@@ -8,7 +8,7 @@ import static org.assertj.core.api.Assertions.*;
 class BorrowedResponseSlotTest {
     private static void initialize(CoreMessage slot, long id) {
         slot.decoderPayloadBuffer(0);
-        slot.decoderHeader(CoreProtocol.SCHEMA_VERSION, WireMessageKind.COMMAND, CoreMessageType.PROBE_INCREMENT,
+        slot.decoderHeader(CoreProtocol.SCHEMA_VERSION, WireMessageKind.COMMAND, CoreMessageType.ADJUST_BALANCE,
                 new UUID(1, id), ProductLine.SPOT, CoreRoute.DEFAULT, CommandSource.GATEWAY,
                 1, id, 7, 1, id);
     }
@@ -47,7 +47,7 @@ class BorrowedResponseSlotTest {
     }
 
     @Test void independentMessagesKeepStableResponseValuesAcrossSubsequentResponses() {
-        var request = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+        var request = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
                 new UUID(1, 1), ProductLine.SPOT, CommandSource.GATEWAY, 1, 1, 7, 1, 1), new byte[0]);
         var first = request.ownedResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                 1, new byte[]{1}, 0, 1);

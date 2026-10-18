@@ -322,10 +322,10 @@ class AeronClientAgentTest {
         }))) {
             CoreMessage message = new CoreMessage(
                     com.surprising.aeron.protocol.CoreMessageHeader.command(
-                            CoreMessageType.PROBE_INCREMENT, UUID.randomUUID(), ProductLine.SPOT,
+                            CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), ProductLine.SPOT,
                             com.surprising.aeron.protocol.CommandSource.OPERATIONS,
                             0x4558504f52544552L, 17, 0, 1, 19),
-                    com.surprising.aeron.protocol.CoreProtocol.probePayload(17));
+                    com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 17)));
 
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> pool.submitPrepared(message))
                     .isInstanceOf(CoreCommandOutcome.NotAcceptedException.class);

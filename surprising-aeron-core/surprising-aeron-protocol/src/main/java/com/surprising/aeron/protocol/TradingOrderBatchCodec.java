@@ -51,15 +51,23 @@ public final class TradingOrderBatchCodec {
     }
 
     public static PlaceOrderBatchCommand decodePlaceOrderBatch(byte[] encoded) {
-        return new PlaceOrderBatchCommand(decodeCommand(encoded, PlaceOrderBatchCommand.MAX_ORDERS,
+        return decodePlaceOrderBatch(encoded, encoded == null ? 0 : encoded.length);
+    }
+
+    public static PlaceOrderBatchCommand decodePlaceOrderBatch(byte[] encoded, int payloadLength) {
+        return new PlaceOrderBatchCommand(decodeCommand(encoded, payloadLength, PlaceOrderBatchCommand.MAX_ORDERS,
                 TradingCommandCodec::decodePlaceOrder));
     }
 
     /** Reuse a batch owned by one command window entry, with no frame wrappers or item list. */
     public static PlaceOrderBatchCommand decodePlaceOrderBatchInto(byte[] encoded, PlaceOrderBatchCommand target) {
+        return decodePlaceOrderBatchInto(encoded, encoded == null ? 0 : encoded.length, target);
+    }
+
+    public static PlaceOrderBatchCommand decodePlaceOrderBatchInto(byte[] encoded, int payloadLength, PlaceOrderBatchCommand target) {
         if (target == null) throw new IllegalArgumentException("decoder batch slot is required");
         target.clearCommandSlot();
-        if (encoded == null || encoded.length < 8 || encoded.length > MAX_BATCH_PAYLOAD_BYTES)
+        if (encoded == null || payloadLength > encoded.length || payloadLength < 8 || payloadLength > MAX_BATCH_PAYLOAD_BYTES)
             throw new ProtocolException("invalid order batch payload");
         if (littleInt(encoded, 0) != PlaceOrderBatchCommand.WIRE_VERSION)
             throw new ProtocolException("unsupported order batch version");
@@ -69,15 +77,15 @@ public final class TradingOrderBatchCodec {
         int offset = 8;
         try {
             for (int index = 0; index < count; index++) {
-                if (offset > encoded.length - 8) throw new ProtocolException("truncated command item");
+                if (offset > payloadLength - 8) throw new ProtocolException("truncated command item");
                 if (littleInt(encoded, offset) != index) throw new ProtocolException("order batch indexes must be contiguous");
                 int length = littleInt(encoded, offset + 4);
                 offset += 8;
-                if (length <= 0 || length > encoded.length - offset) throw new ProtocolException("invalid command item length");
+                if (length <= 0 || length > payloadLength - offset) throw new ProtocolException("invalid command item length");
                 TradingCommandCodec.decodePlaceOrderInto(encoded, offset, length, target.orderSlot(index));
                 offset += length;
             }
-            if (offset != encoded.length) throw new ProtocolException("trailing order batch bytes");
+            if (offset != payloadLength) throw new ProtocolException("trailing order batch bytes");
             return target;
         } catch (IllegalArgumentException invalid) {
             target.clearCommandSlot();
@@ -91,13 +99,86 @@ public final class TradingOrderBatchCodec {
     }
 
     public static CancelOrderBatchCommand decodeCancelOrderBatch(byte[] encoded) {
-        return new CancelOrderBatchCommand(decodeCommand(encoded, CancelOrderBatchCommand.MAX_ORDERS,
+        return decodeCancelOrderBatch(encoded, encoded == null ? 0 : encoded.length);
+    }
+
+    public static CancelOrderBatchCommand decodeCancelOrderBatch(byte[] encoded, int payloadLength) {
+        return new CancelOrderBatchCommand(decodeCommand(encoded, payloadLength, CancelOrderBatchCommand.MAX_ORDERS,
                 TradingCommandCodec::decodeCancelOrder));
     }
 
+    /** The active command owns every reusable ID slot until its terminal response. */
+    public static CancelOrderBatchCommand decodeCancelOrderBatchInto(byte[] encoded, CancelOrderBatchCommand target) {
+        return decodeCancelOrderBatchInto(encoded, encoded == null ? 0 : encoded.length, target);
+    }
+
+    public static CancelOrderBatchCommand decodeCancelOrderBatchInto(byte[] encoded, int payloadLength, CancelOrderBatchCommand target) {
+        if (target == null) throw new IllegalArgumentException("cancel decoder batch slot is required");
+        target.clearCommandSlot();
+        if (encoded == null || payloadLength > encoded.length || payloadLength < 8 || payloadLength > MAX_BATCH_PAYLOAD_BYTES)
+            throw new ProtocolException("invalid cancel batch payload");
+        if (littleInt(encoded, 0) != CancelOrderBatchCommand.WIRE_VERSION)
+            throw new ProtocolException("unsupported cancel batch version");
+        int count = littleInt(encoded, 4);
+        if (count <= 0 || count > CancelOrderBatchCommand.MAX_ORDERS
+                || payloadLength != 8 + count * 16)
+            throw new ProtocolException("invalid cancel batch count or length");
+        target.activeCount(count);
+        try {
+            for (int index = 0, offset = 8; index < count; index++, offset += 16) {
+                if (littleInt(encoded, offset) != index || littleInt(encoded, offset + 4) != Long.BYTES)
+                    throw new ProtocolException("invalid cancel batch item frame");
+                TradingCommandCodec.decodeCancelOrderInto(encoded, offset + 8, Long.BYTES, target.orderSlot(index));
+            }
+            return target;
+        } catch (IllegalArgumentException invalid) {
+            target.clearCommandSlot();
+            throw invalid instanceof ProtocolException ? invalid
+                    : new ProtocolException("invalid cancel batch item: " + invalid.getMessage());
+        }
+    }
+
     public static AmendOrderBatchCommand decodeAmendOrderBatch(byte[] encoded) {
-        return new AmendOrderBatchCommand(decodeCommand(encoded, AmendOrderBatchCommand.MAX_ORDERS,
+        return decodeAmendOrderBatch(encoded, encoded == null ? 0 : encoded.length);
+    }
+
+    public static AmendOrderBatchCommand decodeAmendOrderBatch(byte[] encoded, int payloadLength) {
+        return new AmendOrderBatchCommand(decodeCommand(encoded, payloadLength, AmendOrderBatchCommand.MAX_ORDERS,
                 TradingCommandCodec::decodeAmendOrder));
+    }
+
+    /** Reuse a batch owned by one command window entry, with no frame wrappers or item list. */
+    public static AmendOrderBatchCommand decodeAmendOrderBatchInto(byte[] encoded, AmendOrderBatchCommand target) {
+        return decodeAmendOrderBatchInto(encoded, encoded == null ? 0 : encoded.length, target);
+    }
+
+    public static AmendOrderBatchCommand decodeAmendOrderBatchInto(byte[] encoded, int payloadLength, AmendOrderBatchCommand target) {
+        if (target == null) throw new IllegalArgumentException("decoder batch slot is required");
+        target.clearCommandSlot();
+        if (encoded == null || payloadLength > encoded.length || payloadLength < 8 || payloadLength > MAX_BATCH_PAYLOAD_BYTES)
+            throw new ProtocolException("invalid order batch payload");
+        if (littleInt(encoded, 0) != AmendOrderBatchCommand.WIRE_VERSION)
+            throw new ProtocolException("unsupported order batch version");
+        int count = littleInt(encoded, 4);
+        if (count <= 0 || count > AmendOrderBatchCommand.MAX_ORDERS) throw new ProtocolException("invalid order batch count");
+        target.activeCount(count);
+        int offset = 8;
+        try {
+            for (int index = 0; index < count; index++) {
+                if (offset > payloadLength - 8) throw new ProtocolException("truncated command item");
+                if (littleInt(encoded, offset) != index) throw new ProtocolException("order batch indexes must be contiguous");
+                int length = littleInt(encoded, offset + 4);
+                offset += 8;
+                if (length <= 0 || length > payloadLength - offset) throw new ProtocolException("invalid command item length");
+                TradingCommandCodec.decodeAmendOrderInto(encoded, offset, length, target.orderSlot(index));
+                offset += length;
+            }
+            if (offset != payloadLength) throw new ProtocolException("trailing order batch bytes");
+            return target;
+        } catch (IllegalArgumentException invalid) {
+            target.clearCommandSlot();
+            throw invalid instanceof ProtocolException ? invalid : new ProtocolException("invalid order batch item: " + invalid.getMessage());
+        }
     }
 
     public static byte[] encodeResult(CoreOrderBatchResult result) {
@@ -330,12 +411,12 @@ public final class TradingOrderBatchCodec {
     }
 
     @SuppressWarnings("unchecked")
-    private static <T> List<T> decodeCommand(byte[] encoded, int maxItems, FrameDecoder<T> decoder) {
-        if (encoded == null || encoded.length > MAX_BATCH_PAYLOAD_BYTES
-                || encoded.length < Integer.BYTES * 2) {
+    private static <T> List<T> decodeCommand(byte[] encoded, int payloadLength, int maxItems, FrameDecoder<T> decoder) {
+        if (encoded == null || payloadLength > encoded.length || payloadLength > MAX_BATCH_PAYLOAD_BYTES
+                || payloadLength < Integer.BYTES * 2) {
             throw new ProtocolException("invalid order batch payload");
         }
-        ByteBuffer buffer = readable(encoded);
+        ByteBuffer buffer = readable(encoded, 0, payloadLength);
         int version = buffer.getInt();
         if (version != PlaceOrderBatchCommand.WIRE_VERSION) {
             throw new ProtocolException("unsupported order batch version: " + version);

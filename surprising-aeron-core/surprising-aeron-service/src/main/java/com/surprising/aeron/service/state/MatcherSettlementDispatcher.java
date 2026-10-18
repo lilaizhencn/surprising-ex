@@ -147,11 +147,13 @@ final class MatcherSettlementDispatcher {
         long lanes = event.routedLaneMask();
         if (lanes == 0) throw new IllegalStateException("Matcher settlement has no routed Lane");
         if (!owner.accountLanesStarted) {
-            while (lanes != 0) {
-                int laneId = Long.numberOfTrailingZeros(lanes);
-                lanes &= lanes - 1;
-                event.markLaneQueued(laneId);
-                event.execute(owner.accountLanes[laneId]);
+            if (owner.isFusedExecution()) {
+                while (lanes != 0) {
+                    int laneId = Long.numberOfTrailingZeros(lanes);
+                    lanes &= lanes - 1;
+                    event.markLaneQueued(laneId);
+                    event.execute(owner.accountLanes[laneId]);
+                }
             }
             return;
         }
@@ -162,7 +164,6 @@ final class MatcherSettlementDispatcher {
             event.markLaneQueued(laneId);
             owner.laneWorkers[laneId].publishMatcherSettlement(shard, event);
         }
-        owner.signalOwnerCompletion();
     }
 
     /** 可复用的 matcherSettlementEvent 对象池；仅在消费者完成后回收。 */

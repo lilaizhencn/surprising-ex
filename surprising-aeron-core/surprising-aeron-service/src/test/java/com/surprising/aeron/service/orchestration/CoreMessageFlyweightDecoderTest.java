@@ -16,6 +16,37 @@ import org.junit.jupiter.api.Test;
 
 class CoreMessageFlyweightDecoderTest {
 
+    @Test void varyingOrderLengthsReuseCapacityAndExcludeStaleTailFromWireAndFingerprint() {
+        var decoder = new CoreMessageFlyweightDecoder();
+        CoreMessage previous = null;
+        byte[] backing = null;
+        for (int round = 0; round < 2; round++) {
+            for (int length = 1025; length <= 2048; length++) {
+                byte[] payload = new byte[length];
+                java.util.Arrays.fill(payload, (byte) (length & 255));
+                var expected = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER,
+                        new UUID(21, length), ProductLine.SPOT, CommandSource.GATEWAY,
+                        21, length, 7, 1, length), payload);
+                byte[] frame = CoreMessageCodec.encode(expected);
+                var borrowed = decoder.decodeBorrowed(new UnsafeBuffer(frame), 0, frame.length);
+                try {
+                    if (previous != null) {
+                        assertThat(borrowed).isSameAs(previous);
+                        assertThat(borrowed.payloadUnsafe()).isSameAs(backing);
+                    }
+                    assertThat(borrowed.payloadLength()).isEqualTo(length);
+                    assertThat(borrowed).isEqualTo(expected);
+                    assertThat(borrowed.hashCode()).isEqualTo(expected.hashCode());
+                    assertThat(CoreMessageCodec.encode(borrowed)).containsExactly(frame);
+                    assertThat(com.surprising.aeron.protocol.CommandFingerprint.of(borrowed))
+                            .isEqualTo(com.surprising.aeron.protocol.CommandFingerprint.of(expected));
+                    previous = borrowed;
+                    backing = borrowed.payloadUnsafe();
+                } finally { borrowed.releaseDecoderSlot(); }
+            }
+        }
+    }
+
     @Test void mixedPayloadLengthsReuseTheirOwnBuffersWithoutChangingLeasedFrames() {
         var decoder = new CoreMessageFlyweightDecoder();
         int[] sizes = {0, 1, 8, 31, 256, 2048, 8192};
@@ -25,7 +56,7 @@ class CoreMessageFlyweightDecoderTest {
             var value = new byte[sizes[i]];
             java.util.Arrays.fill(value, (byte) (i + 1));
             frames[i] = CoreMessageCodec.encode(new CoreMessage(CoreMessageHeader.command(
-                    CoreMessageType.PROBE_INCREMENT, new UUID(1, i + 1), ProductLine.SPOT,
+                    CoreMessageType.ADJUST_BALANCE, new UUID(1, i + 1), ProductLine.SPOT,
                     CommandSource.GATEWAY, 1, i + 1, 7, 1, 1), value));
             var first = decoder.decodeBorrowed(new UnsafeBuffer(frames[i]), 0, frames[i].length);
             payloads[i] = first.payloadUnsafe();
@@ -44,7 +75,7 @@ class CoreMessageFlyweightDecoderTest {
         byte[] expected = held.payload();
         for (int length = 1; length < 640; length++) {
             var frame = CoreMessageCodec.encode(new CoreMessage(CoreMessageHeader.command(
-                    CoreMessageType.PROBE_INCREMENT, new UUID(2, length), ProductLine.SPOT,
+                    CoreMessageType.ADJUST_BALANCE, new UUID(2, length), ProductLine.SPOT,
                     CommandSource.GATEWAY, 1, length, 7, 1, 1), new byte[length]));
             var value = decoder.decodeBorrowed(new UnsafeBuffer(frame), 0, frame.length);
             assertThat(value).isNotSameAs(held);
@@ -57,12 +88,12 @@ class CoreMessageFlyweightDecoderTest {
 
     @Test
     void readersBelongToTheirDecoderAndCanBeReusedWithoutChangingOwnedMessages() {
-        byte[] first = CoreMessageCodec.encode(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+        byte[] first = CoreMessageCodec.encode(new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
                 UUID.randomUUID(), ProductLine.SPOT, CommandSource.GATEWAY, 8, 42, 1001,
-                123_456_789, 99), CoreProtocol.probePayload(7)));
-        byte[] second = CoreMessageCodec.encode(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+                123_456_789, 99), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 7))));
+        byte[] second = CoreMessageCodec.encode(new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
                 UUID.randomUUID(), ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY, 8, 43, 1002,
-                123_456_790, 100), CoreProtocol.probePayload(9)));
+                123_456_790, 100), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 9))));
         var decoderA = new CoreMessageFlyweightDecoder();
         var decoderB = new CoreMessageFlyweightDecoder();
         var viewA = decoderA.reader(new UnsafeBuffer(first), 0, first.length);
@@ -75,8 +106,8 @@ class CoreMessageFlyweightDecoderTest {
     }
 
     @Test void borrowedFramesWaitForRetirementAndKeepResponseHeadersStable() {
-        var expected = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
-                new UUID(1, 2), ProductLine.SPOT, CommandSource.GATEWAY, 8, 42, 1001, 1, 99), CoreProtocol.probePayload(7));
+        var expected = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
+                new UUID(1, 2), ProductLine.SPOT, CommandSource.GATEWAY, 8, 42, 1001, 1, 99), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 7)));
         var encoded = CoreMessageCodec.encode(expected);
         var buffer = new UnsafeBuffer(encoded);
         var decoder = new CoreMessageFlyweightDecoder();
@@ -104,9 +135,9 @@ class CoreMessageFlyweightDecoderTest {
 
     @Test
     void decodesDirectBufferIntoOwnedPayload() {
-        CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+        CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
                 UUID.randomUUID(), ProductLine.SPOT, CommandSource.GATEWAY, 8, 42, 1001,
-                123_456_789, 99), CoreProtocol.probePayload(7));
+                123_456_789, 99), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 7)));
         byte[] encoded = CoreMessageCodec.encode(message);
         byte[] framed = new byte[encoded.length + 8];
         System.arraycopy(encoded, 0, framed, 4, encoded.length);

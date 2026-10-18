@@ -207,7 +207,7 @@ class CoreLedgerQueryTest {
     }
 
     private TradingCoreRuntime coreWithInitialState(TradingCoreState state) {
-        return new TradingCoreRuntime(LINE, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
+        return new TradingCoreRuntime(LINE, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
                 new TerminalStateRetention(), null, 0, Map.of(), Map.of(), null, null);
     }
 

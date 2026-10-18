@@ -29,17 +29,12 @@ public final class MatcherSettlementEvent implements
     private long commitTimestamp;
     private long commitClusterPosition;
     private MatcherSettlementPlan plan;
-    private MatcherSettlementPlan[] batchPlans;
     private TradingRuntimeState runtime;
     private RuntimeIdentityRegistry identities;
     private CoreInstrument instrument;
-    private CoreInstrument[] batchInstruments;
     private int baseAssetId;
     private int quoteAssetId;
     private int settleAssetId;
-    private int[] batchBaseAssetIds;
-    private int[] batchQuoteAssetIds;
-    private int[] batchSettleAssetIds;
     private RuntimeTreasuryDelta[] touchedLaneTreasuryDeltas;
     private MatcherSettlementChanges changes;
     private boolean isolatedChanges;
@@ -73,7 +68,7 @@ public final class MatcherSettlementEvent implements
     private boolean expandLaneRoute;
     private volatile boolean directPublished;
     /** Matcher publication keeps the pooled event alive until its SPSC slot is released. */
-    private boolean matcherPublicationDeferred;
+    private volatile boolean matcherPublicationDeferred;
     private Throwable directFailure;
     private long routedLaneMask;
     private java.util.UUID directCommandId;
@@ -174,7 +169,7 @@ public final class MatcherSettlementEvent implements
     }
 
     BatchStorage batchStorage(int size) {
-        if (plan != null) throw new IllegalStateException("settlement event is still active");
+        if (plan != null || batchPlanCount != 0) throw new IllegalStateException("settlement event is still active");
         if (size <= 0) throw new IllegalArgumentException("settlement batch must not be empty");
         if (batchStorage == null || batchStorage.plans.length < size)
             batchStorage = new BatchStorage(size);
@@ -228,16 +223,10 @@ public final class MatcherSettlementEvent implements
         directShard = shard;
         authorizedCancellations = java.util.Objects.requireNonNull(cancellations);
         this.runtime = runtime; this.identities = identities; resultTarget = target;
-        batchPlanCount = count; batchPlans = batchStorage.plans; plan = batchPlans[0];
-        batchInstruments = batchStorage.instruments;
-        batchBaseAssetIds = batchStorage.baseAssetIds; batchQuoteAssetIds = batchStorage.quoteAssetIds;
-        batchSettleAssetIds = batchStorage.settleAssetIds;
-        instrument = batchInstruments[0]; baseAssetId = batchBaseAssetIds[0];
-        quoteAssetId = batchQuoteAssetIds[0]; settleAssetId = batchSettleAssetIds[0];
+        batchPlanCount = count;
         changes = runtime.acquireMatcherSettlementChanges(laneMask);
         changes.directPositionIdentities = true;
         isolatedChanges = true; collected = false;
-        prepareTreasuryDeltas(laneMask, true);
         resetCompletions(runtime.topology().accountLaneCount());
         // Direct events expose their completion through the event-owned padded bitset.  Do not
         // register per-Lane notification expectations used by materialized settlement plans.
@@ -291,11 +280,11 @@ public final class MatcherSettlementEvent implements
     }
     long queuedLaneMask() { return queuedLaneMask; }
     long routedLaneMask() { return direct ? routedLaneMask : requiredLaneMask; }
-    public boolean ready() { return !direct || directPublished; }
+    public boolean ready() { return !direct || directPublished && !matcherPublicationDeferred; }
 
     /** Lane readiness is gated only by the Matcher fact publication. */
     public boolean readyForLane() {
-        return ready();
+        return !direct || directPublished;
     }
 
     public String admissionResultCode() {
@@ -349,8 +338,8 @@ public final class MatcherSettlementEvent implements
     /** Finish event publication before the Matcher exposes its transport completion. */
     public void completeMatcherPublication() {
         if (!direct || !matcherPublicationDeferred) return;
-        matcherPublicationDeferred = false;
         if (resultPrepared()) notifyDirectPublication();
+        else matcherPublicationDeferred = false;
     }
 
     /** Matcher writes its immutable native result directly into this already-owned pooled event. */
@@ -369,18 +358,18 @@ public final class MatcherSettlementEvent implements
             if (cancellation) {
                 if (batchStorage.cancellationOrderIds[0] != orderId)
                     throw new IllegalStateException("direct cancellation order is inconsistent");
-                batchPlans[0].buildDirectNativeCancellation(directCoreSequence, cancellationUserId,
+                batchStorage.plans[0].buildDirectNativeCancellation(directCoreSequence, cancellationUserId,
                         orderId, result, runtime);
             } else if (admissionRequired && admissionAccepted) {
                 if (admissionOrder == null || admissionOrder.orderId() != orderId)
                     throw new IllegalStateException("direct admission order is inconsistent");
-                batchPlans[0].buildDirectNative(directCoreSequence, admissionUserId, admissionOrder,
-                        batchInstruments[0], result, runtime);
+                batchStorage.plans[0].buildDirectNative(directCoreSequence, admissionUserId, admissionOrder,
+                        batchStorage.instruments[0], result, runtime);
             } else {
                 if (admitted == null || admitted.orderId() != orderId)
                     throw new IllegalStateException("direct matcher order is inconsistent");
-                batchPlans[0].buildDirectNative(directCoreSequence, admitted,
-                        batchInstruments[0], result, runtime);
+                batchStorage.plans[0].buildDirectNative(directCoreSequence, admitted,
+                        batchStorage.instruments[0], result, runtime);
             }
             directNativeResult = result;
             directMatcherSequence = matcherSequence;
@@ -393,13 +382,13 @@ public final class MatcherSettlementEvent implements
             // Preserve that outcome so commit validates the Lane's final authorization.
             directNativeStateChanged = directAcceptedCancellationCount != 0 && !directNativeAccepted;
             if (sourceTrigger != null) {
-                batchPlans[0].completeTrigger(directNativeAccepted
+                batchStorage.plans[0].completeTrigger(directNativeAccepted
                         ? RuntimeTriggerOrderStateTransitions.prepareMatchedCompletion(sourceTrigger,
                                 batchStorage.admittedOrders[0].orderId(), triggeredAt)
                         : RuntimeTriggerOrderStateTransitions.prepareRejectedCompletion(sourceTrigger,
                                 result.resultCode().name(), triggeredAt));
             }
-            batchPlans[0].acceptedPreCancellations(
+            batchStorage.plans[0].acceptedPreCancellations(
                     directAcceptedCancellations, directAcceptedCancellationCount);
             finishDirectPublication();
         } catch (Throwable failure) { failDirect(failure); throw failure; }
@@ -423,14 +412,14 @@ public final class MatcherSettlementEvent implements
                     : admitted == null || admitted.orderId() != orderId)
                 throw new IllegalStateException("direct matcher batch order is inconsistent");
             if (cancellation) {
-                batchPlans[index].buildDirectNativeCancellation(directCoreSequence, cancellationUserId,
+                batchStorage.plans[index].buildDirectNativeCancellation(directCoreSequence, cancellationUserId,
                         orderId, result, runtime);
             } else {
-                batchPlans[index].buildDirectNative(directCoreSequence, admitted,
-                        batchInstruments[index], result, runtime);
+                batchStorage.plans[index].buildDirectNative(directCoreSequence, admitted,
+                        batchStorage.instruments[index], result, runtime);
             }
             if (index == 0) {
-                batchPlans[index].acceptedPreCancellations(
+                batchStorage.plans[index].acceptedPreCancellations(
                         directAcceptedCancellations, directAcceptedCancellationCount);
                 directNativeResult = result;
                 directMatcherSequence = matcherSequence;
@@ -465,13 +454,13 @@ public final class MatcherSettlementEvent implements
                     && result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.MATCHING_POST_ONLY_FAILED;
             OrderRuntime admitted = batchStorage.admittedOrders[0];
             if (admitted == null) throw new IllegalStateException("replacement order is missing");
-            batchPlans[0].buildDirectNative(directCoreSequence, admitted,
-                    batchInstruments[0], result, runtime);
+            batchStorage.plans[0].buildDirectNative(directCoreSequence, admitted,
+                    batchStorage.instruments[0], result, runtime);
             if (placementAccepted || businessRejection)
-                batchPlans[0].acceptedReplacementCancellation(replacement.originalOrderId());
-            batchPlans[0].acceptedPreCancellations(
+                batchStorage.plans[0].acceptedReplacementCancellation(replacement.originalOrderId());
+            batchStorage.plans[0].acceptedPreCancellations(
                     directAcceptedCancellations, directAcceptedCancellationCount);
-            if (!placementAccepted) batchPlans[0].omitUnplacedOrder();
+            if (!placementAccepted) batchStorage.plans[0].omitUnplacedOrder();
             directNativeResult = result;
             directMatcherSequence = matcherSequence;
             directLastMatcherSequence = matcherSequence;
@@ -494,7 +483,7 @@ public final class MatcherSettlementEvent implements
                 || orderId != admissionOrderId || matcherSequence <= 0 || matcherShard != directShard)
             throw new IllegalStateException("direct matcher rejection proof is inconsistent");
         try {
-            batchPlans[0].prepareRejectedDirect(
+            batchStorage.plans[0].prepareRejectedDirect(
                     directCoreSequence, admissionUserId, admissionOrderId, routedLaneMask);
             directSyntheticResultCode = resultCode;
             directMatcherSequence = directLastMatcherSequence = matcherSequence;
@@ -577,8 +566,8 @@ public final class MatcherSettlementEvent implements
     private void finishDirectPublication() {
         long actualLanes = 0; int orders = 0;
         for (int index = 0; index < batchPlanCount; index++) {
-            actualLanes |= batchPlans[index].requiredLaneMask();
-            orders = Math.addExact(orders, batchPlans[index].orderCount());
+            actualLanes |= batchStorage.plans[index].requiredLaneMask();
+            orders = Math.addExact(orders, batchStorage.plans[index].orderCount());
         }
         // The initial route contains only the taker's Lane. The Matcher discovers maker Lanes
         // while building the immutable fact, then publishes to each Lane's Matcher mailbox.
@@ -589,7 +578,7 @@ public final class MatcherSettlementEvent implements
             throw new IllegalStateException("matcher result escaped its admitted Lane dependency scope");
         if (expandLaneRoute) routedLaneMask = actualLanes;
         requiredLaneMask = actualLanes;
-        treasuryTrades = hasTrade(batchPlans, batchPlanCount);
+        treasuryTrades = hasTrade(batchStorage.plans, batchPlanCount);
         prepareTreasuryDeltas(actualLanes, treasuryTrades);
         changes.ensureOrderCapacity(orders, actualLanes);
         if (!matcherPublicationDeferred) notifyDirectPublication();
@@ -604,13 +593,14 @@ public final class MatcherSettlementEvent implements
 
     private void notifyDirectPublication() {
         TradingRuntimeState completionRuntime = runtime;
-        // Complete every producer access before the readiness release. The Owner polls this
-        // flag and may apply, clear and reuse the pooled event without waiting for our signal.
+        // Lane may consume a prepared fact as soon as its queue publication is visible.
+        // Owner cannot recycle it until the producer has released its route and finished every enqueue.
+        matcherPublicationDeferred = true;
+        releaseMatcherCompletionBeforeSignal();
         directPublished = true;
         completionRuntime.settlements.publishMatcherOwned(this);
-        releaseMatcherCompletionBeforeSignal();
-        // Only captured values may be used after the release; even failure handling must not
-        // write back to an event which may now belong to the next command.
+        matcherPublicationDeferred = false;
+        // The producer has relinquished the event. Only the captured runtime may be accessed now.
         completionRuntime.signalOwnerCompletion();
     }
 
@@ -800,15 +790,10 @@ public final class MatcherSettlementEvent implements
         resultTarget = null;
         plan = null;
         if (batchStorage != null) batchStorage.clear();
-        batchPlans = null;
         batchPlanCount = 0;
         runtime = null;
         identities = null;
         instrument = null;
-        batchInstruments = null;
-        batchBaseAssetIds = null;
-        batchQuoteAssetIds = null;
-        batchSettleAssetIds = null;
         isolatedChanges = false;
         treasuryTrades = false;
         collected = false;
@@ -832,7 +817,7 @@ public final class MatcherSettlementEvent implements
             throw new IllegalStateException("place admission receipt is missing");
         }
         if (admissionRequired && !admissionAccepted) {
-            if (changes != null) changes.prepareLaneTerminal(laneId, identities, lane, runtime, direct ? directCoreSequence : plan.coreSequence());
+            if (changes != null) changes.prepareLaneTerminal(laneId, identities, lane, runtime, direct ? directCoreSequence : plan().coreSequence());
             publishCompletion(lane);
             return;
         }
@@ -841,7 +826,7 @@ public final class MatcherSettlementEvent implements
         try {
             RuntimeTreasuryDelta delta = !treasuryTrades
                     ? EMPTY_TREASURY_DELTA : touchedLaneTreasuryDeltas[laneSlot(laneId)];
-            if (batchPlans == null) {
+            if (batchPlanCount == 0) {
                 applyPlan(lane, laneId, plan, instrument,
                         baseAssetId, quoteAssetId, settleAssetId, delta, null);
                 if (commitSequence != 0 || cancellation) {
@@ -849,11 +834,11 @@ public final class MatcherSettlementEvent implements
                 }
             }
             else for (int index = 0; index < batchPlanCount; index++) {
-                MatcherSettlementPlan batchPlan = batchPlans[index];
+                MatcherSettlementPlan batchPlan = batchStorage.plans[index];
                 if ((batchPlan.requiredLaneMask() & laneMask) == 0) continue;
-                applyPlan(lane, laneId, batchPlan, batchInstruments[index],
-                        batchBaseAssetIds[index], batchQuoteAssetIds[index],
-                        batchSettleAssetIds[index], delta,
+                applyPlan(lane, laneId, batchPlan, batchStorage.instruments[index],
+                        batchStorage.baseAssetIds[index], batchStorage.quoteAssetIds[index],
+                        batchStorage.settleAssetIds[index], delta,
                         batchStorage == null ? null : batchStorage.admittedOrders[index]);
                 if (commitSequence != 0 || cancellation) {
                     runtime.stampMatcherOrders(
@@ -861,10 +846,10 @@ public final class MatcherSettlementEvent implements
                 }
             }
             if (changes != null) {
-                changes.prepareLaneTerminal(laneId, identities, lane, runtime, direct ? directCoreSequence : plan.coreSequence());
+                changes.prepareLaneTerminal(laneId, identities, lane, runtime, direct ? directCoreSequence : plan().coreSequence());
             }
             if (resultTarget != null && changes != null
-                    && laneId == runtime.topology().accountLaneId(plan.activeUserId())) {
+                    && laneId == runtime.topology().accountLaneId(plan().activeUserId())) {
                 LaneOrderResultTarget.capture(resultTarget, changes.laneDeltas[laneId], identities, lane);
             }
             if (commitSequence != 0) {
@@ -884,7 +869,7 @@ public final class MatcherSettlementEvent implements
     private void publishCompletion(AccountLaneState lane) {
         int laneId = lane.laneId();
         TradingRuntimeState completionRuntime = runtime;
-        long completionSequence = plan.coreSequence();
+        long completionSequence = plan().coreSequence();
         lane.recordSettlementOperation();
         int completionOffset = laneId * CACHE_LINE_LONGS;
         if ((long) LONGS.getAcquire(completedLanes, completionOffset) != 0) {
@@ -1004,9 +989,9 @@ public final class MatcherSettlementEvent implements
                 }
             }
         }
-        if (touchedLaneTreasuryDeltas != null) {
+        // Called once after the actual fact is known, including no-trade reuse after a fill.
+        if (touchedLaneTreasuryDeltas != null)
             for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) delta.clear();
-        }
     }
 
     private static boolean hasTrade(MatcherSettlementPlan[] plans, int planCount) {
@@ -1060,22 +1045,22 @@ public final class MatcherSettlementEvent implements
         return completedLaneMask() == routedLaneMask()
                 && (treasurySettlement == null || treasurySettlement.ledger == null || treasurySettlement.completed);
     }
-    public MatcherSettlementPlan plan() { return plan; }
-    int planCount() { return batchPlans == null ? 1 : batchPlanCount; }
+    public MatcherSettlementPlan plan() { return batchPlanCount == 0 ? plan : batchStorage.plans[0]; }
+    int planCount() { return batchPlanCount == 0 ? 1 : batchPlanCount; }
     OrderRuntime admittedOrder(int index) {
         if (index < 0 || index >= planCount()) throw new IndexOutOfBoundsException(index);
-        return batchStorage == null ? null : batchStorage.admittedOrders[index];
+        return batchPlanCount == 0 ? null : batchStorage.admittedOrders[index];
     }
     MatcherSettlementPlan plan(int index) {
         if (index < 0 || index >= planCount()) throw new IndexOutOfBoundsException(index);
-        return batchPlans == null ? plan : batchPlans[index];
+        return batchPlanCount == 0 ? plan : batchStorage.plans[index];
     }
     RuntimeIdentityRegistry identities() { return identities; }
     boolean hasIsolatedChanges() { return isolatedChanges; }
-    CoreInstrument instrument() { return instrument; }
-    int baseAssetId() { return baseAssetId; }
-    int quoteAssetId() { return quoteAssetId; }
-    int settleAssetId() { return settleAssetId; }
+    CoreInstrument instrument() { return batchPlanCount == 0 ? instrument : batchStorage.instruments[0]; }
+    int baseAssetId() { return batchPlanCount == 0 ? baseAssetId : batchStorage.baseAssetIds[0]; }
+    int quoteAssetId() { return batchPlanCount == 0 ? quoteAssetId : batchStorage.quoteAssetIds[0]; }
+    int settleAssetId() { return batchPlanCount == 0 ? settleAssetId : batchStorage.settleAssetIds[0]; }
     MatcherSettlementChanges changes() {
         if (changes == null) throw new IllegalStateException("matcher settlement changes are unavailable");
         return changes;

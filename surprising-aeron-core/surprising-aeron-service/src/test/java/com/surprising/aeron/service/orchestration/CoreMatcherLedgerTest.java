@@ -13,6 +13,7 @@ class CoreMatcherLedgerTest {
     private static final long TIME = 1_700_000_000_000L;
 
     @Test
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void collectedOrderDeletionWinsBeforeOldActiveRouteIsRetired() throws Exception {
         try (var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applied(state, CoreMessageType.REGISTER_INSTRUMENT, 0,

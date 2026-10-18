@@ -162,7 +162,7 @@ class PendingMatchingRingTest {
 
     private static CoreMessage command(UUID commandId, long userId) {
         return new CoreMessage(CoreMessageHeader.command(
-                CoreMessageType.PROBE_INCREMENT, commandId, ProductLine.LINEAR_PERPETUAL,
+                CoreMessageType.ADJUST_BALANCE, commandId, ProductLine.LINEAR_PERPETUAL,
                 CommandSource.GATEWAY, 1, 1, userId, 1_000, 1), new byte[]{1});
     }
 }

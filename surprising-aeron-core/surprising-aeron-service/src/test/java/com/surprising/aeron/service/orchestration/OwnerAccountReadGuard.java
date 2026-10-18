@@ -7,7 +7,7 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 import java.lang.reflect.Field;
 
-/** Deterministically rejects Owner reads while the actual Lane workers execute a command. */
+/** Rejects Owner account reads when independent Lanes own the tables. FUSED Owner owns all Lanes. */
 final class OwnerAccountReadGuard implements AutoCloseable {
     private final Object[] lanes;
     private final String[] names = {"orders", "reservations", "users", "positions", "balances"};
@@ -58,12 +58,17 @@ final class OwnerAccountReadGuard implements AutoCloseable {
         return table;
     }
 
+    private boolean forbiddenOwnerRead() {
+        return Thread.currentThread() == owner
+                && !runtime.isFusedExecution();
+    }
+
     @SuppressWarnings("unchecked")
     private Object guard(Object original, String name) {
         if (original instanceof Long2ObjectHashMap<?> source) {
             var guard = new Long2ObjectHashMap<Object>() {
                 @Override public Object get(long key) {
-                    if (Thread.currentThread() == owner) throw new AssertionError("Owner read Lane " + name);
+                    if (forbiddenOwnerRead()) throw new AssertionError("Owner read Lane " + name);
                     return super.get(key);
                 }
             };
@@ -72,7 +77,7 @@ final class OwnerAccountReadGuard implements AutoCloseable {
         }
         var guard = new LongObjectHashMap<Object>() {
             @Override public Object get(long key) {
-                if (Thread.currentThread() == owner) throw new AssertionError("Owner read Lane " + name);
+                if (forbiddenOwnerRead()) throw new AssertionError("Owner read Lane " + name);
                 return super.get(key);
             }
         };

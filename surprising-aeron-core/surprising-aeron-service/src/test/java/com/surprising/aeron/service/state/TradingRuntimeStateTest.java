@@ -1029,7 +1029,7 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void laneCompletionMaskCoversAllFourLanesAndTheEmptyApply() {
+    void laneCompletionMaskCoversConfiguredLanesAndTheEmptyApply() {
         LaneTopology topology = LaneTopology.productionDefault();
         TradingRuntimeState state = new TradingRuntimeState(topology);
         java.util.List<Long> users = new java.util.ArrayList<>();
@@ -1041,7 +1041,7 @@ class TradingRuntimeStateTest {
         state.clearChangedKeys();
         long committedLaneMask = state.stageLaneMutation(1, users);
 
-        assertThat(committedLaneMask).isEqualTo(0b1111);
+        assertThat(committedLaneMask).isEqualTo(topology.accountLaneCount() == 64 ? -1L : (1L << topology.accountLaneCount()) - 1);
         for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
             assertThat(laneValues(state, laneId).appliedSequence()).isEqualTo(1);
             assertThat(laneValues(state, laneId).committedSequence()).isEqualTo(1);

@@ -16,7 +16,13 @@ final class OwnerCommandPipelineState {
     static final long COMMAND_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
 
     /** 已准入但尚未提交的撮合命令窗口，所有者是当前 Owner 线程。 */
-    private final ClusterCommandWindow commandWindow = new ClusterCommandWindow();
+    private final ClusterCommandWindow commandWindow;
+
+    OwnerCommandPipelineState() { this(true); }
+
+    OwnerCommandPipelineState(boolean pipelined) {
+        commandWindow = pipelined ? new ClusterCommandWindow() : null;
+    }
     /** 当前正在等待直接控制流程或查询结果的命令。 */
     private OwnerIngressRing.Entry activeControl;
     /** 当前控制命令已经产生、但异步子任务尚未全部完成的响应候选值。 */
@@ -63,7 +69,7 @@ final class OwnerCommandPipelineState {
      * <p>启动和测试复用 Owner 实例时调用；不会清空 TradingCoreRuntime 的业务状态。</p>
      */
     void reset() {
-        commandWindow.clear();
+        if (commandWindow != null) commandWindow.clear();
         activeControl = null;
         controlResponse = null;
         matchingResponseSequence = 0;
@@ -89,7 +95,7 @@ final class OwnerCommandPipelineState {
      * <p>终止阶段不再接收新命令，但观测计数必须先输出，因此不复用 {@link #reset()}。</p>
      */
     void clearCommandContainers() {
-        commandWindow.clear();
+        if (commandWindow != null) commandWindow.clear();
         activeControl = null;
         controlResponse = null;
         matchingResponseSequence = 0;
@@ -251,7 +257,7 @@ final class OwnerCommandPipelineState {
 
     /** 控制命令已排空撮合窗口；内部触发子单独立提交，仅保存客户端命令自身的响应。 */
     void completeControlMatching(long sequence, CoreResponse response) {
-        if (commandWindow.size() != 0 || response == null)
+        if (commandWindow != null && commandWindow.size() != 0 || response == null)
             throw new IllegalStateException("control completion requires an empty trading window and a response");
         if (sequence != matchingResponseSequence) return;
         if (matchingResponse != null) throw new IllegalStateException("duplicate control matching completion");
@@ -266,7 +272,8 @@ final class OwnerCommandPipelineState {
     /** 记录一条命令进入撮合窗口，并更新窗口峰值。 */
     void recordAdmission() {
         commandProgress++;
-        commandWindowHighWaterMark = Math.max(commandWindowHighWaterMark, commandWindow.size());
+        if (commandWindow != null)
+            commandWindowHighWaterMark = Math.max(commandWindowHighWaterMark, commandWindow.size());
     }
 
     /** 记录一次控制命令推进。 */
@@ -293,7 +300,7 @@ final class OwnerCommandPipelineState {
     /** 返回终止日志使用的命令流水线摘要。 */
     String terminationSummary() {
         return "highWaterMark=" + commandWindowHighWaterMark
-                + " pending=" + commandWindow.size()
+                + " pending=" + (commandWindow == null ? 0 : commandWindow.size())
                 + " commands=" + drainedCommands
                 + " dependencyFences=" + dependencyFences
                 + " controlFences=" + controlFences

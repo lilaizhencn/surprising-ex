@@ -66,7 +66,20 @@ final class MatcherEvidenceLedger {
             long sequence,
             int matcherShardId, int nativeMatcherShardId,
             CoreMatchingResult result) {
-        if (commandId == null || result == null) throw new IllegalArgumentException("matcher evidence is required");
+        if (commandId == null) throw new IllegalArgumentException("matcher evidence is required");
+        return bind(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
+                orderId, aeronTimestamp, sequence, matcherShardId, nativeMatcherShardId, result);
+    }
+
+    CoreMatchingResult bind(
+            long coreSequence,
+            long commandIdMsb, long commandIdLsb,
+            long orderId,
+            long aeronTimestamp,
+            long sequence,
+            int matcherShardId, int nativeMatcherShardId,
+            CoreMatchingResult result) {
+        if (result == null) throw new IllegalArgumentException("matcher evidence is required");
         long nativeSequence = result.nativeSequence();
         int matcherIndex = index(matcherShardId);
         if (nativeSequence > 0) {
@@ -75,9 +88,8 @@ final class MatcherEvidenceLedger {
         }
         advanceStrictly(shardSequences, matcherIndex, sequence,
                 "matcher shard sequence is not strictly increasing");
-        return result.bindEvidenceInPlace(coreSequence, commandId.getMostSignificantBits(),
-                commandId.getLeastSignificantBits(), orderId, nativeSequence, sequence,
-                aeronTimestamp, matcherShardId);
+        return result.bindEvidenceInPlace(coreSequence, commandIdMsb, commandIdLsb, orderId,
+                nativeSequence, sequence, aeronTimestamp, matcherShardId);
     }
 
     exchange.core2.core.common.MatcherResult publishNative(
@@ -85,7 +97,17 @@ final class MatcherEvidenceLedger {
             long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
             exchange.core2.core.common.MatcherResult result,
             com.surprising.aeron.service.state.MatcherSettlementEvent target) {
-        if (commandId == null || result == null || target == null)
+        if (commandId == null) throw new IllegalArgumentException("native matcher publication is required");
+        return publishNative(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
+                orderId, aeronTimestamp, sequence, matcherShardId, nativeMatcherShardId, result, target);
+    }
+
+    exchange.core2.core.common.MatcherResult publishNative(
+            long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
+            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
+            exchange.core2.core.common.MatcherResult result,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (result == null || target == null)
             throw new IllegalArgumentException("native matcher publication is required");
         int matcherIndex = index(matcherShardId);
         long nativeSequence = result.sequence();
@@ -96,7 +118,7 @@ final class MatcherEvidenceLedger {
         advanceStrictly(shardSequences, matcherIndex, sequence,
                 "matcher shard sequence is not strictly increasing");
         target.publishDirectNativeResult(result, coreSequence,
-                commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), orderId,
+                commandIdMsb, commandIdLsb, orderId,
                 sequence, matcherShardId);
         return result;
     }
@@ -107,7 +129,18 @@ final class MatcherEvidenceLedger {
             exchange.core2.core.common.MatcherResult cancellation,
             exchange.core2.core.common.MatcherResult result,
             com.surprising.aeron.service.state.MatcherSettlementEvent target) {
-        if (commandId == null || cancellation == null || result == null || target == null)
+        if (commandId == null) throw new IllegalArgumentException("native matcher replacement publication is required");
+        return publishReplacement(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
+                orderId, aeronTimestamp, sequence, matcherShardId, nativeMatcherShardId, cancellation, result, target);
+    }
+
+    exchange.core2.core.common.MatcherResult publishReplacement(
+            long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
+            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
+            exchange.core2.core.common.MatcherResult cancellation,
+            exchange.core2.core.common.MatcherResult result,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (cancellation == null || result == null || target == null)
             throw new IllegalArgumentException("native matcher replacement publication is required");
         long nativeSequence = result.sequence();
         if (nativeSequence > 0) {
@@ -117,7 +150,7 @@ final class MatcherEvidenceLedger {
         advanceStrictly(shardSequences, index(matcherShardId), sequence,
                 "matcher shard sequence is not strictly increasing");
         target.publishDirectNativeReplacement(cancellation, result, coreSequence,
-                commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), orderId,
+                commandIdMsb, commandIdLsb, orderId,
                 sequence, matcherShardId);
         return result;
     }
@@ -127,7 +160,17 @@ final class MatcherEvidenceLedger {
             long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
             exchange.core2.core.common.MatcherResult result, int index,
             com.surprising.aeron.service.state.MatcherSettlementEvent target) {
-        if (commandId == null || result == null || target == null)
+        if (commandId == null) throw new IllegalArgumentException("native matcher batch publication is required");
+        return publishBatchItem(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
+                orderId, aeronTimestamp, sequence, matcherShardId, nativeMatcherShardId, result, index, target);
+    }
+
+    exchange.core2.core.common.MatcherResult publishBatchItem(
+            long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
+            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
+            exchange.core2.core.common.MatcherResult result, int index,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (result == null || target == null)
             throw new IllegalArgumentException("native matcher batch publication is required");
         long nativeSequence = result.sequence();
         if (nativeSequence > 0) {
@@ -137,7 +180,7 @@ final class MatcherEvidenceLedger {
         advanceStrictly(shardSequences, index(matcherShardId), sequence,
                 "matcher shard sequence is not strictly increasing");
         target.publishDirectNativeBatchItem(result, index, coreSequence,
-                commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), orderId,
+                commandIdMsb, commandIdLsb, orderId,
                 sequence, matcherShardId);
         return result;
     }
@@ -146,12 +189,21 @@ final class MatcherEvidenceLedger {
             long coreSequence, java.util.UUID commandId, long orderId,
             long sequence, int matcherShardId, String resultCode,
             com.surprising.aeron.service.state.MatcherSettlementEvent target) {
-        if (commandId == null || resultCode == null || resultCode.isBlank() || target == null)
+        if (commandId == null) throw new IllegalArgumentException("matcher rejection publication is required");
+        publishRejection(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
+                orderId, sequence, matcherShardId, resultCode, target);
+    }
+
+    void publishRejection(
+            long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
+            long sequence, int matcherShardId, String resultCode,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (resultCode == null || resultCode.isBlank() || target == null)
             throw new IllegalArgumentException("matcher rejection publication is required");
         advanceStrictly(shardSequences, index(matcherShardId), sequence,
                 "matcher shard sequence is not strictly increasing");
         target.publishDirectRejection(resultCode, coreSequence,
-                commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), orderId,
+                commandIdMsb, commandIdLsb, orderId,
                 sequence, matcherShardId);
     }
 

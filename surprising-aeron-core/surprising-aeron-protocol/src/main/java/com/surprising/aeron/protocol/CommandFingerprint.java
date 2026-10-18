@@ -1,5 +1,7 @@
 package com.surprising.aeron.protocol;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -65,6 +67,7 @@ public final class CommandFingerprint {
 
     /** One serial producer owns the digest/header; only ofBorrowed opts into an input lease. */
     public static final class Calculator {
+        private final MessageDigest digest = newDigest();
         private final byte[] header = new byte[HEADER_LENGTH];
 
         public CommandFingerprint of(CoreMessage message) {
@@ -101,12 +104,17 @@ public final class CommandFingerprint {
             offset = putInt(this.header, offset, msgHeader.route().version());
             offset = putInt(this.header, offset, msgHeader.source().wireCode());
             offset = putLong(this.header, offset, msgHeader.userId());
-            offset = putInt(this.header, offset, payload.length);
+            offset = putInt(this.header, offset, message.payloadLength());
             if (offset != HEADER_LENGTH) throw new IllegalStateException("invalid fingerprint header length");
 
-            // Zero-copy: compute directly over header and payload with no memory copy
-            murmurHash3_x64_128_composite(this.header, payload, payload.length, 0x9747b28cL, target, targetOffset);
-            murmurHash3_x64_128_composite(this.header, payload, payload.length, 0x1b873593L, target, targetOffset + 16);
+            digest.reset();
+            digest.update(this.header, 0, offset);
+            digest.update(payload, 0, message.payloadLength());
+            try {
+                digest.digest(target, targetOffset, LENGTH);
+            } catch (java.security.DigestException e) {
+                throw new IllegalStateException("failed to compute digest", e);
+            }
         }
     }
 
@@ -184,218 +192,12 @@ public final class CommandFingerprint {
         return result.toString();
     }
 
-    private static void murmurHash3_x64_128_composite(
-            byte[] header, byte[] payload, int payloadLen, long seed, byte[] out, int outOffset) {
-        int length = HEADER_LENGTH + payloadLen;
-        long h1 = seed;
-        long h2 = seed;
-
-        final long c1 = 0x87c37b91114253d5L;
-        final long c2 = 0x4cf5ad432745937fL;
-
-        int nblocks = length / 16;
-        for (int i = 0; i < nblocks; i++) {
-            long k1;
-            long k2;
-            if (i < 2) {
-                int off = i * 16;
-                k1 = getLongLE(header, off);
-                k2 = getLongLE(header, off + 8);
-            } else if (i == 2) {
-                k1 = getLongLE(header, 32);
-                k2 = getLongLE(payload, 0);
-            } else {
-                int off = (i * 16) - 40;
-                k1 = getLongLE(payload, off);
-                k2 = getLongLE(payload, off + 8);
-            }
-
-            k1 *= c1;
-            k1 = Long.rotateLeft(k1, 31);
-            k1 *= c2;
-            h1 ^= k1;
-
-            h1 = Long.rotateLeft(h1, 27);
-            h1 += h2;
-            h1 = h1 * 5 + 0x52dce729;
-
-            k2 *= c2;
-            k2 = Long.rotateLeft(k2, 33);
-            k2 *= c1;
-            h2 ^= k2;
-
-            h2 = Long.rotateLeft(h2, 31);
-            h2 += h1;
-            h2 = h2 * 5 + 0x38495ab5;
+    private static MessageDigest newDigest() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("JDK does not provide SHA-256", exception);
         }
-
-        long k1 = 0;
-        long k2 = 0;
-        int remaining = length & 15;
-
-        if (nblocks == 2) {
-            // tailOffset = 32. 40 <= length < 48. remaining in [8, 15].
-            // k1 is always header[32..39]
-            k1 = getLongLE(header, 32);
-            k1 *= c1;
-            k1 = Long.rotateLeft(k1, 31);
-            k1 *= c2;
-            h1 ^= k1;
-
-            int payloadRemaining = remaining - 8;
-            switch (payloadRemaining) {
-                case 7: k2 ^= (long) (payload[6] & 0xff) << 48;
-                case 6: k2 ^= (long) (payload[5] & 0xff) << 40;
-                case 5: k2 ^= (long) (payload[4] & 0xff) << 32;
-                case 4: k2 ^= (long) (payload[3] & 0xff) << 24;
-                case 3: k2 ^= (long) (payload[2] & 0xff) << 16;
-                case 2: k2 ^= (long) (payload[1] & 0xff) << 8;
-                case 1: k2 ^= (long) (payload[0] & 0xff);
-                        k2 *= c2; k2 = Long.rotateLeft(k2, 33); k2 *= c1; h2 ^= k2;
-            }
-        } else {
-            // nblocks >= 3 (or payloadLen >= 8). tailOffset >= 48 > 40.
-            // Tail is entirely within payload at (nblocks * 16 - 40).
-            int tailOffset = (nblocks * 16) - 40;
-            switch (remaining) {
-                case 15: k2 ^= (long) (payload[tailOffset + 14] & 0xff) << 48;
-                case 14: k2 ^= (long) (payload[tailOffset + 13] & 0xff) << 40;
-                case 13: k2 ^= (long) (payload[tailOffset + 12] & 0xff) << 32;
-                case 12: k2 ^= (long) (payload[tailOffset + 11] & 0xff) << 24;
-                case 11: k2 ^= (long) (payload[tailOffset + 10] & 0xff) << 16;
-                case 10: k2 ^= (long) (payload[tailOffset + 9] & 0xff) << 8;
-                case 9:  k2 ^= (long) (payload[tailOffset + 8] & 0xff);
-                         k2 *= c2; k2 = Long.rotateLeft(k2, 33); k2 *= c1; h2 ^= k2;
-                case 8:  k1 ^= (long) (payload[tailOffset + 7] & 0xff) << 56;
-                case 7:  k1 ^= (long) (payload[tailOffset + 6] & 0xff) << 48;
-                case 6:  k1 ^= (long) (payload[tailOffset + 5] & 0xff) << 40;
-                case 5:  k1 ^= (long) (payload[tailOffset + 4] & 0xff) << 32;
-                case 4:  k1 ^= (long) (payload[tailOffset + 3] & 0xff) << 24;
-                case 3:  k1 ^= (long) (payload[tailOffset + 2] & 0xff) << 16;
-                case 2:  k1 ^= (long) (payload[tailOffset + 1] & 0xff) << 8;
-                case 1:  k1 ^= (long) (payload[tailOffset] & 0xff);
-                         k1 *= c1; k1 = Long.rotateLeft(k1, 31); k1 *= c2; h1 ^= k1;
-            }
-        }
-
-        h1 ^= length;
-        h2 ^= length;
-
-        h1 += h2;
-        h2 += h1;
-
-        h1 = fmix64(h1);
-        h2 = fmix64(h2);
-
-        h1 += h2;
-        h2 += h1;
-
-        putLongLE(out, outOffset, h1);
-        putLongLE(out, outOffset + 8, h2);
-    }
-
-    private static void murmurHash3_x64_128(byte[] data, int offset, int length, long seed, byte[] out, int outOffset) {
-        long h1 = seed;
-        long h2 = seed;
-
-        final long c1 = 0x87c37b91114253d5L;
-        final long c2 = 0x4cf5ad432745937fL;
-
-        int nblocks = length / 16;
-        for (int i = 0; i < nblocks; i++) {
-            int blockOffset = offset + (i * 16);
-            long k1 = getLongLE(data, blockOffset);
-            long k2 = getLongLE(data, blockOffset + 8);
-
-            k1 *= c1;
-            k1 = Long.rotateLeft(k1, 31);
-            k1 *= c2;
-            h1 ^= k1;
-
-            h1 = Long.rotateLeft(h1, 27);
-            h1 += h2;
-            h1 = h1 * 5 + 0x52dce729;
-
-            k2 *= c2;
-            k2 = Long.rotateLeft(k2, 33);
-            k2 *= c1;
-            h2 ^= k2;
-
-            h2 = Long.rotateLeft(h2, 31);
-            h2 += h1;
-            h2 = h2 * 5 + 0x38495ab5;
-        }
-
-        long k1 = 0;
-        long k2 = 0;
-        int tailOffset = offset + (nblocks * 16);
-        int remaining = length & 15;
-
-        switch (remaining) {
-            case 15: k2 ^= (long) (data[tailOffset + 14] & 0xff) << 48;
-            case 14: k2 ^= (long) (data[tailOffset + 13] & 0xff) << 40;
-            case 13: k2 ^= (long) (data[tailOffset + 12] & 0xff) << 32;
-            case 12: k2 ^= (long) (data[tailOffset + 11] & 0xff) << 24;
-            case 11: k2 ^= (long) (data[tailOffset + 10] & 0xff) << 16;
-            case 10: k2 ^= (long) (data[tailOffset + 9] & 0xff) << 8;
-            case 9:  k2 ^= (long) (data[tailOffset + 8] & 0xff);
-                     k2 *= c2; k2 = Long.rotateLeft(k2, 33); k2 *= c1; h2 ^= k2;
-            case 8:  k1 ^= (long) (data[tailOffset + 7] & 0xff) << 56;
-            case 7:  k1 ^= (long) (data[tailOffset + 6] & 0xff) << 48;
-            case 6:  k1 ^= (long) (data[tailOffset + 5] & 0xff) << 40;
-            case 5:  k1 ^= (long) (data[tailOffset + 4] & 0xff) << 32;
-            case 4:  k1 ^= (long) (data[tailOffset + 3] & 0xff) << 24;
-            case 3:  k1 ^= (long) (data[tailOffset + 2] & 0xff) << 16;
-            case 2:  k1 ^= (long) (data[tailOffset + 1] & 0xff) << 8;
-            case 1:  k1 ^= (long) (data[tailOffset] & 0xff);
-                     k1 *= c1; k1 = Long.rotateLeft(k1, 31); k1 *= c2; h1 ^= k1;
-        }
-
-        h1 ^= length;
-        h2 ^= length;
-
-        h1 += h2;
-        h2 += h1;
-
-        h1 = fmix64(h1);
-        h2 = fmix64(h2);
-
-        h1 += h2;
-        h2 += h1;
-
-        putLongLE(out, outOffset, h1);
-        putLongLE(out, outOffset + 8, h2);
-    }
-
-    private static long fmix64(long k) {
-        k ^= k >>> 33;
-        k *= 0xff51afd7ed558ccdL;
-        k ^= k >>> 33;
-        k *= 0xc4ceb9fe1a85ec53L;
-        k ^= k >>> 33;
-        return k;
-    }
-
-    private static long getLongLE(byte[] data, int offset) {
-        return ((long) data[offset] & 0xff)
-                | (((long) data[offset + 1] & 0xff) << 8)
-                | (((long) data[offset + 2] & 0xff) << 16)
-                | (((long) data[offset + 3] & 0xff) << 24)
-                | (((long) data[offset + 4] & 0xff) << 32)
-                | (((long) data[offset + 5] & 0xff) << 40)
-                | (((long) data[offset + 6] & 0xff) << 48)
-                | (((long) data[offset + 7] & 0xff) << 56);
-    }
-
-    private static void putLongLE(byte[] target, int offset, long value) {
-        target[offset] = (byte) value;
-        target[offset + 1] = (byte) (value >>> 8);
-        target[offset + 2] = (byte) (value >>> 16);
-        target[offset + 3] = (byte) (value >>> 24);
-        target[offset + 4] = (byte) (value >>> 32);
-        target[offset + 5] = (byte) (value >>> 40);
-        target[offset + 6] = (byte) (value >>> 48);
-        target[offset + 7] = (byte) (value >>> 56);
     }
 
     private static int putInt(byte[] target, int offset, int value) {
@@ -417,5 +219,4 @@ public final class CommandFingerprint {
         target[offset + 7] = (byte) (value >>> 56);
         return offset + Long.BYTES;
     }
-
 }

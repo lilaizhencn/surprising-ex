@@ -97,7 +97,7 @@ public final class OrderBookQueryService {
     }
 
     CoreResponse beginPreflightQuery(CoreMessage message, long timestamp) {
-        var command = TradingCommandCodec.decodePlaceOrder(message.payloadUnsafe());
+        var command = TradingCommandCodec.decodePlaceOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), null);
         long userId = message.header().userId();
         if (userId <= 0) throw new IllegalArgumentException("preflight user is required");
         owner.requireOrderIdentityAvailable(userId, command);
@@ -701,7 +701,7 @@ public final class OrderBookQueryService {
     }
 
     CoreResponse beginBookQuery(CoreMessage message) {
-        if (message.payloadUnsafe().length == 0) {
+        if (message.payloadLength() == 0) {
             throw new IllegalArgumentException("single-instrumentId book query payload is required");
         }
         var query = CoreStateQueryCodec.decodeOrderBookQuery(message.payloadUnsafe());

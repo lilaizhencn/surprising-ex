@@ -183,6 +183,14 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         completionRuntime.publishPlaceAdmissionReady(laneId, coreSequence);
     }
 
+    /** FUSED resumes this existing admission after the Ledger publishes its immutable OI input. */
+    public void executeInlineIfReady() {
+        if (runtime == null || !runtime.isFusedExecution())
+            throw new IllegalStateException("inline admission requires the fused trading Owner");
+        runtime.assertOwner();
+        if (!completed && inputReady) execute(runtime.accountLanes[runtime.topology().accountLaneId(userId)]);
+    }
+
     public boolean complete() {
         return completed;
     }

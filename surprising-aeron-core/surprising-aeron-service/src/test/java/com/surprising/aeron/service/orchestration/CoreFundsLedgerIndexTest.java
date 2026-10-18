@@ -86,7 +86,7 @@ class CoreFundsLedgerIndexTest {
     }
 
     @Test @Timeout(15)
-    void fullLedgerMailboxLeavesOwnerPendingAndAppliesFundsExactlyOnceAfterDrain() {
+        void fullLedgerMailboxLeavesOwnerPendingAndAppliesFundsExactlyOnceAfterDrain() {
         try (var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applied(core, command(core, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100))));
@@ -143,7 +143,7 @@ class CoreFundsLedgerIndexTest {
     }
 
     @Test @Timeout(15)
-    void indexWriteFailureStopsBeforeTerminalResponseAndDoesNotBecomeBusinessRejection() throws Exception {
+        void indexWriteFailureStopsBeforeTerminalResponseAndDoesNotBecomeBusinessRejection() throws Exception {
         String previous = System.getProperty(INDEX_DIRECTORY);
         Path root = Path.of(previous == null ? System.getProperty("java.io.tmpdir") : previous);
         Files.createDirectories(root);
@@ -174,7 +174,7 @@ class CoreFundsLedgerIndexTest {
     }
 
     @Test @Timeout(15)
-    void indexCompletionSignalsOwnerEvenWhenTheRequestIsImmediatelyReused() {
+        void indexCompletionSignalsOwnerEvenWhenTheRequestIsImmediatelyReused() {
         try (var core = new TradingCoreRuntime(ProductLine.SPOT)) {
             core.activate();
             var signals = new java.util.concurrent.atomic.AtomicInteger();

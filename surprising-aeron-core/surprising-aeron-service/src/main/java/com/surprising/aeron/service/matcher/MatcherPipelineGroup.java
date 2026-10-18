@@ -15,8 +15,7 @@ public final class MatcherPipelineGroup implements AutoCloseable {
     private final MatcherCommandPipeline[] shards;
     private final CommandSlotRing contexts;
     /** Matcher workers set one bit on publication; the Owner drains only signalled shards. */
-    private final com.surprising.aeron.service.state.TradingRuntimeState.PaddedReadyMask completedShardMask =
-            new com.surprising.aeron.service.state.TradingRuntimeState.PaddedReadyMask();
+    private final com.surprising.aeron.service.state.TradingRuntimeState.PaddedReadyMask completedShardMask;
     private volatile boolean completionSignalConfigured;
 
     public void completionSignal(Runnable signal) {
@@ -35,6 +34,7 @@ public final class MatcherPipelineGroup implements AutoCloseable {
             throw new IllegalArgumentException("matcher shard count must be a power of two");
         }
         this.contexts = java.util.Objects.requireNonNull(contexts, "matching sequence contexts");
+        completedShardMask = new com.surprising.aeron.service.state.TradingRuntimeState.PaddedReadyMask(shardCount);
         shards = new MatcherCommandPipeline[shardCount];
         for (int shard = 0; shard < shardCount; shard++) {
             shards[shard] = new MatcherCommandPipeline(shard, capacityPerShard, false);

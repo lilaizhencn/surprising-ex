@@ -2,7 +2,7 @@ package com.surprising.realtime.provider.export;
 
 import static org.assertj.core.api.Assertions.*;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.orchestration.CommittedFundingPage;
+import com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedFundingPage;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.UUID;

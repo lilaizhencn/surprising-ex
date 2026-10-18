@@ -130,7 +130,7 @@ class OwnerIngressRingTest {
     }
 
     private static CoreMessage probe(long id) {
-        return CoreMessage.owned(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, new UUID(19, id),
-                ProductLine.SPOT, CommandSource.GATEWAY, 19, id, 7, id, id), CoreProtocol.probePayload(1));
+        return CoreMessage.owned(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE, new UUID(19, id),
+                ProductLine.SPOT, CommandSource.GATEWAY, 19, id, 7, id, id), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 1)));
     }
 }

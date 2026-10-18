@@ -85,7 +85,8 @@ class TriggerOrderIndexTest {
     void accountThreadMutatesTriggerWhileOwnerUsesOnlyCommitReceipts() {
         try (var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
             long user = 1;
-            while (runtime.topology().accountLaneId(user) != 3) user++;
+            int targetLane = runtime.topology().accountLaneCount() - 1;
+            while (runtime.topology().accountLaneId(user) != targetLane) user++;
             final long userId = user;
             var initial = trigger(901, userId, 100);
             runtime.putTriggerOrder(initial); runtime.clearChangedKeys(); runtime.startAccountLanes();

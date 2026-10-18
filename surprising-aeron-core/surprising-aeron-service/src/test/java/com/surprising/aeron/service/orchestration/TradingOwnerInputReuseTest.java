@@ -175,8 +175,8 @@ class TradingOwnerInputReuseTest {
     }
 
     private static CoreMessage probe(long id) {
-        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, new UUID(15, id),
-                ProductLine.SPOT, CommandSource.GATEWAY, 15, id, 7, 1, id), CoreProtocol.probePayload(1));
+        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE, new UUID(15, id),
+                ProductLine.SPOT, CommandSource.GATEWAY, 15, id, 7, 1, id), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 1)));
     }
 
     private static Cluster cluster(CountDownLatch waiting) {

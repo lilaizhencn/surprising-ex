@@ -478,3 +478,9 @@ HotSpot JDK 27 定向测试 61 个测试类，按最后一次类结果去重共 
 本地验证包括迟到成交 SQL 失败重试、全部 12 个周期、通知排队与重复计数、10080 分钟周线重建、热缓存不回退，真实 PostgreSQL 的版本替换和资金费原子事务/幂等/缺页/冲突/零支付/产品隔离，以及真实 Archive 的分片、提交边界、SQL 失败后 checkpoint 恢复；原 Archive/Kafka 成交导出集成仍执行。在线 Core、撮合资金模型与 Kafka topic 不变，不需要重启 Core。
 
 导出恢复追赶时，已提交位置超过回放位置 64KiB 后，`ExportBatch` 暂将合批目标期限从 5ms 调整到 100ms，减少历史命令逐小批 SQL 往返；接近实时位置后恢复 5ms。原 256 命令/4096 帧上限、完整命令边界、订单事务先于 Kafka、失败不推进 checkpoint 等规则不变；外部 I/O 与调度耗时不计为端到端延迟承诺。此状态只属于原导出线程，不新增配置项或工作线程。六产品线测试覆盖追赶期限、容量上限及恢复实时期限。
+
+## 当前Core协议消费端对齐（2026-10-18，验收中）
+
+`CommittedOrderProjectionRepository` 及资金页测试直接消费 `CommittedTradeReplay.CommittedFundingPage`。资金费支付记录来自确定性回放的实际已提交页；不增设旧类型转接类。
+
+`CandlestickStreamConfiguration` 按现有十字段 `RealtimeFrame` 构造K线帧。`RealtimeRouter` 用产品线和日志序号生成传输日志关联标识；`ReliableTradeKafkaSink` 在Kafka出口生成同一标识，写入公开成交事件及 `X-Trace-Id` header。提交/失败日志使用实际产品线、成交ID和日志位置定位，协议帧不携带另一份追踪状态。

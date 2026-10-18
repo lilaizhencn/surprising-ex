@@ -1,0 +1,44 @@
+[
+  {
+    "file": "INVERSE_DELIVERY.snapshot",
+    "sourceSha256": "404acc74753e5a6a42a0083dd8e204e4257182bda7e0b2a8d0be3015933284e3",
+    "v27Sha256": "0c08554449e8eab7ec654de72b5cfd80347b4c38109a0e1428e81ecd92d21190",
+    "removedProbe": 0,
+    "businessSections": "verbatim; no regeneration or hash rewrite"
+  },
+  {
+    "file": "LINEAR_PERPETUAL.snapshot",
+    "sourceSha256": "5995918492aae69fa215b10e3bde1774f2ff72791b41a77832de47c39e7d7791",
+    "v27Sha256": "c67bfebe4ef57d0d96f228fbfafc0cfb04e1f9f625de2826f31bcb584b242dd6",
+    "removedProbe": 0,
+    "businessSections": "verbatim; no regeneration or hash rewrite"
+  },
+  {
+    "file": "LINEAR_DELIVERY.snapshot",
+    "sourceSha256": "b8edcc821261d871ab3189dfd7f358e293273df83b405b02cc3f1eb124358870",
+    "v27Sha256": "a51af579b650ab4ad55f7383489519ecbe48fa7dd1244168bb569b6c67b4b4bd",
+    "removedProbe": 0,
+    "businessSections": "verbatim; no regeneration or hash rewrite"
+  },
+  {
+    "file": "INVERSE_PERPETUAL.snapshot",
+    "sourceSha256": "78c08e153fd878b9c908ec3b5c067b950e07176b4c0f6099f6ddc3283c563665",
+    "v27Sha256": "451e9e5000ae951aee340667a87bd118f1c99787ac43d37a893df93d3e6e916f",
+    "removedProbe": 0,
+    "businessSections": "verbatim; no regeneration or hash rewrite"
+  },
+  {
+    "file": "SPOT.snapshot",
+    "sourceSha256": "07e0fff087c9231d491144321c2942b13cd9ad39c453bcb002783b74380d9b7d",
+    "v27Sha256": "29c062c6b166e94674789d1003d47f1a3877fabc6095c1a86de0071d403b27ab",
+    "removedProbe": 0,
+    "businessSections": "verbatim; no regeneration or hash rewrite"
+  },
+  {
+    "file": "OPTION.snapshot",
+    "sourceSha256": "ba68bf1047a36e932a6319c92c972ac5a5fa13c9fa493685ac1b4ed025727ec8",
+    "v27Sha256": "7140a9c1d074c199bb978b06485903fb939bb5da05743d61cf0262eb9cc63db0",
+    "removedProbe": 0,
+    "businessSections": "verbatim; no regeneration or hash rewrite"
+  }
+]

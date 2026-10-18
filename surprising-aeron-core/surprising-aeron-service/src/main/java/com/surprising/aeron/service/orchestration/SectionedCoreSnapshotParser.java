@@ -59,7 +59,7 @@ final class SectionedCoreSnapshotParser {
         long checksum = ByteBuffer.wrap(payloads[payloads.length - 1])
                 .order(ByteOrder.LITTLE_ENDIAN).getLong();
         TerminalStateRetention retention = TerminalStateRetention.decode(payloads[7]);
-        return new Components(manifest.productLine(), manifest.appliedCommandCount(), manifest.probeValue(),
+        return new Components(manifest.productLine(), manifest.appliedCommandCount(),
                 commandResults, sourceSequences, matcherSnapshot, tradingState, feePolicies,
                 pendingTransfers, retention, accountLanes, manifest, checksum);
     }
@@ -188,7 +188,6 @@ final class SectionedCoreSnapshotParser {
     record Components(
             ProductLine productLine,
             long appliedCommandCount,
-            long probeValue,
             Map<UUID, CommandResultLedger.StoredResult> commandResults,
             Map<TradingCoreRuntime.SourceKey, Long> sourceSequences,
             MatcherSnapshot matcherSnapshot,
@@ -206,7 +205,7 @@ final class SectionedCoreSnapshotParser {
             try {
                 com.surprising.aeron.service.state.TradingRuntimeState.validateAccountLaneSnapshotManifest(
                         accountLanes, manifest.coreSequence(), tradingState, manifest.topology());
-                candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount, probeValue,
+                candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount,
                         commandResults, sourceSequences, tradingState, retention, matcherForRestoredState(),
                         manifest.projectionSequence(), feePolicies, pendingTransfers);
                 candidate.restoreAccountLaneSnapshots(accountLanes, manifest.coreSequence());

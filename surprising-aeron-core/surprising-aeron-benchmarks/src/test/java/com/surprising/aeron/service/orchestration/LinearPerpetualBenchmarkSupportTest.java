@@ -154,29 +154,36 @@ class LinearPerpetualBenchmarkSupportTest {
         }
     }
 
-    @Test
-    void liquidationBenchmarksExerciseTheFullTwoHundredFiftySixItemPaths() {
-        int lanes = 4;
-        List<NamedScenario> scenarios = List.of(
-                new NamedScenario("multiUserLiquidationPlanning",
-                        () -> LinearPerpetualBenchmarkSupport.riskScan(
-                                LinearPerpetualBenchmarkSupport.riskScanTemplate(lanes, 256))),
-                new NamedScenario("liquidationManyOrderCancellation",
-                        () -> LinearPerpetualBenchmarkSupport.liquidationBatchExecution(lanes, 1, 256)),
-                new NamedScenario("liquidationBurst256",
-                        () -> LinearPerpetualBenchmarkSupport.liquidationBatchExecution(lanes, 256, 0)),
-                new NamedScenario("insuranceShortfallAllocation",
-                        () -> LinearPerpetualBenchmarkSupport.insuranceShortfall(lanes, 256, false)),
-                new NamedScenario("insuranceToAdl",
-                        () -> LinearPerpetualBenchmarkSupport.insuranceShortfall(lanes, 256, true)));
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(TradingExecutionMode.class)
+    void liquidationBenchmarksExerciseTheFullTwoHundredFiftySixItemPaths(TradingExecutionMode mode) {
+        String previous = System.setProperty("surprising.aeron.execution-mode", mode.name());
+        try {
+            int lanes = 4;
+            List<NamedScenario> scenarios = List.of(
+                    new NamedScenario("multiUserLiquidationPlanning",
+                            () -> LinearPerpetualBenchmarkSupport.riskScan(
+                                    LinearPerpetualBenchmarkSupport.riskScanTemplate(lanes, 256))),
+                    new NamedScenario("liquidationManyOrderCancellation",
+                            () -> LinearPerpetualBenchmarkSupport.liquidationBatchExecution(lanes, 1, 256)),
+                    new NamedScenario("liquidationBurst256",
+                            () -> LinearPerpetualBenchmarkSupport.liquidationBatchExecution(lanes, 256, 0)),
+                    new NamedScenario("insuranceShortfallAllocation",
+                            () -> LinearPerpetualBenchmarkSupport.insuranceShortfall(lanes, 256, false)),
+                    new NamedScenario("insuranceToAdl",
+                            () -> LinearPerpetualBenchmarkSupport.insuranceShortfall(lanes, 256, true)));
 
-        for (NamedScenario named : scenarios) {
-            assertThatCode(() -> {
-                try (var scenario = named.factory().get()) {
-                    assertThat(scenario.run()).isNotZero();
-                    scenario.verify();
-                }
-            }).as(named.name()).doesNotThrowAnyException();
+            for (NamedScenario named : scenarios) {
+                assertThatCode(() -> {
+                    try (var scenario = named.factory().get()) {
+                        assertThat(scenario.run()).isNotZero();
+                        scenario.verify();
+                    }
+                }).as(named.name()).doesNotThrowAnyException();
+            }
+        } finally {
+            if (previous == null) System.clearProperty("surprising.aeron.execution-mode");
+            else System.setProperty("surprising.aeron.execution-mode", previous);
         }
     }
 

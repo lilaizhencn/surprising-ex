@@ -432,11 +432,19 @@ public final class TradingCommandCodec {
     }
 
     static CancelOrderCommand decodeCancelOrder(byte[] payload, int offset, int length) {
+        return decodeCancelOrderInto(payload, offset, length, null);
+    }
+
+    public static CancelOrderCommand decodeCancelOrderInto(byte[] payload, int offset, int length,
+            CancelOrderCommand target) {
         requireRange(payload, offset, length);
         if (length != Long.BYTES) {
             throw new ProtocolException("cancel order payload must be 8 bytes");
         }
-        return new CancelOrderCommand(getLong(payload, offset));
+        long orderId = getLong(payload, offset);
+        if (target == null) return new CancelOrderCommand(orderId);
+        target.decodeInto(orderId);
+        return target;
     }
 
     public static byte[] encodeReplaceOrder(ReplaceOrderCommand command) {
@@ -450,24 +458,31 @@ public final class TradingCommandCodec {
     }
 
     public static ReplaceOrderCommand decodeReplaceOrder(byte[] payload) {
-        ByteBuffer buffer = readable(payload);
-        requireRemaining(buffer, Long.BYTES + Integer.BYTES);
-        long originalOrderId = buffer.getLong();
-        int replacementLength = buffer.getInt();
-        if (replacementLength <= 0 || replacementLength != buffer.remaining()) {
+        return decodeReplaceOrderInto(payload, 0, payload == null ? 0 : payload.length, null);
+    }
+
+    public static ReplaceOrderCommand decodeReplaceOrderInto(byte[] payload, int offset, int length,
+            ReplaceOrderCommand target) {
+        requireRange(payload, offset, length);
+        if (length < Long.BYTES + Integer.BYTES) throw new ProtocolException("truncated replacement payload");
+        long originalOrderId = getLong(payload, offset);
+        int replacementLength = getInt(payload, offset + Long.BYTES);
+        if (replacementLength <= 0 || replacementLength != length - Long.BYTES - Integer.BYTES)
             throw new ProtocolException("invalid replacement payload length");
-        }
-        return new ReplaceOrderCommand(originalOrderId,
-                decodePlaceOrder(payload, buffer.position(), replacementLength));
+        PlaceOrderCommand replacement = decodePlaceOrderInto(payload, offset + Long.BYTES + Integer.BYTES,
+                replacementLength, target == null ? null : target.replacement());
+        if (target == null) return new ReplaceOrderCommand(originalOrderId, replacement);
+        target.decodedOriginalOrderId(originalOrderId);
+        return target;
     }
 
     public static byte[] encodeAmendOrder(AmendOrderCommand command) {
         byte[] clientOrderId = optionalText(command.newClientOrderId());
         int mask = 0;
-        if (command.priceTicks() != null) mask |= 1;
-        if (command.quantitySteps() != null) mask |= 1 << 1;
+        if (command.hasPriceTicks()) mask |= 1;
+        if (command.hasQuantitySteps()) mask |= 1 << 1;
         if (command.timeInForce() != null) mask |= 1 << 2;
-        if (command.postOnly() != null) mask |= 1 << 3;
+        if (command.hasPostOnly()) mask |= 1 << 3;
         if (command.newClientOrderId() != null) mask |= 1 << 4;
         int length = Integer.BYTES + Long.BYTES * 2 + Integer.BYTES;
         if ((mask & 1) != 0) length += Long.BYTES;
@@ -480,10 +495,10 @@ public final class TradingCommandCodec {
                 .putLong(command.originalOrderId())
                 .putLong(command.replacementOrderId())
                 .putInt(mask);
-        if ((mask & 1) != 0) buffer.putLong(command.priceTicks());
-        if ((mask & (1 << 1)) != 0) buffer.putLong(command.quantitySteps());
+        if ((mask & 1) != 0) buffer.putLong(command.rawPriceTicks());
+        if ((mask & (1 << 1)) != 0) buffer.putLong(command.rawQuantitySteps());
         if ((mask & (1 << 2)) != 0) buffer.putInt(command.timeInForce().wireCode());
-        if ((mask & (1 << 3)) != 0) buffer.put((byte) (command.postOnly() ? 1 : 0));
+        if ((mask & (1 << 3)) != 0) buffer.put((byte) (command.isPostOnly() ? 1 : 0));
         if ((mask & (1 << 4)) != 0) buffer.putShort((short) clientOrderId.length).put(clientOrderId);
         return buffer.array();
     }
@@ -493,39 +508,65 @@ public final class TradingCommandCodec {
     }
 
     static AmendOrderCommand decodeAmendOrder(byte[] payload, int offset, int length) {
+        return decodeAmendOrderInto(payload, offset, length, null);
+    }
+
+    public static AmendOrderCommand decodeAmendOrderInto(byte[] payload, int offset, int length,
+            AmendOrderCommand target) {
         requireRange(payload, offset, length);
-        ByteBuffer buffer = ByteBuffer.wrap(payload, offset, length).order(ByteOrder.LITTLE_ENDIAN);
-        requireRemaining(buffer, Integer.BYTES + Long.BYTES * 2 + Integer.BYTES);
-        if (buffer.getInt() != AMEND_ORDER_V1_MARKER) {
+        int limit = offset + length;
+        requireRange(payload, offset, Integer.BYTES * 2 + Long.BYTES * 2, limit);
+        if (getInt(payload, offset) != AMEND_ORDER_V1_MARKER)
             throw new ProtocolException("invalid amend order marker");
-        }
-        long originalOrderId = buffer.getLong();
-        long replacementOrderId = buffer.getLong();
-        int mask = buffer.getInt();
-        if (mask <= 0 || (mask & ~0x1f) != 0) {
+        offset += Integer.BYTES;
+        long originalOrderId = getLong(payload, offset);
+        offset += Long.BYTES;
+        long replacementOrderId = getLong(payload, offset);
+        offset += Long.BYTES;
+        int mask = getInt(payload, offset);
+        offset += Integer.BYTES;
+        if (mask <= 0 || (mask & ~0x1f) != 0)
             throw new ProtocolException("invalid amend order field mask");
-        }
         long priceTicks = 0L;
         if ((mask & 1) != 0) {
-            requireRemaining(buffer, Long.BYTES);
-            priceTicks = buffer.getLong();
+            requireRange(payload, offset, Long.BYTES, limit);
+            priceTicks = getLong(payload, offset);
+            offset += Long.BYTES;
         }
         long quantitySteps = 0L;
         if ((mask & (1 << 1)) != 0) {
-            requireRemaining(buffer, Long.BYTES);
-            quantitySteps = buffer.getLong();
+            requireRange(payload, offset, Long.BYTES, limit);
+            quantitySteps = getLong(payload, offset);
+            offset += Long.BYTES;
         }
-        CoreTimeInForce timeInForce = (mask & (1 << 2)) == 0 ? null
-                : readTimeInForce(buffer);
-        byte postOnly = -1;
+        CoreTimeInForce timeInForce = null;
+        if ((mask & (1 << 2)) != 0) {
+            requireRange(payload, offset, Integer.BYTES, limit);
+            timeInForce = CoreTimeInForce.fromWireCode(getInt(payload, offset));
+            offset += Integer.BYTES;
+        }
+        byte postOnly = AmendOrderCommand.UNCHANGED_POST_ONLY;
         if ((mask & (1 << 3)) != 0) {
-            requireRemaining(buffer, Byte.BYTES);
-            postOnly = buffer.get();
+            requireRange(payload, offset, Byte.BYTES, limit);
+            postOnly = payload[offset++];
+            if (postOnly != 0 && postOnly != 1) throw new ProtocolException("invalid postOnly flag");
         }
-        String clientOrderId = (mask & (1 << 4)) == 0 ? null : readOptionalText(buffer);
-        requireConsumed(buffer);
-        return new AmendOrderCommand(originalOrderId, replacementOrderId, clientOrderId,
+        String clientOrderId = null;
+        if ((mask & (1 << 4)) != 0) {
+            requireRange(payload, offset, Short.BYTES, limit);
+            int textLength = getUnsignedShort(payload, offset);
+            offset += Short.BYTES;
+            if (textLength > MAX_TEXT_BYTES) throw new ProtocolException("invalid optional text length");
+            requireRange(payload, offset, textLength, limit);
+            clientOrderId = decodeAsciiSymbol(payload, offset, textLength);
+            offset += textLength;
+        }
+        if (offset != limit) throw new ProtocolException("trailing bytes in trading command payload");
+        if (target == null) return new AmendOrderCommand(originalOrderId, replacementOrderId, clientOrderId,
                 priceTicks, quantitySteps, timeInForce, postOnly);
+        target.decodeInto(originalOrderId, replacementOrderId, clientOrderId,
+                priceTicks, quantitySteps, timeInForce, postOnly);
+        return target;
     }
 
     public static byte[] encodeRegisterInstrument(RegisterInstrumentCommand command) {

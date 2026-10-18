@@ -1,7 +1,6 @@
 package com.surprising.aeron.protocol;
 
 public enum CoreMessageType {
-    PROBE_INCREMENT(1, WireMessageKind.COMMAND),
     VERIFY_STATE_HASH(2, WireMessageKind.COMMAND),
     ADJUST_BALANCE(10, WireMessageKind.COMMAND),
     PLACE_ORDER(11, WireMessageKind.COMMAND),

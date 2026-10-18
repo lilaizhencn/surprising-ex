@@ -481,6 +481,7 @@ final class OrderBatchExecutor {
 
     private boolean collectBatchAmendAdmission(OrderBatchPending batch, long userId) {
         var event = batch.replacementAdmissionEvent;
+        if (owner.runtimeState.isFusedExecution()) event.executeInlineIfReady();
         if (!event.complete()) { owner.runtimeState.assertAccountLanesHealthy(); return false; }
         if (event.rejection() != null) throw event.rejection();
         var admission = event.admission();

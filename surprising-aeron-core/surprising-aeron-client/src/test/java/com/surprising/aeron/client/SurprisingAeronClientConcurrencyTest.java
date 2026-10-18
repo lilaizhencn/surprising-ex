@@ -177,9 +177,9 @@ class SurprisingAeronClientConcurrencyTest {
     }
 
     private static CoreMessage message(long correlationId) {
-        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
                 new UUID(0, correlationId), ProductLine.SPOT, CommandSource.GATEWAY,
-                1, correlationId, 7, 1_000, correlationId), CoreProtocol.probePayload(1));
+                1, correlationId, 7, 1_000, correlationId), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 1)));
     }
 
     private static class CountingClusterOperations implements SurprisingAeronClient.ClusterOperations {

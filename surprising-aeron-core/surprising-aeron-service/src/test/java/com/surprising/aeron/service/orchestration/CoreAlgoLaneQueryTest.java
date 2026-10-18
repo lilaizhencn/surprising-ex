@@ -93,6 +93,7 @@ class CoreAlgoLaneQueryTest {
     }
 
     @Test
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void ownerCanReturnWhileAnAlgoLaneIsBlockedAndConsumesPageExactlyOnce() throws Exception {
         var release = new CountDownLatch(1);
         try (var core = initial(preparedState(false))) {
@@ -154,7 +155,7 @@ class CoreAlgoLaneQueryTest {
     }
 
     private TradingCoreRuntime initial(TradingCoreState state) {
-        return new TradingCoreRuntime(LINE, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
+        return new TradingCoreRuntime(LINE, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
                 new TerminalStateRetention(), null, 0, Map.of(), Map.of(), null, null);
     }
 

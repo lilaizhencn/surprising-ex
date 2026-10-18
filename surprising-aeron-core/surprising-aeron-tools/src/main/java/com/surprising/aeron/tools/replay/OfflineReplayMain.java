@@ -6,7 +6,6 @@ import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
-import com.surprising.aeron.service.matching.MatchingResult;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.product.api.ProductLine;
 import java.io.BufferedInputStream;
@@ -28,10 +27,10 @@ public final class OfflineReplayMain {
             throw new IllegalArgumentException("usage: OfflineReplayMain <PRODUCT_LINE> <length-prefixed-log>");
         }
         ProductLine productLine = ProductLine.requireExternalCode(args[0]);
-        TradingCoreRuntime state = new TradingCoreRuntime(productLine);
         long messages = 0;
-        try (DataInputStream input = new DataInputStream(new BufferedInputStream(
-                Files.newInputStream(Path.of(args[1]))))) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(productLine);
+                DataInputStream input = new DataInputStream(new BufferedInputStream(
+                        Files.newInputStream(Path.of(args[1]))))) {
             while (true) {
                 int length;
                 try {
@@ -49,10 +48,19 @@ public final class OfflineReplayMain {
                 }
                 CoreMessage message = CoreMessageCodec.decode(encoded);
                 int pendingBefore = state.pendingMatching.size();
-                CoreResponse response = state.apply(message);
+                long position = messages + 1;
+                CoreResponse response = state.apply(message, message.header().submittedAtEpochMillis(), position);
+                long directDeadline = System.nanoTime() + 30_000_000_000L;
+                while (state.directCommand.active()) {
+                    response = state.directCommand.poll(state);
+                    if (System.nanoTime() >= directDeadline || Thread.currentThread().isInterrupted())
+                        throw new IllegalStateException("direct command replay did not complete");
+                    if (response == null) java.util.concurrent.locks.LockSupport.parkNanos(1_000L);
+                }
+                if (response == null) throw new IllegalStateException("replay command has no response");
                 if (response.resultCode() == CoreResultCode.MATCHING_PENDING
                         || state.pendingMatching.size() > pendingBefore) {
-                    drainMatching(state, pendingBefore, message);
+                    drainMatching(state, pendingBefore, message, position);
                 }
                 if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
                     long queryId = state.bookQueries.querySequence(message.header().commandId());
@@ -62,29 +70,23 @@ public final class OfflineReplayMain {
                 }
                 messages++;
             }
+            log.info("{}", String.format(java.util.Locale.ROOT,
+                    "productLine=%s messages=%d appliedCommandCount=%d stateHash=%016x%n",
+                    productLine, messages, state.appliedCommandCount(), state.stateHash()).stripTrailing());
         }
-        state.close();
-        log.info("{}", String.format(java.util.Locale.ROOT, "productLine=%s messages=%d appliedCommandCount=%d stateHash=%016x%n",
-                productLine, messages, state.appliedCommandCount(), state.stateHash()).stripTrailing());
     }
 
-    private static void drainMatching(TradingCoreRuntime state, int pendingBefore, CoreMessage message) {
+    private static void drainMatching(TradingCoreRuntime state, int pendingBefore,
+            CoreMessage message, long position) {
+        long deadline = System.nanoTime() + 30_000_000_000L;
         while (state.pendingMatching.size() > pendingBefore) {
-            long sequence = state.pendingMatching.firstSequence();
-            MatchingResult matching = null;
-            long deadline = System.nanoTime() + 30_000_000_000L;
-            while (matching == null && System.nanoTime() < deadline) {
-                matching = state.takeMatchingResult(sequence);
-                if (matching == null) Thread.onSpinWait();
-            }
-            if (matching == null) {
-                throw new IllegalStateException("matching replay timed out sequence=" + sequence);
-            }
-            CoreResponse completed = state.completeMatching(sequence, matching,
-                    message.header().submittedAtEpochMillis(), sequence);
-            if (completed == null) {
-                throw new IllegalStateException("matching replay completion lost sequence=" + sequence);
-            }
+            // Reuse the live Owner's ordered completion path, including admission rejection,
+            // Lane receipts and asynchronous Ledger publication.
+            int completed = state.commits.commitReadyMatching(64,
+                    message.header().submittedAtEpochMillis(), position, false, (sequence, response) -> {});
+            if (System.nanoTime() >= deadline || Thread.currentThread().isInterrupted())
+                throw new IllegalStateException("matching replay did not complete");
+            if (completed == 0) java.util.concurrent.locks.LockSupport.parkNanos(1_000L);
         }
     }
 

@@ -92,6 +92,7 @@ class CoreSelfTradePrefixTest {
         }
     }
 
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     @ParameterizedTest @MethodSource("productsAndPriorFill")
     void cancelBeforePlaceHandlesRestingAndAlreadyMatchedOwnOrders(ProductLine line, int priorFill) throws Exception {
         var releaseMaker = new CountDownLatch(1);

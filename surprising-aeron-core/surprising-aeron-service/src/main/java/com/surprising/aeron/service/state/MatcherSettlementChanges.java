@@ -52,9 +52,6 @@ final class MatcherSettlementChanges {
         }
     }
 
-    /** 每个Lane完成的当前命令预留数量，只在该Lane写入，Owner在事件完成后汇总。 */
-    final int[] completedPending = new int[Long.SIZE];
-
     void addUserRevision(int laneId, long userId, long count) {
         userRevisionDeltas[laneId].addToValue(userId, count);
     }
@@ -176,7 +173,6 @@ final class MatcherSettlementChanges {
         long lanes = activeLaneMask;
         while (lanes != 0) {
             int lane = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
-            completedPending[lane] = 0;
             userRevisionDeltas[lane].clear();
             laneDeltas[lane].clear();
             balancePatches[lane].clear();

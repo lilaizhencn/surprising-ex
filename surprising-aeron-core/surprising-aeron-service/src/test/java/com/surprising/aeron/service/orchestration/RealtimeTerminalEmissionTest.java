@@ -12,9 +12,11 @@ class RealtimeTerminalEmissionTest {
     private static long sequence;
     private static final long TIME=1_700_000_000_000L;
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
-    void committedOrdersEmitOncePerEntity(ProductLine line) {
-            try(var state=new TradingCoreRuntime(line)) {
+    @org.junit.jupiter.params.provider.MethodSource("productsAndModes")
+    @org.junit.jupiter.api.parallel.ResourceLock(org.junit.jupiter.api.parallel.Resources.SYSTEM_PROPERTIES)
+    void committedOrdersEmitOncePerEntity(ProductLine line, TradingExecutionMode mode) {
+        String previous = System.setProperty("surprising.aeron.execution-mode", mode.name());
+        try (var state = new TradingCoreRuntime(line)) {
                 var type=ContractType.valueOf(line.contractTypeCode());
                 String asset=type.isInverse()?"BTC":"USDT";
                 send(state,line,CoreMessageType.REGISTER_INSTRUMENT,0,
@@ -48,8 +50,17 @@ class RealtimeTerminalEmissionTest {
                             capture,outbox,user==7?"batch-resting":"batch-fill");
                 }
                 if(outbox.droppedBatches()!=0)throw new IllegalStateException("dropped audit frames");
-            }
+        } finally {
+            if (previous == null) System.clearProperty("surprising.aeron.execution-mode");
+            else System.setProperty("surprising.aeron.execution-mode", previous);
+        }
     }
+
+    private static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> productsAndModes() {
+        return Arrays.stream(ProductLine.values()).flatMap(line -> Arrays.stream(TradingExecutionMode.values())
+                .map(mode -> org.junit.jupiter.params.provider.Arguments.of(line, mode)));
+    }
+
     private static void place(TradingCoreRuntime state,ProductLine line,long user,long id,CoreOrderSide side,
                               RealtimeStateCapture capture,RealtimeOutbox outbox,String label) {
         send(state,line,CoreMessageType.PLACE_ORDER,user,TradingCommandCodec.encodePlaceOrder(
@@ -84,6 +95,13 @@ class RealtimeTerminalEmissionTest {
             }
         }
         org.assertj.core.api.Assertions.assertThat(duplicateFrames).as(line + " " + label).isZero();
+        if (label.equals("resting-open")) {
+            // The frozen reservation and user revision must each reach the subscriber once.
+            org.assertj.core.api.Assertions.assertThat(kinds.getOrDefault(RealtimeFrame.Kind.METADATA, 0))
+                    .as(line + " resting-open metadata").isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(kinds.getOrDefault(RealtimeFrame.Kind.RESERVATION, 0))
+                    .as(line + " resting-open reservation").isEqualTo(1);
+        }
         int expectedOrders = switch(label) {
             case "fill-open", "fill-close" -> 2;
             case "batch-resting" -> 20;

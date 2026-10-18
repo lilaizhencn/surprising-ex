@@ -48,8 +48,8 @@ class CoreFundsIdempotencyTest {
             assertThat(apply(state, command(CoreMessageType.ADJUST_BALANCE, adjustmentId, 1, payload)).status())
                     .isEqualTo(ResponseStatus.APPLIED);
             for (long sequence = 2; sequence <= TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS + 2L; sequence++) {
-                assertThat(apply(state, command(CoreMessageType.PROBE_INCREMENT, UUID.randomUUID(), sequence,
-                        CoreProtocol.probePayload(1))).status()).isEqualTo(ResponseStatus.APPLIED);
+                assertThat(apply(state, command(CoreMessageType.VERIFY_STATE_HASH, UUID.randomUUID(), sequence,
+                        CoreMessage.EMPTY_PAYLOAD)).status()).isEqualTo(ResponseStatus.APPLIED);
             }
 
             CoreMessage retry = command(CoreMessageType.ADJUST_BALANCE, adjustmentId,

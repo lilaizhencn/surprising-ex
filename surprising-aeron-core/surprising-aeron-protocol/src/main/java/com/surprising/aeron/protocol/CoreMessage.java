@@ -9,6 +9,7 @@ public final class CoreMessage {
 
     private CoreMessageHeader header;
     private byte[] payload;
+    private int payloadLength;
     private final boolean decoderSlot;
     private volatile boolean decoderLeased;
     private final CoreMessageHeader decoderHeader;
@@ -39,6 +40,7 @@ public final class CoreMessage {
         this.payload = owned
                 ? Objects.requireNonNull(payload, "payload")
                 : payload == null || payload.length == 0 ? EMPTY_PAYLOAD : Arrays.copyOf(payload, payload.length);
+        payloadLength = this.payload.length;
     }
 
     private CoreMessage() {
@@ -62,8 +64,15 @@ public final class CoreMessage {
     }
 
     public byte[] decoderPayloadBuffer(int length) {
-        if (!decoderSlot || !decoderLeased || length < 0) throw new IllegalStateException("decoder slot is not owned");
-        if (payload.length != length) payload = length == 0 ? EMPTY_PAYLOAD : new byte[length];
+        return decoderPayloadBuffer(length, length);
+    }
+
+    /** The decoder chooses capacity; every reader must use payloadLength, never spare tail bytes. */
+    public byte[] decoderPayloadBuffer(int length, int capacity) {
+        if (!decoderSlot || !decoderLeased || length < 0 || capacity < length)
+            throw new IllegalStateException("decoder slot is not owned or has invalid capacity");
+        if (payload.length != capacity) payload = capacity == 0 ? EMPTY_PAYLOAD : new byte[capacity];
+        payloadLength = length;
         return payload;
     }
 
@@ -127,7 +136,7 @@ public final class CoreMessage {
             return decoderResponseHeader;
         }
         decoderResponseHeader.assign(header.schemaVersion(), WireMessageKind.RESPONSE, responseType,
-                header.commandId(), header.productLine(), header.route(), header.source(), header.sourceId(),
+                header.commandIdMsb(), header.commandIdLsb(), header.productLine(), header.route(), header.source(), header.sourceId(),
                 header.sourceSequence(), header.userId(), header.submittedAtEpochMillis(), header.correlationId());
         return decoderResponseHeader;
     }
@@ -163,39 +172,42 @@ public final class CoreMessage {
     }
 
     public byte[] payload() {
-        return payload.length == 0 ? EMPTY_PAYLOAD : Arrays.copyOf(payload, payload.length);
+        return payloadLength == 0 ? EMPTY_PAYLOAD : Arrays.copyOf(payload, payloadLength);
     }
 
+    /** Borrowed backing array; only the first payloadLength() bytes belong to this message. */
     public byte[] payloadUnsafe() {
         return payload;
     }
 
     public int payloadLength() {
-        return payload.length;
+        return payloadLength;
     }
 
     public void copyPayloadTo(byte[] destination, int offset) {
         Objects.requireNonNull(destination, "destination");
-        if (offset < 0 || offset > destination.length - payload.length) {
+        if (offset < 0 || offset > destination.length - payloadLength) {
             throw new IndexOutOfBoundsException("payload does not fit destination");
         }
-        System.arraycopy(payload, 0, destination, offset, payload.length);
+        System.arraycopy(payload, 0, destination, offset, payloadLength);
     }
 
     @Override
     public boolean equals(Object other) {
         return this == other || other instanceof CoreMessage message
                 && header.equals(message.header)
-                && Arrays.equals(payload, message.payload);
+                && Arrays.equals(payload, 0, payloadLength, message.payload, 0, message.payloadLength);
     }
 
     @Override
     public int hashCode() {
-        return 31 * header.hashCode() + Arrays.hashCode(payload);
+        int payloadHash = 1;
+        for (int index = 0; index < payloadLength; index++) payloadHash = 31 * payloadHash + payload[index];
+        return 31 * header.hashCode() + payloadHash;
     }
 
     @Override
     public String toString() {
-        return "CoreMessage[header=" + header + ", payload=" + Arrays.toString(payload) + "]";
+        return "CoreMessage[header=" + header + ", payload=" + Arrays.toString(payload()) + "]";
     }
 }

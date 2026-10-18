@@ -57,7 +57,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             new InMemorySerializationProcessor();
     private final Map<String, Integer> symbols = new ConcurrentHashMap<>();
     private final Map<Integer, String> symbolNames = new ConcurrentHashMap<>();
-    private final Set<Integer> registeredSymbols = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<Long, SnapshotOperation> snapshotOperations = new ConcurrentHashMap<>();
     private final LaneTopology topology;
     private final AtomicReference<Throwable> matcherFailure = new AtomicReference<>();
@@ -75,6 +74,9 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         long aeronTimestamp;
         boolean active;
         final LongHashSet users = new LongHashSet();
+        /** Native registration is consumed only by this Matcher writer, including replay. */
+        final org.eclipse.collections.impl.set.mutable.primitive.IntHashSet registeredSymbols =
+                new org.eclipse.collections.impl.set.mutable.primitive.IntHashSet();
         final exchange.core2.core.common.MatcherResult prefixResult = exchange.core2.core.common.MatcherResult.commandSlot();
     }
 
@@ -331,13 +333,22 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
             long userId, com.surprising.aeron.service.state.OrderRuntime command,
             com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (commandId == null) throw new IllegalArgumentException("invalid direct matcher command");
+        return placeAdmittedDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
+                commandId.getLeastSignificantBits(), aeronTimestamp, userId, command, target);
+    }
+
+    public exchange.core2.core.common.MatcherResult placeAdmittedDirect(
+            int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long aeronTimestamp,
+            long userId, com.surprising.aeron.service.state.OrderRuntime command,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null || target == null)
             throw new IllegalArgumentException("invalid direct matcher command");
         command.requireFrozenMatcherInput(userId);
-        validateCommandEvidence(coreSequence, commandId, command.orderId(), aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandIdMsb, commandIdLsb, command.orderId(), aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
-            return publishNativeMatcherResult(shardId, coreSequence, commandId, command.orderId(),
+            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, command.orderId(),
                     aeronTimestamp, placeNativeAdmitted(userId, command, target.nativeResultSlot(0)), target);
         } catch (RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
@@ -353,12 +364,21 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
             long userId, ResolvedPlaceOrder command,
             com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (commandId == null) throw new IllegalArgumentException("invalid direct matcher command");
+        return placeDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
+                commandId.getLeastSignificantBits(), aeronTimestamp, userId, command, target);
+    }
+
+    public exchange.core2.core.common.MatcherResult placeDirect(
+            int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long aeronTimestamp,
+            long userId, ResolvedPlaceOrder command,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null || target == null)
             throw new IllegalArgumentException("invalid direct matcher command");
-        validateCommandEvidence(coreSequence, commandId, command.orderId(), aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandIdMsb, commandIdLsb, command.orderId(), aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
-            return publishNativeMatcherResult(shardId, coreSequence, commandId, command.orderId(),
+            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, command.orderId(),
                     aeronTimestamp, placeNative(userId, command, target.nativeResultSlot(0)), target);
         } catch (RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
@@ -373,12 +393,21 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
             long userId, CoreMatchingOrder command,
             com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (commandId == null) throw new IllegalArgumentException("invalid direct matcher command");
+        return placeDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
+                commandId.getLeastSignificantBits(), aeronTimestamp, userId, command, target);
+    }
+
+    public exchange.core2.core.common.MatcherResult placeDirect(
+            int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long aeronTimestamp,
+            long userId, CoreMatchingOrder command,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null || target == null)
             throw new IllegalArgumentException("invalid direct matcher command");
-        validateCommandEvidence(coreSequence, commandId, command.orderId(), aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandIdMsb, commandIdLsb, command.orderId(), aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
-            return publishNativeMatcherResult(shardId, coreSequence, commandId, command.orderId(),
+            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, command.orderId(),
                     aeronTimestamp, placeNative(userId, command, target.nativeResultSlot(0)), target);
         } catch (RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
@@ -393,13 +422,22 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int shardId, long coreSequence, java.util.UUID commandId, long orderId,
             long aeronTimestamp, long userId, String instrumentId,
             com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (commandId == null) throw new IllegalArgumentException("invalid direct matcher cancellation");
+        return cancelDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
+                commandId.getLeastSignificantBits(), orderId, aeronTimestamp, userId, instrumentId, target);
+    }
+
+    public exchange.core2.core.common.MatcherResult cancelDirect(
+            int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
+            long aeronTimestamp, long userId, String instrumentId,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()
                 || instrumentId == null || instrumentId.isBlank() || target == null)
             throw new IllegalArgumentException("invalid direct matcher cancellation");
-        validateCommandEvidence(coreSequence, commandId, orderId, aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandIdMsb, commandIdLsb, orderId, aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
-            return publishNativeMatcherResult(shardId, coreSequence, commandId, orderId,
+            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, orderId,
                     aeronTimestamp, cancelNative(userId, orderId, instrumentId, target.nativeResultSlot(0)), target);
         } catch (RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
@@ -415,10 +453,21 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long aeronTimestamp, long userId, long originalOrderId, String instrumentId,
             ResolvedPlaceOrder replacement,
             com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (commandId == null) throw new IllegalArgumentException("invalid direct matcher replacement");
+        return replaceDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
+                commandId.getLeastSignificantBits(), orderId, aeronTimestamp, userId, originalOrderId,
+                instrumentId, replacement, target);
+    }
+
+    public exchange.core2.core.common.MatcherResult replaceDirect(
+            int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
+            long aeronTimestamp, long userId, long originalOrderId, String instrumentId,
+            ResolvedPlaceOrder replacement,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()
                 || instrumentId == null || instrumentId.isBlank() || replacement == null || target == null)
             throw new IllegalArgumentException("invalid direct matcher replacement");
-        validateCommandEvidence(coreSequence, commandId, orderId, aeronTimestamp);
+        validateCommandEvidence(coreSequence, commandIdMsb, commandIdLsb, orderId, aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
             exchange.core2.core.common.MatcherResult cancellation =
@@ -428,7 +477,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int nativeShard = result.symbol() <= 0 ? shardId : topology.matcherShardId(result.symbol());
             if (nativeShard != shardId)
                 throw new IllegalStateException("native matcher replacement crossed its evidence partition");
-            return matcherEvidence.publishReplacement(coreSequence, commandId, orderId, aeronTimestamp,
+            return matcherEvidence.publishReplacement(coreSequence, commandIdMsb, commandIdLsb, orderId, aeronTimestamp,
                     matcherEvidence.nextSequence(shardId), shardId, nativeShard,
                     cancellation, result, target);
         } catch (RuntimeException exception) {
@@ -501,13 +550,22 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int shardId, long coreSequence, java.util.UUID commandId, long orderId,
             long aeronTimestamp, exchange.core2.core.common.MatcherResult result,
             com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+        if (commandId == null) throw new IllegalArgumentException("invalid direct matcher command");
+        return publishNativeMatcherResult(shardId, coreSequence, commandId.getMostSignificantBits(),
+                commandId.getLeastSignificantBits(), orderId, aeronTimestamp, result, target);
+    }
+
+    private exchange.core2.core.common.MatcherResult publishNativeMatcherResult(
+            int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
+            long aeronTimestamp, exchange.core2.core.common.MatcherResult result,
+            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
         Throwable poison = matcherFailure.get();
         if (poison != null)
             throw new IllegalStateException("matcher completion discarded after fatal divergence", poison);
         int nativeShard = result.symbol() <= 0 ? -1 : topology.matcherShardId(result.symbol());
         if (nativeShard >= 0 && nativeShard != shardId)
             throw new IllegalStateException("native matcher result crossed its evidence partition");
-        return matcherEvidence.publishNative(coreSequence, commandId, orderId, aeronTimestamp,
+        return matcherEvidence.publishNative(coreSequence, commandIdMsb, commandIdLsb, orderId, aeronTimestamp,
                 matcherEvidence.nextSequence(shardId), shardId, nativeShard, result, target);
     }
 
@@ -580,6 +638,13 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private static void validateCommandEvidence(long coreSequence, java.util.UUID commandId,
             long orderId, long aeronTimestamp) {
         if (coreSequence <= 0 || commandId == null || orderId < 0
+                || aeronTimestamp < 0)
+            throw new IllegalArgumentException("invalid matcher command evidence");
+    }
+
+    private static void validateCommandEvidence(long coreSequence, long commandIdMsb, long commandIdLsb,
+            long orderId, long aeronTimestamp) {
+        if (coreSequence <= 0 || (commandIdMsb == 0 && commandIdLsb == 0) || orderId < 0
                 || aeronTimestamp < 0)
             throw new IllegalArgumentException("invalid matcher command evidence");
     }
@@ -1254,6 +1319,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private int ensureSymbol(String instrumentId) {
         int symbolId = reserveSymbolId(instrumentId);
+        var registeredSymbols = currentCommandScope().registeredSymbols;
         if (registeredSymbols.contains(symbolId)) return symbolId;
         CoreSymbolSpecification specification = CoreSymbolSpecification.builder()
                 .symbolId(symbolId).type(SymbolType.CURRENCY_EXCHANGE_PAIR)

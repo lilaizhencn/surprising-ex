@@ -130,7 +130,11 @@ public final class ClusterServiceEgress {
         leadershipTermId = termId;
     }
 
-    private final org.agrona.collections.LongHashSet overflowSessions = new org.agrona.collections.LongHashSet();
+    /**
+     * Owner publishes exceptional close requests; only the Aeron thread closes sessions.
+     * Requests are deduplicated until consumed. No collection nodes are created on normal sends.
+     */
+    private final java.util.Set<Long> overflowSessions = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private void handleSessionOverflow(long sessionId) {
         if (sessionId != NO_SESSION_ID) {
@@ -175,14 +179,16 @@ public final class ClusterServiceEgress {
         if (!overflowSessions.isEmpty()) {
             var iterator = overflowSessions.iterator();
             while (iterator.hasNext()) {
-                long sid = iterator.nextValue();
+                long sid = iterator.next();
                 TransportSession session = sessions.get(sid);
                 if (session != null) {
                     session.close();
                 }
                 deferred.remove(sid);
+                // Removing just the consumed request preserves other IDs concurrently added by Owner.
+                // A repeated request for this ID needs no further action: its session is already closing.
+                iterator.remove();
             }
-            overflowSessions.clear();
         }
         long consumedBytes = 0;
         for (; work < 256; work++) {

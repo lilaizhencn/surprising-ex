@@ -83,6 +83,56 @@ class CoreAdmissionInputOwnershipTest {
         }
     }
 
+    @org.junit.jupiter.api.Test
+    void fusedAdmissionYieldsUntilLedgerPublishesProportionalOi() throws Exception {
+        String previous = System.setProperty("surprising.aeron.execution-mode", "FUSED");
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        try (var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+            applied(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(instrument(core.productLine, "PROPORTIONAL")));
+            applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
+            applied(core, CoreMessageType.ADJUST_BALANCE, 7,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
+            try {
+                assertThat(core.runtimeState.dispatchLedgerQuery(ignored -> {
+                    entered.countDown();
+                    try {
+                        if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Ledger gate timed out");
+                    } catch (InterruptedException interrupted) { throw new AssertionError(interrupted); }
+                })).isTrue();
+                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+                var command = message(core, CoreMessageType.PLACE_ORDER, 7, TradingCommandCodec.encodePlaceOrder(place(401, 1)));
+                assertThat(core.apply(command).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+                var pending = core.pendingMatching.required(core.matchingSequence(command.header().commandId()));
+                assertThat(pending.isMatchingSubmitted()).isFalse();
+                assertThat(pending.placeAdmission().accountReady()).isFalse();
+                assertThat(pending.placeAdmission().complete()).isFalse();
+                release.countDown();
+                var terminal = new CoreResponse[1];
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (core.pendingMatching.firstSequence() != 0) {
+                    core.commits.commitReadyMatching(64, TIME, command.header().sourceSequence(), false,
+                            (sequence, response) -> terminal[0] = response);
+                    if (System.nanoTime() >= deadline) throw new AssertionError("FUSED admission did not resume");
+                }
+                assertThat(terminal[0].commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                assertThat(CoreTestCompletion.orderState(core, 7, 401).status()).isEqualTo("OPEN");
+                var balance = CoreTestCompletion.userState(core, 7).balances().getFirst();
+                assertThat(balance.availableUnits() + balance.lockedUnits()).isEqualTo(10_000);
+                long hash = core.stateHash();
+                try (var restored = TradingCoreRuntime.fromSnapshot(core.productLine, core.snapshot())) {
+                    assertThat(restored.stateHash()).isEqualTo(hash);
+                    assertThat(CoreTestCompletion.orderState(restored, 7, 401).status()).isEqualTo("OPEN");
+                }
+            } finally { release.countDown(); }
+        } finally {
+            if (previous == null) System.clearProperty("surprising.aeron.execution-mode");
+            else System.setProperty("surprising.aeron.execution-mode", previous);
+        }
+    }
+
     private static RegisterInstrumentCommand instrument(ProductLine line, String mode) {
         var type = ContractType.valueOf(line.contractTypeCode());
         long floor = mode.equals("FLOOR_CAP") ? 1_000 : mode.equals("FLOOR_ABOVE") ? 2_000 : 200;

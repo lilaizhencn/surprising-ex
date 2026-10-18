@@ -488,7 +488,7 @@ public final class RealtimeRouter implements AutoCloseable {
     }
 
     private static String traceId(RealtimeFrame frame) {
-        return frame.traceId().isEmpty() ? "core-" + frame.productLine() + "-" + frame.sequence() : frame.traceId();
+        return "core-" + frame.productLine() + "-" + frame.sequence();
     }
 
     private record PendingFrame(UnsafeBuffer buffer, ProductLine product, long enqueuedAt, String traceId) {}

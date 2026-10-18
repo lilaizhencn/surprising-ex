@@ -74,7 +74,7 @@ class CommittedFundingRepairIntegrationTest {
                 assertThat(Files.readAllBytes(checkpoint)).isEqualTo(seed);
                 exporter.repairFunding(first);
                 assertThat(TradeExportCheckpoint.read(checkpoint,line).logPosition()).isEqualTo(first);
-                var pages=org.mockito.ArgumentCaptor.forClass(com.surprising.aeron.service.orchestration.CommittedFundingPage.class);
+                var pages=org.mockito.ArgumentCaptor.forClass(com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedFundingPage.class);
                 verify(repository,times(2)).persistFunding(pages.capture());
                 assertThat(pages.getValue().payments().getFirst().amountUnits()).isEqualTo(10);
                 assertThat(pages.getValue().progress().complete()).isFalse();

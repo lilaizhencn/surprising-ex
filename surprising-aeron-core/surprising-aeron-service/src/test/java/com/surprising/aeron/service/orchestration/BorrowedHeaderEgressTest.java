@@ -120,8 +120,8 @@ class BorrowedHeaderEgressTest {
     }
 
     private static byte[] frame(long id) {
-        return CoreMessageCodec.encode(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
-                new UUID(1, id), ProductLine.SPOT, CommandSource.GATEWAY, 1, id, 7, 1, id), CoreProtocol.probePayload(1)));
+        return CoreMessageCodec.encode(new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
+                new UUID(1, id), ProductLine.SPOT, CommandSource.GATEWAY, 1, id, 7, 1, id), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 1))));
     }
     @Test void outputQueueRetainsHeaderUntilEncodingEvenAfterOwnerRetiresAndDecoderWraps() {
         var decoder = new CoreMessageFlyweightDecoder();
@@ -237,6 +237,51 @@ class BorrowedHeaderEgressTest {
         assertThat(healthyReceived.get().payload()).isNotNull();
 
         egress.clear();
+    }
+
+    @Test void concurrentOverflowPublicationDoesNotLoseDistinctSessionsOrCloseHealthyOnes() throws Exception {
+        var egress = new ClusterServiceEgress((ignored, actual) -> new ClusterServiceEgress.SessionEgress() {
+            public long offer(long term, long timestamp, DirectBuffer source, int offset, int length) { return 1; }
+            public void close() { }
+        });
+        var cluster = (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(), new Class<?>[]{Cluster.class},
+                (proxy, method, args) -> method.getName().equals("role") ? Cluster.Role.LEADER : zero(method.getReturnType()));
+        egress.start(cluster);
+        int count = 2_000;
+        var sessions = new ClusterServiceEgress.TransportSession[count + 1];
+        for (int index = 0; index <= count; index++) {
+            long id = index + 1_000L;
+            var actual = (ClientSession) Proxy.newProxyInstance(ClientSession.class.getClassLoader(),
+                    new Class<?>[]{ClientSession.class}, (proxy, method, args) ->
+                            method.getName().equals("id") ? id : zero(method.getReturnType()));
+            sessions[index] = egress.transportSession(actual);
+        }
+        var owner = new TradingCoreOwner(ProductLine.SPOT, (id, header, response, sequence) -> { });
+        var request = CoreMessageCodec.decode(frame(1));
+        var response = CoreResponse.owned(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
+                CoreResultCode.NONE, 1, new byte[17 * 1024 * 1024]);
+        var failure = new AtomicReference<Throwable>();
+        var started = new java.util.concurrent.CountDownLatch(1);
+        Thread producer = Thread.ofPlatform().start(() -> {
+            try {
+                started.countDown();
+                for (int round = 0; round < 8; round++) for (int index = 0; index < count; index++)
+                    egress.publishResponse(owner, sessions[index].id(), request.header(), response, 1, 0);
+            } catch (Throwable caught) { failure.set(caught); }
+        });
+        try {
+            assertThat(started.await(1, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+            while (producer.isAlive() && System.nanoTime() - deadline < 0) egress.drainResponses(owner);
+            producer.join(1_000);
+            assertThat(producer.isAlive()).isFalse();
+            assertThat(failure.get()).isNull();
+            egress.drainResponses(owner);
+            for (int index = 0; index < count; index++) assertThat(sessions[index].isClosing()).isTrue();
+            assertThat(sessions[count].isClosing()).isFalse();
+        } finally {
+            producer.interrupt(); producer.join(1_000); egress.clear();
+        }
     }
 
     private static Object zero(Class<?> type) {

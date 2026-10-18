@@ -496,22 +496,27 @@ class ClusterCommandPipelineTest {
         try (Fixture live = new Fixture(product)) {
             live.setup();
             var adapter = live.service.state().matchingAdapter;
-            adapter.matcherShardId("1");
+            int shardId = adapter.matcherShardId("1");
             var symbolsField = adapter.getClass().getDeclaredField("symbols");
             symbolsField.setAccessible(true);
             @SuppressWarnings("unchecked")
             var symbols = (java.util.Map<String, Integer>) symbolsField.get(adapter);
-            var registeredField = adapter.getClass().getDeclaredField("registeredSymbols");
+            var scopesField = adapter.getClass().getDeclaredField("shardCommandScopes");
+            scopesField.setAccessible(true);
+            Object scope = ((Object[]) scopesField.get(adapter))[shardId];
+            var registeredField = scope.getClass().getDeclaredField("registeredSymbols");
             registeredField.setAccessible(true);
-            @SuppressWarnings("unchecked")
-            var registered = (java.util.Set<Integer>) registeredField.get(adapter);
+            var registered = (org.eclipse.collections.impl.set.mutable.primitive.IntHashSet)
+                    registeredField.get(scope);
             // 故障注入使 native 返回真实的 ORDER_BOOK_ID 拒绝；不伪造成交或资金结果。
             int instrumentId = symbols.get("1");
-            registered.add(instrumentId);
+            live.service.state().matcherPipeline.call(shardId, () -> registered.add(instrumentId),
+                    TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS);
             var before = live.service.state().tradingState().user(11).balances();
             var request = live.place(11, "1", 1000, 80, 1, CoreOrderSide.BUY);
             try { live.apply(request); }
-            finally { registered.remove(instrumentId); }
+            finally { live.service.state().matcherPipeline.call(shardId, () -> registered.remove(instrumentId),
+                    TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS); }
             assertThat(live.responses).hasSize(1);
             assertThat(live.responses.getFirst().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(live.responses.getFirst().resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
@@ -1730,6 +1735,9 @@ class ClusterCommandPipelineTest {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             var setup = live.setup(); serial.applyAll(setup);
             LaneTopology topology = live.service.state().runtimeState.topology();
+            assertThat(topology.accountLaneCount())
+                    .as("independent buyers and makers require enough distinct Account Lanes")
+                    .isGreaterThanOrEqualTo(collidingMakers ? 3 : 4);
             long buyers = topology.accountLaneMask(11) | topology.accountLaneMask(disjointUser(11));
             long makerA = 77;
             while ((topology.accountLaneMask(makerA) & buyers) != 0) makerA++;
@@ -1983,7 +1991,7 @@ class ClusterCommandPipelineTest {
             assertThat(f.responses).hasSize(1);
             assertThat(f.responses.get(0).status()).isEqualTo(ResponseStatus.DUPLICATE);
             CoreMessage cancel = f.cancel(11, 101); f.send(cancel);
-            f.apply(f.message(CoreMessageType.PROBE_INCREMENT, 11, CoreProtocol.probePayload(1)));
+            f.apply(f.message(CoreMessageType.ADJUST_BALANCE, 11, com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 1))));
             assertThat(f.service.commandWindowSize()).isZero();
             assertThat(f.service.state().tradingState().user(11).balances().get("USDT").lockedUnits()).isZero();
         }

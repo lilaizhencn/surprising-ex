@@ -60,13 +60,6 @@ abstract class SettlementLaneWorkerRhsPadding extends SettlementLaneWorkerParked
 public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding implements AutoCloseable {
     private static final String WAIT_STRATEGY_PROPERTY = "surprising.aeron.settlement-wait-strategy";
     private static final String SPIN_LIMIT_PROPERTY = "surprising.aeron.settlement-spin-limit";
-    /**
-     * A direct matcher event may be queued before its payload is published.  Keep a short
-     * low-latency spin for that dependency, then park until the matcher signals publication.
-     * This is deliberately a fixed local policy: it adds no per-command state and does not
-     * change the configured strategy for executable Lane work.
-     */
-    private static final int DIRECT_READY_SPIN_LIMIT = 256;
     private static final int BUSY_SPIN_YIELD_THRESHOLD = 1024;
 
     public interface Command {
@@ -191,7 +184,8 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
 
     /** Matcher-only producer path. The caller must be the sole producer for this shard ring. */
     public long publishMatcherSettlement(int matcherShard, MatcherSettlementEvent event) {
-        if (event == null || matcherShard < 0 || matcherShard >= matcherSettlementRings.length)
+        if (event == null || !event.readyForLane()
+                || matcherShard < 0 || matcherShard >= matcherSettlementRings.length)
             throw new IllegalArgumentException("invalid Matcher settlement publication");
         rethrowFailure();
         if (!running) throw new RejectedExecutionException("settlement lane is closed");
@@ -256,7 +250,6 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
             lane.bindOwner();
             started = true;
             long reboundHandoff = 0;
-            int directReadySpins = 0;
             int payloadWaitSpins = 0;
             while (running || next < producerSequence.value
                     || admissionNext < admissionProducerSequence.value
@@ -295,22 +288,12 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
                 MatcherSettlementEvent direct = peekMatcherSettlement();
                 Command main = next < producerSequence.value ? commands[(int) next & indexMask] : null;
                 if (direct != null && shouldRunMatcherSettlement(direct, main)) {
-                    if (ready(direct)) {
-                        pollMatcherSettlement(direct);
-                        execute(direct);
-                        idleSpins = 0;
-                        directReadySpins = 0;
-                        payloadWaitSpins = 0;
-                        continue;
-                    }
-                    if (waitStrategy == WaitStrategy.BUSY_SPIN) {
-                        Thread.onSpinWait();
-                    } else if (directReadySpins++ >= DIRECT_READY_SPIN_LIMIT) {
-                        Thread.onSpinWait();
-                        directReadySpins = 0;
-                    } else {
-                        Thread.onSpinWait();
-                    }
+                    // The Matcher publishes only completed facts. There is no payload-wait
+                    // lifecycle in this mailbox; publication validates that contract once.
+                    pollMatcherSettlement(direct);
+                    execute(direct);
+                    idleSpins = 0;
+                    payloadWaitSpins = 0;
                     continue;
                 }
                 if (next < producerSequence.value) {
@@ -327,7 +310,6 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
                         consumerSequence.value = next;
                         execute(command);
                         idleSpins = 0;
-                        directReadySpins = 0;
                         payloadWaitSpins = 0;
                         continue;
                     }
@@ -383,7 +365,7 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
                         ? commands[(int) consumerSequence.value & indexMask] : null;
                 MatcherSettlementEvent direct = peekMatcherSettlement();
                 if (direct != null && shouldRunMatcherSettlement(direct, main)) {
-                    if (ready(direct)) return;
+                    return;
                 } else if (main != null && ready(main)) {
                     return;
                 }

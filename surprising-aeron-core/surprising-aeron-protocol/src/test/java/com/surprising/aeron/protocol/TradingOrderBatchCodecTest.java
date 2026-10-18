@@ -13,6 +13,45 @@ import org.junit.jupiter.api.Test;
 
 class TradingOrderBatchCodecTest {
 
+    @Test void cancelAndAmendSlotsSurviveResizeFailureAndPublicValueRetention() {
+        var cancels = CancelOrderBatchCommand.commandSlot();
+        byte[] cancelBytes = encodeWithSpareTail(TradingOrderBatchCodec.encodeCancelOrderBatch(
+                new CancelOrderBatchCommand(List.of(new CancelOrderCommand(17), new CancelOrderCommand(18)))));
+        TradingOrderBatchCodec.decodeCancelOrderBatchInto(cancelBytes, 40, cancels);
+        var firstCancelSlot = cancels.orders().getFirst();
+        var retainedCancel = new CancelOrderBatchCommand(cancels.orders());
+        byte[] one = TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(new CancelOrderCommand(19))));
+        TradingOrderBatchCodec.decodeCancelOrderBatchInto(one, cancels);
+        assertThat(cancels.orders().getFirst()).isSameAs(firstCancelSlot);
+        assertThat(cancels.orders().getFirst().orderId()).isEqualTo(19);
+        assertThat(retainedCancel.orders()).containsExactly(new CancelOrderCommand(17), new CancelOrderCommand(18));
+        assertThatThrownBy(() -> TradingOrderBatchCodec.decodeCancelOrderBatchInto(one, one.length - 1, cancels))
+                .isInstanceOf(ProtocolException.class);
+        assertThat(cancels.orders()).isEmpty();
+
+        var amend = new AmendOrderCommand(17, 21, "client", 99L, 2L, CoreTimeInForce.GTC, (byte) 1);
+        var amendments = AmendOrderBatchCommand.commandSlot();
+        byte[] original = TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(amend)));
+        byte[] spare = encodeWithSpareTail(original);
+        TradingOrderBatchCodec.decodeAmendOrderBatchInto(spare, original.length, amendments);
+        var firstAmendSlot = amendments.orders().getFirst();
+        var retainedAmend = new AmendOrderBatchCommand(amendments.orders());
+        TradingOrderBatchCodec.decodeAmendOrderBatchInto(spare, original.length, amendments);
+        assertThat(amendments.orders().getFirst()).isSameAs(firstAmendSlot).isEqualTo(amend);
+        assertThatThrownBy(() -> TradingOrderBatchCodec.decodeAmendOrderBatchInto(spare, original.length - 1, amendments))
+                .isInstanceOf(ProtocolException.class);
+        assertThat(amendments.orders()).isEmpty();
+        assertThat(retainedAmend.orders()).containsExactly(amend);
+        TradingOrderBatchCodec.decodeAmendOrderBatchInto(original, amendments);
+        assertThat(amendments.orders().getFirst()).isEqualTo(amend);
+    }
+
+    private static byte[] encodeWithSpareTail(byte[] bytes) {
+        byte[] buffer = java.util.Arrays.copyOf(bytes, bytes.length + 17);
+        java.util.Arrays.fill(buffer, bytes.length, buffer.length, (byte) 127);
+        return buffer;
+    }
+
     @Test void decodedBatchOwnsItsArrayAndExternalListsRemainDefensivelyCopied() {
         var external = new ArrayList<>(List.of(new CancelOrderCommand(17), new CancelOrderCommand(18)));
         var command = new CancelOrderBatchCommand(external);

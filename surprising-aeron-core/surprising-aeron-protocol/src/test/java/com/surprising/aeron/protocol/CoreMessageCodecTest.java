@@ -13,12 +13,12 @@ import org.junit.jupiter.api.Test;
 
 class CoreMessageCodecTest {
 
-    private static final String CURRENT_GOLDEN = "5845585308000102010001004c000300"
+    private static final String CURRENT_GOLDEN = "58455853080001020a0001004c000300"
             + "7766554433221100ffeeddccbbaa9988"
             + "0800000000000000"
             + "2a00000000000000e903000000000000"
             + "15cd5b07000000006300000000000000"
-            + "080000000700000000000000";
+            + "0e0000000400555344540700000000000000";
 
     @Test
     void matchesCurrentSchemaGoldenMessage() {
@@ -35,7 +35,7 @@ class CoreMessageCodecTest {
         CoreMessage message = command(UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"), 42, 99, 7);
 
         assertThat(CommandFingerprint.of(message).toString())
-                .isEqualTo("c87a1212d64d7aeba88bced765f959a67e6c61899f0eb79d12585ac373ab2a04");
+                .isEqualTo("e42f81cb4e824f001609e0b39dc2eaf88bb70ea5437daa5272d6567309fb52a4");
     }
 
     @Test
@@ -48,7 +48,7 @@ class CoreMessageCodecTest {
         assertThat(producerB.of(second)).isEqualTo(CommandFingerprint.of(second));
         assertThat(producerA.of(second)).isEqualTo(CommandFingerprint.of(second));
         assertThat(producerA.of(first)).isEqualTo(retained);
-        assertThat(retained.toString()).isEqualTo("c87a1212d64d7aeba88bced765f959a67e6c61899f0eb79d12585ac373ab2a04");
+        assertThat(retained.toString()).isEqualTo("e42f81cb4e824f001609e0b39dc2eaf88bb70ea5437daa5272d6567309fb52a4");
     }
 
     @Test
@@ -189,8 +189,8 @@ class CoreMessageCodecTest {
     }
 
     private static CoreMessage command(UUID commandId, long sourceSequence, long correlationId, long delta) {
-        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, commandId,
+        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE, commandId,
                 ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY, 8, sourceSequence, 1001,
-                123_456_789, correlationId), CoreProtocol.probePayload(delta));
+                123_456_789, correlationId), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", delta)));
     }
 }

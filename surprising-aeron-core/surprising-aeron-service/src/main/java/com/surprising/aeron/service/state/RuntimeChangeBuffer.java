@@ -222,7 +222,8 @@ final class RuntimeReservationChangeBuffer extends RuntimeChangeBuffer<Reservati
     }
 
     @Override void clear() {
-        for (int slot = 0; slot < size; slot++)
+        // Inline live changes may exceed the number of materialized publication slots.
+        for (int slot = 0, count = Math.min(size, copies.length); slot < count; slot++)
             if (copies[slot] != null) copies[slot].clearPublicationSlot();
         super.clear();
     }

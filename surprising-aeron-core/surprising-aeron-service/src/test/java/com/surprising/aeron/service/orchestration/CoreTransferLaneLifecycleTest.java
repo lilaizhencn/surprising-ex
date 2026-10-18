@@ -10,6 +10,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import static org.assertj.core.api.Assertions.*;
 
 /** Pending identity and money are Lane-owned; no snapshot/recovery is used. */
+@org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
 class CoreTransferLaneLifecycleTest {
     private static final long TIME = 1_700_000_000_000L;
     private long sequence;

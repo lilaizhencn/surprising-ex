@@ -107,6 +107,7 @@ class CoreRiskLaneQueryTest {
     }
 
     @Test
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void queryFixesPriceAndConfigurationBeforeOwnerUpdatesThemAndDoesNotWaitForLane() throws Exception {
         var state = positionedState(ProductLine.LINEAR_PERPETUAL);
         var identities = new RuntimeIdentityRegistry();
@@ -241,7 +242,7 @@ class CoreRiskLaneQueryTest {
     private static String asset(ProductLine line) { return line == ProductLine.INVERSE_PERPETUAL ? "BTC" : "USDT"; }
 
     private TradingCoreRuntime initial(TradingCoreState state) {
-        return new TradingCoreRuntime(state.productLine(), 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
+        return new TradingCoreRuntime(state.productLine(), 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
                 new TerminalStateRetention(), null, 0, Map.of(), Map.of(), null, null);
     }
 

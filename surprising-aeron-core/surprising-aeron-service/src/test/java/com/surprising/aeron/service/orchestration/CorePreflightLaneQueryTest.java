@@ -105,6 +105,7 @@ class CorePreflightLaneQueryTest {
     }
 
     @Test
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     void blockedLaneUsesCapturedMarketConfigurationAndOwnerReturnsImmediately() throws Exception {
         var release = new CountDownLatch(1);
         try (var core = prepared(ProductLine.LINEAR_PERPETUAL)) {

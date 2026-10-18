@@ -10,20 +10,8 @@ public final class CoreProtocol {
     public static final int HEADER_LENGTH = 76;
     public static final int RESPONSE_FIXED_PAYLOAD_LENGTH = 36;
     public static final int CLUSTER_MAX_MESSAGE_LENGTH = 2 * 1024 * 1024;
-    public static final int PROBE_PAYLOAD_LENGTH = Long.BYTES;
 
     private CoreProtocol() {
-    }
-
-    public static byte[] probePayload(long delta) {
-        return ByteBuffer.allocate(PROBE_PAYLOAD_LENGTH).order(ByteOrder.LITTLE_ENDIAN).putLong(delta).array();
-    }
-
-    public static long decodeProbeDelta(byte[] payload) {
-        if (payload.length != PROBE_PAYLOAD_LENGTH) {
-            throw new ProtocolException("probe payload must be " + PROBE_PAYLOAD_LENGTH + " bytes");
-        }
-        return ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN).getLong();
     }
 
     public static byte[] responsePayload(CoreResponse response) {

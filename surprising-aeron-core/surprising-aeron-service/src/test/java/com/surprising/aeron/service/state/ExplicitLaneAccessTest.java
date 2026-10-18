@@ -21,7 +21,10 @@ class ExplicitLaneAccessTest {
             assertThatThrownBy(() -> runtime.order(foreign, 1)).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> runtime.reservation(foreign, 1)).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> runtime.position(foreign, 1)).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> runtime.requireLaneAccess(lane, 8)).isInstanceOf(IllegalStateException.class);
+            long otherLaneUser = 8;
+            while (runtime.accountLaneId(otherLaneUser) == runtime.accountLaneId(7)) otherLaneUser++;
+            final long foreignUser = otherLaneUser;
+            assertThatThrownBy(() -> runtime.requireLaneAccess(lane, foreignUser)).isInstanceOf(IllegalStateException.class);
             runtime.putBalance(new BalanceRuntime(7, 0, 100, 0));
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
@@ -35,7 +38,7 @@ class ExplicitLaneAccessTest {
                     runtime.readAccountLane(actual, scoped -> {
                         assertThat(scoped).isSameAs(lane);
                         assertThat(runtime.balance(scoped, 7, 0).availableUnits()).isEqualTo(100);
-                        assertThatThrownBy(() -> runtime.balance(scoped, 8, 0))
+                        assertThatThrownBy(() -> runtime.balance(scoped, foreignUser, 0))
                                 .isInstanceOf(IllegalStateException.class);
                         assertThatThrownBy(() -> runtime.requireLaneAccess(foreign, 7))
                                 .isInstanceOf(IllegalStateException.class);

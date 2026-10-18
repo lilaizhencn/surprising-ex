@@ -54,7 +54,7 @@ public final class SectionedCoreSnapshotWriter {
                 || coreSequence != state.appliedCommandCount() || clusterTimestamp < 0 || clusterPosition < 0) {
             throw new IllegalStateException("snapshot fence and matcher manifest do not match");
         }
-        return new CoreSnapshotImage(state.productLine(), state.appliedCommandCount(), state.probeValue(),
+        return new CoreSnapshotImage(state.productLine(), state.appliedCommandCount(),
                 state.lastSourceSequences.digest(), snapshotId, coreSequence, state.commits.publication.publishedSequence(),
                 businessStateHash, fundsStateHash,
                 clusterTimestamp, clusterPosition, matcherSnapshot, snapshotState,
@@ -137,7 +137,6 @@ public final class SectionedCoreSnapshotWriter {
                 .putInt(matcherSnapshot.topology().matchingCompletionCapacity())
                 .putInt(matcherSnapshot.topology().accountLaneQueueCapacity())
                 .putLong(image.appliedCommandCount())
-                .putLong(image.probeValue())
                 .putLong(image.snapshotId())
                 .putLong(image.coreSequence())
                 .putLong(image.projectionSequence())

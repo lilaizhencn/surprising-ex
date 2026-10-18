@@ -11,11 +11,15 @@ import com.surprising.gateway.provider.service.*;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import com.surprising.aeron.service.orchestration.TradingExecutionMode;
 
 /** 六个真实 Core 状态机、真实账户方法和划转编排；仅把 Aeron 网络边界替换为同步协议调用。 */
 class MultiProductMoneyIntegrationTest {
-    @Test void oneGatewayKeepsSixBalancesIsolatedAndCrossProductRetriesConserveFunds() {
+    @ParameterizedTest @EnumSource(TradingExecutionMode.class)
+    void oneGatewayKeepsSixBalancesIsolatedAndCrossProductRetriesConserveFunds(TradingExecutionMode mode) {
+        String previous = System.setProperty("surprising.aeron.execution-mode", mode.name());
         var products = mock(GatewayProductServices.class);
         when(products.enabled()).thenReturn(List.of(ProductLine.values()));
         var cores = new EnumMap<ProductLine, Core>(ProductLine.class);
@@ -69,7 +73,11 @@ class MultiProductMoneyIntegrationTest {
             var excessive = new ProductTransferCommand(42,"overspend","SPOT","USDT_PERPETUAL","USDT",Long.MAX_VALUE,"overspend","test");
             assertThat(transfers.transfer(excessive).status()).isEqualTo(ProductTransferStatus.FAILED);
             assertThat(total(cores)).isEqualTo(initial);
-        } finally { cores.values().forEach(Core::close); }
+        } finally {
+            cores.values().forEach(Core::close);
+            if (previous == null) System.clearProperty("surprising.aeron.execution-mode");
+            else System.setProperty("surprising.aeron.execution-mode", previous);
+        }
     }
     private ProductTransferCommand transfer(ProductLine source, ProductLine target, String key) {
         return new ProductTransferCommand(42,key,source.accountTypeCode(),target.accountTypeCode(),"USDT",1000,key,"allocation");
@@ -88,7 +96,7 @@ class MultiProductMoneyIntegrationTest {
             when(aeron.command(any(),any(),anyLong(),any())).thenAnswer(call -> {
                 long seq=++sequence;
                 var header=CoreMessageHeader.command(call.getArgument(0),call.getArgument(1),line,CommandSource.GATEWAY,998,seq,call.getArgument(2),1_700_000_000_000L+seq,seq);
-                var response=state.apply(new CoreMessage(header,call.getArgument(3)));
+                var response=complete(new CoreMessage(header,call.getArgument(3)));
                 if (response.commandStatus()!=ResponseStatus.APPLIED)
                     throw new AccountCommandRejectedException(response.resultCode().name(),response.resultCode().name());
                 if (dropReply.compareAndSet(true,false)) throw new IllegalStateException("committed reply lost");
@@ -103,7 +111,25 @@ class MultiProductMoneyIntegrationTest {
         }
         CoreResponse query(CoreMessageType type,long user,byte[] payload) {
             long seq=++sequence;
-            return state.apply(new CoreMessage(CoreMessageHeader.query(type,UUID.randomUUID(),line,CommandSource.GATEWAY,998,seq,user,1_700_000_000_000L+seq,seq),payload));
+            return complete(new CoreMessage(CoreMessageHeader.query(type,UUID.randomUUID(),line,CommandSource.GATEWAY,998,seq,user,1_700_000_000_000L+seq,seq),payload));
+        }
+        CoreResponse complete(CoreMessage message) {
+            CoreResponse response = state.apply(message);
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while (state.directCommand.active()) {
+                response = state.directCommand.poll(state);
+                if (System.nanoTime() >= deadline) throw new AssertionError("funds command timeout");
+                if (response == null) Thread.onSpinWait();
+            }
+            if (response != null && response.resultCode() == CoreResultCode.MATCHING_PENDING) {
+                long queryId = state.bookQueries.querySequence(message.header().commandId());
+                do {
+                    response = state.bookQueries.takeQueryResult(queryId);
+                    if (System.nanoTime() >= deadline) throw new AssertionError("funds query timeout");
+                    Thread.onSpinWait();
+                } while (response == null);
+            }
+            return response;
         }
         long balance() { var user=state.tradingState().users().get(42L);return user==null?0:user.totalUnits("USDT"); }
         void restart() { byte[] snapshot=state.snapshot(900);state.close();state=TradingCoreRuntime.fromSnapshot(line,snapshot); }
