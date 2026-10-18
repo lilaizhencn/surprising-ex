@@ -1,5 +1,30 @@
 # 性能验证记录
 
+## 2026-10-18：修复后 FUSED / PIPELINED 复测（用户要求提前结束）
+
+基准为 master `5ca4f206a454637477969eb6d94c480a245b9e0e`，20 个直接依赖 reactor 模块构建成功；两种模式使用同一份产物和 HotSpot Corretto 27。未修改交易代码。入口为 `surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh` 的 `end_to_end` 阶段，经 `ClusterOperationalBenchmark.continuousOperations` / `ClusterMixedCapacityMain` 运行真实单成员 Aeron、UDP、Consensus、Archive。先建立资金、持仓和做市挂单并核对强平/保险/ADL，然后持续挂撤单与成交，排空后核对账户和国库。
+
+固定 LINEAR_PERPETUAL/MIXED、1 matcher、2 Account Lane、128 symbols、batch20、在途窗口256、seed25620；每轮预热30秒、正式60秒，轮间冷却60秒，无 profiler。原计划每模式3轮及独立JFR各1轮；完成以下3轮后，用户要求结束，在冷却期间停止，后续轮次及JFR均未启动。
+
+| 指标 | FUSED 第1轮 | PIPELINED 第1轮 | PIPELINED 第2轮 |
+|---|---:|---:|---:|
+| 稳定终态业务项/s（排除排空） | 282,844 | 400,252 | 393,344 |
+| 普通下单 P99 / ms | 15.605 | 11.567 | 13.500 |
+| 普通撤单 P99 / ms | 16.285 | 8.830 | 14.155 |
+| 批量下单 P99 / ms | 18.792 | 15.384 | 18.808 |
+| 批量撤单 P99 / ms | 21.626 | 15.663 | 24.494 |
+| 节点CPU（100%=1逻辑CPU） | 626.5% | 876.6% | 872.9% |
+| 节点RSS最大采样 / MiB | 1,766.9 | 1,768.9 | 1,768.6 |
+| 正式窗口CPU频率上限范围 | 70–77% | 70–75% | 70–75% |
+
+本机观测 PIPELINED 吞吐比该轮 FUSED 高39.1%–41.5%，代价为更多CPU占用；尾延迟存在轮间波动，第二轮批量撤单P99反而高于FUSED。三轮均有热控，不能作为模式固有性能、容量上限或修复收益的正式证据；正式窗口包络swap-in/out均为0。CPU取正式窗口内首末采样的累计CPU时间差，包含忙等、网络及Archive，不代表有效业务CPU。
+
+业务正确性3/3通过：`mixedCapacity=PASS`、`mixedVerify=PASS`、业务项及Core消息offered=terminal、unfinished=0、fundsDiff=0，并验证零售/做市持仓、挂单和空预约；初始化资金合计1,384,000,000,125单位USDT。批量按业务item展开，吞吐不是HTTP请求/s；延迟为实际提交到终态，批次延迟不除以20。负载受在途窗口背压约束，没有恒定到达率或coordinated omission校正。
+
+未测：剩余重复轮次、JFR/GC分配诊断、长稳、持续资金费/止盈止损、重启恢复、其他五产品线及HTTP/WebSocket在线链路；本轮为执行已有压测，无生产代码改动，未扩大到这些路径，也未启动wallet。环境可以启动，性能证据受宿主热控限制。完整参数、产物SHA256、逐轮计数/分位数/资源采样/模式线程/NMT、原始文件清单及清理状态见 [本轮验证JSON](docs/validation/execution-modes-rerun-20261018.json)。
+
+清理：用户要求结束后停止本轮调度及清理进程；三个节点与客户端此前均正常结束，未启动第四轮。确认本轮无存活Java进程后，已清理三个隔离集群、Archive及全部本轮临时日志/报告/工具；保留本记录、验证JSON及标准构建产物。原始路径仅供历史定位；用户原有两份暂存文档删除保持原状。
+
 ## 2026-10-18：单成员 Aeron 永续 FUSED / PIPELINED 对比
 
 ### 采集前锁定计划（20261018T032558Z-perpetual-modes）
