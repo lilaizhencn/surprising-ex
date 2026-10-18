@@ -315,9 +315,13 @@ public class OrderService {
             throw new IllegalArgumentException("userId must be positive");
         }
         requireOrderId(orderId);
-        OrderResponse current = realtimeQueries==null ? requireAeron().orderState(userId,orderId)
-                : realtimeQueries.require(currentProductLine(),userId,minExportSequence).openOrders().stream()
-                .filter(v->v.orderId()==orderId).map(AeronOrderCommandService::toOrder).findFirst().orElse(null);
+        OrderResponse current;
+        if (realtimeQueries == null) {
+            current = requireAeron().orderState(userId, orderId);
+        } else {
+            var order = realtimeQueries.order(currentProductLine(), userId, orderId, minExportSequence);
+            current = order == null ? null : AeronOrderCommandService.toOrder(order);
+        }
         if (current == null) throw new IllegalStateException("order not found: " + orderId);
         return current;
     }

@@ -81,6 +81,24 @@ class OrderServiceTest {
         verifyNoInteractions(aeronOrders,projection);
     }
 
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void pointOrderQueryPassesIdentityAndWatermarkWithoutReadingTheWholeUser(ProductLine product) {
+        var service = service(product, aeronOrders);
+        var queries = org.mockito.Mockito.mock(com.surprising.realtime.api.ValkeyUserQueries.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "realtimeQueries", queries);
+        var order = new com.surprising.aeron.protocol.CoreOrderStateView(91, product, 1001, "1",
+                com.surprising.aeron.protocol.CoreOrderSide.BUY, 100, 2, 0, 2, false, "OPEN", 1);
+        when(queries.order(product, 1001, 91, 9L)).thenReturn(order);
+        assertThat(service.get(1001, 91, 9L).orderId()).isEqualTo(91);
+        when(queries.order(product, 1001, 91, 9L)).thenThrow(new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_BEHIND"));
+        assertThatThrownBy(() -> service.get(1001, 91, 9L))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        org.mockito.Mockito.verify(queries, never()).require(any(), anyLong(), any());
+        verifyNoInteractions(aeronOrders, projection);
+    }
+
     @Test
     void placeFailsClosedWithoutAeronGateway() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL);

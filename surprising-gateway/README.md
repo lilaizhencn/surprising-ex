@@ -24,6 +24,10 @@ Core 仍独立。公共接口继续经过 Gateway 的身份、审批与审计，
 `OrderMarginMath` 仅保留实际订单名义价值校验使用的价格上下界，资金及保证金裁决继续由 Core 承担。
 同步命令结果的防御性载荷只读取一次，用于空值检查和解码，不改变命令 ID、回执或未知结果语义。
 
+按订单 ID 查询在启用实时视图时调用 `ValkeyUserQueries.order`，只读取目标 `ORDER:<id>` 和
+快照/水位元数据，不加载账户基线或完整用户视图。已完成或不存在的订单保持原有未找到语义；
+读视图未初始化、过期、源 epoch 改变或水位不足仍直接报错，不切换数据源。
+
 ## 用户安全与设备限制
 
 `AuthService` 在登录、二次验证、刷新令牌和签发会话时校验当前账户的设备 ID 与客户端 IP。Web 客户端以 `X-Device-Id` 发送浏览器安装 ID；`GatewayRefreshSessionRepository` 将它保存在 `gateway_refresh_sessions.device_id`。历史会话没有设备 ID 时仍可按会话踢出。`ClientIpResolver` 仅信任配置的代理地址发送的转发头。部署新 Gateway 前，应先执行 `init.sql` 中 `gateway_refresh_sessions.device_id` 和 `gateway_user_access_blocks` 的增量 DDL，并配置可信代理 IP 列表。

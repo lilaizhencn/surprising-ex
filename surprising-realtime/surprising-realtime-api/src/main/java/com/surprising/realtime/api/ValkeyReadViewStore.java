@@ -205,11 +205,11 @@ public final class ValkeyReadViewStore {
         return materialize(product, values, now, maxAgeMillis);
     }
 
-    /** One atomic HMGET of the baseline, requested entities and their validation metadata. */
+    /** One atomic HMGET of requested entities and validation metadata; account reads explicitly request their baseline. */
     public ReadView readFields(ProductLine product, long user, long now, long maxAgeMillis,
                                List<String> entityFields) {
         var fields = new ArrayList<Object>(List.of("@fence", "@epoch", "@snapshotAt", "@invalid",
-                "@exportSequence", "USER:user"));
+                "@exportSequence"));
         fields.addAll(entityFields);
         List<Object> selected = redis.opsForHash().multiGet(keys(product, user).getFirst(), fields);
         var values = new HashMap<Object, Object>();

@@ -484,3 +484,13 @@ HotSpot JDK 27 定向测试 61 个测试类，按最后一次类结果去重共 
 `CommittedOrderProjectionRepository` 及资金页测试直接消费 `CommittedTradeReplay.CommittedFundingPage`。资金费支付记录来自确定性回放的实际已提交页；不增设旧类型转接类。
 
 `CandlestickStreamConfiguration` 按现有十字段 `RealtimeFrame` 构造K线帧。`RealtimeRouter` 用产品线和日志序号生成传输日志关联标识；`ReliableTradeKafkaSink` 在Kafka出口生成同一标识，写入公开成交事件及 `X-Trace-Id` header。提交/失败日志使用实际产品线、成交ID和日志位置定位，协议帧不携带另一份追踪状态。
+
+## 按订单 ID 的点查询
+
+`ValkeyUserQueries.order` 复用 `ValkeyReadViewStore.readFields`，用一次 HMGET 读取目标订单和
+`@fence/@epoch/@snapshotAt/@invalid/@exportSequence`。订单是完整实体值，无需载入 `USER:user`、
+解码其他订单/余额/仓位或构造 `UserReadView` 的七张排序表。初始化、时效、源 epoch 和最低导出水位
+检查与完整查询共用；只返回身份匹配的 OPEN 订单，终态或缺失返回空。
+
+余额和仓位的点查询仍显式读取 `USER:user`，按原有规则将基线和更新叠加；不能为减少分配丢弃基线。
+快照安装及晚到更新的版本、顺序和防复活校验保持不变。

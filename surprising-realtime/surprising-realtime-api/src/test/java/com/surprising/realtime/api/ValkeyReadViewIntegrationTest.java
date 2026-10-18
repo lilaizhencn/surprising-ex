@@ -116,6 +116,44 @@ class ValkeyReadViewIntegrationTest {
                 .hasMessageContaining("READ_VIEW_STALE");
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
+    void orderPointQuerySkipsUnrelatedEntitiesAndRetainsVersionAndIdentityGuards(ProductLine product) {
+        long now = System.currentTimeMillis();
+        var order = new CoreOrderStateView(71, product, 42, "1", CoreOrderSide.BUY,
+                100, 2, 0, 2, false, "OPEN", 1);
+        var snapshot = List.of(
+                new RealtimeFrame(product, RealtimeFrame.Kind.SNAPSHOT_BEGIN, 42, 100, 0, now, 1, "", "", new byte[0]),
+                new RealtimeFrame(product, RealtimeFrame.Kind.USER, 42, 100, 1, now, 1, "", "user",
+                        CoreStateQueryCodec.encodeUserState(new CoreUserStateView(product, 42, 1, List.of(), List.of(), List.of()))),
+                new RealtimeFrame(product, RealtimeFrame.Kind.ORDER, 42, 100, 2, now, 1, "1", "71",
+                        CoreStateQueryCodec.encodeOrderState(order)),
+                new RealtimeFrame(product, RealtimeFrame.Kind.SNAPSHOT_END, 42, 100, 3, now, 1, "", "", new byte[0]));
+        store.install(snapshot, now);
+        String key = "rt:view:{" + product.name() + ":42}";
+        redis.opsForHash().put(key, "ORDER:unrelated", "invalid unrelated frame");
+        redis.opsForHash().put(key, "USER:user", "invalid unrelated account baseline");
+        var queries = new ValkeyUserQueries(redis);
+        assertThat(queries.order(product, 42, 71, null)).isEqualTo(order);
+        assertThat(queries.order(product, 42, 72, null)).isNull();
+        var closed = new CoreOrderStateView(71, product, 42, "1", CoreOrderSide.BUY,
+                100, 2, 2, 0, false, "FILLED", 2);
+        store.applyBatch(List.of(new RealtimeFrame(product, RealtimeFrame.Kind.ORDER, 42, 101, 1,
+                now, 0, "1", "71", CoreStateQueryCodec.encodeOrderState(closed))), 7);
+        assertThat(queries.order(product, 42, 71, 7L)).isNull();
+        store.install(snapshot, now);
+        assertThat(queries.order(product, 42, 71, 7L)).isNull();
+        assertThatThrownBy(() -> queries.order(product, 42, 71, 8L)).hasMessageContaining("READ_VIEW_BEHIND");
+        assertThatThrownBy(() -> queries.order(product, 43, 71, null)).hasMessageContaining("READ_VIEW_INITIALIZING");
+        ProductLine other = Arrays.stream(ProductLine.values()).filter(value -> value != product).findFirst().orElseThrow();
+        assertThatThrownBy(() -> queries.order(other, 42, 71, null)).hasMessageContaining("READ_VIEW_INITIALIZING");
+        redis.opsForHash().put(key, "@snapshotAt", Long.toString(now - 20000));
+        assertThatThrownBy(() -> queries.order(product, 42, 71, null)).hasMessageContaining("READ_VIEW_STALE");
+        redis.opsForHash().put(key, "@snapshotAt", Long.toString(now));
+        store.sourceEpoch(product, "new-owner");
+        assertThatThrownBy(() -> queries.order(product, 42, 71, null)).hasMessageContaining("READ_VIEW_STALE");
+    }
+
     @Test
     void sourceEpochChangeAndUnavailableSnapshotCannotReturnReady() {
         store.sourceEpoch(ProductLine.SPOT, "first");

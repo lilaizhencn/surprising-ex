@@ -23,10 +23,26 @@ public final class ValkeyUserQueries {
         return require(product, user, minExportSequence, null);
     }
 
+    /** Orders are absolute entity values; a point read does not materialize the user's account. */
+    public com.surprising.aeron.protocol.CoreOrderStateView order(
+            ProductLine product, long user, long orderId, Long minExportSequence) {
+        var source = requireSource(product, user, minExportSequence,
+                java.util.List.of("ORDER:" + orderId));
+        for (var frame : source.frames()) {
+            if (frame.kind() != com.surprising.aeron.protocol.RealtimeFrame.Kind.ORDER) continue;
+            var order = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeOrderState(frame.payload());
+            if (frame.productLine() != product || frame.userId() != user
+                    || order.productLine() != product || order.userId() != user || order.orderId() != orderId)
+                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_ORDER_UNAVAILABLE");
+            return "OPEN".equals(order.status()) ? order : null;
+        }
+        return null;
+    }
+
     public java.util.Optional<com.surprising.aeron.protocol.CoreBalanceView> balance(
             ProductLine product, long user, String asset, Long minExportSequence) {
         var account = requireAccount(require(product, user, minExportSequence,
-                java.util.List.of("BALANCE:" + asset)), product, user);
+                java.util.List.of("USER:user", "BALANCE:" + asset)), product, user);
         return account.balances().stream().filter(v -> v.asset().equals(asset)).findFirst();
     }
 
@@ -35,7 +51,7 @@ public final class ValkeyUserQueries {
             com.surprising.aeron.protocol.CoreMarginMode marginMode,
             com.surprising.aeron.protocol.CorePositionSide side, Long minExportSequence) {
         var account = requireAccount(require(product, user, minExportSequence,
-                java.util.List.of("POSITION:" + instrumentId + ":" + side)), product, user);
+                java.util.List.of("USER:user", "POSITION:" + instrumentId + ":" + side)), product, user);
         return account.positions().stream().filter(v -> v.instrumentId().equals(instrumentId)
                 && v.marginMode() == marginMode && v.positionSide() == side).findFirst();
     }
@@ -50,6 +66,11 @@ public final class ValkeyUserQueries {
 
     private UserReadView require(ProductLine product, long user, Long minExportSequence,
                                  java.util.List<String> fields) {
+        return UserReadView.from(requireSource(product, user, minExportSequence, fields));
+    }
+
+    private ValkeyReadViewStore.ReadView requireSource(ProductLine product, long user, Long minExportSequence,
+                                                       java.util.List<String> fields) {
         long now = System.currentTimeMillis();
         try {
             requests.renew(product, user, now + 30000);
@@ -61,7 +82,7 @@ public final class ValkeyUserQueries {
             if (minExportSequence != null && source.exportSequence() < minExportSequence)
                 throw new ResponseStatusException(
                         HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_BEHIND");
-            return UserReadView.from(source);
+            return source;
         } catch (org.springframework.dao.DataAccessException unavailable) {
             throw new ResponseStatusException(
                     HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_UNAVAILABLE");

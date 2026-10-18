@@ -23,3 +23,18 @@ mvn -pl surprising-gateway -am -Dtest=OrderServiceTest,OrderBatchServiceTest,Aer
 这是本地功能验证，不代表资金端到端或性能验收。此阶段未启动交易集群、做市、wallet，未执行快照恢复或六产品线在线资金对账；后续阶段继续验证点查询和 Core 保证金写入。
 
 工作区并行出现的 `TradingCoreOwner.java` 修改不属于本轮实现，保留原状且不纳入本轮提交。
+
+## 订单点查询（第 3 项）
+
+`ValkeyUserQueries.order` 读取目标 ORDER 字段及必要元数据，直接解码订单；不读取完整用户 Hash，
+不加载账户基线，不调用 `UserReadView.from`。没有新增索引、缓存、业务镜像或通用查询框架。
+现有余额/仓位点查询改为显式请求基线，保持原有覆盖语义。Gateway 按订单 ID 查询使用该入口。
+
+```bash
+mvn -pl surprising-gateway,surprising-realtime/surprising-realtime-api -am -Dtest=ValkeyReadViewIntegrationTest,OrderServiceTest,OrderControllerTest,AccountServiceLocalSnapshotTest,TriggerOrderIdentityTest -Dsurefire.failIfNoSpecifiedTests=false test
+```
+
+退出码 0；真实本机 Redis 集成测试覆盖六产品线：目标/缺失/终态订单、晚到快照不复活订单、
+最低水位、用户与产品隔离、过期及 epoch 变化。测试故意破坏无关实体与账户基线，确认订单点查询
+不读取它们；原余额/仓位的基线、零余额和持仓关闭覆盖测试同时通过。Gateway 验证参数传递和读视图
+失败不返回 Core。各模块执行数以 Maven 日志为准，本轮没有启动交易集群或 wallet。
