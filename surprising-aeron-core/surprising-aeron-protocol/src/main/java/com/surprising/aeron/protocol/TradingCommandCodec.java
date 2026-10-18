@@ -33,9 +33,33 @@ public final class TradingCommandCodec {
 
     private static final CachedSymbol[] SYMBOL_CACHE = new CachedSymbol[SYMBOL_CACHE_SIZE];
 
+    private static final java.lang.invoke.VarHandle INT_LE =
+            java.lang.invoke.MethodHandles.byteArrayViewVarHandle(int[].class, ByteOrder.LITTLE_ENDIAN);
+    private static final java.lang.invoke.VarHandle LONG_LE =
+            java.lang.invoke.MethodHandles.byteArrayViewVarHandle(long[].class, ByteOrder.LITTLE_ENDIAN);
+    private static final java.lang.invoke.VarHandle SHORT_LE =
+            java.lang.invoke.MethodHandles.byteArrayViewVarHandle(short[].class, ByteOrder.LITTLE_ENDIAN);
+
     static String decodeAsciiSymbol(byte[] bytes, int offset, int length) {
         if (length == 0) {
             return "";
+        }
+        if (length <= 10 && bytes[offset] >= '1' && bytes[offset] <= '9') {
+            boolean allDigits = true;
+            for (int i = 1; i < length; i++) {
+                byte b = bytes[offset + i];
+                if (b < '0' || b > '9') {
+                    allDigits = false;
+                    break;
+                }
+            }
+            if (allDigits) {
+                try {
+                    int symbolId = com.surprising.product.api.InstrumentIds.parse(bytes, offset, length);
+                    return com.surprising.product.api.InstrumentIds.canonicalString(symbolId);
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
         }
         int hash = 0;
         for (int i = 0; i < length; i++) {
@@ -1038,22 +1062,14 @@ public final class TradingCommandCodec {
     }
 
     private static int getUnsignedShort(byte[] source, int offset) {
-        return Byte.toUnsignedInt(source[offset]) | Byte.toUnsignedInt(source[offset + 1]) << 8;
+        return Short.toUnsignedInt((short) SHORT_LE.get(source, offset));
     }
 
     private static int getInt(byte[] source, int offset) {
-        int value = 0;
-        for (int index = 0; index < Integer.BYTES; index++) {
-            value |= Byte.toUnsignedInt(source[offset + index]) << (index * 8);
-        }
-        return value;
+        return (int) INT_LE.get(source, offset);
     }
 
     private static long getLong(byte[] source, int offset) {
-        long value = 0;
-        for (int index = 0; index < Long.BYTES; index++) {
-            value |= (long) Byte.toUnsignedInt(source[offset + index]) << (index * 8);
-        }
-        return value;
+        return (long) LONG_LE.get(source, offset);
     }
 }

@@ -93,9 +93,11 @@ public final class TradingOrderBatchCodec {
         }
     }
 
+    private static final java.lang.invoke.VarHandle INT_LE =
+            java.lang.invoke.MethodHandles.byteArrayViewVarHandle(int[].class, ByteOrder.LITTLE_ENDIAN);
+
     private static int littleInt(byte[] bytes, int offset) {
-        return (bytes[offset] & 255) | (bytes[offset + 1] & 255) << 8
-                | (bytes[offset + 2] & 255) << 16 | bytes[offset + 3] << 24;
+        return (int) INT_LE.get(bytes, offset);
     }
 
     public static CancelOrderBatchCommand decodeCancelOrderBatch(byte[] encoded) {
