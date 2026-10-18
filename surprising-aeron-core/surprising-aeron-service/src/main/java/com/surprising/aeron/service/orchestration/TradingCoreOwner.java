@@ -142,6 +142,7 @@ public final class TradingCoreOwner {
             }
         } finally {
             state.runtimeState.exitAsynchronousCommandScope();
+            ingress.commitConsumedBytes();
         }
     }
 

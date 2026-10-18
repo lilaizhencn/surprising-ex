@@ -97,6 +97,13 @@ public class ClientSourceOrderingBenchmark {
             if (response != null) terminal.incrementAndGet();
             return response;
         }
+        @Override
+        public int drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
+            return client.drainResponses((correlation, response) -> {
+                terminal.incrementAndGet();
+                consumer.accept(correlation, response);
+            });
+        }
         @Override public RuntimeException sessionFailure() { return client.sessionFailure(); }
         @Override public boolean keepAlive() { return client.keepAlive(); }
         @Override public void close() { client.close(); }

@@ -316,6 +316,24 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
     }
 
     @Override
+    public int drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
+        if (responses.isEmpty()) {
+            return 0;
+        }
+        int count = 0;
+        var iterator = responses.entrySet().iterator();
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
+            long correlationId = entry.getKey();
+            CoreResponse response = entry.getValue();
+            iterator.remove();
+            consumer.accept(correlationId, response);
+            count++;
+        }
+        return count;
+    }
+
+    @Override
     public RuntimeException sessionFailure() {
         return sessionFailure;
     }
@@ -603,6 +621,12 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         public CoreResponse takeResponse(long correlationId) {
             SurprisingAeronClient current = client;
             return current == null ? null : current.takeResponse(correlationId);
+        }
+
+        @Override
+        public int drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
+            SurprisingAeronClient current = client;
+            return current == null ? 0 : current.drainResponses(consumer);
         }
 
         @Override

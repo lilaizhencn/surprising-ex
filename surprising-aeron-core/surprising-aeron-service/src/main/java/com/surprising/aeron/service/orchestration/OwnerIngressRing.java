@@ -10,6 +10,7 @@ import static com.surprising.aeron.service.orchestration.ClusterServiceEgress.NO
 final class OwnerIngressRing {
     static final int CAPACITY = 8192;
     static final long MAX_BYTES = 64L * 1024 * 1024;
+    private static final long BATCH_CONSUMED_BYTES_THRESHOLD = 64 * 1024;
     private final OneToOneConcurrentArrayQueue<Entry> queue = new OneToOneConcurrentArrayQueue<>(CAPACITY);
     private final Entry[] entries = new Entry[CAPACITY];
     /** Producer-only cursor/budget; a failed offer never claims or changes an entry. */
@@ -18,6 +19,7 @@ final class OwnerIngressRing {
     private long p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e, p0f;
     /** Consumer-only cursor/budget; updated only by the Owner thread. */
     private volatile long consumedBytes;
+    private long uncommittedConsumedBytes;
     @SuppressWarnings("unused")
     private long p11, p12, p13, p14, p15, p16, p17, p18, p19, p1a, p1b, p1c, p1d, p1e, p1f;
 
@@ -53,7 +55,17 @@ final class OwnerIngressRing {
         entry.clear();
         // Clear before poll releases the queue head: the producer may immediately reuse this entry.
         if (queue.poll() != entry) throw new IllegalStateException("owner ingress requires one consumer");
-        consumedBytes += bytes;
+        uncommittedConsumedBytes += bytes;
+        if (uncommittedConsumedBytes >= BATCH_CONSUMED_BYTES_THRESHOLD || queue.isEmpty()) {
+            commitConsumedBytes();
+        }
+    }
+
+    void commitConsumedBytes() {
+        if (uncommittedConsumedBytes > 0) {
+            consumedBytes += uncommittedConsumedBytes;
+            uncommittedConsumedBytes = 0;
+        }
     }
 
     /** After workers and the admitted window stop, release only commands still owned by this ring. */
@@ -64,6 +76,7 @@ final class OwnerIngressRing {
             remove();
             if (command != null) command.releaseDecoderSlot();
         }
+        commitConsumedBytes();
     }
 
     static final class Entry {

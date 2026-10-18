@@ -57,6 +57,9 @@ public final class AeronClientPool implements AutoCloseable {
         long offer(CoreMessage message);
         int pollEgress(int fragmentLimit);
         CoreResponse takeResponse(long correlationId);
+        default int drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
+            return -1;
+        }
         RuntimeException sessionFailure();
         default boolean connected() {
             return true;
@@ -1045,9 +1048,9 @@ public final class AeronClientPool implements AutoCloseable {
         }
 
         private void expireAdmitted(AgentLane lane) {
+            if (lane.pendingInDeadlineOrder.isEmpty()) return;
             long now = System.nanoTime();
-            boolean expired = !lane.pendingInDeadlineOrder.isEmpty()
-                    && now - lane.pendingInDeadlineOrder.getFirst().deadlineNanos >= 0;
+            boolean expired = now - lane.pendingInDeadlineOrder.getFirst().deadlineNanos >= 0;
             if (expired) {
                 lane.pending.values().forEach(Request::resultUnknown);
                 lane.pending.clear();
@@ -1072,6 +1075,13 @@ public final class AeronClientPool implements AutoCloseable {
 
         private void dispatchResponses(Session session, Map<Long, Request> pending) {
             if (pending.isEmpty()) return;
+            int drained = session.drainResponses((correlationId, response) -> {
+                Request request = pending.remove(correlationId);
+                if (request != null) {
+                    request.terminal(response);
+                }
+            });
+            if (drained >= 0) return;
             var iterator = pending.entrySet().iterator();
             while (iterator.hasNext()) {
                 Map.Entry<Long, Request> entry = iterator.next();
