@@ -1,0 +1,205 @@
+{
+  "date": "2026-10-18",
+  "change": "核心 int instrument 身份与条件单 primitive 索引；保留外部文本契约",
+  "toolchain": "Corretto HotSpot 27+33 / Maven 3.9.16 / macOS 26.7.2 x86_64",
+  "implementation_commit": "be2062e6db67da977657b1d6ece5187f5759040c",
+  "impact_discovery": "CodeGraph tools unavailable; inspected source call sites and direct Maven consumers. No agents used.",
+  "tests": [
+    {
+      "mode": "FUSED",
+      "base_commit": "f0f31a615cb2045ee4be02a00788b8c2f4f7b41a",
+      "source": "git archive + native-indices.patch production changes; before readiness test adjustment",
+      "command": "mvn -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=ConditionalOrderSchedulingIndexTest,TriggerOrderIndexTest,OwnerIndexChurnTest,RuntimeIdentityRegistryTest,CoreMatchingStateTest,CoreAlgoLaneQueryTest,DeterministicExchangeCoreAdapterTest,CoreNativeSnapshotProductLineTest,CorePerpetualFinancialMatrixTest,CoreDeliveryOptionFinancialMatrixTest,CoreSpotAssetUnitsTest,CoreFinancialLedgerProductionTest,CoreFundsIdempotencyTest,RuntimeCommitRecoveryTest,ProductRecoveryLifecycleTest,ClusterCommandPipelineTest#consecutiveReadyHeadsRetireInOnePollWithoutMergingCommandBoundaries+atomicOcoPairPublishesTogetherAndEitherLegCancelsItsSibling+triggerChildUsesOwningLaneAndPreservesOrderIdCollision+nativeTriggerRejectionReleasesReservationAndCompletesOnItsLane+internalTriggerPagesExpireTrailAndRecoverWithoutAccountHandoff+evaluatesEachTriggerOnlyAgainstItsSelectedPriceStream -Dsurprising.aeron.execution-mode=FUSED -Dsurefire.failIfNoSpecifiedTests=false test",
+      "exit_code": 0,
+      "tests": 232,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log_sha256": "2fbe4fb29e10fd9c2ba6915e1d3caf9eb9930805de4353515765798ad2b288b3"
+    },
+    {
+      "mode": "PIPELINED",
+      "base_commit": "f0f31a615cb2045ee4be02a00788b8c2f4f7b41a",
+      "source": "git archive + native-indices.patch production changes; before readiness test adjustment",
+      "command": "mvn -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=ConditionalOrderSchedulingIndexTest,TriggerOrderIndexTest,OwnerIndexChurnTest,RuntimeIdentityRegistryTest,CoreMatchingStateTest,CoreAlgoLaneQueryTest,DeterministicExchangeCoreAdapterTest,CoreNativeSnapshotProductLineTest,CorePerpetualFinancialMatrixTest,CoreDeliveryOptionFinancialMatrixTest,CoreSpotAssetUnitsTest,CoreFinancialLedgerProductionTest,CoreFundsIdempotencyTest,RuntimeCommitRecoveryTest,ProductRecoveryLifecycleTest,ClusterCommandPipelineTest#consecutiveReadyHeadsRetireInOnePollWithoutMergingCommandBoundaries+atomicOcoPairPublishesTogetherAndEitherLegCancelsItsSibling+triggerChildUsesOwningLaneAndPreservesOrderIdCollision+nativeTriggerRejectionReleasesReservationAndCompletesOnItsLane+internalTriggerPagesExpireTrailAndRecoverWithoutAccountHandoff+evaluatesEachTriggerOnlyAgainstItsSelectedPriceStream -Dsurprising.aeron.execution-mode=PIPELINED -Dsurefire.failIfNoSpecifiedTests=false test",
+      "exit_code": 0,
+      "tests": 232,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log_sha256": "9ab9b228cfa746255b1bf43195cb449c4b2a4ed1b2de93abbbf4a92ff620f66b"
+    },
+    {
+      "scope": "latest master direct consumers and readiness test fix",
+      "base_commit": "a91feabb1456f825fa99539243e9ab045457afec",
+      "command": "mvn -pl surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks,surprising-gateway,surprising-realtime/surprising-realtime-provider -am '-Dtest=ClusterCommandPipelineTest#consecutiveReadyHeadsRetireInOnePollWithoutMergingCommandBoundaries,OfflineReplayMainTest,ClusterFundsReconcileTest,CoreLaneMetricsPrometheusFormatterTest,TriggerCommitBenchmarkTest,TriggerOrderRequestServiceTest,TriggerOrderIdentityTest,AlgoOrderServiceTest,CancelAllAfterServiceTest,InstrumentIdentityCacheTest,RealtimeRouterIntegrationTest' -Dsurefire.failIfNoSpecifiedTests=false test",
+      "exit_code": 0,
+      "tests": 55,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "name": "com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.tools.reconciliation.ClusterFundsReconcileTest",
+          "tests": 16,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.tools.diagnostics.CoreLaneMetricsPrometheusFormatterTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.tools.replay.OfflineReplayMainTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.aeron.service.state.TriggerCommitBenchmarkTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.realtime.provider.RealtimeRouterIntegrationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.instrument.provider.service.InstrumentIdentityCacheTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.trading.order.service.AlgoOrderServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.trading.order.service.CancelAllAfterServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.trading.trigger.service.TriggerOrderRequestServiceTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "name": "com.surprising.trading.trigger.service.TriggerOrderIdentityTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "1ed7797af4c064b99227cb62e81a0eef75d886331b98db555dd8fa71f7791439",
+      "notes": [
+        "TriggerCommitBenchmarkTest executes 3 functional fixture tests, no JMH harness or load run.",
+        "RealtimeRouterIntegrationTest executes 2 Redis/Aeron transport scenarios and closes its services; shutdown/reconnect warnings were logged during deliberate shutdown, no assertion failed.",
+        "Shared workspace also contains independent TradingCoreOwner changes; those changes are excluded from this commit and are not fully qualified by this record."
+      ]
+    }
+  ],
+  "coverage": [
+    "六产品线普通撮合、快照与恢复",
+    "触发单 OCO、追踪、价格源隔离、拒绝解冻、过期、所属 Lane",
+    "价格 Long.MAX_VALUE、已删价格桶的分页续扫、订单及用户大 long ID",
+    "数据库 int 最大币对 ID 到稠密 symbol 0 的注册和快照往返",
+    "算法单组合筛选、改期/移除、客户端 ID 清理",
+    "取消定时器时间/用户/scope 原有排序和恢复",
+    "资金幂等、现货资产单位、永续与交割期权财务矩阵"
+  ],
+  "observed_failures": [
+    {
+      "run": "initial broad core regression",
+      "tests": 516,
+      "failures": 1,
+      "detail": "consecutiveReadyHeadsRetireInOnePollWithoutMergingCommandBoundaries expected 2 responses but observed 1. Test waited for settlement only; production commit additionally requires Matcher submission release.",
+      "log_sha256": "961a41b827a5d4c7ac02d1bb1153d4a06f94a2a7c7a9779219e6dd0239166e52"
+    },
+    {
+      "run": "first readiness test adjustment on latest master",
+      "tests": 6,
+      "failures": 6,
+      "detail": "Rejected adjustment waited for hasMatchingCompletion on direct settlement. Direct path keeps result on event, so separate completion slot is not authoritative. Final test waits for complete events AND submittedMatcherShard == -1, matching production retirement guard.",
+      "log_sha256": "926d499281d2c18514ec7b17df1efbd4b351d613e159d5698ca4dddc8f60ea10"
+    }
+  ],
+  "design": [
+    "规范 instrument 在注册时固定 int 身份；原文本缓存用于协议/查询/快照。",
+    "沿用现有稠密 symbol ID，primitive map 不按最大数据库 ID 分配大数组。",
+    "Owner 持有派生索引，跟随已提交 Lane 状态变更和恢复重建，不新增第二权威状态。",
+    "fastutil primitive AVL 保留价格范围、订单排序及分页，不改为全表扫描。",
+    "算法调度与定时撤单的复合业务键保留有序对象，外部模型仍有字符串/包装类型。"
+  ],
+  "not_run": [
+    "用户要求不压测；未运行压测、JMH、JFR，无吞吐或 P99 改善结论。",
+    "未启动 wallet；未启动完整网关 HTTP/WebSocket 交易集群，缺少部署环境和认证上下文。",
+    "Linux 实机绑核见独立 CPU affinity 验证记录，当前 macOS 无法验证 native mask。"
+  ],
+  "source_sha256": {
+    "surprising-aeron-core/surprising-aeron-service/README.md": "844baee6bb77a1d1766c41b7b6a8c3619e5ad7a7a98663569cf574a5085eae95",
+    "surprising-aeron-core/surprising-aeron-service/pom.xml": "45a6f3ac5d9b3f39ea61d0b2b30bed762ad924caebc06316bff29ec6b47c1ab3",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/trigger/TriggerOrderCommands.java": "cb35b89ad121e7db345b5a825449299591c87e1257c8d247c7b0efb21c84a2a4",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/CoreMatchingOrder.java": "5d34732160c23edbaf604ca851733c6945d8b0ddbafb065404a92ac5af54f42f",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matching/DeterministicExchangeCoreAdapter.java": "83799c0aac630d28380ea71358ba0ac5a9f667fe97cfd752e4b43848a782e9c9",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CommandSlot.java": "50fd14fefc5b2c703dce6f6c3bc382844bf413e77591552df8445cbd7caf69e9",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/MatchingCommandAdmission.java": "8f2e0454cea9b47474c5273ad052fdb098338444979cc59e829d6f16dedaa1c9",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OrderBookQueryService.java": "03341089ea0adb55454929215b12eb45adeddea9a5e04914352dbae39d44143a",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/DerivativeAccountCommandProcessor.java": "fbdbe4bd422da66188aa695bfc49de5d938713492a99c6137b3fd3a3bb7292eb",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeDerivativeRiskProcessor.java": "4d1a4b61990a8f774a8ff1c4967999901b9a864fa3ad19e44f024eb5b9b67efc",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeIdentityRegistry.java": "5fea1814c6ebc3149f937ea55eaf30f6f028cc9f6b02943d8d40c9cff9a01b1f",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeInstrumentStateTransitions.java": "f5899bb2e212bc11db4c03018873d5064dd1fce89aaba2402a270d04344590ea",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeLifecycleSettlement.java": "baf96f6accf8c166f951bb02bfdeb1e5df5fb4e70e0018dcb563cb11f1cefdad",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeLifecycleSettlementContinuation.java": "2613a8154b8e3b3139fddff935fa4949c2b02e5bf6314c46722306582d8bdced",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimePerpetualFundingProcessor.java": "8f1f8222312cba3eb655a6561ac826ca67f8486ccc2adc4cf346cdf8e8901328",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeStateMaterializer.java": "b1b1554ec04378f2c9785de88d114dcca64d6dfda34558b1e1e49d1d4ac27e02",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeStateProjector.java": "8de6bec4411fd4fcb8fe11c7f985be39be42b7e555a67b2871833a47dbba9147",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/admission/CoreOrderDecisionResolver.java": "4973def5ece6ab905af608d3c70b45eef45f93cd6b69c9aa9d803663a50bf8b4",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/index/AlgoOrderIndex.java": "05774583a0b7360ae60b5a9d9364fcded4f8647d03faae07271381164f5e6c92",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/index/CancelAllAfterIndex.java": "93709512553e0c5343311a4c1d907f7366d70edfa137dac0d14e10e9759ed676",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/index/TriggerOrderIndex.java": "ebc56e02da8e5d9d047d5c0982c76de7ee0cbda7949fd8e8f1ddd1dcf58739e4",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/instrument/CoreInstrument.java": "b7ef0fe9fc8fca472b9d0c398e0cc5668816c22b3779042ca0502c0a0ea6dcc6",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/TriggerOrderIndexTest.java": "11c387674b86dea9d5f3d36107177ed4b7011f9a22a93c7c10d3726cf8403151",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/RuntimeIdentityRegistryTest.java": "472cf29ad405b5f57b6a7f32d4420fd2a9a9c83702b46117f40075fd294a82ba",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/DirectMatcherTestInputs.java": "50281ecec978bc04cd075443cbf2cc7dd0fcff2cf01ebe6c5d0e980f48d2a0c2",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java": "007f23027e0bf1a77a5e106f1b2c431231005e63e6251fe39200729bd5cdd079",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/ClusterCommandPipelineTest.java": "ca245c9b0f150046ef14076827d168c22404f6e9e449811a7abc19fef9d21015",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/ConditionalOrderSchedulingIndexTest.java": "c8ee260ac5ae0b439d8fe45b4ca65531742ae62b8dc353e5866178cfd053d1cd"
+  },
+  "cleanup": {
+    "status": "completed; test processes exited, historical isolated directories were already absent, this run artifact directory removed after extracting test counts and hashes. No JFR, Archive or heap dump created. Maven target outputs retained; unrelated task files untouched.",
+    "historical_archive_paths": [
+      "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-native-indices-check-20261018-hqhkb7wy",
+      "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-native-indices-check-20261018-zktu7lh1"
+    ],
+    "historical_artifact_directory": "/Users/atomex/Desktop/surprising/surprising-ex/performance-artifacts/core-native-indices-20261018",
+    "disk": "315 GiB available at end of tests"
+  },
+  "test_fix": "The single-poll retirement test now waits for complete settlement events and release of both Matcher submission tokens. The latest direct path stores results on settlement events, not a separate command-slot completion. Original two-response, ordering, funds/state and snapshot assertions remain."
+}

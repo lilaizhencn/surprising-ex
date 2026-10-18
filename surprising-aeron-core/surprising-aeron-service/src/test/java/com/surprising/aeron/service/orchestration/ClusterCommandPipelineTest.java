@@ -213,10 +213,15 @@ class ClusterCommandPipelineTest {
                     && secondPending.settlementEvent() != null && secondPending.settlementEvent().dispatched());
             release.countDown();
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
-            while ((!firstPending.settlementEvent().complete() || !secondPending.settlementEvent().complete())
+            // Settlement completion and release of the Matcher submission are separate facts.
+            // Wait until the producer has released both slots before testing one-poll retirement.
+            while ((!firstPending.settlementEvent().complete() || !secondPending.settlementEvent().complete()
+                    || firstPending.submittedMatcherShard() != -1 || secondPending.submittedMatcherShard() != -1)
                     && System.nanoTime() < deadline) Thread.onSpinWait();
             assertThat(firstPending.settlementEvent().complete()).isTrue();
             assertThat(secondPending.settlementEvent().complete()).isTrue();
+            assertThat(firstPending.submittedMatcherShard()).isEqualTo(-1);
+            assertThat(secondPending.submittedMatcherShard()).isEqualTo(-1);
             assertThat(live.responses).isEmpty();
             live.service.pollCommands();
             assertThat(live.responses).hasSize(2);
