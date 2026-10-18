@@ -81,7 +81,8 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     static AeronClientCapacity commandCapacity(int window, int sessionWindow) {
         if (window < 1 || window > 65536 || sessionWindow < 1 || sessionWindow > window)
             throw new IllegalArgumentException("require 1 <= session window <= global window <= 65536");
-        return new AeronClientCapacity(1, 1, window, 64, sessionWindow, 32, 128);
+        int egressLimit = Math.max(128, Math.min(window, 2048));
+        return new AeronClientCapacity(1, 1, window, 64, sessionWindow, 32, egressLimit);
     }
 
     public static void main(String[] args) throws Exception {
