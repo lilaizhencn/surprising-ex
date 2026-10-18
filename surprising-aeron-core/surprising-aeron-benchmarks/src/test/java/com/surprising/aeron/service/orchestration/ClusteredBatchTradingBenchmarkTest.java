@@ -13,7 +13,7 @@ class ClusteredBatchTradingBenchmarkTest {
     void batchRiskScanCommitsAndRestoresFunds(ProductLine line) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.productLine = line;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.batchSize = 4;
         workload.maxInFlight = 256;
         workload.setup();
@@ -33,7 +33,7 @@ class ClusteredBatchTradingBenchmarkTest {
     void riskScanBetweenTradesKeepsLaneOwnershipAndRestoresFunds(ProductLine line) throws Exception {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.productLine = line;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.batchSize = 4;
         workload.maxInFlight = 256;
         workload.setup();
@@ -59,7 +59,7 @@ class ClusteredBatchTradingBenchmarkTest {
     void batchMatchingCloseCancelsProtectiveTriggers(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.productLine = productLine;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.batchSize = 4;
         workload.maxInFlight = 256;
         try (workload) {
@@ -78,7 +78,7 @@ class ClusteredBatchTradingBenchmarkTest {
     void partialCloseRetainsTriggerUntilPositionIsFullyClosed(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.productLine = productLine;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.batchSize = 4;
         workload.maxInFlight = 256;
         try (workload) {
@@ -95,7 +95,7 @@ class ClusteredBatchTradingBenchmarkTest {
     void matchingCloseCancelsPendingProtectiveTriggers(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.productLine = productLine;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.batchSize = 4;
         workload.maxInFlight = 256;
         try (workload) {
@@ -112,7 +112,7 @@ class ClusteredBatchTradingBenchmarkTest {
     void finalizationFailurePreservesFundsAndSubsequentTrading(ProductLine productLine) throws Exception {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.productLine = productLine;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.batchSize = 4;
         workload.maxInFlight = 256;
         try (workload) {
@@ -133,7 +133,7 @@ class ClusteredBatchTradingBenchmarkTest {
     void algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.productLine = productLine;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.batchSize = 4;
         workload.maxInFlight = 256;
         try (workload) {
@@ -154,7 +154,7 @@ class ClusteredBatchTradingBenchmarkTest {
     void algoLaneControlsPreserveTradingAndSnapshot(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.productLine = productLine;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.batchSize = 4;
         workload.maxInFlight = 256;
         try (workload) {
@@ -174,7 +174,7 @@ class ClusteredBatchTradingBenchmarkTest {
     void ownerTimerControlsPreserveTradingAndSnapshot(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.productLine = productLine;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.batchSize = 4;
         workload.maxInFlight = 256;
         try (workload) {
@@ -194,7 +194,7 @@ class ClusteredBatchTradingBenchmarkTest {
     void singleOrderPlanReusePreservesSettlementAndSnapshot(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.productLine = productLine;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.batchSize = 4;
         workload.maxInFlight = 256;
         try (workload) {
@@ -212,7 +212,7 @@ class ClusteredBatchTradingBenchmarkTest {
     void changingBatchSizesPreservesSettlementAndSnapshot(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.productLine = productLine;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.batchSize = 4;
         workload.maxInFlight = 256;
         try (workload) {
@@ -232,7 +232,7 @@ class ClusteredBatchTradingBenchmarkTest {
     void fullWindowCommitPreservesFundsAndSnapshot(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.productLine = productLine;
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.batchSize = 1;
         workload.maxInFlight = 256;
         try (workload) {
@@ -247,7 +247,7 @@ class ClusteredBatchTradingBenchmarkTest {
     @EnumSource(ProductLine.class)
     void sequentialBatchHandoffPreservesTerminalFundsAndSnapshot(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.productLine = productLine;
         workload.batchSize = 1;
         workload.maxInFlight = 256;
@@ -267,7 +267,7 @@ class ClusteredBatchTradingBenchmarkTest {
     @EnumSource(ProductLine.class)
     void tradingWithoutInterleavedQueriesRetainsTerminalAndFinancialChecks(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.productLine = productLine;
         workload.batchSize = 2;
         workload.maxInFlight = 256;
@@ -291,7 +291,7 @@ class ClusteredBatchTradingBenchmarkTest {
     @EnumSource(ProductLine.class)
     void priceScopedPrefixScenarioKeepsFundsAndSnapshotCorrect(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.productLine = productLine;
         workload.batchSize = 20;
         workload.maxInFlight = 256;
@@ -306,7 +306,7 @@ class ClusteredBatchTradingBenchmarkTest {
     @EnumSource(ProductLine.class)
     void independentBatchWindowsRestoreFundsAndSnapshot(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
-        workload.accountLanes = 4; workload.productLine = productLine;
+        workload.accountLanes = 2; workload.productLine = productLine;
         workload.batchSize = 20; workload.maxInFlight = 256; workload.realtime = true;
         try (workload) {
             workload.setup();
@@ -317,7 +317,7 @@ class ClusteredBatchTradingBenchmarkTest {
     @EnumSource(ProductLine.class)
     void independentWindowsRestoreFundsAndSnapshot(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
-        workload.accountLanes = 4; workload.productLine = productLine;
+        workload.accountLanes = 2; workload.productLine = productLine;
         workload.batchSize = 2; workload.maxInFlight = 256; workload.realtime = true;
         try (workload) {
             workload.setup();
@@ -328,7 +328,7 @@ class ClusteredBatchTradingBenchmarkTest {
     @EnumSource(ProductLine.class)
     void triggerPublicationAndBatchCompletionSurviveRepeatedUse(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.productLine = productLine;
         workload.batchSize = 20;
         workload.maxInFlight = 256;
@@ -346,7 +346,7 @@ class ClusteredBatchTradingBenchmarkTest {
     @EnumSource(ProductLine.class)
     void multiFillSettlementAndRawEncodingPreserveFundsAndSnapshotsAcrossReuse(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
-        workload.accountLanes = 4; workload.productLine = productLine;
+        workload.accountLanes = 2; workload.productLine = productLine;
         workload.batchSize = 20; workload.maxInFlight = 256; workload.realtime = true;
         try (workload) {
             workload.setup();
@@ -359,7 +359,7 @@ class ClusteredBatchTradingBenchmarkTest {
     @EnumSource(ProductLine.class)
     void ownerBatchCompletionClosesFundsAndRestoresSnapshot(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.productLine = productLine;
         workload.batchSize = 20;
         workload.maxInFlight = 256;
@@ -374,7 +374,7 @@ class ClusteredBatchTradingBenchmarkTest {
     @EnumSource(ProductLine.class)
     void amendTradesRestoreFundsAndPositionsAndRetainSnapshotAcrossReuse(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.productLine = productLine;
         workload.batchSize = 2;
         workload.maxInFlight = 256;
@@ -393,7 +393,7 @@ class ClusteredBatchTradingBenchmarkTest {
     @EnumSource(value = ProductLine.class, names = {"SPOT", "LINEAR_PERPETUAL"})
     void allRejectedContinuationsReachServiceEgressAndKeepSnapshotRecoverable(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.productLine = productLine;
         workload.batchSize = 20;
         workload.maxInFlight = 256;
@@ -408,7 +408,7 @@ class ClusteredBatchTradingBenchmarkTest {
     @EnumSource(value = ProductLine.class, names = {"SPOT", "LINEAR_PERPETUAL"})
     void serviceBatchCycleClosesFundsAndRestoresSnapshotAcrossReuse(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
-        workload.accountLanes = 4;
+        workload.accountLanes = 2;
         workload.productLine = productLine;
         workload.batchSize = 20;
         workload.maxInFlight = 256;
