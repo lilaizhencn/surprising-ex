@@ -220,8 +220,11 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
 
         boolean poll(TradingCoreRuntime owner) {
             owner.assertHealthy();
-            if (!prepared || !owner.runtimeState.systemLedgerStarted())
-                throw new IllegalStateException("funds index request requires active Ledger");
+            if (!prepared) throw new IllegalStateException("funds index request is not prepared");
+            if (!owner.runtimeState.systemLedgerStarted()) {
+                apply(null);
+                return true;
+            }
             if (!queued) {
                 completionRuntime = owner.runtimeState;
                 if (!owner.runtimeState.dispatchLedgerQuery(this)) return false;
@@ -236,7 +239,7 @@ final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderS
             else retained = retention.fundsCommands.get(commandIdMsb, commandIdLsb);
             TradingRuntimeState completion = completionRuntime;
             completed = true;
-            completion.signalOwnerCompletion();
+            if (completion != null) completion.signalOwnerCompletion();
         }
 
         CommandFingerprint retained() {

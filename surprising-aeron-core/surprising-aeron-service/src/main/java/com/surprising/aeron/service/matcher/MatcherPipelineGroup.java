@@ -42,6 +42,15 @@ public final class MatcherPipelineGroup implements AutoCloseable {
         if (startImmediately) start((IntConsumer) null);
     }
 
+    /** 各撮合分片与账户状态由当前交易线程一起拥有。 */
+    public void startInline(IntConsumer shardActivation) {
+        for (int shardId = 0; shardId < shards.length; shardId++) {
+            int currentShardId = shardId;
+            shards[shardId].startInline(shardActivation == null ? null
+                    : () -> shardActivation.accept(currentShardId));
+        }
+    }
+
     public void start(IntConsumer shardActivation) {
         for (int shardId = 0; shardId < shards.length; shardId++) {
             int currentShardId = shardId;

@@ -57,11 +57,13 @@ final class ControlLaneDispatcher {
         owner.assertOwner();
         initializeTasks();
         long validMask = tasks.length == 64 ? -1L : (1L << tasks.length) - 1;
-        if (!owner.accountLanesStarted || pending || laneMask == 0
+        if (pending || laneMask == 0
                 || (laneMask & ~validMask) != 0 || operation == null || type == null)
             throw new IllegalStateException("invalid control Lane dispatch");
-        owner.ensureLaneWorkerCapacity(laneMask);
-        owner.releaseOwnerLaneAccess();
+        if (owner.accountLanesStarted) {
+            owner.ensureLaneWorkerCapacity(laneMask);
+            owner.releaseOwnerLaneAccess();
+        }
         for (LaneControlTask task : tasks) task.clear();
         requiredLaneMask = laneMask;
         observedCompletedMask = 0;
@@ -73,7 +75,11 @@ final class ControlLaneDispatcher {
             lanes &= lanes - 1;
             LONGS.setRelease(completedLanes, laneId * CACHE_LINE_LONGS, 0L);
             tasks[laneId].operation = operation;
-            owner.laneWorkers[laneId].submit(tasks[laneId]);
+            if (!owner.accountLanesStarted) {
+                tasks[laneId].execute(owner.accountLanes[laneId]);
+            } else {
+                owner.laneWorkers[laneId].submit(tasks[laneId]);
+            }
         }
     }
 

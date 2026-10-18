@@ -1381,10 +1381,14 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (activated) return;
         if (closed) throw new IllegalStateException("cannot activate closed core state");
         try {
-            matcherPipeline.start(matchingAdapter::activateShard);
+            boolean fused = TradingExecutionMode.configured() == TradingExecutionMode.FUSED;
+            if (fused) matcherPipeline.startInline(matchingAdapter::activateShard);
+            else matcherPipeline.start(matchingAdapter::activateShard);
             bindOwner();
-            runtimeState.startAccountLanes();
-            runtimeState.startSystemLedgerLane();
+            if (!fused) {
+                runtimeState.startAccountLanes();
+                runtimeState.startSystemLedgerLane();
+            }
             matchingAdapter.activate();
             commits.publication.activate();
             activated = true;

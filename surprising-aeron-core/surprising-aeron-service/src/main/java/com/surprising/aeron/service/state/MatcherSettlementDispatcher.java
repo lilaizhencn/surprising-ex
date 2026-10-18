@@ -146,7 +146,15 @@ final class MatcherSettlementDispatcher {
             throw new IllegalStateException("Matcher settlement was already dispatched");
         long lanes = event.routedLaneMask();
         if (lanes == 0) throw new IllegalStateException("Matcher settlement has no routed Lane");
-        if (!owner.accountLanesStarted) return;
+        if (!owner.accountLanesStarted) {
+            while (lanes != 0) {
+                int laneId = Long.numberOfTrailingZeros(lanes);
+                lanes &= lanes - 1;
+                event.markLaneQueued(laneId);
+                event.execute(owner.accountLanes[laneId]);
+            }
+            return;
+        }
         int shard = event.directShard();
         while (lanes != 0) {
             int laneId = Long.numberOfTrailingZeros(lanes);
