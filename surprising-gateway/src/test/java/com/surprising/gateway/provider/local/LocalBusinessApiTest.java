@@ -18,6 +18,18 @@ import tools.jackson.databind.json.JsonMapper;
 class LocalBusinessApiTest {
 
     @Test
+    void userPriceProtectionRouteReturnsTheProductPolicyWithoutTreatingItAsAnOrderId() {
+        when(orders.priceProtection()).thenReturn(new com.surprising.trading.api.model.OrderPriceProtectionResponse(
+                ProductLine.LINEAR_PERPETUAL, 12345));
+        var response = invoke("trading", "/api/v1/trading/orders/price-protection", HttpMethod.GET, userHeaders(), null);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(new String(response.getBody(), java.nio.charset.StandardCharsets.UTF_8))
+                .contains("\"productLine\":\"LINEAR_PERPETUAL\"", "\"marketMaxSlippagePpm\":12345");
+        verify(orders).priceProtection();
+        verifyNoMoreInteractions(orders);
+    }
+
+    @Test
     void publicBookUnavailabilityKeepsThe503Response() {
         when(market.orderBookSnapshot("1", 30)).thenThrow(
                 new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "MARKET_BOOK_UNAVAILABLE"));
@@ -275,7 +287,7 @@ class LocalBusinessApiTest {
 
     @Test
     void everyPublicBusinessEndpointHasAnExplicitLocalRoute() throws Exception {
-        // Frozen from the original HTTP mappings before deleting duplicate public controllers.
+        // Original mappings plus the user order-protection query.
         var expected = java.nio.file.Files.readAllLines(java.nio.file.Path.of("src/test/resources/local-business-route-paths.txt"));
         var actual = new java.util.HashSet<String>();
         for (Class<?> routes : java.util.List.of(TradingLocalRoutes.class, AccountLocalRoutes.class, InstrumentLocalRoutes.class, LocalBusinessApi.class)) {

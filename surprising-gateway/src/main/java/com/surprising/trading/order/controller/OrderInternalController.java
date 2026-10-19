@@ -39,6 +39,11 @@ import java.util.concurrent.CompletionStage;
 @RestController
 public class OrderInternalController {
 
+    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/price-protection")
+    public com.surprising.trading.api.model.OrderPriceProtectionResponse priceProtection() {
+        return requests.priceProtection();
+    }
+
     @PostMapping(TradingApiPaths.ORDER_BASE_PATH)
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> place(@Valid @RequestBody PlaceOrderRequest request) {
         return requests.place(request);

@@ -52,6 +52,10 @@ public class OrderRequestService {
         this.cancelAllAfterService = cancelAllAfterService;
     }
 
+    public com.surprising.trading.api.model.OrderPriceProtectionResponse priceProtection() {
+        return orderService.priceProtection();
+    }
+
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> place(PlaceOrderRequest request) {
         try {
             return mapAsyncFailure(orderService.placeCommandAsync(request).thenApply(this::commandResponse), HttpStatus.CONFLICT);

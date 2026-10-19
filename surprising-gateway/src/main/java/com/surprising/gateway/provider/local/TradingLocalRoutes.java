@@ -43,6 +43,7 @@ import org.springframework.web.util.pattern.PathPatternParser;
 
 /** 网关协议到订单入口的本地调用；不建立内部 HTTP 连接。 */
 public final class TradingLocalRoutes {
+    private static final PathPattern PRICE_PROTECTION = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/price-protection");
     private static final PathPattern EFFECTIVE_FEE = PathPatternParser.defaultInstance.parse("/api/v1/trading/fees/effective");
     private static final PathPattern ADMIN_MAINTENANCE_CONTROLLER_LIST = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/maintenance");
     private static final PathPattern ADMIN_MAINTENANCE_CONTROLLER_PREVIEW = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/maintenance/preview");
@@ -126,6 +127,7 @@ public final class TradingLocalRoutes {
     }
 
     public Object invoke(LocalApiRequest r) {
+        if (r.matches(HttpMethod.GET, PRICE_PROTECTION)) return orderRequests.priceProtection();
         if (r.matches(HttpMethod.GET, ORDER_BOOK)) {
             return marketDataService.orderBookSnapshot(r.query("instrumentId", String.class, null, true),
                     r.query("depth", int.class, "30", false));

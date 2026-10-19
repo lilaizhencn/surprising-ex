@@ -57,6 +57,19 @@ import org.mockito.quality.Strictness;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class OrderServiceTest {
 
+    @ParameterizedTest @EnumSource(ProductLine.class)
+    void priceProtectionUsesTheCurrentProductSettingsWithoutQueryingCore(ProductLine line) {
+        var properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(line);
+        var service = new OrderService(properties, orderValidator, placementStateService, aeronOrders, projection);
+        properties.getRisk().setMarketMaxSlippagePpm(12345);
+        assertThat(service.priceProtection()).isEqualTo(
+                new com.surprising.trading.api.model.OrderPriceProtectionResponse(line, 12345));
+        properties.getRisk().setMarketMaxSlippagePpm(6789);
+        assertThat(service.priceProtection().marketMaxSlippagePpm()).isEqualTo(6789);
+        verifyNoInteractions(aeronOrders, projection);
+    }
+
     @Mock
     private OrderValidator orderValidator;
     @Mock

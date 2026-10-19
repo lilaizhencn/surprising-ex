@@ -87,6 +87,11 @@ public class OrderService {
         this(properties, orderValidator, placementStateService, null, null);
     }
 
+    public com.surprising.trading.api.model.OrderPriceProtectionResponse priceProtection() {
+        return new com.surprising.trading.api.model.OrderPriceProtectionResponse(
+                currentProductLine(), properties.getRisk().getMarketMaxSlippagePpm());
+    }
+
     public OrderResponse place(PlaceOrderRequest request) {
         requireAeron();
         return aeronOrders.place(prepareOrder(request));

@@ -40,6 +40,16 @@ The Maven modules follow these boundaries: [`surprising-aeron-core`](surprising-
 
 进一步修复查询装配：产品线容器现在显式注册 `ValkeyUserQueries`，普通订单、余额持仓及用户触发单当前查询不再退回 Core。普通订单离开活动视图后从 realtime 提交投影查询终态；后台普通订单全局查询和撤单预览也使用提交投影。Web/client 回执恢复已统一到 `/api/v1/gateway/trading/commands/{commandId}`。192 项查询回归、Web 151 项及 Flutter 131 项测试通过；独立 FUSED 现货实测确认回执地址、终态查询、余额一致和资金守恒。全栈启动默认开启 realtime 与提交导出。专用查询及其他产品线仍按范围逐项验收，详见 [查询与清理记录](docs/validation/public-realtime-query-20261019.json)。
 
+现货余额比例下单继续对齐（2026-10-19）：`GET /api/v1/gateway/trading/price-protection` 经既有
+`TradingLocalRoutes → OrderRequestService → OrderService` 返回当前产品的 `marketMaxSlippagePpm`。
+该只读接口直接读取现有业务配置，不查询 Core、不保存第二份状态；热更新后的配置可立即读取。
+Web/client 使用 instrument 的数量、名义价值限制与 asset-scales 做整数计算，买入按
+`OrderAdmissionMath.fragmentationSafeFeeDebit` 的逐步舍入方式预留手续费，卖出按基础资产向下取整；
+BBO 使用选定方向与档位，市价预估使用当前保护参数。最后准入、冻结和结算仍由 Core 处理。
+新增 DTO 只承担此 HTTP 契约，没有新增交易执行层。本轮 114 项 Java 定向测试、Web/client
+数值与界面检查详见 [比例下单验证](docs/validation/spot-order-sizing-20261019.json)。
+本轮未重启 FUSED 实栈，不将受控浏览器和 Flutter 测试认作真实成交或真机验收。
+
 ### 当前 Core 线程职责（2026-10-13）
 
 用户余额、预留、仓位、订单、算法单、触发单、清算及风险记录由所属 `AccountLaneState` 的实际 worker 读写。`SettlementLaneWorker` 在启动前绑定线程；运行中的 Owner 不能直接读取账户表、进入 Lane 写作用域或执行账户闭包。已删除四张 `published*` 业务镜像，`ActiveOrderIndex` 仅保存订单 ID、用户 ID、币对；触发、算法及清算索引只保存路由与候选筛选键。Owner 定序、检查路由身份、派发任务并按日志顺序发布完成结果；命令内的不可变回执在提交后清理，不留第二份业务状态。
