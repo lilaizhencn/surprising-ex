@@ -147,3 +147,12 @@ Web 在结算中禁止调整杠杆，直接减仓不依赖开仓杠杆设置；�
 ### 期权 OCO 原请求（2026-10-20）
 
 `GET /api/v1/gateway/trading-trigger/oco-submission` 使用原 takeProfitClientId、stopLossClientId 和当前用户/产品，查询同一次 `PLACE_TRIGGER_OCO_PAIR` 的已有已提交回执。不存在、尚未导出或查询异常不能作原请求负确认。Web/client 在一次原子写入前持久保存两腿身份，刷新/重建后只读恢复；其中一腿已触发、另一腿已撤销也不重发。详情见 [期权保护委托](option-protection.md) 和 `docs/validation/option-protection-20261020.json`。
+
+
+## 客户端确认资料保存失败（2026-10-20）
+
+现货 client 的普通下单、单笔撤单、改单及原结果查询原先在删除内存恢复记录后忽略设置存储失败，导致当前界面提前解锁，重启却恢复旧请求。已完成的批量撤单也有相同问题。现在由原 `AppState._writeSettings` 串行边界先保存排除原请求的设置，成功后再解除内存锁定；失败保留同一请求，仅允许查询确认，已完成批次不重新 POST。独立条件单/OCO 的已有清理入口共用这一写入边界，不新增恢复状态容器。
+
+Web 的持久锁定原本已保留；本轮将删除失败的底层存储错误改为明确的中英文查询提示，并修正 320px 长提示宽度。受控 UI 回归涵盖交易页与订单页；client 回归涵盖成功、明确拒绝、确认期间、重建及批量计划。
+
+没有后端源码、SQL、消息协议、Core 交易或资金模型变更；查询继续使用本文已有 realtime 已提交回执。没有启动新的后端服务，因此本轮不声称新增 FUSED 成交或资金对账证据，也未安装原生设备。验证及临时文件清理见 [记录](validation/spot-confirmation-storage-20261020.json)。

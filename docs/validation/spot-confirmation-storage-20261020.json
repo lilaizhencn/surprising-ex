@@ -1,0 +1,545 @@
+{
+  "date": "2026-10-20",
+  "scope": "SPOT 委托确认资料保存及两端 UI；总目标保持 active；没有启动其他产品的实栈",
+  "previousGoalTurn": "progress: inverse delivery backend/Web/client commits were pushed and their remote HEADs verified",
+  "baselines": {
+    "surprising-ex": "17c020f89821ab12a1779c4324cda3b081428048",
+    "surprising-ex-web": "3bdceacc04136815d7d22dc05212a97697a1c489",
+    "surprising-client": "f876afeb143ead6e46c9f7d668acedad857d8621",
+    "surprising-admin-web": "ac8fe282228c1a18082665e56a08adccab577cea"
+  },
+  "rootCause": "client 普通下单、撤单、改单、原回执查询及完成的批量撤单先删除内存恢复记录，再忽略持久写入失败；界面提前解锁但重启仍有旧请求。已有条件单清理也在写入完成前短暂移除内存锁。",
+  "changes": [
+    "沿用 AppState 的串行设置写入及原 PendingTradingOrder；先持久化排除已确认原请求的记录，成功后在同一串行边界删除原内存项；失败保留同一对象。没有新增容器或订单/资金状态副本。",
+    "收到成功、明确拒绝和查询终态时，都必须保存确认资料后才解除锁定；查询或写入失败不再 POST；已完成批量计划重建后不重复任何批次。",
+    "保存期间主题设置排队，不能重新写回已清除的请求；确认前后核对原对象，不能删除被替换的恢复身份。",
+    "Web 原持久锁定已保留，本轮将底层删除异常转换为明确中英文原请求查询提示；现货三种写入有定向回归。",
+    "修正 fixed toast 没有明确内容宽度时被剩余半屏挤窄的问题；内容可换行，关闭按钮不缩小。"
+  ],
+  "client": {
+    "analyze": "No issues found; terminal exit 0",
+    "testsPassed": 278,
+    "optInLiveSkipped": 8,
+    "fullTestExit": 0,
+    "newStateRegressionCases": 8,
+    "redBeforeFix": "8 cases failed: original pending expected non-null, actual null; in-flight clear expected same original, actual null",
+    "coverage": [
+      "成功及 HTTP 400 明确拒绝后的下单/撤单/改单保存失败，各一个 POST；再次操作被拦截，查询仍只读原请求",
+      "确认保存失败后 dispose/bootstrap 恢复，最终保存成功后解锁，三种操作各两次原 GET",
+      "存储未完成时内存仍锁定，排队主题写入不会恢复旧记录",
+      "已完成批量计划清除失败、重建、只完成清理，原批次 POST 一次、查询零次",
+      "320px 深浅主题真实滚动与点击，未知、保存失败、保存成功三个查询阶段；离屏点击为 fatal"
+    ],
+    "commands": [
+      "flutter test test/spot_order_ticket_test.dart test/spot_bulk_cancellation_test.dart --name 'keeps its original intent|remains locked during storage|completed cancellation plan' --reporter expanded (RED)",
+      "flutter analyze",
+      "flutter test --concurrency=2 --reporter expanded"
+    ]
+  },
+  "web": {
+    "testsPassed": 276,
+    "testFilesPassed": 34,
+    "lint": {
+      "exit": 0,
+      "errors": 0,
+      "warnings": 0,
+      "existingInfos": 490
+    },
+    "build": {
+      "exit": 0,
+      "existingLargeChunkAdvisory": true
+    },
+    "newApiCases": 3,
+    "redBeforeFix": "three cases retained identity but exposed raw storage-removal error instead of actionable text",
+    "toastRedBeforeFix": "actual Chromium failed width assertion at 320px; final width and bounds assertions passed",
+    "browserMode": "controlled API/WS fixtures; no real order or account state claimed",
+    "browserCases": [
+      {
+        "page": "/trade/spot?instrumentId=1",
+        "width": 1440,
+        "theme": "dark",
+        "language": "en",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": {
+          "x": 450,
+          "y": 76,
+          "width": 540,
+          "height": 68
+        },
+        "screenshot": "trade-1440-dark-en.png"
+      },
+      {
+        "page": "/trade/spot?instrumentId=1",
+        "width": 1440,
+        "theme": "dark",
+        "language": "zh",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": {
+          "x": 519.3984375,
+          "y": 76,
+          "width": 401.203125,
+          "height": 54
+        },
+        "screenshot": "trade-1440-dark-zh.png"
+      },
+      {
+        "page": "/trade/spot?instrumentId=1",
+        "width": 1440,
+        "theme": "light",
+        "language": "en",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": {
+          "x": 450,
+          "y": 76,
+          "width": 540,
+          "height": 68
+        },
+        "screenshot": "trade-1440-light-en.png"
+      },
+      {
+        "page": "/trade/spot?instrumentId=1",
+        "width": 1440,
+        "theme": "light",
+        "language": "zh",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": {
+          "x": 519.3984375,
+          "y": 76,
+          "width": 401.203125,
+          "height": 54
+        },
+        "screenshot": "trade-1440-light-zh.png"
+      },
+      {
+        "page": "/trade/spot?instrumentId=1",
+        "width": 320,
+        "theme": "dark",
+        "language": "en",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": {
+          "x": 16,
+          "y": 76,
+          "width": 288,
+          "height": 89
+        },
+        "screenshot": "trade-320-dark-en.png"
+      },
+      {
+        "page": "/trade/spot?instrumentId=1",
+        "width": 320,
+        "theme": "dark",
+        "language": "zh",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": {
+          "x": 16,
+          "y": 76,
+          "width": 288,
+          "height": 70
+        },
+        "screenshot": "trade-320-dark-zh.png"
+      },
+      {
+        "page": "/trade/spot?instrumentId=1",
+        "width": 320,
+        "theme": "light",
+        "language": "en",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": {
+          "x": 16,
+          "y": 76,
+          "width": 288,
+          "height": 89
+        },
+        "screenshot": "trade-320-light-en.png"
+      },
+      {
+        "page": "/trade/spot?instrumentId=1",
+        "width": 320,
+        "theme": "light",
+        "language": "zh",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": {
+          "x": 16,
+          "y": 76,
+          "width": 288,
+          "height": 70
+        },
+        "screenshot": "trade-320-light-zh.png"
+      },
+      {
+        "page": "/orders",
+        "width": 1440,
+        "theme": "dark",
+        "language": "en",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": null,
+        "screenshot": "orders-1440-dark-en.png"
+      },
+      {
+        "page": "/orders",
+        "width": 1440,
+        "theme": "dark",
+        "language": "zh",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": null,
+        "screenshot": "orders-1440-dark-zh.png"
+      },
+      {
+        "page": "/orders",
+        "width": 1440,
+        "theme": "light",
+        "language": "en",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": null,
+        "screenshot": "orders-1440-light-en.png"
+      },
+      {
+        "page": "/orders",
+        "width": 1440,
+        "theme": "light",
+        "language": "zh",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": null,
+        "screenshot": "orders-1440-light-zh.png"
+      },
+      {
+        "page": "/orders",
+        "width": 320,
+        "theme": "dark",
+        "language": "en",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": null,
+        "screenshot": "orders-320-dark-en.png"
+      },
+      {
+        "page": "/orders",
+        "width": 320,
+        "theme": "dark",
+        "language": "zh",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": null,
+        "screenshot": "orders-320-dark-zh.png"
+      },
+      {
+        "page": "/orders",
+        "width": 320,
+        "theme": "light",
+        "language": "en",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": null,
+        "screenshot": "orders-320-light-en.png"
+      },
+      {
+        "page": "/orders",
+        "width": 320,
+        "theme": "light",
+        "language": "zh",
+        "restoredAfterReload": true,
+        "pendingDuringFailure": true,
+        "recoveryGets": 3,
+        "writes": 0,
+        "overflow": false,
+        "errors": [],
+        "toastBounds": null,
+        "screenshot": "orders-320-light-zh.png"
+      }
+    ],
+    "recoveryGets": 48,
+    "writes": 0,
+    "commands": [
+      "npm test",
+      "npm run lint",
+      "npm run build",
+      "node --check scripts/spot-confirmation-storage-qa.mjs",
+      "SPOT_CONFIRMATION_QA_ROOT=<owned-prefix-root> SPOT_CONFIRMATION_PLAYWRIGHT_MODULE=<installed-module> SPOT_CONFIRMATION_CHROMIUM=<existing-binary> node scripts/spot-confirmation-storage-qa.mjs"
+    ],
+    "visualReview": "inspected actual 320px light Chinese and dark English full-page screenshots after toast opacity >= 0.99; readable width and close control; desktop orders screenshot inspected"
+  },
+  "backend": {
+    "productionChanges": false,
+    "newSqlOrProtocol": false,
+    "coreReadPathsAdded": false,
+    "newBackendStarted": false,
+    "fusedRerun": false,
+    "financialReplayOrConservationRerun": false,
+    "note": "storage/feedback only; committed realtime query contract unchanged; no production or QA financial data modified"
+  },
+  "verificationCorrections": [
+    "新加入的单行 if initially reported one analyzer info; braces added, final analyze clean",
+    "将旧离屏点击 warning 升为 fatal 后两条小屏测试失败；改为真实滚动到 hit-testable 按钮并断言三次 GET，最终全量通过",
+    "首次浏览器路由 **/api/** 误拦截 /src/api 模块，修改为 **/api/v1/** 后完成验收；该失败不属于产品交易异常"
+  ],
+  "limits": [
+    "没有安装原生 iOS/Android 或验证实际 Keychain/Keystore 异常；使用注入的 ClientSettingsStore 故障与真实 Flutter Widget 交互",
+    "没有重新启动 FUSED、做市、wallet 或其他产品实栈；不以受控浏览器结果声称资金守恒或线上验收",
+    "本次仅确认资料持久化及提示，不声称解决原请求未到达 Core 时的持久负确认，也未验收现货条件单、算法单和批量下单/改单全部能力"
+  ],
+  "codeGraph": "No CodeGraph callable tools exposed; existing index was not reinitialized; used native file reads; no agents spawned",
+  "cleanup": {
+    "state": "complete",
+    "ownedVitePid": 86047,
+    "ownedViteCommand": "node surprising-ex-web/node_modules/.bin/vite --host 127.0.0.1 --port 5173 --strictPort",
+    "ownedRoot": "/tmp/surprising-spot-confirmation-20261020-ui",
+    "browserClosed": true,
+    "backendStarted": false,
+    "onlyOwnedResources": true,
+    "viteStopped": true,
+    "rootRemoved": true,
+    "temporaryLogsAndScreenshotsRemoved": true,
+    "removedFiles": 35,
+    "noOtherProjectProcessStopped": true,
+    "note": "manifest paths are historical; raw screenshots and logs removed after hashes recorded"
+  },
+  "manifest": [
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-red-20261020.log",
+      "bytes": 6474,
+      "sha256": "e95d19555c63459818b8fae1eb17f60fbc1a96792395104b4444621a5b346612"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-green-20261020.log",
+      "bytes": 22417,
+      "sha256": "9ba7d55cc0038be75606504a174d234495b1cfa5cd0e8ecece5c4428542e4db1"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-green-final-20261020.log",
+      "bytes": 25815,
+      "sha256": "f78b1f7ecf4115c70874fbfda12087e9a071ab4a6e9d252071588b8d9c8e5a68"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-widget-20261020.log",
+      "bytes": 7647,
+      "sha256": "3ee3eb84a13277a0980992f2ee405d7902d950b5707e32974dd00965835869c7"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-widget-final-20261020.log",
+      "bytes": 291,
+      "sha256": "02a84b058680c271eba2c26681c49407fcd7848e912e69ff58fe89fce5ab5d30"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-analyze-20261020.log",
+      "bytes": 96,
+      "sha256": "6aeebe1aed7a918ebfc0025756b644d50ac304306b8f9331bac6f99b285011ac"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-flutter-full-20261020.log",
+      "bytes": 49472,
+      "sha256": "7c8d6acf9dc4e29991686a1e898bf54a09a7b3c7ac110f0e1faeea69457376c9"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-web-red-20261020.log",
+      "bytes": 1911,
+      "sha256": "9dbed85501dbee4d58f96616502093bf2484ab46b881e34718540b50202b209d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-web-green-20261020.log",
+      "bytes": 312,
+      "sha256": "c873a0b14dd4b390d9881a4e2d3dc2bd1dee7e46f1184c41db4d5a9b909b7820"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-web-full-20261020.log",
+      "bytes": 288,
+      "sha256": "93892a5a80e31cc7934b56ee5503b354bfcd73c7fc21f57669f2ea42097396c6"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-web-lint-20261020.log",
+      "bytes": 19292,
+      "sha256": "1af4c469b8de4d5d83275406d7a161b81ee71677442c6243a9f40ba10a0aedb0"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-web-build-20261020.log",
+      "bytes": 3274,
+      "sha256": "4f739da90c62eb8c7f4a805aa0f97d7fb75c6f6c59a94307adf2e970133491f2"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-web-lint-final-20261020.log",
+      "bytes": 19253,
+      "sha256": "0d0ecab24e118cf7008575eb9b005610378deb7471a7dcec78bc50d2c2057786"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-web-build-final-20261020.log",
+      "bytes": 3274,
+      "sha256": "62394f1858384528d3d4a6eb7c9d7d32d9d54d891e02b7e8eec951d9c2a91a0f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-browser-20261020.log",
+      "bytes": 371,
+      "sha256": "690376f93d5f4c4a074cf71ef1d69d5e5b9354ffd31c8cf194fa4fd193394e7c"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-browser-final-20261020.log",
+      "bytes": 76,
+      "sha256": "8a61f16cbdf0eaefdd931a64dcb1db020bf51cc249fac261e9f771fb535f517a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-toast-red-20261020.log",
+      "bytes": 415,
+      "sha256": "2f209101b74551c38025bcf277b2c43c9fc555e656e55c5d28fce1a2ccbe477d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-browser-green-20261020.log",
+      "bytes": 77,
+      "sha256": "9598ed4e331f22f889a7723c9bf482ac117de73283e03eaa1d4ff190a28d90b3"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/browser-evidence.json",
+      "bytes": 5733,
+      "sha256": "9245e65eb02045cc2d6821628eac4d212fcce069a0daa916f09172f1f61255ab"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/orders-1440-dark-en.png",
+      "bytes": 117315,
+      "sha256": "958364b731bf03f3435041da7d09c19c3b9b1276d48afe258250bc1c07f088b6"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/orders-1440-dark-zh.png",
+      "bytes": 120900,
+      "sha256": "539d8f5a5cf5acf3b7c6f0b94250fe86b57e56d7825d8f78d3128ed4435d6921"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/orders-1440-light-en.png",
+      "bytes": 117111,
+      "sha256": "3c9880d2e1981009ae4948e135ebe840267bf87ef7e69814124da662a4ee9cf8"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/orders-1440-light-zh.png",
+      "bytes": 121347,
+      "sha256": "4c1d18f81f23236cedc450ea8dc337f757964080ed76e66d5f3d876e2bac1d18"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/orders-320-dark-en.png",
+      "bytes": 70906,
+      "sha256": "ff5e046a71cd831d7c65341c7403ce99f2f1bc19183b34e6feb5f81c03a80c0d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/orders-320-dark-zh.png",
+      "bytes": 72033,
+      "sha256": "40a70de8f3f1bfde45abfd36e90360439513e9ca70dc307f1842dbd9873b4d8e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/orders-320-light-en.png",
+      "bytes": 70252,
+      "sha256": "6a68cc17782fa59aba5f1972f7d41beb2304e5eddc7410a8fd7f99002ad3b796"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/orders-320-light-zh.png",
+      "bytes": 71393,
+      "sha256": "d844f6a3d989447ac4c3504c19e4831e084f409c323e5ba51d3ee20332ead400"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/trade-1440-dark-en.png",
+      "bytes": 112822,
+      "sha256": "03307964a9e9551c2c6b0bbfd020b7108b6ae6c895266c373b848c9b94cd9349"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/trade-1440-dark-zh.png",
+      "bytes": 129843,
+      "sha256": "9338fa9512104d97e6a327cede6373d6bce44be2a887d21c5813e39e99ed87e7"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/trade-1440-light-en.png",
+      "bytes": 112904,
+      "sha256": "9f06dc9ba0c60ec55deb7f24338a56e3aef99a0969909a736f273e07cfa66120"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/trade-1440-light-zh.png",
+      "bytes": 129883,
+      "sha256": "908aadf7c1d7a6780b8eab9014eacf6232428cc5c2d6dc6e86cc22ac5965c736"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/trade-320-dark-en.png",
+      "bytes": 87424,
+      "sha256": "80411db57d93c7b4a1601fd1d6daee6873fe19314f54b688ae35c7c04b3071b1"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/trade-320-dark-zh.png",
+      "bytes": 96913,
+      "sha256": "d73051272f727901681fa64af0a3e7b3959f23c001b99e256adff8779756ffd4"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/trade-320-light-en.png",
+      "bytes": 86199,
+      "sha256": "fe94c0cecc48609ed06029b5324359f7e843676a7b4b879b6a9e699f7496a55e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-confirmation-20261020-ui/trade-320-light-zh.png",
+      "bytes": 95058,
+      "sha256": "3d277322f9757f19205da8e9c86dcad62ad4f3882f636364f8e93041b15d1a7e"
+    }
+  ]
+}
