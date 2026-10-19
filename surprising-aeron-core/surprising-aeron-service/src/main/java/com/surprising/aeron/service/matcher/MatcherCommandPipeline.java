@@ -50,6 +50,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private Runnable startupAction;
     private final PaddedSequence submittedPosition = new PaddedSequence();
     private final PaddedSequence consumedPosition = new PaddedSequence();
+    private long cachedConsumedPosition;
     private final PaddedSequence completedPosition = new PaddedSequence();
     private final Wakeup wakeup = new Wakeup();
     private volatile boolean accepting;
@@ -218,8 +219,11 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         }
         skipReadyDirectSlots();
         long position = submittedPosition.value;
-        if (position - consumedPosition.value >= slots.length) {
-            throw new RejectedExecutionException("matcher pipeline is full");
+        if (position - cachedConsumedPosition >= slots.length) {
+            cachedConsumedPosition = consumedPosition.value;
+            if (position - cachedConsumedPosition >= slots.length) {
+                throw new RejectedExecutionException("matcher pipeline is full");
+            }
         }
         Slot slot = slots[(int) position & mask];
         if (slot.command != null || slot.result != null || slot.failure != null || slot.token != 0) {
@@ -231,7 +235,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         slot.resultTarget = resultTarget;
         slot.directSettlement = settlement != null && settlement.direct();
         submittedPosition.value = position + 1;
-        int depth = Math.toIntExact(position + 1 - consumedPosition.value);
+        int depth = Math.toIntExact(position + 1 - cachedConsumedPosition);
         if (depth > submissionHighWaterMark) {
             submissionHighWaterMark = depth;
         }

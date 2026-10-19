@@ -177,35 +177,27 @@ public final class TradingCoreOwner {
         }
     }
 
-    /** 按“队首提交、异步控制、命令准入”的业务顺序执行一轮流水线。 */
+    /** 按“阶段一：批量排空已完成队首；阶段二：批量准入无依赖命令”的业务顺序执行流水线。 */
     private void progressCommandsInScope() {
-        boolean awaitingCompletion = false;
-        int admittedInputs = 0;
-        // 每轮先推进异步工作；随后连续 ready 的队首直接退休，不重复收集整个窗口。
-        boolean advanceMatching = true;
         ClusterCommandWindow window = commandPipeline.commandWindow();
-        for (int work = 0; work < OwnerCommandPipelineState.COMPLETION_BATCH_SIZE; work++) {
-            // 当前命令的提交边界不变；未完成时仍可准入与在途命令无依赖的后续订单。
-            if (!commandPipeline.hasCommittingHead() && window.size() != 0) beginCommandCommit();
-            // 本轮未收到完成时仍准入独立命令；不为每个新准入项重跑整套完成收集。
-            if (commandPipeline.hasCommittingHead() && !awaitingCompletion) {
-                // 先提交已经就绪的结果；支持批量连续退休以加速滑动窗口排空。
-                int committed = pollCommandCommitBatch(advanceMatching, OwnerCommandPipelineState.COMPLETION_BATCH_SIZE - work);
-                if (committed > 0) {
-                    advanceMatching = false;
-                    work += committed - 1;
-                    continue;
-                }
-                awaitingCompletion = true;
-            }
-            if (window.size() == window.capacity()) return;
-            if (commandPipeline.hasActiveControl()) {
-                if (!pollControl()) return;
-                continue;
-            }
+
+        // 阶段一：批量排空与退休已就绪的队首命令，释放窗口容量
+        if (!commandPipeline.hasCommittingHead() && window.size() != 0) {
+            beginCommandCommit();
+        }
+        if (commandPipeline.hasCommittingHead()) {
+            pollCommandCommitBatch(true, OwnerCommandPipelineState.COMPLETION_BATCH_SIZE);
+        }
+        if (commandPipeline.hasActiveControl()) {
+            if (!pollControl()) return;
+        }
+
+        // 阶段二：紧凑批量填充 Ingress 命令，最大化流水线并发吞吐
+        int admittedInputs = 0;
+        while (admittedInputs < INPUT_BATCH_SIZE && window.size() < window.capacity() && !commandPipeline.hasActiveControl()) {
             var next = ingress.first();
-            if (next == null || next.action != null || admittedInputs == INPUT_BATCH_SIZE) return;
-            if (commandPipeline.isIngressBlocked(next.command)) return;
+            if (next == null || next.action != null) break;
+            if (commandPipeline.isIngressBlocked(next.command)) break;
             commandPipeline.clearBlockedIngress();
             logContext.timestamp = next.timestamp;
             logContext.position = next.position;
@@ -218,16 +210,16 @@ public final class TradingCoreOwner {
             int prefix = !eligible || retry ? window.size() : window.conflictingPrefixSize();
             if (prefix != 0) {
                 commandPipeline.rememberBlockedIngress(next.command, prefix);
-                // 记录等待决定，否则最繁忙的依赖等待会从诊断中消失。
                 if (!eligible) commandPipeline.recordControlFence();
                 else commandPipeline.recordDependencyFence(retry);
-                if (commandPipeline.hasCommittingHead()) return;
-                beginCommandCommit();
-                continue;
+                if (!commandPipeline.hasCommittingHead() && window.size() != 0) {
+                    beginCommandCommit();
+                }
+                break;
             }
             if (!eligible) {
                 if (state.requiresOwnerLaneAccessForPreparation(next.command)
-                        && !state.runtimeState.tryAcquireOwnerLaneAccess()) return;
+                        && !state.runtimeState.tryAcquireOwnerLaneAccess()) break;
                 commandPipeline.beginControl(next);
                 state.assertClusterCallbackComplete();
                 beginCapture(next.position, next.timestamp, next.command.header());
@@ -238,7 +230,8 @@ public final class TradingCoreOwner {
                 boolean matching = TradingCoreRuntime.isMatchingCommand(next.command.header().messageType());
                 commandPipeline.rememberMatchingResponseSequence(matching ? state.matchingSequence(
                         next.command.header().commandIdMsb(), next.command.header().commandIdLsb()) : 0L);
-                continue;
+                pollControl();
+                break;
             }
             if (window.size() == 0) state.assertClusterCallbackComplete();
             var entry = window.add(next.sessionId, next.command, next.timestamp, next.position);
@@ -252,13 +245,10 @@ public final class TradingCoreOwner {
             entry.response = sequence == 0 ? result : null;
             admittedInputs++;
             commandPipeline.recordAdmission();
-            advanceMatching = true;
-            // 准入命令后，如果刚才在等待完成，一旦当前队首就绪即刻放行，消除固定的滞后探测
-            if (awaitingCompletion && state.commits.matchingCommitReady(
-                    state.pendingMatching.get(commandPipeline.committingHead().sequence))) {
-                awaitingCompletion = false;
-                advanceMatching = false;
-            }
+        }
+
+        if (!commandPipeline.hasCommittingHead() && window.size() != 0) {
+            beginCommandCommit();
         }
     }
 

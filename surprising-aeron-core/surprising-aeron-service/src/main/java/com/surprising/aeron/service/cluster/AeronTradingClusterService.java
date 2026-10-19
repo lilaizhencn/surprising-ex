@@ -39,6 +39,8 @@ public final class AeronTradingClusterService implements ClusteredService {
     private final TradingOwnerLoop owner;
     private final CoreMessageFlyweightDecoder messageDecoder = new CoreMessageFlyweightDecoder();
     private final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
+    private static final int INBOUND_DRAIN_THRESHOLD = 16;
+    private int unflushedInboundMessages;
     private Cluster cluster;
 
     /** Spring 使用的构造方法；注入已配置好的 Owner 与响应出口。 */
@@ -116,8 +118,11 @@ public final class AeronTradingClusterService implements ClusteredService {
             throw failure;
         }
 
-        // 立即尝试发送 Owner 已经准备好的响应；仍在异步处理中的命令稍后由后台轮询继续发送。
-        owner.drainResponses();
+        // 批量阈值触发响应排水，避免每条命令被打断；剩余响应由 doBackgroundWork 兜底发送
+        if (++unflushedInboundMessages >= INBOUND_DRAIN_THRESHOLD) {
+            unflushedInboundMessages = 0;
+            owner.drainResponses();
+        }
     }
 
     /**
@@ -166,6 +171,7 @@ public final class AeronTradingClusterService implements ClusteredService {
     @Override
     public int doBackgroundWork(long nowNs) {
         owner.checkFailure();
+        unflushedInboundMessages = 0;
         try {
             return owner.drainResponses();
         } catch (RuntimeException fatal) {
@@ -206,6 +212,8 @@ public final class AeronTradingClusterService implements ClusteredService {
      */
     @Override
     public void onTakeSnapshot(ExclusivePublication publication) {
+        unflushedInboundMessages = 0;
+        owner.drainResponses();
         var snapshot = owner.captureSnapshotSections(cluster.logPosition(), cluster.time());
         writeSnapshot(snapshot, publication, this::awaitProgress);
     }
