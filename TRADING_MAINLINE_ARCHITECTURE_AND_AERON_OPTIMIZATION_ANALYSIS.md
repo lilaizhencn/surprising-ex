@@ -432,3 +432,9 @@
 **核心实测结论**：
 1. **服务端 256 并发限制已彻底解除**：在 `Window = 512` 与 `Window = 1024` 下，服务端 `ClusterCommandWindow` 实际并发水位（`pipelineHighWater.context`）分别达到 **`512`** 和 **`768`**，Matcher 流水线深度达到 **`440 ~ 443`**，证明服务端已具备按需横向扩展至 512 / 1024+ 窗口的能力。
 2. **消除压测脚本人为紧邻冲突后，`Window = 256` 即实现单节点 4 核心线程 `96.4%` 完全饱和**：在真实多交易对（`SYMBOLS = 256`）交错工作负载下，`dependencyFences` 下降了 **95.4%**，`Window = 256` 即可将 `trading-owner`、`core-matcher-0`、`core-account-lane-0/1` 四个核心线程的单核 CPU 同时推升至 **`96.36% ~ 96.41%`**，开启 JFR CPU 采样下的稳态吞吐达 **`287,642.07 ops/s`（较改造前同窗口提升 +26.82%）**，同时由于在途工作集紧凑（L2 Cache 局部性最优）且排队深度适中，最大 P99 尾延迟从 `85.58 ms` 大幅降至 **`43.06 ms`（-49.69%）**。
+
+### FUSED 模式账本内联结算（`SystemLedgerLane.tryApplyInline`）
+
+- **改动**：FUSED 下 `MatcherSettlementEvent.submitTreasurySettlement` 先尝试 `SystemLedgerLane.tryApplyInline`：账本线程已执行完所有入队任务（`appliedSequence == producerSequence`）且结算已就绪时，由 Owner 线程持有 `TreasuryRuntime` 与三个业务索引直接结算；任何其它任务（`dispatchLedgerQuery`、`ControlFundsValidation`、风控）入队前，`offer()` 先把所有权交还账本线程，`PIPELINED` 路径不变。
+- **实测**（FUSED，Window=256，Batch=20，SYMBOLS=256，JFR CPU，20s，单次采样）：`186,472 → 201,609 ops/s`（约 +8.1%）；`pipelineHighWater.context` 仍为 1；`trading-owner` 单核 `99.07%`。
+- **结论与遗留**：FUSED 仍是单线程 Owner 饱和，距离 50 万 ops/s 差距远大于本次收益；`core-system-ledger-lane` 在 `BUSY_SPIN` 下空转占 JFR 样本 `46.57%`，是空闲自旋而非业务计算。`CommandSlot`/`pendingMatching`/`RuntimeChangeBuffer` 的 Owner 内记账未改动，其对应的有序提交、回滚前值与状态哈希语义需要单独评估。
