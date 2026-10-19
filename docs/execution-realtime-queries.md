@@ -39,6 +39,6 @@
 查询读取已提交前缀，允许正常导出延迟。计划重建时先停对应产品 realtime，保留主检查点和完整 Archive，
 同时清除该产品的成交投影与初始化标记；不要修改主检查点或重新发单。未完成的独立补齐检查点也需与其 SQL 进度一起处理。
 
-本轮仅补齐后台成交列表。`/api/v1/admin/trading/metrics` 的完整统计数据源仍需后续实现；
-不能把活动订阅中的部分持仓或已过滤报价订单当作全平台统计。
+该阶段补齐后台成交列表；随后 [交易统计](trading-statistics-realtime.md) 已接入完整已提交采样，
+使用 `trading-orders/metrics`，不把活动订阅中的部分持仓或已过滤报价订单当作全平台统计。
 实测与清理记录见 `docs/validation/execution-realtime-queries-20261020.json`。

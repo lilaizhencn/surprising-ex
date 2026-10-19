@@ -69,10 +69,15 @@ public class CommittedOrderProjectionRepository {
     private final tools.jackson.databind.ObjectMapper json = new tools.jackson.databind.ObjectMapper();
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
+    private final CommittedTradingStatistics statistics;
+
+    /** Use a method so Spring repository proxies delegate to the initialized target instance. */
+    public CommittedTradingStatistics statistics() { return statistics; }
 
     public CommittedOrderProjectionRepository(JdbcTemplate jdbc, PlatformTransactionManager transactions) {
         this.jdbc = jdbc;
         this.transaction = new TransactionTemplate(transactions);
+        this.statistics = new CommittedTradingStatistics(jdbc,transaction);
     }
 
     /** The detached replay checkpoint owns initialization; HTTP never materializes Core state. */
@@ -399,6 +404,7 @@ public class CommittedOrderProjectionRepository {
         if (!executions.isEmpty()) throw new IllegalArgumentException("incomplete execution pair");
         var fills = committedExecutions(product, orders);
         transaction.executeWithoutResult(status -> {
+            statistics.persist(product,commandResults);
             persistCommandResults(product, receipts);
             persistExecutions(product, fills);
             persistTriggers(product, triggers.values(), exportSequence);
@@ -460,6 +466,7 @@ public class CommittedOrderProjectionRepository {
         var receipts = new LinkedHashMap<UUID, CommittedCommandResult>();
         for (var receipt : results) {
             if (receipt.product() != product) throw new IllegalArgumentException("cross-product command result");
+            if (receipt.code() == com.surprising.aeron.protocol.CoreResultCode.IDEMPOTENCY_CONFLICT) continue;
             // Do not retain every transient quote from accounts owned by a maker strategy.
             boolean protection = switch (receipt.commandType()) {
                 case PLACE_TRIGGER_ORDER, PLACE_TRIGGER_OCO_PAIR, CANCEL_TRIGGER_ORDER -> true;

@@ -39,6 +39,7 @@ class SixProductLineContractLiveTest {
     private int optionCompanion;
     private Map<String, Object> triggerQueryFixture;
     private Map<String, Object> tradeQueryFixture;
+    private Map<String, Object> statisticsFixture;
 
     @Test
     void createListEditAndPauseThroughAdminRequestsWithoutRestart() throws Exception {
@@ -250,6 +251,9 @@ class SixProductLineContractLiveTest {
                 content.put("tradeQuery", tradeQueryFixture);
                 content.put("adminAccessToken", admin);
             }
+            if(statisticsFixture!=null) {
+                content.put("statistics",statisticsFixture);content.put("adminAccessToken",admin);
+            }
             java.nio.file.Files.writeString(fixture, json.writeValueAsString(content),
                     java.nio.file.StandardOpenOption.CREATE_NEW);
             java.nio.file.Files.setPosixFilePermissions(fixture, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
@@ -260,7 +264,7 @@ class SixProductLineContractLiveTest {
                 Thread.sleep(250);
             }
             assertThat(java.nio.file.Files.readString(done).trim()).isEqualTo("PASS");
-            if (triggerQueryFixture != null || tradeQueryFixture != null) System.out.printf("ADMIN_QUERY_HANDOFF_PASS productLine=%s browser=true%n", line);
+            if (triggerQueryFixture != null || tradeQueryFixture != null || statisticsFixture!=null) System.out.printf("ADMIN_QUERY_HANDOFF_PASS productLine=%s browser=true%n", line);
             else System.out.printf("CLIENT_HANDOFF_PASS productLine=%s browserAndFlutter=true%n", line);
         } finally {
             java.nio.file.Files.deleteIfExists(fixture);
@@ -688,6 +692,23 @@ class SixProductLineContractLiveTest {
             var bought = place(user, instrumentId, "BUY", "MARKET", 0, "IOC", false);
             assertThat(bought.path("status").asString()).isEqualTo("FILLED");
             if (line != ProductLine.SPOT) verifyCurrentRisk(core, user, instrumentId, settlement, instrument);
+            if("true".equals(System.getenv("SIX_LINE_LIVE_TRADING_STATISTICS"))) {
+                String path="/api/v1/admin/gateway/trading-orders/metrics?productLine="+line+"&windowMinutes=1440&limit=100";
+                JsonNode metrics=null;
+                for(int attempt=0;attempt<200;attempt++) {
+                    metrics=request("GET",path,"",admin,null,200,503);
+                    if(metrics.path("positions").path("usersWithPositions").asLong()==2&&metrics.path("orders").path("openOrders").asLong()>0)break;
+                    Thread.sleep(100);
+                }
+                assertThat(metrics.path("productLine").asString()).isEqualTo(line.name());
+                assertThat(metrics.path("positions").path("usersWithPositions").asLong()).isEqualTo(2);
+                assertThat(metrics.path("positions").path("openPositions").asLong()).isEqualTo(2);
+                assertThat(metrics.path("orders").path("openOrders").asLong()).isPositive();
+                assertThat(metrics.path("trades").path("trades").asLong()).isEqualTo(1);
+                statisticsFixture=Map.of("path",path,"expectedPositions",2,"expectedTrades",1);
+                System.out.println("OPTION_STATISTICS_OPEN_PASS globalPositionAccounts=2 makerWithoutPrivateSubscriptionIncluded=true trades=1 openMakerOrders=true");
+                awaitClientVerification(user,maker,instrumentId,bid);
+            }
             if (line == ProductLine.OPTION && "true".equals(System.getenv("SIX_LINE_LIVE_TRIGGER_READ_VIEW")))
                 verifyMakerTriggerHistory(maker, instrumentId);
             var sold = place(user, instrumentId, "SELL", "MARKET", 0, "IOC", line != ProductLine.SPOT);
@@ -750,7 +771,7 @@ class SixProductLineContractLiveTest {
             }
             System.out.printf("SIX_LINE_REALTIME_PASS productLine=%s depthEvents=%d wsTrades=%d restTrades=%d identitiesMatch=true%n",
                     line, user.depth.size(), user.trades.size(), restTradeIds.size());
-            if (line == ProductLine.SPOT || line == ProductLine.OPTION) awaitClientVerification(user, maker, instrumentId, bid);
+            if ((line == ProductLine.SPOT || line == ProductLine.OPTION)&&statisticsFixture==null) awaitClientVerification(user, maker, instrumentId, bid);
             if (line == ProductLine.OPTION && "true".equals(System.getenv("SIX_LINE_LIVE_OPTION_PROTECTION"))) {
                 var directory = java.nio.file.Path.of(System.getenv("SIX_LINE_LIVE_UI_FIXTURE")).getParent();
                 for (String client : List.of("web", "client")) {

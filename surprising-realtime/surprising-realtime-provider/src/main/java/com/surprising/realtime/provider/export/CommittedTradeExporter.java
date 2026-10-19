@@ -23,7 +23,7 @@ import java.util.concurrent.locks.LockSupport;
 /** Single-threaded committed Archive replay; all replay state belongs to the calling export worker. */
 @Slf4j
 final class CommittedTradeExporter {
-    enum ExportMode { LIVE, FUNDING_REPAIR, COMMAND_RESULT_REPAIR, DELIVERY_REPAIR, EXECUTION_REPAIR }
+    enum ExportMode { LIVE, FUNDING_REPAIR, COMMAND_RESULT_REPAIR, DELIVERY_REPAIR, EXECUTION_REPAIR, STATISTICS_REPAIR }
     private final TradeExportProperties config;
     private final ProductLine product;
     private final String bootstrapServers;
@@ -85,13 +85,39 @@ final class CommittedTradeExporter {
         Files.deleteIfExists(repair.resolveSibling(repair.getFileName() + ".next"));
     }
 
+    private void initializeStatistics(TradeExportCheckpoint checkpoint,java.util.concurrent.atomic.AtomicBoolean running) throws Exception {
+        Path repair=config.checkpoint().toAbsolutePath().resolveSibling(config.checkpoint().getFileName()+".statistics-repair");
+        if(!orders.statistics().initialized(product)) {
+            if(checkpoint.logPosition()>0) {
+                var repairConfig=new TradeExportProperties(config.clusterDirectory(),config.aeronDirectory(),config.archiveControlChannel(),
+                        repair,config.clusterId(),config.kafkaConfig(),config.checkpointInterval(),config.retryInterval());
+                new CommittedTradeExporter(repairConfig,product,null,orders).run(running,ready->{},checkpoint.logPosition(),ExportMode.STATISTICS_REPAIR);
+                if(TradeExportCheckpoint.read(repair,product).logPosition()<checkpoint.logPosition())throw new IllegalStateException("statistics reconstruction incomplete");
+            }
+            if(!running.get()||Thread.currentThread().isInterrupted())throw new IllegalStateException("statistics initialization stopped");
+            orders.statistics().initialize(product,checkpoint.logPosition());
+        }
+        Files.deleteIfExists(repair);Files.deleteIfExists(repair.resolveSibling(repair.getFileName()+".lock"));Files.deleteIfExists(repair.resolveSibling(repair.getFileName()+".next"));
+    }
+
+    private boolean publishStatistics(ExportMode mode,CommittedTradeReplay replay,long position,Aeron aeron) {
+        if(mode!=ExportMode.LIVE)return false;
+        int clusterId=config.clusterId()==null?com.surprising.aeron.protocol.ProductLineClusterLayout.clusterId(product):config.clusterId();
+        int counter=ClusterCounters.find(aeron.countersReader(),AeronCounters.CLUSTER_COMMIT_POSITION_TYPE_ID,clusterId);
+        if(counter<0||position<aeron.countersReader().getCounterValue(counter))return false;
+        long now=System.currentTimeMillis();
+        orders.statistics().publish(product,replay.currentTradingActivity(now),position,now);
+        return true;
+    }
+
     private void run(java.util.concurrent.atomic.AtomicBoolean running,
             java.util.function.Consumer<Boolean> connected, long stopAfter, ExportMode mode) throws Exception {
         Path checkpointPath = config.checkpoint().toAbsolutePath();
         if (mode == ExportMode.LIVE && (checkpointPath.getFileName().toString().endsWith(".command-repair")
                 || checkpointPath.getFileName().toString().endsWith(".funding-repair")
                 || checkpointPath.getFileName().toString().endsWith(".delivery-repair")
-                || checkpointPath.getFileName().toString().endsWith(".execution-repair")))
+                || checkpointPath.getFileName().toString().endsWith(".execution-repair")
+                || checkpointPath.getFileName().toString().endsWith(".statistics-repair")))
             throw new IllegalArgumentException("live exporter cannot use a repair checkpoint");
         Files.createDirectories(checkpointPath.getParent());
         int clusterId = config.clusterId() == null
@@ -136,6 +162,7 @@ final class CommittedTradeExporter {
                 throw new IllegalStateException("trade exporter checkpoint is already in use");
             TradeExportCheckpoint checkpoint = TradeExportCheckpoint.read(checkpointPath, product);
             if (mode == ExportMode.LIVE) initializeExecutions(checkpoint, running);
+            if (mode == ExportMode.LIVE) initializeStatistics(checkpoint, running);
             try (var replay = new CommittedTradeReplay(product, checkpoint.snapshot());
                     var sink =
                             mode != ExportMode.LIVE ? null : new ReliableTradeKafkaSink(
@@ -154,6 +181,7 @@ final class CommittedTradeExporter {
                     var archiveReplay = new ArchiveReplay(aeron, archive, product)) {
                 long cursor = checkpoint.logPosition();
                 if (mode == ExportMode.LIVE) orders.initializeTriggers(product, replay, cursor);
+                boolean[] initialStatisticsPublished={false};
                 long[] nextCheckpoint = {System.nanoTime() + checkpointInterval};
                 var batch = new ExportBatch(product, orders, sink, mode);
                 long[] delivered = {checkpoint.logPosition()};
@@ -189,6 +217,7 @@ final class CommittedTradeExporter {
                     if (System.nanoTime() >= nextCheckpoint[0]) {
                         batch.flush(replay.exportSequence());
                         try {
+                            publishStatistics(mode,replay,delivered[0],aeron);
                             new TradeExportCheckpoint(product, delivered[0], (sink == null ? checkpoint.tradeSequence() : sink.tradeSequence()), replay.snapshot())
                                     .write(checkpointPath);
                         } catch (java.io.IOException failure) {
@@ -218,8 +247,13 @@ final class CommittedTradeExporter {
                     // round trips and prevents the exporter from catching the live core.
                     batch.catchUp(committed - position > 64 * 1024);
                     if (committed <= position) {
+                        if(mode==ExportMode.LIVE&&!initialStatisticsPublished[0]) {
+                            batch.flush(replay.exportSequence());
+                            initialStatisticsPublished[0]=publishStatistics(mode,replay,cursor,aeron);
+                        }
                         if (System.nanoTime() >= nextCheckpoint[0]) {
                             batch.flush(replay.exportSequence());
+                            publishStatistics(mode,replay,cursor,aeron);
                             new TradeExportCheckpoint(product, cursor, (sink == null ? checkpoint.tradeSequence() : sink.tradeSequence()), replay.snapshot())
                                     .write(checkpointPath);
                             nextCheckpoint[0] = System.nanoTime() + checkpointInterval;
@@ -290,6 +324,7 @@ final class CommittedTradeExporter {
                     cursor = partialMessage[0] || image.position() != safeEnd ? delivered[0] : safeEnd;
                     if (System.nanoTime() >= nextCheckpoint[0]) {
                         batch.flush(replay.exportSequence());
+                        publishStatistics(mode,replay,cursor,aeron);
                         new TradeExportCheckpoint(product, cursor, (sink == null ? checkpoint.tradeSequence() : sink.tradeSequence()), replay.snapshot())
                                 .write(checkpointPath);
                         log.info("trade-export product={} committedPosition={} exportedPosition={} trades={}",
@@ -298,6 +333,7 @@ final class CommittedTradeExporter {
                     }
                 }
                 batch.flush(replay.exportSequence());
+                publishStatistics(mode,replay,cursor,aeron);
                 new TradeExportCheckpoint(product, cursor, (sink == null ? checkpoint.tradeSequence() : sink.tradeSequence()), replay.snapshot())
                         .write(checkpointPath);
             }
@@ -362,6 +398,7 @@ final class CommittedTradeExporter {
             if (sequence != flushedSequence || !orderChanges.isEmpty() || !trades.isEmpty() || !commandResults.isEmpty()) {
                 if (mode == ExportMode.COMMAND_RESULT_REPAIR) orders.repairCommandResults(product, commandResults);
                 else if (mode == ExportMode.EXECUTION_REPAIR) orders.repairExecutions(product, orderChanges);
+                else if (mode == ExportMode.STATISTICS_REPAIR) orders.statistics().repair(product,commandResults);
                 else {
                     orders.persist(product, orderChanges, commandResults, sequence);
                     sink.publish(trades);

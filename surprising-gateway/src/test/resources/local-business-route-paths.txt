@@ -89,4 +89,5 @@
 /api/v1/trading/orders/cancellation-plan
 /api/v1/trading/orders/cancellation-batches
 /api/v1/admin/trading/orders/trades
+/api/v1/admin/trading/orders/metrics
 /api/v1/trading/trigger-orders/oco-submission

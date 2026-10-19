@@ -67,12 +67,13 @@ public final class CommittedTradeReplay implements AutoCloseable {
                     throw new IllegalStateException("committed replay matching timed out");
             }
             state.assertClusterCallbackComplete();
-            if (command.header().userId() > 0
-                    && (response == null || response.resultCode() != CoreResultCode.IDEMPOTENCY_CONFLICT)) {
+            if (command.header().userId() > 0) {
                 // Matching may have returned MATCHING_PENDING before the replay drained its
                 // account/ledger commits. Read the final retained result only after that drain.
                 // This belongs to the separate export worker, never the live Core callback.
-                var retained = state.resultLedger.get(command.header().commandId());
+                // A conflicting retry is a rejected attempt, while the original receipt remains unchanged.
+                var retained = response != null && response.resultCode() == CoreResultCode.IDEMPOTENCY_CONFLICT
+                        ? null : state.resultLedger.get(command.header().commandId());
                 if (retained == null && response == null)
                     throw new IllegalStateException("committed replay has no command result");
                 var status = retained == null ? response.commandStatus() : retained.status();
@@ -81,7 +82,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
                 if (code == CoreResultCode.MATCHING_PENDING)
                     throw new IllegalStateException("committed replay did not finish the trading command");
                 String clientOrderId = null, instrumentId = null;
-                if (command.header().messageType() == CoreMessageType.PLACE_ORDER) {
+                if (command.header().messageType() == CoreMessageType.PLACE_ORDER && code != CoreResultCode.IDEMPOTENCY_CONFLICT) {
                     try {
                         var order = TradingCommandCodec.decodePlaceOrder(command.payloadUnsafe());
                         clientOrderId = order.clientOrderId();
@@ -93,7 +94,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
                     }
                 }
                 List<CancelBatchItem> cancelResults = List.of();
-                if (command.header().messageType() == CoreMessageType.CANCEL_ORDER_BATCH) {
+                if (command.header().messageType() == CoreMessageType.CANCEL_ORDER_BATCH && code != CoreResultCode.IDEMPOTENCY_CONFLICT) {
                     List<CancelOrderCommand> requested;
                     try { requested = TradingOrderBatchCodec.decodeCancelOrderBatch(command.payloadUnsafe()).orders(); }
                     catch (IllegalArgumentException invalid) {
@@ -252,6 +253,11 @@ public final class CommittedTradeReplay implements AutoCloseable {
         return state.realtimeExportSequence();
     }
 
+    public com.surprising.aeron.service.state.CommittedTradingActivity currentTradingActivity(long now) {
+        state.assertClusterCallbackComplete();
+        return com.surprising.aeron.service.state.CommittedTradingActivity.capture(state.runtimeState, state.identities, now);
+    }
+
     public byte[] snapshot() {
         state.assertClusterCallbackComplete();
         return state.snapshot();
@@ -283,7 +289,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
         }
     }
 
-    /** A processing receipt, not another order/account state. Owned by one replay step. */
+    /** Final outcome of one committed attempt. Conflicting retries are counted but never replace the original receipt. */
     public record CommittedCommandResult(ProductLine product, long userId, UUID commandId,
                                          CoreMessageType commandType, String clientOrderId, String instrumentId,
                                          ResponseStatus status, CoreResultCode code, long appliedCommandCount,

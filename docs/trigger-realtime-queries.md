@@ -46,7 +46,7 @@
 真实做市 OCO 读取验证不作为高频报价过滤已在运行时生效的证明。
 
 该阶段后台还发现交易统计、全局成交列表的旧地址返回 404。全局成交现已由
-[已提交成交投影](execution-realtime-queries.md) 恢复；交易统计仍需补齐完整数据源。
+[已提交成交投影](execution-realtime-queries.md) 恢复；交易统计已接入 [完整已提交采样](trading-statistics-realtime.md)。
 后台页面分别处理每项结果，明确显示失败原因，避免其他查询失败阻断已可用的条件单列表。
 
 本轮实测与清理记录见 `docs/validation/trigger-realtime-queries-20261020.json`。

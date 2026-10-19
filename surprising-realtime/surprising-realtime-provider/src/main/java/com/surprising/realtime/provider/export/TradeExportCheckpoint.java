@@ -14,12 +14,14 @@ record TradeExportCheckpoint(
     private static final int COMMAND_REPAIR_MAGIC = 0x54584332;
     private static final int DELIVERY_REPAIR_MAGIC = 0x54584333;
     private static final int EXECUTION_REPAIR_MAGIC = 0x54584334;
+    private static final int STATISTICS_REPAIR_MAGIC = 0x54584335;
 
     private static int magic(Path path) {
         String name = path.getFileName().toString();
         if (name.endsWith(".command-repair")) return COMMAND_REPAIR_MAGIC;
         if (name.endsWith(".delivery-repair")) return DELIVERY_REPAIR_MAGIC;
         if (name.endsWith(".execution-repair")) return EXECUTION_REPAIR_MAGIC;
+        if (name.endsWith(".statistics-repair")) return STATISTICS_REPAIR_MAGIC;
         return MAGIC;
     }
 

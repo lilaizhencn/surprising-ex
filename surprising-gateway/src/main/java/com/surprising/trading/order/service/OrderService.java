@@ -50,6 +50,16 @@ import org.springframework.stereotype.Service;
 @Service
 public class OrderService {
     @org.springframework.beans.factory.annotation.Autowired
+    private com.surprising.trading.order.repository.TradingMetricsRepository tradingMetrics;
+
+    public java.util.Map<String,Object> tradingMetrics(int window,int limit,ProductLine requestedProduct) {
+        var product=currentProductLine();
+        if(requestedProduct!=null&&requestedProduct!=product)throw new IllegalArgumentException("product line does not match provider");
+        if(tradingMetrics==null)throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"TRADING_METRICS_UNAVAILABLE");
+        return tradingMetrics.require(product,window,limit);
+    }
+    @org.springframework.beans.factory.annotation.Autowired
     private com.surprising.trading.order.repository.TradeProjectionRepository tradeProjection;
 
     public com.surprising.trading.api.model.AdminTradeQueryResponse adminTrades(Long userId, String instrumentId,

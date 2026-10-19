@@ -16,6 +16,12 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
 class LocalBusinessApiTest {
+    @Test void tradingMetricsRouteUsesTheSelectedProductAndDoesNotAcceptAnUntrustedAdminHeader() {
+        var headers=new HttpHeaders();headers.set("X-Admin-User-Id","7");headers.set("X-Product-Line","LINEAR_PERPETUAL");
+        assertThat(invoke("trading-orders","/api/v1/admin/trading/orders/metrics?productLine=LINEAR_PERPETUAL&windowMinutes=60&limit=1",HttpMethod.GET,headers,null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(adminOrders).metrics("7","LINEAR_PERPETUAL","LINEAR_PERPETUAL",60,1);
+        assertThat(invoke("trading-orders","/api/v1/admin/trading/orders/metrics",HttpMethod.GET,userHeaders(),null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
     private final com.surprising.trading.order.service.AdminOrderRequestService adminOrders = mock(com.surprising.trading.order.service.AdminOrderRequestService.class);
 
     @Test void executionAuditRouteRequiresAdminAndPreservesExactOrderIdentityAndProductScope() {

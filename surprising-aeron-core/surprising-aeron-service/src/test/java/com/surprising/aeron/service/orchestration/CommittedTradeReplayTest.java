@@ -10,6 +10,28 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.api.Test;
 
 class CommittedTradeReplayTest {
+    @Test void conflictingRetryRemainsARejectedStatisticsAttemptInsteadOfBorrowingTheOriginalSuccess() {
+        var line=ProductLine.SPOT;
+        try(var replay=new CommittedTradeReplay(line,null)) {
+            send(replay,line,CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(
+                    new RegisterInstrumentCommand("604",ContractType.SPOT.ordinal(),"BTC","USDT","USDT",1,1,1,100000,50000,0,0,0,-1,0)));
+            send(replay,line,CoreMessageType.ADJUST_BALANCE,7,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1000000)));
+            place(replay,line,7,201,CoreOrderSide.BUY);var original=replay.commandResult();
+            long seq=++sequence;
+            var conflict=new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER,original.commandId(),line,
+                    CommandSource.OPERATIONS,991,seq,7,TIME+seq,seq),TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(201,"604",CoreOrderSide.BUY,
+                            101,2,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"replay-201")));
+            replay.apply(CoreMessageCodec.encode(conflict),TIME+seq,seq);
+            assertThat(replay.commandResult().code()).isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
+            assertThat(replay.commandResult().status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(original.code()).isEqualTo(CoreResultCode.NONE);
+            seq=++sequence;
+            var malformed=new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER,original.commandId(),line,
+                    CommandSource.OPERATIONS,991,seq,7,TIME+seq,seq),new byte[]{1});
+            replay.apply(CoreMessageCodec.encode(malformed),TIME+seq,seq);
+            assertThat(replay.commandResult().code()).isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
+        }
+    }
     @Test void capturesTerminalTriggersAndReconstructsThemWithoutChangingReplayBusinessState() {
         var line = ProductLine.OPTION;
         byte[] snapshot;
@@ -38,6 +60,15 @@ class CommittedTradeReplayTest {
         }
         try (var restored = new CommittedTradeReplay(line, snapshot)) {
             long before = restored.businessHash();
+            var activity=restored.currentTradingActivity(TIME);
+            assertThat(activity.usersWithPositions()).isEqualTo(2);
+            assertThat(activity.openPositions()).isEqualTo(2);
+            assertThat(activity.openOrders()).isZero();
+            assertThat(activity.pendingTriggers()).isZero();
+            assertThat(activity.instruments()).singleElement().satisfies(v->{
+                assertThat(v.longQuantitySteps()).isEqualTo(java.math.BigInteger.valueOf(2));
+                assertThat(v.shortQuantitySteps()).isEqualTo(java.math.BigInteger.valueOf(2));
+            });
             var retained = restored.retainedTriggersBefore(0, 1);
             assertThat(retained).hasSize(1);
             assertThat(retained.getFirst().triggerOrderId()).isEqualTo(Long.MAX_VALUE);

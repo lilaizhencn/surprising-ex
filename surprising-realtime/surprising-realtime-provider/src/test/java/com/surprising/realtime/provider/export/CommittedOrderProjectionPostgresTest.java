@@ -32,12 +32,39 @@ class CommittedOrderProjectionPostgresTest {
         jdbc.execute("CREATE TABLE core_trigger_projection_initialization (LIKE public.core_trigger_projection_initialization INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_execution_projection (LIKE public.core_execution_projection INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_execution_projection_initialization (LIKE public.core_execution_projection_initialization INCLUDING ALL)");
+        for(var name:List.of("core_trading_command_statistics","core_trading_statistics_cursor","core_trading_statistics_initialization","core_trading_statistics_snapshot"))
+            jdbc.execute("CREATE TABLE "+name+" (LIKE public."+name+" INCLUDING ALL)");
         jdbc.execute("CREATE TABLE market_maker_strategies (product_line text, account_ids bigint[])");
         jdbc.execute("CREATE TABLE market_maker_business_settings (product_line text, settings jsonb)");
         repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
     }
 
     @AfterEach void clean() { if (jdbc != null) jdbc.execute("DROP SCHEMA order_projection_it CASCADE"); }
+
+    @Test void springRepositoryProxyDelegatesStatisticsToTheSameTransactionalTarget() {
+        var factory=new org.springframework.aop.framework.ProxyFactory(repository);factory.setProxyTargetClass(true);
+        factory.addAdvice((org.aopalliance.intercept.MethodInterceptor)invocation->invocation.proceed());
+        var proxy=(CommittedOrderProjectionRepository)factory.getProxy();
+        assertThat(org.springframework.aop.support.AopUtils.isCglibProxy(proxy)).isTrue();
+        var result=new com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult(ProductLine.OPTION,7,new java.util.UUID(0,1),
+                CoreMessageType.PLACE_ORDER,"client","604",ResponseStatus.APPLIED,CoreResultCode.NONE,10,10,System.currentTimeMillis(),List.of());
+        proxy.persist(ProductLine.OPTION,List.of(),List.of(result),10);
+        proxy.statistics().publish(ProductLine.OPTION,new com.surprising.aeron.service.state.CommittedTradingActivity(0,0,0,0,0,List.of()),10,System.currentTimeMillis());
+        assertThat(jdbc.queryForObject("SELECT sum(commands) FROM core_trading_command_statistics",Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_trading_statistics_snapshot",Integer.class)).isEqualTo(4);
+    }
+
+    @Test void conflictingRetryCountsAsRejectedButCannotReplaceTheOriginalSuccessfulReceipt() {
+        var line=ProductLine.OPTION;long now=System.currentTimeMillis();
+        var original=new com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult(line,7,new java.util.UUID(0,1),
+                CoreMessageType.PLACE_ORDER,"client","604",ResponseStatus.APPLIED,CoreResultCode.NONE,10,10,now,List.of());
+        var conflict=new com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult(line,7,original.commandId(),
+                CoreMessageType.PLACE_ORDER,"client","604",ResponseStatus.REJECTED,CoreResultCode.IDEMPOTENCY_CONFLICT,20,20,now,List.of());
+        repository.persist(line,List.of(),List.of(original),10);repository.persist(line,List.of(),List.of(conflict),20);
+        assertThat(jdbc.queryForObject("SELECT result_code FROM core_command_result_projection",String.class)).isEqualTo("NONE");
+        assertThat(jdbc.queryForObject("SELECT sum(commands) FROM core_trading_command_statistics",Long.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT commands FROM core_trading_command_statistics WHERE command_status='REJECTED'",Long.class)).isEqualTo(1);
+    }
 
     private static RealtimeFrame trigger(long id, long user, CoreTriggerOrderStatus status, long revision) {
         var v=new CoreTriggerOrderStateView(id,ProductLine.OPTION,user,"client-"+id,"oco","74",CoreOrderSide.SELL,

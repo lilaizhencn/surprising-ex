@@ -19,6 +19,11 @@ import org.springframework.stereotype.Service;
  */
 @Service()
 public class AdminOrderRequestService {
+    public java.util.Map<String,Object> metrics(String adminUserId,String productHeader,String productValue,int window,int limit) {
+        requireAdmin(adminUserId);
+        try { return orderService.tradingMetrics(window,limit,productLine(productValue,productHeader)); }
+        catch(IllegalArgumentException invalid) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST,invalid.getMessage(),invalid); }
+    }
 
     private final OrderService orderService;
 
