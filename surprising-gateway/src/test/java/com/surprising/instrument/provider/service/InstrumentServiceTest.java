@@ -77,6 +77,25 @@ class InstrumentServiceTest {
     }
 
     @Test
+    void optionIntrinsicUsesOptionTickEvenWhenUnderlyingTickDiffers() {
+        var outbox = mock(InstrumentOutboxService.class);
+        var storage = mock(InstrumentStorageService.class);
+        when(storage.latest(1, ProductLine.LINEAR_PERPETUAL))
+                .thenReturn(Optional.of(linearPerpetual("BTC-USDT", 2L, 1_000_000L)));
+        var service = new InstrumentService(storage, mock(InstrumentValidator.class),
+                new InstrumentProperties(), outbox);
+        var instrument = option("BTC-USDT-CALL", InstrumentStatus.CLOSED);
+        service.publishProductLifecycleEvent(instrument, 0L, 71_000_000_000L);
+        var event = ArgumentCaptor.forClass(Object.class);
+        verify(outbox).enqueue(eq("INSTRUMENT"), eq(2L),
+                eq("surprising.option.option.exercises.v1"), eq("1"),
+                eq("OPTION_EXERCISE"), event.capture(), any(Instant.class));
+        // 21,000,000,000 intrinsic units / option tick 10,000,000 * multiplier 10,000.
+        assertThat(((OptionExerciseEvent) event.getValue()).cashSettlementUnitsPerContract())
+                .isEqualTo(21_000_000L);
+    }
+
+    @Test
     void usesConfiguredLifecycleTopicOverrides() {
         InstrumentOutboxService outboxService = mock(InstrumentOutboxService.class);
         InstrumentProperties properties = new InstrumentProperties();

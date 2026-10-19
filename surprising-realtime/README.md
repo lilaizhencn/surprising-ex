@@ -554,3 +554,12 @@ LINEAR_DELIVERY <cluster-directory> <aeron-directory> <archive-control-channel> 
 ```
 
 首次使用不存在的独立回补检查点，从保留的日志前缀回放；后续只续用本任务自己的检查点。`.delivery-repair` 有独立文件标识，复制或重命名 live 检查点会拒绝。不得清零、替换 live 检查点，不重复提交结算。回补只写交割现金流水，不连接 Kafka，不写订单、回执、资金费或水位，不向在线 Core 发送命令。外层限制堆、时间与磁盘，并核对保留日志覆盖范围；缺失前缀不能从后续 snapshot 猜测。
+
+
+### 期权行权现金分类与历史纠正（2026-10-20）
+
+既有已提交到期回放同时支持 OPTION。`persistDelivery` 现在按产品选择 `OPTION_EXERCISE/期权行权`；仍使用同一现金差额、自然身份与事务，不新增状态副本或在线 Core 查询。平价和价外没有现金变化时不生成零金额流水。
+
+旧数据库在停止本产品 exporter 后执行 `deployment/migrations/20261020-option-exercise-ledger.sql`，只把 OPTION 账户、OPTION 参考号的旧 DELIVERY_SETTLEMENT 分类改正，保留原 ID、金额、余额及检查点。与正确分类已有相同自然身份时整笔失败，先对账，不自动删除历史记录。迁移可重复执行；PostgreSQL 测试同时验证迁移后重放仍只有一条记录及冲突回滚。
+
+历史缺失流水仍使用 `CommittedDeliveryLedgerRepair` 的独立 `.delivery-repair` 检查点和有限 end-position，首参数可为 OPTION；不得复用 live 检查点或再次提交行权。修正生产者的价格单位不能追溯修改已经提交的交易；已提交错误结算需要独立按账本对账处理。本轮实际六组结算与两端读取结果见 [验证记录](../docs/validation/option-trading-20261020.json)。

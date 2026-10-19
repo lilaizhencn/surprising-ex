@@ -132,3 +132,14 @@ Web 在结算中禁止调整杠杆，直接减仓不依赖开仓杠杆设置；�
 风险验收先有限等待账户与持仓风险的盈亏/维持保证金一致，再按返回标记价独立核算，避免跨两次价格更新比较。不会取消盈亏、权益、保证金或资金守恒断言。共享杠杆 GET 的六产品隔离与未就绪行为有定向测试；完整运行仍只启动 LINEAR_DELIVERY，其他产品风险、算法/管理/生命周期的剩余 Core 读取和批量写入需后续继续检查，不能据此宣称全部查询迁移或全部交割功能验收完成。
 
 发布时必须同时包含本轮 price 与 gateway 修复，然后发布 Web/client；仅更新 gateway 仍会因旧 price 停止结算中指数源而拒绝市价平仓。本轮无需新增 SQL 迁移，但此前 realtime 回执迁移、导出和必要历史回补仍是前置条件。
+
+
+## OPTION 两端恢复及真实到期验收（2026-10-20）
+
+期权单笔下单和撤单沿用原持久化意图与 realtime 回执，保存失败不发送，未知结果保留待确认。Web 移除不存在的 `/api/v1/options/quote` 请求；client 移除按价内外猜测 Delta。Greeks/IV 定价接口尚未实现，两端显示暂无可信报价。权利金按 ticks × 张数 × notionalMultiplierUnits 全额计算，再按结算资产精度展示手续费；没有杠杆除法。卖方保证金由提交时 Core 风险核定，前端不编造精确保证金。
+
+`SixProductLineContractLiveTest` 可用 `SIX_LINE_LIVE_PRODUCT=OPTION`、`SIX_LINE_LIVE_TRADING=true`、`SIX_LINE_LIVE_EXPIRY=true`、本地隔离 JDBC 及 `/tmp/surprising-option-fused-<run>/ui-fixture.json` 交接两端。主合约在真实做市下开平、撤单、核对 WS/REST 成交标识、风险及资金。Web 买一张、Flutter 平一张，分别丢真实响应；Flutter 还暂停该 run 的 realtime、查询未知、恢复并重建 AppState，再查询原结果，每个独立意图只 POST 一次。四分钟后自动退出交接，finally 删除凭据。
+
+到期矩阵同一 OPTION 集群创建 CALL/PUT 各三种行权价，在同一时钟到期。每组两张、权利金 10 USDT；本轮标的结算价 52000，行权价为 50000/52000/54000，价内每组现金 4 USDT。普通挂单、OCO TP/SL、做市报价均经已有生命周期排空，双人审批确认后读取 realtime 产品账本。重复确认不产生新结算版本，零现金不造流水；所有参与账户与财库资金守恒。client 的现有两个实栈测试通过 DELIVERY_LIVE_PRODUCT/DELIVERY_EXPIRY_PRODUCT=OPTION 选择此产品，未设置隔离 fixture 时仍跳过。
+
+发布顺序和分类迁移见 realtime README。既有 Core 日志中价格单位错误的结算不会因读端更新而自动改写，必须独立对账。此次没有原生设备安装、生产部署、希腊值报价、非本轮产品实栈或全面强平/ADL 验收；[完整验证记录](validation/option-trading-20261020.json)。

@@ -59,10 +59,7 @@ class ExpiringContractSettlementFanoutServiceTest {
         AccountAeronGateway aeron = mock(AccountAeronGateway.class);
         AccountProperties properties = properties(ProductLine.OPTION);
         var service = new ExpiringContractSettlementFanoutService(aeron, properties);
-        var event = new OptionExerciseEvent("45", 6, "1", com.surprising.product.api.ProductLine.SPOT, 70_000_000,
-                71_000_000, 1_000, OptionType.CALL, OptionExerciseStyle.EUROPEAN,
-                SETTLEMENT_TIME, SETTLEMENT_TIME, ContractSettlementMethod.CASH,
-                InstrumentStatus.CLOSED, SETTLEMENT_TIME, null);
+        var event = optionEvent(71_000_000, true);
         stubCompleted(aeron);
 
         assertThat(service.fanout(event)).isEqualTo(1);
@@ -72,7 +69,29 @@ class ExpiringContractSettlementFanoutServiceTest {
                 eq(0L), payload.capture());
         assertThat(TradingCommandCodec.decodeSettleInstrument(payload.getValue())).isEqualTo(
                 new SettleInstrumentCommand(SETTLEMENT_TIME.toEpochMilli(),
-                        "45", 71_000_000, 1_000));
+                        "45", 71_000, 1_000));
+    }
+
+    @Test
+    void rejectsMissingOptionPrecisionAndUnalignedSettlementBeforeCoreRequests() {
+        var aeron=mock(AccountAeronGateway.class);
+        var service=new ExpiringContractSettlementFanoutService(aeron,properties(ProductLine.OPTION));
+        org.assertj.core.api.Assertions.assertThatThrownBy(()->service.fanout(optionEvent(71_000_000,false))).hasMessageContaining("snapshot");
+        org.assertj.core.api.Assertions.assertThatThrownBy(()->service.fanout(optionEvent(71_000_001,true))).hasMessageContaining("tick");
+        org.mockito.Mockito.verifyNoInteractions(aeron);
+    }
+
+    private OptionExerciseEvent optionEvent(long price,boolean withSnapshot) {
+        var snapshot=mock(com.surprising.instrument.api.model.InstrumentResponse.class);
+        when(snapshot.instrumentId()).thenReturn(45); when(snapshot.changeId()).thenReturn(6L);
+        when(snapshot.instrumentType()).thenReturn(com.surprising.instrument.api.model.InstrumentType.OPTION);
+        when(snapshot.contractType()).thenReturn(ContractType.VANILLA_OPTION);
+        when(snapshot.underlyingInstrumentId()).thenReturn("1"); when(snapshot.underlyingProductLine()).thenReturn(ProductLine.SPOT);
+        when(snapshot.strikePriceUnits()).thenReturn(70_000_000L); when(snapshot.optionType()).thenReturn(OptionType.CALL);
+        when(snapshot.optionExerciseStyle()).thenReturn(OptionExerciseStyle.EUROPEAN); when(snapshot.status()).thenReturn(InstrumentStatus.CLOSED);
+        when(snapshot.priceTickUnits()).thenReturn(1000L);
+        return new OptionExerciseEvent("45",6,"1",ProductLine.SPOT,70_000_000,price,1000,OptionType.CALL,
+                OptionExerciseStyle.EUROPEAN,SETTLEMENT_TIME,SETTLEMENT_TIME,ContractSettlementMethod.CASH,InstrumentStatus.CLOSED,SETTLEMENT_TIME,withSnapshot?snapshot:null);
     }
 
     @Test

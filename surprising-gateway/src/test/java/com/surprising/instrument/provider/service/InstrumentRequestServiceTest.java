@@ -20,7 +20,7 @@ class InstrumentRequestServiceTest {
             mock(MarketSummaryRepository.class), JsonMapper.builder().findAndAddModules().build());
 
     @ParameterizedTest
-    @EnumSource(value=ContractType.class, names={"LINEAR_DELIVERY","INVERSE_DELIVERY"})
+    @EnumSource(value=ContractType.class, names={"LINEAR_DELIVERY","INVERSE_DELIVERY","VANILLA_OPTION"})
     void settlingDeliveryRemainsAvailableByIdAndInCatalog(ContractType type) {
         var settling = instrument(type, InstrumentStatus.SETTLING);
         var draft = instrument(type, InstrumentStatus.DRAFT);
@@ -49,7 +49,7 @@ class InstrumentRequestServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value=ContractType.class, names={"LINEAR_DELIVERY","INVERSE_DELIVERY"})
+    @EnumSource(value=ContractType.class, names={"LINEAR_DELIVERY","INVERSE_DELIVERY","VANILLA_OPTION"})
     void closedDeliveryCanBeReadByIdentityButIsAbsentFromDefaultCatalog(ContractType type) {
         var closed = instrument(type, InstrumentStatus.CLOSED);
         when(instruments.latest(73, type.productLine())).thenReturn(closed);

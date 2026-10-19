@@ -164,7 +164,7 @@ class LeverageServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value=ContractType.class, names={"LINEAR_DELIVERY","INVERSE_DELIVERY"})
+    @EnumSource(value=ContractType.class, names={"LINEAR_DELIVERY","INVERSE_DELIVERY","VANILLA_OPTION"})
     void settlingLinearDeliveryReadsProjectedLeverageButStillRejectsUpdates(ContractType type) {
         var aeron = mock(OrderAeronGateway.class);
         org.mockito.Mockito.when(queries.require(type.productLine(), 1001L, null))
@@ -178,7 +178,7 @@ class LeverageServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value=ContractType.class, names={"LINEAR_DELIVERY","INVERSE_DELIVERY"})
+    @EnumSource(value=ContractType.class, names={"LINEAR_DELIVERY","INVERSE_DELIVERY","VANILLA_OPTION"})
     void closedDeliveryLeverageRemainsReadOnlyAndUsesRealtime(ContractType type) {
         var aeron = mock(OrderAeronGateway.class);
         org.mockito.Mockito.when(queries.require(type.productLine(), 1001L, null))

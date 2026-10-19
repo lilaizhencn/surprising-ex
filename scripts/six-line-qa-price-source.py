@@ -16,7 +16,7 @@ from websockets.exceptions import ConnectionClosed
 
 def ticker(path="/"):
     if urlparse(path).path == "/option":
-        return {"symbol": "BTCUSDT", "markPrice": "1000", "indexPrice": "50000",
+        return {"symbol": "BTCUSDT", "markPrice": parse_qs(urlparse(path).query).get("premium", ["1000"])[0], "indexPrice": "50000",
                 "sameExpiryForwardPrice": "50500", "expiryTime": parse_qs(urlparse(path).query)["expiry"][0],
                 "timestamp": int(time.time() * 1000)}
     return {"s": "BTCUSDT", "b": "49999.9", "a": "50000.1", "B": "100", "A": "100",

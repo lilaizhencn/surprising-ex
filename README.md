@@ -246,3 +246,14 @@ Web/client 的单笔下单和撤单在 POST 前持久保存原身份；响应丢
 INVERSE_DELIVERY 的 SETTLING 合约继续提供目录、指数源与 realtime 杠杆只读查询，只允许直接减仓；CLOSED 可按 ID 查询历史元数据，默认目录仍排除。Web/client 单笔下单及撤单先持久化意图，响应不明时查询原回执，不重复发送交易。到期清理继续覆盖普通单、TP/SL 与做市报价，交割现金流水由 realtime 的已提交回放写入既有产品账本。币本位的余额、保证金、手续费与盈亏使用 BTC 单位，固定报价面值不能套用线性乘价公式。
 
 本轮只实际启动 INVERSE_DELIVERY 单节点 FUSED；真实用户和做市账户完成成交、减仓、响应丢失恢复及自动到期，核对资金守恒与 BTC 流水。Web 390/1440、Flutter 主机 320 深浅色检查见 docs/validation/inverse-delivery-trading-20261020.json。该记录不代表其他产品线、批量故障、强平/ADL 或原生真机已完成验收。
+
+
+### 期权交易、到期行权与两端恢复（2026-10-20）
+
+本轮仅启动 OPTION 单节点 FUSED。期权买方全额支付权利金，卖方保证金仍由既有 Core 风险模型核定。`ExpiringContractSettlementFanoutService` 把事件的标的结算价格整数按不可变期权快照的 `priceTickUnits` 精确换成 Core 档位；缺少精度或未对齐直接拒绝。`InstrumentService` 用相同的期权档位和乘数计算事件现金，不能混用标的合约的档位。Core 继续独立计算内在价值和结算资金，本轮没有修改在线 Core 交易状态模型。
+
+realtime 的 `CommittedOrderProjectionRepository.persistDelivery` 对 OPTION 写入现有产品账本的 `OPTION_EXERCISE/期权行权`；交割仍为 `DELIVERY_SETTLEMENT`。金额、余额、自然身份、整页事务及提交检查点规则不变。旧数据库先停止相关 exporter，执行 [分类迁移](deployment/migrations/20261020-option-exercise-ledger.sql)，再发布 gateway/realtime/Web/client；迁移只改分类，不重放交易、不改金额，身份冲突整笔回滚。新建数据库无需修复旧分类。
+
+Web/client 的期权单笔下单及撤单先保存原请求身份，丢失响应后只查询 realtime 原回执；期权只允许未到期 TRADING 下单。到期自动排空普通单、TP/SL 和做市报价，经现有双人审批确认价格后行权；CLOSED 元数据及现金流水仍可查。两端按真实币种精度展示全额权利金和手续费，移除杠杆入口及不可信 Delta。后端尚未提供 Greeks 定价接口，因此两端明确显示暂无可信报价；不能把这一轮当成完整期权定价功能已经完成。
+
+实际覆盖 CALL/PUT 各价内、平价、价外六组合约：每组两张，权利金 10 USDT、买方手续费 0.005 USDT、卖方手续费 0.002 USDT；价内行权 4 USDT，其余为零。仓位、冻结和预占清零，用户/做市/财库资金差额为零。两端验证真实丢回包恢复与 CLOSED 流水，小屏修复摘要重叠。环境、命令、未测范围和清理状态见 [本轮记录](docs/validation/option-trading-20261020.json)。

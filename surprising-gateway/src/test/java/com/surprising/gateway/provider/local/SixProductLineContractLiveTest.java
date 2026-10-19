@@ -40,7 +40,7 @@ class SixProductLineContractLiveTest {
     @Test
     void createListEditAndPauseThroughAdminRequestsWithoutRestart() throws Exception {
         String jdbcUrl = System.getenv("SIX_LINE_LIVE_JDBC_URL");
-        assertThat(jdbcUrl).matches("jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/(sixline_live|surprising_spot_[0-9_]+|surprising_delivery_[0-9_]+|surprising_inverse_delivery_[0-9_]+)");
+        assertThat(jdbcUrl).matches("jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/(sixline_live|surprising_spot_[0-9_]+|surprising_delivery_[0-9_]+|surprising_inverse_delivery_[0-9_]+|surprising_option_[0-9_]+)");
         var jdbc = new JdbcTemplate(new DriverManagerDataSource(jdbcUrl,
                 System.getenv().getOrDefault("SIX_LINE_LIVE_JDBC_USER", "sixline_qa"),
                 System.getenv().getOrDefault("SIX_LINE_LIVE_JDBC_PASSWORD", "qa")));
@@ -129,7 +129,8 @@ class SixProductLineContractLiveTest {
         assertThat(processIdentities()).isEqualTo(started);
         var changes = get("/api/v1/admin/gateway/instrument-admin/" + id + "/changes?productLine=" + line + "&limit=20", admin);
         assertThat(changes.size()).isEqualTo(5);
-        if (line.isDeliveryProduct()) {
+        if (line == ProductLine.OPTION && "true".equals(System.getenv("SIX_LINE_LIVE_EXPIRY"))) exerciseOptionExpiryMatrix(jdbc, created);
+        else if (line.isDeliveryProduct()) {
             if (System.getenv("SIX_LINE_LIVE_UI_FIXTURE") != null) exerciseDeliveryClients(jdbc, created);
             if ("true".equals(System.getenv("SIX_LINE_LIVE_EXPIRY"))) exerciseDeliveryExpiry(jdbc, created);
         }
@@ -159,7 +160,7 @@ class SixProductLineContractLiveTest {
         if (output == null || output.isBlank()) return;
         var fixture = java.nio.file.Path.of(output).toAbsolutePath().normalize();
         assertThat(fixture.toString()).startsWith(line == ProductLine.SPOT
-                ? "/tmp/surprising-spot-fused-" : line == ProductLine.INVERSE_DELIVERY ? "/tmp/surprising-inverse-delivery-fused-" : "/tmp/surprising-linear-delivery-fused-");
+                ? "/tmp/surprising-spot-fused-" : line == ProductLine.OPTION ? "/tmp/surprising-option-fused-" : line == ProductLine.INVERSE_DELIVERY ? "/tmp/surprising-inverse-delivery-fused-" : "/tmp/surprising-linear-delivery-fused-");
         var done = fixture.resolveSibling(fixture.getFileName() + ".done");
         assertThat(java.nio.file.Files.exists(fixture)).isFalse();
         assertThat(java.nio.file.Files.exists(done)).isFalse();
@@ -350,6 +351,141 @@ class SixProductLineContractLiveTest {
         }
     }
 
+    private record OptionExpiryCase(int id, Participant buyer, Participant maker, String type, String money, long cash) {}
+
+    private void exerciseOptionExpiryMatrix(JdbcTemplate jdbc, JsonNode template) throws Exception {
+        var cases = new ArrayList<OptionExpiryCase>();
+        var strategies = new ArrayList<String>();
+        var expiry = Instant.now().plusSeconds(120);
+        try (var core = SurprisingAeronClient.connect(line, List.of("127.0.0.1"),"127.0.0.1", Duration.ofSeconds(10))) {
+            for (String type : List.of("CALL","PUT")) for (String money : List.of("ITM","ATM","OTM")) {
+                long strike = money.equals("ATM")?52_000:(type.equals("CALL") == money.equals("ITM")?50_000 : 54_000);
+                var draft = ((ObjectNode)template).deepCopy();
+                draft.remove(List.of("changeId","lastChangeId","createdAt","updatedAt","baseAsset","quoteAsset","settleAsset","contractValueAsset"));
+                draft.putNull("instrumentId");
+                draft.put("symbol","QA-OPTION-"+type+'-'+money+'-'+run.toUpperCase(Locale.ROOT));
+                draft.put("status","DRAFT");
+                draft.put("optionType", type);
+                draft.put("strikePriceUnits", strike*100_000_000L);
+                draft.put("expiryTime", expiry.toString());
+                draft.put("deliveryTime", expiry.plusSeconds(5).toString());
+                for (var source : draft.path("indexSources")) {
+                    ((ObjectNode)source).put("path","/option?expiry="+expiry+"&premium=5000");
+                    ((ObjectNode)source).put("websocketUrl","ws://127.0.0.1:19194/option?expiry="+expiry+"&premium=5000");
+                }
+                var created = write("instrument-admin","/upsert?reason=option-expiry-qa&expectedChangeId=0", draft, 200);
+                int id = created.path("instrumentId").asInt();
+                var listed = changeStatus(id, created,"PRE_TRADING", 200);
+                var trading = changeStatus(id, listed,"TRADING", 200);
+                awaitSync(id, trading.path("lastChangeId").asLong());
+                var buyer = participantFixture(jdbc,"option-"+type.toLowerCase(Locale.ROOT)+'-'+money.toLowerCase(Locale.ROOT)+"-buyer", false);
+                var maker = participantFixture(jdbc,"option-"+type.toLowerCase(Locale.ROOT)+'-'+money.toLowerCase(Locale.ROOT)+"-maker", false);
+                fund(buyer,"USDT", 10_000_000_000_000L);
+                fund(maker,"USDT", 10_000_000_000_000L);
+                cases.add(new OptionExpiryCase(id, buyer, maker, type, money, money.equals("ITM")?400_000_000L : 0));
+            }
+            long[] users = cases.stream().flatMapToLong(c -> java.util.stream.LongStream.of(c.buyer.id, c.maker.id)).toArray();
+            var before = combinedFunds(core, users);
+            for (var c : cases) {
+                c.buyer.connect(c.id);
+                place(c.maker, c.id,"SELL","LIMIT", 50_000,"GTC", false, 2);
+                place(c.buyer, c.id,"BUY","LIMIT", 50_000,"IOC", false, 2);
+                assertThat(wallet(core, c.buyer.id)).as("buyer full premium plus fee").isEqualTo(10_000_000_000_000L-1_000_000_000L-500_000L);
+                assertThat(wallet(core, c.maker.id)).as("seller premium minus maker fee").isEqualTo(10_000_000_000_000L+1_000_000_000L-200_000L);
+                assertThat(userState(core, c.buyer.id).positions()).anyMatch(p -> p.signedQuantitySteps() == 2 && p.positionMarginUnits() == 0);
+                assertThat(userState(core, c.maker.id).positions()).anyMatch(p -> p.signedQuantitySteps() == -2 && p.positionMarginUnits()>0);
+                place(c.buyer, c.id,"BUY","LIMIT", 49_000,"GTC", false, 1);
+                var legs = new ArrayList<Map<String, Object>>();
+                for (boolean tp : new boolean[]{true, false}) {
+                    var leg = new LinkedHashMap<String, Object>();
+                    leg.put("userId", c.buyer.id);
+                    leg.put("clientTriggerOrderId","option-"+run+'-'+c.id+(tp?"-tp":"-sl"));
+                    leg.put("ocoGroupId","option-"+run+'-'+c.id);
+                    leg.put("instrumentId", String.valueOf(c.id));
+                    leg.put("side","SELL");
+                    leg.put("triggerType", tp?"TAKE_PROFIT":"STOP_LOSS");
+                    leg.put("triggerPriceTicks", tp?60_000 : 40_000);
+                    leg.put("orderType","MARKET");
+                    leg.put("timeInForce","IOC");
+                    leg.put("priceTicks", 0);
+                    leg.put("quantitySteps", 2);
+                    leg.put("marginMode","CROSS");
+                    leg.put("positionSide","NET");
+                    leg.put("reduceOnly", true);
+                    legs.add(leg);
+                }
+                var stops = request("POST","/api/v1/gateway/trading-trigger/batch", json.writeValueAsString(Map.of("orders", legs,"atomic", true)), c.buyer.token, null, 200);
+                assertThat(stops.path("completed").asInt()).isEqualTo(2);
+                String strategy = "qa-option-"+run+'-'+c.id;
+                var definition = new LinkedHashMap<String, Object>();
+                definition.put("strategyId", strategy);
+                definition.put("productLine", line.name());
+                definition.put("enabled", true);
+                definition.put("accountIds", List.of(c.maker.id));
+                definition.put("instrumentIds", List.of(String.valueOf(c.id)));
+                definition.put("baseQuantitySteps", 1);
+                definition.put("marginMode","CROSS");
+                definition.put("spreadTicks", 20);
+                definition.put("levelSpacingTicks", 10);
+                definition.put("maxInventorySteps", 1_000_000);
+                definition.put("maxInventorySkewPpm", 0);
+                definition.put("orderLevels", 1);
+                definition.put("initialAnchorPriceTicks", 50_000);
+                definition.put("version", 0);
+                write("market-maker","/strategy-definitions?reason=option-expiry-qa", definition, 200);
+                strategies.add(strategy);
+            }
+            var repository = new InstrumentRepository(jdbc);
+            var readiness = new InstrumentLifecycleReadinessService(new InstrumentLifecycleDrainRepository(jdbc));
+            long deadline = System.nanoTime()+TimeUnit.SECONDS.toNanos(180);
+            for (var c : cases) {
+                while (repository.current(c.id, line).orElseThrow().status() != com.surprising.instrument.api.model.InstrumentStatus.SETTLING) {
+                    assertThat(System.nanoTime()).as("option clock expiry").isLessThan(deadline);
+                    Thread.sleep(200);
+                }
+                var settling = repository.current(c.id, line).orElseThrow();
+                while (!readiness.isReady(line, String.valueOf(c.id), settling.lastChangeId()) || Instant.now().isBefore(expiry.plusSeconds(5))) {
+                    assertThat(System.nanoTime()).as("option committed drain readiness").isLessThan(deadline);
+                    Thread.sleep(200);
+                }
+                assertThat(CoreTriggerOrderCodec.decodeList(query(core, CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY, c.buyer.id,
+                CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(0, String.valueOf(c.id), 0, 100))).data())).isEmpty();
+                String settlement = "/"+c.id+"/settlement?productLine=OPTION&settlementPriceTicks=50000&underlyingSettlementPriceUnits=5200000000000&reason=option-expiry-qa";
+                var closed = write("instrument-admin", settlement, null, 200);
+                for (var actor : List.of(c.buyer, c.maker)) {
+                    for (;;) {
+                        var state = userState(core, actor.id);
+                        if (state.positions().stream().allMatch(p -> p.signedQuantitySteps() == 0 && p.positionMarginUnits() == 0) && state.reservations().isEmpty() && state.balances().stream().allMatch(b -> b.lockedUnits() == 0)) break;
+                        assertThat(System.nanoTime()).as("option final account state").isLessThan(deadline);
+                        Thread.sleep(100);
+                    }
+                }
+                assertThat(wallet(core, c.buyer.id)).isEqualTo(10_000_000_000_000L-1_000_000_000L-500_000L+c.cash);
+                assertThat(wallet(core, c.maker.id)).isEqualTo(10_000_000_000_000L+1_000_000_000L-200_000L-c.cash);
+                assertThat(write("instrument-admin", settlement, null, 200).path("lastChangeId").asLong()).isEqualTo(closed.path("lastChangeId").asLong());
+                for (var actor : List.of(c.buyer, c.maker)) {
+                    JsonNode ledger = null;
+                    long ledgerDeadline = System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+                    do {ledger = get("/api/v1/gateway/account/product-ledger?userId="+actor.id+"&accountType=OPTION&referenceType=OPTION_EXERCISE&limit=100", actor.token);
+                        if (c.cash == 0 || !ledger.path("entries").isEmpty()) break;
+                        Thread.sleep(100);
+                    } while (System.nanoTime()<ledgerDeadline);
+                    assertThat(ledger.path("entries")).hasSize(c.cash == 0?0 : 1);
+                    if (c.cash != 0) assertThat(ledger.path("entries").get(0).path("amountUnits").asLong()).isEqualTo(actor == c.buyer?c.cash:-c.cash);
+                }
+                System.out.printf("OPTION_EXPIRY_ROW_PASS instrumentId=%d buyer=%d maker=%d type=%s moneyness=%s exerciseCash=%d positions=0 locked=0%n", c.id, c.buyer.id, c.maker.id, c.type, c.money, c.cash);
+            }
+            assertThat(combinedFunds(core, users)).as("all option buyers, makers and treasury conservation").isEqualTo(before);
+            System.out.println("OPTION_EXPIRY_MATRIX_PASS rows=6 premiumPerPair=1000000000 takerFee=500000 makerFee=200000 fundsDifference=0");
+        } finally {
+            for (String strategy : strategies) write("market-maker","/strategies/"+strategy+"/pause?productLine=OPTION", null, 200);
+            for (var c : cases) if (c.buyer.socket != null)c.buyer.socket.sendClose(WebSocket.NORMAL_CLOSURE,"option QA complete").join();
+        }
+    }
+    private long wallet(SurprisingAeronClient core, long user) {
+        return userState(core, user).balances().stream().filter(b -> b.asset().equals("USDT")).mapToLong(b -> Math.addExact(b.availableUnits(), b.lockedUnits())).sum();
+    }
+
     private String adminFixture(JdbcTemplate jdbc, String role) throws Exception {
         return participantFixture(jdbc, role, true).token;
     }
@@ -491,7 +627,7 @@ class SixProductLineContractLiveTest {
             assertThat(restTradeIds).containsAll(user.trades.keySet());
             System.out.printf("SIX_LINE_REALTIME_PASS productLine=%s depthEvents=%d wsTrades=%d restTrades=%d identitiesMatch=true%n",
                     line, user.depth.size(), user.trades.size(), restTradeIds.size());
-            if (line == ProductLine.SPOT) awaitClientVerification(user, maker, instrumentId, bid);
+            if (line == ProductLine.SPOT || line == ProductLine.OPTION) awaitClientVerification(user, maker, instrumentId, bid);
             write("market-maker", "/strategies/" + strategy + "/pause?productLine=" + line, null, 200);
             strategyPaused = true;
             for (int attempt = 0; attempt < 100; attempt++) {
@@ -657,9 +793,9 @@ class SixProductLineContractLiveTest {
         return CoreStateQueryCodec.decodeUserState(query(core, CoreMessageType.USER_STATE_QUERY, user).data());
     }
 
-    private Map<String, Long> combinedFunds(SurprisingAeronClient core, long user, long maker) {
+    private Map<String, Long> combinedFunds(SurprisingAeronClient core, long... users) {
         var funds = new TreeMap<String, Long>();
-        for (long actor : List.of(user, maker)) for (var balance : userState(core, actor).balances())
+        for (long actor : users) for (var balance : userState(core, actor).balances())
             funds.merge(balance.asset(), Math.addExact(balance.availableUnits(), balance.lockedUnits()), Math::addExact);
         for (var balance : CoreStateQueryCodec.decodeTreasuryState(query(core, CoreMessageType.TREASURY_STATE_QUERY, 0).data()))
             funds.merge(balance.asset(), java.util.stream.LongStream.of(balance.feeBalanceUnits(), balance.insuranceBalanceUnits(),

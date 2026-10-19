@@ -311,10 +311,10 @@ public class InstrumentService {
         BigInteger intrinsic = option.optionType() == com.surprising.instrument.api.model.OptionType.CALL
                 ? underlyingPrice.subtract(strike).max(BigInteger.ZERO)
                 : strike.subtract(underlyingPrice).max(BigInteger.ZERO);
-        BigInteger tick = BigInteger.valueOf(underlying.priceTickUnits());
+        BigInteger tick = BigInteger.valueOf(option.priceTickUnits());
         BigInteger[] quotientAndRemainder = intrinsic.divideAndRemainder(tick);
         if (quotientAndRemainder[1].signum() != 0) {
-            throw new IllegalArgumentException("标的结算价未落在标的价格档位");
+            throw new IllegalArgumentException("标的结算价未落在期权价格档位");
         }
         return quotientAndRemainder[0]
                 .multiply(BigInteger.valueOf(option.notionalMultiplierUnits()))

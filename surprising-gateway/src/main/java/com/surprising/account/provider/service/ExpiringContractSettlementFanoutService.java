@@ -33,7 +33,17 @@ public class ExpiringContractSettlementFanoutService {
     }
 
     public int fanout(OptionExerciseEvent event) {
-        submit(event.instrumentId(), event.changeId(), event.underlyingSettlementPriceUnits(),
+        var instrument = event.instrument();
+        if (instrument == null || instrument.priceTickUnits() <= 0) {
+            throw new IllegalArgumentException("option exercise snapshot with price precision is required");
+        }
+        long units = event.underlyingSettlementPriceUnits();
+        if (units % instrument.priceTickUnits() != 0) {
+            throw new IllegalArgumentException("option settlement price is not aligned to its tick");
+        }
+        // Core 的 strike 与价格均使用期权档位，事件的标的价格则是报价资产整数单位。
+        // 只在接入边界换算；收益仍由 Core 独立计算，不能用事件现金字段覆盖交易状态。
+        submit(event.instrumentId(), event.changeId(), units / instrument.priceTickUnits(),
                 event.cashSettlementUnitsPerContract(),
                 settlementTime(event.deliveryTime(), event.eventTime()));
         return 1;

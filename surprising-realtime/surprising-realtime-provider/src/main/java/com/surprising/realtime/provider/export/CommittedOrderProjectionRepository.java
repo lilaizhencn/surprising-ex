@@ -24,24 +24,26 @@ public class CommittedOrderProjectionRepository {
         transaction.executeWithoutResult(tx -> {
             String reference = page.product().name() + ':' + page.command().instrumentId() + ':' + page.command().settlementId();
             String account = page.product().accountTypeCode();
+            String referenceType = page.product().isOptionProduct() ? "OPTION_EXERCISE" : "DELIVERY_SETTLEMENT";
+            String reason = page.product().isOptionProduct() ? "期权行权" : "交割结算";
             var occurred = java.sql.Timestamp.from(java.time.Instant.ofEpochMilli(page.occurredAt()));
             for (var flow : page.cashFlows()) {
                 int inserted = jdbc.update("""
                         INSERT INTO account_product_ledger_entries
                           (entry_id,user_id,account_type,asset,amount_units,balance_after_units,
                            reference_type,reference_id,instrument_id,reason,created_at)
-                        VALUES(nextval('account_product_ledger_entry_seq'),?,?,?,?,?,'DELIVERY_SETTLEMENT',?,?,'交割结算',?)
+                        VALUES(nextval('account_product_ledger_entry_seq'),?,?,?,?,?,?,?,?,?,?)
                         ON CONFLICT(reference_type,reference_id,user_id,account_type,asset) DO NOTHING
                         """, flow.userId(), account, flow.asset(), flow.amountUnits(), flow.balanceAfterUnits(),
-                        reference, page.command().instrumentId(), occurred);
+                        referenceType, reference, page.command().instrumentId(), reason, occurred);
                 if (inserted == 0) {
                     Integer matches = jdbc.queryForObject("""
                             SELECT count(*) FROM account_product_ledger_entries
-                            WHERE reference_type='DELIVERY_SETTLEMENT' AND reference_id=? AND user_id=?
+                            WHERE reference_type=? AND reference_id=? AND user_id=?
                               AND account_type=? AND asset=? AND amount_units=? AND balance_after_units=?
-                              AND instrument_id=? AND reason='交割结算' AND created_at=?
-                            """, Integer.class, reference, flow.userId(), account, flow.asset(), flow.amountUnits(),
-                            flow.balanceAfterUnits(), page.command().instrumentId(), occurred);
+                              AND instrument_id=? AND reason=? AND created_at=?
+                            """, Integer.class, referenceType, reference, flow.userId(), account, flow.asset(), flow.amountUnits(),
+                            flow.balanceAfterUnits(), page.command().instrumentId(), reason, occurred);
                     if (matches == null || matches != 1) throw new IllegalStateException("conflicting committed delivery cash flow");
                 }
             }
