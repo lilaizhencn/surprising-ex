@@ -45,6 +45,7 @@ class SixProductLineContractLiveTest {
                 System.getenv().getOrDefault("SIX_LINE_LIVE_JDBC_PASSWORD", "qa")));
         admin = adminFixture(jdbc, "requester");
         approver = adminFixture(jdbc, "approver");
+        enableLocalProduct();
         assertThat(get("/api/v1/runtime", null).path("productLines").get(0).asString()).isEqualTo(line.name());
         var started = processIdentities();
         verifyBusinessSettings();
@@ -131,6 +132,51 @@ class SixProductLineContractLiveTest {
                 line, id, halted.path("lastChangeId").asLong(), started.keySet());
     }
 
+    private void enableLocalProduct() throws Exception {
+        for (var status : get("/api/v1/admin/product-lines", admin)) {
+            var configuration = status.path("configuration");
+            if (line.name().equals(configuration.path("productLine").asString()) && !configuration.path("enabled").asBoolean())
+                request("POST", "/api/v1/admin/product-lines/" + line + "/enable",
+                        json.writeValueAsString(Map.of("expectedVersion", configuration.path("configurationVersion").asLong(),
+                                "reason", "isolated product live QA")), admin, null, 200);
+        }
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(40);
+        while (get("/api/v1/runtime", null).path("productLines").isEmpty()) {
+            assertThat(System.nanoTime()).as("selected local Core activation").isLessThan(deadline);
+            Thread.sleep(200);
+        }
+    }
+
+    /** Optional local UI handoff: keep the real maker running until both clients finish. */
+    private void awaitSpotClientVerification(Participant user, Participant maker, int instrumentId, long bid) throws Exception {
+        String output = System.getenv("SIX_LINE_LIVE_UI_FIXTURE");
+        if (output == null || output.isBlank()) return;
+        var fixture = java.nio.file.Path.of(output).toAbsolutePath().normalize();
+        assertThat(fixture.toString()).startsWith("/tmp/surprising-spot-fused-");
+        var done = fixture.resolveSibling(fixture.getFileName() + ".done");
+        assertThat(java.nio.file.Files.exists(fixture)).isFalse();
+        assertThat(java.nio.file.Files.exists(done)).isFalse();
+        try {
+            java.nio.file.Files.writeString(fixture, json.writeValueAsString(Map.of(
+                    "userId", user.id, "accessToken", user.token, "instrumentId", String.valueOf(instrumentId),
+                    "makerId", maker.id, "bidPriceTicks", bid, "runId", System.getenv("SIX_LINE_LIVE_RUN_ID"),
+                    "session", Map.of("accessToken", user.token, "user", Map.of("userId", user.id, "username", "live-spot")))),
+                    java.nio.file.StandardOpenOption.CREATE_NEW);
+            java.nio.file.Files.setPosixFilePermissions(fixture, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+            System.out.printf("SPOT_CLIENT_FIXTURE_READY instrumentId=%d userId=%d makerId=%d%n", instrumentId, user.id, maker.id);
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MINUTES.toNanos(4);
+            while (!java.nio.file.Files.exists(done)) {
+                assertThat(System.nanoTime()).as("bounded SPOT browser/client handoff").isLessThan(deadline);
+                Thread.sleep(250);
+            }
+            assertThat(java.nio.file.Files.readString(done).trim()).isEqualTo("PASS");
+            System.out.println("SPOT_CLIENT_HANDOFF_PASS browserAndFlutter=true");
+        } finally {
+            java.nio.file.Files.deleteIfExists(fixture);
+            java.nio.file.Files.deleteIfExists(done);
+        }
+    }
+
     private String adminFixture(JdbcTemplate jdbc, String role) throws Exception {
         return participantFixture(jdbc, role, true).token;
     }
@@ -193,6 +239,7 @@ class SixProductLineContractLiveTest {
             if (line == ProductLine.SPOT) fund(actor, "BTC", 1_000_000_000L);
         }
         String strategy = "qa-" + run;
+        boolean strategyCreated = false, strategyPaused = false;
         try (var core = SurprisingAeronClient.connect(line, List.of("127.0.0.1"), "127.0.0.1", Duration.ofSeconds(10))) {
             var before = combinedFunds(core, user.id, maker.id);
             user.connect(instrumentId);
@@ -212,6 +259,7 @@ class SixProductLineContractLiveTest {
             definition.put("maxInventorySteps", 1_000_000); definition.put("maxInventorySkewPpm", 0);
             definition.put("orderLevels", 3); definition.put("initialAnchorPriceTicks", line == ProductLine.OPTION ? 10_000 : 500_000); definition.put("version", 0);
             write("market-maker", "/strategy-definitions?reason=six-line-qa", definition, 200);
+            strategyCreated = true;
             JsonNode book = null;
             for (int attempt = 0; attempt < 180; attempt++) {
                 book = request("GET", "/api/v1/gateway/trading-market/orderbook?instrumentId=" + instrumentId + "&depth=10",
@@ -270,7 +318,9 @@ class SixProductLineContractLiveTest {
             assertThat(restTradeIds).containsAll(user.trades.keySet());
             System.out.printf("SIX_LINE_REALTIME_PASS productLine=%s depthEvents=%d wsTrades=%d restTrades=%d identitiesMatch=true%n",
                     line, user.depth.size(), user.trades.size(), restTradeIds.size());
+            if (line == ProductLine.SPOT) awaitSpotClientVerification(user, maker, instrumentId, bid);
             write("market-maker", "/strategies/" + strategy + "/pause?productLine=" + line, null, 200);
+            strategyPaused = true;
             for (int attempt = 0; attempt < 100; attempt++) {
                 if (userState(core, maker.id).reservations().isEmpty()) break;
                 Thread.sleep(100);
@@ -305,6 +355,8 @@ class SixProductLineContractLiveTest {
             System.out.printf("SIX_LINE_TRADING_PASS productLine=%s instrumentId=%d trader=%d maker=%d executions=%d fundsDifference=0%n",
                     line, instrumentId, user.id, maker.id, user.executions.size());
         } finally {
+            if (strategyCreated && !strategyPaused)
+                write("market-maker", "/strategies/" + strategy + "/pause?productLine=" + line, null, 200);
             if (user.socket != null) user.socket.sendClose(WebSocket.NORMAL_CLOSURE, "QA complete").join();
         }
     }
@@ -388,7 +440,14 @@ class SixProductLineContractLiveTest {
         var receipt = request("POST", "/api/v1/gateway/trading", json.writeValueAsString(body), actor.token, null, 200);
         String resultUrl = receipt.path("commandResultUrl").asString();
         assertThat(resultUrl).startsWith("/api/v1/gateway/trading/commands/");
-        var confirmed = get(resultUrl, actor.token);
+        JsonNode confirmed = null;
+        long receiptDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        do {
+            confirmed = request("GET", resultUrl, "", actor.token, null, 200, 202);
+            if ("TERMINAL".equals(confirmed.path("outcome").asString())) break;
+            assertThat(System.nanoTime()).as("committed realtime command projection").isLessThan(receiptDeadline);
+            Thread.sleep(100);
+        } while (true);
         assertThat(confirmed.path("commandId").asString()).isEqualTo(receipt.path("commandId").asString());
         assertThat(confirmed.path("outcome").asString()).isEqualTo("TERMINAL");
         return orderResult(receipt);

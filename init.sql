@@ -3405,6 +3405,7 @@ BEGIN
             WHEN 'payload' THEN '结构化业务事件 JSON 载荷。'
             WHEN 'raw_event' THEN '未经转换的 Core Export 二进制事件。'
             WHEN 'raw_order_state' THEN '订单状态的版本化二进制快照。'
+            WHEN 'cancel_batch_results' THEN '已提交批量撤单的逐项 index/orderId/success/code；最多 50 笔，NULL 表示尚无逐项事实，不表示撤单失败。'
             WHEN 'raw_user_delta' THEN '用户状态增量的版本化二进制载荷。'
             WHEN 'error_code' THEN '稳定的机器可读错误代码。'
             WHEN 'error_message' THEN '用于审计和排障的错误说明。'

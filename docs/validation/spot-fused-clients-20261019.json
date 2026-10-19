@@ -1,0 +1,580 @@
+{
+  "date": "2026-10-19",
+  "scope": "SPOT only; real one-node FUSED maker plus Web and host Flutter acceptance",
+  "runtime": {
+    "product": "SPOT",
+    "executionMode": "FUSED (confirmed Core log)",
+    "nodes": 1,
+    "walletStarted": false,
+    "jdk": "HotSpot Corretto27",
+    "maven": "3.9.16",
+    "database": "isolated PostgreSQL18 database on existing process",
+    "kafka": "isolated single KRaft broker",
+    "valkey": "isolated Redis on16379",
+    "ticker": "deterministic loopback external ticker; trading, account, funds, queries and WS are real",
+    "heapLimitMiB": {
+      "core": 256,
+      "gateway": 384,
+      "price": 256,
+      "realtime": 256,
+      "maker": 256,
+      "kafka": 256
+    },
+    "streamThreads": 1,
+    "rocksdbBlockCacheMiB": 16,
+    "jfr": false,
+    "observedPeakRuntimeSize": "about2.7GiB; no stress/performance conclusion"
+  },
+  "backend": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "durationSeconds": 92.678,
+    "markers": [
+      "SIX_LINE_SETTINGS_PASS productLine=SPOT price=true lifecycle=false",
+      "SIX_LINE_REALTIME_PASS productLine=SPOT depthEvents=12 wsTrades=6 restTrades=6 identitiesMatch=true",
+      "SPOT_CLIENT_FIXTURE_READY instrumentId=868 userId=7 makerId=8",
+      "SPOT_CLIENT_HANDOFF_PASS browserAndFlutter=true",
+      "SIX_LINE_PUBLIC_QUERY_PASS productLine=SPOT terminalByOrderAndClient=true balancesMatch=true",
+      "SIX_LINE_TRADING_PASS productLine=SPOT instrumentId=868 trader=7 maker=8 executions=6 fundsDifference=0",
+      "SIX_LINE_CONTRACT_PASS productLine=SPOT instrumentId=868 version=11 transitions=DRAFT,PRE_TRADING,TRADING,EDIT,HALT processes=[27704, 27772, 28013, 28435, 28686]"
+    ],
+    "reportSha256": "245a67cd462360bd636cf7354354c0a186d47dcb7ae7bf1a7938402bac0b8ab3",
+    "instrumentId": "868",
+    "traderId": "7",
+    "makerId": "8",
+    "verified": [
+      "admin enable API and hot product activation",
+      "DRAFT,PRE_TRADING,TRADING,EDIT,HALT with stable five process identities",
+      "real maker; BUY/SELL MARKET IOC/FOK and LIMIT FOK; insufficient liquidity no partial FOK",
+      "REST/WS six trades identical; depth and private executions present",
+      "realtime query terminal orders/by-client ID and product balances match Core audit",
+      "maker paused; both actors reservations/locks zero, no spot positions; per-asset users+maker+treasury conservation difference zero"
+    ]
+  },
+  "webCases": [
+    {
+      "width": 1440,
+      "theme": "dark",
+      "requested": 51,
+      "completed": 50,
+      "failed": 1,
+      "firstBatchSize": 50,
+      "secondBatchSize": 1,
+      "batchKeys": [
+        "cancel-d457b2fe-b197-4d71-a0a3-28c7140103a5",
+        "cancel-f5eb6d39-c1b4-4b9c-9c6f-3b98facd256a"
+      ],
+      "fixedOrderIds": [
+        "526504923671327843",
+        "696364631207158603",
+        "860436502999388523",
+        "879730057576736779",
+        "927383919438037695",
+        "1211648236699704185",
+        "1286577539976846085",
+        "1459209752715801563",
+        "1586819883327993868",
+        "1804903717747200409",
+        "2332758938647862901",
+        "2375619581600232344",
+        "2424450828950838390",
+        "2607098026040459638",
+        "2733845346926283582",
+        "2832446198474023760",
+        "3003810116912108864",
+        "3319981947250076888",
+        "3528556076334126808",
+        "3531666736221321954",
+        "3895021132082417821",
+        "4018241867130578407",
+        "4036306791838364746",
+        "4042266665141573710",
+        "4093115151769723026",
+        "4255478200408562753",
+        "4292510691738372674",
+        "4568705311389659912",
+        "4784607937320412783",
+        "4932114816370014358",
+        "5019940067883548892",
+        "5038621190054011098",
+        "5193143761443052727",
+        "5211894095978038948",
+        "5536663434487638830",
+        "5607172841511814348",
+        "5920304814714827116",
+        "6423726974752256507",
+        "6652961367534942319",
+        "6666768046272499061",
+        "7000603640183945763",
+        "7029688111637375677",
+        "7251073116704626967",
+        "7372078237408709658",
+        "7651420919158421125",
+        "8183902175325846795",
+        "8471467529630703847",
+        "8697172038052394604",
+        "8717911439117866319",
+        "8843087740620215348",
+        "8877891564727786848"
+      ],
+      "laterOrderSurvived": "5499336149374313890",
+      "unknownDuringRealProjectionPause": true,
+      "reloadRestored": true,
+      "queries": [
+        {
+          "status": 202,
+          "method": "GET",
+          "url": "/api/v1/gateway/trading/cancellation-batches"
+        },
+        {
+          "status": 200,
+          "method": "GET",
+          "url": "/api/v1/gateway/trading/cancellation-batches"
+        }
+      ],
+      "overflow": false,
+      "errors": []
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "requested": 51,
+      "completed": 50,
+      "failed": 1,
+      "firstBatchSize": 50,
+      "secondBatchSize": 1,
+      "batchKeys": [
+        "cancel-6fa73a30-fabb-4dd2-a66c-60cbc358c8f8",
+        "cancel-8ebf8d35-637f-42e0-836b-294bba94dcdc"
+      ],
+      "fixedOrderIds": [
+        "116260266715869530",
+        "241787797851911427",
+        "243246182784878369",
+        "594032233890499487",
+        "689962510663298642",
+        "771461255456725730",
+        "1431381542661817987",
+        "1811024655259068124",
+        "2142456545902201442",
+        "2215054988865629769",
+        "2578783700079638366",
+        "2597503839263653772",
+        "2634245041067737138",
+        "2782562881000146895",
+        "3089954486633631896",
+        "3295591436973591109",
+        "3485849547795976426",
+        "3633498128380959897",
+        "3718389858822669114",
+        "3835710804125265381",
+        "3962993553741717039",
+        "3964955018951733456",
+        "4110505717455704674",
+        "4250660038008107877",
+        "4469851251893305273",
+        "4972162205922735556",
+        "4988126925810923190",
+        "5130112318676958896",
+        "5237010357739268476",
+        "5237218909042815541",
+        "5328217444631546510",
+        "5375592848500383280",
+        "5783560311848558018",
+        "5928472224724892815",
+        "6577108392167630743",
+        "6608389096242280363",
+        "6625910011907694343",
+        "6767131466168168607",
+        "6961105144151805195",
+        "7063741371418869738",
+        "7249290464950752264",
+        "7284778617219064120",
+        "7899462765755094853",
+        "8032610774042560048",
+        "8076213736292252726",
+        "8189560411938289046",
+        "8303169843305024693",
+        "8463513160353927972",
+        "8697053099953660403",
+        "8748391304274311136",
+        "9117206836550690801"
+      ],
+      "laterOrderSurvived": "5423739588685014177",
+      "unknownDuringRealProjectionPause": true,
+      "reloadRestored": true,
+      "queries": [
+        {
+          "status": 202,
+          "method": "GET",
+          "url": "/api/v1/gateway/trading/cancellation-batches"
+        },
+        {
+          "status": 200,
+          "method": "GET",
+          "url": "/api/v1/gateway/trading/cancellation-batches"
+        }
+      ],
+      "overflow": false,
+      "errors": []
+    }
+  ],
+  "flutterLive": {
+    "requested": 52,
+    "completed": 51,
+    "failed": 1,
+    "batchKeys": [
+      "app-cancel-e34f0626ae87b8d59f9a251ec8e6538c",
+      "app-cancel-aa8edad80d57c1a995ff812749105827"
+    ],
+    "orderIds": [
+      "342029188885154341",
+      "2673449303427466098",
+      "5069519434891003382",
+      "2667712592025862954",
+      "6792011178306057587",
+      "550143016125563535",
+      "8638747103688896950",
+      "50908189195823519",
+      "5218472485045171857",
+      "5796789432169909779",
+      "2614344623746118745",
+      "3283620964769113046",
+      "8434915063618651555",
+      "615576175179662731",
+      "129976665325529229",
+      "1075955680803742572",
+      "6869254587818239037",
+      "5388474459882415735",
+      "3111061939923754283",
+      "7650237370291727746",
+      "6483976426679301237",
+      "2722074189183532770",
+      "8111418163064001666",
+      "825216219576451946",
+      "9060868768982823728",
+      "549169719776724610",
+      "9204047057524104893",
+      "296319905459879652",
+      "545173836777173887",
+      "2483955571937006932",
+      "7172111349828038867",
+      "8263953022960182509",
+      "9215407558653986799",
+      "5499060568911534958",
+      "4643871968989570188",
+      "2042043963209327516",
+      "2643455771692568782",
+      "1754372917041591617",
+      "8263401782694975294",
+      "7789462720351973335",
+      "4931834171335889371",
+      "3304046855262474466",
+      "7625301491376105720",
+      "5564124112898107622",
+      "4386434235945545805",
+      "254447250515030031",
+      "2006650710113567370",
+      "7321969841160531958",
+      "739927529502334145",
+      "6612104930955904712",
+      "4087207919232438796",
+      "7973703445631990111"
+    ],
+    "endedId": "50908189195823519",
+    "methods": [
+      "POST",
+      "GET",
+      "GET",
+      "POST"
+    ],
+    "unknownDuringRealProjectionPause": true,
+    "restartRestoredOriginalKey": true,
+    "realBookBothSides": true,
+    "privateLockedZero": true,
+    "widgetWidth": 320,
+    "widgetTheme": "dark"
+  },
+  "routineChecks": {
+    "webTests": 204,
+    "webLint": "exit0, existing informational hints",
+    "webBuild": "exit0, existing large-chunk notice",
+    "flutterTests": 185,
+    "flutterSkipped": 1,
+    "flutterSkipReason": "The explicit live fixture test is skipped in ordinary suite; separately executed with real fixture and passed1/1",
+    "flutterAnalyze": "No issues found"
+  },
+  "fixesAndFindings": [
+    "Fresh full init failed schema gate due to missing business description for cancel_batch_results. Added specific description to baseline and migration; full initialization and live use passed.",
+    "Updated live verifier to activate its product through admin API and bound GET202 polling for asynchronous committed projection, without resending writes.",
+    "First attempt of older verifier expected immediate GET200 and failed; paused its owned maker and reran on the same isolated runtime.",
+    "First Web attempt used5198, rejected by existing CORS allowlist before any order; switched to permitted5173 without changing gateway CORS."
+  ],
+  "limits": [
+    "Native iOS/Android applications were not installed; Flutter host widget uses real AppState/API/WS with injected in-memory settings/session stores.",
+    "Only ordinary SPOT single placement/basic market modes and cancellation paths here; batch placement/amendment and other product UIs remain outside this evidence.",
+    "No deployed online change or production database touched; no capacity/JMH/JFR performance assertion.",
+    "No all-product completion claim; goal remains active."
+  ],
+  "cleanup": {
+    "status": "complete: owned applications, Kafka, Redis, ticker, Vite, browser, database, runtime/log/Archive/RocksDB/venv/screenshot directories and selected Maven report removed after evidence archive",
+    "runtimeRoot": "/tmp/surprising-spot-fused-20261019-2205",
+    "ownedDatabase": "surprising_spot_20261019_2205",
+    "applicationPids": [
+      27704,
+      27772,
+      28013,
+      28435,
+      28686
+    ],
+    "infrastructurePids": [
+      25658,
+      25660
+    ],
+    "preexistingPostgresPidsPreserved": [
+      1435,
+      26015
+    ],
+    "credentials": "fixture and done marker deleted by backend finally after both consumers passed",
+    "runtimeReclaimedKiB": 2306928,
+    "reportHistoricalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.SixProductLineContractLiveTest.xml"
+  },
+  "artifacts": {
+    "live-test.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/live-test.log",
+      "sha256": "29de2ede08000f189ad2bb40080597b540a8ba693514a17e9f722a7cbe1513e4",
+      "bytes": 32611
+    },
+    "vite-allowed.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/vite-allowed.log",
+      "sha256": "60ac0f60573561f9c92690ce73051712c475d6f4fc4f2d52145e40e49d424593",
+      "bytes": 168
+    },
+    "client-fixture.json.web-390-light.png": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/client-fixture.json.web-390-light.png",
+      "sha256": "406f104b5f1e92f427fe0033715b2c9213970c229adf4ce71fbb7f2d7eaba7f8",
+      "bytes": 121512
+    },
+    "kafka.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/kafka.log",
+      "sha256": "5cee15d5a66fd40352a905937c2c878223d59d4cc8ce73da3ee89d1349271071",
+      "bytes": 414457
+    },
+    "pip.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/pip.log",
+      "sha256": "b9db9d2358705d38e7c2fb5df574577435e38fd28527084df1af77ef1b6b35f9",
+      "bytes": 589
+    },
+    "migration.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/migration.log",
+      "sha256": "faba00a83e1bbfef79d9dc023994ae0d3c62ff281ae265d83955c699f6d3d112",
+      "bytes": 193
+    },
+    "client-live.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/client-live.log",
+      "sha256": "f5ddc36b6733e4a397380ceff37eafa8129ad456fc01ab66ed5d00ac7559f0ee",
+      "bytes": 377
+    },
+    "start.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/start.log",
+      "sha256": "106b58b131abb6df3298fd9b4a95c4633184242218d8c64461d1d5f4d2e1853b",
+      "bytes": 3475
+    },
+    "web-format.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/web-format.log",
+      "sha256": "a5377a7cef24c3e831b3cec2deec4979d34d3bd9329e0643b3fb3e726d8b7ab5",
+      "bytes": 40
+    },
+    "client-tests.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/client-tests.log",
+      "sha256": "2726e78d08a28824f7f812b37df61c9a8a21dcef072e5697233709797bb5a54f",
+      "bytes": 42804
+    },
+    "client-final-analyze.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/client-final-analyze.log",
+      "sha256": "d235d0b1c4e1e451b0e9b7f5fdd5ec7d64e92678c88dfad5d62e2c600d430cb5",
+      "bytes": 96
+    },
+    "redis.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/redis.log",
+      "sha256": "4b0a9942c9b7f975adfb88bb055c15a8cfcc24ff01c09f45d572782076ae39ae",
+      "bytes": 1005
+    },
+    "client-analyze.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/client-analyze.log",
+      "sha256": "37dd85bb6629956e7293c42b17dcec37e4eb62b909b740f422637e8dfae39724",
+      "bytes": 96
+    },
+    "live-test-fixed.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/live-test-fixed.log",
+      "sha256": "0d04058ae95d1d059c5da05610399f6206121e60698440d63d6e0770a2a847da",
+      "bytes": 30133
+    },
+    "client-fixture.json.web-1440-dark.png": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/client-fixture.json.web-1440-dark.png",
+      "sha256": "440331ec369ae34ae78b6296022f26e7aad65dda38ef90c5b2b2a0fd541d4d1e",
+      "bytes": 151269
+    },
+    "client-format.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/client-format.log",
+      "sha256": "201363ae23832375357c5580f6a07ce89f48c2a27211bd100d74e34f26295c71",
+      "bytes": 46
+    },
+    "web-build.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/web-build.log",
+      "sha256": "6d7c03c2c004a4450b74b30d91942a7469b52ab79cddce8604dea851e5f5af35",
+      "bytes": 3274
+    },
+    "ticker.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/ticker.log",
+      "sha256": "4a908625a27b01464a6c575092134155e99d5fa9adb0789f961cb0094aedc1ef",
+      "bytes": 49
+    },
+    "client-fix.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/client-fix.log",
+      "sha256": "306a3dbaf31506bbfa2e0d261f2a401d8e852072e2d6895d591db4b973d41929",
+      "bytes": 213
+    },
+    "vite.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/vite.log",
+      "sha256": "e0c5e9ec9b3c133e14bf98fe89e90b32f34c95eed540651486408dc95433272b",
+      "bytes": 168
+    },
+    "stop.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/stop.log",
+      "sha256": "46213ca28e25f8444a9519a6f0a71b174f4921fb83cea72881fbb43fd2374302",
+      "bytes": 73
+    },
+    "web-live.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/web-live.log",
+      "sha256": "34085bf4e7154fc576f0b5367289dc8f5c1042ce6235630fedb0a1a788a6b476",
+      "bytes": 222
+    },
+    "web-lint.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/web-lint.log",
+      "sha256": "9056e538242deddf6b54fc1bc3da60de72fd535593d3644274beb19cb0d8b33f",
+      "bytes": 19253
+    },
+    "kafka-format.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/kafka-format.log",
+      "sha256": "4779193846216ed440d64f7ee8351dfe567a991c9c4e299bb9ab16a3bf860b21",
+      "bytes": 976
+    },
+    "start-fixed.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/start-fixed.log",
+      "sha256": "3dd497b600500e1eaf184f292ec7b6a6f6bf6e5aa84e7aabb5aac0dc573a8b2c",
+      "bytes": 3464
+    },
+    "web-tests.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/web-tests.log",
+      "sha256": "37fe108565076c01767725ce21dae5bdeb1166cfdc0c39984564dec9c2e07e3b",
+      "bytes": 288
+    },
+    "kafka-logs/state-change.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/kafka-logs/state-change.log",
+      "sha256": "59ce04192c05651fa33c5bbbb49a773794a4ae961a902260a20739ca98682122",
+      "bytes": 87254
+    },
+    "kafka-logs/kafkaServer-gc.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/kafka-logs/kafkaServer-gc.log",
+      "sha256": "dc7062e420e1bafe9e5032058f02cb36fe1654441465aad20fcff323f0c788a9",
+      "bytes": 111236
+    },
+    "kafka-logs/kafka-authorizer.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/kafka-logs/kafka-authorizer.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "kafka-logs/kafka-request.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/kafka-logs/kafka-request.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "kafka-logs/log-cleaner.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/kafka-logs/log-cleaner.log",
+      "sha256": "1835f36bcb5bb4883fa190cc97502f62b60a7049031877f562d47ea144412c52",
+      "bytes": 780
+    },
+    "kafka-logs/controller.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/kafka-logs/controller.log",
+      "sha256": "7f7f047fcd1c2c0ecacaec43fbea89123ce644b290f5b842a48925d6f26ac06a",
+      "bytes": 81707
+    },
+    "kafka-logs/server.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/kafka-logs/server.log",
+      "sha256": "de62299e83d17155c2a7402334c2361d12b9133fdd757ea948e240ee5a743353",
+      "bytes": 413393
+    },
+    "runtime/spot-live-fused-2205/logs/gateway.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/runtime/spot-live-fused-2205/logs/gateway.log",
+      "sha256": "a54e64a6d2d088a7f81168b73b8253c2310e4b09a17f4d922886eded6116924d",
+      "bytes": 1540814
+    },
+    "runtime/spot-live-fused-2205/logs/realtime-gc.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/runtime/spot-live-fused-2205/logs/realtime-gc.log",
+      "sha256": "24fd5700b37cec6e8cfceb063c97189b87d837fc9ab1480681b12f1867b71a9a",
+      "bytes": 19426
+    },
+    "runtime/spot-live-fused-2205/logs/core-probe.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/runtime/spot-live-fused-2205/logs/core-probe.log",
+      "sha256": "70f06f7516eb518ac21340ce08cf22fe432764f5bc6f131303975f2f3d392f93",
+      "bytes": 106
+    },
+    "runtime/spot-live-fused-2205/logs/price-gc.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/runtime/spot-live-fused-2205/logs/price-gc.log",
+      "sha256": "4b09e8e5ee79a463c3c29fca09f92b39fe9bcd1324b54c539ec3994c206b4c46",
+      "bytes": 368449
+    },
+    "runtime/spot-live-fused-2205/logs/core-node0-gc.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/runtime/spot-live-fused-2205/logs/core-node0-gc.log",
+      "sha256": "c697972814a1c90904dc065069d0bce249983529a690e76f2558e5d8d0c0e27a",
+      "bytes": 114388
+    },
+    "runtime/spot-live-fused-2205/logs/price.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/runtime/spot-live-fused-2205/logs/price.log",
+      "sha256": "043d834f8c6d7cee199b8b41d8b8d835deb30e8033c73e08973a8e521ce7cd5f",
+      "bytes": 2140817
+    },
+    "runtime/spot-live-fused-2205/logs/maker-gc.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/runtime/spot-live-fused-2205/logs/maker-gc.log",
+      "sha256": "a21041f4ef2906dbe3dd55501a2db61116452c3aabbba096939b0fcbaf28f1ae",
+      "bytes": 223972
+    },
+    "runtime/spot-live-fused-2205/logs/core-node0.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/runtime/spot-live-fused-2205/logs/core-node0.log",
+      "sha256": "d9dc05500d2b121aad1465f42ccac6d5f12d2b9fa8d23a5672f9af8deee8e9ac",
+      "bytes": 1832
+    },
+    "runtime/spot-live-fused-2205/logs/realtime.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/runtime/spot-live-fused-2205/logs/realtime.log",
+      "sha256": "3539a20c6df3cecd97a77b5ff11983b62138cffb1ef101dee17ce913256bbbcb",
+      "bytes": 805476
+    },
+    "runtime/spot-live-fused-2205/logs/gateway-gc.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/runtime/spot-live-fused-2205/logs/gateway-gc.log",
+      "sha256": "020d512197acd0dfa35c7c3494e3d33019c461a044ef2c96ea6f774dcafa6802",
+      "bytes": 236347
+    },
+    "runtime/spot-live-fused-2205/logs/core-probe-gc.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/runtime/spot-live-fused-2205/logs/core-probe-gc.log",
+      "sha256": "6c9b05e78a15d8cee3c1306ec8e8b8bd24647e9cb940acb42a9c337ae820f014",
+      "bytes": 32308
+    },
+    "runtime/spot-live-fused-2205/logs/maker.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/runtime/spot-live-fused-2205/logs/maker.log",
+      "sha256": "0fed491f64e4125e6ee9a7b00d71404d6c8907c0bf3b18d78d993ddbd7575f1e",
+      "bytes": 593892
+    },
+    "runtime/spot-live-fused-2205/aeron/spot/node0/cluster/recording.log": {
+      "historicalPath": "/tmp/surprising-spot-fused-20261019-2205/runtime/spot-live-fused-2205/aeron/spot/node0/cluster/recording.log",
+      "sha256": "3cc595bc59f689e9bc136eb465f3ba7aeff102eacde97d6aef526421e7f71e78",
+      "bytes": 64
+    },
+    "maven-build": {
+      "historicalPath": "/tmp/surprising-spot-live-build.log",
+      "sha256": "97c1bdcbb8923013df02ef33fac47a864bcdb3eefae82596ff88b32a1c4d99d7"
+    }
+  }
+}

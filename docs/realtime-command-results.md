@@ -96,3 +96,19 @@ Web 188 项、lint/build，client 166 项及 analyze 通过。浏览器对交易
 恢复按钮“确认并继续撤单”只查询已发送的当前批；确认结果后可以继续 POST 原计划中尚未发送的后续批次。已发送批次不会再次 POST。初始保存失败不提交；进度保存失败停在原断点；查询失败、回执目标/命令号/计数不符均保持锁定；换账户不会继续发送原账户后续批次。Web 使用同账户 Web Locks 串行恢复，不支持该能力的浏览器在发送前明确报错。client 随安全设置保存断点，重启后恢复。
 
 本轮范围为普通现货批量撤单。旧直接 `cancel-open` 聚合端点、client 的旧底层直接聚合调用、算法/触发单批量操作、批量下单/改单及其他产品 UI 的完整异常恢复不在此次验收范围。没有部署或重跑完整 FUSED 服务栈，也没有安装原生 iOS/Android；实际验证见 [批量撤单记录](validation/spot-bulk-cancellation-20261019.json)。
+
+## 现货 FUSED 两端实链路验收（2026-10-19 后续）
+
+本轮在全新隔离数据库初始化时复现了 `cancel_batch_results` 缺少专用业务说明导致的 schema gate 失败。`init.sql` 的目录注释映射与 `20261019-cancel-batch-results.sql` 现均说明逐项事实、50 笔边界以及 NULL 的未决语义；完整初始化和运行时重放通过，没有绕过门禁。
+
+`SixProductLineContractLiveTest` 先使用后台接入 API 启用目标产品，再验证热连接；回执查询接受异步投影的 202，有限等待 GET 终态，不重发下单。可选 `SIX_LINE_LIVE_UI_FIXTURE` 将现货用户和交易对交接给两端验收，真实 maker 在此期间持续挂单；凭据文件限制为 0600，交接限时四分钟，finally 删除，成功或失败都清理本测试创建的做市策略。每次仅启一条产品，fixture JDBC 只允许既有测试库前缀。
+
+两端使用真实网关 HTTP 和 WebSocket，仅在已确认属于本轮的 realtime 进程上短暂停顿，然后恢复：
+
+- Web 在 1440 深色和 390 浅色页面各处理 51 个固定 ID；原批次一笔先由另一会话撤掉，回放显示 50 成功、1 失败。暂停导出时收到真实 202，恢复并重新加载页面后只发送后续 1 笔批次；计划之后新增的订单保留，验收后另行撤掉。
+- Flutter 使用真实 `AppState`/`ApiClient`/订阅与安全设置接口的测试存储，52 笔原目标分成 50+2；代理在网关收到并处理首批后断开响应，不伪造服务结果。暂停时 GET 未决，恢复并重建 AppState 后原键保留；总计两个不同批次，51 成功、1 已结束。真实盘口两侧存在，私有冻结清零，320px 暗色面板可查看失败详情。
+- 做市暂停后，Core 对账验证用户、做市无预留/冻结，无现货持仓，用户+做市+财库逐资产守恒差额 0；六笔基础成交的 REST/WS tradeId 对齐，账户和订单查询与权威状态一致。全过程五个应用进程不重启。
+
+复现需先按当前脚本启动单节点 SPOT、realtime 导出、独立数据库/Kafka/Valkey 和测试外部 ticker。启动 `SixProductLineContractLiveTest` 时同时显式设置原 `SIX_LINE_LIVE_*` 参数及 `SIX_LINE_LIVE_UI_FIXTURE=/tmp/surprising-spot-fused-<run>/client-fixture.json`。在四分钟交接窗口内，将该路径交给两端的 `SPOT_FUSED_LIVE_FIXTURE`，并把所属运行目录的 `pids/realtime.pid` 交给 `SPOT_FUSED_REALTIME_PID_FILE`；两个消费者都校验 PID 的 launcher identity 后才注入暂停。Web 的 `scripts/spot-fused-live.mjs` 使用网关允许的本地开发地址 127.0.0.1:5173，需要现有 Playwright 包（可用 `SPOT_FUSED_PLAYWRIGHT_MODULE` 指定模块路径）和 Chromium（可用 `SPOT_FUSED_CHROMIUM` 指定已有二进制）。Flutter 使用 `flutter test test/spot_fused_live_test.dart --reporter expanded`。两端均退出 0 后，向 fixture 路径加 `.done` 的文件写入 PASS，父验收继续核对余额、成交和进程身份。未设置显式 fixture 时 Flutter 实栈用例默认跳过，普通回归不会连接外部服务。
+
+该结果补充了上轮受控 API/WS 的证据；尚未在 iOS/Android 设备安装运行，也未验收交割、期权或批量下单/改单的全部异常恢复。本轮只修改 schema 说明与验收代码，未增加 Core 查询或更改交易协议、在线状态。详见 [实际运行与清理记录](validation/spot-fused-clients-20261019.json)。

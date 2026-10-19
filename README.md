@@ -228,3 +228,5 @@ Web/client 补齐单笔现货订单行改单和请求身份，响应丢失时只
 ### 现货批量撤单（2026-10-19）
 
 Web/client 从 realtime 获取完整固定目标，保存批次键和发送断点后按原生每批 50 笔撤单，展示成功/失败及失败订单。响应丢失时查询 realtime 提交投影；确认当前批次后只继续原计划未发送的批次，不重新读取目标或重发已发送批次。Core 保持交易职责，本次未改在线撮合/账户/账本交易逻辑。发布前需要 SQL 迁移、realtime 更新及必要的历史逐项结果回补；[完整契约和发布顺序](docs/realtime-command-results.md#现货批量撤单与固定目标恢复2026-10-19)，[验证与清理记录](docs/validation/spot-bulk-cancellation-20261019.json)。
+
+后续已完成真实 SPOT FUSED 两端验收：Web 桌面/手机和 Flutter 在真实做市、HTTP/WS 下验证分批撤单、暂停 realtime 后 202 未决、断响应/刷新/重建状态恢复以及新增订单保留。最终用户和做市冻结清零，逐资产资金守恒差额为 0。修复完整建库时新增回执列缺少业务说明触发的 schema gate；[复现方式](docs/realtime-command-results.md#现货-fused-两端实链路验收2026-10-19-后续)，[验证记录](docs/validation/spot-fused-clients-20261019.json)。原生设备安装、其他产品和其余批量写入仍待继续。
