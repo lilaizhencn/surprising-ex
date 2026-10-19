@@ -257,3 +257,12 @@ realtime 的 `CommittedOrderProjectionRepository.persistDelivery` 对 OPTION 写
 Web/client 的期权单笔下单及撤单先保存原请求身份，丢失响应后只查询 realtime 原回执；期权只允许未到期 TRADING 下单。到期自动排空普通单、TP/SL 和做市报价，经现有双人审批确认价格后行权；CLOSED 元数据及现金流水仍可查。两端按真实币种精度展示全额权利金和手续费，移除杠杆入口及不可信 Delta。后端尚未提供 Greeks 定价接口，因此两端明确显示暂无可信报价；不能把这一轮当成完整期权定价功能已经完成。
 
 实际覆盖 CALL/PUT 各价内、平价、价外六组合约：每组两张，权利金 10 USDT、买方手续费 0.005 USDT、卖方手续费 0.002 USDT；价内行权 4 USDT，其余为零。仓位、冻结和预占清零，用户/做市/财库资金差额为零。两端验证真实丢回包恢复与 CLOSED 流水，小屏修复摘要重叠。环境、命令、未测范围和清理状态见 [本轮记录](docs/validation/option-trading-20261020.json)。
+
+
+### 期权行情与参考估值、公开手续费版本（2026-10-20 后续）
+
+两端已接入 realtime 的期权参考接口 `/api/v1/gateway/candlestick/options/quote`，展示真实权利金、标的指数、同到期远期价及零贴现 Black-76 参考 IV/远期 Delta/Gamma/Vega/每日 Theta。模型与每1单位标的的口径明确显示，缺失/过期/越界不造数；它不替代账户风险或结算。HALT 中有新鲜源数据的未到期合约仍可查询，下单限制保持独立。
+
+期权链现在可直接切换 CALL/PUT，按标的身份、精确到期时刻及币种分组，使用整数行权价并保留同价多合约。Web 补齐320px已登录页头、语言菜单与主题交互。另修复公开有效手续费的版本名：返回 changeId，与公开合约精度版本一致，client 不再依赖被网关删除的 instrumentChangeId；Web 现货费用版本校验同步使用公开 changeId，缺失或旧字段仍拒绝。未放开脱敏、未添加猜测费率。
+
+发布需配套 realtime、gateway 与两端；本轮没有 SQL 或 Core 资金/撮合/协议变更。参考模型仅为明确的零贴现欧式现金模型，不提供完整利率曲线或组合 Greeks；原生设备安装及其他产品本轮实栈不在验收范围。[验证与清理记录](docs/validation/option-market-reference-20261020.json)。

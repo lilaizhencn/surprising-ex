@@ -36,6 +36,7 @@ class SixProductLineContractLiveTest {
     private final String run = UUID.randomUUID().toString().substring(0, 8);
     private String admin;
     private String approver;
+    private int optionCompanion;
 
     @Test
     void createListEditAndPauseThroughAdminRequestsWithoutRestart() throws Exception {
@@ -114,6 +115,23 @@ class SixProductLineContractLiveTest {
         changeStatus(id, created, "TRADING", 409);
         var trading = changeStatus(id, listed, "TRADING", 200);
         awaitSync(id, trading.path("lastChangeId").asLong());
+        if (line == ProductLine.OPTION && "true".equals(System.getenv("SIX_LINE_LIVE_OPTION_REFERENCE"))) {
+            var put = draft.deepCopy();
+            put.put("symbol", "QA-OPTION-PUT-" + run.toUpperCase(Locale.ROOT));
+            put.putNull("instrumentId");
+            put.put("optionType", "PUT");
+            // 与 CALL=1000、F=50500、K=50000 一致的 PUT=500，满足零贴现平价关系。
+            for (var configuredSource : put.path("indexSources")) {
+                var input = (ObjectNode) configuredSource;
+                input.put("path", input.path("path").asString() + "&premium=500");
+                input.put("websocketUrl", input.path("websocketUrl").asString() + "&premium=500");
+            }
+            var putCreated = write("instrument-admin", "/upsert?reason=option-reference-qa&expectedChangeId=0", put, 200);
+            optionCompanion = putCreated.path("instrumentId").asInt();
+            var putListed = changeStatus(optionCompanion, putCreated, "PRE_TRADING", 200);
+            var putTrading = changeStatus(optionCompanion, putListed, "TRADING", 200);
+            awaitSync(optionCompanion, putTrading.path("lastChangeId").asLong());
+        }
         if ("true".equals(System.getenv("SIX_LINE_LIVE_TRADING"))) exerciseTrading(jdbc, id, created);
         draft.put("instrumentId", id);
         draft.put("status", "TRADING");
@@ -130,7 +148,7 @@ class SixProductLineContractLiveTest {
         var changes = get("/api/v1/admin/gateway/instrument-admin/" + id + "/changes?productLine=" + line + "&limit=20", admin);
         assertThat(changes.size()).isEqualTo(5);
         if (line == ProductLine.OPTION && "true".equals(System.getenv("SIX_LINE_LIVE_EXPIRY"))) exerciseOptionExpiryMatrix(jdbc, created);
-        else if (line.isDeliveryProduct()) {
+        else if (line == ProductLine.LINEAR_DELIVERY || line == ProductLine.INVERSE_DELIVERY) {
             if (System.getenv("SIX_LINE_LIVE_UI_FIXTURE") != null) exerciseDeliveryClients(jdbc, created);
             if ("true".equals(System.getenv("SIX_LINE_LIVE_EXPIRY"))) exerciseDeliveryExpiry(jdbc, created);
         }
@@ -167,7 +185,7 @@ class SixProductLineContractLiveTest {
         try {
             java.nio.file.Files.writeString(fixture, json.writeValueAsString(Map.of(
                     "userId", user.id, "accessToken", user.token, "instrumentId", String.valueOf(instrumentId),
-                    "makerId", maker.id, "bidPriceTicks", bid, "runId", System.getenv("SIX_LINE_LIVE_RUN_ID"), "productLine", line.name(),
+                    "makerId", maker.id, "bidPriceTicks", bid, "runId", System.getenv("SIX_LINE_LIVE_RUN_ID"), "productLine", line.name(), "optionCompanionId", optionCompanion,
                     "session", Map.of("accessToken", user.token, "user", Map.of("userId", user.id, "username", "live-" + line.name())))),
                     java.nio.file.StandardOpenOption.CREATE_NEW);
             java.nio.file.Files.setPosixFilePermissions(fixture, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));

@@ -1,0 +1,932 @@
+{
+  "date": "2026-10-20",
+  "scope": "本轮仅 OPTION 实栈；完整目标继续，不能以本轮参考模型替代所有交易产品/完整期权功能验收。",
+  "changes": [
+    "realtime 读取已有价格事件，按当前冻结精度版本、源一致性与五秒新鲜度提供参考报价；不查询在线 Core。",
+    "显式零贴现、ACT/365F Black-76 IV/远期Delta/Gamma/Vega/每日Theta；不可求解时保留实际价格而Greeks为空。",
+    "Web/client 可操作的同到期期权链按精确标的身份/到期/币种/整数行权价分组，保留重复合约；迟到或过期数据不沿用。",
+    "HALT 中有效价格仍可读，交易权限与查询分开；CLOSED/已到期或无新鲜价格拒绝参考查询。",
+    "有效手续费公开版本改为changeId，与instrument一致；client继续严格核对用户/产品/合约/版本，不放开网关脱敏、不填默认费用。",
+    "Web 320px已登录页头修复横向溢出，语言菜单/主题/导航可操作。",
+    "定时清理保留新精度事件直到过期或元数据赶上，不能让旧编码重新覆盖；Web现货费用校验同步公开changeId。"
+  ],
+  "runtime": {
+    "runId": "option-reference-live-0200",
+    "rootHistorical": "/tmp/surprising-option-fused-20261020-0200",
+    "product": "OPTION",
+    "mode": "FUSED",
+    "coreNodes": 1,
+    "apps": 6,
+    "wallet": false,
+    "jdk": "HotSpot Corretto 27",
+    "heapsMiB": {
+      "core": 256,
+      "gateway": 384,
+      "providers": 256,
+      "kafka": 256,
+      "redis": 128
+    },
+    "candlestickThreads": 1,
+    "rocksdbMiB": [
+      16,
+      8,
+      16
+    ],
+    "kafkaPartitions": 1,
+    "kafkaRetentionHours": 1,
+    "priceSource": "Loopback QA ticker: CALL=1000, PUT=500, underlyingIndex=50000, forward=50500, strike=50000; meaningful price parity, actual FUSED accounts/HTTP/WS/maker."
+  },
+  "backend": {
+    "testsPassed": 103,
+    "classes": [
+      {
+        "class": "com.surprising.realtime.provider.MarketApplicationContextTest",
+        "tests": 20,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.realtime.provider.option.OptionQuoteServiceTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.realtime.provider.option.Black76ReferenceTest",
+        "tests": 18,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.candlestick.provider.service.RecentTradeQueryServiceTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.candlestick.provider.service.SymbolRegistryServiceTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.trading.order.service.TradingFeeServiceTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.gateway.provider.service.GatewayProxyServiceTest",
+        "tests": 40,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "command": "mvn -o -pl surprising-gateway,surprising-realtime/surprising-realtime-provider -am -Dtest=Black76ReferenceTest,OptionQuoteServiceTest,MarketApplicationContextTest,RecentTradeQueryServiceTest,SymbolRegistryServiceTest,TradingFeeServiceTest,GatewayProxyServiceTest -Dsurefire.failIfNoSpecifiedTests=false package",
+    "liveCommand": "SIX_LINE_LIVE_PRODUCT=OPTION SIX_LINE_LIVE_TRADING=true SIX_LINE_LIVE_OPTION_REFERENCE=true SIX_LINE_LIVE_UI_FIXTURE=<本轮隔离fixture> SIX_LINE_LIVE_JDBC_URL=<本轮隔离JDBC> mvn -o -pl surprising-gateway -am -Dtest=SixProductLineContractLiveTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "liveMarkers": [
+      "SIX_LINE_SETTINGS_PASS productLine=OPTION price=true lifecycle=true",
+      "SIX_LINE_RISK_PASS productLine=OPTION instrumentId=867 pnl=-100000 notional=100000000 maintenance=0 equity=9999999849950",
+      "SIX_LINE_REALTIME_PASS productLine=OPTION depthEvents=19 wsTrades=2 restTrades=2 identitiesMatch=true",
+      "CLIENT_FIXTURE_READY productLine=OPTION instrumentId=867 userId=3 makerId=4",
+      "CLIENT_HANDOFF_PASS productLine=OPTION browserAndFlutter=true",
+      "SIX_LINE_PUBLIC_QUERY_PASS productLine=OPTION terminalByOrderAndClient=true balancesMatch=true",
+      "SIX_LINE_TRADING_PASS productLine=OPTION instrumentId=867 trader=3 maker=4 executions=4 fundsDifference=0",
+      "SIX_LINE_CONTRACT_PASS productLine=OPTION instrumentId=867 version=11 transitions=DRAFT,PRE_TRADING,TRADING,EDIT,HALT processes=[81486, 81548, 81814, 82013, 82325, 82463]"
+    ],
+    "gatewayApplicationClassesIdenticalToFinalVerifiedBuild": 616,
+    "build": "BUILD SUCCESS",
+    "postLivePruneRegression": {
+      "red": "9 tests, 1 expected failure",
+      "green": "103 tests, 0 failures/errors/skips; package BUILD SUCCESS",
+      "liveReRun": false,
+      "scope": "Only event retention across scheduled prune changed after the live stack was stopped; reproduced and verified with mutable-clock event/metadata regression."
+    }
+  },
+  "web": {
+    "testsPassed": 229,
+    "lint": "pass; 435 existing informational diagnostics",
+    "build": "pass; existing chunk-size advisory",
+    "live": {
+      "productLine": "OPTION",
+      "callDelta": 0.6156362735685879,
+      "putDelta": -0.38436372643141214,
+      "model": "BLACK_76_ZERO_RATE_ACT_365",
+      "discountFactor": 1,
+      "unit": "PER_UNDERLYING_UNIT",
+      "underlyingIndexPrice": 50000,
+      "sameExpiryForwardPrice": 50500,
+      "chainSwitch": true,
+      "languageMenuAndTheme": true,
+      "stale503": true,
+      "expiredValuesHidden": true,
+      "resumed": true,
+      "widths": [
+        320,
+        390,
+        1440
+      ],
+      "postCount": 1,
+      "lostResponseRecovered": true,
+      "pageErrors": []
+    },
+    "halt": {
+      "productLine": "OPTION",
+      "instrumentId": "867",
+      "status": "HALT",
+      "referenceVisible": true,
+      "tradingDisabled": true,
+      "writes": 0,
+      "width": 320,
+      "pageErrors": []
+    },
+    "visualReview": "直接查看320px参考面板和HALT面板截图；报价、模型口径及各合约按钮均可读，整页横向宽度断言通过。",
+    "postLiveFeeContractRegression": {
+      "red": "2 tests, 1 expected failure",
+      "green": "229 tests pass; lint/build exit 0",
+      "liveReRun": false,
+      "scope": "SPOT fee revision key follows the same actual public DTO verified through OPTION. Missing/old/wrong revision remains rejected; no SPOT stack started."
+    }
+  },
+  "client": {
+    "testsPassed": 221,
+    "defaultOptInSkipped": 4,
+    "analyze": "No issues found",
+    "tradingLive": {
+      "productLine": "OPTION",
+      "status": "TRADING",
+      "openBlocked": true,
+      "closeQuantity": 1,
+      "posts": 1,
+      "clientOrderId": "app-ff9c9adb79e56edc1eaf65ef35e96251",
+      "pausedUnknown": true,
+      "restartRestored": true,
+      "positions": 0,
+      "locked": 0,
+      "width": 320,
+      "theme": "light",
+      "optionReferenceAndChain": true
+    },
+    "reference": "实际CALL/PUT切换，指数50000、同到期远期50500，Delta符号正确；旧合约响应不覆盖新选择。",
+    "feeLive": "旧gateway先复现fee terms=null；更新后320px深浅主题真实票据显示两张PUT权利金及费用1.0005 USDT，writes=0；同时读取实际参考报价。",
+    "liveCommands": [
+      "DELIVERY_LIVE_PRODUCT=OPTION LINEAR_DELIVERY_LIVE_FIXTURE=<隔离fixture> LINEAR_DELIVERY_REALTIME_PID_FILE=<本轮realtime.pid> flutter test test/linear_delivery_fused_live_test.dart",
+      "OPTION_REFERENCE_FEE_SESSION=<本轮0600会话fixture> flutter test test/option_reference_fee_live_test.dart"
+    ]
+  },
+  "financial": {
+    "realMaker": true,
+    "executions": 4,
+    "webOrderPosts": 1,
+    "clientClosePosts": 1,
+    "lostResponseRecovery": "original request read only, no duplicate submission; client SIGSTOP realtime -> unknown -> SIGCONT -> reconstructed AppState -> recovered",
+    "finalPositions": 0,
+    "finalReservations": 0,
+    "finalLocked": 0,
+    "fundsDifference": 0,
+    "postContractFixValidation": "Subsequent fee/HALT checks are read-only, no additional trading writes. Core financial/trading production code unchanged.",
+    "expiryMatrix": "本轮不重复实际到期；上一轮六组实际CALL/PUT到期见option-trading-20261020.json。"
+  },
+  "feeContract": {
+    "before": {
+      "instrument": {
+        "keys": [
+          "instrumentId",
+          "baseAssetId",
+          "quoteAssetId",
+          "settleAssetId",
+          "contractValueAssetId",
+          "symbol",
+          "changeId",
+          "instrumentType",
+          "contractType",
+          "baseAsset",
+          "quoteAsset",
+          "settleAsset",
+          "contractMultiplierPpm",
+          "contractValueAsset",
+          "priceTickUnits",
+          "quantityStepUnits",
+          "minQuantitySteps",
+          "maxQuantitySteps",
+          "minNotionalUnits",
+          "maxNotionalUnits",
+          "notionalMultiplierUnits",
+          "pricePrecision",
+          "quantityPrecision",
+          "supportedOrderTypes",
+          "supportedTimeInForce",
+          "postOnlyEnabled",
+          "reduceOnlyEnabled",
+          "marketOrderEnabled",
+          "maxLeveragePpm",
+          "initialMarginRatePpm",
+          "maintenanceMarginRatePpm",
+          "makerFeeRatePpm",
+          "takerFeeRatePpm",
+          "maxPositionNotionalUnits",
+          "userOpenInterestLimitRatePpm",
+          "userOpenInterestLimitFloorUnits",
+          "fundingIntervalHours",
+          "interestRatePpm",
+          "fundingRateCapPpm",
+          "fundingRateFloorPpm",
+          "impactNotionalUnits",
+          "minValidIndexSources",
+          "expiryTime",
+          "deliveryTime",
+          "underlyingInstrumentId",
+          "underlyingProductLine",
+          "strikePriceUnits",
+          "optionType",
+          "optionExerciseStyle",
+          "settlementMethod",
+          "status",
+          "effectiveTime",
+          "createdAt",
+          "updatedAt",
+          "riskLimitBrackets",
+          "indexSources",
+          "lastChangeId"
+        ],
+        "changeId": 7,
+        "instrumentChangeId": null,
+        "makerFeeRatePpm": 200,
+        "takerFeeRatePpm": 500
+      },
+      "fees": {
+        "keys": [
+          "userId",
+          "productLine",
+          "instrumentId",
+          "makerFeeRatePpm",
+          "takerFeeRatePpm",
+          "source",
+          "resolvedAt"
+        ],
+        "changeId": null,
+        "instrumentChangeId": null,
+        "makerFeeRatePpm": 200,
+        "takerFeeRatePpm": 500
+      }
+    },
+    "after": {
+      "userId": 3,
+      "productLine": "OPTION",
+      "instrumentId": "868",
+      "changeId": 7,
+      "makerFeeRatePpm": 200,
+      "takerFeeRatePpm": 500,
+      "source": "INSTRUMENT",
+      "resolvedAt": "2026-10-19T18:41:23.381329Z"
+    },
+    "deployment": "gateway changeId公开契约先发布，再发布client；realtime及两端模型配套更新。无需本轮SQL/Core协议迁移。"
+  },
+  "failuresResolved": [
+    "首轮期权UI已通过但测试随后误入交割专用支路：isDeliveryProduct也包含OPTION。明确限制支路为两条交割，停止该错误验收并重建本轮隔离Core/DB/Kafka/Redis，随后最终主用例退出0；不写假PASS。",
+    "首轮320px整页宽385：已登录页头语言选择和图标撑宽。改为紧凑语言标签及30px按钮，完整菜单保留；最终320/390/1440及语言/主题/导航交互通过。",
+    "价格版本不能与lastChangeId比较，已按冻结changeId匹配并覆盖版本先到/乱序/生命周期测试。",
+    "公开手续费instrumentChangeId被既有网关过滤，实际client票据永久未就绪；先复现后统一为公开changeId，未增加legacy兼容路径。",
+    "测试夹具补齐Jackson3基本类型及offline显式仪器列表；一次脚本Shell错误在本轮独占Gateway重载时改为bash。最终实测以退出0的日志为准。",
+    "最终清理边界回归：先新增prune后旧版本事件仍须拒绝的断言，复现1/9失败；保留尚未过期的新编码事件后103项全通过。",
+    "Web现货有效费用校验同步公开changeId；先用正确公开DTO复现1/2失败，修复后229项通过，缺失/错误版本及仅旧字段均拒绝。"
+  ],
+  "boundaries": [
+    "模型仅明确零贴现、报价与结算资产相同的欧式现金参考值，不是完整利率/波动率曲面或组合Greeks。",
+    "没有原生iOS/Android设备安装、生产部署、负载/性能提升结论或本轮其他产品实栈验收。",
+    "完整到期结果报告与全量功能对齐仍需继续，不能把现金账本与本轮报价当成全平台完成证明。"
+  ],
+  "sources": [
+    "https://www.lme.com/Trading/Contract-types/Options/Black-Scholes-76-Formula",
+    "https://github.com/lballabio/QuantLib/blob/master/ql/pricingengines/blackcalculator.cpp"
+  ],
+  "artifactHashes": [
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+      "sha256": "8d88a8463dfcb33ebd0496d0b1ab69525a01316f7f50510d36dc56ddab343830"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar",
+      "sha256": "35eb13089a7fcc0c4f5dc1dfad2e16c5f04da1922cfa9669a3a7d2c61918a12a"
+    },
+    {
+      "path": "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "6d5ab616cbb424890c1e881673a91701cadba853292b895004b125a9c03d7df2"
+    },
+    {
+      "path": "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "93d8b3dd211a61dd26507ae2f77651d05a24f8234608d8ca8ba68e76985a55db"
+    },
+    {
+      "path": "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "e50223f53246b9b5ce319480f5fe4f20e3006ea9a43af6fb85d66a76c78bdfe0"
+    },
+    {
+      "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "4a8daf561ba016b262eec87f25891bf8659515699979f7f095268e6cd302f8de"
+    },
+    {
+      "path": "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "7c13acce6ab5b26b5d1ec5f98e2597f45970537e1bf8a2d0760f63e7256b678d"
+    }
+  ],
+  "tradeStageGatewayHashes": [
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+      "sha256": "8d88a8463dfcb33ebd0496d0b1ab69525a01316f7f50510d36dc56ddab343830"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar",
+      "sha256": "35eb13089a7fcc0c4f5dc1dfad2e16c5f04da1922cfa9669a3a7d2c61918a12a"
+    },
+    {
+      "path": "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "31848d6a85b2bcfb3e4db821ffe0510a08f3e597224837d20a1bdf9b12aff05e"
+    },
+    {
+      "path": "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "d705853478ae59d162485b7b38a5466a1a2386f2a794ea874e43be3ea0976c88"
+    },
+    {
+      "path": "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "e50223f53246b9b5ce319480f5fe4f20e3006ea9a43af6fb85d66a76c78bdfe0"
+    },
+    {
+      "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "4a8daf561ba016b262eec87f25891bf8659515699979f7f095268e6cd302f8de"
+    },
+    {
+      "path": "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "7c13acce6ab5b26b5d1ec5f98e2597f45970537e1bf8a2d0760f63e7256b678d"
+    }
+  ],
+  "evidenceHashes": [
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0200/client-live-final.log",
+      "bytes": 467,
+      "sha256": "2b54213d1584de0fc3f0ae736fc38fb2cc245769401304a69a418447f3923d85"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0200/fee-client-red.log",
+      "bytes": 2383,
+      "sha256": "2e9569ae42469f0d0c6ca5d770a0db36315dfea3bd9ae1b5166c1fa0400cfc9d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0200/fee-client-verified.log",
+      "bytes": 322,
+      "sha256": "c3f96490719402176b088d5a3d657b77587c94a5990cde8c4be6ac91cfcb5107"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0200/gateway-fee-restart.log",
+      "bytes": 453,
+      "sha256": "2247e2e8f0efa986c03e0ca3af145bd5e543971b2eaf1a262bfd5a23eff5e041"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0200/halt-readonly.log",
+      "bytes": 80,
+      "sha256": "6d5d074c7534959cea7ab6a31782176061530569f0b1ca48598bbb3d3ccd5329"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0200/live-final.log",
+      "bytes": 30298,
+      "sha256": "a452c7ee38c906cf6333b501747ba6bcc8d5dc2fe0fdc29db62f0bb1f81ca790"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0200/realtime-final-restart.log",
+      "bytes": 454,
+      "sha256": "5cb4ab7e584d5e2f1bb26ebeadbb22828de3d9820f3304ccfe50141cc29f7a10"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0200/reference-halt-320.png",
+      "bytes": 56507,
+      "sha256": "6591522082c99a2fbad47c6ab0771fcd2d31bb9360af969563e42cf2c3644fbc"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0200/reference-web-1440-dark.png",
+      "bytes": 55869,
+      "sha256": "e5c993bf772b26e4a152602ae1882b7d67e33211dfa0c278f1649849f0b6ba78"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0200/reference-web-320-light.png",
+      "bytes": 57029,
+      "sha256": "abe73db48b5f65aab0c277dfd29e7eb960afb2a03f5f74d66951c500e3340e21"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0200/reference-web-390-dark.png",
+      "bytes": 58644,
+      "sha256": "9376dca5ec86ca1e36afe5620341c77cef545dc4e5d69d5f4d8fc2681ab5aa8e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0200/start-final.log",
+      "bytes": 265,
+      "sha256": "bad5c6f97f2d9e99906fae3e1dbc63cc68aca7355805c1f5694a85ead5484565"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0200/stop-final.log",
+      "bytes": 81,
+      "sha256": "39806dee207e714c672b038f66beef5337a2c0a772243aa0ff9c447a10002f92"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0200/web-live-final.log",
+      "bytes": 118,
+      "sha256": "b215d85ba1d67f3530a2f77a0374f1bc023ab221ac6eaac84bcddb13fc4a2a35"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-backend-final.log",
+      "bytes": 25343,
+      "sha256": "27750d685bc09d9b1c959fb3daf868447790bac9da33b3919246495c30bc694e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-backend-verified.log",
+      "bytes": 128773,
+      "sha256": "92c6bbb8aae8dcbb50fefd1b88b0321c8f91911de674b17af36ba0d5dfc37402"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-build.log",
+      "bytes": 33125,
+      "sha256": "e5e3a2f1f612f85c5ac565e9d96d869d9857bb16ba408342decce51fc815fdb1"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-analyze-final.log",
+      "bytes": 96,
+      "sha256": "8791870a035d97546272485a9fd72a84ef588364f5766cd4e2230580cfbd7355"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-analyze-last.log",
+      "bytes": 96,
+      "sha256": "5205006ffdcae65a14cd130b71b6c69cd67865af451f4af51524163d1d0acb7f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-analyze-verified.log",
+      "bytes": 96,
+      "sha256": "b0702e5f37eb835117470dc0d97f28eda98ecc6f5a6cbceb8a1bd32465691c73"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-analyze.log",
+      "bytes": 1332,
+      "sha256": "a13b11f37472b0c0ceb8ffde0f60b9f8cbc75e4b6b2304867149dfad452696f0"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-analyze2.log",
+      "bytes": 96,
+      "sha256": "7050464577f0aa415ac83c65e511b15563d60f2476081609db526246d2cfdc27"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-analyze3.log",
+      "bytes": 3889,
+      "sha256": "07eecb047fcfe295eae5404c6e85d6010b859ec585b0a163509c97d46a2dbc98"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-analyze4.log",
+      "bytes": 96,
+      "sha256": "7969802ab7f28b3548e56c470b93ffbbdf61d8dfb8c1bf315e009c3230210687"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-analyze5.log",
+      "bytes": 96,
+      "sha256": "4956d557c20d4734c4faf6423186bf6466fdf141c38741035b9232abe539a1c0"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-fix.log",
+      "bytes": 308,
+      "sha256": "fc96d2946826bfa6d57c95fe314f0f84f9e25b2a9a9c68435aa5c392436bc71f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-fix2.log",
+      "bytes": 56,
+      "sha256": "36a4af8ede1b88dedda24f0628b2e80f2d38b739b3f695b4ea6026dcf39cc644"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-format-final.log",
+      "bytes": 84,
+      "sha256": "c25f542a3d25c8968bacc1ad70b203b58ad1946f05b40bd42399947a8a47c3b2"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-format-last.log",
+      "bytes": 74,
+      "sha256": "ed927119ec4a1597d14408fa23f84de2441a7d8bc6c52f9f590fd43cf8b8e648"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-format.log",
+      "bytes": 171,
+      "sha256": "f07edd22abfde0f549b151ad45bef36c63f4b7e7271fe60cfd1caac6d7626873"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-format2.log",
+      "bytes": 46,
+      "sha256": "1685974b88bd671112e17334bdc2abb8ef350e01ae026547459ec7a8307375ec"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-format3.log",
+      "bytes": 85,
+      "sha256": "a88a09c87556cb4e33c47b89b63031415881d7a974a1bc51954ee8d838129f4c"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-format4.log",
+      "bytes": 46,
+      "sha256": "ebf8691cd9669b02dd9d748aaf543551b337b2beb44f2d128dc7ffbfa0318f03"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-format5.log",
+      "bytes": 79,
+      "sha256": "9c044558a104ea34b5166d3cd2509bc6abf78404939ac08af1c7ebb5e1ca25dc"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-live-format.log",
+      "bytes": 98,
+      "sha256": "b392ebe4bfab911b27c70f468dd1e78795230dc38e05991ca73b28c809ebca79"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-market-test.log",
+      "bytes": 582,
+      "sha256": "ce622387cb6882241565251ae3b5e4956cfa8379fce2d534a20e8ceeb3e72e01"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-tests-final.log",
+      "bytes": 49705,
+      "sha256": "9b8e68c00599da32182bb076b476160f046bc6951b6c5b31803d0d780494a03a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-tests-last.log",
+      "bytes": 50339,
+      "sha256": "e41e1aa364e7fa2fe63caf3f1028752d0954fb08f35edf3ae50bdf8af953d2f5"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-tests-verified.log",
+      "bytes": 50242,
+      "sha256": "720f19a2a1fcf7cad00c5a0bd19a606111ad0539980ae942ac0c74773520bc41"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-tests.log",
+      "bytes": 48792,
+      "sha256": "4f37f7364ee96994a01beebac5de87cc3afea6d93cbd9c1b7d1f199b98104690"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-tests3.log",
+      "bytes": 61967,
+      "sha256": "4a8bd0d0532032d6ac532594c9e024b03bd7f73f7087c62bf1f7f1e818bab24a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-client-tests4.log",
+      "bytes": 50088,
+      "sha256": "a57773da88cddbabaa7f7572d82b9dacb69d7ce939f6a1d66d0e864e0247469e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-fee-backend.log",
+      "bytes": 41090,
+      "sha256": "511cbc5bedc80dbebc116fe673c0f330466bf8f85025d22c0d3f4bedb994e22f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-fee-client-analyze.log",
+      "bytes": 96,
+      "sha256": "a113f63a2e980b5a73412ac4f24207f802b7ce3db4ecb2794e5a8314b2638339"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-fee-client-format.log",
+      "bytes": 46,
+      "sha256": "45f3353e898deb4b13521a069348e591aca266875cf9b82d5617f6118e7bec29"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-fee-client-tests.log",
+      "bytes": 50037,
+      "sha256": "118c533c1ea0b4e59ff9b359b562e2801d4b9f9219101a8f81fb3fe00d867b85"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-fee-live-format.log",
+      "bytes": 97,
+      "sha256": "ffc663fac05dee8056f28eb274fc7a053f54ab9c691cc238de95ec218d600b3b"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-package-final.log",
+      "bytes": 126336,
+      "sha256": "2a9c5c62b6fd5e253bb77af9fae52c4e4ce99e905db3337f405d88d2487ccb8b"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-package.log",
+      "bytes": 43420,
+      "sha256": "8d94e04a4d7d286c2f28f9c31f554771784232bfcbb1db130e801d62014d2b12"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-query-final.log",
+      "bytes": 117175,
+      "sha256": "9ef7d77b9f81175b3ef55349f493d3bca94071ea16075a4d5bc98a696e3e0f55"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-script-format.log",
+      "bytes": 40,
+      "sha256": "a5377a7cef24c3e831b3cec2deec4979d34d3bd9329e0643b3fb3e726d8b7ab5"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-tests.log",
+      "bytes": 39767,
+      "sha256": "eec6c4b5cb67482de716d2b6fd0860a84a4a5466b629ef2163b41cba68650aae"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-tests2.log",
+      "bytes": 22824,
+      "sha256": "5c632189cd6beaf76d79916aa92c7b41b9318b3259f66d924cc0811936838d1a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-tests3.log",
+      "bytes": 24201,
+      "sha256": "57b05331fa963acfcad929f1415d96ac617ac97fb83fab93031d5c0a4f295dc8"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-build-final.log",
+      "bytes": 3274,
+      "sha256": "1b2d8f29017e794ab0ddf94ec31248672ae049639c24e16694031c20684c73d5"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-build-verified.log",
+      "bytes": 3274,
+      "sha256": "edd88ca9cee73b505f11ed5762f293841f40415415189136943124dd4d1527e3"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-build.log",
+      "bytes": 3274,
+      "sha256": "988a874121307a96dfe699c9feab5aa9b7b75bb80ecb2d5bd757261603223d47"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-build2.log",
+      "bytes": 3274,
+      "sha256": "9e462cc916cdf6129d8f6fe4b073c8e62150713e7a73ff5d987862b19046ff88"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-format-final.log",
+      "bytes": 41,
+      "sha256": "4c40aa1e7838a58a6a3786a2fcec5a54bb04fe738450e92952ed93b3f765eb92"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-format.log",
+      "bytes": 10845,
+      "sha256": "345d16019232c2550e82d65a4a1f9c469ffe117fe01c04c2b1713407811da984"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-format2.log",
+      "bytes": 40,
+      "sha256": "a6da047079da9e280a5a38e05863eada6e3ee139b175991dd95f948b417d22a8"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-format3.log",
+      "bytes": 42,
+      "sha256": "b94e2ededf582efa868d9c7b5f586024ab4ac0f5c7e7ebcacef9a06393825113"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-format4.log",
+      "bytes": 42,
+      "sha256": "c2c8bbbb112e1015744389616a59c72ea8d2c82c3c244a61b5e39441851520cf"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-format5.log",
+      "bytes": 38,
+      "sha256": "921754f718f3936071fa120f9770d301d92fa6ac31bfb6d06fb38ab43de7e4ac"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-format6.log",
+      "bytes": 40,
+      "sha256": "cff3c5c8c382bf2363bdf798d2bcc8d7deef8252a2264c009d5b50fef728fc76"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-lint-final.log",
+      "bytes": 19253,
+      "sha256": "dc3e827e08ed71b13e55bb61bcf07bd60050e2d1b0e07492e635e9a34da89d98"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-lint-verified.log",
+      "bytes": 19253,
+      "sha256": "1e58040ae336f4f4ce3743d4d10a01064c59e9b24605d70ff4294d8b7c4200a0"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-lint.log",
+      "bytes": 19253,
+      "sha256": "0a5c22aba9c61de73657bab7e56a63b0055f5c86f3b147cad84c76af24c43a7d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-tests-final.log",
+      "bytes": 288,
+      "sha256": "5d89462d1bacbc4d127718046f82bd893d4d9180c94212f6f6f9900c0a72c20a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-tests-verified.log",
+      "bytes": 289,
+      "sha256": "656bad3301d34295d3a7265a3ded542f2a3c8c3130b144dec7a19f640f19f0c7"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-tests.log",
+      "bytes": 288,
+      "sha256": "8a270ec90d9e94ddaef5f5947bf7cac8441beec0faa7403e92f94f3ed944e42a"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.option.Black76ReferenceTest.xml",
+      "bytes": 55458,
+      "sha256": "d623e945c144ac7f517fccbfbf52febc231ef992b832ad26136bf07d9adb5c98"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.option.Black76ReferenceTest.txt",
+      "bytes": 371,
+      "sha256": "75b00f4575fed5f0eae3329eea5a32e8fb7d073e90bc869386535e576244d5ae"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.MarketApplicationContextTest.xml",
+      "bytes": 138469,
+      "sha256": "183f5270eb1b66ddfc788f38cb25f5fbde1f7d15c8c77eb674283470dfaddc79"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.MarketApplicationContextTest.txt",
+      "bytes": 373,
+      "sha256": "379e0ab5cffe84e4ef52e3d23486b8cbe54250a8cbfad0563189a2941b798d76"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.option.OptionQuoteServiceTest.xml",
+      "bytes": 53504,
+      "sha256": "b85afabfa4ce7d5c7d5caa954f82dac8fa124e3194677d01f6e0a5d5862a194f"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.option.OptionQuoteServiceTest.txt",
+      "bytes": 374,
+      "sha256": "7162b2b160378433b659e74348e44b6dc16ff863370366ecef1d0e5759af3083"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.SymbolRegistryServiceTest.xml",
+      "bytes": 52491,
+      "sha256": "be0379c0029ca3aca82912c97fc7026290ac6dc92e68c71dc8424f9097483051"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.SymbolRegistryServiceTest.txt",
+      "bytes": 388,
+      "sha256": "2beb254a099f5753a0dbc96fbb016b55110a7894bf0f9ffa03e35e8b0ef79024"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.RecentTradeQueryServiceTest.xml",
+      "bytes": 53752,
+      "sha256": "5cfc19c9a392a0fb56d5a42f5ca14b3b4a196a287836f8c2e46f7b79af40fcef"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.RecentTradeQueryServiceTest.txt",
+      "bytes": 392,
+      "sha256": "0ff7fd8ea6c48b4a98a10bab54f71ed703473c0a278230a7ed4997c38bb7a030"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.SixProductLineContractLiveTest.xml",
+      "bytes": 45452,
+      "sha256": "5d98bb9c7c5cc80b4a694d01f28539a3b982e3d7ec1a70fda71ccaba0a49d483"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.SixProductLineContractLiveTest.txt",
+      "bytes": 386,
+      "sha256": "875110ceb7db72e5bfa41f6775331a9d064b2a53fcc08230b8bb06baa871fdfc"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.TradingFeeServiceTest.xml",
+      "bytes": 46922,
+      "sha256": "5e39bf3797219f2e215b363e26fcd91b5c38aca151e6b063a6ae40095be72b72"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.TradingFeeServiceTest.txt",
+      "bytes": 366,
+      "sha256": "153ba1c317eeb406fbcf16460a1a6059aec465f99d320c79cf9fb21ad4d01b67"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.GatewayProxyServiceTest.xml",
+      "bytes": 52164,
+      "sha256": "e82929c130787cf574086cf1ebdad3b862e387d313db7577526d1ecd74a08848"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.GatewayProxyServiceTest.txt",
+      "bytes": 377,
+      "sha256": "c639fb1ecd5199cfa2d0de929fdfd13b92f9364f6e7159dc360fc5cd888c1d94"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-prune-red.log",
+      "bytes": 24891,
+      "sha256": "52498576aaafa226cbd9df3072d08da8bc7440af982033a2c3ba0b3b8b1a5b1f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-prune-verified.log",
+      "bytes": 128772,
+      "sha256": "71a9d26e95f1d6deea96222e94e6ce481d6d544903ed82a7103fb17fa961ad0d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-fee-red.log",
+      "bytes": 1229,
+      "sha256": "1bcbb86f1d2c91393567aa9c3b2ff293ac5b173e2de620825576d00b899e6aef"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-final-lint.log",
+      "bytes": 19253,
+      "sha256": "c1a003bedf30c99977c21d003659f05e2c585ef82aa75dce28a7703368b14fa4"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-final-build.log",
+      "bytes": 3274,
+      "sha256": "2e742a361e67a96d0248a0444e7d55185886c99a4704bb46c167c866ed8b9b9e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-reference-web-final-tests.log",
+      "bytes": 288,
+      "sha256": "dafd94f357de653812b1ffe88b0451498ce31c201492f99bc53c01a252868a88"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.MarketApplicationContextTest.xml",
+      "bytes": 138472,
+      "sha256": "2fb2bd5dabe95f3f6fad5f910a9aba55068794498c7d3d90d68fd0d8fa5ceb00"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.MarketApplicationContextTest.txt",
+      "bytes": 373,
+      "sha256": "52261d9429876dc7f740d078f8632892c90795598b74487ac61dbf09b13e88cc"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.option.OptionQuoteServiceTest.xml",
+      "bytes": 53503,
+      "sha256": "acdc6863cdce33015d510d7e9acd45c615c52ecabec5c855d74d9a908fccc6e2"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.option.OptionQuoteServiceTest.txt",
+      "bytes": 374,
+      "sha256": "2b79a247db0912b1f936382dafa7c01216e368adf800e5908bcf149479104ebb"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.option.Black76ReferenceTest.xml",
+      "bytes": 55458,
+      "sha256": "a7e475b6ac756bb9fccdd2800ce7c37fa5f9a1291a3fb415983409da49b2a0de"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.option.Black76ReferenceTest.txt",
+      "bytes": 371,
+      "sha256": "70e075a7f5c22871ae8acbf266b590e2bcfd65aa9184bc56283822969a82503b"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.RecentTradeQueryServiceTest.xml",
+      "bytes": 53753,
+      "sha256": "1e44de4475208bdf62bf7f17dcf4fe569cd6b46576819f741a8211b3cb966d7f"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.RecentTradeQueryServiceTest.txt",
+      "bytes": 392,
+      "sha256": "17b577cec55c96dda5f03894798218ac409425999b35dd1cf20972917fa9803e"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.SymbolRegistryServiceTest.xml",
+      "bytes": 52493,
+      "sha256": "1571e5525031fa92900b3755ccdb3906e85da3736c77bd6e840d70580010a783"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.SymbolRegistryServiceTest.txt",
+      "bytes": 388,
+      "sha256": "2beb254a099f5753a0dbc96fbb016b55110a7894bf0f9ffa03e35e8b0ef79024"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.TradingFeeServiceTest.xml",
+      "bytes": 46920,
+      "sha256": "3ddf59802ed2c26aa04ed9beb5bb090fa4301b4935fe2f57d69d9be1e7f37381"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.TradingFeeServiceTest.txt",
+      "bytes": 366,
+      "sha256": "4c42e6944b571829d95ef81d2e23048fd3e4e5040fdfb5ce9eb3c9e629087684"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.GatewayProxyServiceTest.xml",
+      "bytes": 52165,
+      "sha256": "2e5d76ecc09e605eb816e5394b6f6190ab70a3d97d3aea2dd7659a281e5ab4bf"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.GatewayProxyServiceTest.txt",
+      "bytes": 377,
+      "sha256": "26ec0048d967897d9e48e22e9729a5aba87be18edfaca2cc410f81250f7d8646"
+    }
+  ],
+  "cleanup": {
+    "state": "complete",
+    "preserve": "existing PostgreSQL pid1435 and all unrelated data",
+    "mavenReportsRemoved": 30,
+    "applicationsStopped": true,
+    "ownedKafkaTickerRedisViteStopped": true,
+    "ownedDatabaseDropped": true,
+    "ownedRuntimeRootRemoved": true,
+    "ownedSessionFileRemoved": true,
+    "hashedTemporaryLogsRemoved": 63,
+    "existingPostgresqlPidPreserved": 1435,
+    "historicalPaths": "Deleted after hashing; retained only for historical evidence lookup.",
+    "completedAt": "2026-10-19T18:50:40.192259+00:00"
+  },
+  "finalVerifiedBuildArtifacts": [
+    {
+      "path": "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "185d44a1742312e9082fc1e3ac798a0ca28115a56f8c90c3ae289515735ae86c"
+    },
+    {
+      "path": "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "a05ab941d701db22015d7d2191af05499a37bc64e5aae325ecf8e80dcb130e95"
+    }
+  ],
+  "artifactHashesMeaning": "Historical live runtime JAR copies before shutdown. finalVerifiedBuildArtifacts identifies the subsequent verified package build."
+}

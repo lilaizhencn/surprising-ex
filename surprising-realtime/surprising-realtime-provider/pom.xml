@@ -8,6 +8,13 @@
     </parent>
     <artifactId>surprising-realtime-provider</artifactId>
     <dependencies>
+        <!-- Reference analytics only; prices and trading admission remain owned by existing services. -->
+        <dependency>
+            <groupId>com.surprising</groupId><artifactId>surprising-price-api</artifactId><version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId><artifactId>commons-math3</artifactId><version>3.6.1</version>
+        </dependency>
         <!-- Deterministic replay library only; RealtimeApplication does not scan or start Core. -->
         <dependency>
             <groupId>com.surprising</groupId><artifactId>surprising-aeron-service</artifactId><version>${project.version}</version>

@@ -46,7 +46,9 @@ class TradingFeeServiceTest {
         assertThat(response.userId()).isEqualTo(1001L);
         assertThat(response.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
         assertThat(response.instrumentId()).isEqualTo("1");
-        assertThat(response.instrumentChangeId()).isEqualTo(7L);
+        assertThat(response.changeId()).isEqualTo(7L);
+        String wire = new tools.jackson.databind.ObjectMapper().writeValueAsString(response);
+        assertThat(wire).contains("\"changeId\":7").doesNotContain("instrumentChangeId");
         assertThat(response.makerFeeRatePpm()).isEqualTo(-50L);
         assertThat(response.takerFeeRatePpm()).isEqualTo(350L);
         assertThat(response.source()).isEqualTo("VIP_SYMBOL");

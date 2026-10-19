@@ -563,3 +563,8 @@ LINEAR_DELIVERY <cluster-directory> <aeron-directory> <archive-control-channel> 
 旧数据库在停止本产品 exporter 后执行 `deployment/migrations/20261020-option-exercise-ledger.sql`，只把 OPTION 账户、OPTION 参考号的旧 DELIVERY_SETTLEMENT 分类改正，保留原 ID、金额、余额及检查点。与正确分类已有相同自然身份时整笔失败，先对账，不自动删除历史记录。迁移可重复执行；PostgreSQL 测试同时验证迁移后重放仍只有一条记录及冲突回滚。
 
 历史缺失流水仍使用 `CommittedDeliveryLedgerRepair` 的独立 `.delivery-repair` 检查点和有限 end-position，首参数可为 OPTION；不得复用 live 检查点或再次提交行权。修正生产者的价格单位不能追溯修改已经提交的交易；已提交错误结算需要独立按账本对账处理。本轮实际六组结算与两端读取结果见 [验证记录](../docs/validation/option-trading-20261020.json)。
+
+
+### 期权参考报价读视图（2026-10-20）
+
+仅 OPTION 进程注册 `OptionQuoteService` 与现有 price.events topic 消费者，保存每合约一份可重建价格发布，按当前精度版本及源数据新鲜度查询；不向在线 Core 发查询。经既有 candlestick 市场数据路由返回真实价格与明确零贴现的参考 Greeks，源数据不合格则503，模型无法求解时greeks为null。停牌的未到期合约仍可查询，交易权限不随查询开放。[模型、公开费用契约和发布步骤](../docs/option-market-reference.md)。

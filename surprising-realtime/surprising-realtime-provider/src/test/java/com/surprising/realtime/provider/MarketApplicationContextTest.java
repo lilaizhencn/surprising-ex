@@ -74,6 +74,13 @@ class MarketApplicationContextTest {
                     .doesNotHaveBean(com.surprising.realtime.provider.export.TradeExportService.class)
                     .doesNotHaveBean(com.surprising.realtime.provider.export.CommittedOrderProjectionRepository.class)
                     .doesNotHaveBean(com.surprising.aeron.service.config.AeronCoreLifecycle.class);
+            if (line == ProductLine.OPTION) {
+                assertThat(ctx).hasSingleBean(com.surprising.realtime.provider.option.OptionQuoteService.class)
+                        .hasSingleBean(com.surprising.realtime.provider.option.OptionQuoteController.class);
+            } else {
+                assertThat(ctx).doesNotHaveBean(com.surprising.realtime.provider.option.OptionQuoteService.class)
+                        .doesNotHaveBean(com.surprising.realtime.provider.option.OptionQuoteController.class);
+            }
             MockMvcBuilders.webAppContextSetup(ctx).build()
                     .perform(get("/api/v1/candlestick/candles").param("instrumentId", "1")
                             .param("period", "1m").param("startTime", "2026-09-20T00:00:00Z")
