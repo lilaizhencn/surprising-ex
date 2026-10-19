@@ -125,8 +125,14 @@ public class OrderInternalController {
     }
 
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/commands/{commandId}")
-    public ResponseEntity<OrderCommandReceipt> commandResult(@PathVariable("commandId") UUID commandId) {
-        return requests.commandResult(commandId);
+    public ResponseEntity<OrderCommandReceipt> commandResult(@org.springframework.web.bind.annotation.RequestHeader("X-User-Id") long userId, @PathVariable("commandId") UUID commandId) {
+        return requests.commandResult(userId, commandId);
+    }
+
+    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/submission")
+    public ResponseEntity<com.surprising.trading.api.model.OrderSubmissionResponse> submission(@RequestParam("userId") long userId,
+            @RequestParam("clientOrderId") String clientOrderId) {
+        return requests.submission(userId, clientOrderId);
     }
 
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/by-client-order-id")

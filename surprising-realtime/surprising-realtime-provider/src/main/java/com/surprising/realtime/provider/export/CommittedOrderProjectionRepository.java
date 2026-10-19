@@ -4,6 +4,7 @@ import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.product.api.ProductLine;
+import com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult;
 import java.util.List;
 import java.util.*;
 import java.nio.ByteBuffer;
@@ -117,22 +118,18 @@ public class CommittedOrderProjectionRepository {
     private record FundingCursor(long current, long next, long rate, boolean complete) {}
 
     /** All orders and their visibility watermark commit together, before the export checkpoint. */
-    void persist(ProductLine product, List<RealtimeFrame> orders, long exportSequence) {
+    void persist(ProductLine product, List<RealtimeFrame> orders,
+                 List<CommittedCommandResult> commandResults, long exportSequence) {
         if (product == null || exportSequence < 0) throw new IllegalArgumentException("invalid order projection batch");
-        if (orders.isEmpty()) {
+        if (orders.isEmpty() && commandResults.isEmpty()) {
             // Commands without order changes must still advance the visibility watermark.
             transaction.executeWithoutResult(status -> advanceWatermark(product, exportSequence));
             return;
         }
         // Read each committed batch from the admin catalog. Disabled strategies still own
         // their historical accounts; changing enablement must not reclassify old maker fills.
-        Set<Long> marketMakerAccounts = new HashSet<>(jdbc.queryForList(
-                """
-                SELECT unnest(account_ids) FROM market_maker_strategies WHERE product_line=?
-                UNION SELECT value::bigint FROM market_maker_business_settings,
-                    jsonb_array_elements_text(settings->'trade'->'accountIds')
-                    WHERE product_line=?
-                """, Long.class, product.name(), product.name()));
+        Set<Long> marketMakerAccounts = marketMakerAccounts(product);
+        var receipts = retailCommandResults(product, commandResults, marketMakerAccounts);
         // This bounded, per-commit SQL batch owns only the latest supplied version of each order.
         // PostgreSQL multi-row ON CONFLICT cannot update the same key twice in one statement.
         var latest = new LinkedHashMap<Long, OrderWrite>();
@@ -174,6 +171,7 @@ public class CommittedOrderProjectionRepository {
         }
         if (!executions.isEmpty()) throw new IllegalArgumentException("incomplete execution pair");
         transaction.executeWithoutResult(status -> {
+            persistCommandResults(product, receipts);
             // A stored maker order is the durable proof of a previous ordinary-user fill.
             // Reuse it across batches/restarts instead of checkpointing a second history index.
             var candidates = latest.values().stream().map(OrderWrite::order)
@@ -209,6 +207,76 @@ public class CommittedOrderProjectionRepository {
             });
             advanceWatermark(product, exportSequence);
         });
+    }
+
+    /** Receipt backfill owns a separate checkpoint; it must not advance the order watermark. */
+    void repairCommandResults(ProductLine product, List<CommittedCommandResult> results) {
+        if (product == null) throw new IllegalArgumentException("product is required");
+        if (results.isEmpty()) return;
+        var receipts = retailCommandResults(product, results, marketMakerAccounts(product));
+        transaction.executeWithoutResult(tx -> persistCommandResults(product, receipts));
+    }
+
+    private Set<Long> marketMakerAccounts(ProductLine product) {
+        return new HashSet<>(jdbc.queryForList("""
+                SELECT unnest(account_ids) FROM market_maker_strategies WHERE product_line=?
+                UNION SELECT value::bigint FROM market_maker_business_settings,
+                    jsonb_array_elements_text(settings->'trade'->'accountIds') WHERE product_line=?
+                """, Long.class, product.name(), product.name()));
+    }
+
+    private static Map<UUID, CommittedCommandResult> retailCommandResults(ProductLine product,
+            List<CommittedCommandResult> results, Set<Long> marketMakerAccounts) {
+        var receipts = new LinkedHashMap<UUID, CommittedCommandResult>();
+        for (var receipt : results) {
+            if (receipt.product() != product) throw new IllegalArgumentException("cross-product command result");
+            // Do not retain every transient quote from accounts owned by a maker strategy.
+            if (marketMakerAccounts.contains(receipt.userId())) continue;
+            var prior = receipts.putIfAbsent(receipt.commandId(), receipt);
+            if (prior != null) requireSameResult(prior, receipt);
+        }
+        return receipts;
+    }
+
+    private void persistCommandResults(ProductLine product, Map<UUID, CommittedCommandResult> receipts) {
+        if (receipts.isEmpty()) return;
+        jdbc.batchUpdate("""
+                INSERT INTO core_command_result_projection(product_line,command_id,user_id,command_type,
+                  client_order_id,instrument_id,command_status,result_code,applied_command_count,
+                  cluster_position,occurred_at_epoch_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT (product_line,command_id) DO NOTHING
+                """, receipts.values(), 256, (s, receipt) -> {
+            s.setString(1, product.name()); s.setObject(2, receipt.commandId()); s.setLong(3, receipt.userId());
+            s.setString(4, receipt.commandType().name()); s.setString(5, receipt.clientOrderId());
+            s.setString(6, receipt.instrumentId()); s.setString(7, receipt.status().name());
+            s.setString(8, receipt.code().name()); s.setLong(9, receipt.appliedCommandCount());
+            s.setLong(10, receipt.clusterPosition()); s.setLong(11, receipt.occurredAt());
+        });
+        // Replays can revisit already-persisted commands. Verify their immutable outcome;
+        // a conflicting row aborts the same transaction as orders and their watermark.
+        var arguments = new ArrayList<Object>();
+        arguments.add(product.name()); arguments.addAll(receipts.keySet());
+        var stored = jdbc.query("""
+                SELECT * FROM core_command_result_projection WHERE product_line=? AND command_id IN (
+                """ + String.join(",", Collections.nCopies(receipts.size(), "?")) + ")", (r, row) ->
+                new CommittedCommandResult(product, r.getLong("user_id"), r.getObject("command_id", UUID.class),
+                    com.surprising.aeron.protocol.CoreMessageType.valueOf(r.getString("command_type")),
+                    r.getString("client_order_id"), r.getString("instrument_id"),
+                    com.surprising.aeron.protocol.ResponseStatus.valueOf(r.getString("command_status")),
+                    com.surprising.aeron.protocol.CoreResultCode.valueOf(r.getString("result_code")),
+                    r.getLong("applied_command_count"), r.getLong("cluster_position"), r.getLong("occurred_at_epoch_ms")),
+                arguments.toArray());
+        if (stored.size() != receipts.size()) throw new IllegalStateException("incomplete committed command results");
+        for (var receipt : stored) requireSameResult(receipts.get(receipt.commandId()), receipt);
+    }
+
+    private static void requireSameResult(CommittedCommandResult expected, CommittedCommandResult actual) {
+        if (expected.userId() != actual.userId() || expected.commandType() != actual.commandType()
+                || !Objects.equals(expected.clientOrderId(), actual.clientOrderId())
+                || !Objects.equals(expected.instrumentId(), actual.instrumentId())
+                || expected.status() != actual.status() || expected.code() != actual.code()
+                || expected.appliedCommandCount() != actual.appliedCommandCount())
+            throw new IllegalStateException("conflicting committed command result");
     }
     private void advanceWatermark(ProductLine product, long exportSequence) {
         jdbc.update("""

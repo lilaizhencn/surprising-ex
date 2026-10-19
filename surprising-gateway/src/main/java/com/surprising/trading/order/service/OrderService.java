@@ -282,12 +282,18 @@ public class OrderService {
                 .thenApply(aeronOrders::receipt);
     }
 
-    public OrderCommandReceipt commandResult(java.util.UUID commandId) {
+    public OrderCommandReceipt commandResult(long userId, java.util.UUID commandId) {
         if (commandId == null) {
             throw new IllegalArgumentException("commandId is required");
         }
-        requireAeron();
-        return aeronOrders.commandResult(commandId);
+        return requireProjection().commandResult(currentProductLine(), userId, commandId);
+    }
+
+    public com.surprising.trading.api.model.OrderSubmissionResponse submission(long userId, String clientOrderId) {
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        String key = normalizeClientOrderId(clientOrderId);
+        var product = currentProductLine();
+        return requireProjection().submission(product, userId, key, StableOrderIdentity.commandId(product, userId, key));
     }
 
     public OrderBatchResponse cancelOpenOrders(CancelOpenOrdersRequest request) {

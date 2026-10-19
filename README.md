@@ -212,3 +212,7 @@ Core 内部的用户、订单、客户订单、用户/订单 hash 与挂单分�
 
 
 Owner 编排的订单读取已收口到本次已收集回执与既有活跃索引，显式删除回执优先，取消跨 Lane 订单/预留探测。已删除无调用的持仓查询、触发准备及合约暴露全表扫描，普通下单只消费 Lane 准入。25 次必要用例执行通过，见 [订单读取收口验证](docs/validation/owner-order-receipt-only-20261012.json)。风险状态与 ADL 候选查询仍需迁移；未做压测或快照恢复。
+
+## 已提交命令回执查询（2026-10-19）
+
+realtime 现从已提交 Archive 回放生成普通用户命令回执，与订单投影、水位同事务落库。用户命令查询不再读取 Core 的短期缓存；新增 submission 按原 clientOrderId 查回执，让 Web/client 在响应丢失且没有订单实体的拒单场景也能恢复。未知结果保持待确认，不自动重发。需先应用新增迁移、升级 realtime 并用独立 checkpoint 有限回补，再更新 gateway 和两端。详见 [业务、发布与验证说明](docs/realtime-command-results.md)。174 项后端定向测试无失败或跳过，Web 172 项与 client 148 项通过；本轮未执行完整 FUSED 实栈或原生设备验收。

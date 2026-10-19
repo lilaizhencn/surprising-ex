@@ -84,7 +84,7 @@ class CommittedFundingRepairIntegrationTest {
                 assertThat(pages.getValue().payments().getFirst().amountUnits()).isEqualTo(-10);
                 assertThat(pages.getValue().progress().complete()).isTrue();
                 assertThat(TradeExportCheckpoint.read(checkpoint,line).logPosition()).isEqualTo(last);
-                verify(repository,never()).persist(any(),anyList(),anyLong());
+                verify(repository,never()).persist(any(),anyList(),anyList(),anyLong());
                 assertThatThrownBy(()->exporter.repairFunding(Long.MAX_VALUE)).isInstanceOf(IllegalArgumentException.class);
                 var unsafe=new TradeExportProperties(cluster,directory,control,temp.resolve("checkpoint.bin"),0,null,null,null);
                 assertThatThrownBy(()->new CommittedTradeExporter(unsafe,line,null,repository).repairFunding(last)).isInstanceOf(IllegalArgumentException.class);

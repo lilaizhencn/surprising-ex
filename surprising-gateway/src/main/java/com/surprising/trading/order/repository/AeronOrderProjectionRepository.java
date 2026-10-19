@@ -15,6 +15,9 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
+import com.surprising.trading.api.model.OrderCommandReceipt;
+import com.surprising.trading.api.model.OrderSubmissionResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -74,6 +77,50 @@ public class AeronOrderProjectionRepository {
         requirePositive(orderId, "orderId");
         return execute(productLine, minExportSequence, Query.byOrder(userId, orderId));
     }
+
+    public OrderCommandReceipt commandResult(ProductLine product, long userId, UUID commandId) {
+        var result = submittedCommand(product, userId, commandId);
+        return new OrderCommandReceipt(commandId, result == null ? "RESULT_UNKNOWN" : "TERMINAL",
+                result == null ? "RESULT_UNKNOWN" : result.code(),
+                result == null ? "committed command result is not available yet" : "committed command result",
+                OrderCommandReceipt.commandResultUrl(commandId) + "?productLine=" + product.name(), List.of(), null, null);
+    }
+
+    public OrderSubmissionResponse submission(ProductLine product, long userId, String clientOrderId, UUID commandId) {
+        var result = submittedCommand(product, userId, commandId);
+        if (result != null && (!"PLACE_ORDER".equals(result.commandType())
+                || !Objects.equals(clientOrderId, result.clientOrderId())))
+            throw new IllegalStateException("submitted command identity does not match");
+        return new OrderSubmissionResponse(userId, product, clientOrderId,
+                result == null ? null : result.instrumentId(), commandId,
+                result == null ? "RESULT_UNKNOWN" : "TERMINAL", result == null ? "RESULT_UNKNOWN" : result.code());
+    }
+
+    private SubmittedCommand submittedCommand(ProductLine product, long userId, UUID commandId) {
+        requireProductLine(product);
+        requireUserId(userId);
+        Objects.requireNonNull(commandId, "commandId");
+        var results = jdbcTemplate.query("""
+                SELECT command_type,client_order_id,instrument_id,command_status,result_code
+                  FROM core_command_result_projection WHERE product_line=? AND user_id=? AND command_id=?
+                """, (r, row) -> {
+            try {
+                var status = com.surprising.aeron.protocol.ResponseStatus.valueOf(r.getString("command_status"));
+                var code = com.surprising.aeron.protocol.CoreResultCode.valueOf(r.getString("result_code"));
+                if ((status != com.surprising.aeron.protocol.ResponseStatus.APPLIED
+                        && status != com.surprising.aeron.protocol.ResponseStatus.REJECTED)
+                        || code == com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING)
+                    throw new IllegalStateException("command result projection is not terminal");
+                return new SubmittedCommand(r.getString("command_type"), r.getString("client_order_id"),
+                        r.getString("instrument_id"), code.name());
+            } catch (IllegalArgumentException corruptResult) {
+                throw new org.springframework.dao.DataRetrievalFailureException("invalid committed command result", corruptResult);
+            }
+        }, product.name(), userId, commandId);
+        return results.isEmpty() ? null : results.getFirst();
+    }
+
+    private record SubmittedCommand(String commandType, String clientOrderId, String instrumentId, String code) { }
 
     public ProjectionReadResult byClientOrderId(ProductLine productLine, long userId,
                                                 String clientOrderId, Long minExportSequence) {

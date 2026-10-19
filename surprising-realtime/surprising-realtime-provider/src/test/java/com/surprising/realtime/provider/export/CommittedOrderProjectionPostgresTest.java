@@ -27,6 +27,7 @@ class CommittedOrderProjectionPostgresTest {
         jdbc = new JdbcTemplate(source);
         jdbc.execute("CREATE TABLE core_order_projection (LIKE public.core_order_projection INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_projection_watermark (LIKE public.core_projection_watermark INCLUDING ALL)");
+        jdbc.execute("CREATE TABLE core_command_result_projection (LIKE public.core_command_result_projection INCLUDING ALL)");
         jdbc.execute("CREATE TABLE market_maker_strategies (product_line text, account_ids bigint[])");
         jdbc.execute("CREATE TABLE market_maker_business_settings (product_line text, settings jsonb)");
         repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
@@ -34,12 +35,62 @@ class CommittedOrderProjectionPostgresTest {
 
     @AfterEach void clean() { if (jdbc != null) jdbc.execute("DROP SCHEMA order_projection_it CASCADE"); }
 
+    @Test void rejectedCommandsWithoutOrdersRemainQueryableAfterRestartAndMoreThan128OtherResults() {
+        var result = result(1, 7, CoreResultCode.ORDER_NOT_FOUND);
+        repository.persist(ProductLine.SPOT, List.of(), List.of(result), 0);
+        repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
+        repository.persist(ProductLine.SPOT, List.of(), List.of(result), 0);
+        var later = new java.util.ArrayList<com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult>();
+        for (int i=2;i<150;i++) later.add(result(i, 7, CoreResultCode.NONE));
+        repository.persist(ProductLine.SPOT, List.of(), later, 0);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_command_result_projection", Integer.class)).isEqualTo(149);
+        assertThat(jdbc.queryForObject("SELECT result_code FROM core_command_result_projection WHERE command_id=?",
+                String.class, result.commandId())).isEqualTo("ORDER_NOT_FOUND");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_order_projection", Integer.class)).isZero();
+    }
+
+    @Test void receiptBackfillDoesNotCreateOrdersOrAdvanceTheirVisibilityWatermark() {
+        repository.persist(ProductLine.SPOT, List.of(), List.of(), 3);
+        repository.repairCommandResults(ProductLine.SPOT, List.of(result(999, 7, CoreResultCode.ORDER_NOT_FOUND)));
+        repository.repairCommandResults(ProductLine.SPOT, List.of(result(999, 7, CoreResultCode.ORDER_NOT_FOUND)));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_command_result_projection", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark", Long.class)).isEqualTo(3);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_order_projection", Integer.class)).isZero();
+    }
+
+    @Test void conflictingCommandOutcomeRollsBackItsOrdersAndWatermark() {
+        repository.persist(ProductLine.SPOT, List.of(), List.of(result(1, 7, CoreResultCode.NONE)), 1);
+        assertThatThrownBy(() -> repository.persist(ProductLine.SPOT,
+                List.of(frame(ProductLine.SPOT, 91, "OPEN", 1)),
+                List.of(result(1, 7, CoreResultCode.ORDER_NOT_FOUND)), 2))
+                .isInstanceOf(IllegalStateException.class).hasMessage("conflicting committed command result");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_order_projection", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT result_code FROM core_command_result_projection", String.class)).isEqualTo("NONE");
+    }
+
+    @Test void filtersMakerReceiptsAndKeepsUserOutcomesIsolatedByProduct() {
+        jdbc.update("INSERT INTO market_maker_strategies VALUES ('SPOT', ARRAY[900]::bigint[])");
+        repository.persist(ProductLine.SPOT, List.of(), List.of(result(1, 900, CoreResultCode.NONE), result(2, 7, CoreResultCode.NONE)), 1);
+        assertThat(jdbc.queryForList("SELECT user_id FROM core_command_result_projection", Long.class)).containsExactly(7L);
+        assertThatThrownBy(() -> repository.persist(ProductLine.OPTION, List.of(), List.of(result(3,7,CoreResultCode.NONE)), 2))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("cross-product command result");
+    }
+
+    private static com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult result(
+            long id, long user, CoreResultCode code) {
+        return new com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult(
+                ProductLine.SPOT, user, new java.util.UUID(0, id), CoreMessageType.CANCEL_ORDER,
+                null, null, code == CoreResultCode.NONE ? ResponseStatus.APPLIED : ResponseStatus.REJECTED,
+                code, id, id * 32, 1700000000000L + id);
+    }
+
     @Test void emptyOrderBatchesAdvanceOnlyWatermarkWithoutDependingOnMakerCatalog() {
         // An empty order batch must not query either catalog table.
         jdbc.execute("DROP TABLE market_maker_strategies, market_maker_business_settings");
         for (var product : ProductLine.values()) {
-            repository.persist(product, List.of(), 10);
-            repository.persist(product, List.of(), 9);
+            repository.persist(product, List.of(), List.of(), 10);
+            repository.persist(product, List.of(), List.of(), 9);
             assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark WHERE product_line=?",
                     Long.class, product.name())).isEqualTo(10);
         }
@@ -48,11 +99,11 @@ class CommittedOrderProjectionPostgresTest {
 
     @Test void idempotentRestartAndOldRevisionsCannotReplaceTerminalOrdersAcrossSixLines() {
         for (var line : ProductLine.values()) {
-            repository.persist(line, List.of(frame(line, 91, "OPEN", 1)), 10);
-            repository.persist(line, List.of(frame(line, 91, "FILLED", 2)), 11);
+            repository.persist(line, List.of(frame(line, 91, "OPEN", 1)), List.of(), 10);
+            repository.persist(line, List.of(frame(line, 91, "FILLED", 2)), List.of(), 11);
             var restarted = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
-            restarted.persist(line, List.of(frame(line, 91, "FILLED", 2)), 11);
-            restarted.persist(line, List.of(frame(line, 91, "OPEN", 1)), 10);
+            restarted.persist(line, List.of(frame(line, 91, "FILLED", 2)), List.of(), 11);
+            restarted.persist(line, List.of(frame(line, 91, "OPEN", 1)), List.of(), 10);
             var raw = jdbc.queryForObject("SELECT raw_order_state FROM core_order_projection WHERE product_line=? AND order_id=91", byte[].class, line.name());
             assertThat(CoreStateQueryCodec.decodeOrderState(raw).status()).isEqualTo("FILLED");
             assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark WHERE product_line=?", Long.class, line.name())).isEqualTo(11);
@@ -62,25 +113,25 @@ class CommittedOrderProjectionPostgresTest {
 
     @Test void failedBatchRollsBackOrdersAndWatermarkThenCanBeRetried() {
         var line = ProductLine.LINEAR_PERPETUAL;
-        repository.persist(line, List.of(frame(line, 91, "OPEN", 1)), 10);
+        repository.persist(line, List.of(frame(line, 91, "OPEN", 1)), List.of(), 10);
         var batch = new java.util.ArrayList<RealtimeFrame>();
         // The first JDBC batch is already executed before the final row violates the SQL column limit.
         for (int id = 92; id < 604; id++) batch.add(frame(line, id, "FILLED", 1));
         batch.add(frame(line, 604, "X".repeat(33), 1));
-        assertThatThrownBy(() -> repository.persist(line, batch, 11))
+        assertThatThrownBy(() -> repository.persist(line, batch, List.of(), 11))
                 .isInstanceOf(org.springframework.dao.DataAccessException.class);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM core_order_projection", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark", Long.class)).isEqualTo(10);
-        repository.persist(line, List.of(frame(line, 92, "FILLED", 1)), 11);
+        repository.persist(line, List.of(frame(line, 92, "FILLED", 1)), List.of(), 11);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM core_order_projection", Integer.class)).isEqualTo(2);
     }
 
     @Test void coalescesOnlyTheLatestVersionWithinOneSqlBatchAndRejectsCrossProductFrames() {
         var line = ProductLine.LINEAR_PERPETUAL;
         repository.persist(line, List.of(frame(line, 91, "OPEN", 1), frame(line, 91, "FILLED", 2),
-                frame(line, 91, "OPEN", 1)), 10);
+                frame(line, 91, "OPEN", 1)), List.of(), 10);
         assertThat(jdbc.queryForObject("SELECT status FROM core_order_projection", String.class)).isEqualTo("FILLED");
-        assertThatThrownBy(() -> repository.persist(line, List.of(frame(ProductLine.SPOT, 92, "OPEN", 1)), 11))
+        assertThatThrownBy(() -> repository.persist(line, List.of(frame(ProductLine.SPOT, 92, "OPEN", 1)), List.of(), 11))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark", Long.class)).isEqualTo(10);
     }
@@ -93,28 +144,28 @@ class CommittedOrderProjectionPostgresTest {
         for (var line : ProductLine.values()) {
             // Unfilled quotes and cancellations are omitted. Ordinary-user orders always remain.
             repository.persist(line, List.of(order(line, 10, 900, "OPEN", 0, 1),
-                    order(line, 11, 900, "CANCELED", 0, 1), order(line, 12, 7, "CANCELED", 0, 1)), 1);
+                    order(line, 11, 900, "CANCELED", 0, 1), order(line, 12, 7, "CANCELED", 0, 1)), List.of(), 1);
             // Different maker accounts and the same maker account both count as internal trading.
             repository.persist(line, List.of(order(line, 20, 900, "FILLED", 2, 2),
                     order(line, 21, 901, "FILLED", 2, 2), execution(line, "internal", 20, 900, true),
-                    execution(line, "internal", 21, 901, false)), 2);
+                    execution(line, "internal", 21, 901, false)), List.of(), 2);
             repository.persist(line, List.of(order(line, 22, 900, "FILLED", 2, 2),
                     order(line, 23, 900, "FILLED", 2, 2), execution(line, "self", 22, 900, true),
-                    execution(line, "self", 23, 900, false)), 3);
+                    execution(line, "self", 23, 900, false)), List.of(), 3);
             // This quote first fills internally, then with a user: store its full cumulative state.
             repository.persist(line, List.of(order(line, 30, 900, "OPEN", 1, 2),
-                    execution(line, "first", 30, 900, true), execution(line, "first", 31, 901, false)), 4);
+                    execution(line, "first", 30, 900, true), execution(line, "first", 31, 901, false)), List.of(), 4);
             repository.persist(line, List.of(order(line, 30, 900, "OPEN", 2, 3),
                     order(line, 32, 7, "FILLED", 2, 2), execution(line, "user", 30, 900, true),
-                    execution(line, "user", 32, 7, false)), 5);
+                    execution(line, "user", 32, 7, false)), List.of(), 5);
             // A maker account acting as taker against a user must also be retained.
             repository.persist(line, List.of(order(line, 40, 901, "FILLED", 2, 2),
-                    execution(line, "maker-taker", 40, 901, false), execution(line, "maker-taker", 41, 7, true)), 5);
+                    execution(line, "maker-taker", 40, 901, false), execution(line, "maker-taker", 41, 7, true)), List.of(), 5);
             // Restart, then another internal fill and cancellation must still update the stored order.
             repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
             repository.persist(line, List.of(order(line, 30, 900, "CANCELED", 3, 4),
-                    execution(line, "last", 30, 900, true), execution(line, "last", 33, 901, false)), 6);
-            repository.persist(line, List.of(order(line, 30, 900, "OPEN", 2, 3)), 5);
+                    execution(line, "last", 30, 900, true), execution(line, "last", 33, 901, false)), List.of(), 6);
+            repository.persist(line, List.of(order(line, 30, 900, "OPEN", 2, 3)), List.of(), 5);
             assertThat(jdbc.queryForList("SELECT order_id FROM core_order_projection WHERE product_line=? ORDER BY order_id",
                     Long.class, line.name())).containsExactly(12L, 30L, 32L, 40L);
             var saved = CoreStateQueryCodec.decodeOrderState(jdbc.queryForObject(
@@ -129,7 +180,7 @@ class CommittedOrderProjectionPostgresTest {
         repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
         var line = ProductLine.LINEAR_PERPETUAL;
         assertThatThrownBy(() -> repository.persist(line, List.of(order(line, 30, 900, "FILLED", 2, 1),
-                execution(line, "missing", 30, 900, true)), 1)).isInstanceOf(IllegalArgumentException.class);
+                execution(line, "missing", 30, 900, true)), List.of(), 1)).isInstanceOf(IllegalArgumentException.class);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM core_order_projection", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM core_projection_watermark", Integer.class)).isZero();
     }

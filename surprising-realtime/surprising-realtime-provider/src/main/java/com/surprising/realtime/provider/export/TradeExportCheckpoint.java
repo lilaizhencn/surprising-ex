@@ -11,6 +11,11 @@ import java.security.*;
 record TradeExportCheckpoint(
         ProductLine product, long logPosition, long tradeSequence, byte[] snapshot) {
     private static final int MAGIC = 0x54584331;
+    private static final int COMMAND_REPAIR_MAGIC = 0x54584332;
+
+    private static int magic(Path path) {
+        return path.getFileName().toString().endsWith(".command-repair") ? COMMAND_REPAIR_MAGIC : MAGIC;
+    }
 
     static TradeExportCheckpoint read(Path path, ProductLine expected) throws IOException {
         if (!Files.exists(path)) return new TradeExportCheckpoint(expected, 0, 0, null);
@@ -18,7 +23,7 @@ record TradeExportCheckpoint(
         try (var raw = Files.newInputStream(path);
                 var hashing = new DigestInputStream(raw, digest);
                 var input = new DataInputStream(hashing)) {
-            if (input.readInt() != MAGIC) throw new IOException("invalid trade export checkpoint");
+            if (input.readInt() != magic(path)) throw new IOException("invalid trade export checkpoint purpose");
             ProductLine product = ProductLine.valueOf(input.readUTF());
             long position = input.readLong(), sequence = input.readLong();
             int length = input.readInt();
@@ -47,7 +52,7 @@ record TradeExportCheckpoint(
         try (var raw = Files.newOutputStream(temp);
                 var hashing = new DigestOutputStream(raw, digest);
                 var output = new DataOutputStream(hashing)) {
-            output.writeInt(MAGIC);
+            output.writeInt(magic(path));
             output.writeUTF(product.name());
             output.writeLong(logPosition);
             output.writeLong(tradeSequence);

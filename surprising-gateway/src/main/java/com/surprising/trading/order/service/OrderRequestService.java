@@ -224,11 +224,25 @@ public class OrderRequestService {
         }
     }
 
-    public ResponseEntity<OrderCommandReceipt> commandResult(UUID commandId) {
+    public ResponseEntity<OrderCommandReceipt> commandResult(long userId, UUID commandId) {
         try {
-            return commandResponse(orderService.commandResult(commandId));
+            return commandResponse(orderService.commandResult(userId, commandId));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (org.springframework.dao.DataAccessException | IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "committed command result is unavailable", ex);
+        }
+    }
+
+    public ResponseEntity<com.surprising.trading.api.model.OrderSubmissionResponse> submission(long userId, String clientOrderId) {
+        try {
+            var result = orderService.submission(userId, clientOrderId);
+            return ResponseEntity.status("TERMINAL".equals(result.outcome()) ? HttpStatus.OK : HttpStatus.ACCEPTED)
+                    .cacheControl(org.springframework.http.CacheControl.noStore()).body(result);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (org.springframework.dao.DataAccessException | IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "committed submission result is unavailable", ex);
         }
     }
 
@@ -285,6 +299,6 @@ public class OrderRequestService {
             default ->
                 HttpStatus.OK;
         };
-        return ResponseEntity.status(status).body(receipt);
+        return ResponseEntity.status(status).cacheControl(org.springframework.http.CacheControl.noStore()).body(receipt);
     }
 }

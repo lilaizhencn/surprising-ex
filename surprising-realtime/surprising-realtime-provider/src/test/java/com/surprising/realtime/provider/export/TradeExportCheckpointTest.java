@@ -12,6 +12,26 @@ import java.nio.file.*;
 class TradeExportCheckpointTest {
     @TempDir Path directory;
 
+    @Test void commandRepairCannotStartFromARenamedOnlineCheckpoint() throws Exception {
+        var online = directory.resolve("online.checkpoint");
+        var repair = directory.resolve("receipts.command-repair");
+        var checkpoint = new TradeExportCheckpoint(ProductLine.SPOT, 100, 0, new byte[]{1, 2, 3});
+        checkpoint.write(online);
+        Files.copy(online, repair);
+        assertThatThrownBy(() -> TradeExportCheckpoint.read(repair, ProductLine.SPOT))
+                .isInstanceOf(java.io.IOException.class).hasMessageContaining("purpose");
+        checkpoint.write(repair);
+        assertThat(TradeExportCheckpoint.read(repair, ProductLine.SPOT).logPosition()).isEqualTo(100);
+        Files.copy(repair, online, StandardCopyOption.REPLACE_EXISTING);
+        assertThatThrownBy(() -> TradeExportCheckpoint.read(online, ProductLine.SPOT))
+                .isInstanceOf(java.io.IOException.class).hasMessageContaining("purpose");
+        var config = new TradeExportProperties(directory, "unused", "unused", repair, 0, null, null, null);
+        assertThatThrownBy(() -> new CommittedTradeExporter(config, ProductLine.SPOT, null,
+                org.mockito.Mockito.mock(CommittedOrderProjectionRepository.class))
+                .run(new java.util.concurrent.atomic.AtomicBoolean(false), ready -> {}, 100))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("live exporter");
+    }
+
     @Test
     void atomicallyReplacesAndRejectsCorruptionOrWrongProduct() throws Exception {
         Path path = directory.resolve("checkpoint");

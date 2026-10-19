@@ -16,6 +16,25 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
 class LocalBusinessApiTest {
+    @Test void committedSubmissionRouteUsesAuthenticatedIdentityAndIsNotAnOrderId() {
+        var id = new java.util.UUID(4, 5);
+        when(orders.submission(42, "a+b")).thenReturn(ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(new com.surprising.trading.api.model.OrderSubmissionResponse(
+                        42, ProductLine.SPOT, "a+b", "1", id, "TERMINAL", "INSUFFICIENT_AVAILABLE_BALANCE")));
+        var response = invoke("trading", "/api/v1/trading/orders/submission?clientOrderId=a%2Bb", HttpMethod.GET, userHeaders(), null);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-store");
+        assertThat(new String(response.getBody(), java.nio.charset.StandardCharsets.UTF_8)).contains("INSUFFICIENT_AVAILABLE_BALANCE", "a+b");
+        verify(orders).submission(42, "a+b");
+        when(orders.submission(42, "pending")).thenReturn(ResponseEntity.accepted().cacheControl(CacheControl.noStore())
+                .body(new com.surprising.trading.api.model.OrderSubmissionResponse(
+                        42, ProductLine.SPOT, "pending", null, id, "RESULT_UNKNOWN", "RESULT_UNKNOWN")));
+        var pending = invoke("trading", "/api/v1/trading/orders/submission?clientOrderId=pending", HttpMethod.GET, userHeaders(), null);
+        assertThat(pending.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(pending.getHeaders().getCacheControl()).isEqualTo("no-store");
+        assertThat(invoke("trading", "/api/v1/trading/orders/submission?userId=43&clientOrderId=x", HttpMethod.GET, userHeaders(), null).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
 
     @Test
     void userPriceProtectionRouteReturnsTheProductPolicyWithoutTreatingItAsAnOrderId() {

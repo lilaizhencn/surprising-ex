@@ -1,0 +1,433 @@
+{
+  "date": "2026-10-19",
+  "productDebugScope": "SPOT",
+  "sharedReplayCoverage": "six product lines in deterministic replay tests",
+  "change": "Committed Archive processing receipts owned by realtime; user command-result and clientOrderId recovery queries read SQL only, never Core.",
+  "baseCommit": "543d36a24f38d49b92f1a5f071743e895c883280",
+  "jdk": "Amazon Corretto HotSpot 27; Maven 3.9.16",
+  "verification": {
+    "uniqueTests": 174,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "classes": [
+      {
+        "name": "com.surprising.aeron.service.orchestration.CommittedTradeReplayTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "5.727",
+        "timestamp": null
+      },
+      {
+        "name": "com.surprising.realtime.provider.export.ExportBatchTest",
+        "tests": "16",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.103",
+        "timestamp": null
+      },
+      {
+        "name": "com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest",
+        "tests": "10",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "5.379",
+        "timestamp": null
+      },
+      {
+        "name": "com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "15.225",
+        "timestamp": null
+      },
+      {
+        "name": "com.surprising.realtime.provider.export.CommittedFundingRepairIntegrationTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "3.533",
+        "timestamp": null
+      },
+      {
+        "name": "com.surprising.trading.order.repository.CommittedCommandResultQueryPostgresTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.65",
+        "timestamp": null
+      },
+      {
+        "name": "com.surprising.trading.order.controller.OrderControllerTest",
+        "tests": "9",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.942",
+        "timestamp": null
+      },
+      {
+        "name": "com.surprising.trading.order.service.OrderServiceTest",
+        "tests": "88",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.685",
+        "timestamp": null
+      },
+      {
+        "name": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+        "tests": "25",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.507",
+        "timestamp": null
+      },
+      {
+        "name": "com.surprising.aeron.service.orchestration.CoreSpotAssetUnitsTest",
+        "tests": "12",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "6.467",
+        "timestamp": null
+      },
+      {
+        "name": "com.surprising.realtime.provider.export.TradeExportCheckpointTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.176",
+        "timestamp": null
+      }
+    ],
+    "commands": [
+      "INSTRUMENT_TEST_JDBC_URL=<owned PostgreSQL JDBC URL> INSTRUMENT_TEST_DB_USER=atomex INSTRUMENT_TEST_DB_PASSWORD='' mvn -o -pl surprising-realtime/surprising-realtime-provider,surprising-gateway -am -Dtest=CommittedTradeReplayTest,ExportBatchTest,CommittedOrderProjectionPostgresTest,CommittedCommandResultQueryPostgresTest,OrderServiceTest,LocalBusinessApiTest,OrderControllerTest,CommittedTradeExportIntegrationTest,CommittedFundingRepairIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test",
+      "mvn -o -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=CoreSpotAssetUnitsTest -Dsurefire.failIfNoSpecifiedTests=false test",
+      "mvn -o -pl surprising-realtime/surprising-realtime-provider -am -Dtest=TradeExportCheckpointTest,ExportBatchTest,CommittedTradeExportIntegrationTest,CommittedFundingRepairIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test",
+      "INSTRUMENT_TEST_JDBC_URL=<owned PostgreSQL JDBC URL> INSTRUMENT_TEST_DB_USER=atomex INSTRUMENT_TEST_DB_PASSWORD='' mvn -o -pl surprising-gateway -am -Dtest=CommittedCommandResultQueryPostgresTest,OrderServiceTest,LocalBusinessApiTest,OrderControllerTest -Dsurefire.failIfNoSpecifiedTests=false test",
+      "mvn -o -pl surprising-realtime/surprising-realtime-provider,surprising-gateway -am -DskipTests package",
+      "psql -X -v ON_ERROR_STOP=1 -d surprising_receipts_1dbeed79ab -f deployment/migrations/20261019-committed-command-results.sql"
+    ],
+    "assertions": [
+      "SPOT insufficient funds rejects without any order entity but retains clientOrderId/instrument identity",
+      "140 subsequent commands exceed the Core result cache; durable immutable receipts remain queryable after repository restart",
+      "SQL receipts/orders/watermark transaction rolls back on conflicting results; duplicate replay is idempotent",
+      "Maker strategy receipts omitted; product/user/client identity isolated; corrupt SQL result and SQL unavailability fail closed",
+      "Authentic Archive commit boundary, fragmented messages, crash-window trade identity, finite independent receipt-only backfill and resume",
+      "Repair checkpoint purpose rejects copied/renamed live state; repair leaves Kafka, orders and normal checkpoint/watermark unchanged",
+      "12 native SPOT LIMIT IOC and MARKET IOC/FOK scenarios verify user/maker/treasury units, fees, locked balances and snapshot restore",
+      "HTTP 200 terminal / 202 unknown / 503 unavailable; no-store; static route preceding dynamic order IDs; authenticated UID spoof rejected"
+    ],
+    "package": "success, tests deliberately skipped only in packaging command; tests above executed without skips"
+  },
+  "dependencyReleaseOrder": [
+    "apply SQL migration",
+    "update realtime and keep REALTIME/TRADE_EXPORT enabled",
+    "bounded historical receipt repair using a fresh *.command-repair checkpoint from retained log prefix",
+    "update gateway then Web/client"
+  ],
+  "frontends": {
+    "webTests": 172,
+    "clientTests": 148,
+    "webLintBuild": "passed; pre-existing informational lint and bundle-size diagnostics remain",
+    "clientAnalyze": "No issues found",
+    "browserSource": "controlled API/WS fixture, not a real FUSED stack",
+    "browser": [
+      {
+        "width": 1440,
+        "theme": "dark",
+        "persistedBeforePost": true,
+        "post": {
+          "userId": 1,
+          "clientOrderId": "web-70e99ee8-b9c0-4aee-981e-9e6d11e45622",
+          "instrumentId": "1",
+          "side": "BUY",
+          "orderType": "LIMIT",
+          "timeInForce": "GTC",
+          "priceTicks": "1000",
+          "quantitySteps": "9",
+          "marginMode": "CROSS",
+          "positionSide": "NET",
+          "reduceOnly": false,
+          "postOnly": false
+        },
+        "queries": [
+          "/api/v1/gateway/trading/submission",
+          "/api/v1/gateway/trading/by-client-order-id",
+          "/api/v1/gateway/trading/submission"
+        ],
+        "unknownKeptLocked": true,
+        "committedRejectionUnlocked": true,
+        "noOrderEntity": true,
+        "errors": [],
+        "overflow": false
+      },
+      {
+        "width": 1440,
+        "theme": "light",
+        "persistedBeforePost": true,
+        "post": {
+          "userId": 1,
+          "clientOrderId": "web-12deadc9-0149-4136-b368-b8837af1817c",
+          "instrumentId": "1",
+          "side": "BUY",
+          "orderType": "LIMIT",
+          "timeInForce": "GTC",
+          "priceTicks": "1000",
+          "quantitySteps": "9",
+          "marginMode": "CROSS",
+          "positionSide": "NET",
+          "reduceOnly": false,
+          "postOnly": false
+        },
+        "queries": [
+          "/api/v1/gateway/trading/submission",
+          "/api/v1/gateway/trading/by-client-order-id",
+          "/api/v1/gateway/trading/submission"
+        ],
+        "unknownKeptLocked": true,
+        "committedRejectionUnlocked": true,
+        "noOrderEntity": true,
+        "errors": [],
+        "overflow": false
+      },
+      {
+        "width": 390,
+        "theme": "dark",
+        "persistedBeforePost": true,
+        "post": {
+          "userId": 1,
+          "clientOrderId": "web-2a1cc939-2a2d-47d1-90dc-7352f8d05a66",
+          "instrumentId": "1",
+          "side": "BUY",
+          "orderType": "LIMIT",
+          "timeInForce": "GTC",
+          "priceTicks": "1000",
+          "quantitySteps": "9",
+          "marginMode": "CROSS",
+          "positionSide": "NET",
+          "reduceOnly": false,
+          "postOnly": false
+        },
+        "queries": [
+          "/api/v1/gateway/trading/submission",
+          "/api/v1/gateway/trading/by-client-order-id",
+          "/api/v1/gateway/trading/submission"
+        ],
+        "unknownKeptLocked": true,
+        "committedRejectionUnlocked": true,
+        "noOrderEntity": true,
+        "errors": [],
+        "overflow": false
+      },
+      {
+        "width": 390,
+        "theme": "light",
+        "persistedBeforePost": true,
+        "post": {
+          "userId": 1,
+          "clientOrderId": "web-02b95664-34d1-4cb1-a25c-9fefcb3792ff",
+          "instrumentId": "1",
+          "side": "BUY",
+          "orderType": "LIMIT",
+          "timeInForce": "GTC",
+          "priceTicks": "1000",
+          "quantitySteps": "9",
+          "marginMode": "CROSS",
+          "positionSide": "NET",
+          "reduceOnly": false,
+          "postOnly": false
+        },
+        "queries": [
+          "/api/v1/gateway/trading/submission",
+          "/api/v1/gateway/trading/by-client-order-id",
+          "/api/v1/gateway/trading/submission"
+        ],
+        "unknownKeptLocked": true,
+        "committedRejectionUnlocked": true,
+        "noOrderEntity": true,
+        "errors": [],
+        "overflow": false
+      }
+    ],
+    "clientScope": [
+      "320px light/dark widget interactions",
+      "real loopback HTTP server closes after receiving POST; recovery only GET",
+      "committed rejection bypasses uninitialized order view"
+    ]
+  },
+  "notVerified": [
+    "online deployment and production historical backfill",
+    "real full FUSED app stack in this round",
+    "iOS/Android native device install",
+    "other product UIs, algo/admin/lifecycle specialized queries",
+    "negative confirmation for requests never committed to Core"
+  ],
+  "limits": [
+    "Missing committed SQL record is RESULT_UNKNOWN, never proof of original nonacceptance. No automatic POST resend.",
+    "History before available Archive prefix cannot be inferred from a later snapshot; backfill must verify coverage.",
+    "Processing receipt is not current order state; maker internal quote recovery is excluded."
+  ],
+  "attemptCorrections": [
+    "Initial expected ENTITY_NOT_FOUND corrected to actual ORDER_NOT_FOUND; old Mockito persist signatures updated.",
+    "Final gateway compile initially failed because one mock still returned DTO instead of ResponseEntity; updated and all 124 gateway tests reran successfully.",
+    "Temporary browser output path corrected and latest four passed fixture results relocated before cleanup."
+  ],
+  "artifacts": {
+    "surprising-receipts-backend.log": {
+      "sha256": "81591884f243b016bbef7b7c3e92541ef6dd27c42117a0ecfe4dfb70b365ee57",
+      "bytes": 690515,
+      "historicalPath": "/tmp/surprising-receipts-backend.log",
+      "status": "passed"
+    },
+    "surprising-receipts-checkpoint.log": {
+      "sha256": "957ea337a5f60266759ecd7150a4031add018099fc47ef11962b1a5aeb58540e",
+      "bytes": 673738,
+      "historicalPath": "/tmp/surprising-receipts-checkpoint.log",
+      "status": "passed"
+    },
+    "surprising-receipts-client-analyze.log": {
+      "sha256": "6aeebe1aed7a918ebfc0025756b644d50ac304306b8f9331bac6f99b285011ac",
+      "bytes": 96,
+      "historicalPath": "/tmp/surprising-receipts-client-analyze.log",
+      "status": "passed"
+    },
+    "surprising-receipts-client-tests.log": {
+      "sha256": "36384cc1346e48647447770a84a79a061661c30990264c4dc756cbf05e29e21f",
+      "bytes": 24698,
+      "historicalPath": "/tmp/surprising-receipts-client-tests.log",
+      "status": "passed"
+    },
+    "surprising-receipts-core-export.log": {
+      "sha256": "e69368a7032b8a8e0330a7c46d448973826b00789a331eb7268875a57b0d1f94",
+      "bytes": 19127,
+      "historicalPath": "/tmp/surprising-receipts-core-export.log",
+      "status": "superseded_failed_attempt"
+    },
+    "surprising-receipts-funds.log": {
+      "sha256": "209e519403641a7329b884601bffdf334a59a56c88f08d8942a03facd38ebda6",
+      "bytes": 12871,
+      "historicalPath": "/tmp/surprising-receipts-funds.log",
+      "status": "passed"
+    },
+    "surprising-receipts-gateway-final.log": {
+      "sha256": "19dd7d7922b96339d0e12504f9c10143252b70ff46801ea06ba5ad96382469e4",
+      "bytes": 31780,
+      "historicalPath": "/tmp/surprising-receipts-gateway-final.log",
+      "status": "passed"
+    },
+    "surprising-receipts-package.log": {
+      "sha256": "34fc937398a9e3ccad20ccc3621db51264fcce195473c462b6da14468a67fbcb",
+      "bytes": 41602,
+      "historicalPath": "/tmp/surprising-receipts-package.log",
+      "status": "passed"
+    },
+    "surprising-receipts-web-build.log": {
+      "sha256": "45f7e2eb48e2b7c576a9783d110f5c41c0cde2e3691bf59af07d457ad040f9da",
+      "bytes": 3353,
+      "historicalPath": "/tmp/surprising-receipts-web-build.log",
+      "status": "passed"
+    },
+    "surprising-receipts-web-format.log": {
+      "sha256": "7b97c1a486eeadd4cc98d837f884fcf2779d718e34719792223c47f573e3a81a",
+      "bytes": 21185,
+      "historicalPath": "/tmp/surprising-receipts-web-format.log",
+      "status": "superseded_failed_attempt"
+    },
+    "surprising-receipts-web-lint.log": {
+      "sha256": "b5a55e4a20c0c33c9a3d9dace5d1cfae92c7f89af1548f91eb635ade46faa42e",
+      "bytes": 18447,
+      "historicalPath": "/tmp/surprising-receipts-web-lint.log",
+      "status": "passed"
+    },
+    "surprising-receipts-web-tests.log": {
+      "sha256": "cc5c5044224958ecd7fd282b299b1aae9a15650ba2b0cb26a453764a529e8f9a",
+      "bytes": 288,
+      "historicalPath": "/tmp/surprising-receipts-web-tests.log",
+      "status": "passed"
+    }
+  },
+  "cleanup": {
+    "status": "complete",
+    "ownedDatabase": "surprising_receipts_1dbeed79ab",
+    "databaseDroppedAndVerified": true,
+    "ownedVitePid": 61465,
+    "ownedVitePort": 5189,
+    "ownedViteStoppedAndPortClosed": true,
+    "browserClosed": true,
+    "historicalUiRoot": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-receipts-ui-fp779nys",
+    "uiRootRemoved": true,
+    "rawLogsRemovedAfterSummaryAndHashArchive": true,
+    "ownedSurefireReportsRemoved": [
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CommittedTradeReplayTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CommittedTradeReplayTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.ExportBatchTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.ExportBatchTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedFundingRepairIntegrationTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedFundingRepairIntegrationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.repository.CommittedCommandResultQueryPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.repository.CommittedCommandResultQueryPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.controller.OrderControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.controller.OrderControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.OrderServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.OrderServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.LocalBusinessApiTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.LocalBusinessApiTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreSpotAssetUnitsTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreSpotAssetUnitsTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.TradeExportCheckpointTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.TradeExportCheckpointTest.txt"
+    ],
+    "historicalUiArtifacts": {
+      "390-dark.png": {
+        "sha256": "929e35ba58543ebe73ba98904b65958c15c88d4e6d28597b220aa23a8ab95de0",
+        "bytes": 94282
+      },
+      "browser.log": {
+        "sha256": "6db24ea6dfbf2dde4fcf1b233af07b96c5c2c69119b09ac43ae1396d761c1ef0",
+        "bytes": 2266
+      },
+      "390-light.png": {
+        "sha256": "3a81d30a4d0d9f893f10cbb330e4b7e67ab724104a36db0ce6f33cd0ae780e2b",
+        "bytes": 93595
+      },
+      "result.json": {
+        "sha256": "ceed70e7d642c648168e1a40ed21447036213dc3f37ffcfd2c03ff370af31890",
+        "bytes": 3038
+      },
+      "1440-light.png": {
+        "sha256": "f12062ea1410ee4407f36860475ae9fa93d8261032e41931a294c1fd55fe8915",
+        "bytes": 117165
+      },
+      "1440-dark.png": {
+        "sha256": "29f537c65f20fe338f920231e056577162b23b447d2fdf3436ee6b397921bcb9",
+        "bytes": 116839
+      },
+      "check.mjs": {
+        "sha256": "ecfab5cac22af0565f6bff6a8b8fe32840caca221c833cbed65bd7ed6454f476",
+        "bytes": 6953
+      },
+      "vite.log": {
+        "sha256": "5c70125af142a6ae2bf3a51a625e219481a73e05070528b6ed57b0e1e1985af0",
+        "bytes": 603
+      }
+    },
+    "preserved": "Existing PostgreSQL system process and unrelated databases/data; compiled dependencies and build outputs; no wallet or persistent trading stack started.",
+    "note": "Historical paths identify deleted evidence; retained class counts, results and checksums are in this record."
+  }
+}

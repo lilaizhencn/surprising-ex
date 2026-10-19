@@ -82,18 +82,18 @@ class OrderControllerTest {
     }
 
     @Test
-    void commandResultEndpointDistinguishesKnownPendingAndOutsideRetention() {
+    void commandResultEndpointDistinguishesCommittedUnknownAndUnavailable() {
         OrderService orderService = mock(OrderService.class);
         OrderInternalController controller = new OrderInternalController(new com.surprising.trading.order.service.OrderRequestService(orderService, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
         UUID commandId = UUID.fromString("11111111-1111-1111-1111-111111111111");
-        when(orderService.commandResult(commandId)).thenReturn(receipt("TERMINAL", "NONE"));
-        assertThat(controller.commandResult(commandId).getStatusCode()).isEqualTo(HttpStatus.OK);
-        when(orderService.commandResult(commandId)).thenReturn(receipt("RESULT_UNKNOWN", "RESULT_UNKNOWN"));
-        assertThat(controller.commandResult(commandId).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
-        when(orderService.commandResult(commandId)).thenReturn(receipt("OUTSIDE_RETENTION", "RESULT_UNKNOWN_OUTSIDE_RETENTION"));
-        ResponseEntity<OrderCommandReceipt> outside = controller.commandResult(commandId);
-        assertThat(outside.getStatusCode()).isEqualTo(HttpStatus.GONE);
-        assertThat(outside.getBody().code()).isEqualTo("RESULT_UNKNOWN_OUTSIDE_RETENTION");
+        when(orderService.commandResult(1001L, commandId)).thenReturn(receipt("TERMINAL", "NONE"));
+        assertThat(controller.commandResult(1001L, commandId).getStatusCode()).isEqualTo(HttpStatus.OK);
+        when(orderService.commandResult(1001L, commandId)).thenReturn(receipt("RESULT_UNKNOWN", "RESULT_UNKNOWN"));
+        assertThat(controller.commandResult(1001L, commandId).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(controller.commandResult(1001L, commandId).getHeaders().getCacheControl()).isEqualTo("no-store");
+        when(orderService.commandResult(1001L, commandId)).thenThrow(new org.springframework.dao.DataAccessResourceFailureException("database unavailable"));
+        assertThatThrownBy(() -> controller.commandResult(1001L, commandId)).isInstanceOf(ResponseStatusException.class)
+                .satisfies(error -> assertThat(((ResponseStatusException)error).getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
     }
 
     @Test
@@ -105,8 +105,8 @@ class OrderControllerTest {
         OrderCommandReceipt pending = receipt("MATCHING_PENDING", "MATCHING_PENDING", commandId);
         when(orderService.placeCommandAsync(any())).thenReturn(CompletableFuture.completedFuture(pending));
         ResponseEntity<OrderCommandReceipt> initial = controller.place(request).toCompletableFuture().join();
-        when(orderService.commandResult(commandId)).thenReturn(pending);
-        ResponseEntity<OrderCommandReceipt> queried = controller.commandResult(commandId);
+        when(orderService.commandResult(1001L, commandId)).thenReturn(pending);
+        ResponseEntity<OrderCommandReceipt> queried = controller.commandResult(1001L, commandId);
         assertThat(initial.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(initial.getBody().outcome()).isEqualTo("MATCHING_PENDING");
         assertThat(initial.getBody().commandId()).isEqualTo(commandId);

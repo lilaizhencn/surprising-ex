@@ -44,7 +44,7 @@ class CommittedTradeExportIntegrationTest {
             if (projectionUnavailable.getAndSet(false)) throw new IllegalStateException("projection unavailable");
             projected.addAll(call.<List<RealtimeFrame>>getArgument(1));
             return null;
-        }).when(orders).persist(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyLong());
+        }).when(orders).persist(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyLong());
         String topic = ProductTopicNames.of(ProductLine.SPOT).matchTradesTopic();
         var broker =
                 new EmbeddedKafkaKraftBroker(1, 1, topic)
@@ -270,6 +270,31 @@ class CommittedTradeExportIntegrationTest {
                         .filter(o -> "FILLED".equals(o.status())).map(CoreOrderStateView::orderId))
                         .contains(1L, 2L);
                 byte[] committedCheckpoint = Files.readAllBytes(checkpoint);
+                var repaired = new ArrayList<com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult>();
+                org.mockito.Mockito.doAnswer(call -> {
+                    repaired.addAll(call.<List<com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult>>getArgument(1));
+                    return null;
+                }).when(orders).repairCommandResults(org.mockito.ArgumentMatchers.eq(ProductLine.SPOT), org.mockito.ArgumentMatchers.anyList());
+                long liveWrites = org.mockito.Mockito.mockingDetails(orders).getInvocations().stream()
+                        .filter(call -> call.getMethod().getName().equals("persist")).count();
+                var repairCheckpoint = temp.resolve("export/receipts.command-repair");
+                var repairConfig = new TradeExportProperties(clusterDir, directory, control, repairCheckpoint, 0, null, null, null);
+                var repair = new CommittedTradeExporter(repairConfig, ProductLine.SPOT, null, orders);
+                repair.repairCommandResults(afterTrade);
+                assertThat(repaired).anySatisfy(result -> {
+                    assertThat(result.commandId()).isEqualTo(new UUID(77, 4));
+                    assertThat(result.userId()).isEqualTo(1001);
+                    assertThat(result.clientOrderId()).isEqualTo("replay-2");
+                    assertThat(result.code()).isEqualTo(CoreResultCode.NONE);
+                });
+                assertThat(TradeExportCheckpoint.read(repairCheckpoint, ProductLine.SPOT).logPosition()).isEqualTo(afterTrade);
+                assertThat(Files.readAllBytes(checkpoint)).isEqualTo(committedCheckpoint);
+                assertThat(org.mockito.Mockito.mockingDetails(orders).getInvocations().stream()
+                        .filter(call -> call.getMethod().getName().equals("persist")).count()).isEqualTo(liveWrites);
+                int repairedCount = repaired.size();
+                repair.repairCommandResults(afterTrade);
+                assertThat(repaired).hasSize(repairedCount);
+                assertThatThrownBy(() -> repair.repairCommandResults(Long.MAX_VALUE)).isInstanceOf(IllegalArgumentException.class);
                 var invalid = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER,
                         UUID.randomUUID(), ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY,
                         77, 5, 1001, 1700000000000L, 1),

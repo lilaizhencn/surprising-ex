@@ -14,6 +14,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
     private final com.surprising.aeron.service.state.realtime.RealtimeStateCapture capture;
     private com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor.FundingResult fundingResult;
     private CommittedFundingPage fundingPage;
+    private CommittedCommandResult commandResult;
 
     public CommittedTradeReplay(ProductLine product, byte[] snapshot) {
         state =
@@ -28,6 +29,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
 
     public List<RealtimeFrame> apply(byte[] bytes, long timestamp, long logPosition) {
         fundingPage = null;
+        commandResult = null;
         fundingResult = null;
         CoreMessage command = CoreMessageCodec.decode(bytes);
         if (command.header().productLine() != state.productLine())
@@ -61,6 +63,35 @@ public final class CommittedTradeReplay implements AutoCloseable {
                     throw new IllegalStateException("committed replay matching timed out");
             }
             state.assertClusterCallbackComplete();
+            if (command.header().userId() > 0
+                    && (response == null || response.resultCode() != CoreResultCode.IDEMPOTENCY_CONFLICT)) {
+                // Matching may have returned MATCHING_PENDING before the replay drained its
+                // account/ledger commits. Read the final retained result only after that drain.
+                // This belongs to the separate export worker, never the live Core callback.
+                var retained = state.resultLedger.get(command.header().commandId());
+                if (retained == null && response == null)
+                    throw new IllegalStateException("committed replay has no command result");
+                var status = retained == null ? response.commandStatus() : retained.status();
+                var code = retained == null ? response.resultCode() : retained.resultCode();
+                long applied = retained == null ? response.appliedCommandCount() : retained.appliedCommandCount();
+                if (code == CoreResultCode.MATCHING_PENDING)
+                    throw new IllegalStateException("committed replay did not finish the trading command");
+                String clientOrderId = null, instrumentId = null;
+                if (command.header().messageType() == CoreMessageType.PLACE_ORDER) {
+                    try {
+                        var order = TradingCommandCodec.decodePlaceOrder(command.payloadUnsafe());
+                        clientOrderId = order.clientOrderId();
+                        instrumentId = order.instrumentId();
+                    } catch (IllegalArgumentException invalidCommand) {
+                        // Invalid wire commands still have a definitive committed rejection,
+                        // but cannot supply an order identity for a client-ID lookup.
+                        if (code != CoreResultCode.INVALID_COMMAND) throw invalidCommand;
+                    }
+                }
+                commandResult = new CommittedCommandResult(state.productLine(), command.header().userId(),
+                        command.header().commandId(), command.header().messageType(), clientOrderId, instrumentId,
+                        status, code, applied, logPosition, timestamp);
+            }
             if (fundingResult != null) {
                 if (response.commandStatus() != ResponseStatus.APPLIED)
                     throw new IllegalStateException("funding payments without an applied committed command");
@@ -88,6 +119,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
     }
 
     public CommittedFundingPage fundingPage() { return fundingPage; }
+    public CommittedCommandResult commandResult() { return commandResult; }
 
     public long exportSequence() {
         return state.realtimeExportSequence();
@@ -121,6 +153,21 @@ public final class CommittedTradeReplay implements AutoCloseable {
                         || payment.fundingRatePpm() != command.fundingRatePpm())
                     throw new IllegalArgumentException("funding payment does not belong to committed command");
             }
+        }
+    }
+
+    /** A processing receipt, not another order/account state. Owned by one replay step. */
+    public record CommittedCommandResult(ProductLine product, long userId, UUID commandId,
+                                         CoreMessageType commandType, String clientOrderId, String instrumentId,
+                                         ResponseStatus status, CoreResultCode code, long appliedCommandCount,
+                                         long clusterPosition, long occurredAt) {
+        public CommittedCommandResult {
+            if (product == null || userId <= 0 || commandId == null || commandType == null
+                    || commandType.kind() != WireMessageKind.COMMAND
+                    || (status != ResponseStatus.APPLIED && status != ResponseStatus.REJECTED) || code == null
+                    || code == CoreResultCode.MATCHING_PENDING || appliedCommandCount < 0
+                    || clusterPosition <= 0 || occurredAt <= 0)
+                throw new IllegalArgumentException("invalid committed command result");
         }
     }
 }

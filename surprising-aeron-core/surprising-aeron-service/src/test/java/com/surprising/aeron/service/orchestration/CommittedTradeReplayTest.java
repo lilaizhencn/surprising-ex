@@ -7,10 +7,29 @@ import com.surprising.product.api.ProductLine;
 import java.util.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.api.Test;
 
 class CommittedTradeReplayTest {
     private static final long TIME = 1_700_000_000_000L;
     private long sequence;
+
+    @Test void spotAdmissionRejectionWithoutAnOrderStillCarriesTheClientIdentity() {
+        try (var replay = new CommittedTradeReplay(ProductLine.SPOT, null)) {
+            send(replay, ProductLine.SPOT, CoreMessageType.REGISTER_INSTRUMENT, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("604",
+                            ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+                            100000, 50000, 0, 0, 0, -1, 0)));
+            send(replay, ProductLine.SPOT, CoreMessageType.ADJUST_BALANCE, 7,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1)));
+            assertThat(place(replay, ProductLine.SPOT, 7, 201, CoreOrderSide.BUY)).isEmpty();
+            assertThat(replay.commandResult()).satisfies(result -> {
+                assertThat(result.clientOrderId()).isEqualTo("replay-201");
+                assertThat(result.instrumentId()).isEqualTo("604");
+                assertThat(result.status()).isEqualTo(ResponseStatus.REJECTED);
+                assertThat(result.code()).isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
+            });
+        }
+    }
 
     @ParameterizedTest @EnumSource(ProductLine.class)
     void capturesCommittedMakerAndTakerOrdersAndResumesFromSnapshot(ProductLine line) {
@@ -31,6 +50,12 @@ class CommittedTradeReplayTest {
                             ? new ApplyMarkPriceCommand("604", 100, 100, 100, 1, TIME)
                             : new ApplyMarkPriceCommand("604", 100, 1, TIME)));
             var resting = place(replay, line, 7, 201, CoreOrderSide.SELL);
+            assertThat(replay.commandResult()).satisfies(result -> {
+                assertThat(result.userId()).isEqualTo(7);
+                assertThat(result.clientOrderId()).isEqualTo("replay-201");
+                assertThat(result.instrumentId()).isEqualTo("604");
+                assertThat(result.code()).isEqualTo(CoreResultCode.NONE);
+            });
             assertThat(resting).hasSize(1);
             assertThat(order(resting.getFirst()).status()).isEqualTo("OPEN");
             place(replay, line, 7, 209, CoreOrderSide.SELL);
@@ -54,6 +79,8 @@ class CommittedTradeReplayTest {
         }
         try (var restored = new CommittedTradeReplay(line, snapshot)) {
             var filled = place(restored, line, 8, 202, CoreOrderSide.BUY);
+            assertThat(restored.commandResult().code()).isEqualTo(CoreResultCode.NONE);
+            assertThat(restored.commandResult().status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(filled.stream().filter(f -> f.kind() == RealtimeFrame.Kind.TRADE)).hasSize(1);
             var orders = filled.stream().filter(f -> f.kind() == RealtimeFrame.Kind.ORDER).map(CommittedTradeReplayTest::order).toList();
             assertThat(orders).hasSize(2).allSatisfy(o -> {
@@ -73,7 +100,26 @@ class CommittedTradeReplayTest {
             // A rejected cancellation must not manufacture an order or advance its revision.
             assertThat(send(restored, line, CoreMessageType.CANCEL_ORDER, 8,
                     TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(999)))).isEmpty();
+            assertThat(restored.commandResult().status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(restored.commandResult().code()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
         }
+    }
+
+    @Test void committedRejectionWithoutAnOrderHasAnImmutableReceiptAfterTheCacheMovesOn() {
+        CommittedTradeReplay.CommittedCommandResult rejected;
+        try (var replay = new CommittedTradeReplay(ProductLine.SPOT, null)) {
+            assertThat(send(replay, ProductLine.SPOT, CoreMessageType.CANCEL_ORDER, 7,
+                    TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(999)))).isEmpty();
+            rejected = replay.commandResult();
+            assertThat(rejected.commandId()).isEqualTo(new UUID(99, sequence));
+            assertThat(rejected.userId()).isEqualTo(7);
+            assertThat(rejected.code()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
+            for (int i = 0; i < 140; i++) send(replay, ProductLine.SPOT, CoreMessageType.ADJUST_BALANCE, 7,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1)));
+            assertThat(replay.commandResult().commandId()).isNotEqualTo(rejected.commandId());
+        }
+        assertThat(rejected.code()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
+        assertThat(rejected.clusterPosition()).isEqualTo(1);
     }
 
     private List<RealtimeFrame> place(CommittedTradeReplay replay, ProductLine line, long user, long id, CoreOrderSide side) {

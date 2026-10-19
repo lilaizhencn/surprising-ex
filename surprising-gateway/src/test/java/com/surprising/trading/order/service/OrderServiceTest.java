@@ -56,6 +56,26 @@ import org.mockito.quality.Strictness;
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class OrderServiceTest {
+    @ParameterizedTest @EnumSource(ProductLine.class)
+    void publicCommandReceiptsUseTheCommittedProjectionForTheAuthenticatedUser(ProductLine line) {
+        var service = service(line, aeronOrders);
+        var id = new UUID(4, 5);
+        var expected = new com.surprising.trading.api.model.OrderCommandReceipt(id, "TERMINAL", "ORDER_NOT_FOUND",
+                "committed rejection", null, List.of(), null, null);
+        when(projection.commandResult(line, 1001, id)).thenReturn(expected);
+        assertThat(service.commandResult(1001, id)).isSameAs(expected);
+        verifyNoInteractions(aeronOrders);
+    }
+
+    @Test void submissionLookupNormalizesTheClientKeyAndNeverQueriesCore() {
+        var service = service(ProductLine.SPOT, aeronOrders);
+        var id = StableOrderIdentity.commandId(ProductLine.SPOT, 1001, "client-91");
+        var expected = new com.surprising.trading.api.model.OrderSubmissionResponse(1001, ProductLine.SPOT,
+                "client-91", "1", id, "TERMINAL", "INSUFFICIENT_FUNDS");
+        when(projection.submission(ProductLine.SPOT, 1001, "client-91", id)).thenReturn(expected);
+        assertThat(service.submission(1001, " client-91 ")).isSameAs(expected);
+        verifyNoInteractions(aeronOrders);
+    }
 
     @ParameterizedTest @EnumSource(ProductLine.class)
     void priceProtectionUsesTheCurrentProductSettingsWithoutQueryingCore(ProductLine line) {
