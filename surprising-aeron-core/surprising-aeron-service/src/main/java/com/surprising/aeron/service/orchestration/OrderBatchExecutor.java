@@ -253,10 +253,8 @@ final class OrderBatchExecutor {
         long userId = pending.command().header().userId();
         int shard = owner.matchingAdapter.matcherShardId(batch.preparedSymbols.getFirst());
         batch.settlementEvent = preparePipelinedPlaceBatch(pending, batch, shard);
-        owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
-            owner.matchingAdapter.prepareOrderRoutes(userId, batch.preparedSymbols);
-            return submitPreparedPipelinedPlaceBatch(pending, batch, userId, shard);
-        }, batch.settlementEvent);
+        batch.pipelinedPlaceBatchSubmission.prepare(this, pending, batch, userId, shard);
+        owner.matcherPipeline.submit(shard, pending.sequence(), batch.pipelinedPlaceBatchSubmission, batch.settlementEvent);
         owner.pendingMatching.progressChanged();
         batch.markPredispatched();
         pending.countPipelinedSettlement();
@@ -581,19 +579,8 @@ final class OrderBatchExecutor {
         var direct = prepareCancelBatch(
                 pending, batch, shard, finalChunk, end - start);
         batch.itemSettlementEvent = direct;
-        owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
-            exchange.core2.core.common.MatcherResult firstNative = null;
-            for (int index = start; index < chunkEnd; index++) {
-                OrderBatchItem item = batch.items.get(index);
-                var result = owner.matchingAdapter.cancelDirectBatchItem(
-                        shard, index - start, pending.sequence(), pending.command().header().commandId(), item.orderId,
-                        pending.command().header().submittedAtEpochMillis(),
-                        pending.command().header().userId(), item.cancelSymbol, direct);
-                if (firstNative == null) firstNative = result;
-            }
-            batch.lastMatchingResult = direct;
-            return firstNative;
-        }, direct);
+        batch.cancelBatchChunkSubmission.prepare(this, pending, batch, shard, start, chunkEnd, direct);
+        owner.matcherPipeline.submit(shard, pending.sequence(), batch.cancelBatchChunkSubmission, direct);
     }
 
     CoreResponse completeOrderBatchMatching(long sequence,
@@ -1138,5 +1125,81 @@ final class OrderBatchExecutor {
                 owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), batch);
         direct.reserveMatcherPublication();
         return direct;
+    }
+
+    static final class PipelinedPlaceBatchSubmission implements java.util.function.Supplier<Object> {
+        private OrderBatchExecutor executor;
+        private CommandSlot pending;
+        private OrderBatchPending batch;
+        private long userId;
+        private int shard;
+
+        void prepare(OrderBatchExecutor executor, CommandSlot pending, OrderBatchPending batch, long userId, int shard) {
+            this.executor = executor;
+            this.pending = pending;
+            this.batch = batch;
+            this.userId = userId;
+            this.shard = shard;
+        }
+
+        void clear() {
+            executor = null;
+            pending = null;
+            batch = null;
+            userId = 0;
+            shard = 0;
+        }
+
+        @Override
+        public Object get() {
+            executor.owner.matchingAdapter.prepareOrderRoutes(userId, batch.preparedSymbols);
+            return executor.submitPreparedPipelinedPlaceBatch(pending, batch, userId, shard);
+        }
+    }
+
+    static final class CancelBatchChunkSubmission implements java.util.function.Supplier<Object> {
+        private OrderBatchExecutor executor;
+        private CommandSlot pending;
+        private OrderBatchPending batch;
+        private int shard;
+        private int start;
+        private int chunkEnd;
+        private com.surprising.aeron.service.state.MatcherSettlementEvent direct;
+
+        void prepare(OrderBatchExecutor executor, CommandSlot pending, OrderBatchPending batch, int shard,
+                     int start, int chunkEnd, com.surprising.aeron.service.state.MatcherSettlementEvent direct) {
+            this.executor = executor;
+            this.pending = pending;
+            this.batch = batch;
+            this.shard = shard;
+            this.start = start;
+            this.chunkEnd = chunkEnd;
+            this.direct = direct;
+        }
+
+        void clear() {
+            executor = null;
+            pending = null;
+            batch = null;
+            shard = 0;
+            start = 0;
+            chunkEnd = 0;
+            direct = null;
+        }
+
+        @Override
+        public Object get() {
+            exchange.core2.core.common.MatcherResult firstNative = null;
+            for (int index = start; index < chunkEnd; index++) {
+                OrderBatchItem item = batch.items.get(index);
+                var result = executor.owner.matchingAdapter.cancelDirectBatchItem(
+                        shard, index - start, pending.sequence(), pending.command().header().commandId(), item.orderId,
+                        pending.command().header().submittedAtEpochMillis(),
+                        pending.command().header().userId(), item.cancelSymbol, direct);
+                if (firstNative == null) firstNative = result;
+            }
+            batch.lastMatchingResult = direct;
+            return firstNative;
+        }
     }
 }

@@ -52,6 +52,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private final PaddedSequence consumedPosition = new PaddedSequence();
     private long cachedConsumedPosition;
     private final PaddedSequence completedPosition = new PaddedSequence();
+    private long cachedCompletedPosition;
     private final Wakeup wakeup = new Wakeup();
     private volatile boolean accepting;
     private volatile int submissionHighWaterMark;
@@ -237,7 +238,11 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         submittedPosition.value = position + 1;
         int depth = Math.toIntExact(position + 1 - cachedConsumedPosition);
         if (depth > submissionHighWaterMark) {
-            submissionHighWaterMark = depth;
+            cachedConsumedPosition = consumedPosition.value;
+            depth = Math.toIntExact(position + 1 - cachedConsumedPosition);
+            if (depth > submissionHighWaterMark) {
+                submissionHighWaterMark = depth;
+            }
         }
         if (waitStrategy != WaitStrategy.BUSY_SPIN && wakeup.requested != 0L
                 && PARK_REQUESTED.compareAndSet(wakeup, 1L, 0L)) {
@@ -304,7 +309,10 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             rethrowPublicationFailure();
             skipReadyDirectSlots();
             long position = consumedPosition.value;
-            if (position >= completedPosition.value) return 0;
+            if (position >= cachedCompletedPosition) {
+                cachedCompletedPosition = completedPosition.value;
+                if (position >= cachedCompletedPosition) return 0;
+            }
             Slot slot = slots[(int) position & mask];
             // Matcher may publish a direct completion between skipReadyDirectSlots() and
             // the completed-position read above. Re-check the cell before exposing its token;
@@ -325,7 +333,10 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             return result;
         }
         long position = consumedPosition.value;
-        if (position >= completedPosition.value) return null;
+        if (position >= cachedCompletedPosition) {
+            cachedCompletedPosition = completedPosition.value;
+            if (position >= cachedCompletedPosition) return null;
+        }
         Slot slot = slots[(int) position & mask];
         // A shard still publishes completions in its own submission order. The owner can probe
         // pending commands in a different (Core sequence) order, so a non-head token is simply
@@ -353,7 +364,10 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private void skipReadyDirectSlots() {
         while (true) {
             long position = consumedPosition.value;
-            if (position >= completedPosition.value) return;
+            if (position >= cachedCompletedPosition) {
+                cachedCompletedPosition = completedPosition.value;
+                if (position >= cachedCompletedPosition) return;
+            }
             Slot slot = slots[(int) position & mask];
             // Only Owner retires transport cells, after Matcher publishes completedPosition.
             // The event may already be recycled; completion belongs to this cell's cursor.
@@ -445,33 +459,40 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         }
         if (startupFailure != null) return;
         long position = completedPosition.value;
+        long cachedSubmitted = submittedPosition.value;
+        long cachedConsumed = consumedPosition.value;
         int idle = 0;
         try {
-            while (accepting || position < submittedPosition.value) {
-                // Observe the submission cursor before the read mailbox. A later command publication
-                // therefore cannot overtake a read published by the same owner at an earlier fence.
-                long submitted = submittedPosition.value;
+            while (accepting || position < (cachedSubmitted = submittedPosition.value)) {
                 BackgroundRead<?> read = backgroundReads.peek();
-                if (read != null && position >= read.fence()) {
-                    backgroundReads.poll();
-                    read.execute();
-                    continue;
-                }
-                if (position >= submitted) {
-                    if (waitStrategy == WaitStrategy.BUSY_SPIN) {
-                        Thread.onSpinWait();
-                    } else if (idle++ < WORKER_IDLE_SPINS) {
-                        Thread.onSpinWait();
-                    } else {
-                        if (accepting && position >= submittedPosition.value && backgroundReads.isEmpty()) {
-                            wakeup.requested = 1L;
-                            if (accepting && position >= submittedPosition.value && backgroundReads.isEmpty()) {
-                                LockSupport.parkNanos(this, WORKER_IDLE_PARK_NANOS);
-                            }
-                            wakeup.requested = 0L;
-                        }
+                if (read != null) {
+                    // Observe the submission cursor before checking read fence so a later command
+                    // publication cannot overtake a read published by the same owner at an earlier fence.
+                    cachedSubmitted = submittedPosition.value;
+                    if (position >= read.fence()) {
+                        backgroundReads.poll();
+                        read.execute();
+                        continue;
                     }
-                    continue;
+                }
+                if (position >= cachedSubmitted) {
+                    cachedSubmitted = submittedPosition.value;
+                    if (position >= cachedSubmitted) {
+                        if (waitStrategy == WaitStrategy.BUSY_SPIN) {
+                            Thread.onSpinWait();
+                        } else if (idle++ < WORKER_IDLE_SPINS) {
+                            Thread.onSpinWait();
+                        } else {
+                            if (accepting && position >= (cachedSubmitted = submittedPosition.value) && backgroundReads.isEmpty()) {
+                                wakeup.requested = 1L;
+                                if (accepting && position >= (cachedSubmitted = submittedPosition.value) && backgroundReads.isEmpty()) {
+                                    LockSupport.parkNanos(this, WORKER_IDLE_PARK_NANOS);
+                                }
+                                wakeup.requested = 0L;
+                            }
+                        }
+                        continue;
+                    }
                 }
                 idle = 0;
                 Slot slot = slots[(int) position & mask];
@@ -513,9 +534,12 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                 completedPosition.value = position;
                 Runnable signal = completionSignal;
                 if (signal != null) signal.run();
-                int compDepth = Math.toIntExact(position - consumedPosition.value);
-                if (compDepth > completionHighWaterMark) {
-                    completionHighWaterMark = compDepth;
+                if (position - cachedConsumed > completionHighWaterMark) {
+                    cachedConsumed = consumedPosition.value;
+                    int compDepth = Math.toIntExact(position - cachedConsumed);
+                    if (compDepth > completionHighWaterMark) {
+                        completionHighWaterMark = compDepth;
+                    }
                 }
                 if (publicationFailure != null) break;
             }

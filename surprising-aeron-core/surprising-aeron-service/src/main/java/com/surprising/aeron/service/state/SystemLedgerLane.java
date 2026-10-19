@@ -1,7 +1,5 @@
 package com.surprising.aeron.service.state;
 
-import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
-
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -18,8 +16,27 @@ public final class SystemLedgerLane implements AutoCloseable {
     private static final String WAIT_STRATEGY_PROPERTY = "surprising.aeron.system-ledger-wait-strategy";
     public enum WaitStrategy { BUSY_SPIN, BLOCKING }
 
+    private static class SequenceLhsPadding {
+        @SuppressWarnings("unused")
+        protected long p01, p02, p03, p04, p05, p06, p07, p08, p09, p10, p11, p12, p13, p14, p15;
+    }
+
+    private static class SequenceValue extends SequenceLhsPadding {
+        protected volatile long value = -1L;
+    }
+
+    private static final class PaddedSequence extends SequenceValue {
+        @SuppressWarnings("unused")
+        protected long p16, p17, p18, p19, p20, p21, p22, p23, p24, p25, p26, p27, p28, p29, p30;
+    }
+
     private final TreasuryRuntime ledger;
-    private final OneToOneConcurrentArrayQueue<Entry> entries;
+    private final Entry[] ring;
+    private final int capacity;
+    private final int mask;
+    private final PaddedSequence producerSequence = new PaddedSequence();
+    private final PaddedSequence consumerSequence = new PaddedSequence();
+    private long cachedConsumerSequence = -1L;
     private final Thread producer;
     private final Thread thread;
     private final Consumer<Throwable> failurePublisher;
@@ -33,9 +50,12 @@ public final class SystemLedgerLane implements AutoCloseable {
         if (ledger == null || capacity <= 0 || failurePublisher == null)
             throw new IllegalArgumentException("system ledger, capacity and failure publisher are required");
         this.ledger = ledger;
+        this.capacity = capacity;
+        int ringSize = capacity <= 1 ? 2 : Integer.highestOneBit(capacity - 1) << 1;
+        this.ring = new Entry[ringSize];
+        this.mask = ringSize - 1;
         this.failurePublisher = failurePublisher;
         this.waitStrategy = configuredWaitStrategy();
-        entries = new OneToOneConcurrentArrayQueue<>(capacity);
         producer = Thread.currentThread();
         thread = new Thread(this::run, "core-system-ledger-lane");
         thread.setDaemon(true);
@@ -56,12 +76,28 @@ public final class SystemLedgerLane implements AutoCloseable {
         if (entry == null) throw new IllegalArgumentException("system ledger entry is required");
         assertHealthy();
         if (!running) throw new RejectedExecutionException("system ledger Lane is closed");
-        return entries.offer(entry);
+        long nextSeq = producerSequence.value + 1;
+        if (nextSeq - cachedConsumerSequence > capacity) {
+            cachedConsumerSequence = consumerSequence.value;
+            if (nextSeq - cachedConsumerSequence > capacity) return false;
+        }
+        ring[(int) nextSeq & mask] = entry;
+        producerSequence.value = nextSeq;
+        if (waitStrategy == WaitStrategy.BLOCKING && parked) {
+            LockSupport.unpark(thread);
+        }
+        return true;
     }
 
     Thread thread() { return thread; }
-    int depth() { return entries.size(); }
-    boolean hasCapacity() { return running && failure == null && entries.size() < entries.capacity(); }
+    int depth() { return (int) Math.max(0L, producerSequence.value - consumerSequence.value); }
+    boolean hasCapacity() {
+        if (!running || failure != null) return false;
+        long nextSeq = producerSequence.value + 1;
+        if (nextSeq - cachedConsumerSequence <= capacity) return true;
+        cachedConsumerSequence = consumerSequence.value;
+        return nextSeq - cachedConsumerSequence <= capacity;
+    }
     boolean parked() { return parked; }
 
     void assertHealthy() {
@@ -73,23 +109,39 @@ public final class SystemLedgerLane implements AutoCloseable {
 
     private void run() {
         int spins = 0;
+        long nextConsumeSeq = 0;
+        long cachedProducerSeq = -1L;
+        Entry head = null;
         try {
             ledger.bindOwner();
             started = true;
-            while (running || !entries.isEmpty()) {
-                Entry entry = entries.peek();
-                if (entry != null && entry.ready()) {
+            while (true) {
+                if (head == null) {
+                    if (nextConsumeSeq > cachedProducerSeq) {
+                        cachedProducerSeq = producerSequence.value;
+                    }
+                    if (nextConsumeSeq <= cachedProducerSeq) {
+                        head = ring[(int) nextConsumeSeq & mask];
+                    } else if (!running) {
+                        break;
+                    }
+                }
+                if (head != null && head.ready()) {
                     // The worker now owns the ready head. Release transport capacity before
                     // applying money; business completion still comes from the entry's release
                     // marker. Owner can continuously enqueue even before a response retires.
-                    entries.poll();
-                    entry.apply(ledger);
+                    ring[(int) nextConsumeSeq & mask] = null;
+                    consumerSequence.value = nextConsumeSeq;
+                    nextConsumeSeq++;
+                    Entry readyEntry = head;
+                    head = null;
+                    readyEntry.apply(ledger);
                     // apply may publish completion and immediately allow slot reuse. Never
                     // read entry fields again after that ownership handoff.
                     spins = 0;
                     continue;
                 }
-                if (!running && entry != null)
+                if (!running && head != null)
                     throw new IllegalStateException("system ledger stopped before settlement was ready");
                 if (waitStrategy == WaitStrategy.BUSY_SPIN) {
                     Thread.onSpinWait();
@@ -98,8 +150,10 @@ public final class SystemLedgerLane implements AutoCloseable {
                 if (spins++ < 256) { Thread.onSpinWait(); continue; }
                 parked = true;
                 try {
-                    Entry next = entries.peek();
-                    if (running && (next == null || !next.ready()))
+                    if (head == null && nextConsumeSeq <= (cachedProducerSeq = producerSequence.value)) {
+                        head = ring[(int) nextConsumeSeq & mask];
+                    }
+                    if (running && (head == null || !head.ready()))
                         LockSupport.parkNanos(this, 100_000L);
                 } finally { parked = false; }
                 spins = 0;
@@ -127,6 +181,7 @@ public final class SystemLedgerLane implements AutoCloseable {
 
     @Override public void close() {
         running = false;
+        LockSupport.unpark(thread);
         boolean interrupted = false;
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (thread.isAlive() && System.nanoTime() < deadline) {

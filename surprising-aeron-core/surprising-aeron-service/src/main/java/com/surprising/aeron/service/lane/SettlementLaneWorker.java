@@ -88,8 +88,10 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
     private final Thread thread;
     private final PaddedSequence producerSequence = new PaddedSequence();
     private final PaddedSequence consumerSequence = new PaddedSequence();
+    private long cachedConsumerSequence;
     private final PaddedSequence admissionProducerSequence = new PaddedSequence();
     private final PaddedSequence admissionConsumerSequence = new PaddedSequence();
+    private long cachedAdmissionConsumerSequence;
     private volatile boolean started;
     private volatile boolean running = true;
     private volatile Throwable failure;
@@ -162,8 +164,13 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
         rethrowFailure();
         if (!running) throw new RejectedExecutionException("settlement lane is closed");
         long next = producerSequence.value;
-        long consumed = consumerSequence.value;
-        if (next - consumed >= commands.length || depth() >= commands.length) {
+        if (next - cachedConsumerSequence >= commands.length) {
+            cachedConsumerSequence = consumerSequence.value;
+            if (next - cachedConsumerSequence >= commands.length) {
+                throw new RejectedExecutionException("settlement lane queue is full");
+            }
+        }
+        if (depth() >= commands.length) {
             throw new RejectedExecutionException("settlement lane queue is full");
         }
         commands[(int) next & indexMask] = command;
@@ -182,8 +189,11 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
         rethrowFailure();
         if (!running) throw new RejectedExecutionException("settlement lane is closed");
         long next = admissionProducerSequence.value;
-        if (next - admissionConsumerSequence.value >= admissionCommands.length) {
-            throw new RejectedExecutionException("settlement lane admission queue is full");
+        if (next - cachedAdmissionConsumerSequence >= admissionCommands.length) {
+            cachedAdmissionConsumerSequence = admissionConsumerSequence.value;
+            if (next - cachedAdmissionConsumerSequence >= admissionCommands.length) {
+                throw new RejectedExecutionException("settlement lane admission queue is full");
+            }
         }
         admissionCommands[(int) next & admissionIndexMask] = command;
         admissionProducerSequence.value = next + 1;
@@ -235,9 +245,13 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
 
     /** Returns the sampled total depth, or -1 when the dedicated admission mailbox is full. */
     public int admissionDepthIfAvailable() {
-        if (!running || failure != null
-                || admissionProducerSequence.value - admissionConsumerSequence.value >= admissionCommands.length) {
-            return -1;
+        if (!running || failure != null) return -1;
+        long next = admissionProducerSequence.value;
+        if (next - cachedAdmissionConsumerSequence >= admissionCommands.length) {
+            cachedAdmissionConsumerSequence = admissionConsumerSequence.value;
+            if (next - cachedAdmissionConsumerSequence >= admissionCommands.length) {
+                return -1;
+            }
         }
         int currentDepth = depth();
         return currentDepth < admissionCommands.length ? currentDepth : -1;
@@ -253,15 +267,17 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
 
     private void run(TradingCpuAffinity configuration) {
         long next = consumerSequence.value;
+        long cachedProducerSeq = producerSequence.value;
         long admissionNext = admissionConsumerSequence.value;
+        long cachedAdmissionProducerSeq = admissionProducerSequence.value;
         int idleSpins = 0;
         try (var affinity = configuration.accountLane(lane.laneId())) {
             lane.bindOwner();
             started = true;
             long reboundHandoff = 0;
             int payloadWaitSpins = 0;
-            while (running || next < producerSequence.value
-                    || admissionNext < admissionProducerSequence.value
+            while (running || next < (cachedProducerSeq = producerSequence.value)
+                    || admissionNext < (cachedAdmissionProducerSeq = admissionProducerSequence.value)
                     || hasMatcherSettlementWork()) {
                 if (completedHandoff > reboundHandoff) {
                     if (resumedHandoff < completedHandoff) {
@@ -278,7 +294,10 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
                 }
                 // Admissions are independent producer mail and must be drained even when the
                 // main queue head is a Matcher result that has not been published yet.
-                if (admissionNext < admissionProducerSequence.value) {
+                if (admissionNext >= cachedAdmissionProducerSeq) {
+                    cachedAdmissionProducerSeq = admissionProducerSequence.value;
+                }
+                if (admissionNext < cachedAdmissionProducerSeq) {
                     int admissionIndex = (int) admissionNext & admissionIndexMask;
                     Command admission = admissionCommands[admissionIndex];
                     if (admission == null) throw new IllegalStateException("admission publication gap");
@@ -294,8 +313,11 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
                 }
                 // Handoff is an ownership barrier.  Do not consume a Matcher ring after the
                 // worker has released its Lane to the Owner and before the Owner resumes it.
+                if (next >= cachedProducerSeq) {
+                    cachedProducerSeq = producerSequence.value;
+                }
                 MatcherSettlementEvent direct = peekMatcherSettlement();
-                Command main = next < producerSequence.value ? commands[(int) next & indexMask] : null;
+                Command main = next < cachedProducerSeq ? commands[(int) next & indexMask] : null;
                 if (direct != null && shouldRunMatcherSettlement(direct, main)) {
                     // The Matcher publishes only completed facts. There is no payload-wait
                     // lifecycle in this mailbox; publication validates that contract once.
@@ -305,7 +327,7 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
                     payloadWaitSpins = 0;
                     continue;
                 }
-                if (next < producerSequence.value) {
+                if (next < cachedProducerSeq) {
                     int index = (int) next & indexMask;
                     Command command = commands[index];
                     if (command == null) throw new IllegalStateException("settlement lane publication gap");

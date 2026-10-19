@@ -253,6 +253,10 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     /** 顺序批量下单复用一个 Lane 预留任务；下项只能在上项完成后准备。 */
     final com.surprising.aeron.service.state.BatchPlaceReservation placeReservation =
             new com.surprising.aeron.service.state.BatchPlaceReservation();
+    final OrderBatchExecutor.PipelinedPlaceBatchSubmission pipelinedPlaceBatchSubmission =
+            new OrderBatchExecutor.PipelinedPlaceBatchSubmission();
+    final OrderBatchExecutor.CancelBatchChunkSubmission cancelBatchChunkSubmission =
+            new OrderBatchExecutor.CancelBatchChunkSubmission();
 
     private static final byte COMMIT_WAITING = 0;
     private static final byte COMMIT_PREDISPATCHED = 1;
@@ -392,6 +396,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         itemAdmissionRevision = 0;
         laneCommitEvent = null;
         placeReservation.clear();
+        pipelinedPlaceBatchSubmission.clear();
+        cancelBatchChunkSubmission.clear();
         kind = null;
         clusterTimestamp = 0;
         clusterPosition = 0;

@@ -64,7 +64,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private final Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
             snapshotPersistence;
     private Runnable deferredActivation;
-    private boolean activationComplete;
+    private volatile boolean activationComplete;
     private final AtomicInteger activatedShardCount = new AtomicInteger();
     private MatcherSnapshot restoredSnapshot;
     private List<CoreOrderState> restoredActiveOrders = List.of();
@@ -230,7 +230,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
     }
 
-    public synchronized boolean activated() { return activationComplete; }
+    public boolean activated() { return activationComplete; }
 
     /** Starts one independent synchronous engine on the thread that will own that shard. */
     public void activateShard(int shardId) {
