@@ -121,9 +121,13 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
                     return CoreTriggerOrderCodec.decodeList(response.data()).stream().findFirst().orElse(null);
                 });
     }
-    public void cancel(long userId, long id) { command(CoreMessageType.CANCEL_TRIGGER_ORDER, stable("TRIGGER_CANCEL:" + userId + ':' + id), userId, CoreTriggerOrderCodec.encodeId(id)); }
+    public static UUID cancellationCommandId(long userId, long id) {
+        if (userId <= 0 || id <= 0) throw new IllegalArgumentException("userId and triggerOrderId must be positive");
+        return stable("TRIGGER_CANCEL:" + userId + ':' + id);
+    }
+    public void cancel(long userId, long id) { command(CoreMessageType.CANCEL_TRIGGER_ORDER, cancellationCommandId(userId, id), userId, CoreTriggerOrderCodec.encodeId(id)); }
     public CompletionStage<CoreResponse> cancelAsync(long userId, long id) {
-        return commandAsync(CoreMessageType.CANCEL_TRIGGER_ORDER, stable("TRIGGER_CANCEL:" + userId + ':' + id),
+        return commandAsync(CoreMessageType.CANCEL_TRIGGER_ORDER, cancellationCommandId(userId, id),
                 userId, CoreTriggerOrderCodec.encodeId(id));
     }
     public void claim(long id, long sequence, long price, long at) { command(CoreMessageType.CLAIM_TRIGGER_ORDER, stable("TRIGGER_CLAIM:" + id + ':' + sequence), 0, CoreTriggerOrderCodec.encodeClaim(id, sequence, price, at)); }

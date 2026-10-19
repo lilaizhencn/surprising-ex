@@ -46,6 +46,8 @@ public final class TradingLocalRoutes {
     private static final PathPattern ADMIN_METRICS = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/metrics");
     private static final PathPattern ADMIN_TRADES = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/trades");
     private static final PathPattern TRIGGER_OCO_SUBMISSION = PathPatternParser.defaultInstance.parse("/api/v1/trading/trigger-orders/oco-submission");
+    private static final PathPattern TRIGGER_SUBMISSION = PathPatternParser.defaultInstance.parse("/api/v1/trading/trigger-orders/submission");
+    private static final PathPattern TRIGGER_CANCELLATION = PathPatternParser.defaultInstance.parse("/api/v1/trading/trigger-orders/cancellations/{triggerOrderId}");
     private static final PathPattern CANCELLATION_PLAN = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/cancellation-plan");
     private static final PathPattern CANCELLATION_BATCH = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/cancellation-batches");
     private static final PathPattern AMENDMENT = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/amendments");
@@ -262,6 +264,14 @@ public final class TradingLocalRoutes {
             return triggerOrderRequests.ocoSubmission(r.query("userId", long.class, null, true),
                     r.query("takeProfitClientId", String.class, null, true),
                     r.query("stopLossClientId", String.class, null, true));
+        }
+        if (r.matches(HttpMethod.GET, TRIGGER_SUBMISSION)) {
+            return triggerOrderRequests.submission(r.query("userId", long.class, null, true),
+                    r.query("clientTriggerOrderId", String.class, null, true));
+        }
+        if (r.matches(HttpMethod.GET, TRIGGER_CANCELLATION)) {
+            return triggerOrderRequests.cancellation(r.query("userId", long.class, null, true),
+                    r.path("triggerOrderId", long.class));
         }
         if (r.matches(HttpMethod.POST, ORDER_CONTROLLER_CANCELBATCH)) {
             return orderRequests.cancelBatch(r.body(BatchCancelOrdersRequest.class, true, true));

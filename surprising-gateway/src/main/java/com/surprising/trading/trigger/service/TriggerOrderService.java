@@ -97,8 +97,7 @@ public class TriggerOrderService {
         ProductLine productLine = currentProductLine();
         long triggerOrderId = StableOrderIdentity.triggerOrderId(productLine, normalized.userId(),
                 normalized.clientTriggerOrderId());
-        UUID commandId = StableOrderIdentity.triggerCommandId(productLine, normalized.userId(),
-                normalized.clientTriggerOrderId());
+        UUID commandId = submissionCommandId(normalized.userId(), normalized.clientTriggerOrderId());
         CoreTriggerOrderStateView view = new CoreTriggerOrderStateView(
                 triggerOrderId, productLine, normalized.userId(), normalized.clientTriggerOrderId(),
                 emptyToNull(normalized.ocoGroupId()), normalized.instrumentId(),
@@ -180,6 +179,14 @@ public class TriggerOrderService {
             results.add(new TriggerOrderBatchItemResponse(i, true, "completed", TriggerOrderAeronGateway.response(view)));
         }
         return triggerBatchResponse(results);
+    }
+
+    /** 与单笔下单共用原始身份；只计算查询键，不向 Core 发送命令或查询。 */
+    public UUID submissionCommandId(long userId, String clientTriggerOrderId) {
+        String key = emptyToNull(clientTriggerOrderId);
+        if (key == null || key.length() > 64)
+            throw new IllegalArgumentException("clientTriggerOrderId must contain 1 to 64 characters");
+        return StableOrderIdentity.triggerCommandId(currentProductLine(), userId, key);
     }
 
     /** 与原子下单共用原始身份；只计算查询键，不向 Core 发送命令或查询。 */

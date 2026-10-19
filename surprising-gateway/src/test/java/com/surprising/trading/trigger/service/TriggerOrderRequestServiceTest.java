@@ -19,6 +19,48 @@ import org.springframework.web.server.ResponseStatusException;
 class TriggerOrderRequestServiceTest {
 
     @Test
+    void singlePlacementAndCancellationReadOriginalCommittedResultsWithoutCore() {
+        var core = mock(TriggerOrderAeronGateway.class);
+        var results = mock(com.surprising.trading.order.service.OrderService.class);
+        for (var product : com.surprising.product.api.ProductLine.values()) {
+            var properties = new com.surprising.trading.trigger.config.TriggerProperties();
+            properties.setProductLine(product);
+            var service = new TriggerOrderService(properties, core);
+            var requests = new TriggerOrderRequestService(service, results);
+            var placement = service.submissionCommandId(1001, " original-single ");
+            org.assertj.core.api.Assertions.assertThat(placement).isEqualTo(
+                    com.surprising.trading.order.service.StableOrderIdentity.triggerCommandId(product, 1001, "original-single"));
+            var cancellation = TriggerOrderAeronGateway.cancellationCommandId(1001, Long.MAX_VALUE);
+            org.assertj.core.api.Assertions.assertThat(cancellation).isEqualTo(java.util.UUID.nameUUIDFromBytes(
+                    ("TRIGGER_CANCEL:1001:" + Long.MAX_VALUE).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            for (var command : java.util.List.of(placement, cancellation)) {
+                var receipt = new com.surprising.trading.api.model.OrderCommandReceipt(command,
+                        "RESULT_UNKNOWN", "RESULT_UNKNOWN", "pending", null, java.util.List.of(), null, null);
+                when(results.commandResult(1001, command)).thenReturn(receipt);
+                org.assertj.core.api.Assertions.assertThat(command.equals(placement)
+                        ? requests.submission(1001, " original-single ") : requests.cancellation(1001, Long.MAX_VALUE))
+                        .isSameAs(receipt);
+            }
+        }
+        org.mockito.Mockito.verifyNoInteractions(core);
+    }
+
+    @Test
+    void invalidSingleTriggerIdentitiesCannotReadAReceipt() {
+        var properties = new com.surprising.trading.trigger.config.TriggerProperties();
+        properties.setProductLine(com.surprising.product.api.ProductLine.OPTION);
+        var core = mock(TriggerOrderAeronGateway.class);
+        var results = mock(com.surprising.trading.order.service.OrderService.class);
+        var requests = new TriggerOrderRequestService(new TriggerOrderService(properties, core), results);
+        for (String key : java.util.List.of("", " ", "x".repeat(65)))
+            assertStatus(() -> requests.submission(1001, key), HttpStatus.BAD_REQUEST);
+        assertStatus(() -> requests.submission(0, "original"), HttpStatus.BAD_REQUEST);
+        assertStatus(() -> requests.cancellation(0, 99), HttpStatus.BAD_REQUEST);
+        assertStatus(() -> requests.cancellation(1001, 0), HttpStatus.BAD_REQUEST);
+        org.mockito.Mockito.verifyNoInteractions(core, results);
+    }
+
+    @Test
     void ocoSubmissionReadsCommittedResultWithoutSendingOrQueryingCore() {
         var properties = new com.surprising.trading.trigger.config.TriggerProperties();
         properties.setProductLine(com.surprising.product.api.ProductLine.OPTION);

@@ -16,6 +16,24 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
 class LocalBusinessApiTest {
+    private final com.surprising.trading.trigger.service.TriggerOrderRequestService triggers = mock(com.surprising.trading.trigger.service.TriggerOrderRequestService.class);
+
+    @Test void triggerReceiptRoutesBindUserAndPreserveOriginalIdentities() {
+        var receipt = new com.surprising.trading.api.model.OrderCommandReceipt(new java.util.UUID(4, 5),
+                "RESULT_UNKNOWN", "RESULT_UNKNOWN", "pending", null, java.util.List.of(), null, null);
+        when(triggers.submission(42, "a+b")).thenReturn(receipt);
+        assertThat(invoke("trading-trigger", "/api/v1/trading/trigger-orders/submission?clientTriggerOrderId=a%2Bb", HttpMethod.GET, userHeaders(), null).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        verify(triggers).submission(42, "a+b");
+        when(triggers.cancellation(42, Long.MAX_VALUE)).thenReturn(receipt);
+        assertThat(invoke("trading-trigger", "/api/v1/trading/trigger-orders/cancellations/"+Long.MAX_VALUE, HttpMethod.GET, userHeaders(), null).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        verify(triggers).cancellation(42, Long.MAX_VALUE);
+        assertThat(invoke("trading-trigger", "/api/v1/trading/trigger-orders/submission?userId=43&clientTriggerOrderId=x", HttpMethod.GET, userHeaders(), null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(invoke("trading-trigger", "/api/v1/trading/trigger-orders/cancellations/99?userId=43", HttpMethod.GET, userHeaders(), null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(invoke("trading-trigger", "/api/v1/trading/trigger-orders/submission", HttpMethod.GET, userHeaders(), null).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        verifyNoMoreInteractions(triggers);
+    }
     @Test void tradingMetricsRouteUsesTheSelectedProductAndDoesNotAcceptAnUntrustedAdminHeader() {
         var headers=new HttpHeaders();headers.set("X-Admin-User-Id","7");headers.set("X-Product-Line","LINEAR_PERPETUAL");
         assertThat(invoke("trading-orders","/api/v1/admin/trading/orders/metrics?productLine=LINEAR_PERPETUAL&windowMinutes=60&limit=1",HttpMethod.GET,headers,null).getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -208,7 +226,7 @@ class LocalBusinessApiTest {
     }
 
     private LocalBusinessApi api() {
-        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, mock(com.surprising.trading.trigger.service.TriggerOrderRequestService.class), mock(com.surprising.trading.trigger.service.AdminTriggerOrderRequestService.class), leverage, mock(com.surprising.trading.order.service.TradingFeeRequestService.class), orders, adminOrders, mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments, mock(com.surprising.trading.order.config.OrderBusinessSettingsService.class)), mapper, Validation.buildDefaultValidatorFactory().getValidator(), websocket, accountProperties, tradingProperties);
+        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, triggers, mock(com.surprising.trading.trigger.service.AdminTriggerOrderRequestService.class), leverage, mock(com.surprising.trading.order.service.TradingFeeRequestService.class), orders, adminOrders, mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments, mock(com.surprising.trading.order.config.OrderBusinessSettingsService.class)), mapper, Validation.buildDefaultValidatorFactory().getValidator(), websocket, accountProperties, tradingProperties);
     }
 
     private ResponseEntity<byte[]> invoke(String service, String path, HttpMethod method, HttpHeaders headers, String body) {

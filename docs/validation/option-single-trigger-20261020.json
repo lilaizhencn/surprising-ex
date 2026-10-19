@@ -1,0 +1,711 @@
+{
+  "date": "2026-10-20",
+  "recordedAt": "2026-10-19T22:05:06.102125+00:00",
+  "scope": "Only OPTION live runtime. Independent trigger placement and single cancellation now persist their original identities in Web/client and resolve via realtime. Overall Web/client product parity goal remains active.",
+  "previousGoalTurn": "progress: complete committed statistics verified and pushed",
+  "moduleStatus": "verified; owned runtime/database/reports cleaned; ready to commit and push",
+  "baseHeads": {
+    "surprising-ex": "fa8f5d9a1f190275b014283968f451db7673095b",
+    "surprising-ex-web": "c20d5c25c0e382cc8a5c3b213774a32438a852a2",
+    "surprising-client": "04197f6b7b5608af0e3e87d92f54042d7fc3b9b9"
+  },
+  "behavior": [
+    "Persist user/product/instrument/clientTriggerOrderId before the sole independent placement POST; persist original triggerOrderId before cancellation. Initial storage failure sends nothing.",
+    "Unknown/lost/malformed replies retain original intent. Reconstructed AppState/browser reload GET the original committed result; no implicit POST retry or new identity.",
+    "A client multi-tier submission stops at the first unknown tier. Already acknowledged and issued-unknown tiers leave the open form; unsent tiers remain. After restart, only the issued request identity is restored; this does not claim durable restoration of unsubmitted form drafts.",
+    "Confirmation-storage failure retains the original intent. User/session fences prevent sending remaining old-account tiers and showing old-account results.",
+    "Trade-page trigger cancellation and order-page cancellation are disabled for an existing pending request. Both views pass canonical instrument identity; the result button identifies trigger cancellation.",
+    "Normal trigger/cancel acknowledgments validate original ID/instrument/owner/status. Native TriggerOrderModel now retains the private owner field for that validation."
+  ],
+  "backend": {
+    "placementRead": "GET /api/v1/gateway/trading-trigger/submission?userId=...&clientTriggerOrderId=...",
+    "cancellationRead": "GET /api/v1/gateway/trading-trigger/cancellations/{triggerOrderId}?userId=...",
+    "flow": "TradingLocalRoutes → TriggerOrderRequestService → original stable identity → OrderService.commandResult → realtime committed receipt projection",
+    "identity": "Placement lookup shares normalized product/user/client identity with prepareTriggerOrder. Cancellation key remains UUID.nameUUIDFromBytes(TRIGGER_CANCEL:user:id), unchanged for existing commands. Lookup validation rejects nonpositive user/ID and blank/overlong client identity.",
+    "isolation": "Authenticated user binding; cross-user query parameters rejected. Six-product identity/receipt unit coverage; no online Core query/fallback, new SQL, new protocol or financial-model change.",
+    "release": "Deploy matching gateway and both clients; retain existing committed-receipt migration/export and required history repair. No new migration this round.",
+    "newAbstractions": "No new production class/interface or framework. Added pure original-key methods and read routes in existing owners; client intent fields reuse the existing settings persistence, read-confirmation UI and private state."
+  },
+  "verification": {
+    "jdk": "HotSpot Corretto 27+33-FR; Maven 3.9.16",
+    "backendTargeted": {
+      "tests": 50,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "command": "mvn -o -pl surprising-gateway -am -Dtest=TriggerOrderRequestServiceTest,TriggerOrderIdentityTest,LocalBusinessApiTest -Dsurefire.failIfNoSpecifiedTests=false test"
+    },
+    "backendLive": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "backendClasses": [
+      {
+        "class": "com.surprising.trading.trigger.service.TriggerOrderRequestServiceTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.trading.trigger.service.TriggerOrderIdentityTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+        "tests": 33,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.gateway.provider.local.SixProductLineContractLiveTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "package": "mvn -o -pl surprising-gateway -am -DskipTests package: BUILD SUCCESS",
+    "web": {
+      "unitTests": 241,
+      "testFiles": 34,
+      "testCommand": "npm test",
+      "lint": "npm run lint: exit 0 (existing informational property-access diagnostics)",
+      "build": "npm run build: exit 0",
+      "syntax": "node --check scripts/option-single-trigger-fused-live.mjs: exit 0",
+      "finalFiles": "The last OrdersPage pending-button/label edits were followed by fresh lint, build and all 241 tests. Browser financial scenario covered trade-page cancellation, not a second OrdersPage financial write."
+    },
+    "flutter": {
+      "unitWidgetTests": 238,
+      "defaultOptInSkipped": 6,
+      "command": "flutter test --concurrency=1 --reporter expanded",
+      "analyze": "flutter analyze: No issues found",
+      "targetedAfterUiFence": 17,
+      "actualFusedOptIn": 1,
+      "coverage": "Before-write persistence; same original GET after reconstruction; exact int64 cancel; no unsent tier after lost reply; malformed/unavailable response; initial/confirmation storage failure; account change during storage; 320px light/dark independent and OCO UI. Existing other-product and account/realtime regressions remained passing."
+    },
+    "earlyRepairs": "Initial analyzer reported missing debugPrint import and brace-style issues in the new opt-in fixture. Fixed before the actual live test and final clean analyzer/full suite. No failed financial scenario was restarted."
+  },
+  "runtime": {
+    "historicalRoot": "/tmp/surprising-option-fused-20261020-054629",
+    "runId": "option-single-20261020-054629",
+    "product": "OPTION",
+    "mode": "FUSED",
+    "nodes": 1,
+    "applicationRoles": 6,
+    "makerRunning": true,
+    "wallet": false,
+    "jfr": false,
+    "heapsMiB": {
+      "core": 256,
+      "gateway": 384,
+      "providers": 256,
+      "kafka": 256,
+      "redis": 128
+    },
+    "minimumHeapMiB": 64,
+    "candlestickThreads": 1,
+    "rocksdbMiB": [
+      16,
+      8,
+      16
+    ],
+    "kafkaPartitions": 1,
+    "kafkaRetentionHours": 1,
+    "kafkaSegmentMiB": 16,
+    "priceSource": "Owned loopback OPTION ticker; real Core, accounts, maker, REST and WebSocket. No financial API data mocked.",
+    "sampleInterval": "Owned lab 1 second; source default remains 60 seconds. No latency/throughput or production-load claim.",
+    "startup": "First Core launch from workspace JARs/current JDK path failed the bounded readiness check and the script authoritatively stopped its process. No account or financial scenario had run. Pinned explicit HotSpot 27 and copied all seven artifact hashes into the owned temporary directory, retained same DB/runtime, then all six roles became ready. The underlying OS launch cause is not claimed established.",
+    "activation": "Preflight enabled OPTION and observed the actual public active product before Maven. Transient NOT_CONNECTED activation attempts are retained in logs; product activation behavior was not refactored.",
+    "preflight": {
+      "productLine": "OPTION",
+      "activeBeforeMaven": true,
+      "administratorId": 1,
+      "noFundingOrTradingSubmitted": true
+    },
+    "artifactsSha256": {
+      "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar": "70cc36a9c510d79e322f83e7f1685687b1c0a798e1b0f6be1822f1b169a9e516",
+      "surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar": "f6d7b9e5609818d6395414545c42dab34ba6bb32b5995c44ae8713de19caa9b9",
+      "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar": "a2d53e83e85791c6f626b81fc5e714d8fcc563cfe04df406e49ea0cd60e96c41",
+      "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar": "07444b8ec921ddae360b893717282e5dded5bbc6f04d93c2c26aa5e489944848",
+      "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar": "e50223f53246b9b5ce319480f5fe4f20e3006ea9a43af6fb85d66a76c78bdfe0",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar": "4a8daf561ba016b262eec87f25891bf8659515699979f7f095268e6cd302f8de",
+      "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar": "7c13acce6ab5b26b5d1ec5f98e2597f45970537e1bf8a2d0760f63e7256b678d"
+    }
+  },
+  "live": {
+    "command": "SIX_LINE_LIVE_PRODUCT=OPTION SIX_LINE_LIVE_RUN_ID=<owned-run> SIX_LINE_LIVE_TRADING=true SIX_LINE_LIVE_OPTION_REFERENCE=true SIX_LINE_LIVE_TRADING_STATISTICS=true SIX_LINE_LIVE_UI_FIXTURE=<owned-fixture> SIX_LINE_LIVE_JDBC_URL=<owned-db> mvn -o -pl surprising-gateway -am -Dtest=SixProductLineContractLiveTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "handoff": "Existing statistics handoff runs while retail and maker positions are open; this round used that window for Web and Flutter independent trigger operations. Parent console labels it ADMIN_QUERY_HANDOFF, while the two separate client evidence files prove both clients actually ran.",
+    "instrumentId": 867,
+    "retailUser": 4,
+    "makerUser": 5,
+    "realTrades": 2,
+    "depthEvents": 286,
+    "wsRestTradeIdentitiesMatch": true,
+    "publicBalancesMatchCore": true,
+    "terminalOrderLookup": true,
+    "finalPositions": 0,
+    "finalReservations": 0,
+    "finalLocked": 0,
+    "combinedFundsDifference": 0,
+    "triggerProjection": {
+      "productLine": "OPTION",
+      "canceled": 3,
+      "active": 0,
+      "source": "committed realtime trigger projection"
+    },
+    "web": {
+      "productLine": "OPTION",
+      "posts": [
+        {
+          "operation": "place",
+          "clientTriggerOrderId": "web-trigger-a365879c-4837-4fe5-ace2-3e308068dd44"
+        },
+        {
+          "operation": "cancel",
+          "triggerOrderId": "7494396296755710838"
+        }
+      ],
+      "pageErrors": [],
+      "widths": [
+        1440,
+        320
+      ],
+      "triggerId": "7494396296755710838",
+      "placePosts": 1,
+      "cancelPosts": 1,
+      "placeReloadRecovered": true,
+      "cancelReloadRecovered": true,
+      "noBodyOverflow": true
+    },
+    "client": {
+      "productLine": "OPTION",
+      "triggerIds": [
+        "7530981025908337880",
+        "5600304138009361735"
+      ],
+      "posts": 4,
+      "placementPosts": 2,
+      "cancellationPosts": 2,
+      "lostReplyCreate": true,
+      "lostReplyCancel": true,
+      "pausedUnknown": 2,
+      "reconstructed": 2,
+      "corePausedQueries": 2,
+      "unsentTiersStopped": 2,
+      "normalAcknowledgments": true,
+      "allTriggersCanceled": true,
+      "positionStillOneUntilParentCloses": true
+    },
+    "flutterHarness": "Actual AppState and HTTP, memory settings/session adapters for host Flutter; private refresh in the live harness reads real positions. Parent Maven verifies real private/public WS. This is not native secure-storage/device installation acceptance.",
+    "readonlyVisual": {
+      "readOnly": true,
+      "replay": "Exact original pending identities, now terminal on server; render before GET confirmation without another trading POST",
+      "screens": [
+        {
+          "kind": "place",
+          "width": 1440,
+          "theme": "light",
+          "originalIdentityConfirmed": true
+        },
+        {
+          "kind": "cancel",
+          "width": 320,
+          "theme": "dark",
+          "originalIdentityConfirmed": true
+        }
+      ],
+      "financialWrites": 0,
+      "pageErrors": []
+    },
+    "screenshots": "Original financial scenario screenshots show the reset ordinary ticket after reload. Additional viewed light-desktop/dark-mobile screenshots replay exact original pending identities locally before real GET confirmation; no new trading POST. No body overflow or browser page errors."
+  },
+  "notRepeated": [
+    "Other five full live runtimes; pure stable-key/route unit coverage spans six products.",
+    "Native iOS/Android installation, native secure-storage plugin persistence, production release, new expiry/exercise/liquidation/stress matrix or JMH/JFR.",
+    "Admin frontend source unchanged this round; prior committed statistics UI remains separate."
+  ],
+  "remaining": [
+    "Independent trigger durable recovery on the other non-perpetual products, conditional bulk actions and remaining Web/client product UI/flow parity need separate audits.",
+    "Continue per-product acceptance and native device validation before claiming the overall objective achieved."
+  ],
+  "sourceSha256": {
+    "surprising-ex/surprising-gateway/src/main/java/com/surprising/gateway/provider/local/TradingLocalRoutes.java": "7d1f733996b29a9ea4a81fe04d9e4c619e4c5e92341c074cd36a3f94388db10a",
+    "surprising-ex/surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java": "155ae4fe75925a418e3544f06f29439a542f5765da7a12a369df56e17be8be95",
+    "surprising-ex/surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderRequestService.java": "e27944cb296821c01fa0bbedb53aaef3e8b510fb6c67029a6a7df5b496d31db9",
+    "surprising-ex/surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderService.java": "89305678b266cea7ca342b5b395524e9b7de4b443e1e9f2ac668743c925525a4",
+    "surprising-ex/surprising-gateway/src/test/java/com/surprising/gateway/provider/local/LocalBusinessApiTest.java": "521e68c20f2a6572f39e60d31d66744acb77cfda266d8942ab1bfe41834f5e39",
+    "surprising-ex/surprising-gateway/src/test/java/com/surprising/trading/trigger/service/TriggerOrderRequestServiceTest.java": "febddc67f68a060b1870d206000fb2f25baa79221ef0f1927d7b74a11ff8eb5f",
+    "surprising-ex-web/scripts/option-single-trigger-fused-live.mjs": "cfa6aa03609d638f2050133e591e7d664c41932e11ef49e0d17b14527db00612",
+    "surprising-ex-web/src/api/endpoints.ts": "c5521fa1124bd482d2a466d040e1a8c3ee851fe2eef21001e07ce647227cbcab",
+    "surprising-ex-web/src/api/optionTrigger.test.ts": "19bafab68639797855250455a7256867b7285eaa7e4891350623da87ff8994dd",
+    "surprising-ex-web/src/features/orders/OrdersPage.tsx": "2544c69a1fcf5546b404ec6718c2afbc64dc03b7f40bb8b07ab1009126c4ed1e",
+    "surprising-ex-web/src/features/trading/TradePage.tsx": "7e29fc5855155fe93d6961034708d496c28716c9ae251545c34bbc4e50d9ab71",
+    "surprising-ex-web/src/state/pendingOrders.ts": "41576913aacb86b4c4a0cc0331d5bd3effe5a5eb8c056e94aae08c81409343d3",
+    "surprising-client/lib/src/api.dart": "e1a7eff9ca37fa46e128523e01cc4465bd8b41e489421a9d2678acf269f832df",
+    "surprising-client/lib/src/app.dart": "b9631a84da8f74f37eced95db873e76d14cd69a11f6a2c8d069f6a8652e99988",
+    "surprising-client/lib/src/app_state.dart": "be64846cb5e468e132906853fb1184376f0648f4b0760b0853bf7a7f52aa9332",
+    "surprising-client/lib/src/models.dart": "cdc5ca499e6ee5a9294a2792295949d3eef5baeb7b7458f8250d5004cfe3c196",
+    "surprising-client/test/mobile_audit_test.dart": "adeaadf01b6d98868f844ac25d32c8ee5a7510bc69daafc48f50d361f8d23016",
+    "surprising-client/test/option_protection_test.dart": "cf68e794043b2f48d4442120583fa98c58f9ea7f2d3e20e50dea9c0fb2ffc99f",
+    "surprising-client/test/option_single_trigger_fused_live_test.dart": "fbc47f715ee751cdd05964bdade1ecfc6bda3eeaf417cd5b5c64e88be846b358"
+  },
+  "evidenceArtifacts": [
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.LocalBusinessApiTest.xml",
+      "bytes": 50728,
+      "sha256": "373aeb2c891acdbac55d535a60a396f1476cf32e043de2b87f3ac7a4f056113c"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.SixProductLineContractLiveTest.xml",
+      "bytes": 45575,
+      "sha256": "d8c35392cfd740317dd3f1c254d59a39859d99d7803db1b346794cd008f0d92e"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.trigger.service.TriggerOrderIdentityTest.xml",
+      "bytes": 45977,
+      "sha256": "965fefbd1625f7bcba1525c8c7c81ed120266a051dcb67d2760fcadb7eafcf0d"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.trigger.service.TriggerOrderRequestServiceTest.xml",
+      "bytes": 46618,
+      "sha256": "e3768493e28a57aabb383a7cbdabf21e9ce8ea0f306317f447a661f2604131fe"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.LocalBusinessApiTest.txt",
+      "bytes": 367,
+      "sha256": "8abbe27701ee7de73a0bf3a445f064020a6657fbd303e9343e2c0e6bc37175d3"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.SixProductLineContractLiveTest.txt",
+      "bytes": 386,
+      "sha256": "6b182048eb4ba0474372936397811439b25603c8eb17d9deed1bfdaa03ca08df"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.trigger.service.TriggerOrderIdentityTest.txt",
+      "bytes": 376,
+      "sha256": "cbb8912a59ef065e7eecf1a2969a9311d81ef8553f4fd3e24598f59b1dc512a5"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.trigger.service.TriggerOrderRequestServiceTest.txt",
+      "bytes": 388,
+      "sha256": "ab6a28d9d65eb90358f587e5064e499c53655c10686021f9ef4457aeb09b4ac3"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/artifact-hashes.json",
+      "bytes": 1166,
+      "sha256": "46ce2261e97bb54219a378b89473a8579b620dadb82e6cc451d12ff962d3b280"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/client-live.log",
+      "bytes": 395,
+      "sha256": "771877bc2d4b687205ec49d9a4b4a67ebba7d2779d9d16deb3ff3753b59bc249"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/core-launch-sample.log",
+      "bytes": 118,
+      "sha256": "c27a3c92ab9f33dbb33194393aa6d37be891a36a987a639ef7e8308b59637766"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/database-init.log",
+      "bytes": 11848,
+      "sha256": "a011e654dee809b8bfe3f5192cd39120eff0ec4e92769c4510912930d68c3884"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/final-trigger-state.json",
+      "bytes": 104,
+      "sha256": "0e16bf9a88abf24c18d681189219646b9f49ab672b020282d3a25f0bf59277fa"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/kafka-format.log",
+      "bytes": 980,
+      "sha256": "a95517fe62ae72f3093a8d7e3eaa2961ab16318ef0617496ee2e54012e9a77cb"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/kafka-logs/controller.log",
+      "bytes": 81500,
+      "sha256": "b33c043efbd982c798a372ec0a571b4afa9e5bce9516f0d6148e2b22e83f0d4f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/kafka-logs/kafka-authorizer.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/kafka-logs/kafka-request.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/kafka-logs/kafkaServer-gc.log",
+      "bytes": 116531,
+      "sha256": "58c9d2ba6c93395267e094f48b299a28dcc88ef3ba1826b8429c81e63bc15a32"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/kafka-logs/log-cleaner.log",
+      "bytes": 780,
+      "sha256": "cca3ddcb9be80985d5d31fb99fbd4bec622fec38804937118702b641178278ec"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/kafka-logs/server.log",
+      "bytes": 441587,
+      "sha256": "1119752852f783bb8fb549630aefad4e2f528b519d2722d3f5a900718f0b210a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/kafka-logs/state-change.log",
+      "bytes": 89180,
+      "sha256": "cd32c627e0fc32ba578185b567d3ec4d4cbc34d5efdf0b008df0f4be24ca568c"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/kafka.log",
+      "bytes": 442651,
+      "sha256": "2299068bdca2d3e338a1963628b05b2931f4cd92e730eaaa2e96c3fa91383deb"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/live-maven.log",
+      "bytes": 30422,
+      "sha256": "1aa93c5cd95ff80ec07215547b4b5618a5e142f81bfe0b38ef792606708db4cf"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/preflight-evidence.json",
+      "bytes": 111,
+      "sha256": "ad4f02ec267c7db93e5ff45025b7c81c60ddd60d654d780def647c74f786c664"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/readonly-ui-evidence.json",
+      "bytes": 460,
+      "sha256": "ff9314e479510ab0e76ba6bfbc37856ba0b304fe31765d8935c71d173bace236"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/readonly-ui.log",
+      "bytes": 90,
+      "sha256": "0bb3caea7bb18bf33c365e00c5fdfa0aae36dc08f36e36dca173198bd8e7a20b"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/redis.log",
+      "bytes": 1065,
+      "sha256": "95b6c70e58a25e3d23841f19e5c643730b72b9339c8f0051abd91d77abeb9cdf"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/core-node0-gc.log",
+      "bytes": 20934,
+      "sha256": "66450c8e7200f6c38e5e89944d5722797554087d94578975e9108741e73e0e51"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/core-node0.app.log",
+      "bytes": 1354,
+      "sha256": "7da8eec36d629857eb50f4d6bac1012102b89f516c7d99dc156936980170b7bd"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/core-node0.log",
+      "bytes": 429,
+      "sha256": "00b575c4f10663fcbbcb22023cb3dc03ac421cd628282283de805994b296c57a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/core-probe-gc.log",
+      "bytes": 3164,
+      "sha256": "5ee45ee2e8ea321bb76ea2c69519bc15b166abee3ce48cb2d33d6f9b4c14e888"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/core-probe.log",
+      "bytes": 106,
+      "sha256": "318bd3a12570e09542b7f669cfca042a3222635f0b5bd34bf3325cae570034aa"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/derivatives-lifecycle-gc.log",
+      "bytes": 193230,
+      "sha256": "1b4feeb8e4c596309c4ffac3e1b227c2ae659f50b748c989bc42303fbce1c0dd"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/derivatives-lifecycle.app.log",
+      "bytes": 450687,
+      "sha256": "aaca744a5f96c324707c8ae48713b80b086fa4195ee1bad1ba9cfa6b4b03fa54"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/derivatives-lifecycle.log",
+      "bytes": 295,
+      "sha256": "10c7d78afacf9b44cc07813e510d7e4247536c8857f6a49461aa30097d9da022"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/gateway-gc.log",
+      "bytes": 86365,
+      "sha256": "7dbf3506fe919c468e92eb21a6329290a948ebc5a6b1edeefe8b999c1efb93c0"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/gateway.app.log",
+      "bytes": 952892,
+      "sha256": "f8a60e80c5c668fc7f856931390fd8576ecaba43e67ebb01ac0012ed4547efeb"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/gateway.log",
+      "bytes": 362,
+      "sha256": "d0516eff9a6337940e8a4e76b161ff4fd41fe911e450b1f9eb060157c81006f2"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/maker-gc.log",
+      "bytes": 79260,
+      "sha256": "ece80547d6800dfa3de97d674f7b9b2b749dc7cd8194b01b96e47c8fe1c26d0e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/maker.app.log",
+      "bytes": 415762,
+      "sha256": "11b1cfb4ab5392b9f927ba0033ca71afa6ab5a3cc1e86b6c5951edc7ca2d1736"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/maker.log",
+      "bytes": 295,
+      "sha256": "10c7d78afacf9b44cc07813e510d7e4247536c8857f6a49461aa30097d9da022"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/price-gc.log",
+      "bytes": 98048,
+      "sha256": "d1840059bacfc2da0f387b412698cb65271f15750c9742040d41c43752178edc"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/price.app.log",
+      "bytes": 1149813,
+      "sha256": "bdadaf5dae1d7e2af265e0378a9eaacb309993d3b0f2f7742109de4da6b1d0d2"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/price.log",
+      "bytes": 295,
+      "sha256": "10c7d78afacf9b44cc07813e510d7e4247536c8857f6a49461aa30097d9da022"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/realtime-gc.log",
+      "bytes": 3162,
+      "sha256": "8a2ee98a4470ab1f31b0d341323a382046e7ccaaffaed20f0253c420c4cd4989"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/realtime.app.log",
+      "bytes": 992952,
+      "sha256": "872b8289e483379a9796f0f904d34db2e311827d753d057843fd238ed5f980a2"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/runtime/option-single-20261020-054629/logs/realtime.log",
+      "bytes": 939,
+      "sha256": "43f8180c40ca31664d6037a4dfffce2720a3568956d40369617d57ede51f422c"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/single-trigger-client-evidence.json",
+      "bytes": 358,
+      "sha256": "a37abb48990b0357b562bd9da701a8ac4c53ded53683013db11dfbd14fa4323f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/single-trigger-pending-cancel-320.png",
+      "bytes": 41182,
+      "sha256": "6fbb91bbc0566948967d9d30b7710a82e70cc825ef2769c4bf382ba44271e31e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/single-trigger-pending-place-1440.png",
+      "bytes": 44223,
+      "sha256": "1a9cfc8ea4e796874f0e825af342c7acd6ac5865a4b72fe21c6b8f75445dcfd9"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/single-trigger-web-desktop.png",
+      "bytes": 34399,
+      "sha256": "308b71be6e64c5ef85c9bf8939c3bbf267dfc2d7cd41659747af16eea0c398f5"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/single-trigger-web-evidence.json",
+      "bytes": 481,
+      "sha256": "532b9b4dc2a30c78f795c34957b867b2d26715f4421ad597879d8b7a11015db2"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/single-trigger-web-mobile.png",
+      "bytes": 30581,
+      "sha256": "2ae296fc02a1b2a6240571be9978dadeabf18c4207e13da41464eadf17a6a1e3"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/start-artifacts.log",
+      "bytes": 270,
+      "sha256": "fb779b99828843eeb5b3516013ec187cb0ec97772956769dd30754e05b17196a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/start.log",
+      "bytes": 347,
+      "sha256": "04aec096fa12e051b46493082645ea72994a472172efb8e15a98f03f627e4fe0"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/stop.log",
+      "bytes": 84,
+      "sha256": "ee29cf62d3e1326e77cfe6d301af168940e86da6bc2e5c57596165f915c179c5"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/ticker.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/web-live.log",
+      "bytes": 95,
+      "sha256": "13e7a42db039a66ed99e9df7ea80e0001c0be5c8a8c7dbc964887934d4d97357"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-054629/web-vite.log",
+      "bytes": 155,
+      "sha256": "52bf6fa9b02a1ee0534805a8776c6baa3d46842abb437840cdfaccb2467e0387"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-biome-format.log",
+      "bytes": 24166,
+      "sha256": "20fc6371524e73dc5ff247c1a02a24a3665f1227ae47ad45d6febcd1aa2a383e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-dart-format-final.log",
+      "bytes": 47,
+      "sha256": "1ad3663799d06a7f5252301eb73eb8a33f288261481f896d9696ebf2754574d9"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-dart-format.log",
+      "bytes": 177,
+      "sha256": "553e0ab1b3c6cc0320cc950f9c445e0cedc0244c3515d753bd0fec77f56bbc60"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-dart-live-format-final.log",
+      "bytes": 104,
+      "sha256": "08b062910d2d20bec6e05aec5a0aa2b8094811e8ecfb5f8c4f34f0a16be9b0b0"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-dart-live-format.log",
+      "bytes": 132,
+      "sha256": "effc5023ad0a6b93e1f3aa5a3110f7bf9baa79feb6495ad9b9ed680cb2914ab5"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-flutter-analyze-final.log",
+      "bytes": 96,
+      "sha256": "5205006ffdcae65a14cd130b71b6c69cd67865af451f4af51524163d1d0acb7f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-flutter-analyze-final2.log",
+      "bytes": 96,
+      "sha256": "ac936d45b9bc704b4eb509abc698ba9590b1cb119339f2b7ed8dc080eea17c74"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-flutter-analyze-live.log",
+      "bytes": 1606,
+      "sha256": "452435559737b553a209368882333c7b3e1609ad1ba80110b76874a24caec468"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-flutter-analyze-ship.log",
+      "bytes": 96,
+      "sha256": "6c95ea41ecca97e906cb8d2cda1a6e6f511238f563b0e468eb24e4d27375312d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-flutter-analyze.log",
+      "bytes": 824,
+      "sha256": "f901dfaeda201a19619d8668e3c6c05ea1be1877eb52a9cd58a8ebc7058a6115"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-flutter-full-final.log",
+      "bytes": 56194,
+      "sha256": "9930df26b8ebdb1d80253f2c6c22be634baab6f086b9da5887ef92005659c717"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-flutter-full.log",
+      "bytes": 55856,
+      "sha256": "cc58df776679d2912a9f888b929e3266b81a3b8e3597956454a263e2e20a7c16"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-flutter-target-final.log",
+      "bytes": 1721,
+      "sha256": "5152689d03c76f74cfde4b3e9ebdc4df67257aeb251672a4efe00fb4bdcbfe42"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-flutter-target.log",
+      "bytes": 4705,
+      "sha256": "f788c317b13be6f15453d313db0361d9f4d268456d58cf5bc9c32e9f73169b93"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-gateway-target.log",
+      "bytes": 31558,
+      "sha256": "4a3a0721cbcc1ba6d3d7df80c2c986fe724333add4059a56785026b90830bb2d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-package.log",
+      "bytes": 39665,
+      "sha256": "91d09f54688f410ade64a249f90db8bf7f4c797b5064997b2263359e9618fd02"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-web-build-final.log",
+      "bytes": 3274,
+      "sha256": "734e40e7dfdfd5af9457890786c7c5b0c64a1432c766e3071a3ce410b17f7e6b"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-web-build-ship.log",
+      "bytes": 3274,
+      "sha256": "b98b22d6d5e56d9e6c55d5b172bc2abd80038382bb862d1747a7f754d161b60f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-web-build.log",
+      "bytes": 3274,
+      "sha256": "bf84ef0bf2ad06b4db831c60c2673af4288d93e78417a2eb9bee11cf057c02f1"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-web-format-final.log",
+      "bytes": 10847,
+      "sha256": "98a48c7757c7c9d5a7fb53921c42ba326a5e69e41c576fecd9180fd696b6eae7"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-web-full-final.log",
+      "bytes": 289,
+      "sha256": "4dae6b638f8824f411419a27113c8bbc6311e6cb5516e01bb62668b1d1f94a6d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-web-full-ship.log",
+      "bytes": 288,
+      "sha256": "ccb603833bccbcd2e53d6990b3bf39a6bfc2bb01bf430a4d8c4d72b2068012e5"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-web-full.log",
+      "bytes": 289,
+      "sha256": "14dfebd8e13647160c725d425abd6f9d951d9f9b5730788f9df962c72c0ab4d1"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-web-lint-final.log",
+      "bytes": 19292,
+      "sha256": "aadae9395aeded4e9487c065b67eb6b00bbe6ee25baf3d1d8f1fc9d9835fb423"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-web-lint-ship.log",
+      "bytes": 19292,
+      "sha256": "6874481818bee44f6f91671bc324730c768f7f4aa2a75f799ceaed2db806745d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-web-lint.log",
+      "bytes": 19292,
+      "sha256": "de6594f352f5eb4f8fffead38f6d318e18180bf574de5bf70fc990569dc9a787"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-web-orders-format.log",
+      "bytes": 14569,
+      "sha256": "6af5caaf139a3d39eda8f900b85654cd83198745e38d880241304cc88abb456e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-single-web-target.log",
+      "bytes": 368,
+      "sha256": "8a0a183d4c9eb362a28ec1896c827d5ced57bc5a7a78a296b0f82943fb1c5f37"
+    }
+  ],
+  "cleanup": {
+    "ownedRootHistoricalPath": "/tmp/surprising-option-fused-20261020-054629",
+    "ownedDatabase": "surprising_option_20261020_054629",
+    "apps": "all six owned app roles, broker, ticker, Redis and Web Vite stopped",
+    "portsReleased": true,
+    "ownedLaunchJobsRemoved": true,
+    "databaseDropped": true,
+    "ownedRootDeleted": true,
+    "ownedReportsRemoved": true,
+    "existingPostgresPid": 1435,
+    "existingPostgresPreserved": true,
+    "unrelatedProcessesPreserved": true,
+    "credentials": "all private QA fixtures and run environment deleted with owned temporary root",
+    "externalOwnedReportCount": 36
+  }
+}

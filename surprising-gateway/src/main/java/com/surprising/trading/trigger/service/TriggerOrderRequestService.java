@@ -41,6 +41,22 @@ public class TriggerOrderRequestService {
         }
     }
 
+    public com.surprising.trading.api.model.OrderCommandReceipt submission(long userId, String clientTriggerOrderId) {
+        try {
+            return orderResults.commandResult(userId, triggerOrderService.submissionCommandId(userId, clientTriggerOrderId));
+        } catch (IllegalArgumentException invalid) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
+        }
+    }
+
+    public com.surprising.trading.api.model.OrderCommandReceipt cancellation(long userId, long triggerOrderId) {
+        try {
+            return orderResults.commandResult(userId, TriggerOrderAeronGateway.cancellationCommandId(userId, triggerOrderId));
+        } catch (IllegalArgumentException invalid) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
+        }
+    }
+
     public CompletionStage<TriggerOrderResponse> place(PlaceTriggerOrderRequest request) {
         try {
             return mapAsyncFailure(triggerOrderService.placeAsync(request), HttpStatus.CONFLICT);
