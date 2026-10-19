@@ -15,6 +15,7 @@ final class OwnerIngressRing {
     private final Entry[] entries = new Entry[CAPACITY];
     /** Producer-only cursor/budget; a failed offer never claims or changes an entry. */
     private long producedEntries, producedBytes;
+    private long cachedConsumedBytes;
     @SuppressWarnings("unused")
     private long p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e, p0f;
     /** Consumer-only cursor/budget; updated only by the Owner thread. */
@@ -31,7 +32,13 @@ final class OwnerIngressRing {
                   Runnable action, long enqueuedNanos, CommandFingerprint fingerprint) {
         int bytes = command == null ? 0 : command.payloadLength();
         if (bytes > MAX_BYTES) throw new IllegalStateException("command exceeds ingress byte budget");
-        if (queue.remainingCapacity() == 0 || bytes > MAX_BYTES - (producedBytes - consumedBytes)) return false;
+        if (queue.remainingCapacity() == 0) return false;
+        long availableBytes = MAX_BYTES - (producedBytes - cachedConsumedBytes);
+        if (bytes > availableBytes) {
+            cachedConsumedBytes = consumedBytes;
+            availableBytes = MAX_BYTES - (producedBytes - cachedConsumedBytes);
+            if (bytes > availableBytes) return false;
+        }
         Entry entry = entries[(int) producedEntries & (CAPACITY - 1)];
         entry.command = command; entry.sessionId = sessionId;
         entry.timestamp = timestamp; entry.position = position;

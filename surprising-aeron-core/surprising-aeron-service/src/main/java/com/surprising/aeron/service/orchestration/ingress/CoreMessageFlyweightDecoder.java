@@ -15,19 +15,36 @@ import java.util.UUID;
 import org.agrona.DirectBuffer;
 
 public final class CoreMessageFlyweightDecoder {
-    private static final int CACHE_SLOTS = 512;
+    public static final int DEFAULT_CACHE_SLOTS = 512;
     private static final int MAX_CACHED_FRAME_BYTES = 16_384;
+    private final int cacheSlots;
+    private final int cacheSlotsMask;
     /** Owned by one serial ingress callback or benchmark producer. */
-    private final CoreMessage[] commandSlots = new CoreMessage[CACHE_SLOTS];
+    private final CoreMessage[] commandSlots;
     /** Capacity buckets for hot orders; exact lengths for administrative commands. Ingress owns metadata. */
     private final int[] lengthHeads = new int[MAX_CACHED_FRAME_BYTES + 1];
-    private final int[] next = new int[CACHE_SLOTS];
-    private final int[] previous = new int[CACHE_SLOTS];
-    private final int[] lengths = new int[CACHE_SLOTS];
+    private final int[] next;
+    private final int[] previous;
+    private final int[] lengths;
     private int replacementCursor;
     private final DirectMessageReader messageReader = new DirectMessageReader();
 
-    public CoreMessageFlyweightDecoder() { reset(); }
+    public CoreMessageFlyweightDecoder() {
+        this(DEFAULT_CACHE_SLOTS);
+    }
+
+    public CoreMessageFlyweightDecoder(int cacheSlots) {
+        if (cacheSlots < 2 || (cacheSlots & (cacheSlots - 1)) != 0) {
+            throw new IllegalArgumentException("cacheSlots must be a power of two: " + cacheSlots);
+        }
+        this.cacheSlots = cacheSlots;
+        this.cacheSlotsMask = cacheSlots - 1;
+        this.commandSlots = new CoreMessage[cacheSlots];
+        this.next = new int[cacheSlots];
+        this.previous = new int[cacheSlots];
+        this.lengths = new int[cacheSlots];
+        reset();
+    }
 
     public void reset() {
         java.util.Arrays.fill(commandSlots, null);
@@ -73,9 +90,9 @@ public final class CoreMessageFlyweightDecoder {
             } while (index != head);
         }
         // Replace only unleased slots. Power-of-two order buckets reuse variable text/frame sizes;
-        // all payload storage remains bounded by 512 * 16 KiB, independently of incoming sizes.
-        for (int checked = 0; checked < CACHE_SLOTS; checked++) {
-            int index = replacementCursor++ & (CACHE_SLOTS - 1);
+        // all payload storage remains bounded by cacheSlots * 16 KiB, independently of incoming sizes.
+        for (int checked = 0; checked < cacheSlots; checked++) {
+            int index = replacementCursor++ & cacheSlotsMask;
             CoreMessage slot = commandSlots[index];
             if (slot == null) commandSlots[index] = slot = CoreMessage.decoderSlot();
             if (!slot.acquireDecoderSlot()) continue;

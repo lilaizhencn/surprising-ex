@@ -37,7 +37,9 @@ public final class AeronTradingClusterService implements ClusteredService {
             Long.getLong("surprising.aeron.snapshot-timeout-seconds", 300L));
     private final ClusterServiceEgress egress;
     private final TradingOwnerLoop owner;
-    private final CoreMessageFlyweightDecoder messageDecoder = new CoreMessageFlyweightDecoder();
+    private static final int DEFAULT_DECODER_CACHE_SLOTS = 4096;
+    private final CoreMessageFlyweightDecoder messageDecoder = new CoreMessageFlyweightDecoder(
+            Integer.getInteger("surprising.aeron.decoder-cache-slots", DEFAULT_DECODER_CACHE_SLOTS));
     private final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
     private static final int INBOUND_DRAIN_THRESHOLD = 16;
     private int unflushedInboundMessages;

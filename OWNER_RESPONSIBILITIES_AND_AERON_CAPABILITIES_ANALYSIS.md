@@ -125,8 +125,32 @@ Aeron 之所以成为金融高频交易领域事实上的低延迟标准，核�
 ## 四、实施路径与优先级建议
 
 1. **第一优先级（高收益、低风险）**：
-   - 优化 `AeronTradingClusterService.onSessionMessage`，将每笔必调的 `owner.drainResponses()` 调整为批量/空闲驱动，打通入站日志与出站响应的批处理流水线。
+   - 优化 `AeronTradingClusterService.onSessionMessage`，将每笔必调的 `owner.drainResponses()` 调整为批量/空闲驱动（`INBOUND_DRAIN_THRESHOLD = 16` + `doBackgroundWork` + `onTakeSnapshot` 兜底），打通入站日志与出站响应的批处理流水线。
 2. **第二优先级（核心吞吐突破）**：
    - 重构 `TradingCoreOwner.progressCommandsInScope()`，拆分为清晰的“阶段一：批量排空已就绪队首”与“阶段二：批量准入 Ingress 新单”，批处理容量提升至 64。
 3. **第三优先级（架构深度精简）**：
    - 审查并剥离 Owner 线程内的只读行情轮询 `progressRealtimeReads`，交由外部独立通道处理，让 Owner 成为纯粹的交易状态机调度器。
+
+---
+
+## 五、深化演进与工程落地全记录
+
+在先前的四大突破口落地基础上，根据 Aeron 单机共享内存与无锁环形缓冲机制，进一步彻底落地了以下关键优化：
+
+### 1. Ingress 路径 Zero-Allocation 与游标解耦
+- **4096 槽位全工况池化**：在 [`CoreMessageFlyweightDecoder.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/ingress/CoreMessageFlyweightDecoder.java) 中支持可配置槽位，集群服务默认启用 4096 槽位（覆盖最大并发命令窗口），杜绝了高并发下槽位耗尽回退堆分配的 GC 风险。
+- **OwnerIngressRing 游标本地缓存**：在 [`OwnerIngressRing.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/OwnerIngressRing.java) 生产端增加 `cachedConsumedBytes`，消除入站命令高频跨核读取 volatile 造成的 L1/L2 缓存行颠簸。
+
+### 2. RealtimeOutbox 位掩码寻址与双向游标缓存
+- **2 的幂次位掩码**：在 [`RealtimeOutbox.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-client/src/main/java/com/surprising/aeron/client/RealtimeOutbox.java) 中将容量规范化，以 `staged & mask` 位运算替代耗时的 64 位整数除法/取模（`%`），单次操作节省数十个 CPU 周期。
+- **双向游标本地缓存**：在 `stage()` 方法中引入 `cachedHead` 与 `cachedConsumedBytes`，只在缓存容量不足时重读跨核 volatile 变量，彻底消除发布线程与发送线程间的 MESI 总线争用。
+
+### 3. 实测验证数据
+- **单元与集成测试**：`surprising-aeron-service` 与 `surprising-aeron-client` 全部通过。
+- **极限异步流水线压测（`qualify-aeron-async-stages.sh`）**：
+  - `end_to_end`：`mixedVerify=PASS fundsDiff=0`
+  - `lane`：`mixedVerify=PASS fundsDiff=0`
+  - `matcher`：`mixedVerify=PASS fundsDiff=0`
+  - `owner`：`mixedVerify=PASS fundsDiff=0`
+  - 核心业务对账全部成立，资金差额为 0。
+
