@@ -1237,10 +1237,13 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
                 responseArena.release(responseSlot);
                 responseSlot = null;
             }
-            java.util.Arrays.fill(orders, null);
-            for (OrderRuntime copy : orderCopies) if (copy != null) copy.clearCommandSlot();
-            java.util.Arrays.fill(symbols, null);
-            java.util.Arrays.fill(ids, 0);
+            for (int i = 0; i < count; i++) {
+                orders[i] = null;
+                OrderRuntime copy = orderCopies[i];
+                if (copy != null) copy.clearCommandSlot();
+                symbols[i] = null;
+                ids[i] = 0;
+            }
             count = 0;
             capturedMask = 0;
             prepared = false;

@@ -279,19 +279,16 @@ final class OrderBatchExecutor {
                         batch.settlementEvent);
                 if (firstNative == null) firstNative = result;
                 item.realtimeTakerOrder = item.admittedOrder;
-                item.captureExecutions(result.events());
+                int trades = item.captureExecutions(result.events());
                 item.executionTakerUserId = userId;
-                for (int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
-                    if (item.executionEvents.get(eventIndex).eventType() == MatcherEventType.TRADE) {
-                        item.executionCount++;
-                        batch.tradeCount = Math.incrementExact(batch.tradeCount);
-                    }
+                if (trades != 0) {
+                    item.executionCount += trades;
+                    batch.tradeCount = Math.addExact(batch.tradeCount, trades);
                 }
                 boolean accepted = result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
                         || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
                 item.status = accepted ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
                 item.resultCode = accepted ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
-                batch.collectChangedOrderIds(item, userId, result);
             }
             batch.lastMatchingResult = batch.settlementEvent;
             return firstNative;
@@ -381,9 +378,15 @@ final class OrderBatchExecutor {
         var context = CoreOrderDecisionResolver.context(owner.runtimeState, owner.identities,
                 userId, instrumentId, batch.clusterTimestamp);
         var instrument = context.instrument();
+        String baseAsset = instrument.baseAsset();
+        String quoteAsset = instrument.quoteAsset();
+        String settleAsset = instrument.settleAsset();
+        int baseAssetId = owner.identities.assetId(baseAsset);
+        int quoteAssetId = baseAsset.equals(quoteAsset) ? baseAssetId : owner.identities.assetId(quoteAsset);
+        int settleAssetId = quoteAsset.equals(settleAsset) ? quoteAssetId
+                : baseAsset.equals(settleAsset) ? baseAssetId : owner.identities.assetId(settleAsset);
         var decision = new com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision(context, 0,
-                owner.identities.assetId(instrument.baseAsset()), owner.identities.assetId(instrument.quoteAsset()),
-                owner.identities.assetId(instrument.settleAsset()));
+                baseAssetId, quoteAssetId, settleAssetId);
         index = batch.preparedSymbols.size();
         batch.preparedSymbols.add(instrumentId);
         batch.preparedContextDecisions[index] = decision;
@@ -605,6 +608,7 @@ final class OrderBatchExecutor {
             if (matchingResult instanceof com.surprising.aeron.service.state.MatcherSettlementEvent event
                     && event == batch.itemSettlementEvent && event.hasDirectNativeResult()) {
                 if (!event.complete()) throw new IllegalStateException("cancel chunk Lane is incomplete");
+                batch.observedSettlementLaneMask |= event.requiredLaneMask();
                 batch.mergeTreasuryDelta(owner.runtimeState.collectOrderBatchMatcherSettlement(
                         event, owner.runtimeState.coldCommandFunds(), owner.terminalRetention));
                 owner.commits.publication.request();
@@ -612,14 +616,14 @@ final class OrderBatchExecutor {
                 owner.runtimeState.releaseMatcherSettlement(event);
                 batch.itemSettlementEvent = null;
                 batch.lastMatchingResult = null;
+                boolean trackChanges = !batch.laneCommitCompleted();
+                if (trackChanges) {
+                    batch.changedUserIds.add(pending.command().header().userId());
+                }
                 while (batch.nextIndex < batch.cancellationChunkEnd) {
                     OrderBatchItem item = batch.items.get(batch.nextIndex);
-                    batch.changedUserIds.add(pending.command().header().userId());
-                    batch.itemChangedOrderIds.clear();
-                    batch.itemChangedOrderIds.add(item.orderId());
-                    if (item.status == ResponseStatus.APPLIED)
+                    if (trackChanges && item.status == ResponseStatus.APPLIED)
                         batch.runtimeChangedOrderIds.add(item.orderId());
-                    batch.changedOrderIds.add(item.orderId());
                     item.cancelSymbol = null;
                     batch.nextIndex++;
                 }
@@ -732,21 +736,17 @@ final class OrderBatchExecutor {
                 && owner.realtimeCapture.active()) item.realtimeTakerOrder = item.admittedOrder;
 
         if (batch.kind != OrderBatchKind.CANCEL) {
-            item.captureExecutions(matchingResult.matcherEvents());
+            int trades = item.captureExecutions(matchingResult.matcherEvents());
             item.executionTakerUserId = pending.command().header().userId();
-            for (int eventIndex = 0; eventIndex < item.executionEvents.size(); eventIndex++) {
-                MatcherEvent event = item.executionEvents.get(eventIndex);
-                if (event.eventType() == MatcherEventType.TRADE) {
-                    item.executionCount++;
-                    batch.tradeCount = Math.incrementExact(batch.tradeCount);
-                }
+            if (trades != 0) {
+                item.executionCount += trades;
+                batch.tradeCount = Math.addExact(batch.tradeCount, trades);
             }
         }
         switch (batch.kind) {
             case PLACE -> {
                 if (batch.itemSettlementEvent != matchingResult || !batch.itemSettlementEvent.direct())
                     throw new IllegalStateException("batch place requires its direct Lane event");
-                batch.collectChangedOrderIds(item, pending.command().header().userId(), matchingResult);
                 return;
             }
             case CANCEL -> { return; } // Chunk Lane changes were collected before its item results.
@@ -754,7 +754,6 @@ final class OrderBatchExecutor {
             case AMEND -> {
                 if (batch.itemSettlementEvent != matchingResult || !batch.itemSettlementEvent.direct())
                     throw new IllegalStateException("batch amendment requires a direct Lane event");
-                batch.collectChangedOrderIds(item, pending.command().header().userId(), matchingResult);
                 return;
             }
             default -> throw new IllegalStateException("unsupported order batch kind");
@@ -866,15 +865,17 @@ final class OrderBatchExecutor {
 
     void initializeOrderBatchLaneContext(OrderBatchPending batch, CommandSlot pending) {
         if (batch.laneContextInitialized()) return;
-        long expectedLaneMask = 0;
+        long expectedLaneMask = batch.observedSettlementLaneMask;
+        if (batch.settlementEvent != null) {
+            expectedLaneMask |= batch.settlementEvent.requiredLaneMask();
+        }
         for (int index = 0; index < batch.changedUserIds.size(); index++) {
             expectedLaneMask |= owner.matchingAdapter.topology().accountLaneMask(
                     batch.changedUserIds.valueAt(index));
         }
         batch.actualLaneMask = expectedLaneMask;
         var finalMatchingResult = batch.lastMatchingResult == null
-                ? new com.surprising.aeron.service.matching.CoreMatchingResult(true, "NO_NATIVE_COMMAND")
-                .withCoreSequenceInPlace(batch.sequence)
+                ? batch.noNativeCommandResult.withCoreSequenceInPlace(batch.sequence)
                 : batch.lastMatchingResult;
         pending.result(
                 finalMatchingResult, expectedLaneMask, owner.commits.validAccountLaneMask());

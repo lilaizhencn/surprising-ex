@@ -150,6 +150,10 @@ public final class CoreMatchingResult implements MatchingResult {
         return this;
     }
 
+    public void clearCoreSequence() {
+        nativeCoreSequence = 0;
+    }
+
     static List<MatcherResult.MatcherEvent> concatenateEvents(
             List<MatcherResult.MatcherEvent> first,
             List<MatcherResult.MatcherEvent> second) {

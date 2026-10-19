@@ -4915,10 +4915,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         MatcherSettlementChanges changes = lane.matcherSettlementChanges;
         if (changes == null || !changes.directPositionIdentities || (!lane.commandScopeActive && ownerLaneScope != lane))
             throw new IllegalStateException("direct position identity requires its settlement Lane");
-        long key = RuntimeIdentityRegistry.positionIdentityKey(order.userId(), instrument.instrumentId(), order.positionSide());
+        long key = order.positionIdentityKey();
         var output = changes.laneDeltas[lane.laneId()].positions;
         if (output.indexOf(key) >= 0) return;
-        long retained = identities.retainPositionInLane(lane, order.userId(), instrument.instrumentId(), order.positionSide());
+        long retained = identities.retainPositionInLane(
+                lane, key, order.userId(), instrument.instrumentId(), order.positionSide());
         if (retained != key) throw new IllegalStateException("position identity changed during retention");
         output.put(key, lane.positions.get(key));
     }

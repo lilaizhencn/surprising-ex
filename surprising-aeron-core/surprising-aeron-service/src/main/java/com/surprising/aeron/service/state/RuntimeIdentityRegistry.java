@@ -24,6 +24,8 @@ public final class RuntimeIdentityRegistry {
     static final class LookupScratch {
         private final PositionLookup position = new PositionLookup();
         private final PositionMapLookup positionMap = new PositionMapLookup();
+        private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<PositionEntry> positionEntries =
+                new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
     }
 
     private Long findPositionIdentity(long userId, String key) {
@@ -144,25 +146,59 @@ public final class RuntimeIdentityRegistry {
     }
 
     private PositionEntry positionEntry(long key) {
-        PositionMapLookup lookup = lookupScratch().positionMap;
-        lookup.value = key;
-        return positions.get(lookup);
+        return positionEntry(lookupScratch(), key);
     }
 
     private PositionEntry positionEntry(AccountLaneState lane, long key) {
-        PositionMapLookup lookup = lane.identityLookupScratch.positionMap;
-        lookup.value = key;
-        return positions.get(lookup);
+        return positionEntry(lane.identityLookupScratch, key);
     }
+
+    private PositionEntry positionEntry(LookupScratch scratch, long key) {
+        PositionEntry cached = scratch.positionEntries.get(key);
+        if (cached != null && cached.get() >= 0 && cached.identityRegistered) {
+            return cached;
+        }
+        PositionMapLookup lookup = scratch.positionMap;
+        lookup.value = key;
+        PositionEntry entry = positions.get(lookup);
+        if (entry != null && entry.get() >= 0 && entry.identityRegistered) {
+            scratch.positionEntries.put(key, entry);
+        } else if (cached != null) {
+            scratch.positionEntries.remove(key);
+        }
+        return entry;
+    }
+
     /** A Lane output retains its identity until ordered publication consumes that output. */
     private static final class PositionEntry extends java.util.concurrent.atomic.AtomicInteger {
         final PositionIdentity identity;
+        String verifiedInstrumentId;
+        CorePositionSide verifiedSide;
         boolean allocationRecorded; // Owner only; restored identities have already been recorded.
         volatile boolean identityRegistered;
         PositionEntry(PositionIdentity identity, boolean recorded) {
             this.identity = identity;
             this.allocationRecorded = recorded;
             this.identityRegistered = recorded;
+        }
+
+        PositionEntry(PositionIdentity identity, String instrumentId, CorePositionSide side, boolean recorded) {
+            this.identity = identity;
+            this.verifiedInstrumentId = instrumentId;
+            this.verifiedSide = side;
+            this.allocationRecorded = recorded;
+            this.identityRegistered = recorded;
+        }
+
+        boolean matches(long userId, String instrumentId, CorePositionSide side) {
+            if (identity.userId() != userId) return false;
+            if (verifiedSide == side && verifiedInstrumentId != null && verifiedInstrumentId.equals(instrumentId)) {
+                return true;
+            }
+            if (!positionNameEquals(identity.positionKey(), instrumentId, side)) return false;
+            verifiedInstrumentId = instrumentId;
+            verifiedSide = side;
+            return true;
         }
     }
     private final LongLongHashMap positionAllocationKeys = new LongLongHashMap();
@@ -325,10 +361,13 @@ public final class RuntimeIdentityRegistry {
                 || instrument == null || side == null) {
             throw new IllegalStateException("position identity crossed account Lane");
         }
-        long key = positionIdentityKey(userId, instrument.instrumentId(), side);
+        long key = positionIdentityKey(userId, instrumentId(instrument), side);
         PositionEntry entry = positionEntry(lane, key);
-        return entry != null && entry.identity.userId() == userId
-                && positionNameEquals(entry.identity.positionKey(), instrument.instrumentId(), side) ? key : 0;
+        return entry != null && entry.matches(userId, instrument.instrumentId(), side) ? key : 0;
+    }
+
+    private static String instrumentId(CoreInstrument instrument) {
+        return instrument.instrumentId();
     }
 
     public Long findClientKey(long userId, String clientOrderId) {
@@ -382,6 +421,7 @@ public final class RuntimeIdentityRegistry {
         PositionEntry retained = collision == null ? entry : collision;
         ensurePositionIdentityRegistered(retained, key);
         recordPositionAllocation(key, retained);
+        ownerLookupScratch.positionEntries.put(key, retained);
         return key;
     }
 
@@ -400,22 +440,21 @@ public final class RuntimeIdentityRegistry {
         long key = positionIdentityKey(userId, instrumentId, side);
         PositionEntry existing = positionEntry(key);
         if (existing != null) {
-            if (existing.identity.userId() != userId
-                    || !positionNameEquals(existing.identity.positionKey(), instrumentId, side)) {
+            if (!existing.matches(userId, instrumentId, side)) {
                 throw new IllegalStateException("deterministic position identity collision");
             }
             return key;
         }
         String name = side == CorePositionSide.NET ? instrumentId : instrumentId + ':' + side.name();
-        PositionEntry created = new PositionEntry(new PositionIdentity(userId, name), false);
+        PositionEntry created = new PositionEntry(new PositionIdentity(userId, name), instrumentId, side, false);
         PositionEntry collision = positions.putIfAbsent(new PositionMapKey(key), created);
-        if (collision != null && (collision.identity.userId() != userId
-                || !positionNameEquals(collision.identity.positionKey(), instrumentId, side))) {
+        if (collision != null && !collision.matches(userId, instrumentId, side)) {
             throw new IllegalStateException("deterministic position identity collision");
         }
         PositionEntry retained = collision == null ? created : collision;
         ensurePositionIdentityRegistered(retained, key);
         recordPositionAllocation(key, retained);
+        ownerLookupScratch.positionEntries.put(key, retained);
         return key;
     }
 
@@ -457,28 +496,37 @@ public final class RuntimeIdentityRegistry {
      */
     long retainPositionInLane(AccountLaneState lane, long userId, String instrumentId,
                               CorePositionSide side) {
+        if (instrumentId == null || instrumentId.isBlank() || side == null) {
+            throw new IllegalArgumentException("position identity belongs to another Lane");
+        }
+        return retainPositionInLane(lane, positionIdentityKey(userId, instrumentId, side),
+                userId, instrumentId, side);
+    }
+
+    long retainPositionInLane(AccountLaneState lane, long key, long userId, String instrumentId,
+                              CorePositionSide side) {
         lane.assertOwner();
         if (clientTopology.accountLaneId(userId) != lane.laneId()
                 || instrumentId == null || instrumentId.isBlank() || side == null) {
             throw new IllegalArgumentException("position identity belongs to another Lane");
         }
-        long key = positionIdentityKey(userId, instrumentId, side);
         while (true) {
             PositionEntry entry = positionEntry(lane, key);
             if (entry == null) {
                 String name = side == CorePositionSide.NET ? instrumentId : instrumentId + ':' + side.name();
-                PositionEntry created = new PositionEntry(new PositionIdentity(userId, name), false);
+                PositionEntry created = new PositionEntry(
+                        new PositionIdentity(userId, name), instrumentId, side, false);
                 entry = positions.putIfAbsent(new PositionMapKey(key), created);
                 if (entry == null) entry = created;
             }
-            if (entry.identity.userId() != userId
-                    || !positionNameEquals(entry.identity.positionKey(), instrumentId, side)) {
+            if (!entry.matches(userId, instrumentId, side)) {
                 throw new IllegalStateException("deterministic position identity collision");
             }
             int uses = entry.get();
             if (uses < 0) { Thread.onSpinWait(); continue; }
             if (!entry.compareAndSet(uses, Math.incrementExact(uses))) continue;
             ensurePositionIdentityRegistered(entry, key);
+            lane.identityLookupScratch.positionEntries.put(key, entry);
             return key;
         }
     }
@@ -519,8 +567,7 @@ public final class RuntimeIdentityRegistry {
     private long findPositionKeyValue(long userId, String instrumentId, CorePositionSide side) {
         long key = positionIdentityKey(userId, instrumentId, side);
         PositionEntry entry = positionEntry(key);
-        return entry != null && entry.identity.userId() == userId
-                && positionNameEquals(entry.identity.positionKey(), instrumentId, side) ? key : 0;
+        return entry != null && entry.matches(userId, instrumentId, side) ? key : 0;
     }
 
     public long positionCheckpoint() {
@@ -548,6 +595,7 @@ public final class RuntimeIdentityRegistry {
                 throw new IllegalStateException("position identity checkpoint is inconsistent");
             }
             entry.identityRegistered = false;
+            ownerLookupScratch.positionEntries.remove(key);
             positions.remove(new PositionMapKey(key), entry);
         }
     }
@@ -580,10 +628,21 @@ public final class RuntimeIdentityRegistry {
     long preparedPositionKey(long userId, String instrumentId, CorePositionSide side) {
         long key = positionIdentityKey(userId, instrumentId, side);
         PositionEntry entry = positionEntry(key);
-        if (entry == null || entry.identity.userId() != userId
-                || !positionNameEquals(entry.identity.positionKey(), instrumentId, side)) {
+        if (entry == null || !entry.matches(userId, instrumentId, side)) {
             throw new IllegalStateException("position identity was not prepared by the Sequencer");
         }
+        return key;
+    }
+
+    long preparedPositionKey(AccountLaneState lane, OrderRuntime order) {
+        lane.assertOwner();
+        long userId = order.userId();
+        if (lane.laneId() != clientTopology.accountLaneId(userId))
+            throw new IllegalStateException("position identity crossed account Lane");
+        long key = order.positionIdentityKey();
+        PositionEntry entry = positionEntry(lane, key);
+        if (entry == null || !entry.matches(userId, order.instrument().instrumentId(), order.positionSide()))
+            throw new IllegalStateException("position identity was not prepared by the Sequencer");
         return key;
     }
 
@@ -593,8 +652,7 @@ public final class RuntimeIdentityRegistry {
             throw new IllegalStateException("position identity crossed account Lane");
         long key = positionIdentityKey(userId, instrumentId, side);
         PositionEntry entry = positionEntry(lane, key);
-        if (entry == null || entry.identity.userId() != userId
-                || !positionNameEquals(entry.identity.positionKey(), instrumentId, side))
+        if (entry == null || !entry.matches(userId, instrumentId, side))
             throw new IllegalStateException("position identity was not prepared by the Sequencer");
         return key;
     }
@@ -652,6 +710,7 @@ public final class RuntimeIdentityRegistry {
         // Remove the forward entry before permitting another generation to acquire this key.
         positionKeys.remove(entry.identity, positionKey);
         entry.identityRegistered = false;
+        ownerLookupScratch.positionEntries.remove(positionKey);
         positions.remove(new PositionMapKey(positionKey), entry);
         removeAllocation(positionAllocationKeys, positionKeyAllocations, positionKey);
     }

@@ -996,7 +996,7 @@ final class LaneColdState {
     final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<com.surprising.aeron.service.state.risk.RiskSnapshotRuntime> riskSnapshots =
             new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
     final java.util.Map<com.surprising.aeron.service.state.model.CoreLeverageKey, Long> leverages =
-            new java.util.concurrent.ConcurrentHashMap<>();
+            new java.util.HashMap<>();
     final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<java.util.HashSet<com.surprising.aeron.service.state.model.CoreLeverageKey>> leverageKeysByUser =
             new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
     final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<com.surprising.aeron.service.state.model.CoreAlgoOrderState> algoOrders =

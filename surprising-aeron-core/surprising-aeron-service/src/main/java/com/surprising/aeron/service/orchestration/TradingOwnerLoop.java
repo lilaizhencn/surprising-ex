@@ -191,10 +191,16 @@ public final class TradingOwnerLoop implements Runnable {
 
     private void enqueue(CoreMessage command, long sessionId, long timestamp, long position,
                          Runnable action, long enqueuedNanos, CommandFingerprint fingerprint, long timeoutNanos) {
+        checkFailure();
+        if (input.offer(command, sessionId, timestamp, position, action, enqueuedNanos, fingerprint)) {
+            ownerIdle.signal();
+            return;
+        }
         long started = System.nanoTime();
         long deadline = started + timeoutNanos;
         boolean reported = false;
         while (true) {
+            awaitProgress(deadline);
             checkFailure();
             if (input.offer(command, sessionId, timestamp, position, action, enqueuedNanos, fingerprint)) {
                 ownerIdle.signal();
@@ -205,7 +211,6 @@ public final class TradingOwnerLoop implements Runnable {
                         input.size(), input.retainedBytes(), failure);
                 reported = true;
             }
-            awaitProgress(deadline);
         }
     }
 

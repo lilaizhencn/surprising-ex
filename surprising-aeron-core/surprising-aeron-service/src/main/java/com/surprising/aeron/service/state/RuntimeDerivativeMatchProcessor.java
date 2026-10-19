@@ -232,7 +232,7 @@ public final class RuntimeDerivativeMatchProcessor {
                     leverage = configured == null ? instrument.maxLeveragePpm() : configured;
                     leverageByUser.put(order.userId(), leverage);
                 }
-                long key = identities.preparedPositionKey(lane, order.userId(), instrument.instrumentId(), order.positionSide());
+                long key = identities.preparedPositionKey(lane, order);
                 cursor = free.pollFirst();
                 if (cursor == null) cursor = new RuntimeDerivativeFillCalculator.FillCursor();
                 RuntimeDerivativeFillCalculator.begin(cursor, runtime, lane, instrument, order, key,
@@ -332,7 +332,7 @@ public final class RuntimeDerivativeMatchProcessor {
         Long configuredLeverage = runtime.leverage(lane, order.userId(), instrument.instrumentId(), order.marginMode());
         long leverage = configuredLeverage == null ? instrument.maxLeveragePpm() : configuredLeverage;
         RuntimeDerivativeFillCalculator.apply(runtime, lane, identities, instrument, order,
-                identities.preparedPositionKey(lane, order.userId(), instrument.instrumentId(), order.positionSide()),
+                identities.preparedPositionKey(lane, order),
                 priceTicks, quantitySteps, taker, leverage, settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
     }
 

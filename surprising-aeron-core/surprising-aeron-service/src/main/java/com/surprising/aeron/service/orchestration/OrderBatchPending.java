@@ -180,12 +180,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     CommandSlot.Operation operation;
     /** 当前命令变化的用户 ID，保持 primitive 收集直到返回边界。 */
     final PrimitiveLongChangeSet changedUserIds;
-    /** 当前命令变化的订单 ID，保持 primitive 收集直到返回边界。 */
-    final PrimitiveLongChangeSet changedOrderIds;
     /** 本批实际改变运行时状态的订单，用于最终序号标记。 */
     final PrimitiveLongChangeSet runtimeChangedOrderIds;
-    /** 当前批量项的变化 ID 临时集合，每项处理前清空。 */
-    final PrimitiveLongChangeSet itemChangedOrderIds;
     /** 本批准入分配的客户单号，失败时按逆序回滚；数组槽位跨批复用，避免逐项 record 分配。 */
     final long[] preparedClientUsers;
     final String[] preparedClientIds;
@@ -239,6 +235,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     /** 与 preparedSymbols 对齐的批内准入上下文；批次最多几十项，线性查找避免 Map 节点。 */
     final com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision[] preparedContextDecisions;
 
+    /** 本批已观察到的直接结算 Lane 位图，免除无变更收集时的重复推导。 */
+    long observedSettlementLaneMask;
     /** 本批实际涉及的账户 Lane，用于和预期范围核对。 */
     long actualLaneMask;
     /** 当前批最近完成的撮合结果，用于延续序号证据。 */
@@ -250,6 +248,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     long itemAdmissionRevision;
     com.surprising.aeron.service.state.LaneCommitEvent laneCommitEvent;
     MatchingResult lastMatchingResult;
+    final com.surprising.aeron.service.matching.CoreMatchingResult noNativeCommandResult =
+            new com.surprising.aeron.service.matching.CoreMatchingResult(true, "NO_NATIVE_COMMAND");
     /** 顺序批量下单复用一个 Lane 预留任务；下项只能在上项完成后准备。 */
     final com.surprising.aeron.service.state.BatchPlaceReservation placeReservation =
             new com.surprising.aeron.service.state.BatchPlaceReservation();
@@ -302,9 +302,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         items = new ArrayList<>(capacity);
         itemSlots = new OrderBatchItem[capacity];
         changedUserIds = new PrimitiveLongChangeSet(capacity * 2);
-        changedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         runtimeChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
-        itemChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         preparedClientUsers = new long[capacity];
         preparedClientIds = new String[capacity];
         preparedClientKeys = new long[capacity];
@@ -354,9 +352,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         runtimeCheckpoint = 0;
         positionIdentityCheckpoint = 0;
         changedUserIds.clear();
-        changedOrderIds.clear();
         runtimeChangedOrderIds.clear();
-        itemChangedOrderIds.clear();
         java.util.Arrays.fill(preparedClientIds, 0, preparedClientKeyCount, null);
         java.util.Arrays.fill(preparedClientKeys, 0, preparedClientKeyCount, 0);
         preparedClientKeyCount = 0;
@@ -387,8 +383,10 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         }
         clearPreparedDecisionCache();
         lifecycleFlags = 0;
+        observedSettlementLaneMask = 0;
         actualLaneMask = 0;
         lastMatchingResult = null;
+        noNativeCommandResult.clearCoreSequence();
         itemSettlementEvent = null;
         replacementAdmission = null;
         replacementAdmissionEvent = null;
@@ -455,55 +453,27 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
             long takerUserId,
             MatchingResult matchingResult) {
         changedUserIds.add(takerUserId);
-        itemChangedOrderIds.clear();
-        itemChangedOrderIds.add(item.orderId());
-        if (item.originalOrderId() > 0) itemChangedOrderIds.add(item.originalOrderId());
-        if (item.replacementOrderId() > 0) itemChangedOrderIds.add(item.replacementOrderId());
+        boolean recordOrders = kind == OrderBatchKind.PLACE || matchingResult.accepted();
+        if (recordOrders) {
+            runtimeChangedOrderIds.add(item.orderId());
+            if (item.originalOrderId() > 0) runtimeChangedOrderIds.add(item.originalOrderId());
+            if (item.replacementOrderId() > 0) runtimeChangedOrderIds.add(item.replacementOrderId());
+        }
         var matcherEvents = matchingResult.matcherEvents();
         for (int index = 0; index < matcherEvents.size(); index++) {
             MatcherEvent event = matcherEvents.get(index);
             if (event.eventType() == MatcherEventType.TRADE) {
                 changedUserIds.add(event.matchedOrderUid());
-                itemChangedOrderIds.add(event.matchedOrderId());
+                if (recordOrders) runtimeChangedOrderIds.add(event.matchedOrderId());
             }
         }
         var cancellations = matchingResult.cancellations();
         for (int index = 0; index < cancellations.size(); index++) {
             CoreCancellationResult cancellation = cancellations.get(index);
             if (cancellation.accepted()) {
-                itemChangedOrderIds.add(cancellation.orderId());
                 runtimeChangedOrderIds.add(cancellation.orderId());
             }
         }
-        if (kind == OrderBatchKind.PLACE || matchingResult.accepted()) {
-            for (int index = 0; index < itemChangedOrderIds.size(); index++) {
-                runtimeChangedOrderIds.add(itemChangedOrderIds.valueAt(index));
-            }
-        }
-        changedOrderIds.addAll(itemChangedOrderIds);
-    }
-
-    void collectChangedOrderIds(OrderBatchItem item, long takerUserId,
-                                exchange.core2.core.common.MatcherResult result) {
-        changedUserIds.add(takerUserId);
-        itemChangedOrderIds.clear();
-        itemChangedOrderIds.add(item.orderId());
-        if (item.originalOrderId() > 0) itemChangedOrderIds.add(item.originalOrderId());
-        if (item.replacementOrderId() > 0) itemChangedOrderIds.add(item.replacementOrderId());
-        for (int index = 0; index < result.events().size(); index++) {
-            MatcherEvent event = result.events().get(index);
-            if (event.eventType() == MatcherEventType.TRADE) {
-                changedUserIds.add(event.matchedOrderUid());
-                itemChangedOrderIds.add(event.matchedOrderId());
-            }
-        }
-        boolean accepted = result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
-                || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
-        if (kind == OrderBatchKind.PLACE || accepted) {
-            for (int index = 0; index < itemChangedOrderIds.size(); index++)
-                runtimeChangedOrderIds.add(itemChangedOrderIds.valueAt(index));
-        }
-        changedOrderIds.addAll(itemChangedOrderIds);
     }
 }
 
@@ -535,10 +505,19 @@ final class OrderBatchItem {
         resultOrder = order == null ? null : (resultCopy = order.copyIntoCommandSlot(resultCopy));
     }
 
-    void captureExecutions(List<MatcherEvent> events) {
+    int captureExecutions(List<MatcherEvent> events) {
+        if (events.isEmpty()) {
+            executionEvents = List.of();
+            return 0;
+        }
         if (executionSlot == null) executionSlot = exchange.core2.core.common.MatcherResult.commandSlot();
         executionSlot.captureEvents(events);
         executionEvents = executionSlot.events();
+        int trades = 0;
+        for (int index = 0; index < executionEvents.size(); index++) {
+            if (executionEvents.get(index).eventType() == MatcherEventType.TRADE) trades++;
+        }
+        return trades;
     }
     /** 本项需要编码的成交数量。 */
     int executionCount;

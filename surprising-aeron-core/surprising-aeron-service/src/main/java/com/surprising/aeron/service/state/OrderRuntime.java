@@ -290,6 +290,7 @@ public final class OrderRuntime {
         target.clusterPosition = clusterPosition;
         target.status = status;
         target.revision = revision;
+        target.cachedPositionKey = cachedPositionKey;
     }
 
     /** Release request-specific references; the slot object remains allocated for its next command. */
@@ -297,7 +298,7 @@ public final class OrderRuntime {
         if (!commandSlotValue) throw new IllegalStateException("cannot clear an authoritative order as a command slot");
         productLine = null; instrument = null; side = null; marginMode = null; positionSide = null;
         orderType = null; timeInForce = null; clientOrderId = null; commandId = null; status = null;
-        orderId = userId = revision = 0;
+        orderId = userId = revision = cachedPositionKey = 0;
     }
 
     private boolean commandSlotValue;
@@ -305,9 +306,19 @@ public final class OrderRuntime {
 
     private boolean pooledAuthority;
     private long retiredAfterSequence;
+    private long cachedPositionKey;
     /** One authoritative reservation follows this order through the existing retirement fence. */
     private ReservationRuntime reservationSlot;
     private boolean reservationPrepared;
+
+    public long positionIdentityKey() {
+        long key = cachedPositionKey;
+        if (key == 0) {
+            key = RuntimeIdentityRegistry.positionIdentityKey(userId, instrument.instrumentId(), positionSide);
+            cachedPositionKey = key;
+        }
+        return key;
+    }
 
     boolean commandSlotValue() { return commandSlotValue; }
 
@@ -345,6 +356,7 @@ public final class OrderRuntime {
         target.makerFeeRatePpm = intent.makerFeeRatePpm(); target.takerFeeRatePpm = intent.takerFeeRatePpm();
         target.createdAtEpochMillis = target.updatedAtEpochMillis = timestamp; target.clusterPosition = position;
         target.status = CoreOrderStatus.OPEN; target.revision = 1; target.mutable = true; target.retiredAfterSequence = 0;
+        target.cachedPositionKey = 0;
         target.reservationPrepared = false;
     }
 
@@ -372,6 +384,7 @@ public final class OrderRuntime {
     void clearRetiredReferences() {
         if (!pooledAuthority || retiredAfterSequence == 0) throw new IllegalStateException("order was not retired");
         clientOrderId = null; commandId = null; instrument = null; productLine = null;
+        cachedPositionKey = 0;
     }
 
     OrderRuntime laneValue() { return mutable ? this : mutableCopy(); }

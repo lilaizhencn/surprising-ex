@@ -981,8 +981,11 @@ public final class MatcherSettlementEvent implements
         if (ownerObservedComplete) return true;
         if (!ready()) return false;
         ensureLanesExecuted();
-        boolean done = completedLaneMask() == routedLaneMask()
-                && (treasurySettlement == null || treasurySettlement.ledger == null || treasurySettlement.completed);
+        if (completedLaneMask() != routedLaneMask()) return false;
+        if (treasurySettlement != null && treasurySettlement.localNoTrade && !treasurySettlement.completed) {
+            treasurySettlement.completeLocalNoTrade();
+        }
+        boolean done = treasurySettlement == null || treasurySettlement.ledger == null || treasurySettlement.completed;
         if (done) ownerObservedComplete = true;
         return done;
     }
@@ -1046,6 +1049,17 @@ public final class MatcherSettlementEvent implements
         if (treasurySettlement == null) treasurySettlement = new TreasurySettlement();
         if (treasurySettlement.queued) throw new IllegalStateException("Treasury settlement was already queued");
         ownerObservedComplete = false;
+        if (ready() && !treasuryTrades) {
+            ledger.assertHealthy();
+            treasurySettlement.ledger = ledger;
+            treasurySettlement.localNoTrade = true;
+            treasurySettlement.queued = true;
+            if (completedLaneMask() == routedLaneMask()) {
+                treasurySettlement.completeLocalNoTrade();
+                ownerObservedComplete = true;
+            }
+            return true;
+        }
         treasurySettlement.ledger = ledger;
         if (!ledger.offer(treasurySettlement)) return false;
         treasurySettlement.queued = true;
@@ -1058,9 +1072,18 @@ public final class MatcherSettlementEvent implements
         private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
         private volatile SystemLedgerLane ledger;
         private boolean queued;
+        private boolean localNoTrade;
         private volatile boolean completed;
 
         @Override public boolean ready() { return accountLanesCompleteForLedger(); }
+
+        void completeLocalNoTrade() {
+            if (completed) return;
+            changes.appendFundsDelta(requiredLaneMask, funds);
+            funds.requireConserved(false);
+            funds.clear();
+            completed = true;
+        }
 
         @Override public void apply(TreasuryRuntime treasury) {
             if (!ready() || completed || treasury.hasChangedValues())
@@ -1083,7 +1106,7 @@ public final class MatcherSettlementEvent implements
             if (ledger != null && !completed) throw new IllegalStateException("Ledger still owns this settlement");
             if (!funds.isEmpty()) throw new IllegalStateException("Ledger funds scratch was not cleared");
             ledger = null;
-            queued = completed = false;
+            queued = localNoTrade = completed = false;
         }
     }
 
@@ -1101,7 +1124,12 @@ public final class MatcherSettlementEvent implements
         observedCompletedLaneMask = 0;
         ownerObservedComplete = false;
         int length = Math.multiplyExact(laneCount, CACHE_LINE_LONGS);
-        if (completedLanes == null || completedLanes.length != length) completedLanes = new long[length];
-        else java.util.Arrays.fill(completedLanes, 0L);
+        if (completedLanes == null || completedLanes.length != length) {
+            completedLanes = new long[length];
+        } else {
+            for (int laneId = 0; laneId < laneCount; laneId++) {
+                completedLanes[laneId * CACHE_LINE_LONGS] = 0L;
+            }
+        }
     }
 }
