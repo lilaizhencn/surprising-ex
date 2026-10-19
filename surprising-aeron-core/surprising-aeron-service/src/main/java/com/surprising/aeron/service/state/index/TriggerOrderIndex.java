@@ -78,6 +78,11 @@ public final class TriggerOrderIndex {
         return LongSortedSets.unmodifiable(allIds);
     }
 
+    /** Descending query range; the caller still excludes the equal cursor ID. */
+    public Set<Long> idsBefore(long before) {
+        return LongSortedSets.unmodifiable(allIds.tailSet(before));
+    }
+
     public Set<Long> ids(CoreTriggerOrderStatus status) {
         LongSortedSet ids = idsByStatus.get(status);
         return ids == null ? LongSortedSets.EMPTY_SET : LongSortedSets.unmodifiable(ids);

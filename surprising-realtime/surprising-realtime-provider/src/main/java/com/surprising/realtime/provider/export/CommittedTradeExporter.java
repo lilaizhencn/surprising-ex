@@ -131,6 +131,7 @@ final class CommittedTradeExporter {
                     var recordingLog = new RecordingLog(config.clusterDirectory().toFile(), false);
                     var archiveReplay = new ArchiveReplay(aeron, archive, product)) {
                 long cursor = checkpoint.logPosition();
+                if (mode == ExportMode.LIVE) orders.initializeTriggers(product, replay, cursor);
                 long[] nextCheckpoint = {System.nanoTime() + checkpointInterval};
                 var batch = new ExportBatch(product, orders, sink, mode);
                 long[] delivered = {checkpoint.logPosition()};

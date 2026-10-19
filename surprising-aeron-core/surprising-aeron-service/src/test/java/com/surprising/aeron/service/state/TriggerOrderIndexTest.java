@@ -24,6 +24,13 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class TriggerOrderIndexTest {
+    @Test void descendingQueryRangeStartsAtItsCursorBeyondTheScanBound() {
+        var index = new TriggerOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
+        for (long id = 1; id <= 17_000; id++) index.apply(id, trigger(id, 7, 100));
+        assertThat(index.idsBefore(10)).containsExactly(10L, 9L, 8L, 7L, 6L, 5L, 4L, 3L, 2L, 1L);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> index.idsBefore(10).clear())
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
 
     @Test
     void closeTriggerCommitPublishesOnlyAfterLanesAndDoesNotRepeatOnReuse() {

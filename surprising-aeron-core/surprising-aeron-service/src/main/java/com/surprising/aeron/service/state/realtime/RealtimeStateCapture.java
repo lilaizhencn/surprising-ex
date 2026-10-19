@@ -25,10 +25,10 @@ public final class RealtimeStateCapture {
     private final RealtimeOutbox outbox;
     private final ProductLine product;
     private final RuntimeIdentityRegistry identities;
-    private boolean ordersAndTradesOnly;
+    private boolean orderProjectionOnly;
 
-    public void ordersAndTradesOnly(boolean value) {
-        ordersAndTradesOnly = value;
+    public void orderProjectionOnly(boolean value) {
+        orderProjectionOnly = value;
     }
 
     public boolean privateStateEnabled() {
@@ -195,7 +195,7 @@ public final class RealtimeStateCapture {
     }
 
     public void balance(long userId, int assetId, long available, long locked) {
-        if (ordersAndTradesOnly) return;
+        if (orderProjectionOnly) return;
         if (!active()) return;
         try {
             String assetName = identities.asset(assetId);
@@ -211,7 +211,7 @@ public final class RealtimeStateCapture {
     }
 
     public void metadata(UserRuntime u) {
-        if (ordersAndTradesOnly) return;
+        if (orderProjectionOnly) return;
         if (!active() || u == null) return;
         emit(
                 RealtimeFrame.Kind.METADATA,
@@ -222,7 +222,7 @@ public final class RealtimeStateCapture {
     }
 
     public void reservation(ReservationRuntime r) {
-        if (ordersAndTradesOnly) return;
+        if (orderProjectionOnly) return;
         if (!active() || r == null) return;
         String instrumentId = identities.instrumentId(r.symbolId());
         String asset = identities.asset(r.assetId());
@@ -237,7 +237,7 @@ public final class RealtimeStateCapture {
     }
 
     public void leverage(CoreLeverageKey key, long value) {
-        if (ordersAndTradesOnly) return;
+        if (orderProjectionOnly) return;
         if (!active()) return;
         try {
             emit(
@@ -253,7 +253,7 @@ public final class RealtimeStateCapture {
     }
 
     public void removedPosition(PositionRuntime p) {
-        if (ordersAndTradesOnly) return;
+        if (orderProjectionOnly) return;
         if (!active() || p == null) return;
         String instrumentId = identities.instrumentId(p.symbolId());
         String asset = identities.asset(p.assetId());
@@ -268,7 +268,7 @@ public final class RealtimeStateCapture {
     }
 
     public void position(PositionRuntime p) {
-        if (ordersAndTradesOnly) return;
+        if (orderProjectionOnly) return;
         if (!active() || p == null) return;
         String instrumentId = identities.instrumentId(p.symbolId());
         String asset = identities.asset(p.assetId());
@@ -325,7 +325,6 @@ public final class RealtimeStateCapture {
     }
 
     public void trigger(CoreTriggerOrderState t) {
-        if (ordersAndTradesOnly) return;
         if (!active() || t == null) return;
         emit(
                 RealtimeFrame.Kind.TRIGGER,
@@ -409,7 +408,7 @@ public final class RealtimeStateCapture {
     }
 
     public void risk(RiskSnapshotRuntime risk) {
-        if (ordersAndTradesOnly) return;
+        if (orderProjectionOnly) return;
         if (!active() || risk == null) return;
         String instrumentId = identities.instrumentId(risk.symbolId());
         outbox.stage(RealtimeFrameCodec.encodeRiskPayload(

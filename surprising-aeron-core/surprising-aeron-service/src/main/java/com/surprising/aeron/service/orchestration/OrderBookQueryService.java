@@ -244,7 +244,9 @@ public final class OrderBookQueryService {
                 ? owner.triggerOrderIndex.expired(requested.expiresBeforeEpochMillis(), requested.limit())
                 : requested.instrumentId().isEmpty()
                 ? requested.status() != null ? owner.triggerOrderIndex.ids(requested.status())
-                : message.header().userId() == 0 ? owner.triggerOrderIndex.ids() : owner.triggerOrderIndex.ids(message.header().userId())
+                : message.header().userId() == 0 ? requested.beforeTriggerOrderId() == 0
+                        ? owner.triggerOrderIndex.ids() : owner.triggerOrderIndex.idsBefore(before)
+                        : owner.triggerOrderIndex.ids(message.header().userId())
                 : requested.status() == null ? owner.triggerOrderIndex.ids(requested.instrumentId())
                 : owner.triggerOrderIndex.ids(requested.instrumentId(), requested.status());
         var selected = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
@@ -255,7 +257,7 @@ public final class OrderBookQueryService {
             if (++scanned > RuntimeOperationalQueryService.MAX_INDEX_SCAN)
                 throw new RuntimeOperationalQueryService.QueryTooLargeException();
             var route = owner.triggerOrderIndex.route(id);
-            if (route == null || id >= before || requested.triggerOrderId() != 0 && requested.triggerOrderId() != id
+            if (route == null || requested.beforeTriggerOrderId() != 0 && id >= before || requested.triggerOrderId() != 0 && requested.triggerOrderId() != id
                     || message.header().userId() != 0 && message.header().userId() != route.userId()
                     || requestedInstrument != 0 && requestedInstrument != route.instrumentId()
                     || requested.status() != null && requested.status() != route.status()

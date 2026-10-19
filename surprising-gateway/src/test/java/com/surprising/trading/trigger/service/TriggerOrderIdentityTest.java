@@ -39,12 +39,46 @@ class TriggerOrderIdentityTest {
     @Test
     void privateTriggerQueryDoesNotReturnToCoreOnAReadViewMiss() {
         var gateway=mock(TriggerOrderAeronGateway.class);var service=new TriggerOrderService(properties(),gateway);
-        var queries=mock(com.surprising.realtime.api.ValkeyUserQueries.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(service,"realtimeQueries",queries);
-        when(queries.require(ProductLine.LINEAR_PERPETUAL,1001L,null)).thenReturn(
-            new com.surprising.realtime.api.UserReadView("READY","v",1,null,java.util.List.of(),java.util.List.of(),1,java.util.List.of()));
+        var queries=mock(TriggerOrderProjectionRepository.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"triggerProjection",queries);
+        when(queries.get(ProductLine.LINEAR_PERPETUAL,1001L,99L)).thenReturn(java.util.Optional.empty());
         assertThatThrownBy(()->service.get(1001L,99L)).isInstanceOf(IllegalStateException.class);
         org.mockito.Mockito.verifyNoInteractions(gateway);
+    }
+
+    @Test
+    void missingProjectionIsUnavailableForUserAdminAndTimelineWithoutCoreFallback() {
+        var gateway = mock(TriggerOrderAeronGateway.class);
+        var service = new TriggerOrderService(properties(), gateway);
+        assertThatThrownBy(() -> service.get(1001L, 99L)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        assertThatThrownBy(() -> service.get(99L, ProductLine.LINEAR_PERPETUAL)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        assertThatThrownBy(() -> service.adminOrders(null, null, null, null, 10)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        assertThatThrownBy(() -> service.adminTimeline(99L)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        org.mockito.Mockito.verifyNoInteractions(gateway);
+    }
+
+    @Test
+    void terminalDetailsAndActualPriceSourceComeFromProjectionWithoutCoreReads() {
+        var core = mock(TriggerOrderAeronGateway.class);
+        var projection = mock(TriggerOrderProjectionRepository.class);
+        var service = new TriggerOrderService(properties(), core);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "triggerProjection", projection);
+        var state = new CoreTriggerOrderStateView(Long.MAX_VALUE, ProductLine.LINEAR_PERPETUAL, 1001,
+                "client", "oco", "1", com.surprising.aeron.protocol.CoreOrderSide.SELL,
+                com.surprising.aeron.protocol.CoreTriggerOrderType.TAKE_PROFIT,
+                com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL, 120, 0, 0, 0, 0, 0,
+                com.surprising.aeron.protocol.CoreOrderType.MARKET, com.surprising.aeron.protocol.CoreTimeInForce.IOC,
+                0, 1, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET,
+                com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERED, 77, 9, 121, "", 0, 1100, 1000, 1200, 3, 0, 0,
+                com.surprising.aeron.protocol.CoreTriggerPriceSource.LAST);
+        when(projection.get(ProductLine.LINEAR_PERPETUAL, 1001L, Long.MAX_VALUE)).thenReturn(java.util.Optional.of(state));
+        when(projection.get(ProductLine.LINEAR_PERPETUAL, null, Long.MAX_VALUE)).thenReturn(java.util.Optional.of(state));
+        assertThat(service.get(1001, Long.MAX_VALUE).triggerOrderId()).isEqualTo(Long.MAX_VALUE);
+        var timeline = service.adminTimeline(Long.MAX_VALUE);
+        assertThat(timeline.order().priceSource()).isEqualTo(TriggerPriceSource.LAST);
+        assertThat(timeline.events()).extracting(com.surprising.trading.api.model.AdminTriggerOrderTimelineEvent::eventType)
+                .containsExactly("CREATED", "TRIGGERED_LAST", "EXECUTION_PLACED");
+        org.mockito.Mockito.verifyNoInteractions(core);
     }
 
     @Test

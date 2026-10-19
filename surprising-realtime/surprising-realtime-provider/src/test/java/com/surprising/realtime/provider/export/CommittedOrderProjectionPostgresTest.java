@@ -28,12 +28,72 @@ class CommittedOrderProjectionPostgresTest {
         jdbc.execute("CREATE TABLE core_order_projection (LIKE public.core_order_projection INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_projection_watermark (LIKE public.core_projection_watermark INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_command_result_projection (LIKE public.core_command_result_projection INCLUDING ALL)");
+        jdbc.execute("CREATE TABLE core_trigger_order_projection (LIKE public.core_trigger_order_projection INCLUDING ALL)");
+        jdbc.execute("CREATE TABLE core_trigger_projection_initialization (LIKE public.core_trigger_projection_initialization INCLUDING ALL)");
         jdbc.execute("CREATE TABLE market_maker_strategies (product_line text, account_ids bigint[])");
         jdbc.execute("CREATE TABLE market_maker_business_settings (product_line text, settings jsonb)");
         repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
     }
 
     @AfterEach void clean() { if (jdbc != null) jdbc.execute("DROP SCHEMA order_projection_it CASCADE"); }
+
+    private static RealtimeFrame trigger(long id, long user, CoreTriggerOrderStatus status, long revision) {
+        var v=new CoreTriggerOrderStateView(id,ProductLine.OPTION,user,"client-"+id,"oco","74",CoreOrderSide.SELL,
+                CoreTriggerOrderType.TAKE_PROFIT,CoreTriggerCondition.GREATER_OR_EQUAL,120,0,0,0,0,0,
+                CoreOrderType.MARKET,CoreTimeInForce.IOC,0,1,CoreMarginMode.CROSS,CorePositionSide.NET,status,
+                0,0,0,"",0,0,1000,1000+revision,revision,0,0,CoreTriggerPriceSource.LAST);
+        return new RealtimeFrame(ProductLine.OPTION,RealtimeFrame.Kind.TRIGGER,user,10,0,1000,0,"74",Long.toString(id),CoreTriggerOrderCodec.encodeList(List.of(v)));
+    }
+
+    @Test void triggerVersionsTerminalHistoryAndReceiptsCommitWithTheWatermark() {
+        var first=trigger(Long.MAX_VALUE,7,CoreTriggerOrderStatus.PENDING,1);
+        var terminal=trigger(Long.MAX_VALUE,7,CoreTriggerOrderStatus.CANCELED,2);
+        repository.persist(ProductLine.OPTION,List.of(first,terminal),List.of(),10);
+        repository.persist(ProductLine.OPTION,List.of(first),List.of(),11);
+        assertThat(jdbc.queryForObject("SELECT status FROM core_trigger_order_projection",String.class)).isEqualTo("CANCELED");
+        assertThat(jdbc.queryForObject("SELECT revision FROM core_trigger_order_projection",Long.class)).isEqualTo(2);
+        assertThatThrownBy(()->repository.persist(ProductLine.OPTION,List.of(trigger(Long.MAX_VALUE,8,CoreTriggerOrderStatus.CANCELED,3)),List.of(),12))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("conflicting");
+        assertThat(jdbc.queryForObject("SELECT user_id FROM core_trigger_order_projection",Long.class)).isEqualTo(7);
+        assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark",Long.class)).isEqualTo(11);
+        assertThatThrownBy(()->repository.persist(ProductLine.OPTION,List.of(trigger(Long.MAX_VALUE,7,CoreTriggerOrderStatus.TRIGGERED,2)),List.of(),12))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("conflicting");
+    }
+
+    @Test void incompleteTriggerSnapshotIsHiddenAndReconstructionRetriesWithoutRegressingState() {
+        var replay=org.mockito.Mockito.mock(com.surprising.aeron.service.orchestration.CommittedTradeReplay.class);
+        var state=CoreTriggerOrderCodec.decodeList(trigger(90,7,CoreTriggerOrderStatus.CANCELED,2).payload()).getFirst();
+        org.mockito.Mockito.when(replay.retainedTriggersBefore(0,512)).thenReturn(List.of(state));
+        org.mockito.Mockito.when(replay.retainedTriggersBefore(90,512)).thenThrow(new IllegalStateException("incomplete snapshot"));
+        org.mockito.Mockito.when(replay.exportSequence()).thenReturn(10L);
+        assertThatThrownBy(()->repository.initializeTriggers(ProductLine.OPTION,replay,32)).hasMessage("incomplete snapshot");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_trigger_projection_initialization",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_trigger_order_projection",Integer.class)).isEqualTo(1);
+        org.mockito.Mockito.reset(replay);
+        org.mockito.Mockito.when(replay.retainedTriggersBefore(0,512)).thenReturn(List.of(state));
+        org.mockito.Mockito.when(replay.retainedTriggersBefore(90,512)).thenReturn(List.of());
+        org.mockito.Mockito.when(replay.exportSequence()).thenReturn(10L);
+        repository.initializeTriggers(ProductLine.OPTION,replay,32);
+        assertThat(jdbc.queryForObject("SELECT snapshot_log_position FROM core_trigger_projection_initialization",Long.class)).isEqualTo(32);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_trigger_order_projection",Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_projection_watermark",Integer.class)).isZero();
+    }
+
+    @Test void makerProtectionReceiptsAreRetainedWhileTransientQuoteReceiptsStayFiltered() {
+        jdbc.update("INSERT INTO market_maker_strategies VALUES ('OPTION', ARRAY[900]::bigint[])");
+        var receipts=new java.util.ArrayList<com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult>();
+        for(var type:List.of(CoreMessageType.PLACE_TRIGGER_OCO_PAIR,CoreMessageType.PLACE_TRIGGER_ORDER,CoreMessageType.CANCEL_TRIGGER_ORDER,CoreMessageType.CANCEL_ORDER)) {
+            int i=receipts.size()+1;
+            receipts.add(new com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult(
+                    ProductLine.OPTION,900,new java.util.UUID(0,i),type,null,null,ResponseStatus.APPLIED,CoreResultCode.NONE,i,32L*i,1000L+i,List.of()));
+        }
+        repository.persist(ProductLine.OPTION,List.of(),receipts,10);
+        assertThat(jdbc.queryForList("SELECT command_type FROM core_command_result_projection ORDER BY command_type",String.class))
+                .containsExactly("CANCEL_TRIGGER_ORDER","PLACE_TRIGGER_OCO_PAIR","PLACE_TRIGGER_ORDER");
+        jdbc.execute("DELETE FROM core_command_result_projection");
+        repository.repairCommandResults(ProductLine.OPTION,receipts);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_command_result_projection",Integer.class)).isEqualTo(3);
+    }
 
     @Test void cancelBatchFactsPersistAndEnrichOnlyMissingHistoricalDetails() {
         var receipt = batchResult(false);

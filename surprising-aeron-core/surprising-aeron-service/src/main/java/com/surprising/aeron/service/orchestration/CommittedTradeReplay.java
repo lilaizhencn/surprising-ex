@@ -24,7 +24,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
                         : TradingCoreRuntime.fromSnapshot(product, snapshot);
         state.assertClusterCallbackComplete();
         capture = state.attachRealtime(outbox);
-        capture.ordersAndTradesOnly(true);
+        capture.orderProjectionOnly(true);
         state.funding.observeReplayPayments(result -> fundingResult = result);
     }
 
@@ -147,7 +147,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
             while ((encoded = outbox.poll()) != null) {
                 var frame = RealtimeFrameCodec.decode(encoded);
                 if (frame.kind() == RealtimeFrame.Kind.TRADE || frame.kind() == RealtimeFrame.Kind.ORDER
-                        || frame.kind() == RealtimeFrame.Kind.EXECUTION)
+                        || frame.kind() == RealtimeFrame.Kind.EXECUTION || frame.kind() == RealtimeFrame.Kind.TRIGGER)
                     changes.add(frame);
             }
             return List.copyOf(changes);
@@ -159,6 +159,14 @@ public final class CommittedTradeReplay implements AutoCloseable {
     public CommittedFundingPage fundingPage() { return fundingPage; }
     public CommittedDeliveryPage deliveryPage() { return deliveryPage; }
     public CommittedCommandResult commandResult() { return commandResult; }
+
+    /** Startup projection reconstruction from this worker's committed snapshot, never the live Core. */
+    public List<CoreTriggerOrderStateView> retainedTriggersBefore(long before, int limit) {
+        if (before < 0 || limit < 1 || limit > 512) throw new IllegalArgumentException("invalid retained trigger page");
+        long now = System.currentTimeMillis();
+        return CoreTriggerOrderCodec.decodeList(replayQuery(CoreMessageType.TRIGGER_ORDER_QUERY, 0,
+                CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(0, "", before, limit)), now, 1).data());
+    }
 
     private SettleInstrumentCommand deliveryCommand(CoreMessage message) {
         if (!state.productLine().isDeliveryProduct() || message.header().messageType() != CoreMessageType.SETTLE_INSTRUMENT) return null;

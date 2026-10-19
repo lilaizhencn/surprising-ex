@@ -10,6 +10,42 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.api.Test;
 
 class CommittedTradeReplayTest {
+    @Test void capturesTerminalTriggersAndReconstructsThemWithoutChangingReplayBusinessState() {
+        var line = ProductLine.OPTION;
+        byte[] snapshot;
+        try (var replay = new CommittedTradeReplay(line, null)) {
+            send(replay, line, CoreMessageType.REGISTER_INSTRUMENT, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("604",
+                            ContractType.VANILLA_OPTION.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+                            100_000, 50_000, 0, 0, 2_000_000_000_000L, 0, 100)));
+            for (long user : new long[]{7, 8}) send(replay, line, CoreMessageType.ADJUST_BALANCE, user,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000_000)));
+            send(replay, line, CoreMessageType.APPLY_MARK_PRICE, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("604", 100, 100, 100, 1, TIME)));
+            place(replay, line, 7, 201, CoreOrderSide.SELL);
+            place(replay, line, 8, 202, CoreOrderSide.BUY);
+            var trigger = new CoreTriggerOrderStateView(Long.MAX_VALUE, line, 8, "retained-tp", "", "604", CoreOrderSide.SELL,
+                    CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL, 200, 0, 0, 0, 0, 0,
+                    CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
+                    CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 0, 0, 1);
+            var created = send(replay, line, CoreMessageType.PLACE_TRIGGER_ORDER, 8, CoreTriggerOrderCodec.encodeState(trigger));
+            assertThat(created).anySatisfy(f -> assertThat(f.kind()).isEqualTo(RealtimeFrame.Kind.TRIGGER));
+            var canceled = send(replay, line, CoreMessageType.CANCEL_TRIGGER_ORDER, 8, CoreTriggerOrderCodec.encodeId(Long.MAX_VALUE));
+            assertThat(canceled.stream().filter(f -> f.kind() == RealtimeFrame.Kind.TRIGGER)
+                    .flatMap(f -> CoreTriggerOrderCodec.decodeList(f.payload()).stream()))
+                    .anySatisfy(v -> assertThat(v.status()).isEqualTo(CoreTriggerOrderStatus.CANCELED));
+            snapshot = replay.snapshot();
+        }
+        try (var restored = new CommittedTradeReplay(line, snapshot)) {
+            long before = restored.businessHash();
+            var retained = restored.retainedTriggersBefore(0, 1);
+            assertThat(retained).hasSize(1);
+            assertThat(retained.getFirst().triggerOrderId()).isEqualTo(Long.MAX_VALUE);
+            assertThat(retained.getFirst().status()).isEqualTo(CoreTriggerOrderStatus.CANCELED);
+            assertThat(restored.retainedTriggersBefore(Long.MAX_VALUE, 1)).isEmpty();
+            assertThat(restored.businessHash()).isEqualTo(before);
+        }
+    }
     @Test void committedCancelBatchRetainsItsMixedOutcomesBeyondTheCoreCache() {
         try (var replay = new CommittedTradeReplay(ProductLine.SPOT, null)) {
             send(replay, ProductLine.SPOT, CoreMessageType.REGISTER_INSTRUMENT, 0,

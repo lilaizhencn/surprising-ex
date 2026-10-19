@@ -47,6 +47,8 @@ import org.springframework.stereotype.Service;
 public class TriggerOrderService {
     @org.springframework.beans.factory.annotation.Autowired
     private com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
+    @org.springframework.beans.factory.annotation.Autowired
+    private TriggerOrderProjectionRepository triggerProjection;
 
     private static final long MIN_TRAILING_CALLBACK_RATE_PPM = 1_000L;
     private static final long MAX_TRAILING_CALLBACK_RATE_PPM = 100_000L;
@@ -201,8 +203,7 @@ public class TriggerOrderService {
         if (userId <= 0 || triggerOrderId <= 0) {
             throw new IllegalArgumentException("userId and triggerOrderId must be positive");
         }
-        CoreTriggerOrderStateView value = requireRealtimeQueries().require(currentProductLine(), userId, null).triggerOrders().stream()
-                    .filter(order -> order.triggerOrderId() == triggerOrderId).findFirst().orElse(null);
+        CoreTriggerOrderStateView value = requireTriggerProjection().get(currentProductLine(), userId, triggerOrderId).orElse(null);
         if (value == null || value.userId() != userId || value.productLine() != currentProductLine()) {
             throw new IllegalStateException("trigger order not found: " + triggerOrderId);
         }
@@ -214,7 +215,8 @@ public class TriggerOrderService {
             throw new IllegalArgumentException("triggerOrderId must be positive");
         }
         ProductLine effective = productLine == null ? currentProductLine() : productLine;
-        CoreTriggerOrderStateView value = aeronGateway.get(0, triggerOrderId);
+        if (effective != currentProductLine()) throw new IllegalArgumentException("product line does not match provider");
+        CoreTriggerOrderStateView value = requireTriggerProjection().get(effective, null, triggerOrderId).orElse(null);
         if (value == null || value.productLine() != effective) {
             throw new IllegalStateException("trigger order not found: " + triggerOrderId);
         }
@@ -355,18 +357,16 @@ public class TriggerOrderService {
         String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         CoreTriggerOrderStatus normalizedStatus = status == null || status.isBlank() ? null
                 : CoreTriggerOrderStatus.valueOf(status.trim().toUpperCase());
-        long before = decodeOpenTriggerCursor(cursor);
-        List<TriggerOrderResponse> values = aeronGateway.query(userId == null ? 0 : userId,
-                        triggerOrderId == null ? 0 : triggerOrderId, normalizedSymbol, before, limit + 1,
-                        normalizedStatus)
-                .stream().filter(value -> value.productLine() == effective)
-                .map(TriggerOrderAeronGateway::response).toList();
-        boolean hasMore = values.size() > limit;
-        List<TriggerOrderResponse> orders = hasMore ? values.subList(0, limit) : values;
-        String next = hasMore && !orders.isEmpty()
-                ? encodeOpenTriggerCursor(orders.getLast().triggerOrderId()) : null;
-        return new TriggerOrderQueryResponse(orders.size(), List.copyOf(orders), next, hasMore,
-                "createdAt.desc", limit);
+        var page = requireTriggerProjection().search(effective, userId, normalizedSymbol, normalizedStatus,
+                triggerOrderId, limit, cursor, sort);
+        var values = page.orders().stream().map(TriggerOrderAeronGateway::response).toList();
+        return new TriggerOrderQueryResponse(values.size(), values, page.nextCursor(), page.hasMore(), page.sort(), limit);
+    }
+
+    private TriggerOrderProjectionRepository requireTriggerProjection() {
+        if (triggerProjection == null) throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "TRIGGER_READ_VIEW_UNAVAILABLE");
+        return triggerProjection;
     }
 
     public AdminTriggerOrderTimelineResponse adminTimeline(long triggerOrderId) {
@@ -517,7 +517,7 @@ public class TriggerOrderService {
                     "trigger order canceled", order.traceId(), order.updatedAt()));
         }
         if (order.triggeredAt() != null) {
-            events.add(new AdminTriggerOrderTimelineEvent("TRIGGERED_MARK", order.status(), order.triggerSequence(),
+            events.add(new AdminTriggerOrderTimelineEvent("TRIGGERED_" + order.priceSource().name(), order.status(), order.triggerSequence(),
                     order.triggeredPriceTicks(), null, null, order.traceId(), order.triggeredAt()));
         }
         if (order.placedOrderId() != null) {

@@ -37,6 +37,7 @@ class SixProductLineContractLiveTest {
     private String admin;
     private String approver;
     private int optionCompanion;
+    private Map<String, Object> triggerQueryFixture;
 
     @Test
     void createListEditAndPauseThroughAdminRequestsWithoutRestart() throws Exception {
@@ -157,6 +158,59 @@ class SixProductLineContractLiveTest {
                 line, id, halted.path("lastChangeId").asLong(), started.keySet());
     }
 
+    /** Protect the real maker short, then retain both terminal legs for history/receipt reads. */
+    private void verifyMakerTriggerHistory(Participant maker, int instrumentId) throws Exception {
+        var legs = new ArrayList<Map<String, Object>>();
+        for (boolean tp : new boolean[]{true, false}) {
+            var leg = new LinkedHashMap<String, Object>();
+            leg.put("userId", maker.id);
+            leg.put("clientTriggerOrderId", "query-" + run + (tp ? "-tp" : "-sl"));
+            leg.put("ocoGroupId", "query-" + run);
+            leg.put("instrumentId", String.valueOf(instrumentId));
+            leg.put("side", "BUY");
+            leg.put("triggerType", tp ? "TAKE_PROFIT" : "STOP_LOSS");
+            leg.put("triggerPriceTicks", tp ? 8000 : 12000);
+            leg.put("priceSource", "LAST");
+            leg.put("orderType", "MARKET"); leg.put("timeInForce", "IOC");
+            leg.put("quantitySteps", 1); leg.put("priceTicks", 0);
+            leg.put("marginMode", "CROSS"); leg.put("positionSide", "NET"); leg.put("reduceOnly", true);
+            legs.add(leg);
+        }
+        var result = request("POST", "/api/v1/gateway/trading-trigger/batch",
+                json.writeValueAsString(Map.of("orders", legs, "atomic", true)), maker.token, null, 200);
+        assertThat(result.path("completed").asInt()).isEqualTo(2);
+        var ids = new ArrayList<String>();
+        for (var row : result.path("results")) {
+            long id = row.path("order").path("triggerOrderId").asLong();
+            ids.add(Long.toString(id));
+            request("POST", "/api/v1/gateway/trading-trigger/cancel",
+                    json.writeValueAsString(Map.of("userId", maker.id, "triggerOrderId", id)), maker.token, null, 200);
+            JsonNode terminal = null;
+            for (int i = 0; i < 100; i++) {
+                terminal = request("GET", "/api/v1/gateway/trading-trigger/" + id + "?userId=" + maker.id,
+                        "", maker.token, null, 200, 404, 503);
+                if (terminal.path("status").asString().equals("CANCELED")) break;
+                Thread.sleep(100);
+            }
+            assertThat(terminal.path("status").asString()).isEqualTo("CANCELED");
+            var timeline = get("/api/v1/admin/gateway/trading-trigger/" + id + "/timeline?productLine=" + line, admin);
+            assertThat(timeline.path("order").path("triggerOrderId").asLong()).isEqualTo(id);
+            assertThat(timeline.path("order").path("priceSource").asString()).isEqualTo("LAST");
+        }
+        String receiptPath = "/api/v1/gateway/trading-trigger/oco-submission?userId=" + maker.id
+                + "&takeProfitClientId=query-" + run + "-tp&stopLossClientId=query-" + run + "-sl";
+        JsonNode receipt = null;
+        for (int i = 0; i < 100; i++) {
+            receipt = request("GET", receiptPath, "", maker.token, null, 200, 404, 503);
+            if (receipt.path("outcome").asString().equals("TERMINAL")) break;
+            Thread.sleep(100);
+        }
+        assertThat(receipt.path("outcome").asString()).isEqualTo("TERMINAL");
+        assertThat(receipt.path("code").asString()).isEqualTo("NONE");
+        triggerQueryFixture = Map.of("userId", maker.id, "accessToken", maker.token, "triggerIds", ids, "receiptPath", receiptPath);
+        System.out.println("OPTION_TRIGGER_READ_PASS makerOcoReceipt=true terminalUserLookup=2 adminTimeline=2 source=LAST");
+    }
+
     private void enableLocalProduct() throws Exception {
         for (var status : get("/api/v1/admin/product-lines", admin)) {
             var configuration = status.path("configuration");
@@ -183,10 +237,15 @@ class SixProductLineContractLiveTest {
         assertThat(java.nio.file.Files.exists(fixture)).isFalse();
         assertThat(java.nio.file.Files.exists(done)).isFalse();
         try {
-            java.nio.file.Files.writeString(fixture, json.writeValueAsString(Map.of(
+            var content = new LinkedHashMap<String, Object>(Map.of(
                     "userId", user.id, "accessToken", user.token, "instrumentId", String.valueOf(instrumentId),
                     "makerId", maker.id, "bidPriceTicks", bid, "runId", System.getenv("SIX_LINE_LIVE_RUN_ID"), "productLine", line.name(), "optionCompanionId", optionCompanion,
-                    "session", Map.of("accessToken", user.token, "user", Map.of("userId", user.id, "username", "live-" + line.name())))),
+                    "session", Map.of("accessToken", user.token, "user", Map.of("userId", user.id, "username", "live-" + line.name()))));
+            if (triggerQueryFixture != null) {
+                content.put("triggerQuery", triggerQueryFixture);
+                content.put("adminAccessToken", admin);
+            }
+            java.nio.file.Files.writeString(fixture, json.writeValueAsString(content),
                     java.nio.file.StandardOpenOption.CREATE_NEW);
             java.nio.file.Files.setPosixFilePermissions(fixture, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
             System.out.printf("CLIENT_FIXTURE_READY productLine=%s instrumentId=%d userId=%d makerId=%d%n", line, instrumentId, user.id, maker.id);
@@ -196,7 +255,8 @@ class SixProductLineContractLiveTest {
                 Thread.sleep(250);
             }
             assertThat(java.nio.file.Files.readString(done).trim()).isEqualTo("PASS");
-            System.out.printf("CLIENT_HANDOFF_PASS productLine=%s browserAndFlutter=true%n", line);
+            if (triggerQueryFixture != null) System.out.printf("ADMIN_QUERY_HANDOFF_PASS productLine=%s browser=true%n", line);
+            else System.out.printf("CLIENT_HANDOFF_PASS productLine=%s browserAndFlutter=true%n", line);
         } finally {
             java.nio.file.Files.deleteIfExists(fixture);
             java.nio.file.Files.deleteIfExists(done);
@@ -589,6 +649,8 @@ class SixProductLineContractLiveTest {
             var business = ((ObjectNode) settings.path("settings")).deepCopy();
             ((ObjectNode) business.path("engine")).put("enabled", true);
             ((ObjectNode) business.path("trade")).put("enabled", false);
+            if ("true".equals(System.getenv("SIX_LINE_LIVE_TRIGGER_READ_VIEW")))
+                ((ObjectNode) business.path("trade")).putArray("accountIds").add(maker.id);
             ((ObjectNode) business.path("referenceMarket")).put("enabled", false);
             write("market-maker", "/business-settings?productLine=" + line,
                     Map.of("settings", business, "expectedVersion", settings.path("version").asLong(), "reason", "six-line live QA"), 200);
@@ -621,6 +683,8 @@ class SixProductLineContractLiveTest {
             var bought = place(user, instrumentId, "BUY", "MARKET", 0, "IOC", false);
             assertThat(bought.path("status").asString()).isEqualTo("FILLED");
             if (line != ProductLine.SPOT) verifyCurrentRisk(core, user, instrumentId, settlement, instrument);
+            if (line == ProductLine.OPTION && "true".equals(System.getenv("SIX_LINE_LIVE_TRIGGER_READ_VIEW")))
+                verifyMakerTriggerHistory(maker, instrumentId);
             var sold = place(user, instrumentId, "SELL", "MARKET", 0, "IOC", line != ProductLine.SPOT);
             assertThat(sold.path("status").asString()).isEqualTo("FILLED");
             if (line == ProductLine.SPOT) {

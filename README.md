@@ -40,6 +40,8 @@ The Maven modules follow these boundaries: [`surprising-aeron-core`](surprising-
 
 进一步修复查询装配：产品线容器现在显式注册 `ValkeyUserQueries`，普通订单、余额持仓及用户触发单当前查询不再退回 Core。普通订单离开活动视图后从 realtime 提交投影查询终态；后台普通订单全局查询和撤单预览也使用提交投影。Web/client 回执恢复已统一到 `/api/v1/gateway/trading/commands/{commandId}`。192 项查询回归、Web 151 项及 Flutter 131 项测试通过；独立 FUSED 现货实测确认回执地址、终态查询、余额一致和资金守恒。全栈启动默认开启 realtime 与提交导出。专用查询及其他产品线仍按范围逐项验收，详见 [查询与清理记录](docs/validation/public-realtime-query-20261019.json)。
 
+条件单终态单笔查询及后台列表、详情、时间线现改由 realtime 的已提交 SQL 投影提供，Core 继续承担交易控制。投影缺失或重建未完成返回明确 503；首次启动从 realtime 自身检查点重建保留状态。升级需先应用 `deployment/migrations/20261020-trigger-read-projection.sql`，详见 [条件单查询与回执边界](docs/trigger-realtime-queries.md)。
+
 现货余额比例下单继续对齐（2026-10-19）：`GET /api/v1/gateway/trading/price-protection` 经既有
 `TradingLocalRoutes → OrderRequestService → OrderService` 返回当前产品的 `marketMaxSlippagePpm`。
 该只读接口直接读取现有业务配置，不查询 Core、不保存第二份状态；热更新后的配置可立即读取。

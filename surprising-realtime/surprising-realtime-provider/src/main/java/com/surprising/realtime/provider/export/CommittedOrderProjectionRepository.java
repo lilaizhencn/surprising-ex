@@ -3,6 +3,9 @@ package com.surprising.realtime.provider.export;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.RealtimeFrame;
+import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
+import com.surprising.aeron.protocol.CoreTriggerOrderCodec;
+import com.surprising.aeron.service.orchestration.CommittedTradeReplay;
 import com.surprising.product.api.ProductLine;
 import com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult;
 import java.util.List;
@@ -70,6 +73,66 @@ public class CommittedOrderProjectionRepository {
     public CommittedOrderProjectionRepository(JdbcTemplate jdbc, PlatformTransactionManager transactions) {
         this.jdbc = jdbc;
         this.transaction = new TransactionTemplate(transactions);
+    }
+
+    /** The detached replay checkpoint owns initialization; HTTP never materializes Core state. */
+    void initializeTriggers(ProductLine product, CommittedTradeReplay replay, long checkpointPosition) {
+        if (Integer.valueOf(1).equals(jdbc.queryForObject("SELECT count(*) FROM core_trigger_projection_initialization WHERE product_line=?",
+                Integer.class, product.name()))) return;
+        long before = 0;
+        while (true) {
+            var page = replay.retainedTriggersBefore(before, 512);
+            if (page.isEmpty()) break;
+            var writes = page.stream().map(v -> new TriggerWrite(v, CoreTriggerOrderCodec.encodeList(List.of(v)))).toList();
+            transaction.executeWithoutResult(tx -> persistTriggers(product, writes, replay.exportSequence()));
+            long next = page.getLast().triggerOrderId();
+            if (next <= 0 || before != 0 && next >= before)
+                throw new IllegalStateException("nonadvancing retained trigger cursor");
+            before = next;
+        }
+        // Page failures leave this marker absent. Replay/version checks make retries idempotent.
+        jdbc.update("""
+                INSERT INTO core_trigger_projection_initialization(product_line,snapshot_log_position,initial_export_sequence)
+                VALUES (?,?,?) ON CONFLICT DO NOTHING
+                """, product.name(), checkpointPosition, replay.exportSequence());
+    }
+
+    private record TriggerWrite(CoreTriggerOrderStateView state, byte[] raw) {}
+
+    private void persistTriggers(ProductLine product, Collection<TriggerWrite> writes, long sequence) {
+        if (writes.isEmpty()) return;
+        jdbc.batchUpdate("""
+                INSERT INTO core_trigger_order_projection(product_line,trigger_order_id,user_id,
+                  client_trigger_order_id,instrument_id,status,created_at_epoch_ms,updated_at_epoch_ms,
+                  revision,export_sequence,raw_trigger_state) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT (product_line,trigger_order_id) DO UPDATE SET
+                  status=EXCLUDED.status,updated_at_epoch_ms=EXCLUDED.updated_at_epoch_ms,
+                  revision=EXCLUDED.revision,export_sequence=EXCLUDED.export_sequence,raw_trigger_state=EXCLUDED.raw_trigger_state
+                WHERE core_trigger_order_projection.revision < EXCLUDED.revision
+                """, writes, 512, (s, write) -> {
+            var v = write.state();
+            if (v.productLine() != product || v.revision() <= 0 || v.createdAtEpochMillis() <= 0 || v.updatedAtEpochMillis() <= 0)
+                throw new IllegalArgumentException("invalid committed trigger identity");
+            s.setString(1, product.name()); s.setLong(2, v.triggerOrderId()); s.setLong(3, v.userId());
+            s.setString(4, v.clientTriggerOrderId()); s.setString(5, v.instrumentId()); s.setString(6, v.status().name());
+            s.setLong(7, v.createdAtEpochMillis()); s.setLong(8, v.updatedAtEpochMillis()); s.setLong(9, v.revision());
+            s.setLong(10, sequence); s.setBytes(11, write.raw());
+        });
+        var arguments = new ArrayList<Object>(); arguments.add(product.name());
+        var expected = new HashMap<Long, TriggerWrite>();
+        for (var write : writes) { expected.put(write.state().triggerOrderId(), write); arguments.add(write.state().triggerOrderId()); }
+        jdbc.query("SELECT * FROM core_trigger_order_projection WHERE product_line=? AND trigger_order_id IN ("
+                + String.join(",", Collections.nCopies(writes.size(), "?")) + ") ORDER BY trigger_order_id FOR UPDATE", rs -> {
+            var incoming = expected.remove(rs.getLong("trigger_order_id"));
+            var v = incoming.state();
+            if (rs.getLong("user_id") != v.userId() || !rs.getString("instrument_id").equals(v.instrumentId())
+                    || !rs.getString("client_trigger_order_id").equals(v.clientTriggerOrderId())
+                    || rs.getLong("created_at_epoch_ms") != v.createdAtEpochMillis()
+                    || rs.getLong("revision") < v.revision()
+                    || rs.getLong("revision") == v.revision() && !Arrays.equals(rs.getBytes("raw_trigger_state"), incoming.raw()))
+                throw new IllegalStateException("conflicting committed trigger state");
+        }, arguments.toArray());
+        if (!expected.isEmpty()) throw new IllegalStateException("incomplete committed trigger states");
     }
 
     /** One committed funding page and its nonzero ledger entries commit together. The
@@ -165,6 +228,7 @@ public class CommittedOrderProjectionRepository {
         // This bounded, per-commit SQL batch owns only the latest supplied version of each order.
         // PostgreSQL multi-row ON CONFLICT cannot update the same key twice in one statement.
         var latest = new LinkedHashMap<Long, OrderWrite>();
+        var triggers = new LinkedHashMap<Long, TriggerWrite>();
         // Both execution sides are emitted together by one committed command. The temporary
         // map is limited to this SQL batch; no order or execution history is cached in memory.
         Set<Long> userTradedOrders = new HashSet<>();
@@ -172,6 +236,24 @@ public class CommittedOrderProjectionRepository {
         for (var frame : orders) {
             if (frame.productLine() != product)
                 throw new IllegalArgumentException("cross-product projection frame");
+            if (frame.kind() == RealtimeFrame.Kind.TRIGGER) {
+                var decoded = CoreTriggerOrderCodec.decodeList(frame.payload());
+                if (decoded.size() != 1) throw new IllegalArgumentException("trigger frame must contain one entity");
+                var value = decoded.getFirst();
+                if (value.productLine() != product || value.userId() != frame.userId()
+                        || !value.instrumentId().equals(frame.instrumentId()) || !Long.toString(value.triggerOrderId()).equals(frame.entityId()))
+                    throw new IllegalArgumentException("trigger projection identity mismatch");
+                var prior = triggers.get(value.triggerOrderId());
+                if (prior != null && (prior.state().userId() != value.userId()
+                        || !prior.state().instrumentId().equals(value.instrumentId())
+                        || !prior.state().clientTriggerOrderId().equals(value.clientTriggerOrderId())
+                        || prior.state().createdAtEpochMillis() != value.createdAtEpochMillis()
+                        || prior.state().revision() == value.revision() && !Arrays.equals(prior.raw(), frame.payload())))
+                    throw new IllegalStateException("conflicting committed trigger state");
+                if (prior == null || prior.state().revision() < value.revision())
+                    triggers.put(value.triggerOrderId(), new TriggerWrite(value, frame.payload()));
+                continue;
+            }
             if (frame.kind() == RealtimeFrame.Kind.EXECUTION) {
                 if (frame.payloadLength() != 26 || frame.userId() <= 0)
                     throw new IllegalArgumentException("invalid execution identity");
@@ -204,6 +286,7 @@ public class CommittedOrderProjectionRepository {
         if (!executions.isEmpty()) throw new IllegalArgumentException("incomplete execution pair");
         transaction.executeWithoutResult(status -> {
             persistCommandResults(product, receipts);
+            persistTriggers(product, triggers.values(), exportSequence);
             // A stored maker order is the durable proof of a previous ordinary-user fill.
             // Reuse it across batches/restarts instead of checkpointing a second history index.
             var candidates = latest.values().stream().map(OrderWrite::order)
@@ -263,7 +346,11 @@ public class CommittedOrderProjectionRepository {
         for (var receipt : results) {
             if (receipt.product() != product) throw new IllegalArgumentException("cross-product command result");
             // Do not retain every transient quote from accounts owned by a maker strategy.
-            if (marketMakerAccounts.contains(receipt.userId())) continue;
+            boolean protection = switch (receipt.commandType()) {
+                case PLACE_TRIGGER_ORDER, PLACE_TRIGGER_OCO_PAIR, CANCEL_TRIGGER_ORDER -> true;
+                default -> false;
+            };
+            if (marketMakerAccounts.contains(receipt.userId()) && !protection) continue;
             var prior = receipts.putIfAbsent(receipt.commandId(), receipt);
             if (prior != null) {
                 requireSameResult(prior, receipt);

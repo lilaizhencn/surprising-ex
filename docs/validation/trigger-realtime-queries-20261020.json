@@ -1,0 +1,434 @@
+{
+  "date": "2026-10-20",
+  "status": "current module verified; broader goal remains active",
+  "scope": "条件单终态/后台查询迁移至 realtime，后台异步查询隔离与精确 ID",
+  "branches": {
+    "surprising-ex": "master",
+    "surprising-admin-web": "main"
+  },
+  "java": "Corretto 27 HotSpot 27+33-FR",
+  "backend": {
+    "command": "INSTRUMENT_TEST_JDBC_URL=<owned-db> INSTRUMENT_TEST_DB_USER=atomex INSTRUMENT_TEST_DB_PASSWORD=<local-test-password> mvn -o -pl surprising-gateway,surprising-realtime/surprising-realtime-provider -am -Dtest=CommittedTradeReplayTest,TriggerOrderIndexTest,CommittedOrderProjectionPostgresTest,TriggerOrderProjectionPostgresTest,TriggerOrderIdentityTest,TriggerOrderRequestServiceTest,TriggerLifecycleDrainTest,MarketApplicationContextTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "tests": [
+      {
+        "class": "com.surprising.aeron.service.state.TriggerOrderIndexTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.orchestration.CommittedTradeReplayTest",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.realtime.provider.MarketApplicationContextTest",
+        "tests": 20,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest",
+        "tests": 14,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.trading.trigger.service.TriggerLifecycleDrainTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.trading.trigger.service.TriggerOrderRequestServiceTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.trading.trigger.service.TriggerOrderProjectionPostgresTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.trading.trigger.service.TriggerOrderIdentityTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "total": 75,
+    "result": "BUILD SUCCESS",
+    "package": "mvn -o -pl surprising-gateway,surprising-realtime/surprising-realtime-provider,surprising-aeron-core/surprising-aeron-tools -am -DskipTests package; exit 0",
+    "migration": "applied from init.sql, re-applied migration successfully, exact init.sql suffix parity"
+  },
+  "live": {
+    "productLine": "OPTION",
+    "mode": "FUSED",
+    "makerRunning": true,
+    "walletStarted": false,
+    "jfrStarted": false,
+    "class": "com.surprising.gateway.provider.local.SixProductLineContractLiveTest",
+    "tests": 1,
+    "failures": 0,
+    "command": "SIX_LINE_LIVE_PRODUCT=OPTION SIX_LINE_LIVE_TRADING=true SIX_LINE_LIVE_OPTION_REFERENCE=true SIX_LINE_LIVE_TRIGGER_READ_VIEW=true SIX_LINE_LIVE_PREVIOUS_UI_FIXTURE=<owned-recovered-actors> SIX_LINE_LIVE_UI_FIXTURE=<owned-fixture> SIX_LINE_LIVE_JDBC_URL=<owned-db> mvn -o -pl surprising-gateway -am -Dtest=SixProductLineContractLiveTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "instrumentId": 869,
+    "traderId": 7,
+    "makerId": 8,
+    "terminalUserTriggerReads": 2,
+    "adminTriggerTimelines": 2,
+    "makerOcoReceipt": "TERMINAL/NONE",
+    "depthEvents": 14,
+    "websocketTradeIdsEqualRest": true,
+    "tradeCount": 2,
+    "positions": 0,
+    "reservations": 0,
+    "locked": 0,
+    "combinedFundsDifference": 0,
+    "balancesEqualCore": true,
+    "firstAttempt": "Test read completed from receipt instead of outcome; API was 200. Fixed assertion; own actors 3/4 were closed via reduce-only orders. Second Maven run confirmed their Core positions/reservations/locked and fundsDifference all zero.",
+    "uiHandoff": "Admin browser only; historical CLIENT_HANDOFF browserAndFlutter label in this test log is not native Flutter evidence. Test logging now distinguishes admin handoff."
+  },
+  "admin": {
+    "lint": "npm run lint: exit 0",
+    "build": "npm run build: exit 0",
+    "script": "scripts/trigger-query-fused-live.mjs",
+    "actual": {
+      "productLine": "OPTION",
+      "triggerIds": [
+        "1706882556298789072",
+        "5783563686494548220"
+      ],
+      "pageErrors": [],
+      "exactInt64Timeline": true,
+      "staleListRejected": true,
+      "unavailableClearsRows": true,
+      "widths": [
+        1440,
+        360
+      ],
+      "rows": 2
+    },
+    "faultInjection": "Delay real trigger response and inject one 503; no mock balances/orders or admin writes."
+  },
+  "restartAndCoreIsolation": {
+    "productLine": "OPTION",
+    "corePausedRequests": 9,
+    "maxResponseMs": 29.34,
+    "sorts": [
+      "createdAt.asc",
+      "createdAt.desc"
+    ],
+    "crossUserCursorRejected": true,
+    "readWhileCoreStopped": true,
+    "reconstruction": {
+      "retainedRows": 4,
+      "unchangedRawStates": true,
+      "snapshotLogPosition": 2370528,
+      "checkpointTradeSequence": 4,
+      "initializing503": true,
+      "oldRealtimePid": 34245,
+      "newRealtimePid": 38598
+    },
+    "makerReceipt": "TERMINAL/NONE"
+  },
+  "runtimeArtifactSha256": {
+    "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar": "ab63cd40d3d747ae95913d32615f17a4d95c3630129dd17ee13224cf22032bdd",
+    "surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar": "bbcab250dc95dcfdebf6b837f4a0fa8a90e844df3af1c2911fc51db9f3bc04ac",
+    "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar": "54bdbbb8e87f8e8fdea0e692226c9dbfa83d806bb0ee1b19ee2e6f426585effc",
+    "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar": "583aa025360dfc46c66b647688cf2642ca88ae7ca81dca902a9bb819bac2838e",
+    "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar": "e50223f53246b9b5ce319480f5fe4f20e3006ea9a43af6fb85d66a76c78bdfe0",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar": "4a8daf561ba016b262eec87f25891bf8659515699979f7f095268e6cd302f8de",
+    "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar": "7c13acce6ab5b26b5d1ec5f98e2597f45970537e1bf8a2d0760f63e7256b678d"
+  },
+  "notRepeated": [
+    "Other product live runtimes; shared regression includes six-product SQL order isolation",
+    "Web and Flutter full suites/native platform UI: source unchanged in this round",
+    "Performance/JMH/JFR, production deployment and wallet"
+  ],
+  "knownRemaining": [
+    "后台交易统计 /api/v1/admin/trading/metrics 及全局成交 /api/v1/admin/gateway/trading-orders/trades 返回404；后台分别报错，未恢复该两项能力。",
+    "当前 maker 公共配置和动态策略驻进程，既有 realtime SQL 账户过滤目录未同步；保护回执例外由 PostgreSQL 回归覆盖。真实 maker OCO 查询通过不证明高频报价过滤生效；此目录来源及普通单回执策略需继续核对。",
+    "本轮只完成条件单历史/详情读边界；不能推断所有专用查询及各产品客户端能力已验收。"
+  ],
+  "webAndClient": {
+    "changedThisRound": false,
+    "webPreviouslyPushed": "c20d5c25c0e382cc8a5c3b213774a32438a852a2",
+    "clientPreviouslyPushed": "04197f6b7b5608af0e3e87d92f54042d7fc3b9b9"
+  },
+  "evidenceArtifacts": [
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CommittedTradeReplayTest.xml",
+      "bytes": 23419,
+      "sha256": "a1143341880f9a40ef09a7847462980a2e0e8c95aa21cbf87eaee601e5e3e651"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CommittedTradeReplayTest.txt",
+      "bytes": 385,
+      "sha256": "28f1fef64f044210191a9313e35d946ce20696f66566c109c8148002df4303cb"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.TriggerOrderIndexTest.xml",
+      "bytes": 22567,
+      "sha256": "e5ecc841e59f67152bb01545c7679ba5c9b1ecc6b3c85077beb74f4c847dbbdf"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.TriggerOrderIndexTest.txt",
+      "bytes": 362,
+      "sha256": "d052e6e911a3be0dfdc8de373649e7aaa08ef4863212c6110ca0f197f57187a3"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.MarketApplicationContextTest.xml",
+      "bytes": 137891,
+      "sha256": "52d2a8d6d270ab2083de2915b82650fc5ba414077f481ec8ed33d173e8ab5f32"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest.txt",
+      "bytes": 403,
+      "sha256": "c62c5c5249540f28d6666b0f48b88589dc6666853e9de26010fe61db96a0db1e"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.MarketApplicationContextTest.txt",
+      "bytes": 373,
+      "sha256": "7105bba0aedd3be968456a8e81c264a82d5e1315a8312358b3ef4f777de6ae65"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest.xml",
+      "bytes": 54103,
+      "sha256": "368f4881b91c5e311a2db21ac6068dde005edd53d0e2190c3b95bdc377eb3911"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.trigger.service.TriggerOrderProjectionPostgresTest.xml",
+      "bytes": 45484,
+      "sha256": "63bd57be25f50de1c3217d0bccfea931ea887d0b8c5f02483ae3e703081b155a"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.trigger.service.TriggerLifecycleDrainTest.txt",
+      "bytes": 378,
+      "sha256": "7ae3c06c2cdc41933e0a7835d4271e608dd37bd58033b5f2bfd1e7a9d9bb8226"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.trigger.service.TriggerOrderIdentityTest.xml",
+      "bytes": 46134,
+      "sha256": "3203f114bfc483c2cb5ed7b12a226ca780cdec5ace83bb18e75812de890b8aa9"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.trigger.service.TriggerOrderIdentityTest.txt",
+      "bytes": 376,
+      "sha256": "68b7f3f4e8c86132a5cd266035868fa5554bf4c9c8815c7304fb0b2d1425e701"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.SixProductLineContractLiveTest.xml",
+      "bytes": 45631,
+      "sha256": "9309f603ef08ae3621d9bd7425d906697e70a4f5a0e6533b1d0bd94a42dbfae7"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.trigger.service.TriggerOrderRequestServiceTest.txt",
+      "bytes": 388,
+      "sha256": "e91bba0124e938e707728e03d9499ff37476430387dd65ebf0b0caee7893f887"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.trigger.service.TriggerOrderRequestServiceTest.xml",
+      "bytes": 45601,
+      "sha256": "adfd5978a4bf718023d9840a70b233d6305bc3e384aa1ce4661c212667f2b6fe"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.SixProductLineContractLiveTest.txt",
+      "bytes": 386,
+      "sha256": "84719346261883c791f17a1bf1a2fe147b050e4172c9950ac284474501f63425"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.trigger.service.TriggerLifecycleDrainTest.xml",
+      "bytes": 45882,
+      "sha256": "b1593cf7f8e0baa3edd37d5441cb2da20a52f59fab66b3f294958569b1fb1b34"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.trigger.service.TriggerOrderProjectionPostgresTest.txt",
+      "bytes": 396,
+      "sha256": "1fed5178430b73ee4b657458c6da09a2866fb40158263062b7e00c067b86cb3f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/kafka.log",
+      "bytes": 477225,
+      "sha256": "1c0727d57540faccdb6b3e07c6df2d871009bdbf7d2d74bbd4c36fec1a98aa6a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/live-maven.log",
+      "bytes": 31505,
+      "sha256": "282cb047bddf9e9c3edee335f66b4af6b2b15d825041541c9ac98648af282767"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/admin-vite.log",
+      "bytes": 209,
+      "sha256": "beb9d7ca4504a7601aec83c04b39d0cf780cd2ef8e0007dee4404c31efcd1dfe"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/start.log",
+      "bytes": 261,
+      "sha256": "dc78567f8e849480ac1c04b121b3ccd5ed89147641f38880b925d46bedae975a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/admin-live4.log",
+      "bytes": 108,
+      "sha256": "92fb22f297de058032953a65eee470100821419b3d98f7504cbd66b1ace12e78"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/redis.log",
+      "bytes": 1005,
+      "sha256": "2195353e4fee9ce4c39435210bff2624d199ed038a592d2b18d7e2a0623e81a6"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/admin-live2.log",
+      "bytes": 417,
+      "sha256": "ca08f6ea9bedf4b0dcb8cd4c81b47de89527b83e171b1200fde6f2f6a5adb08a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/migration-idempotency.log",
+      "bytes": 1128,
+      "sha256": "3724ef47fffbed86b4235b1a45d013115bbb2ac8f001da58f3fbc138c88e3084"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/failed-run-recovery.log",
+      "bytes": 1710,
+      "sha256": "9d069f7ef15e4ba5b03844a6102fe0b0789dfc2dd2a40302361305f5e63314e7"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/admin-live3.log",
+      "bytes": 702,
+      "sha256": "276fffad0517447ebde6a5bc376597db5f5c3c59f33de963c1bb605dc0631305"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/live-maven2.log",
+      "bytes": 30477,
+      "sha256": "9c0f6768f3dccffbb65c977fa26319301a530057902e8d9ac722092c0e183748"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/failed-run-recovery2.log",
+      "bytes": 143,
+      "sha256": "f042a10196cf3c5322d5f6175b02fbd4ae0657a5a499b677d65e576769536639"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/database-init.log",
+      "bytes": 11003,
+      "sha256": "2b38865b8281a643786c851488110887f97d5761303660fc8dd731199d0856de"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/ticker.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/stop.log",
+      "bytes": 77,
+      "sha256": "884f2d1c61954d2b9aa57577e7c34e9619cd8bb2029b15d680ea3f66da95b0e7"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/admin-live.log",
+      "bytes": 384,
+      "sha256": "8305936a1c362032426a51832c8b749ec4c519eb9db1661d041ff2802a92ba64"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/query-runtime-check.log",
+      "bytes": 132,
+      "sha256": "1b7c9f2a4b9702067389149096a2b66326c89a041f701bb71384d06bed29998f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/kafka-format.log",
+      "bytes": 992,
+      "sha256": "67d0918e227a006fe703c1115eab63969b9c41a45255a8bea0993671b28645e5"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/trigger-admin-failure.png",
+      "bytes": 152147,
+      "sha256": "0492015150394facbfd02f0f9ab52a3c4ba5ba6ecbdffc5b0144e5d8b5e17e83"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/trigger-admin-desktop.png",
+      "bytes": 280537,
+      "sha256": "50f52b7e233236b097da15a7833cb916ab15aa017d16640fff5c887f6a25f781"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0345/trigger-admin-mobile.png",
+      "bytes": 159166,
+      "sha256": "e0f7989e3cd9af1b61488c84d187ba9b33a8d3145e30d96962c061cd31caad51"
+    },
+    {
+      "historicalPath": "/tmp/surprising-trigger-projection-admin-lint-final.log",
+      "bytes": 60,
+      "sha256": "d42c3636f32ef74a518f6843324ee65ae8148aa3ee49633d0e42886017d64845"
+    },
+    {
+      "historicalPath": "/tmp/surprising-trigger-projection-admin-build-final2.log",
+      "bytes": 417,
+      "sha256": "0ec7bd37679ab34324ec7cd0a8f810a36407bc07f801f685d1a56528b6336a17"
+    },
+    {
+      "historicalPath": "/tmp/surprising-trigger-projection-target.log",
+      "bytes": 119473,
+      "sha256": "ccacfd8d81416c4511880c5ed3318fa585c5310a7811bc6c4a8eb9eb2b1ae679"
+    },
+    {
+      "historicalPath": "/tmp/surprising-trigger-projection-admin-build-final.log",
+      "bytes": 417,
+      "sha256": "110be5dfbda7668e9fbec650a343cd386a88e013745bfeb4ec1f5d416286d692"
+    },
+    {
+      "historicalPath": "/tmp/surprising-trigger-projection-admin-build2.log",
+      "bytes": 417,
+      "sha256": "a65909da70d37427d0a42d47447ddfe9c601037dfeb39df8aadc3a7503ef65b1"
+    },
+    {
+      "historicalPath": "/tmp/surprising-trigger-projection-admin-lint2.log",
+      "bytes": 60,
+      "sha256": "d42c3636f32ef74a518f6843324ee65ae8148aa3ee49633d0e42886017d64845"
+    },
+    {
+      "historicalPath": "/tmp/surprising-trigger-projection-compile.log",
+      "bytes": 122253,
+      "sha256": "048c743ef99db4eed4b55971f17d56c349c79b886afac0a7423aa3264d7590e5"
+    },
+    {
+      "historicalPath": "/tmp/surprising-trigger-projection-target-final.log",
+      "bytes": 117506,
+      "sha256": "da667647904261b3a6ce8b877e3e5d7e03e6eece4cca49347572309d0acc4fda"
+    },
+    {
+      "historicalPath": "/tmp/surprising-trigger-projection-package.log",
+      "bytes": 54318,
+      "sha256": "d7daa4b789668a52f5c6568f13fc1029e6b061500eb90d7af9eec9d004553a8a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-trigger-projection-admin-lint.log",
+      "bytes": 462,
+      "sha256": "4f6960ebf00c477cb2bcfd3c2550b65beda4ea50fc24d4a751ad3d39bee4a4b9"
+    },
+    {
+      "historicalPath": "/tmp/surprising-trigger-projection-admin-lint-final2.log",
+      "bytes": 60,
+      "sha256": "d42c3636f32ef74a518f6843324ee65ae8148aa3ee49633d0e42886017d64845"
+    }
+  ],
+  "cleanup": {
+    "ownedRootHistoricalPath": "/tmp/surprising-option-fused-20261020-0345",
+    "ownedDatabase": "surprising_option_20261020_0345",
+    "processes": "six app services, owned Vite, Kafka, ticker and Redis stopped",
+    "diskAvailableAtEnd": "270 GiB",
+    "existingPostgresPid": 1435,
+    "databaseDropped": true,
+    "ownedRootDeleted": true,
+    "ownedReportsRemoved": true,
+    "untrackedAdminCodegraph": "preserved; generated index excluded from commits",
+    "portsReleased": true,
+    "existingPostgresPreserved": true
+  }
+}
