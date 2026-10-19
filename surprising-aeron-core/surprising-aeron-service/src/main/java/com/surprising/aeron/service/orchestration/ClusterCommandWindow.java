@@ -120,12 +120,7 @@ public final class ClusterCommandWindow {
         if (routedSource == null || routedSource != decodedSource || decoded == null || size == 0) return prefix;
         CoreMessageType type = decodedSource.header().messageType();
         switch (type) {
-            case PLACE_ORDER -> prefix = maxOrderPrefix(prefix, decoded.placeOrder().orderId());
             case CANCEL_ORDER -> prefix = maxOrderPrefix(prefix, decoded.cancelOrder().orderId());
-            case PLACE_ORDER_BATCH -> {
-                for (var order : decoded.placeOrderBatch().orders())
-                    prefix = maxOrderPrefix(prefix, order.orderId());
-            }
             case CANCEL_ORDER_BATCH -> {
                 for (var order : decoded.cancelOrderBatch().orders())
                     prefix = maxOrderPrefix(prefix, order.orderId());

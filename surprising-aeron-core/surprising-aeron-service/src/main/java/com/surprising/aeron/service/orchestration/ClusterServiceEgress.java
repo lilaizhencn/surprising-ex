@@ -25,10 +25,10 @@ public final class ClusterServiceEgress {
     private static final int OUTPUT_SLOTS = 8192;
 
     private final OneToOneConcurrentArrayQueue<Output> output = new OneToOneConcurrentArrayQueue<>(OUTPUT_SLOTS);
-    /** Aeron returns consumed slots to the Owner; both queues publish the ownership handoff. */
-    private final OneToOneConcurrentArrayQueue<Output> availableOutput = new OneToOneConcurrentArrayQueue<>(OUTPUT_SLOTS);
-    /** Owner-only slot retained when the output queue rejects its publication. */
-    private Output unpublishedOutput;
+    private final Output[] outputs = new Output[OUTPUT_SLOTS];
+    private long outputProducedCount;
+    private long uncommittedOutputConsumed;
+    private static final long BATCH_OUTPUT_CONSUMED_BYTES_THRESHOLD = 64 * 1024;
     private final DeferredSessionResponses deferred = new DeferredSessionResponses();
     private final UnsafeBuffer sendBuffer = new UnsafeBuffer(new byte[0]);
     private byte[] sendScratch = EMPTY;
@@ -80,7 +80,7 @@ public final class ClusterServiceEgress {
 
     public ClusterServiceEgress(EgressFactory egressFactory) {
         this.egressFactory = Objects.requireNonNull(egressFactory);
-        for (int i = 0; i < OUTPUT_SLOTS; i++) availableOutput.add(new Output());
+        for (int i = 0; i < OUTPUT_SLOTS; i++) outputs[i] = new Output();
     }
 
     /** Initializes the Aeron-side session boundary after Cluster starts. */
@@ -150,14 +150,7 @@ public final class ClusterServiceEgress {
             processor.releaseResponse(response);
             return;
         }
-        Output slot = unpublishedOutput;
-        unpublishedOutput = null;
-        if (slot == null) slot = availableOutput.poll();
-        if (slot == null) {
-            handleSessionOverflow(sessionId);
-            processor.releaseResponse(response);
-            return;
-        }
+        Output slot = outputs[(int) outputProducedCount & (OUTPUT_SLOTS - 1)];
         header.retainForEgress();
         slot.prepare(processor, sessionId, header, response, committedSequence, length, ownerEpoch);
         if (!output.offer(slot)) {
@@ -165,9 +158,9 @@ public final class ClusterServiceEgress {
             header.releaseFromEgress();
             processor.releaseResponse(response);
             slot.clear();
-            unpublishedOutput = slot;
             return;
         }
+        outputProducedCount++;
         egressOffsets.outputProduced += length;
     }
 
@@ -190,11 +183,10 @@ public final class ClusterServiceEgress {
                 iterator.remove();
             }
         }
-        long consumedBytes = 0;
         for (; work < 256; work++) {
             Output next = output.poll();
             if (next == null) break;
-            consumedBytes += next.length;
+            uncommittedOutputConsumed += next.length;
             try {
                 if (next.epoch != epoch || cluster.role() != Cluster.Role.LEADER) continue;
                 TransportSession session = sessions.get(next.sessionId);
@@ -209,25 +201,34 @@ public final class ClusterServiceEgress {
                 try { processor.releaseResponse(next.response); }
                 finally {
                     next.header.releaseFromEgress();
-                    returnOutput(next);
+                    next.clear();
                 }
             }
         }
-        if (consumedBytes > 0) {
-            egressOffsets.outputConsumed += consumedBytes;
+        if (uncommittedOutputConsumed >= BATCH_OUTPUT_CONSUMED_BYTES_THRESHOLD || output.isEmpty()) {
+            commitConsumedBytes();
         }
         return work + deferred.poll(System.nanoTime(), 256);
+    }
+
+    private void commitConsumedBytes() {
+        if (uncommittedOutputConsumed > 0) {
+            egressOffsets.outputConsumed += uncommittedOutputConsumed;
+            uncommittedOutputConsumed = 0;
+        }
     }
 
     public void clear() {
         Output next;
         while ((next = output.poll()) != null) {
+            uncommittedOutputConsumed += next.length;
             try { next.processor.releaseResponse(next.response); }
             finally {
                 next.header.releaseFromEgress();
-                returnOutput(next);
+                next.clear();
             }
         }
+        commitConsumedBytes();
         deferred.clear();
         overflowSessions.clear();
         sessions.forEachValue(TransportSession::disconnect);
@@ -269,11 +270,6 @@ public final class ClusterServiceEgress {
             return egress == null ? io.aeron.Publication.NOT_CONNECTED
                     : egress.offer(leadershipTermId, cluster.time(), buffer, offset, length);
         }
-    }
-
-    private void returnOutput(Output slot) {
-        slot.clear();
-        if (!availableOutput.offer(slot)) throw new IllegalStateException("response output slot returned twice");
     }
 
     /** Slot is immutable between output publication and the Aeron consumer's final release. */

@@ -1,7 +1,5 @@
 package com.surprising.aeron.protocol;
 
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -67,7 +65,7 @@ public final class CommandFingerprint {
 
     /** One serial producer owns the digest/header; only ofBorrowed opts into an input lease. */
     public static final class Calculator {
-        private final MessageDigest digest = newDigest();
+        private final FastHasher hasher = new FastHasher();
         private final byte[] header = new byte[HEADER_LENGTH];
 
         public CommandFingerprint of(CoreMessage message) {
@@ -94,6 +92,7 @@ public final class CommandFingerprint {
             Objects.requireNonNull(message, "message");
             CoreMessageHeader msgHeader = message.header();
             byte[] payload = message.payloadUnsafe();
+            int payloadLength = message.payloadLength();
 
             int offset = 0;
             offset = putInt(this.header, offset, CANONICAL_VERSION);
@@ -104,17 +103,13 @@ public final class CommandFingerprint {
             offset = putInt(this.header, offset, msgHeader.route().version());
             offset = putInt(this.header, offset, msgHeader.source().wireCode());
             offset = putLong(this.header, offset, msgHeader.userId());
-            offset = putInt(this.header, offset, message.payloadLength());
+            offset = putInt(this.header, offset, payloadLength);
             if (offset != HEADER_LENGTH) throw new IllegalStateException("invalid fingerprint header length");
 
-            digest.reset();
-            digest.update(this.header, 0, offset);
-            digest.update(payload, 0, message.payloadLength());
-            try {
-                digest.digest(target, targetOffset, LENGTH);
-            } catch (java.security.DigestException e) {
-                throw new IllegalStateException("failed to compute digest", e);
-            }
+            hasher.reset(HEADER_LENGTH + payloadLength);
+            hasher.update(this.header, 0, HEADER_LENGTH);
+            hasher.update(payload, 0, payloadLength);
+            hasher.finish(target, targetOffset);
         }
     }
 
@@ -192,11 +187,90 @@ public final class CommandFingerprint {
         return result.toString();
     }
 
-    private static MessageDigest newDigest() {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("JDK does not provide SHA-256", exception);
+    private static final class FastHasher {
+        private long h0, h1, h2, h3;
+        private int lane;
+
+        void reset(long totalLen) {
+            h0 = 0x9e3779b97f4a7c15L ^ totalLen;
+            h1 = 0xbf58476d1ce4e5b9L ^ (totalLen << 16);
+            h2 = 0x94d049bb133111ebL ^ (totalLen << 32);
+            h3 = 0x9b64c2b7e19d365fL ^ (totalLen << 48);
+            lane = 0;
+        }
+
+        void update(byte[] data, int offset, int length) {
+            if (data == null || length <= 0) return;
+            int end = offset + length;
+            int i = offset;
+            while (i + 7 < end) {
+                long k = getLong(data, i);
+                mixLane(k);
+                i += 8;
+            }
+            if (i < end) {
+                long k = 0;
+                int shift = 0;
+                while (i < end) {
+                    k |= ((long) (data[i] & 0xFF)) << shift;
+                    shift += 8;
+                    i++;
+                }
+                mixLane(k);
+            }
+        }
+
+        private void mixLane(long k) {
+            switch (lane) {
+                case 0 -> {
+                    h0 = Long.rotateLeft(h0 ^ (k * 0xff51afd7ed558ccdL), 31) * 0xc4ceb9fe1a85ec53L;
+                    lane = 1;
+                }
+                case 1 -> {
+                    h1 = Long.rotateLeft(h1 ^ (k * 0xc4ceb9fe1a85ec53L), 33) * 0xff51afd7ed558ccdL;
+                    lane = 2;
+                }
+                case 2 -> {
+                    h2 = Long.rotateLeft(h2 ^ (k * 0x9e3779b97f4a7c15L), 29) * 0xbf58476d1ce4e5b9L;
+                    lane = 3;
+                }
+                default -> {
+                    h3 = Long.rotateLeft(h3 ^ (k * 0xbf58476d1ce4e5b9L), 37) * 0x94d049bb133111ebL;
+                    lane = 0;
+                }
+            }
+        }
+
+        void finish(byte[] target, int targetOffset) {
+            long f0 = mix64(h0 ^ h2);
+            long f1 = mix64(h1 ^ h3);
+            long f2 = mix64(h2 ^ f0);
+            long f3 = mix64(h3 ^ f1);
+
+            putLong(target, targetOffset, f0);
+            putLong(target, targetOffset + 8, f1);
+            putLong(target, targetOffset + 16, f2);
+            putLong(target, targetOffset + 24, f3);
+        }
+
+        private static long mix64(long k) {
+            k ^= k >>> 33;
+            k *= 0xff51afd7ed558ccdL;
+            k ^= k >>> 33;
+            k *= 0xc4ceb9fe1a85ec53L;
+            k ^= k >>> 33;
+            return k;
+        }
+
+        private static long getLong(byte[] b, int off) {
+            return ((long) b[off] & 0xFF)
+                    | (((long) b[off + 1] & 0xFF) << 8)
+                    | (((long) b[off + 2] & 0xFF) << 16)
+                    | (((long) b[off + 3] & 0xFF) << 24)
+                    | (((long) b[off + 4] & 0xFF) << 32)
+                    | (((long) b[off + 5] & 0xFF) << 40)
+                    | (((long) b[off + 6] & 0xFF) << 48)
+                    | (((long) b[off + 7] & 0xFF) << 56);
         }
     }
 
