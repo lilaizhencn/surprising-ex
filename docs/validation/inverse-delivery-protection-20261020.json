@@ -1,0 +1,1327 @@
+{
+  "date": "2026-10-20",
+  "scope": "仅 INVERSE_DELIVERY 实栈。沿用原整体功能目标，其他产品及原生设备不据此宣布完成。",
+  "changes": [
+    "Web/client 把币本位交割独立条件单、原子 OCO 和单笔撤销接入既有原身份持久恢复。client 显示 OCO，已发双腿移出新草稿；未知结果仅 GET realtime。",
+    "复用原产品、账户、永久合约 ID、方向、仓位及数量校验；未到期 TRADING 可创建，SETTLING 仅保留直接减仓和原结果查询。",
+    "PublicTradeEventMapper 以报价面值/实际成交价计算 INVERSE_DELIVERY 的基础币量，保留原始张数 quantitySteps，使用18位展示精度。其他产品数量换算分支未改。",
+    "SymbolRegistryService 允许 SETTLING/CLOSED 的已提交成交进入 K 线，修复结算减仓成交被漏记。新单准入仍由 Core 原逻辑执行。",
+    "CandleQueryRepository 从已关闭分钟返回当前大周期的 PARTIAL 聚合，修复缓存为空时4h/1w无数据；原查询路径继续在 realtime。",
+    "交割单元与实栈脚本合并为 delivery_protection/delivery-protection，明确以产品参数隔离。没有 Core 撮合、资金模型、DDL 或交易源 topic 变更。"
+  ],
+  "runtime": {
+    "rootHistorical": "/tmp/surprising-inverse-delivery-fused-20261020-065238",
+    "runId": "inverse-protection-20261020-065238",
+    "databaseHistorical": "surprising_inverse_delivery_20261020_065238",
+    "productLine": "INVERSE_DELIVERY",
+    "mode": "FUSED",
+    "nodes": 1,
+    "initialApplications": 6,
+    "wallet": false,
+    "jfr": false,
+    "jdk": "HotSpot Corretto 27+33-FR",
+    "maven": "3.9.16",
+    "heapsMiB": {
+      "core": 256,
+      "gateway": 384,
+      "providers": 256,
+      "kafka": 256,
+      "redis": 128
+    },
+    "hikariMaxConnections": 4,
+    "candlestickThreads": 1,
+    "rocksdbMiB": [
+      16,
+      8,
+      16
+    ],
+    "defaultNewTopicPartitions": 1,
+    "kafkaSegmentMiB": 16,
+    "kafkaRetentionHours": 1,
+    "applicationLogMaxFileMiB": 8,
+    "applicationLogTotalCapMiB": 32,
+    "gcLogFiles": 5,
+    "gcLogMaxFileMiB": 20,
+    "tradeExportCheckpointSeconds": 1,
+    "priceSource": "Owned loopback deterministic 50000 ticker; actual Core/maker/accounts/HTTP/WS.",
+    "initialArtifacts": {
+      "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar": "70cc36a9c510d79e322f83e7f1685687b1c0a798e1b0f6be1822f1b169a9e516",
+      "surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar": "f6d7b9e5609818d6395414545c42dab34ba6bb32b5995c44ae8713de19caa9b9",
+      "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar": "a2d53e83e85791c6f626b81fc5e714d8fcc563cfe04df406e49ea0cd60e96c41",
+      "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar": "07444b8ec921ddae360b893717282e5dded5bbc6f04d93c2c26aa5e489944848",
+      "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar": "e50223f53246b9b5ce319480f5fe4f20e3006ea9a43af6fb85d66a76c78bdfe0",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar": "4a8daf561ba016b262eec87f25891bf8659515699979f7f095268e6cd302f8de",
+      "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar": "7c13acce6ab5b26b5d1ec5f98e2597f45970537e1bf8a2d0760f63e7256b678d"
+    },
+    "productionBaseline": "85483bbe806fcdd6c79031a251cb0f6ae609e17b (main runtime artifacts unchanged since preceding validation)",
+    "marketFixInstall": {
+      "realtimePath": "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "29f48ff77d356ca3ac7453a2ee9c6565b5ce3f25846078c171142510f728a0c1",
+      "previousSha256": "07444b8ec921ddae360b893717282e5dded5bbc6f04d93c2c26aa5e489944848",
+      "derivedRowsRebuilt": 2,
+      "originalCorePid": 51932,
+      "appId": "inverse-protection-market-replay-20261020-065238"
+    },
+    "coldQueryInstall": {
+      "path": "/tmp/surprising-inverse-delivery-fused-20261020-065238/artifacts-market-tail/surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "37b7c962816e4a7ad696c7b013146726e454ba8d68d644ad90ac94cc0e7afe1f",
+      "coldQueryTestsPassed": 9
+    },
+    "finalRuntime": {
+      "mode": "FUSED",
+      "modeEvidence": "Live VM has no override; packaged TradingExecutionMode defaults to FUSED.",
+      "corePid": 51932,
+      "unchangedOtherRolePids": {
+        "gateway": 51998,
+        "derivatives-lifecycle": 53038,
+        "core-node0": 51932,
+        "price": 52190,
+        "maker": 53202
+      },
+      "realtimeFinalPid": 74713,
+      "realtimeArtifact": "/tmp/surprising-inverse-delivery-fused-20261020-065238/artifacts-market-tail/surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar",
+      "sha256": "37b7c962816e4a7ad696c7b013146726e454ba8d68d644ad90ac94cc0e7afe1f",
+      "changedRuntimeClassesMatchTestedBuild": [
+        "com/surprising/candlestick/provider/service/PublicTradeEventMapper.class",
+        "com/surprising/candlestick/provider/service/SymbolRegistryService.class",
+        "com/surprising/candlestick/provider/repository/CandleQueryRepository.class"
+      ],
+      "replayApplicationId": "inverse-protection-market-clean-20261020-065238"
+    },
+    "peakOwnedRootGiB": 4.4,
+    "diskFreeBeforeCleanupGiB": 251
+  },
+  "backend": {
+    "realtimeTestsPassed": 41,
+    "liveContractTestsPassed": 1,
+    "reports": [
+      {
+        "class": "com.surprising.gateway.provider.local.SixProductLineContractLiveTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.candlestick.provider.aggregation.CandleRollupAccumulatorTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.candlestick.provider.config.CandlestickLiveRollupTopologyTest",
+        "tests": 9,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.candlestick.provider.config.CandlestickRollupTopologyTest",
+        "tests": 8,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.candlestick.provider.service.RecentTradeQueryServiceTest",
+        "tests": 9,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.candlestick.provider.service.PublicTradeEventMapperTest",
+        "tests": 4,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.candlestick.provider.repository.CandleQueryPostgresTest",
+        "tests": 4,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.candlestick.provider.repository.CandleQueryRepositoryTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.candlestick.provider.service.CandleQueryServiceTest",
+        "tests": 4,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      }
+    ],
+    "marketTestsCommand": "mvn -o -pl surprising-realtime/surprising-realtime-provider -am -Dtest=PublicTradeEventMapperTest,RecentTradeQueryServiceTest,CandlestickRollupTopologyTest,CandlestickLiveRollupTopologyTest,CandleRollupAccumulatorTest,CommittedTradeExportIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false package",
+    "coldQueryCommand": "INSTRUMENT_TEST_JDBC_URL=<owned-db> INSTRUMENT_TEST_DB_USER=<owned-user> INSTRUMENT_TEST_DB_PASSWORD=<owned-password> mvn -o -pl surprising-realtime/surprising-realtime-provider -am -Dtest=CandleQueryPostgresTest,CandleQueryRepositoryTest,CandleQueryServiceTest -Dsurefire.failIfNoSpecifiedTests=false package",
+    "liveCommand": "SIX_LINE_LIVE_PRODUCT=INVERSE_DELIVERY SIX_LINE_LIVE_TRADING=true SIX_LINE_LIVE_DELIVERY_PROTECTION=true SIX_LINE_LIVE_RUN_ID=<owned-run> SIX_LINE_LIVE_UI_FIXTURE=<owned-fixture> SIX_LINE_LIVE_JDBC_URL=<owned-db> mvn -o -pl surprising-gateway -am -Dtest=SixProductLineContractLiveTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "builds": "32 market tests + 9 query tests + 1 live contract; each terminal exit 0 / BUILD SUCCESS",
+    "markers": [
+      "SIX_LINE_SETTINGS_PASS productLine=INVERSE_DELIVERY price=true lifecycle=true",
+      "SIX_LINE_RISK_PASS productLine=INVERSE_DELIVERY instrumentId=867 pnl=-40 notional=2000000 maintenance=10000 equity=999998960",
+      "SIX_LINE_REALTIME_PASS productLine=INVERSE_DELIVERY depthEvents=19 wsTrades=2 restTrades=2 identitiesMatch=true",
+      "SIX_LINE_PUBLIC_QUERY_PASS productLine=INVERSE_DELIVERY terminalByOrderAndClient=true balancesMatch=true",
+      "SIX_LINE_TRADING_PASS productLine=INVERSE_DELIVERY instrumentId=867 trader=3 maker=4 executions=2 fundsDifference=0",
+      "CLIENT_FIXTURE_READY productLine=INVERSE_DELIVERY instrumentId=868 userId=5 makerId=6",
+      "CLIENT_HANDOFF_PASS productLine=INVERSE_DELIVERY browserAndFlutter=true",
+      "INVERSE_DELIVERY_PROTECTION_CORE_PASS webCanceled=3 clientTriggered=1 siblingCanceled=1 remainingPosition=1",
+      "INVERSE_DELIVERY_SETTLING_TRIGGER_REJECT_PASS single=409 oco=409 directReductionStillAllowed=true",
+      "CLIENT_FIXTURE_READY productLine=INVERSE_DELIVERY instrumentId=868 userId=5 makerId=6",
+      "CLIENT_HANDOFF_PASS productLine=INVERSE_DELIVERY browserAndFlutter=true",
+      "INVERSE_DELIVERY_PROTECTION_REALTIME_PASS trades=3 wsRestIdentitiesMatch=true positions=0 reservations=0 locked=0 fundsDifference=0",
+      "INVERSE_DELIVERY_CLIENTS_PASS instrumentId=868 trader=5 maker=6 status=SETTLING positions=0 locked=0 fundsDifference=0",
+      "SIX_LINE_CONTRACT_PASS productLine=INVERSE_DELIVERY instrumentId=867 version=8 transitions=DRAFT,PRE_TRADING,TRADING,EDIT,HALT processes=[51932, 51998, 52190, 52434, 53038, 53202]"
+    ],
+    "postgresFixturesRolledBack": true
+  },
+  "web": {
+    "testsPassed": 273,
+    "testFilesPassed": 34,
+    "newInverseRecoveryCases": 14,
+    "redBeforeFix": 14,
+    "lint": {
+      "exitCode": 0,
+      "errors": 0,
+      "warnings": 0,
+      "informationalDiagnostics": 490
+    },
+    "build": "exit 0; existing chunk-size advisory",
+    "nodeScriptsSyntax": "node --check exit 0",
+    "trading": {
+      "productLine": "INVERSE_DELIVERY",
+      "phase": "TRADING",
+      "settlementAsset": "BTC",
+      "triggerIds": [
+        "5286759159079074487",
+        "2604589207857482156",
+        "5201356641155544747"
+      ],
+      "posts": 5,
+      "singlePosts": 1,
+      "cancelPosts": 3,
+      "ocoPosts": 1,
+      "pausedUnknown": 2,
+      "reloadRecovered": 3,
+      "noMixedOpeningEstimate": true,
+      "feesAtExecution": true,
+      "source": "LAST",
+      "widths": [
+        1440,
+        320
+      ],
+      "pageErrors": []
+    },
+    "settling": {
+      "productLine": "INVERSE_DELIVERY",
+      "phase": "SETTLING",
+      "settlementAsset": "BTC",
+      "writes": 0,
+      "priorCancellationRestored": true,
+      "newSingleDisabled": true,
+      "newOcoDisabled": true,
+      "directCloseEnabled": true,
+      "width": 320,
+      "pageErrors": []
+    },
+    "marketRebuild": {
+      "productLine": "INVERSE_DELIVERY",
+      "instrumentId": "868",
+      "writes": 0,
+      "expectedTradeCount": 3,
+      "quoteVolume": 4000,
+      "baseVolume": 0.08000040000800016,
+      "views": [
+        {
+          "width": 1440,
+          "theme": "dark",
+          "displayedBaseVolume": "0.0800004"
+        },
+        {
+          "width": 320,
+          "theme": "dark",
+          "displayedBaseVolume": "0.0800004"
+        },
+        {
+          "width": 320,
+          "theme": "light",
+          "displayedBaseVolume": "0.0800004"
+        }
+      ],
+      "pageErrors": [],
+      "candleFrames": 9,
+      "candleUpdateFrames": 3
+    },
+    "finalActualCandleFrame": {
+      "instrumentId": "868",
+      "period": "4h",
+      "openTime": "2026-10-19T20:00:00Z",
+      "closeTime": "2026-10-20T00:00:00Z",
+      "openPrice": 50000,
+      "highPrice": 50000,
+      "lowPrice": 49999,
+      "closePrice": 50000,
+      "baseVolume": 0.08000040000800016,
+      "quoteVolume": 4000,
+      "tradeCount": 3,
+      "firstTradeId": "INVERSE_DELIVERY:383776:569:6410941374786322353:0",
+      "lastTradeId": "INVERSE_DELIVERY:1243648:1483:5564547921133790193:0",
+      "firstSequence": 3,
+      "lastSequence": 5,
+      "status": "PARTIAL",
+      "eventTime": "2026-10-19T23:31:33.884Z",
+      "emittedAt": "2026-10-19T23:31:34.480Z",
+      "sourcePartition": null,
+      "sourceOffset": null
+    },
+    "visualReview": "Viewed real desktop full page and 320px light chart. 1440 dark, 320 dark/light rendered 0.0800004 BTC; header turnover 4000 USDT; no document overflow/page errors. Protection UI also verified desktop and320px.",
+    "commands": [
+      "DELIVERY_PROTECTION_PRODUCT=INVERSE_DELIVERY DELIVERY_PROTECTION_PHASE=TRADING|SETTLING DELIVERY_PROTECTION_LIVE_FIXTURE=<owned-fixture> DELIVERY_PROTECTION_PLAYWRIGHT_MODULE=<installed-module> DELIVERY_PROTECTION_CHROMIUM=<Chrome> node scripts/delivery-protection-fused-live.mjs",
+      "INVERSE_MARKET_LIVE_ROOT=<owned-root> INVERSE_MARKET_REPLAY_EVENTS=true DELIVERY_PROTECTION_PLAYWRIGHT_MODULE=<installed-module> DELIVERY_PROTECTION_CHROMIUM=<Chrome> node scripts/inverse-delivery-market-live.mjs"
+    ]
+  },
+  "client": {
+    "testsPassed": 270,
+    "defaultOptInSkipped": 8,
+    "deliveryUnitCases": 32,
+    "newInverseCases": 16,
+    "inverseRedBeforeFix": 13,
+    "analyze": "No issues found; final current source exit 0",
+    "liveTestsPassed": 3,
+    "trading": {
+      "productLine": "INVERSE_DELIVERY",
+      "triggerIds": [
+        "8653660656088787412",
+        "2909993633361188171"
+      ],
+      "posts": 1,
+      "atomic": true,
+      "pausedUnknown": true,
+      "restartRestored": true,
+      "finalPosition": 1,
+      "width": 320,
+      "settlementAsset": "BTC",
+      "quoteAsset": "USDT"
+    },
+    "settling": {
+      "productLine": "INVERSE_DELIVERY",
+      "phase": "SETTLING",
+      "triggerPosts": 0,
+      "directClosePosts": 1,
+      "priorOcoRestored": true,
+      "corePausedQueries": 1,
+      "finalPosition": 0,
+      "width": 320,
+      "settlementAsset": "BTC",
+      "quoteAsset": "USDT"
+    },
+    "marketRebuild": {
+      "productLine": "INVERSE_DELIVERY",
+      "instrumentId": "868",
+      "settlementAsset": "BTC",
+      "tradeCount": 3,
+      "baseVolume": 0.08000040000800016,
+      "quoteVolume": 4000.0,
+      "corePausedReads": true,
+      "typedCandleMapping": true,
+      "coldHigherPeriod": "4h"
+    },
+    "commands": [
+      "DELIVERY_PROTECTION_PRODUCT=INVERSE_DELIVERY DELIVERY_PROTECTION_LIVE_FIXTURE=<owned-fixture> flutter test test/delivery_protection_fused_live_test.dart --concurrency=1 --reporter expanded (TRADING, then SETTLING)",
+      "INVERSE_MARKET_LIVE_ROOT=<owned-root> flutter test test/inverse_delivery_market_live_test.dart --concurrency=1 --reporter expanded"
+    ],
+    "scope": "Host Flutter real HTTP/AppState/widget with test session/settings adapters, not native secure-storage or installed iOS/Android. 320px dark/light widgets; real typed 1m/4h reads pass with Core SIGSTOP."
+  },
+  "financial": {
+    "realMaker": true,
+    "mainRoundTripTrades": 2,
+    "protectionContractTrades": 3,
+    "webTriggers": "3 CANCELED",
+    "nativeOco": "TP TRIGGERED with real market child; SL CANCELED",
+    "settlingNewSingleHttp": 409,
+    "settlingNewOcoHttp": 409,
+    "allAccountsAndTreasuryBeforeMarket": {
+      "productLine": "INVERSE_DELIVERY",
+      "fundedAccounts": 4,
+      "allAccountsAndTreasuryBTC": 4000000000,
+      "fundsDifference": 0,
+      "accounts": [
+        {
+          "userId": 3,
+          "BTC": 999997919,
+          "positions": 0,
+          "reservations": 0,
+          "locked": 0
+        },
+        {
+          "userId": 4,
+          "BTC": 999999279,
+          "positions": 0,
+          "reservations": 0,
+          "locked": 0
+        },
+        {
+          "userId": 5,
+          "BTC": 999995959,
+          "positions": 0,
+          "reservations": 0,
+          "locked": 0
+        },
+        {
+          "userId": 6,
+          "BTC": 999998439,
+          "positions": 0,
+          "reservations": 0,
+          "locked": 0
+        }
+      ]
+    },
+    "allAccountsAndTreasuryAfterMarket": {
+      "productLine": "INVERSE_DELIVERY",
+      "fundedAccounts": 4,
+      "allAccountsAndTreasuryBTC": 4000000000,
+      "fundsDifference": 0,
+      "accounts": [
+        {
+          "userId": 3,
+          "BTC": 999997919,
+          "positions": 0,
+          "reservations": 0,
+          "locked": 0
+        },
+        {
+          "userId": 4,
+          "BTC": 999999279,
+          "positions": 0,
+          "reservations": 0,
+          "locked": 0
+        },
+        {
+          "userId": 5,
+          "BTC": 999995959,
+          "positions": 0,
+          "reservations": 0,
+          "locked": 0
+        },
+        {
+          "userId": 6,
+          "BTC": 999998439,
+          "positions": 0,
+          "reservations": 0,
+          "locked": 0
+        }
+      ]
+    },
+    "beforeAfterExactlyEqual": true,
+    "coreReads": "Typed OPERATIONS queries for reconciliation only. Production receipt, position and candle queries remain on realtime.",
+    "unchangedOriginalRoles": "Core/gateway/price/lifecycle/maker PIDs unchanged throughout financial verification and market repair; only owned realtime intentionally replaced."
+  },
+  "marketRepair": {
+    "originalDefect": {
+      "productLine": "INVERSE_DELIVERY",
+      "instrumentId": "868",
+      "quoteFacePerContract": "1000",
+      "expectedTradeCount": 3,
+      "expectedQuantitySteps": 4,
+      "expectedBaseVolume": "0.080000400008000160003200064001280025600512010240205",
+      "expectedQuoteVolume": "4000",
+      "observedCandleTradeCount": 2,
+      "observedCandleBaseVolume": "0.003",
+      "observedCandleQuoteVolume": "149.999",
+      "trades": [
+        {
+          "tradeId": "INVERSE_DELIVERY:1243648:1483:5564547921133790193:0",
+          "price": "50000.0",
+          "quantitySteps": 1,
+          "observedQuantity": "0.001",
+          "expectedBaseQuantity": "0.02"
+        },
+        {
+          "tradeId": "INVERSE_DELIVERY:580000:773:8083949275322799017:0",
+          "price": "49999",
+          "quantitySteps": 1,
+          "observedQuantity": "0.001",
+          "expectedBaseQuantity": "0.020000400008000160003200064001280025600512010240205"
+        },
+        {
+          "tradeId": "INVERSE_DELIVERY:383776:569:6410941374786322353:0",
+          "price": "50000.0",
+          "quantitySteps": 2,
+          "observedQuantity": "0.002",
+          "expectedBaseQuantity": "0.04"
+        }
+      ]
+    },
+    "coreReadOnlyVerified": true,
+    "rawCommittedSourcePreserved": {
+      "productLine": "INVERSE_DELIVERY",
+      "derivedTopic": "surprising.inverse-delivery.candle.events.v1",
+      "sourceTopic": "surprising.inverse-delivery.match.trades.v1",
+      "sourceOffsetsUnchanged": true,
+      "backupBytes": 97294,
+      "sourceOffsets": "surprising.inverse-delivery.match.trades.v1:0:10"
+    },
+    "finalCandleTradeCount": 3,
+    "finalBaseVolume": "0.08000040000800016",
+    "finalQuoteVolume": "4000",
+    "replayDidNotCreateNewTrades": true,
+    "procedure": "Stopped realtime, backed up and rebuilt two owned derived minute rows. Fresh group alone still reconsumed obsolete derived candle events, proven by real 4h WS 0.023/1149.999. Backed up/reset ONLY owned product candle.events topic, used explicit new application-id and independent derived state, preserved original match-trades offsets exactly (partition0 end10). Clean replay produced matching REST/WS values. No online/production data altered.",
+    "deploymentRequirement": "Old incorrect minutes, derived candle.events and derived Streams state must be rebuilt together under controlled product isolation; see docs/inverse-delivery-market-data.md."
+  },
+  "failuresAndScope": [
+    "Frontend recovery red: Web14 and Flutter13 inverse cases failed before enabling the product. Corrected two source predicates; existing option/linear suites remained passing.",
+    "Market mapper/registry RED: 3 failures among4 cases before fix. Cold SQL query RED: empty list (initial NoSuchElement), then explicit expected size1 actual0; real PostgreSQL rollback testcase passes after fix. Both Web4h and Flutter4h real reads reproduced empty current rollup before query fix.",
+    "Web formatter initially reported two formatting errors in extended tests; fixed and lint/build passed. Existing informational style diagnostics and build chunk advisory remain.",
+    "Additional exported Kafka application-id was not forwarded by the macOS launchctl env list; explicit owned QA YAML binding was required. One healthy immutable-artifact launch was intentionally stopped to correct this setting.",
+    "Two standalone launchctl realtime attempts exited during restart; first logged class-loader shutdown errors despite required classes present. No root-cause fix claimed. Foreground owned JVMs with immutable artifacts ran and passed the repair/HTTP/WS checks. Other original processes, DB and Archive were preserved.",
+    "An extra live WS replay test caught stale derived candle events polluting equal-count rebuilt rollups. Corrected the controlled rebuild procedure instead of weakening dedupe/version guards or resending financial writes. Final strict data-frame/REST/DOM checks passed.",
+    "Historical replay was kept inside the existing dedupe retention. Full older-than-retention rebuild is not claimed.",
+    "No wallet/JFR, no newly executed trades during market repairs. Previous transient Core transport refusal root cause was not changed in this turn."
+  ],
+  "notTested": [
+    "Other product live stacks this turn; shared read aggregation covered unit/topology and real SQL tests, not all-product live completion.",
+    "Native iOS/Android installation or native secure-storage process death.",
+    "Full cross-product stress; full inverse delivery cash settlement/lifecycle previously has its own report, not repeated here.",
+    "Production deployment, production data rebuild, batch conditional cancellation or remaining spot protection parity."
+  ],
+  "codeGraph": "No CodeGraph tools exposed; existing local source inspected with rg/read. No subagents used.",
+  "cleanup": {
+    "state": "complete",
+    "onlyOwnedResources": true,
+    "rootRemoved": true,
+    "databaseDropped": true,
+    "applicationsStopped": true,
+    "dependenciesStopped": true,
+    "viteStopped": true,
+    "reportsRemoved": true,
+    "protectedPids": [
+      1435,
+      6640,
+      56298
+    ],
+    "note": "Manifest paths are historical after cleanup; no raw session/JWT/config/pending files or screenshots committed.",
+    "protectedPidsConfirmed": [
+      1435,
+      6640,
+      56298
+    ],
+    "selectedGeneratedFilesRemoved": [
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.SixProductLineContractLiveTest.xml",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.SixProductLineContractLiveTest.txt",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.aggregation.CandleRollupAccumulatorTest.xml",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.config.CandlestickLiveRollupTopologyTest.xml",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.config.CandlestickRollupTopologyTest.xml",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.repository.CandleQueryPostgresTest.xml",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.repository.CandleQueryRepositoryTest.xml",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.CandleQueryServiceTest.xml",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.PublicTradeEventMapperTest.xml",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.RecentTradeQueryServiceTest.xml",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest.xml",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.aggregation.CandleRollupAccumulatorTest.txt",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.config.CandlestickLiveRollupTopologyTest.txt",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.config.CandlestickRollupTopologyTest.txt",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.repository.CandleQueryPostgresTest.txt",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.repository.CandleQueryRepositoryTest.txt",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.CandleQueryServiceTest.txt",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.PublicTradeEventMapperTest.txt",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.RecentTradeQueryServiceTest.txt",
+      "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest.txt",
+      "/tmp/surprising-inverse-protection-cold-query-green.log",
+      "/tmp/surprising-inverse-protection-cold-query-red-final.log",
+      "/tmp/surprising-inverse-protection-cold-query-red.log",
+      "/tmp/surprising-inverse-protection-dart-format.log",
+      "/tmp/surprising-inverse-protection-flutter-analyze-final-market.log",
+      "/tmp/surprising-inverse-protection-flutter-analyze-final.log",
+      "/tmp/surprising-inverse-protection-flutter-analyze-market.log",
+      "/tmp/surprising-inverse-protection-flutter-analyze-ship.log",
+      "/tmp/surprising-inverse-protection-flutter-analyze.log",
+      "/tmp/surprising-inverse-protection-flutter-full-final.log",
+      "/tmp/surprising-inverse-protection-flutter-full.log",
+      "/tmp/surprising-inverse-protection-flutter-green.log",
+      "/tmp/surprising-inverse-protection-flutter-red.log",
+      "/tmp/surprising-inverse-protection-live-dart-format-final.log",
+      "/tmp/surprising-inverse-protection-live-dart-format.log",
+      "/tmp/surprising-inverse-protection-market-dart-format.log",
+      "/tmp/surprising-inverse-protection-market-dart-format2.log",
+      "/tmp/surprising-inverse-protection-market-green.log",
+      "/tmp/surprising-inverse-protection-market-red.log",
+      "/tmp/surprising-inverse-protection-web-build.log",
+      "/tmp/surprising-inverse-protection-web-format.log",
+      "/tmp/surprising-inverse-protection-web-full.log",
+      "/tmp/surprising-inverse-protection-web-green.log",
+      "/tmp/surprising-inverse-protection-web-lint-final.log",
+      "/tmp/surprising-inverse-protection-web-lint.log",
+      "/tmp/surprising-inverse-protection-web-red.log",
+      "/tmp/surprising-inverse-protection-current.json",
+      "/tmp/surprising-inverse-protection-bootstrap.py"
+    ],
+    "extraOwnedAeronDriverRemoved": {
+      "historicalPath": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-aeron-4851170967707210873",
+      "cncOwnerPid": 53038,
+      "verifiedPidOffsetFromPackagedClass": 40,
+      "noOpenFiles": true
+    },
+    "embeddedKafkaDirectoryAlreadyRemovedByTest": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/kafka-8342496254939047913",
+    "noOtherProjectProcessStopped": true
+  },
+  "manifest": [
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.SixProductLineContractLiveTest.xml",
+      "bytes": 46140,
+      "sha256": "4756165c69c7c7db5e1d88b163caecdd16d90b39cf7569106c48a5c36793aa5b"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.SixProductLineContractLiveTest.txt",
+      "bytes": 386,
+      "sha256": "4aed3e0af425d3ee51124719276c062f55607acc120d9a0a87ac8be07878a551"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.aggregation.CandleRollupAccumulatorTest.xml",
+      "bytes": 52353,
+      "sha256": "ed25bb0a7fa43a588b65ed9f2dfb301cbdb434e9c6dab5b0b73cc0b3b00482b8"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.config.CandlestickLiveRollupTopologyTest.xml",
+      "bytes": 87575,
+      "sha256": "3b27bea0568cc02473c5522c87673c7b6ec58ac9fe4ec7216bcb9ba1799b423c"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.config.CandlestickRollupTopologyTest.xml",
+      "bytes": 105017,
+      "sha256": "25240e83d762ac68758f1a064c7dcaab3e0014f21a113b8aaacc102ad3906da1"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.repository.CandleQueryPostgresTest.xml",
+      "bytes": 52620,
+      "sha256": "a9ab167cc3322c81f63e47ecce6f0755b2eee1a1aee94148f80be16f3ddba1e5"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.repository.CandleQueryRepositoryTest.xml",
+      "bytes": 52891,
+      "sha256": "00120459ea6a5abfdf58d3192f2ad14e9227eac83e39fcc0b961c623c2a5a76d"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.CandleQueryServiceTest.xml",
+      "bytes": 52540,
+      "sha256": "beaab70363163d10ab73aee27505e9c36402cfe47cdf2f54da69a5daf5f96678"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.PublicTradeEventMapperTest.xml",
+      "bytes": 52893,
+      "sha256": "5d8bebbc45fc4402bee49666552528134300e18a00a76f09c155654de8f42ca2"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.RecentTradeQueryServiceTest.xml",
+      "bytes": 53921,
+      "sha256": "c4f32b768f705d44dd3b37a8ed7a5b1d6a30f2d90360b057d09741bf9e316d5a"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest.xml",
+      "bytes": 713125,
+      "sha256": "e73e3ac93108174906701902c35bf8e2e1e6d286fdfac4fdc4487240df389857"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.aggregation.CandleRollupAccumulatorTest.txt",
+      "bytes": 400,
+      "sha256": "348f99ad12b6b8f2479abb219d0079cac5df8f70b9c33c521e70d1e48f707c03"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.config.CandlestickLiveRollupTopologyTest.txt",
+      "bytes": 402,
+      "sha256": "b3220c293643bf262178ffc00e3052dc4cf81463e4012099d0452d3f58b2c87c"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.config.CandlestickRollupTopologyTest.txt",
+      "bytes": 394,
+      "sha256": "76d0e55e87ebe577b7ca371f762a17e990699dc8dc480d78fd39a790ad481d39"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.repository.CandleQueryPostgresTest.txt",
+      "bytes": 390,
+      "sha256": "599eabef9d44723005ccc4262cbeac4e275aead8cb3a6edb13ec69b3eb4c8c69"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.repository.CandleQueryRepositoryTest.txt",
+      "bytes": 394,
+      "sha256": "8070d04b6e812e80fe45fa3fe5bb5543aedc34057795c3cffd5901672c63ba49"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.CandleQueryServiceTest.txt",
+      "bytes": 382,
+      "sha256": "972778437d73c2f2f3a410a4a6988ff791e0ae7314d70ac84e85809f167d257d"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.PublicTradeEventMapperTest.txt",
+      "bytes": 390,
+      "sha256": "89ff9eb54a494e2343c8be0c0f2db3172fcba24769238c22410f8f137c9d584f"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.RecentTradeQueryServiceTest.txt",
+      "bytes": 392,
+      "sha256": "78df8122a64cdd45e77213b06855dea2bc1fd1d9215375a922179701b29d6b96"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest.txt",
+      "bytes": 400,
+      "sha256": "d60f4d0cfc3429bb9d143f7b6bf124ce98c4197e4965bd225f329920688c55b2"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/all-qa-funds-after-market.json",
+      "bytes": 409,
+      "sha256": "5aa70b9ec03e68e3b6f6e4469a4e933e4b3728ebbe34b0dcdd288164e1e52871"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/all-qa-funds-after-market.log",
+      "bytes": 112,
+      "sha256": "d4a0b113ae1ba11aed1f7a91fc384500ba9a7237bf2fcb5a51f780b7d09a3533"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/all-qa-funds-final.json",
+      "bytes": 409,
+      "sha256": "5aa70b9ec03e68e3b6f6e4469a4e933e4b3728ebbe34b0dcdd288164e1e52871"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/all-qa-funds-final.log",
+      "bytes": 112,
+      "sha256": "d4a0b113ae1ba11aed1f7a91fc384500ba9a7237bf2fcb5a51f780b7d09a3533"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/candle-view-before-rebuild.jsonl",
+      "bytes": 1270,
+      "sha256": "9d5ce3584664ae3934d25b0fccbde8d80b02d677baaaa0766465b47c1cc2402a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/client-settling-live.log",
+      "bytes": 370,
+      "sha256": "498349db30e545dd3c649be1179f53d41dd5415a2cdc1c0527db52e208f314d4"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/client-trading-live.log",
+      "bytes": 375,
+      "sha256": "e63242188d77c46f56bb33dc2e3f369a668d8dc83e7bf3db2d787245fbedcb8c"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/command-counts-final.txt",
+      "bytes": 601,
+      "sha256": "49cbad7e474f3edf5d7b4cf211bc0aaae810176a9c764f9b1b64997f4d2bb46c"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/database-init.log",
+      "bytes": 13446,
+      "sha256": "68d014e7c3e8c89c0f1e9f68916329e7f67055893c97c07fefd1070d27000c94"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/delivery-protection-client-evidence.json",
+      "bytes": 235,
+      "sha256": "d9dc6f68dd925b441b122ce243f3ad74d39381a57e4cf757e1d2b524f78709d2"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/delivery-protection-client-settling-evidence.json",
+      "bytes": 211,
+      "sha256": "d488c5a006a02474380a655ea5fcbe625b5320468ca70463483d1f476f2c462e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/delivery-protection-web-desktop-viewport.png",
+      "bytes": 177932,
+      "sha256": "de035deccb4b23991ebed7dda5e6549110327722210e02c452418bd0be7e98ad"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/delivery-protection-web-desktop.png",
+      "bytes": 55426,
+      "sha256": "f240af34d0c2277c89d93dde0fe700fbc8b991f19bb988d60880fa59fbf842a3"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/delivery-protection-web-evidence.json",
+      "bytes": 447,
+      "sha256": "1a798e85d409f02a072c434321b22f07582dd97fa2159a90199096e59f0f46c0"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/delivery-protection-web-mobile-viewport.png",
+      "bytes": 157753,
+      "sha256": "6f198e25308568c9689b9d3a43b5208dd6ac20aca8d72da359e6ada5753ebdcc"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/delivery-protection-web-mobile.png",
+      "bytes": 59871,
+      "sha256": "0a4c43feb40e9bbe00711d1f889ab15996d166e057bb78e4c8389ce3282abb3b"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/delivery-protection-web-settling-evidence.json",
+      "bytes": 263,
+      "sha256": "ced210f270d7acb62a71d3125965c42c8b2bc0c12e667db24a1a3f2eec872789"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/delivery-protection-web-settling.png",
+      "bytes": 73212,
+      "sha256": "1447de1fde0f69ab3632a7c89b74ef8f1babce9236d26ef11d38f1603c45d8b5"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/dependencies-stopped.json",
+      "bytes": 60,
+      "sha256": "28a69a9dec631399bd55bc9c9b80eda60382873a032867adec527ecd8a001653"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/derived-candles-backup.log",
+      "bytes": 577,
+      "sha256": "7a68080ab9b44cbe111cdd0f0915787d8481ed4402e780a468d7952a6b22830a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/derived-candles-before-reset.txt",
+      "bytes": 97294,
+      "sha256": "64c7d2d07bdd3dbc0800bb95174cd553d15b90a7ce29feebc2948672e80e30ba"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/derived-reset-evidence.json",
+      "bytes": 298,
+      "sha256": "2d66add2a56c24663260e9cde96ebf3350c21237c1c064483c4adc999e90c827"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/derived-topic-reset.log",
+      "bytes": 579,
+      "sha256": "2562df64e0424a8c464f8a90f45595438b575487bf61fd21caa457161d8adbe1"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/final-runtime-evidence.json",
+      "bytes": 979,
+      "sha256": "6797bfa3c6c2c192b751dad751f426f6c0041d2f109b75d3d13b38e00a04bf8a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/kafka-format.log",
+      "bytes": 990,
+      "sha256": "1cc8bdf22369e3501faf7ab19af239604b18b6b94fdb3d80766a13668803ee76"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/kafka.log",
+      "bytes": 555071,
+      "sha256": "a5100cf12c2315f94582ebc3265df2658097ce2ebcc806741fdaa0340fbd241d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/live-maven.log",
+      "bytes": 30986,
+      "sha256": "f70ac728ff34f49d62944b304f6b324a155520fb98b67d5dfd0d7fa7b8ce6ca1"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-clean-client-final.log",
+      "bytes": 229,
+      "sha256": "9030ad53ab38fe95061685b1f3e2a87121115d7322b2cabffa6bebef9a1d7a49"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-clean-web-events.log",
+      "bytes": 95,
+      "sha256": "1e89de1150fa08eb15670870d7a4d7412d67900723d2987603a24ba0da91b353"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-cold-4h-corrected.json",
+      "bytes": 629,
+      "sha256": "2514208cd9294e83acaa2719aceffd59032aecc82d96669e11501573816fd2d3"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-expected.json",
+      "bytes": 1071,
+      "sha256": "ee2fe3d482cd7e55648da19e8cbaafb0b49db6446676e3ff30d3ebeaf8ee7d81"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-fix-install.json",
+      "bytes": 418,
+      "sha256": "b3e6156da12c3dd7ab2c988c511b29451a32e278279d96d6a3bb03bec98814d7"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-candles.json",
+      "bytes": 61,
+      "sha256": "f81b965d63efd2015ab9ff1f66a6a1a80bafa0b1824c79f800988897d98330a7"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-client-cold-red.log",
+      "bytes": 844,
+      "sha256": "245066ecda56524357aee1b174cd3a11aa1426e78a1825f702d772a513234d75"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-client-evidence.json",
+      "bytes": 221,
+      "sha256": "e5cfd4e6965d552218ac29bb51aaa9ed8ab9750f9b71f85ea8e51737b1591a8a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-client-final.log",
+      "bytes": 229,
+      "sha256": "9030ad53ab38fe95061685b1f3e2a87121115d7322b2cabffa6bebef9a1d7a49"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-client-live.log",
+      "bytes": 229,
+      "sha256": "9030ad53ab38fe95061685b1f3e2a87121115d7322b2cabffa6bebef9a1d7a49"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-trades.json",
+      "bytes": 623,
+      "sha256": "89401408c4ae1cbaf90c1b1c70e761c4ebb07fcb4b5515c950d673766921c26d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-web-1440-dark-chart.png",
+      "bytes": 24849,
+      "sha256": "1f945b12ac07a3dfc8522b28f6b4ef319f420e1a631e25562b7e8123a2712f2d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-web-1440-dark.png",
+      "bytes": 156130,
+      "sha256": "1f2527c06f1c09e155e33e0315838b9de73a7ad0ca3e52f6596d34cd0d1a6bf9"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-web-320-dark-chart.png",
+      "bytes": 17863,
+      "sha256": "ae4f24a987e2201ea6ae7fa7ed385d20547fab52ae6928ac2aa5003f2d6345aa"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-web-320-dark.png",
+      "bytes": 118986,
+      "sha256": "1d173db65cc5e4967946a38e25d50af1efbb5de90d5e022c47e61dfe3aad6c06"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-web-320-light-chart.png",
+      "bytes": 17708,
+      "sha256": "a8d23267af91af8bd5e140889db7437f30070b55a4c7ed5d47b300185a590be5"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-web-candle-frames.json",
+      "bytes": 5587,
+      "sha256": "4bd1660b5a07c7716e9a9723d78e092be037f4d3061b9c68481a6adda5362d54"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-web-events.log",
+      "bytes": 469,
+      "sha256": "f6107584f054056839a26b9b631bfc616b5beb1ab4ba89d38b15e8fd2db5bcc8"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-web-evidence.json",
+      "bytes": 544,
+      "sha256": "7231e51b64773f413ebc4af1a26b24cac47dd2ac83cb8e3962584855ec9a747e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-web-failure.png",
+      "bytes": 118007,
+      "sha256": "3895865e6e2149a7d0afcefbb6a3af50ce711b607663fae9e5e23bb7ea80b2d1"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-web-failure.txt",
+      "bytes": 1316,
+      "sha256": "2aca5b6d1290bbd65e5bfb8bef749be7e488e65c465125af89fb69d06c55e24e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-web-final.log",
+      "bytes": 95,
+      "sha256": "e14720aa6d4b8eaf929226bc815271651a9ae81b9d849f71c544df920a72684f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-replay-web-live.log",
+      "bytes": 281,
+      "sha256": "5a407e0f28e49e5f16f631c1e96bb8a0d1db2251f3a9b2e8da8b162ab7c4f3bc"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/market-tail-install.json",
+      "bytes": 310,
+      "sha256": "9dcd002f23f7ad8ab1e7920d4f9b9a9dd6b64f8851e74c201625795475e04b75"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/mixed-derived-market-replay-web-events.log",
+      "bytes": 469,
+      "sha256": "f6107584f054056839a26b9b631bfc616b5beb1ab4ba89d38b15e8fd2db5bcc8"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/mixed-derived-market-replay-web-failure.png",
+      "bytes": 118007,
+      "sha256": "3895865e6e2149a7d0afcefbb6a3af50ce711b607663fae9e5e23bb7ea80b2d1"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/mixed-derived-market-replay-web-failure.txt",
+      "bytes": 1316,
+      "sha256": "2aca5b6d1290bbd65e5bfb8bef749be7e488e65c465125af89fb69d06c55e24e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/observed-volume-candles.json",
+      "bytes": 3224,
+      "sha256": "948cbdace4f897d62eba4b4b38df6cd616ac971539b40357a678c991ac0c903f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/observed-volume-instrument.json",
+      "bytes": 3371,
+      "sha256": "60ed98172729135ac228b7128c8a37d3f45d8aeea05e1bf8c688884349486526"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/observed-volume-trades.json",
+      "bytes": 847,
+      "sha256": "d07cad34e08beca2f07f38ae3e3c9593e3a3cfc9f409db846d22c4dd1113fbd4"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-clean-context.log",
+      "bytes": 468,
+      "sha256": "5c3a7ba8846ce4c692b507b52a25d26277b01adbf979faa6af7305e29b488828"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-clean-foreground.log",
+      "bytes": 1811,
+      "sha256": "dd46751bfa63fe3d6fad6cf5e33f295011a36c44a16708fa110dd3fedfcad784"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-events-context.log",
+      "bytes": 468,
+      "sha256": "5c3a7ba8846ce4c692b507b52a25d26277b01adbf979faa6af7305e29b488828"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-events-foreground.log",
+      "bytes": 3199,
+      "sha256": "bb44df46fda15d462f3604d5380d39f8a6dfa1748a43237e54cefc04de40442a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-first-replay-start-failure.log",
+      "bytes": 9198,
+      "sha256": "a99ed3e62d0bd839d71c85298ee9ed3663fa3a25b2a7d4bd9997384251c09d9d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-foreground-context.log",
+      "bytes": 468,
+      "sha256": "5c3a7ba8846ce4c692b507b52a25d26277b01adbf979faa6af7305e29b488828"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-foreground.log",
+      "bytes": 2422,
+      "sha256": "ab04dfe454879557152f8d1d1fbcceea8bfac294bfec71cb3667bbf058a8eb7d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-replay-launch-context-configured.log",
+      "bytes": 468,
+      "sha256": "5c3a7ba8846ce4c692b507b52a25d26277b01adbf979faa6af7305e29b488828"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-replay-launch-context-final.log",
+      "bytes": 468,
+      "sha256": "5c3a7ba8846ce4c692b507b52a25d26277b01adbf979faa6af7305e29b488828"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-replay-launch-context.log",
+      "bytes": 468,
+      "sha256": "5c3a7ba8846ce4c692b507b52a25d26277b01adbf979faa6af7305e29b488828"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-replay-start-configured.log",
+      "bytes": 155,
+      "sha256": "a2ed098fb7207fbead77bdbffe3b0ac8cdaef87db6c0d2e787c8b7fbed40094f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-replay-start-final.log",
+      "bytes": 15,
+      "sha256": "976b065300170d6fe32fd99912deb36033743c36d93572f78c9e3083fae26911"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-replay-start.log",
+      "bytes": 155,
+      "sha256": "a2ed098fb7207fbead77bdbffe3b0ac8cdaef87db6c0d2e787c8b7fbed40094f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-tail-context.log",
+      "bytes": 468,
+      "sha256": "5c3a7ba8846ce4c692b507b52a25d26277b01adbf979faa6af7305e29b488828"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/realtime-tail-foreground.log",
+      "bytes": 2424,
+      "sha256": "9b74faaea5bdd62d7e2cbb8ad997ff6dba9130dd088998cb54bd3767705dc485"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/redis.log",
+      "bytes": 1005,
+      "sha256": "78b89f1eeff10a7d664cd7a6ee8b7ca389a5520f7c9e71827574de7fd2015417"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/core-node0-gc.log",
+      "bytes": 55198,
+      "sha256": "18a7cd0c6aff24877593e4bd55ba7101850c86399debac61ce7bfa3fc925e590"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/core-node0.app.log",
+      "bytes": 1518,
+      "sha256": "8d57bd56103d3ac7d0d5d49b387db493c6f021beda5e35dbe85af26987a58568"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/core-node0.log",
+      "bytes": 295,
+      "sha256": "10c7d78afacf9b44cc07813e510d7e4247536c8857f6a49461aa30097d9da022"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/core-probe-gc.log",
+      "bytes": 3164,
+      "sha256": "3eb57e641bc1f0b3dd4500bdcfe39523b5a3192c5c3342c614950337f27c8e51"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/core-probe.log",
+      "bytes": 106,
+      "sha256": "d00c6b7469803fd2f2cfea3872fbd4d3c35678bb8a7328c30e745a3bd76bcb97"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/derivatives-lifecycle-gc.log",
+      "bytes": 2014627,
+      "sha256": "ec725cd0732ba4f8ca2deacde2931cb74102e64c50f4f199433200ba949aaad3"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/derivatives-lifecycle.app.log",
+      "bytes": 7310233,
+      "sha256": "ff3fc92de570c851058827e69a97449fd00a6fec10cabf0f0b177edffcb2a8f0"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/derivatives-lifecycle.log",
+      "bytes": 5031,
+      "sha256": "45c4a40a9bd0f7dcee0f1206ca04d477cef942d670c4ff217ab2893db254c55f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/gateway-gc.log",
+      "bytes": 219024,
+      "sha256": "21cb871afc4d2badf97eedb0c7ad03b57bd1bf7e7c1b9e4bd75ea5e5d710e8ce"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/gateway.app.log",
+      "bytes": 1398142,
+      "sha256": "a5285461794ecc2425b0ad7f8fa188d8345e817eb9a86a8fc14ccd89b25b6603"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/gateway.log",
+      "bytes": 4594,
+      "sha256": "a04bcf4c284591618a04b913e92968fac91bc4a542f04776710d6f92b56cb63b"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/maker-gc.log",
+      "bytes": 138854,
+      "sha256": "25f148dbc96706859a83bea29c25b164493e037cc69265acf376bb175fc36222"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/maker.app.log",
+      "bytes": 7525820,
+      "sha256": "24483e7722fb553437adbcf6714174bbc7e06b9ec8efecc8c096c05d68b082c6"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/maker.log",
+      "bytes": 220689,
+      "sha256": "efc86a602b7b3a77b0af8ecfec59aa92a12bbf57afb34c93008640ce05b83e8b"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/price-gc.log",
+      "bytes": 184441,
+      "sha256": "a0d00a2c3dacec0bc3897e24e2e138848b1f294a0721a647dad58182c9d59f0b"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/price.app.log",
+      "bytes": 5778467,
+      "sha256": "a070e76e242ef1c535a9acfa3094a3487bb58833d11940036ea955cb8fefa4ee"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/price.log",
+      "bytes": 6416,
+      "sha256": "79e65293d85fdb14972062cf106cf1d06a0473bf669c6c6983363baa88c41208"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/realtime-gc.log",
+      "bytes": 131531,
+      "sha256": "7059249fab3d346b9ffdb5636eaa27ef3a644229451da35a2ba67391fa7e1c4f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/realtime.app.log",
+      "bytes": 5906052,
+      "sha256": "54e1aefeaa9af6fa989c79d995233dd2f0f928b70050d3e0d830742c7e299661"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/runtime/inverse-protection-20261020-065238/logs/realtime.log",
+      "bytes": 13363,
+      "sha256": "2767c587736717853bc0412a494143f252b2689d83805bc1fcb40bb6b9c4f2f2"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/source-offsets-after-derived-reset.txt",
+      "bytes": 49,
+      "sha256": "283d90c388ac94bd75d96ac7838cdc015c033148c1d0ceb0fef906043ba8959b"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/source-offsets-before-derived-reset.txt",
+      "bytes": 49,
+      "sha256": "283d90c388ac94bd75d96ac7838cdc015c033148c1d0ceb0fef906043ba8959b"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/stack-down.log",
+      "bytes": 99,
+      "sha256": "cc194c06faaa4d1f9f80f37862d9a60d395b2cc9ee2735d3717d8ff10dde18f2"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/start.log",
+      "bytes": 295,
+      "sha256": "2dbc8c4b486b96f4cc5c8b910ca497e5931ba9c7415e2c3662eef8e6eb356191"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/ticker.log",
+      "bytes": 49,
+      "sha256": "4a908625a27b01464a6c575092134155e99d5fa9adb0789f961cb0094aedc1ef"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/topics-before-derived-rebuild.txt",
+      "bytes": 2465,
+      "sha256": "06b22e3fb0bda85721ce693c258144339a40a33e93cc18d59edfeabea6ceb999"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/web-settling-live.log",
+      "bytes": 142,
+      "sha256": "93e38005b88860e57d1b001c4d52f8ea225b810e0f7907b26fc6f3ee2a3b3968"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/web-trading-live.log",
+      "bytes": 144,
+      "sha256": "f1d8276e88029e837851624a898a9d739903825fdbaf26eab7157afb27717f7f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/web-vite.log",
+      "bytes": 168,
+      "sha256": "c2e6d0504c3cc74bfa778cb683bc5c8db8d0e23fbd9fd5f06db060c0b4e20ee8"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-cold-query-green.log",
+      "bytes": 35511,
+      "sha256": "3258f81be7e62056cc4464cd96fb980739fe5dfda8564b38f4a56ac2cc03311e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-cold-query-red-final.log",
+      "bytes": 25355,
+      "sha256": "ddfb7315e6c00eb2f718d39ce7c612513a17ea04c49019584e8f4ea351fb88ef"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-cold-query-red.log",
+      "bytes": 25331,
+      "sha256": "632951b61f76d8ebfc85bd8aa202463c15ff27044adb67ae8860ef06f03c6a31"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-dart-format.log",
+      "bytes": 98,
+      "sha256": "8abd630f1c3b255a89099dbe52fd5432232fee6aeefde7c918a3b8ee53ef63cf"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-flutter-analyze-final-market.log",
+      "bytes": 96,
+      "sha256": "066eedefd4ea77c3f644a379c99da4a1212897538c799f3d23935c4082058fdf"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-flutter-analyze-final.log",
+      "bytes": 96,
+      "sha256": "60dd6ddecda89ee710ad18924e7d6ba084f2b56150c2a08d361375219e3944d6"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-flutter-analyze-market.log",
+      "bytes": 96,
+      "sha256": "849a9040e8f2621cf17c66f27fa3d21deabee0d558329bf928aafd56049e034e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-flutter-analyze-ship.log",
+      "bytes": 96,
+      "sha256": "a0cbe60f7552571be1ceee5c1e15ef72ff675de008da56d6bd0d8d17832da652"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-flutter-analyze.log",
+      "bytes": 96,
+      "sha256": "b44b0781dc75d5f360b9138e8738ea79131647e45f07addfe96ae4e23753b444"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-flutter-full-final.log",
+      "bytes": 60432,
+      "sha256": "1be96c08fd291dd6ab5404ffa5eea38f8e1aa13012cbc88f7d9fc7188e5a8e78"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-flutter-full.log",
+      "bytes": 60537,
+      "sha256": "893db60478a1c9d72e4a8ecfd64271bd97ab18c555edbe3bf1304a004e5d3872"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-flutter-green.log",
+      "bytes": 3653,
+      "sha256": "cb6e923dbf1b3636114d7c4097cbd1305f88b523479b6683b1fa91628fa30ddc"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-flutter-red.log",
+      "bytes": 15848,
+      "sha256": "adaf0848ddb875375015b5b28aff768d9b8c45601bae0e59d72d85fde7f8a0bf"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-live-dart-format-final.log",
+      "bytes": 102,
+      "sha256": "5d6c6bad8940e12b4cdac42b3ae979686c79cde044ccc2a4511f028eca33d0aa"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-live-dart-format.log",
+      "bytes": 103,
+      "sha256": "3839b0dc3ca1462105586a176e34435dec4c9fa497f4879a81863bb93591730c"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-market-dart-format.log",
+      "bytes": 100,
+      "sha256": "ac0636b4a90fc827f3c7c4b7e85a99f369154fadede8d2f48d6912680b42f915"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-market-dart-format2.log",
+      "bytes": 100,
+      "sha256": "ac0636b4a90fc827f3c7c4b7e85a99f369154fadede8d2f48d6912680b42f915"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-market-green.log",
+      "bytes": 781251,
+      "sha256": "61946a9156571b0b7ca80f99fa0a2e0b13175bd611e2e64b52ab9ccb8582ffa6"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-market-red.log",
+      "bytes": 26862,
+      "sha256": "e9b61f5e1c504e858c36f8387f37a04c9020c332385f26323c7e6e07f76645f7"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-web-build.log",
+      "bytes": 3274,
+      "sha256": "645c8263ee24ee13db1d6ed20653aef15f2a095aeac67e10ce34d9a20b3bd063"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-web-format.log",
+      "bytes": 42,
+      "sha256": "248247598d85adcfafe85495cf9010b7d72795b97998c56c9ec9c69b3373122e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-web-full.log",
+      "bytes": 852,
+      "sha256": "14464e9d6d325fb336c3afdf97c4689c4f749c68bd9befc41411f71397c471b1"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-web-green.log",
+      "bytes": 438,
+      "sha256": "233d86258d505b8f49ab63081f4afb46651491d0fa7722d17bead2b484bb678b"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-web-lint-final.log",
+      "bytes": 19292,
+      "sha256": "1a5de4b7a2431f116826d78bd29812afff082f23f9c2cdc330f5f4cfdd268144"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-web-lint.log",
+      "bytes": 35224,
+      "sha256": "eea60593acbfc11799e51a0628e0bbe94484812dddf3b2f3c527c5dca7bd3d3e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-protection-web-red.log",
+      "bytes": 15945,
+      "sha256": "50d24fedfa35ef5698c503160d99d217623851230040075280f50854058962ae"
+    },
+    {
+      "historicalPath": "/tmp/surprising-inverse-delivery-fused-20261020-065238/cnc-owner-check.log",
+      "bytes": 44,
+      "sha256": "05b8083cb01a35a17840ef3c97b71e3ce7f53e27dd210a3c578df9a6c6ef3970"
+    }
+  ]
+}

@@ -285,3 +285,7 @@ Web 同步保存 OPTION OCO 原身份并复用结果确认入口。TP/SL 票据�
 期权独立条件单与单笔撤销的原请求查询沿用 realtime 已提交回执，不查询在线 Core；两端持久恢复与配套发布见 [条件单原请求恢复](docs/trigger-command-recovery.md)。本轮不新增 SQL。
 
 U 本位交割的独立条件单/OCO 恢复与 SETTLING 直接减仓边界，参见 [条件单原请求恢复](docs/trigger-command-recovery.md)；实栈用例在同一仓位上交接交易与结算两个阶段。
+
+
+币本位交割的条件单/OCO 持久恢复复用既有 realtime 回执入口；BTC 资金、报价币触发价和 SETTLING 直接减仓分别验证。
+realtime 同步修正币本位交割基础币成交量、结算/关闭后真实成交接收，以及冷启动时当前大周期查询；Core 撮合与资金模型不变。见 [条件单原请求恢复](docs/trigger-command-recovery.md)、[行情口径与投影重建](docs/inverse-delivery-market-data.md) 及 [验证记录](docs/validation/inverse-delivery-protection-20261020.json)。

@@ -51,7 +51,10 @@ public class SymbolRegistryService extends AbstractInstrumentSnapshotInitializer
         enabledSymbols = snapshotCache.current(productLine).stream()
                 .filter(instrument -> instrument.status() == InstrumentStatus.PRE_TRADING
                         || instrument.status() == InstrumentStatus.TRADING
-                        || instrument.status() == InstrumentStatus.HALT)
+                        || instrument.status() == InstrumentStatus.HALT
+                        // Settling reductions and closed-contract replay are committed trades.
+                        || instrument.status() == InstrumentStatus.SETTLING
+                        || instrument.status() == InstrumentStatus.CLOSED)
                 .map(instrument -> Integer.toString(instrument.instrumentId()))
                 .map(CandleKey::normalizeSymbol)
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());

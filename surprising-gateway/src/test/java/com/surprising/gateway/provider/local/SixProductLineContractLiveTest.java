@@ -291,7 +291,7 @@ class SixProductLineContractLiveTest {
         long initialFunds = line == ProductLine.INVERSE_DELIVERY ? 1_000_000_000L : 10_000_000_000_000L;
         fund(user, settlementAsset, initialFunds); fund(maker, settlementAsset, initialFunds);
         boolean protection = "true".equals(System.getenv("SIX_LINE_LIVE_DELIVERY_PROTECTION"));
-        if (protection) assertThat(line).isEqualTo(ProductLine.LINEAR_DELIVERY);
+        if (protection) assertThat(line).isIn(ProductLine.LINEAR_DELIVERY, ProductLine.INVERSE_DELIVERY);
         String strategy = "qa-delivery-protection-" + run;
         boolean strategyCreated = false;
         try (var core = SurprisingAeronClient.connect(line, List.of("127.0.0.1"), "127.0.0.1", Duration.ofSeconds(10))) {
@@ -335,7 +335,7 @@ class SixProductLineContractLiveTest {
                 assertThat(userState(core, user.id).positions()).anyMatch(pos -> pos.signedQuantitySteps() == 1);
                 assertThat(userState(core, maker.id).positions()).anyMatch(pos -> pos.signedQuantitySteps() == -1);
                 write("market-maker", "/strategies/" + strategy + "/pause?productLine=" + line, null, 200);
-                System.out.println("LINEAR_DELIVERY_PROTECTION_CORE_PASS webCanceled=3 clientTriggered=1 siblingCanceled=1 remainingPosition=1");
+                System.out.println(line + "_PROTECTION_CORE_PASS webCanceled=3 clientTriggered=1 siblingCanceled=1 remainingPosition=1");
             }
             var settling = changeStatus(id, trading, "SETTLING", 200);
             awaitSync(id, settling.path("lastChangeId").asLong());
@@ -355,7 +355,7 @@ class SixProductLineContractLiveTest {
                 }
                 request("POST", "/api/v1/gateway/trading-trigger", json.writeValueAsString(legs.getFirst()), user.token, null, 409);
                 request("POST", "/api/v1/gateway/trading-trigger/batch", json.writeValueAsString(Map.of("atomic", true, "orders", legs)), user.token, null, 409);
-                System.out.println("LINEAR_DELIVERY_SETTLING_TRIGGER_REJECT_PASS single=409 oco=409 directReductionStillAllowed=true");
+                System.out.println(line + "_SETTLING_TRIGGER_REJECT_PASS single=409 oco=409 directReductionStillAllowed=true");
             }
             long leverageDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
             JsonNode leverage;
@@ -394,7 +394,7 @@ class SixProductLineContractLiveTest {
                 for (var trade : recent.path("trades")) ids.add(trade.path("tradeId").asString());
                 assertThat(ids).containsExactlyInAnyOrderElementsOf(user.trades.keySet());
                 assertThat(ids).hasSize(3);
-                System.out.println("LINEAR_DELIVERY_PROTECTION_REALTIME_PASS trades=3 wsRestIdentitiesMatch=true positions=0 reservations=0 locked=0 fundsDifference=0");
+                System.out.println(line + "_PROTECTION_REALTIME_PASS trades=3 wsRestIdentitiesMatch=true positions=0 reservations=0 locked=0 fundsDifference=0");
             }
             System.out.printf("%s_CLIENTS_PASS instrumentId=%d trader=%d maker=%d status=SETTLING positions=0 locked=0 fundsDifference=0%n", line, id, user.id, maker.id);
         } finally {

@@ -94,14 +94,14 @@ public class CandleQueryRepository {
                 "AND open_time >= ? AND open_time < ? ORDER BY open_time ASC LIMIT ?");
         return jdbcTemplate.query(sql, CANDLE_ROW_MAPPER, bucketSeconds, bucketSeconds, instrumentId,
                 java.sql.Timestamp.from(inputStart), java.sql.Timestamp.from(inputEnd), period.code(),
-                bucketSeconds, java.sql.Timestamp.from(startTime), java.sql.Timestamp.from(endTime), limit);
+                bucketSeconds, bucketSeconds, java.sql.Timestamp.from(startTime), java.sql.Timestamp.from(endTime), limit);
     }
 
     private Optional<CandleResponse> findLatestRollup(String instrumentId, CandlePeriod period) {
         long bucketSeconds = period.duration().toSeconds();
         String sql = rollupSql("", "ORDER BY open_time DESC LIMIT 1");
         List<CandleResponse> rows = jdbcTemplate.query(sql, CANDLE_ROW_MAPPER,
-                bucketSeconds, bucketSeconds, instrumentId, period.code(), bucketSeconds);
+                bucketSeconds, bucketSeconds, instrumentId, period.code(), bucketSeconds, bucketSeconds);
         return rows.stream().findFirst();
     }
 
@@ -134,14 +134,15 @@ public class CandleQueryRepository {
                                FILTER (WHERE first_sequence IS NOT NULL))[1] AS first_sequence,
                            (array_agg(last_sequence ORDER BY open_time DESC)
                                FILTER (WHERE last_sequence IS NOT NULL))[1] AS last_sequence,
-                           'CLOSED' AS status,
+                           CASE WHEN bucket_open + (? * interval '1 second') <= CURRENT_TIMESTAMP
+                                THEN 'CLOSED' ELSE 'PARTIAL' END AS status,
                            max(updated_at) AS updated_at
                       FROM bucketed
                      GROUP BY instrument_id, bucket_open
                 )
                 SELECT %s
                   FROM rollups
-                 WHERE close_time <= CURRENT_TIMESTAMP
+                 WHERE true
                  %s
                 """.formatted(minuteBounds, SELECT_COLUMNS, ordering);
     }

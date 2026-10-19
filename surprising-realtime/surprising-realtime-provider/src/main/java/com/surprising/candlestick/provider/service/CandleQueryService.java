@@ -62,7 +62,7 @@ public class CandleQueryService {
         int safeLimit = Math.min(limit, properties.getQuery().getMaxLimit());
         List<CandleResponse> hotCandles = hotCache == null ? List.of() : hotCache.range(
                 normalizedSymbol, candlePeriod.code(), startTime, endTime, safeLimit);
-        // 只从数据库读取已经进入关闭时间范围的 K 线，当前窗口由内存/RocksDB 提供。
+        // 已关闭分钟也组成当前大周期的持久部分，再与最新实时完整快照合并。
         Instant now = Instant.now();
         Instant closedEnd = endTime.isBefore(now) ? endTime : now;
         List<CandleResponse> persistedCandles = startTime.isBefore(closedEnd)

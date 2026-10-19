@@ -20,11 +20,11 @@ client 的独立档位按顺序分别提交；某档结果不明后停止剩余�
 已确认档位和已发送待确认档位移出表单，尚未发送的档位保留；查询确认后，用户可决定是否提交剩余档位。
 初始保存和确认结果保存分开处理，后者失败仍保留原请求。界面在忙碌/待确认时禁用条件单撤销。
 
-U 本位交割现已与期权共用单笔及 OCO 恢复；其余产品的条件单恢复、批量条件单撤销和整体功能仍需按产品继续验收。
+两类交割现已与期权共用单笔及 OCO 恢复；其余产品的条件单恢复、批量条件单撤销和整体功能仍需按产品继续验收。
 已提交的 OCO 双腿恢复保持原入口 `oco-submission`。
 实测范围、恢复结果和环境清理见 `docs/validation/option-single-trigger-20261020.json`。
 
-## U 本位交割的交易与结算边界
+## 两类交割的交易与结算边界
 
 两端 OCO 一次提交两腿，不拆为两个独立写请求；client 的支持产品由 ProductMode.tracksTriggerIntent 统一判断，
 原 placeOco 与单笔恢复共用现有持久设置。确认结果存储失败时，OCO 与单笔一样保留待确认；已发送双腿移出新请求草稿。
@@ -37,3 +37,9 @@ SixProductLineContractLiveTest 的 SIX_LINE_LIVE_DELIVERY_PROTECTION=true 在同
 交易阶段运行真实做市，Web 恢复独立条件单及撤销并撤销 OCO；client 原子 TP 触发平一张，另一腿撤销。
 随后 Core 转为 SETTLING 并拒绝绕过前端的新单腿/OCO，客户端确认原结果并直接平掉剩余一张。
 验收及清理见 docs/validation/linear-delivery-protection-20261020.json；本轮没有新增 SQL 或 Core 资金/撮合逻辑。
+
+
+币本位交割使用同一 SIX_LINE_LIVE_DELIVERY_PROTECTION=true 用例，产品参数为 INVERSE_DELIVERY；
+用户和做市资金以 BTC 入账、收费与对账，触发价仍取报价币精度。Web 及 Flutter 共用 delivery-protection 实栈脚本，
+通过 DELIVERY_PROTECTION_PRODUCT 绑定单一产品、原合约和原请求。查询不增加 Core 读路径。
+验证记录见 docs/validation/inverse-delivery-protection-20261020.json；其他产品条件单恢复仍需逐条验收。

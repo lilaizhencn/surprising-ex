@@ -14,6 +14,33 @@ import org.springframework.transaction.support.TransactionTemplate;
 @EnabledIfEnvironmentVariable(named = "INSTRUMENT_TEST_JDBC_URL", matches = ".+")
 class CandleQueryPostgresTest {
     @Test
+    void coldQueryRebuildsTheCurrentRollupFromClosedMinutes() {
+        var source = new DriverManagerDataSource(System.getenv("INSTRUMENT_TEST_JDBC_URL"),
+                System.getenv("INSTRUMENT_TEST_DB_USER"), System.getenv("INSTRUMENT_TEST_DB_PASSWORD"));
+        var jdbc = new JdbcTemplate(source);
+        new TransactionTemplate(new DataSourceTransactionManager(source)).executeWithoutResult(tx -> {
+            tx.setRollbackOnly();
+            var now = Instant.now();
+            var open = now.truncatedTo(java.time.temporal.ChronoUnit.MINUTES).minusSeconds(120);
+            var period = com.surprising.candlestick.api.model.CandlePeriod.W1;
+            org.junit.jupiter.api.Assumptions.assumeTrue(period.closeTime(period.floor(open)).isAfter(now));
+            new PostgresCandleSink(jdbc).upsertBatch(java.util.List.of(minute(open, 2, "110", "3")));
+            var repository = new CandleQueryRepository(jdbc);
+            var service = new com.surprising.candlestick.provider.service.CandleQueryService(repository,
+                    new com.surprising.candlestick.provider.config.CandlestickProperties(),
+                    new com.surprising.candlestick.provider.service.CandleHotCache());
+            var rows = service.query("2147483598", "1w", period.floor(open), now, 10).candles();
+            assertThat(rows).hasSize(1);
+            var row = rows.getFirst();
+            assertThat(row.tradeCount()).isEqualTo(2);
+            assertThat(row.baseVolume()).isEqualByComparingTo("3");
+            assertThat(row.quoteVolume()).isEqualByComparingTo("330");
+            assertThat(row.status()).isEqualTo(com.surprising.candlestick.api.model.CandleStatus.PARTIAL);
+            assertThat(service.latest("2147483598", "1w").orElseThrow().baseVolume()).isEqualByComparingTo("3");
+        });
+    }
+
+    @Test
     void lateTradeReplacesMinuteAndRollupWhileDuplicateAndOlderVersionsCannotUndoIt() {
         var source = new DriverManagerDataSource(System.getenv("INSTRUMENT_TEST_JDBC_URL"),
                 System.getenv("INSTRUMENT_TEST_DB_USER"), System.getenv("INSTRUMENT_TEST_DB_PASSWORD"));

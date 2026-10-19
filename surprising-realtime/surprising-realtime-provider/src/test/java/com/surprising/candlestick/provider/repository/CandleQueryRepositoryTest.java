@@ -34,7 +34,7 @@ class CandleQueryRepositoryTest {
         assertThat(sql.getValue()).contains("AND open_time >= ? AND open_time < ? ORDER BY open_time ASC");
         assertThat(arguments.getValue()).containsExactly(300L, 300L, "1",
                 java.sql.Timestamp.from(Instant.parse("2026-08-25T10:00:00Z")),
-                java.sql.Timestamp.from(Instant.parse("2026-08-25T11:00:00Z")), "5m", 300L,
+                java.sql.Timestamp.from(Instant.parse("2026-08-25T11:00:00Z")), "5m", 300L, 300L,
                 java.sql.Timestamp.from(Instant.parse("2026-08-25T10:02:00Z")),
                 java.sql.Timestamp.from(Instant.parse("2026-08-25T10:57:00Z")), 100);
     }

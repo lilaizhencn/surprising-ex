@@ -64,9 +64,23 @@ public class PublicTradeEventMapper {
 
         InstrumentScale scale = scales.computeIfAbsent(instrumentId, this::loadScale);
         BigDecimal price = toDecimal(publicTrade.priceTicks(), scale.priceTickUnits(), scale.quoteScaleUnits());
-        BigDecimal quantity = productLine == com.surprising.product.api.ProductLine.LINEAR_PERPETUAL
-                ? toDecimal(publicTrade.quantitySteps(), scale.contractMultiplierPpm(), 1_000_000L)
-                : toDecimal(publicTrade.quantitySteps(), scale.quantityStepUnits(), scale.baseScaleUnits());
+        BigDecimal quantity;
+        if (productLine == com.surprising.product.api.ProductLine.LINEAR_PERPETUAL) {
+            quantity = toDecimal(publicTrade.quantitySteps(), scale.contractMultiplierPpm(), 1_000_000L);
+        } else if (productLine == com.surprising.product.api.ProductLine.INVERSE_DELIVERY) {
+            if (scale.notionalMultiplierUnits() <= 0) {
+                throw new IllegalArgumentException("inverse delivery quote face must be positive");
+            }
+            // Quote face / actual quote price gives executed base volume. Quote asset
+            // scale cancels; quantityStepUnits is not the inverse contract face.
+            quantity = BigDecimal.valueOf(publicTrade.quantitySteps())
+                    .multiply(BigDecimal.valueOf(scale.notionalMultiplierUnits()))
+                    .divide(BigDecimal.valueOf(publicTrade.priceTicks())
+                            .multiply(BigDecimal.valueOf(scale.priceTickUnits())), DISPLAY_SCALE, RoundingMode.HALF_UP)
+                    .stripTrailingZeros();
+        } else {
+            quantity = toDecimal(publicTrade.quantitySteps(), scale.quantityStepUnits(), scale.baseScaleUnits());
+        }
         return new TradeEvent(
                 instrumentId,
                 publicTrade.tradeId(),
@@ -90,7 +104,7 @@ public class PublicTradeEventMapper {
         long quoteScaleUnits = snapshotCache.scale(productLine, instrument.quoteAsset())
                 .orElseThrow(() -> new IllegalArgumentException("asset scale not found for " + instrument.quoteAsset()));
         return new InstrumentScale(instrument.priceTickUnits(), instrument.quantityStepUnits(),
-                instrument.contractMultiplierPpm(), baseScaleUnits, quoteScaleUnits);
+                instrument.contractMultiplierPpm(), instrument.notionalMultiplierUnits(), baseScaleUnits, quoteScaleUnits);
     }
 
     private BigDecimal toDecimal(long steps, long unitSize, long scaleUnits) {
@@ -117,6 +131,7 @@ public class PublicTradeEventMapper {
     private record InstrumentScale(long priceTickUnits,
                                    long quantityStepUnits,
                                    long contractMultiplierPpm,
+                                   long notionalMultiplierUnits,
                                    long baseScaleUnits,
                                    long quoteScaleUnits) {
     }
