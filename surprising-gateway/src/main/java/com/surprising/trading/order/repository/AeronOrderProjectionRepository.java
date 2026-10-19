@@ -80,10 +80,23 @@ public class AeronOrderProjectionRepository {
 
     public OrderCommandReceipt commandResult(ProductLine product, long userId, UUID commandId) {
         var result = submittedCommand(product, userId, commandId);
+        return commandReceipt(product, commandId, result, List.of());
+    }
+
+    public OrderCommandReceipt cancellation(ProductLine product, long userId, long orderId, UUID commandId) {
+        requirePositive(orderId, "orderId");
+        var result = submittedCommand(product, userId, commandId);
+        if (result != null && !"CANCEL_ORDER".equals(result.commandType()))
+            throw new IllegalStateException("cancellation command identity does not match");
+        return commandReceipt(product, commandId, result, List.of(orderId));
+    }
+
+    private OrderCommandReceipt commandReceipt(ProductLine product, UUID commandId, SubmittedCommand result,
+                                                List<Long> orderIds) {
         return new OrderCommandReceipt(commandId, result == null ? "RESULT_UNKNOWN" : "TERMINAL",
                 result == null ? "RESULT_UNKNOWN" : result.code(),
                 result == null ? "committed command result is not available yet" : "committed command result",
-                OrderCommandReceipt.commandResultUrl(commandId) + "?productLine=" + product.name(), List.of(), null, null);
+                OrderCommandReceipt.commandResultUrl(commandId) + "?productLine=" + product.name(), orderIds, null, null);
     }
 
     public OrderSubmissionResponse submission(ProductLine product, long userId, String clientOrderId, UUID commandId) {

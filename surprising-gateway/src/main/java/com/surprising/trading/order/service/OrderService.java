@@ -296,6 +296,14 @@ public class OrderService {
         return requireProjection().submission(product, userId, key, StableOrderIdentity.commandId(product, userId, key));
     }
 
+    public OrderCommandReceipt cancellation(long userId, long orderId) {
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        requireOrderId(orderId);
+        var product = currentProductLine();
+        return requireProjection().cancellation(product, userId, orderId,
+                StableOrderIdentity.commandId(product, userId, "cancel:" + orderId));
+    }
+
     public OrderBatchResponse cancelOpenOrders(CancelOpenOrdersRequest request) {
         if (request == null) {
             throw new IllegalArgumentException("cancel open orders request is required");

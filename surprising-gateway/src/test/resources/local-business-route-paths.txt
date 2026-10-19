@@ -84,3 +84,4 @@
 /api/v1/instruments/admin/order-settings
 /api/v1/trading/orders/price-protection
 /api/v1/trading/orders/submission
+/api/v1/trading/orders/cancellations/{orderId}

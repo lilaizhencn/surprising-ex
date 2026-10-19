@@ -48,6 +48,26 @@ class CommittedCommandResultQueryPostgresTest {
         });
     }
 
+    @Test void cancellationUsesACommittedCancelReceiptAndNeverInfersSuccessFromAnOrder() {
+        var cancel = StableOrderIdentity.commandId(ProductLine.SPOT, 7, "cancel:91");
+        assertThat(repository.cancellation(ProductLine.SPOT, 7, 91, cancel).outcome()).isEqualTo("RESULT_UNKNOWN");
+        jdbc.update("""
+                INSERT INTO core_command_result_projection VALUES ('SPOT',?,7,'CANCEL_ORDER',null,null,
+                  'APPLIED','NONE',2,64,1700000000001)
+                """, cancel);
+        assertThat(repository.cancellation(ProductLine.SPOT, 7, 91, cancel)).satisfies(result -> {
+            assertThat(result.commandId()).isEqualTo(cancel);
+            assertThat(result.prospectiveOrderIds()).containsExactly(91L);
+            assertThat(result.outcome()).isEqualTo("TERMINAL");
+            assertThat(result.code()).isEqualTo("NONE");
+        });
+        assertThat(repository.cancellation(ProductLine.SPOT, 8, 91, cancel).outcome()).isEqualTo("RESULT_UNKNOWN");
+        assertThat(repository.cancellation(ProductLine.OPTION, 7, 91, cancel).outcome()).isEqualTo("RESULT_UNKNOWN");
+        jdbc.update("UPDATE core_command_result_projection SET command_type='PLACE_ORDER' WHERE command_id=?", cancel);
+        assertThatThrownBy(() -> repository.cancellation(ProductLine.SPOT, 7, 91, cancel))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
     @Test void missingResultsAndDifferentUsersOrProductsRemainUnknown() {
         assertThat(repository.commandResult(ProductLine.SPOT, 8, id).outcome()).isEqualTo("RESULT_UNKNOWN");
         assertThat(repository.commandResult(ProductLine.OPTION, 7, id).outcome()).isEqualTo("RESULT_UNKNOWN");

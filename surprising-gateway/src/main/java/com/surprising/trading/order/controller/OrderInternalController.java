@@ -135,6 +135,12 @@ public class OrderInternalController {
         return requests.submission(userId, clientOrderId);
     }
 
+    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/cancellations/{orderId}")
+    public ResponseEntity<OrderCommandReceipt> cancellation(@RequestParam("userId") long userId,
+            @PathVariable("orderId") long orderId) {
+        return requests.cancellation(userId, orderId);
+    }
+
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/by-client-order-id")
     public OrderResponse getByClientOrderId(@RequestParam("userId") long userId, @RequestParam("clientOrderId") String clientOrderId, @RequestParam(value = "minExportSequence", required = false) Long minExportSequence) {
         return requests.getByClientOrderId(userId, clientOrderId, minExportSequence);

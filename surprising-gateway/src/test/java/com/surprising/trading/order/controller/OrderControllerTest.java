@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.api.model.PlaceOrderRequest;
@@ -25,6 +26,23 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.server.ResponseStatusException;
 
 class OrderControllerTest {
+    @Test void cancellationLookupDistinguishesTerminalUnknownInvalidAndUnavailable() {
+        var service = mock(OrderService.class);
+        var controller = new OrderInternalController(new com.surprising.trading.order.service.OrderRequestService(
+                service, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
+        when(service.cancellation(1001, 91)).thenReturn(receipt("TERMINAL", "NONE"));
+        assertThat(controller.cancellation(1001, 91).getStatusCode()).isEqualTo(HttpStatus.OK);
+        when(service.cancellation(1001, 91)).thenReturn(receipt("RESULT_UNKNOWN", "RESULT_UNKNOWN"));
+        assertThat(controller.cancellation(1001, 91).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(controller.cancellation(1001, 91).getHeaders().getCacheControl()).isEqualTo("no-store");
+        when(service.cancellation(1001, 91)).thenThrow(new IllegalArgumentException("invalid order"));
+        assertThatThrownBy(() -> controller.cancellation(1001, 91)).isInstanceOf(ResponseStatusException.class)
+                .satisfies(error -> assertThat(((ResponseStatusException)error).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+        doThrow(new org.springframework.dao.DataAccessResourceFailureException("offline")).when(service).cancellation(1001, 91);
+        assertThatThrownBy(() -> controller.cancellation(1001, 91)).isInstanceOf(ResponseStatusException.class)
+                .satisfies(error -> assertThat(((ResponseStatusException)error).getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+    }
+
 
     @Test
     void oversizedProjectionResponseIsTypedAndCarriesContinuationCursor() {

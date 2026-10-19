@@ -16,6 +16,19 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
 class LocalBusinessApiTest {
+    @Test void cancellationLookupBindsTheUserAndKeepsUnknownResultsUncached() {
+        var receipt = new com.surprising.trading.api.model.OrderCommandReceipt(new java.util.UUID(8, 9),
+                "RESULT_UNKNOWN", "RESULT_UNKNOWN", "pending", null, java.util.List.of(91L), null, null);
+        when(orders.cancellation(42, 91)).thenReturn(ResponseEntity.accepted()
+                .cacheControl(CacheControl.noStore()).body(receipt));
+        var response = invoke("trading", "/api/v1/trading/orders/cancellations/91", HttpMethod.GET, userHeaders(), null);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-store");
+        verify(orders).cancellation(42, 91);
+        assertThat(invoke("trading", "/api/v1/trading/orders/cancellations/91?userId=43", HttpMethod.GET, userHeaders(), null)
+                .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
     @Test void committedSubmissionRouteUsesAuthenticatedIdentityAndIsNotAnOrderId() {
         var id = new java.util.UUID(4, 5);
         when(orders.submission(42, "a+b")).thenReturn(ResponseEntity.ok().cacheControl(CacheControl.noStore())

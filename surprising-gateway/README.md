@@ -427,3 +427,7 @@ HotSpot JDK 27，对比 `243158a8` 的该方法与当前实现，使用相同 Ob
 `OrderAeronGateway` 的 BOOK_STATE_QUERY。公共和内部 URL 不变，按产品/合约读取最多每侧
 50 档的完整视图。无视图、超过 5 秒未刷新或 source epoch 已改变返回 503，不返回伪空盘口。
 详细状态所有权、初始化和部署顺序见 [realtime README](../surprising-realtime/README.md#行情查询与交易-core-分离2026-10-19)。
+
+## 现货撤单恢复查询（2026-10-19）
+
+`OrderService.cancellation` 沿用实际撤单的 StableOrderIdentity，只向 `AeronOrderProjectionRepository` 查询 realtime 已提交回执，并验证类型为 CANCEL_ORDER。用户入口 `GET /api/v1/gateway/trading/cancellations/{orderId}` 与 MVC/local FUSED 路由一致，认证用户不能被 query 覆盖。200 确认、202 未知、503 不可用，no-store；不回查 Core、不重发撤单。两端提前持久保存原订单号，响应中断后通过该入口恢复。部署顺序、边界和本轮 145 项定向后端测试范围见 [说明](../docs/realtime-command-results.md)。

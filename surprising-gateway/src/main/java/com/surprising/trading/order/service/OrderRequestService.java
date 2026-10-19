@@ -234,6 +234,16 @@ public class OrderRequestService {
         }
     }
 
+    public ResponseEntity<OrderCommandReceipt> cancellation(long userId, long orderId) {
+        try {
+            return commandResponse(orderService.cancellation(userId, orderId));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (org.springframework.dao.DataAccessException | IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "committed cancellation result is unavailable", ex);
+        }
+    }
+
     public ResponseEntity<com.surprising.trading.api.model.OrderSubmissionResponse> submission(long userId, String clientOrderId) {
         try {
             var result = orderService.submission(userId, clientOrderId);

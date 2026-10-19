@@ -1,0 +1,491 @@
+{
+  "date": "2026-10-19",
+  "productDebugScope": "SPOT only; shared gateway query contract tested over six ProductLine enum values",
+  "change": "Persist SPOT cancellation identity before POST; recover from realtime committed cancellation receipt without resubmitting or probing Core.",
+  "baseCommits": {
+    "surprising-ex": "ae61e530db4e984815ec1c5eddcdd80a6d605329",
+    "surprising-ex-web": "3bee7b5e1106bd3abcc67dc2dc751a1770942f26",
+    "surprising-client": "92b740c49ecf28ea4c020f4d72af09b5894d8634"
+  },
+  "backend": {
+    "jdk": "HotSpot Amazon Corretto 27",
+    "maven": "3.9.16",
+    "uniqueTests": 145,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "classes": [
+      {
+        "name": "com.surprising.trading.order.service.OrderServiceTest",
+        "tests": "94",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.7"
+      },
+      {
+        "name": "com.surprising.trading.order.controller.OrderControllerTest",
+        "tests": "10",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.985"
+      },
+      {
+        "name": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+        "tests": "26",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.623"
+      },
+      {
+        "name": "com.surprising.trading.order.repository.CommittedCommandResultQueryPostgresTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.752"
+      },
+      {
+        "name": "com.surprising.aeron.service.orchestration.CoreSpotAssetUnitsTest",
+        "tests": "12",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "6.874"
+      }
+    ],
+    "package": "success; only package command skips tests, the test invocations executed without skips"
+  },
+  "web": {
+    "tests": 181,
+    "lint": "passed, pre-existing and literal-key informational diagnostics remain",
+    "build": "passed, bundle-size advisory remains",
+    "browser": "controlled API/WS fixtures; eight page/size/theme cases, not real FUSED services",
+    "results": [
+      {
+        "page": "/trade/spot?instrumentId=1",
+        "width": 1440,
+        "theme": "dark",
+        "orderId": "9007199254740993",
+        "persistedBeforePost": true,
+        "posts": 1,
+        "queries": [
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          },
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          }
+        ],
+        "unknownRemainedLocked": true,
+        "confirmedUnlocked": true,
+        "overflow": false,
+        "errors": []
+      },
+      {
+        "page": "/trade/spot?instrumentId=1",
+        "width": 1440,
+        "theme": "light",
+        "orderId": "9007199254740993",
+        "persistedBeforePost": true,
+        "posts": 1,
+        "queries": [
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          },
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          }
+        ],
+        "unknownRemainedLocked": true,
+        "confirmedUnlocked": true,
+        "overflow": false,
+        "errors": []
+      },
+      {
+        "page": "/trade/spot?instrumentId=1",
+        "width": 390,
+        "theme": "dark",
+        "orderId": "9007199254740993",
+        "persistedBeforePost": true,
+        "posts": 1,
+        "queries": [
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          },
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          }
+        ],
+        "unknownRemainedLocked": true,
+        "confirmedUnlocked": true,
+        "overflow": false,
+        "errors": []
+      },
+      {
+        "page": "/trade/spot?instrumentId=1",
+        "width": 390,
+        "theme": "light",
+        "orderId": "9007199254740993",
+        "persistedBeforePost": true,
+        "posts": 1,
+        "queries": [
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          },
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          }
+        ],
+        "unknownRemainedLocked": true,
+        "confirmedUnlocked": true,
+        "overflow": false,
+        "errors": []
+      },
+      {
+        "page": "/orders",
+        "width": 1440,
+        "theme": "dark",
+        "orderId": "9007199254740993",
+        "persistedBeforePost": true,
+        "posts": 1,
+        "queries": [
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          },
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          }
+        ],
+        "unknownRemainedLocked": true,
+        "confirmedUnlocked": true,
+        "overflow": false,
+        "errors": []
+      },
+      {
+        "page": "/orders",
+        "width": 1440,
+        "theme": "light",
+        "orderId": "9007199254740993",
+        "persistedBeforePost": true,
+        "posts": 1,
+        "queries": [
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          },
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          }
+        ],
+        "unknownRemainedLocked": true,
+        "confirmedUnlocked": true,
+        "overflow": false,
+        "errors": []
+      },
+      {
+        "page": "/orders",
+        "width": 390,
+        "theme": "dark",
+        "orderId": "9007199254740993",
+        "persistedBeforePost": true,
+        "posts": 1,
+        "queries": [
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          },
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          }
+        ],
+        "unknownRemainedLocked": true,
+        "confirmedUnlocked": true,
+        "overflow": false,
+        "errors": []
+      },
+      {
+        "page": "/orders",
+        "width": 390,
+        "theme": "light",
+        "orderId": "9007199254740993",
+        "persistedBeforePost": true,
+        "posts": 1,
+        "queries": [
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          },
+          {
+            "method": "GET",
+            "path": "/api/v1/gateway/trading/cancellations/9007199254740993"
+          }
+        ],
+        "unknownRemainedLocked": true,
+        "confirmedUnlocked": true,
+        "overflow": false,
+        "errors": []
+      }
+    ]
+  },
+  "client": {
+    "tests": 155,
+    "analyze": "No issues found",
+    "widgetCoverage": "320px dark/light order-list cancellation, lock and query result",
+    "httpCoverage": "real loopback HTTP server receives a 64-bit orderId cancellation POST and closes its socket without a reply; one POST then two GETs recover the committed result",
+    "otherCoverage": [
+      "storage failure sends no POST",
+      "cold-start restoration",
+      "unavailable and mismatched query stays pending",
+      "committed cancellation rejection",
+      "duplicate cancellation/new SPOT order blocked",
+      "late response cannot mutate another user or disposed notifier"
+    ]
+  },
+  "regressionEvidence": {
+    "web": "Temporarily restored original cancelOrder implementation only: RESULT_UNKNOWN resolved rather than throwing PendingTradingCommand; new regression failed. Restored current source and all 181 tests passed. Original implementation also failed prewrite persistence check.",
+    "client": "Temporarily restored original cancelOrder only: after response loss pending.cancelOrderId expected 91, actual null; restored current source and all 155 tests passed."
+  },
+  "queryContract": {
+    "path": "GET /api/v1/gateway/trading/cancellations/{orderId}?userId=<authenticated user>",
+    "identity": "same StableOrderIdentity(product,user,cancel:orderId) used by actual Core cancellation command; database command_type must be CANCEL_ORDER",
+    "responses": [
+      "200 TERMINAL",
+      "202 RESULT_UNKNOWN",
+      "400 invalid input",
+      "503 unavailable or conflicting command type"
+    ],
+    "cacheControl": "no-store",
+    "dataSource": "realtime core_command_result_projection only",
+    "orderIdBinding": "prospectiveOrderIds contains exactly the original order ID"
+  },
+  "releaseOrder": [
+    "ensure previous ae61e530d receipt SQL migration, realtime exporter upgrade and required historical backfill completed",
+    "update gateway with cancellation lookup route",
+    "update Web/client; no additional SQL migration or Core/exporter changes"
+  ],
+  "notVerified": [
+    "new deployment or online backfill",
+    "complete FUSED app stack and live maker in this round",
+    "iOS/Android device install",
+    "other product UIs",
+    "batch/amend/algo/trigger write recovery",
+    "negative confirmation for a request never committed to Core"
+  ],
+  "limits": [
+    "Missing cancellation receipt remains unknown; absent order does not prove cancellation or original nonacceptance. No automatic POST retry.",
+    "This round changes public query and frontends only; Core matching/funds and realtime export remain unchanged. Twelve existing native SPOT cases independently validate user/maker/treasury balances, fees, locked units, cancellation release and snapshot restore.",
+    "Command processing receipt does not replace the latest realtime order status; partial fills and fill/cancel races must be read from that view.",
+    "SPOT prewrite recovery is extended here; other products retain their existing received-command recovery and require separate UI acceptance."
+  ],
+  "attemptCorrections": [
+    "Test used orderIds getter instead of existing prospectiveOrderIds; corrected before successful final run.",
+    "Mockito exception restubbing changed to doThrow and imported it; final gateway 133 tests passed.",
+    "Client widget initially tried to find a query button in an offscreen lazy-built order ticket; added a nearby order-list query entry and both 320px themes passed.",
+    "Fixed import organization and Dart braces; lint/analyze reran successfully."
+  ],
+  "commands": [
+    "INSTRUMENT_TEST_JDBC_URL=<owned PostgreSQL JDBC URL> INSTRUMENT_TEST_DB_USER=atomex INSTRUMENT_TEST_DB_PASSWORD='' mvn -o -pl surprising-gateway -am -Dtest=CommittedCommandResultQueryPostgresTest,OrderServiceTest,LocalBusinessApiTest,OrderControllerTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "mvn -o -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=CoreSpotAssetUnitsTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "mvn -o -pl surprising-gateway -am -DskipTests package",
+    "npm test",
+    "npm run lint",
+    "npm run build",
+    "flutter analyze",
+    "flutter test --reporter expanded",
+    "node <owned-ui-root>/check.mjs"
+  ],
+  "artifacts": {
+    "surprising-cancel-funds.log": {
+      "historicalPath": "/tmp/surprising-cancel-funds.log",
+      "sha256": "0be24865a4927d891b74fcc67798308de5e2fa4173bb238d1d929610f7d1be6c",
+      "bytes": 12871,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-cancel-vite.log": {
+      "historicalPath": "/tmp/surprising-cancel-vite.log",
+      "sha256": "aa775d45a1f932b2798437d1472236ee92f8ae5b6aa5746cce0f908809e655e7",
+      "bytes": 2722,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-cancel-package.log": {
+      "historicalPath": "/tmp/surprising-cancel-package.log",
+      "sha256": "82f379a45c9c09e14ea95e0920295b3474f2980eb60ee99cce3bb33063befff8",
+      "bytes": 39664,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-cancel-web-build.log": {
+      "historicalPath": "/tmp/surprising-cancel-web-build.log",
+      "sha256": "67c37b31f783fc872101072b30a10020cc7f42a51546357cf3e65f7b982d2c63",
+      "bytes": 3353,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-cancel-client-tests.log": {
+      "historicalPath": "/tmp/surprising-cancel-client-tests.log",
+      "sha256": "5e5ef5d99deaa48827db212b57352ea6bc952364fb5df871afe764b4dd1d9f45",
+      "bytes": 33351,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-cancel-web-pending-red.log": {
+      "historicalPath": "/tmp/surprising-cancel-web-pending-red.log",
+      "sha256": "1e4a1ce7d6d45bf54bf5cfd036a056aff777fb6b543eab8dc8ac1dd65cda99fe",
+      "bytes": 1339,
+      "status": "expected failure against prior implementation"
+    },
+    "surprising-cancel-web-tests.log": {
+      "historicalPath": "/tmp/surprising-cancel-web-tests.log",
+      "sha256": "5c3b62b0d3bb19ca0a071de3fe1496fc8c8c3b7da5e2de09eac7bb17e26cab5c",
+      "bytes": 288,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-cancel-client-target.log": {
+      "historicalPath": "/tmp/surprising-cancel-client-target.log",
+      "sha256": "eb23f21586719f801df513ba6bbe554dd83ff1286227de2b6bc3cc7fc741e48d",
+      "bytes": 10572,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-cancel-web-lint.log": {
+      "historicalPath": "/tmp/surprising-cancel-web-lint.log",
+      "sha256": "04874b113165c7c104b283cd4ef8b4b400f1db547461917511404ca8442bc0b7",
+      "bytes": 18447,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-cancel-web-format.log": {
+      "historicalPath": "/tmp/surprising-cancel-web-format.log",
+      "sha256": "0bd5d63095f9076c2bb31613836776183bb1aac9c7b07ff1fe613ee63c703214",
+      "bytes": 42,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-cancel-client-analyze.log": {
+      "historicalPath": "/tmp/surprising-cancel-client-analyze.log",
+      "sha256": "6aeebe1aed7a918ebfc0025756b644d50ac304306b8f9331bac6f99b285011ac",
+      "bytes": 96,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-cancel-client-red.log": {
+      "historicalPath": "/tmp/surprising-cancel-client-red.log",
+      "sha256": "9578d8d15b4e480b2799fed04c0d36c57ae2e8736555f5daa60d9b9167575fce",
+      "bytes": 1199,
+      "status": "expected failure against prior implementation"
+    },
+    "surprising-cancel-web-red.log": {
+      "historicalPath": "/tmp/surprising-cancel-web-red.log",
+      "sha256": "a560c98d50c3a1be66889919f884ebec89618f7be874137d31522f3fd47ab841",
+      "bytes": 1378,
+      "status": "expected failure against prior implementation"
+    },
+    "surprising-cancel-web-type.log": {
+      "historicalPath": "/tmp/surprising-cancel-web-type.log",
+      "sha256": "28151c3ea8607c70d336e2411d9d846f0256865ee60b5ed04f089f44b9aaca8a",
+      "bytes": 62,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-cancel-client-format.log": {
+      "historicalPath": "/tmp/surprising-cancel-client-format.log",
+      "sha256": "2d68c3b12d9d0596960c6cabb53a693c1807d27ea8b32b1b67946f5a0eacd777",
+      "bytes": 46,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-cancel-web-target.log": {
+      "historicalPath": "/tmp/surprising-cancel-web-target.log",
+      "sha256": "82eb1cd37973f8210ddb86fed47a0b7d3807ee771b56d9ecaccb5539e4a7890c",
+      "bytes": 312,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-cancel-backend.log": {
+      "historicalPath": "/tmp/surprising-cancel-backend.log",
+      "sha256": "870d95d8cdab4413d98a7deef927ed64f56ef3857719de4f7cbc6c067ec15930",
+      "bytes": 31781,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-cancel-browser.log": {
+      "historicalPath": "/tmp/surprising-cancel-browser.log",
+      "sha256": "ff6472ce53768e104329523a66ac8729872b0b24c37cde4db8ee15f1e68358c1",
+      "bytes": 3038,
+      "status": "passed or routine diagnostic"
+    }
+  },
+  "cleanup": {
+    "status": "complete",
+    "ownedDatabase": "surprising_cancel_3e5bf1feea",
+    "databaseDroppedAndVerified": true,
+    "ownedVitePid": 74296,
+    "ownedVitePort": 5191,
+    "portClosed": true,
+    "browserClosed": true,
+    "historicalUiRoot": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-cancel-ui-3s1xg4ou",
+    "uiRootRemoved": true,
+    "rawLogsRemovedAfterSummaryAndHashArchive": true,
+    "ownedSurefireReportsRemoved": [
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.OrderServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.OrderServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.controller.OrderControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.controller.OrderControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.LocalBusinessApiTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.LocalBusinessApiTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.repository.CommittedCommandResultQueryPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.repository.CommittedCommandResultQueryPostgresTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreSpotAssetUnitsTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreSpotAssetUnitsTest.txt"
+    ],
+    "historicalUiArtifacts": {
+      "trade-390-light.png": {
+        "bytes": 97291,
+        "sha256": "e4fe066ea6f125d60ca8950e2b8ef5b64784719b9b80d084d5b6d375f68da443"
+      },
+      "orders-1440-light.png": {
+        "bytes": 117118,
+        "sha256": "05e46f7908b2fd190363e844e2b4b49ad57beb123a2f64c24f91426b015105d2"
+      },
+      "orders-1440-dark.png": {
+        "bytes": 117748,
+        "sha256": "09ec64de45df0b4d2caf30e2cea7b3ef7762f740e4820c74b88111de2b1a9e55"
+      },
+      "result.json": {
+        "bytes": 4198,
+        "sha256": "f2ac7ddf92e011edd4ba458cef4534252ec41bef673b49a85a0913e757d63061"
+      },
+      "trade-1440-light.png": {
+        "bytes": 124059,
+        "sha256": "862046b047581ec4cfc9cfb2be8f6cecf30bdc0037213113aa6c81fd2fbbd2e6"
+      },
+      "orders-390-dark.png": {
+        "bytes": 68628,
+        "sha256": "35259db4bd8acda3aa820fa6b07870a832a12bcca19959335af310481b3b81ac"
+      },
+      "orders-390-light.png": {
+        "bytes": 67996,
+        "sha256": "572d758052ccde55375ec9ae09fb4fa5bb5328bafc829ee3efb812634bf449bc"
+      },
+      "check.mjs": {
+        "bytes": 7057,
+        "sha256": "6636cbcb65d2abd5c200249362b6e8b59cdaafa6534186321e3710ca09caedd8"
+      },
+      "trade-1440-dark.png": {
+        "bytes": 120962,
+        "sha256": "077e23dd387a23a69c60d8ad65dd57b6612e847183a2160b69a41211b3aa9699"
+      },
+      "trade-390-dark.png": {
+        "bytes": 95518,
+        "sha256": "e776e13c24074b9dc139758633e92ae111f236f2e75e17e1af331173abb67e80"
+      }
+    },
+    "preserved": "System PostgreSQL and unrelated databases/data, installed dependencies and compiled build outputs; no wallet or persistent trading stack started.",
+    "note": "Historical paths refer to deleted temporary files; current summaries, class counts, browser results and artifact hashes remain in this record."
+  },
+  "repository": "surprising-ex"
+}

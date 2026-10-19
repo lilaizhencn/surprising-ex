@@ -216,3 +216,7 @@ Owner 编排的订单读取已收口到本次已收集回执与既有活跃索�
 ## 已提交命令回执查询（2026-10-19）
 
 realtime 现从已提交 Archive 回放生成普通用户命令回执，与订单投影、水位同事务落库。用户命令查询不再读取 Core 的短期缓存；新增 submission 按原 clientOrderId 查回执，让 Web/client 在响应丢失且没有订单实体的拒单场景也能恢复。未知结果保持待确认，不自动重发。需先应用新增迁移、升级 realtime 并用独立 checkpoint 有限回补，再更新 gateway 和两端。详见 [业务、发布与验证说明](docs/realtime-command-results.md)。174 项后端定向测试无失败或跳过，Web 172 项与 client 148 项通过；本轮未执行完整 FUSED 实栈或原生设备验收。
+
+## 现货撤单恢复（2026-10-19）
+
+网关新增按认证用户、产品和原订单号查询已提交撤单的 `GET /api/v1/gateway/trading/cancellations/{orderId}`；结果来自 realtime SQL 投影，不查询 Core。Web/client 在现货撤单前持久保存原订单身份，响应丢失后保持待确认，只以 GET 恢复；未知结果不当作成功。145 项后端定向测试、Web 181 项和 client 155 项通过，详情与发布顺序见 [回执说明](docs/realtime-command-results.md)。本轮没有启动完整 FUSED 服务栈或原生设备。

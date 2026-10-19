@@ -48,3 +48,15 @@ HotSpot JDK 27 定向测试按测试类去重共 174 项，全部通过，无跳
 Web 172 项、lint/build 和 1440/390px 深浅色四组浏览器交互通过；client analyze 无问题、148 项测试通过，包含 320px 深浅色交互与本机 HTTP 接收 POST 后断开连接的恢复。浏览器使用受控 API/WS，不能替代真实 FUSED 交易验收。本轮没有启动完整 FUSED 栈、wallet、原生设备或其他产品 UI；算法、后台及生命周期专用查询仍须继续按范围审计。
 
 命令、逐类数量、浏览器结果和临时资源清理见 [验证记录](validation/committed-command-results-20261019.json)。
+
+## 撤单响应丢失恢复（2026-10-19）
+
+新增 `GET /api/v1/gateway/trading/cancellations/{orderId}?userId=<认证用户>`，带原 productLine。`OrderService.cancellation` 使用与实际撤单相同的 StableOrderIdentity（产品、用户、`cancel:<orderId>`）推导命令号；`AeronOrderProjectionRepository.cancellation` 只读取 realtime 已提交回执，还要求记录类型为 CANCEL_ORDER。返回既有 OrderCommandReceipt，prospectiveOrderIds 为原订单号；客户端据此核对恢复身份，不能用下单回执冒充撤单结果。
+
+TERMINAL 返回 200，未查到返回 202 / RESULT_UNKNOWN，均 no-store。参数非法 400，数据源不可用或命令类型矛盾 503。不读 Core、不依据订单从活动列表消失推断撤单成功，也不重发撤单。NONE 只确认撤单命令处理成功，实际成交或撤销状态仍由最新订单视图展示。网关的 MVC、本地 FUSED 路由和静态路径清单同步更新；本轮未改 Core、撮合、资金、导出或 SQL 表结构，没有增加状态容器或服务进程。
+
+Web `api/endpoints.ts.cancelOrder` 和 client `AppState.cancelOrder` 在现货 POST 前持久保存用户、产品、原订单号；存储失败不发送。断网、异常响应、资料不匹配或服务异常保留锁定；刷新/冷启动后只查原撤单。Web 交易页与订单页同步禁用重复撤单，client 在订单列表旁增加查询入口。收到明确回执后解除锁定并刷新账户，拒单提示与下单拒单区分。沿用同一份 pending 记录，不维护订单状态副本；迟到响应不得修改另一用户或已 dispose 的界面。
+
+先保证上一节的回执迁移、realtime 更新与所需历史回补已完成，再发布本轮 gateway，最后更新 Web/client。无需追加迁移或重置导出 checkpoint。请求未到 Core、尚在途中或不在已回补范围内时仍未决，不能强制解锁；本轮只扩展普通现货单笔撤单，批量、改单等写入的完整异常恢复仍需继续验收。
+
+本轮 145 项后端定向测试无失败或跳过（gateway 133 + 原生 SPOT 资金 12），Web 181 项、lint/build 和 client 155 项、analyze 通过。真实隔离 PostgreSQL 验证原命令身份、用户/产品隔离及命令类型不符时关闭查询；真实本机 HTTP 在接收撤单 POST 后断开连接，再以两次 GET 恢复，包含 64 位订单号。受控 API/WS 浏览器检查覆盖交易页、订单页各 1440/390px 深浅主题，共八组，每组仅一条 POST；Flutter 覆盖 320px 深浅色撤单锁定与查询。本轮未启动完整 FUSED 服务栈、wallet 或真机，也未验收其他产品 UI。详见 [撤单验证与清理记录](validation/spot-cancel-recovery-20261019.json)。

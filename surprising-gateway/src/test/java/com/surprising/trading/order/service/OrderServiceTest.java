@@ -57,6 +57,18 @@ import org.mockito.quality.Strictness;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class OrderServiceTest {
     @ParameterizedTest @EnumSource(ProductLine.class)
+    void cancellationLookupUsesTheOriginalStableIdentityAndOnlyTheProjection(ProductLine line) {
+        var service = service(line, aeronOrders);
+        var id = StableOrderIdentity.commandId(line, 1001, "cancel:91");
+        var expected = new com.surprising.trading.api.model.OrderCommandReceipt(id, "TERMINAL", "NONE",
+                "committed cancellation", null, List.of(91L), null, null);
+        when(projection.cancellation(line, 1001, 91, id)).thenReturn(expected);
+        assertThat(service.cancellation(1001, 91)).isSameAs(expected);
+        assertThatThrownBy(() -> service.cancellation(1001, 0)).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(aeronOrders);
+    }
+
+    @ParameterizedTest @EnumSource(ProductLine.class)
     void publicCommandReceiptsUseTheCommittedProjectionForTheAuthenticatedUser(ProductLine line) {
         var service = service(line, aeronOrders);
         var id = new UUID(4, 5);
