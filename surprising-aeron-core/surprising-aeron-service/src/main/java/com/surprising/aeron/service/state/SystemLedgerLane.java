@@ -36,19 +36,31 @@ public final class SystemLedgerLane implements AutoCloseable {
     private final int mask;
     private final PaddedSequence producerSequence = new PaddedSequence();
     private final PaddedSequence consumerSequence = new PaddedSequence();
+    /** 账本线程完成 apply 之后才推进；等于 producerSequence 表示所有已入队任务都已彻底执行完。 */
+    private final PaddedSequence appliedSequence = new PaddedSequence();
     private long cachedConsumerSequence = -1L;
     private final Thread producer;
     private final Thread thread;
     private final Consumer<Throwable> failurePublisher;
+    /** 账本所有权随线程移交时，同步迁移由账本线程独占的业务索引。 */
+    private final Consumer<Thread> businessOwnerBinder;
     private final WaitStrategy waitStrategy;
+    /** 仅生产者线程读写：true 表示账本当前由 Owner 线程内联持有，账本线程处于静默。 */
+    private boolean producerHoldsLedger;
     private volatile boolean running = true;
     private volatile boolean started;
     private volatile boolean parked;
     private volatile Throwable failure;
 
     SystemLedgerLane(TreasuryRuntime ledger, int capacity, Consumer<Throwable> failurePublisher) {
-        if (ledger == null || capacity <= 0 || failurePublisher == null)
+        this(ledger, capacity, failurePublisher, owner -> { });
+    }
+
+    SystemLedgerLane(TreasuryRuntime ledger, int capacity, Consumer<Throwable> failurePublisher,
+                     Consumer<Thread> businessOwnerBinder) {
+        if (ledger == null || capacity <= 0 || failurePublisher == null || businessOwnerBinder == null)
             throw new IllegalArgumentException("system ledger, capacity and failure publisher are required");
+        this.businessOwnerBinder = businessOwnerBinder;
         this.ledger = ledger;
         this.capacity = capacity;
         int ringSize = capacity <= 1 ? 2 : Integer.highestOneBit(capacity - 1) << 1;
@@ -82,10 +94,37 @@ public final class SystemLedgerLane implements AutoCloseable {
             if (nextSeq - cachedConsumerSequence > capacity) return false;
         }
         ring[(int) nextSeq & mask] = entry;
+        if (producerHoldsLedger) {
+            // 账本线程此刻静默（appliedSequence==producerSequence），先把账本与索引交还给它再发布任务。
+            ledger.transferOwner(thread);
+            businessOwnerBinder.accept(thread);
+            producerHoldsLedger = false;
+        }
         producerSequence.value = nextSeq;
         if (waitStrategy == WaitStrategy.BLOCKING && parked) {
             LockSupport.unpark(thread);
         }
+        return true;
+    }
+
+    /**
+     * FUSED 的唯一同步结算入口：仅当此前所有入队任务都已彻底执行完且任务已就绪时，
+     * 由 Owner 线程直接持有账本并 apply，省掉一次跨线程交接与等待。
+     * 否则返回 false，调用方回退到 {@link #offer(Entry)} 的异步路径。
+     */
+    boolean tryApplyInline(Entry entry) {
+        if (Thread.currentThread() != producer)
+            throw new IllegalStateException("system ledger mailbox has one Owner producer");
+        if (entry == null) throw new IllegalArgumentException("system ledger entry is required");
+        assertHealthy();
+        if (!running) throw new RejectedExecutionException("system ledger Lane is closed");
+        if (appliedSequence.value != producerSequence.value || !entry.ready()) return false;
+        if (!producerHoldsLedger) {
+            ledger.transferOwner(producer);
+            businessOwnerBinder.accept(producer);
+            producerHoldsLedger = true;
+        }
+        entry.apply(ledger);
         return true;
     }
 
@@ -132,12 +171,14 @@ public final class SystemLedgerLane implements AutoCloseable {
                     // marker. Owner can continuously enqueue even before a response retires.
                     ring[(int) nextConsumeSeq & mask] = null;
                     consumerSequence.value = nextConsumeSeq;
+                    long appliedSeq = nextConsumeSeq;
                     nextConsumeSeq++;
                     Entry readyEntry = head;
                     head = null;
                     readyEntry.apply(ledger);
                     // apply may publish completion and immediately allow slot reuse. Never
                     // read entry fields again after that ownership handoff.
+                    appliedSequence.value = appliedSeq;
                     spins = 0;
                     continue;
                 }
@@ -164,7 +205,7 @@ public final class SystemLedgerLane implements AutoCloseable {
             try { failurePublisher.accept(problem); }
             catch (Throwable reportingFailure) { problem.addSuppressed(reportingFailure); }
         } finally {
-            ledger.releaseOwnerForHandoff();
+            ledger.transferOwner(null);
             started = true;
         }
     }

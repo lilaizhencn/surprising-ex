@@ -1061,6 +1061,10 @@ public final class MatcherSettlementEvent implements
             return true;
         }
         treasurySettlement.ledger = ledger;
+        if (runtime.isFusedExecution() && ledger.tryApplyInline(treasurySettlement)) {
+            treasurySettlement.queued = true;
+            return true;
+        }
         if (!ledger.offer(treasurySettlement)) return false;
         treasurySettlement.queued = true;
         return true;

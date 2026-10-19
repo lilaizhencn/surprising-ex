@@ -65,6 +65,9 @@ public final class TreasuryRuntime {
         owner = null;
     }
 
+    /** 仅在 SystemLedgerLane 确认账本静默时调用；volatile 写入同时作为内存可见性边界。 */
+    void transferOwner(Thread nextOwner) { owner = nextOwner; }
+
     public long fee(int assetId) { assertOwner(); return feeBalances.get(assetId); }
     public long insurance(int assetId) { assertOwner(); return insuranceBalances.get(assetId); }
     public long insuranceDeficit(int assetId) { assertOwner(); return insuranceDeficits.get(assetId); }

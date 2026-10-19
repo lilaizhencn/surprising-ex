@@ -605,7 +605,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 Math.max(4_096, Math.multiplyExact(matcherSettlementChangesRing.length, 2)), failure -> {
                     accountLaneFailure.compareAndSet(null, failure);
                     signalOwnerCompletion();
-                });
+                }, businessOwner -> { if (factIndexes != null) factIndexes.bindBusinessOwner(businessOwner); });
         if (factIndexes != null) factIndexes.bindBusinessOwner(systemLedger.thread());
     }
 
