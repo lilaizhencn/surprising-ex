@@ -11,7 +11,6 @@ import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster;
 import java.util.Objects;
 import org.agrona.DirectBuffer;
-import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.springframework.stereotype.Component;
 
@@ -23,12 +22,11 @@ public final class ClusterServiceEgress {
     private static final byte[] EMPTY = new byte[0];
     private static final long OUTPUT_BYTES = 16L * 1024 * 1024;
     private static final int OUTPUT_SLOTS = 8192;
-
-    private final OneToOneConcurrentArrayQueue<Output> output = new OneToOneConcurrentArrayQueue<>(OUTPUT_SLOTS);
-    private final Output[] outputs = new Output[OUTPUT_SLOTS];
-    private long outputProducedCount;
-    private long uncommittedOutputConsumed;
+    private static final int OUTPUT_MASK = OUTPUT_SLOTS - 1;
     private static final long BATCH_OUTPUT_CONSUMED_BYTES_THRESHOLD = 64 * 1024;
+    private static final int BATCH_OUTPUT_CONSUMED_SLOTS_THRESHOLD = 64;
+
+    private final Output[] outputs = new Output[OUTPUT_SLOTS];
     private final DeferredSessionResponses deferred = new DeferredSessionResponses();
     private final UnsafeBuffer sendBuffer = new UnsafeBuffer(new byte[0]);
     private byte[] sendScratch = EMPTY;
@@ -37,13 +35,17 @@ public final class ClusterServiceEgress {
     private final EgressFactory egressFactory;
     private Cluster cluster;
     private boolean closeRequests;
+
     private static class PaddedOutputProducedPadding {
         @SuppressWarnings("unused")
         private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e;
     }
 
     private static class PaddedOutputProducedValue extends PaddedOutputProducedPadding {
-        protected long outputProduced;
+        protected volatile long outputProducedCount;
+        protected long outputProducedBytes;
+        protected long cachedOutputConsumedCount;
+        protected long cachedOutputConsumedBytes;
     }
 
     private static class PaddedOutputConsumedPadding extends PaddedOutputProducedValue {
@@ -52,7 +54,12 @@ public final class ClusterServiceEgress {
     }
 
     private static class PaddedOutputConsumedValue extends PaddedOutputConsumedPadding {
-        protected volatile long outputConsumed;
+        protected volatile long outputConsumedCount;
+        protected volatile long outputConsumedBytes;
+        protected long cachedOutputProducedCount;
+        protected long localConsumedCount;
+        protected long uncommittedConsumedBytes;
+        protected int uncommittedConsumedSlots;
     }
 
     private static final class PaddedEgressOffsets extends PaddedOutputConsumedValue {
@@ -135,41 +142,51 @@ public final class ClusterServiceEgress {
      * Requests are deduplicated until consumed. No collection nodes are created on normal sends.
      */
     private final java.util.Set<Long> overflowSessions = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private volatile boolean hasOverflowSessions;
 
     private void handleSessionOverflow(long sessionId) {
-        if (sessionId != NO_SESSION_ID) {
-            overflowSessions.add(sessionId);
+        if (sessionId != NO_SESSION_ID && overflowSessions.add(sessionId)) {
+            hasOverflowSessions = true;
         }
     }
 
     void publishResponse(TradingCoreOwner processor, long sessionId, CoreMessageHeader header, CoreResponse response,
                          long committedSequence, long ownerEpoch) {
         int length = CoreMessageCodec.encodedResponseLength(header, response);
-        if (length > OUTPUT_BYTES - (egressOffsets.outputProduced - egressOffsets.outputConsumed) || output.remainingCapacity() == 0) {
-            handleSessionOverflow(sessionId);
-            processor.releaseResponse(response);
-            return;
+        long currentCount = egressOffsets.outputProducedCount;
+        long nextCount = currentCount + 1L;
+        long nextBytes = egressOffsets.outputProducedBytes + length;
+        if (nextCount - egressOffsets.cachedOutputConsumedCount > OUTPUT_SLOTS
+                || nextBytes - egressOffsets.cachedOutputConsumedBytes > OUTPUT_BYTES) {
+            egressOffsets.cachedOutputConsumedCount = egressOffsets.outputConsumedCount;
+            egressOffsets.cachedOutputConsumedBytes = egressOffsets.outputConsumedBytes;
+            if (nextCount - egressOffsets.cachedOutputConsumedCount > OUTPUT_SLOTS
+                    || nextBytes - egressOffsets.cachedOutputConsumedBytes > OUTPUT_BYTES) {
+                handleSessionOverflow(sessionId);
+                processor.releaseResponse(response);
+                return;
+            }
         }
-        Output slot = outputs[(int) outputProducedCount & (OUTPUT_SLOTS - 1)];
+        Output slot = outputs[(int) currentCount & OUTPUT_MASK];
         header.retainForEgress();
         slot.prepare(processor, sessionId, header, response, committedSequence, length, ownerEpoch);
-        if (!output.offer(slot)) {
-            handleSessionOverflow(sessionId);
-            header.releaseFromEgress();
-            processor.releaseResponse(response);
-            slot.clear();
-            return;
-        }
-        outputProducedCount++;
-        egressOffsets.outputProduced += length;
+        egressOffsets.outputProducedBytes = nextBytes;
+        egressOffsets.outputProducedCount = nextCount;
     }
 
     int drainResponses(TradingCoreOwner processor) {
-        if (output.peek() == null && deferred.size() == 0 && overflowSessions.isEmpty()) {
-            return 0;
+        long consumed = egressOffsets.localConsumedCount;
+        long produced = egressOffsets.cachedOutputProducedCount;
+        if (consumed == produced) {
+            produced = egressOffsets.outputProducedCount;
+            egressOffsets.cachedOutputProducedCount = produced;
+            if (consumed == produced && deferred.size() == 0 && !hasOverflowSessions) {
+                return 0;
+            }
         }
         int work = 0;
-        if (!overflowSessions.isEmpty()) {
+        if (hasOverflowSessions) {
+            hasOverflowSessions = false;
             var iterator = overflowSessions.iterator();
             while (iterator.hasNext()) {
                 long sid = iterator.next();
@@ -183,10 +200,12 @@ public final class ClusterServiceEgress {
                 iterator.remove();
             }
         }
-        for (; work < 256; work++) {
-            Output next = output.poll();
-            if (next == null) break;
-            uncommittedOutputConsumed += next.length;
+        for (; work < 256 && consumed != produced; work++) {
+            Output next = outputs[(int) consumed & OUTPUT_MASK];
+            consumed++;
+            egressOffsets.localConsumedCount = consumed;
+            egressOffsets.uncommittedConsumedBytes += next.length;
+            egressOffsets.uncommittedConsumedSlots++;
             try {
                 if (next.epoch != epoch || cluster.role() != Cluster.Role.LEADER) continue;
                 TransportSession session = sessions.get(next.sessionId);
@@ -196,7 +215,7 @@ public final class ClusterServiceEgress {
                     sendBuffer.wrap(sendScratch);
                 }
                 CoreMessageCodec.encodeResponse(next.header, next.response, next.committedSequence, sendScratch);
-                deferred.offer(session, sendBuffer, next.length, System.nanoTime());
+                deferred.offer(session, sendBuffer, next.length);
             } finally {
                 try { processor.releaseResponse(next.response); }
                 finally {
@@ -205,23 +224,33 @@ public final class ClusterServiceEgress {
                 }
             }
         }
-        if (uncommittedOutputConsumed >= BATCH_OUTPUT_CONSUMED_BYTES_THRESHOLD || output.isEmpty()) {
+        if (egressOffsets.uncommittedConsumedBytes >= BATCH_OUTPUT_CONSUMED_BYTES_THRESHOLD
+                || egressOffsets.uncommittedConsumedSlots >= BATCH_OUTPUT_CONSUMED_SLOTS_THRESHOLD
+                || consumed == produced) {
             commitConsumedBytes();
         }
-        return work + deferred.poll(System.nanoTime(), 256);
+        return work + (deferred.size() == 0 ? 0 : deferred.poll(System.nanoTime(), 256));
     }
 
     private void commitConsumedBytes() {
-        if (uncommittedOutputConsumed > 0) {
-            egressOffsets.outputConsumed += uncommittedOutputConsumed;
-            uncommittedOutputConsumed = 0;
+        if (egressOffsets.uncommittedConsumedSlots > 0 || egressOffsets.uncommittedConsumedBytes > 0) {
+            egressOffsets.outputConsumedBytes += egressOffsets.uncommittedConsumedBytes;
+            egressOffsets.outputConsumedCount = egressOffsets.localConsumedCount;
+            egressOffsets.uncommittedConsumedBytes = 0;
+            egressOffsets.uncommittedConsumedSlots = 0;
         }
     }
 
     public void clear() {
-        Output next;
-        while ((next = output.poll()) != null) {
-            uncommittedOutputConsumed += next.length;
+        long consumed = egressOffsets.localConsumedCount;
+        long produced = egressOffsets.outputProducedCount;
+        egressOffsets.cachedOutputProducedCount = produced;
+        while (consumed != produced) {
+            Output next = outputs[(int) consumed & OUTPUT_MASK];
+            consumed++;
+            egressOffsets.localConsumedCount = consumed;
+            egressOffsets.uncommittedConsumedBytes += next.length;
+            egressOffsets.uncommittedConsumedSlots++;
             try { next.processor.releaseResponse(next.response); }
             finally {
                 next.header.releaseFromEgress();
@@ -230,6 +259,7 @@ public final class ClusterServiceEgress {
         }
         commitConsumedBytes();
         deferred.clear();
+        hasOverflowSessions = false;
         overflowSessions.clear();
         sessions.forEachValue(TransportSession::disconnect);
         sessions.clear();

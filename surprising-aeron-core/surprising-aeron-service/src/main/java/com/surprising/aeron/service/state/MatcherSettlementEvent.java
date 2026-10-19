@@ -978,10 +978,13 @@ public final class MatcherSettlementEvent implements
     }
 
     public boolean complete() {
+        if (ownerObservedComplete) return true;
         if (!ready()) return false;
         ensureLanesExecuted();
-        return completedLaneMask() == routedLaneMask()
+        boolean done = completedLaneMask() == routedLaneMask()
                 && (treasurySettlement == null || treasurySettlement.ledger == null || treasurySettlement.completed);
+        if (done) ownerObservedComplete = true;
+        return done;
     }
     public MatcherSettlementPlan plan() { return plan(0); }
     int planCount() { return batchPlanCount; }
@@ -1042,6 +1045,7 @@ public final class MatcherSettlementEvent implements
             throw new IllegalStateException("Ledger settlement requires retained isolated account facts");
         if (treasurySettlement == null) treasurySettlement = new TreasurySettlement();
         if (treasurySettlement.queued) throw new IllegalStateException("Treasury settlement was already queued");
+        ownerObservedComplete = false;
         treasurySettlement.ledger = ledger;
         if (!ledger.offer(treasurySettlement)) return false;
         treasurySettlement.queued = true;
@@ -1091,8 +1095,11 @@ public final class MatcherSettlementEvent implements
         return Long.bitCount(requiredLaneMask & (laneBit - 1));
     }
 
+    private boolean ownerObservedComplete;
+
     private void resetCompletions(int laneCount) {
         observedCompletedLaneMask = 0;
+        ownerObservedComplete = false;
         int length = Math.multiplyExact(laneCount, CACHE_LINE_LONGS);
         if (completedLanes == null || completedLanes.length != length) completedLanes = new long[length];
         else java.util.Arrays.fill(completedLanes, 0L);

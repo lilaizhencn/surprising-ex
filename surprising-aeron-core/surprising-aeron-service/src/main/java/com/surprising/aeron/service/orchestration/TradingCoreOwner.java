@@ -288,9 +288,6 @@ public final class TradingCoreOwner {
                 adv = !state.commits.matchingCommitReady(state.pendingMatching.get(last.sequence));
             }
             if (last.sequence != 0) {
-                if (committedCount > 0 && !adv && !state.commits.matchingCommitReady(state.pendingMatching.get(last.sequence))) {
-                    break;
-                }
                 CoreResponse terminalResponse = state.commits.commitReadyMatchingHead(
                         last.timestamp, last.position, last.sequence, dispatchThrough, adv);
                 if (terminalResponse == null) {

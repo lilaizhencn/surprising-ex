@@ -25,8 +25,7 @@ public final class MatcherPipelineGroup implements AutoCloseable {
         for (int shardId = 0; shardId < shards.length; shardId++) {
             final int currentShardId = shardId;
             shards[shardId].completionSignal(() -> {
-                completedShardMask.setBit(currentShardId);
-                if (signal != null) signal.run();
+                if (completedShardMask.setBit(currentShardId) && signal != null) signal.run();
             });
         }
     }

@@ -189,18 +189,19 @@ public final class TradingRuntimeState implements AutoCloseable {
         public boolean setBit(int bitIndex) {
             int offset = offset(bitIndex);
             if ((long) CELLS.getAcquire(cells, offset) != 0) return false;
-            return (long) CELLS.getAndSet(cells, offset, 1L) == 0;
+            CELLS.setRelease(cells, offset, 1L);
+            return true;
         }
 
         public void clearBit(int bitIndex) {
-            CELLS.getAndSet(cells, offset(bitIndex), 0L);
+            CELLS.setRelease(cells, offset(bitIndex), 0L);
         }
 
         public void clearBits(long bitsToClear) {
             while (bitsToClear != 0) {
                 int bit = Long.numberOfTrailingZeros(bitsToClear);
                 bitsToClear &= bitsToClear - 1;
-                clearBit(bit);
+                CELLS.setRelease(cells, bit * STRIDE, 0L);
             }
         }
 
@@ -216,8 +217,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             for (int bit = 0; bit < bitCount; bit++) {
                 int offset = bit * STRIDE;
                 // Empty polling reads a shared line; only an actual receipt takes write ownership.
-                if ((long) CELLS.getAcquire(cells, offset) != 0
-                        && (long) CELLS.getAndSet(cells, offset, 0L) != 0) ready |= 1L << bit;
+                if ((long) CELLS.getAcquire(cells, offset) != 0) {
+                    CELLS.setRelease(cells, offset, 0L);
+                    ready |= 1L << bit;
+                }
             }
             return ready;
         }
@@ -1745,8 +1748,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void publishPlaceAdmissionReady(int laneId, long coreSequence) {
         placeAdmissionReadyQueues[laneId].publish(coreSequence);
-        placeAdmissionReadyLanes.setBit(laneId);
-        signalOwnerCompletion();
+        if (placeAdmissionReadyLanes.setBit(laneId)) signalOwnerCompletion();
     }
 
     public long takePlaceAdmissionReadyLaneMask() {
@@ -1764,8 +1766,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (matcherShard < 0 || matcherShard >= topology.matchingEngineCount()) {
             throw new IllegalArgumentException("invalid matcher shard");
         }
-        accountAdmissionReadyShards.setBit(matcherShard);
-        signalOwnerCompletion();
+        if (accountAdmissionReadyShards.setBit(matcherShard)) signalOwnerCompletion();
     }
 
     public long takeAccountAdmissionReadyShardMask() {
@@ -1801,8 +1802,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void publishMatcherSettlementReady(int laneId, long coreSequence) {
         matcherSettlementReadyQueues[laneId].publish(coreSequence);
-        settlementReadyLanes.setBit(laneId);
-        signalOwnerCompletion();
+        if (settlementReadyLanes.setBit(laneId)) signalOwnerCompletion();
     }
 
     /**
@@ -1810,8 +1810,7 @@ public final class TradingRuntimeState implements AutoCloseable {
      * is the authoritative source, so no Owner-side queue node or expectation counter is needed.
      */
     void publishDirectMatcherSettlementReady(int laneId) {
-        directSettlementReadyLanes.setBit(laneId);
-        signalOwnerCompletion();
+        if (directSettlementReadyLanes.setBit(laneId)) signalOwnerCompletion();
     }
 
     public long takeDirectMatcherSettlementReadyLaneMask() {

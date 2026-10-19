@@ -205,13 +205,41 @@ public final class MatcherSettlementPlan {
         takerLaneId = runtime.topology().accountLaneId(activeUserId);
         requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
         matcherEvents = result.events();
-        int capacity = Math.addExact(matcherEvents.size(), 1);
+        int eventCount = matcherEvents.size();
+        if (eventCount == 0) {
+            orderIds[0] = takerOrderId;
+            orderCount = 1;
+            rejectTaker(!nativeAccepted(result));
+            return;
+        }
+        int capacity = Math.addExact(eventCount, 1);
         if (orderIds.length < capacity) orderIds = new long[Math.max(capacity, orderIds.length * 2)];
+        if (eventCount <= 4) {
+            orderIds[0] = takerOrderId;
+            int count = 1;
+            long remaining = remainingQuantity;
+            for (int index = 0; index < eventCount; index++) {
+                MatcherEvent event = matcherEvents.get(index);
+                if (event == null) throw new IllegalArgumentException("missing matcher event");
+                if (event.eventType() != MatcherEventType.TRADE) continue;
+                if (event.price() <= 0 || event.size() <= 0 || event.matchedOrderId() <= 0
+                        || event.matchedOrderUid() <= 0 || event.matchedOrderUid() == activeUserId)
+                    throw new IllegalStateException("invalid direct fill identity or quantity");
+                remaining = Math.subtractExact(remaining, event.size());
+                if (remaining < 0) throw new IllegalStateException("fill exceeds admitted taker quantity");
+                count = addUniqueLinear(orderIds, count, event.matchedOrderId());
+                requiredLaneMask |= runtime.topology().accountLaneMask(event.matchedOrderUid());
+                tradeCount++;
+            }
+            orderCount = count;
+            rejectTaker(!nativeAccepted(result));
+            return;
+        }
         LongHashSet keys = directOrderKeys;
         try {
             orderCount = addUnique(keys, orderIds, 0, takerOrderId);
             long remaining = remainingQuantity;
-            for (int index = 0; index < matcherEvents.size(); index++) {
+            for (int index = 0; index < eventCount; index++) {
                 MatcherEvent event = matcherEvents.get(index);
                 if (event == null) throw new IllegalArgumentException("missing matcher event");
                 if (event.eventType() != MatcherEventType.TRADE) continue;
@@ -227,6 +255,14 @@ public final class MatcherSettlementPlan {
             rejectTaker(!nativeAccepted(result));
             indexLaneEvents(runtime);
         } finally { keys.clear(); }
+    }
+
+    private static int addUniqueLinear(long[] values, int size, long value) {
+        for (int i = 0; i < size; i++) {
+            if (values[i] == value) return size;
+        }
+        values[size] = value;
+        return size + 1;
     }
 
     void buildDirectNativeCancellation(long sequence, long userId, long orderId,

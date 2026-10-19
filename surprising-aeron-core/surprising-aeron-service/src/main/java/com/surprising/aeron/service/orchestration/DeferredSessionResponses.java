@@ -24,14 +24,36 @@ final class DeferredSessionResponses {
     /** 复用的发送包装器，只在一次 offer 调用期间引用消息。 */
     private final UnsafeBuffer buffer = new UnsafeBuffer(new byte[0]);
 
-    void offer(TransportSession session, DirectBuffer source, int length, long nowNs) {
-        if (session.isClosing()) { remove(session.id()); return; }
-        SessionQueue queue = sessions.get(session.id());
+    void offer(TransportSession session, DirectBuffer source, int length) {
+        if (session.isClosing()) {
+            if (size != 0) remove(session.id());
+            return;
+        }
+        SessionQueue queue = size == 0 ? null : sessions.get(session.id());
         if (queue == null) {
             long result = session.offer(source, 0, length);
             if (result >= 0) return;
             if (!retryable(result)) { session.close(); return; }
         }
+        enqueueDeferred(session, queue, source, length, System.nanoTime());
+    }
+
+    void offer(TransportSession session, DirectBuffer source, int length, long nowNs) {
+        if (session.isClosing()) {
+            if (size != 0) remove(session.id());
+            return;
+        }
+        SessionQueue queue = size == 0 ? null : sessions.get(session.id());
+        if (queue == null) {
+            long result = session.offer(source, 0, length);
+            if (result >= 0) return;
+            if (!retryable(result)) { session.close(); return; }
+        }
+        enqueueDeferred(session, queue, source, length, nowNs);
+    }
+
+    private void enqueueDeferred(
+            TransportSession session, SessionQueue queue, DirectBuffer source, int length, long nowNs) {
         if (length > MAX_BYTES - bytes || size == MAX_RESPONSES) {
             // Execution is already terminal. The gateway must reconcile by commandId after reconnect.
             // Never roll back committed funds or report a new business rejection here.

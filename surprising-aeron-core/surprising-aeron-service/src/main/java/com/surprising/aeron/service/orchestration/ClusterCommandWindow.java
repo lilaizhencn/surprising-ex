@@ -22,6 +22,8 @@ public final class ClusterCommandWindow {
     private static final int MAX_TRACKED_ORDER_IDS = Math.max(
             PlaceOrderBatchCommand.MAX_ORDERS, CancelOrderBatchCommand.MAX_ORDERS);
 
+    private static final int ORDER_INDEX_ROTATION_THRESHOLD = 4096;
+
     /** Owner ingress fences are limited to exact orders and the submitting account Lane. */
     public enum Conflict { NONE, ORDER, ACCOUNT }
 
@@ -30,8 +32,19 @@ public final class ClusterCommandWindow {
     private final int indexMask;
     private int head;
     private int size;
+    private long headAbsSeq = 1L;
+    private long tailAbsSeq;
     private long lastMatchingSequence;
-    private int lastMatchingPhysical = -1;
+    private long lastMatchingAbsSeq;
+
+    private final org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap userLastAbsSeq =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap(512);
+    private org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap activeOrderLastAbsSeq =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap(4096);
+    private org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap previousOrderLastAbsSeq =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap(4096);
+    private long previousOrderMaxAbsSeq;
+    private int activeOrderInserts;
 
     private long candidateUser;
     private long candidateUserLaneBit;
@@ -92,19 +105,16 @@ public final class ClusterCommandWindow {
      */
     public int conflictingPrefixSize() {
         conflict = Conflict.NONE;
-        int exactPrefix = 0;
-        exactPrefix = exactOrderPrefix(exactPrefix);
+        if (size == 0) return 0;
+        int exactPrefix = exactOrderPrefix(0);
         long candidateUserId = candidateRouted ? candidateUser : 0;
         if (candidateUserId != 0) {
-            for (int i = size - 1; i >= 0; i--) {
-                Entry entry = get(i);
-                if (entry.routePresent && entry.routeUserId == candidateUserId) {
-                    int userPrefix = i + 1;
-                    if (userPrefix > exactPrefix) {
-                        conflict = Conflict.ACCOUNT;
-                        return userPrefix;
-                    }
-                    break;
+            long userAbsSeq = userLastAbsSeq.get(candidateUserId);
+            if (userAbsSeq >= headAbsSeq) {
+                int userPrefix = (int) (userAbsSeq - headAbsSeq + 1L);
+                if (userPrefix > exactPrefix) {
+                    conflict = Conflict.ACCOUNT;
+                    return userPrefix;
                 }
             }
         }
@@ -122,8 +132,10 @@ public final class ClusterCommandWindow {
         switch (type) {
             case CANCEL_ORDER -> prefix = maxOrderPrefix(prefix, decoded.cancelOrder().orderId());
             case CANCEL_ORDER_BATCH -> {
-                for (var order : decoded.cancelOrderBatch().orders())
-                    prefix = maxOrderPrefix(prefix, order.orderId());
+                var orders = decoded.cancelOrderBatch().orders();
+                for (int i = 0, n = orders.size(); i < n; i++) {
+                    prefix = maxOrderPrefix(prefix, orders.get(i).orderId());
+                }
             }
             default -> { }
         }
@@ -132,13 +144,12 @@ public final class ClusterCommandWindow {
 
     private int maxOrderPrefix(int prefix, long orderId) {
         if (orderId <= 0) return prefix;
-        for (int i = size - 1; i >= 0; i--) {
-            Entry entry = get(i);
-            for (int k = 0; k < entry.orderCount; k++) {
-                if (entry.orders[k] == orderId) {
-                    return Math.max(prefix, i + 1);
-                }
-            }
+        long orderAbsSeq = activeOrderLastAbsSeq.get(orderId);
+        if (orderAbsSeq < headAbsSeq && previousOrderMaxAbsSeq >= headAbsSeq) {
+            orderAbsSeq = previousOrderLastAbsSeq.get(orderId);
+        }
+        if (orderAbsSeq >= headAbsSeq) {
+            return Math.max(prefix, (int) (orderAbsSeq - headAbsSeq + 1L));
         }
         return prefix;
     }
@@ -177,6 +188,8 @@ public final class ClusterCommandWindow {
         if (size == entries.length) throw new IllegalStateException("cluster command window is full");
         if (!candidateRouted) throw new IllegalStateException("ingress route is missing");
         Entry entry = get(size++);
+        long absSeq = ++tailAbsSeq;
+        entry.absSeq = absSeq;
         entry.sessionId = sessionId;
         entry.request = request;
         entry.timestamp = timestamp;
@@ -186,7 +199,8 @@ public final class ClusterCommandWindow {
         entry.routeUserLaneBit = candidateUserLaneBit;
         entry.routePresent = true;
         int physical = (head + size - 1) & indexMask;
-        entry.orderCount = copyTrackedOrderIds(entry);
+        userLastAbsSeq.put(candidateUser, absSeq);
+        indexTrackedOrderIds(absSeq);
         if (decodedSource == request && decoded == candidateDecoder) {
             var spare = entry.decodedSlot;
             entry.decodedSlot = candidateDecoder;
@@ -196,30 +210,42 @@ public final class ClusterCommandWindow {
         return entry;
     }
 
-    /** Store only exact identities belonging to this admitted command entry. */
-    private int copyTrackedOrderIds(Entry entry) {
-        if (routedSource == null || routedSource != decodedSource || decoded == null) return 0;
+    /** Index exact identities belonging to this admitted command entry in O(1) without per-entry array clearing. */
+    private void indexTrackedOrderIds(long absSeq) {
+        if (routedSource == null || routedSource != decodedSource || decoded == null) return;
+        if (activeOrderInserts >= ORDER_INDEX_ROTATION_THRESHOLD && headAbsSeq > previousOrderMaxAbsSeq) {
+            previousOrderLastAbsSeq.clear();
+            var swap = previousOrderLastAbsSeq;
+            previousOrderLastAbsSeq = activeOrderLastAbsSeq;
+            activeOrderLastAbsSeq = swap;
+            previousOrderMaxAbsSeq = absSeq - 1L;
+            activeOrderInserts = 0;
+        }
         int count = 0;
         switch (decodedSource.header().messageType()) {
-            case PLACE_ORDER -> count = trackOrderId(entry, count, decoded.placeOrder().orderId());
-            case CANCEL_ORDER -> count = trackOrderId(entry, count, decoded.cancelOrder().orderId());
+            case PLACE_ORDER -> count = trackOrderId(absSeq, count, decoded.placeOrder().orderId());
+            case CANCEL_ORDER -> count = trackOrderId(absSeq, count, decoded.cancelOrder().orderId());
             case PLACE_ORDER_BATCH -> {
-                for (var order : decoded.placeOrderBatch().orders())
-                    count = trackOrderId(entry, count, order.orderId());
+                var orders = decoded.placeOrderBatch().orders();
+                for (int i = 0, n = orders.size(); i < n; i++) {
+                    count = trackOrderId(absSeq, count, orders.get(i).orderId());
+                }
             }
             case CANCEL_ORDER_BATCH -> {
-                for (var order : decoded.cancelOrderBatch().orders())
-                    count = trackOrderId(entry, count, order.orderId());
+                var orders = decoded.cancelOrderBatch().orders();
+                for (int i = 0, n = orders.size(); i < n; i++) {
+                    count = trackOrderId(absSeq, count, orders.get(i).orderId());
+                }
             }
             default -> { }
         }
-        return count;
     }
 
-    private int trackOrderId(Entry entry, int count, long orderId) {
+    private int trackOrderId(long absSeq, int count, long orderId) {
         if (orderId <= 0) return count;
         if (count >= MAX_TRACKED_ORDER_IDS) throw new IllegalArgumentException("too many tracked order IDs");
-        entry.orders[count] = orderId;
+        activeOrderLastAbsSeq.put(orderId, absSeq);
+        activeOrderInserts++;
         return count + 1;
     }
 
@@ -230,7 +256,7 @@ public final class ClusterCommandWindow {
         entry.sequence = sequence;
         if (sequence == 0) return;
         lastMatchingSequence = sequence;
-        lastMatchingPhysical = entry.physicalSlot;
+        lastMatchingAbsSeq = entry.absSeq;
     }
 
     public int size() { return size; }
@@ -245,24 +271,15 @@ public final class ClusterCommandWindow {
 
     public void removePrefix(int count) {
         if (count < 0 || count > size) throw new IllegalArgumentException("invalid window prefix");
-        boolean removedLastMatching = false;
         for (int i = 0; i < count; i++) {
             Entry entry = get(i);
-            int physical = (head + i) & indexMask;
-            for (int k = 0; k < entry.orderCount; k++) {
-                entry.orders[k] = 0;
-            }
-            if (entry.sequence != 0) {
-                removedLastMatching |= physical == lastMatchingPhysical;
-            }
             entry.decodedSlot.clearCommandSlot();
-            entry.orderCount = 0;
             entry.sessionId = NO_SESSION_ID;
             if (decodedSource == entry.request) releaseDecoded();
             if (entry.request != null) entry.request.releaseDecoderSlot();
             entry.request = null;
             entry.response = null;
-            entry.sequence = entry.timestamp = entry.position = 0;
+            entry.sequence = entry.timestamp = entry.position = entry.absSeq = 0;
             entry.routeUserId = entry.routeUserLaneBit = 0;
             entry.routeMatcherShard = -1;
             entry.routePresent = false;
@@ -270,26 +287,19 @@ public final class ClusterCommandWindow {
         }
         head = (head + count) & indexMask;
         size -= count;
-        if (removedLastMatching) recomputeLastMatching();
-    }
-
-    private void recomputeLastMatching() {
-        lastMatchingSequence = 0;
-        lastMatchingPhysical = -1;
-        for (int i = size - 1; i >= 0; i--) {
-            Entry entry = get(i);
-            if (entry.sequence == 0) continue;
-            lastMatchingSequence = entry.sequence;
-            lastMatchingPhysical = entry.physicalSlot;
-            return;
+        headAbsSeq += count;
+        if (lastMatchingAbsSeq < headAbsSeq) {
+            lastMatchingSequence = 0;
+            lastMatchingAbsSeq = 0;
+        }
+        if (size == 0 && userLastAbsSeq.size() > ORDER_INDEX_ROTATION_THRESHOLD) {
+            userLastAbsSeq.clear();
         }
     }
 
     public static final class Entry {
         private DecodedMatchingCommand decodedSlot = DecodedMatchingCommand.commandSlot();
-        /** Only exact identities needed for cancellation/retry fencing. */
-        public final long[] orders = new long[MAX_TRACKED_ORDER_IDS];
-        public int orderCount;
+        private long absSeq;
         public long routeUserId;
         public long routeUserLaneBit;
         public int routeMatcherShard = -1;

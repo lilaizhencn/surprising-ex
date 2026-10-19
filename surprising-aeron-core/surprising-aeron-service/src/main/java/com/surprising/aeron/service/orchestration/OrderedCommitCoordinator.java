@@ -116,9 +116,16 @@ public final class OrderedCommitCoordinator {
                                   MatchingResult matchingResult,
                                   long clusterTimestamp, long clusterPosition) {
         owner.assertOwner();
-        CommandSlot pending = owner.pendingMatching.get(sequence);
+        return completeMatching(owner.pendingMatching.get(sequence), matchingResult, clusterTimestamp, clusterPosition);
+    }
+
+    CoreResponse completeMatching(CommandSlot pending,
+                                  MatchingResult matchingResult,
+                                  long clusterTimestamp, long clusterPosition) {
+        owner.assertOwner();
         if (pending == null || matchingResult == null) return null;
-        OrderBatchPending waitingBatch = owner.batches.batch(sequence);
+        long sequence = pending.sequence();
+        OrderBatchPending waitingBatch = pending.orderBatch != null ? pending.orderBatch : owner.batches.batch(sequence);
         try {
             owner.runtimeState.assertAccountLanesHealthy();
         } catch (RuntimeException failure) {
@@ -1041,7 +1048,7 @@ public final class OrderedCommitCoordinator {
             MatchingResult matching,
             long clusterTimestamp,
             long clusterPosition) {
-        return completeMatching(pending.sequence(), matching, clusterTimestamp, clusterPosition);
+        return completeMatching(pending, matching, clusterTimestamp, clusterPosition);
     }
 
     public int commitReadyMatching(int maxCompletions, long clusterTimestamp, long clusterPosition,
