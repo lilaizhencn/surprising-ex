@@ -39,7 +39,7 @@ class SixProductLineContractLiveTest {
     @Test
     void createListEditAndPauseThroughAdminRequestsWithoutRestart() throws Exception {
         String jdbcUrl = System.getenv("SIX_LINE_LIVE_JDBC_URL");
-        assertThat(jdbcUrl).matches("jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/(sixline_live|surprising_spot_[0-9_]+)");
+        assertThat(jdbcUrl).matches("jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/(sixline_live|surprising_spot_[0-9_]+|surprising_delivery_[0-9_]+)");
         var jdbc = new JdbcTemplate(new DriverManagerDataSource(jdbcUrl,
                 System.getenv().getOrDefault("SIX_LINE_LIVE_JDBC_USER", "sixline_qa"),
                 System.getenv().getOrDefault("SIX_LINE_LIVE_JDBC_PASSWORD", "qa")));
@@ -128,6 +128,9 @@ class SixProductLineContractLiveTest {
         assertThat(processIdentities()).isEqualTo(started);
         var changes = get("/api/v1/admin/gateway/instrument-admin/" + id + "/changes?productLine=" + line + "&limit=20", admin);
         assertThat(changes.size()).isEqualTo(5);
+        if (line == ProductLine.LINEAR_DELIVERY && System.getenv("SIX_LINE_LIVE_UI_FIXTURE") != null)
+            exerciseLinearDeliveryClients(jdbc, created);
+        assertThat(processIdentities()).isEqualTo(started);
         System.out.printf("SIX_LINE_CONTRACT_PASS productLine=%s instrumentId=%d version=%d transitions=DRAFT,PRE_TRADING,TRADING,EDIT,HALT processes=%s%n",
                 line, id, halted.path("lastChangeId").asLong(), started.keySet());
     }
@@ -148,32 +151,78 @@ class SixProductLineContractLiveTest {
     }
 
     /** Optional local UI handoff: keep the real maker running until both clients finish. */
-    private void awaitSpotClientVerification(Participant user, Participant maker, int instrumentId, long bid) throws Exception {
+    private void awaitClientVerification(Participant user, Participant maker, int instrumentId, long bid) throws Exception {
         String output = System.getenv("SIX_LINE_LIVE_UI_FIXTURE");
         if (output == null || output.isBlank()) return;
         var fixture = java.nio.file.Path.of(output).toAbsolutePath().normalize();
-        assertThat(fixture.toString()).startsWith("/tmp/surprising-spot-fused-");
+        assertThat(fixture.toString()).startsWith(line == ProductLine.SPOT
+                ? "/tmp/surprising-spot-fused-" : "/tmp/surprising-linear-delivery-fused-");
         var done = fixture.resolveSibling(fixture.getFileName() + ".done");
         assertThat(java.nio.file.Files.exists(fixture)).isFalse();
         assertThat(java.nio.file.Files.exists(done)).isFalse();
         try {
             java.nio.file.Files.writeString(fixture, json.writeValueAsString(Map.of(
                     "userId", user.id, "accessToken", user.token, "instrumentId", String.valueOf(instrumentId),
-                    "makerId", maker.id, "bidPriceTicks", bid, "runId", System.getenv("SIX_LINE_LIVE_RUN_ID"),
-                    "session", Map.of("accessToken", user.token, "user", Map.of("userId", user.id, "username", "live-spot")))),
+                    "makerId", maker.id, "bidPriceTicks", bid, "runId", System.getenv("SIX_LINE_LIVE_RUN_ID"), "productLine", line.name(),
+                    "session", Map.of("accessToken", user.token, "user", Map.of("userId", user.id, "username", "live-" + line.name())))),
                     java.nio.file.StandardOpenOption.CREATE_NEW);
             java.nio.file.Files.setPosixFilePermissions(fixture, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
-            System.out.printf("SPOT_CLIENT_FIXTURE_READY instrumentId=%d userId=%d makerId=%d%n", instrumentId, user.id, maker.id);
+            System.out.printf("CLIENT_FIXTURE_READY productLine=%s instrumentId=%d userId=%d makerId=%d%n", line, instrumentId, user.id, maker.id);
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MINUTES.toNanos(4);
             while (!java.nio.file.Files.exists(done)) {
-                assertThat(System.nanoTime()).as("bounded SPOT browser/client handoff").isLessThan(deadline);
+                assertThat(System.nanoTime()).as("bounded browser/client handoff").isLessThan(deadline);
                 Thread.sleep(250);
             }
             assertThat(java.nio.file.Files.readString(done).trim()).isEqualTo("PASS");
-            System.out.println("SPOT_CLIENT_HANDOFF_PASS browserAndFlutter=true");
+            System.out.printf("CLIENT_HANDOFF_PASS productLine=%s browserAndFlutter=true%n", line);
         } finally {
             java.nio.file.Files.deleteIfExists(fixture);
             java.nio.file.Files.deleteIfExists(done);
+        }
+    }
+
+    /** A separate contract enters SETTLING once; both clients close one of two contracts without reopening it. */
+    private void exerciseLinearDeliveryClients(JdbcTemplate jdbc, JsonNode template) throws Exception {
+        var draft = ((ObjectNode) template).deepCopy();
+        draft.remove(List.of("changeId", "lastChangeId", "createdAt", "updatedAt", "baseAsset", "quoteAsset", "settleAsset", "contractValueAsset"));
+        draft.putNull("instrumentId"); draft.put("symbol", "QA-DELIVERY-CLOSE-" + run.toUpperCase(Locale.ROOT));
+        draft.put("status", "DRAFT");
+        var created = write("instrument-admin", "/upsert?reason=delivery-close-qa&expectedChangeId=0", draft, 200);
+        int id = created.path("instrumentId").asInt();
+        var listed = changeStatus(id, created, "PRE_TRADING", 200);
+        var trading = changeStatus(id, listed, "TRADING", 200);
+        awaitSync(id, trading.path("lastChangeId").asLong());
+        var user = participantFixture(jdbc, "delivery-trader", false);
+        var maker = participantFixture(jdbc, "delivery-maker", false);
+        fund(user, "USDT", 10_000_000_000_000L); fund(maker, "USDT", 10_000_000_000_000L);
+        try (var core = SurprisingAeronClient.connect(line, List.of("127.0.0.1"), "127.0.0.1", Duration.ofSeconds(10))) {
+            var before = combinedFunds(core, user.id, maker.id);
+            place(maker, id, "SELL", "LIMIT", 500_000, "GTC", false, 2);
+            place(user, id, "BUY", "LIMIT", 500_000, "IOC", false, 2);
+            var settling = changeStatus(id, trading, "SETTLING", 200);
+            awaitSync(id, settling.path("lastChangeId").asLong());
+            assertThat(get("/api/v1/gateway/instrument/list?productLine=LINEAR_DELIVERY", null).toString()).contains("QA-DELIVERY-CLOSE-" + run.toUpperCase(Locale.ROOT));
+            place(maker, id, "BUY", "LIMIT", 500_000, "GTC", true, 2);
+            long leverageDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+            JsonNode leverage;
+            do {
+                leverage = request("GET", "/api/v1/gateway/trading-leverage/settings?userId=" + user.id
+                        + "&instrumentId=" + id + "&marginMode=CROSS", "", user.token, null, 200, 503);
+                if (leverage.path("productLine").asString().equals(line.name())) break;
+                assertThat(System.nanoTime()).as("bounded realtime leverage readiness").isLessThan(leverageDeadline);
+                Thread.sleep(100);
+            } while (true);
+            assertThat(leverage.path("instrumentId").asInt()).isEqualTo(id);
+            assertThat(leverage.path("leveragePpm").asLong()).isPositive();
+            awaitClientVerification(user, maker, id, 500_000);
+            for (var actor : List.of(user, maker)) {
+                var state = userState(core, actor.id);
+                assertThat(state.reservations()).isEmpty();
+                assertThat(state.positions()).allMatch(p -> p.signedQuantitySteps() == 0 && p.positionMarginUnits() == 0);
+                assertThat(state.balances()).allMatch(b -> b.lockedUnits() == 0);
+            }
+            assertThat(combinedFunds(core, user.id, maker.id)).as("delivery close funds conservation").isEqualTo(before);
+            System.out.printf("LINEAR_DELIVERY_CLIENTS_PASS instrumentId=%d trader=%d maker=%d status=SETTLING positions=0 locked=0 fundsDifference=0%n", id, user.id, maker.id);
         }
     }
 
@@ -318,7 +367,7 @@ class SixProductLineContractLiveTest {
             assertThat(restTradeIds).containsAll(user.trades.keySet());
             System.out.printf("SIX_LINE_REALTIME_PASS productLine=%s depthEvents=%d wsTrades=%d restTrades=%d identitiesMatch=true%n",
                     line, user.depth.size(), user.trades.size(), restTradeIds.size());
-            if (line == ProductLine.SPOT) awaitSpotClientVerification(user, maker, instrumentId, bid);
+            if (line == ProductLine.SPOT) awaitClientVerification(user, maker, instrumentId, bid);
             write("market-maker", "/strategies/" + strategy + "/pause?productLine=" + line, null, 200);
             strategyPaused = true;
             for (int attempt = 0; attempt < 100; attempt++) {
@@ -364,9 +413,19 @@ class SixProductLineContractLiveTest {
     private void verifyCurrentRisk(SurprisingAeronClient core, Participant actor, int instrumentId, String settlement, JsonNode instrument) throws Exception {
         var position = userState(core, actor.id).positions().stream().filter(p -> p.instrumentId().equals(String.valueOf(instrumentId))).findFirst().orElseThrow();
         assertThat(position.signedQuantitySteps()).isEqualTo(1);
-        var rows = get("/api/v1/gateway/risk/positions/latest?userId=" + actor.id, actor.token).path("positions");
-        JsonNode risk = null;
-        for (var candidate : rows) if (candidate.path("instrumentId").asInt() == instrumentId) risk = candidate;
+        JsonNode risk = null, account = null;
+        long riskDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        // 两个 GET 可能跨过一次标记价更新；只对齐一致的持仓/账户投影再独立核算。
+        while (true) {
+            var rows = get("/api/v1/gateway/risk/positions/latest?userId=" + actor.id, actor.token).path("positions");
+            risk = null;
+            for (var candidate : rows) if (candidate.path("instrumentId").asInt() == instrumentId) risk = candidate;
+            account = get("/api/v1/gateway/risk/account/latest?userId=" + actor.id + "&accountType=" + line.accountTypeCode() + "&settleAsset=" + settlement, actor.token);
+            if (risk != null && account.path("unrealizedPnlUnits").asLong() == risk.path("unrealizedPnlUnits").asLong()
+                    && account.path("maintenanceMarginUnits").asLong() == risk.path("maintenanceMarginUnits").asLong()) break;
+            assertThat(System.nanoTime()).as("bounded coherent risk reads: position=" + risk + " account=" + account).isLessThan(riskDeadline);
+            Thread.sleep(100);
+        }
         assertThat(risk).isNotNull();
         long mark = risk.path("markPriceTicks").asLong();
         assertThat(mark).isPositive();
@@ -390,7 +449,6 @@ class SixProductLineContractLiveTest {
         long maintenance = line == ProductLine.OPTION ? 0 : java.math.BigDecimal.valueOf(notional)
                 .multiply(java.math.BigDecimal.valueOf(maintenanceRate)).divide(java.math.BigDecimal.valueOf(1_000_000), 0, java.math.RoundingMode.CEILING).longValueExact();
         assertThat(risk.path("maintenanceMarginUnits").asLong()).isEqualTo(maintenance);
-        var account = get("/api/v1/gateway/risk/account/latest?userId=" + actor.id + "&accountType=" + line.accountTypeCode() + "&settleAsset=" + settlement, actor.token);
         var balance = userState(core, actor.id).balances().stream().filter(b -> b.asset().equals(settlement)).findFirst().orElseThrow();
         long wallet = Math.addExact(balance.availableUnits(), balance.lockedUnits());
         long equity = Math.addExact(wallet, line == ProductLine.OPTION ? notional : pnl);

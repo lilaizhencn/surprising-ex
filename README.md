@@ -230,3 +230,9 @@ Web/client 补齐单笔现货订单行改单和请求身份，响应丢失时只
 Web/client 从 realtime 获取完整固定目标，保存批次键和发送断点后按原生每批 50 笔撤单，展示成功/失败及失败订单。响应丢失时查询 realtime 提交投影；确认当前批次后只继续原计划未发送的批次，不重新读取目标或重发已发送批次。Core 保持交易职责，本次未改在线撮合/账户/账本交易逻辑。发布前需要 SQL 迁移、realtime 更新及必要的历史逐项结果回补；[完整契约和发布顺序](docs/realtime-command-results.md#现货批量撤单与固定目标恢复2026-10-19)，[验证与清理记录](docs/validation/spot-bulk-cancellation-20261019.json)。
 
 后续已完成真实 SPOT FUSED 两端验收：Web 桌面/手机和 Flutter 在真实做市、HTTP/WS 下验证分批撤单、暂停 realtime 后 202 未决、断响应/刷新/重建状态恢复以及新增订单保留。最终用户和做市冻结清零，逐资产资金守恒差额为 0。修复完整建库时新增回执列缺少业务说明触发的 schema gate；[复现方式](docs/realtime-command-results.md#现货-fused-两端实链路验收2026-10-19-后续)，[验证记录](docs/validation/spot-fused-clients-20261019.json)。原生设备安装、其他产品和其余批量写入仍待继续。
+
+## U 本位交割结算中减仓与两端恢复（2026-10-19）
+
+`InstrumentRequestService.latest/list` 保留 `LINEAR_DELIVERY + SETTLING` 的公开合约元数据，供用户定位已有持仓、直接减仓与撤单；DRAFT/CLOSED 和其他产品的可见规则保持原有约束。普通交易仍由 `OrderValidator`/Core 校验：结算中仅接受 reduceOnly，HALT 不允许下单。此处不改变结算调度或资金模型。
+
+Web/client 的单笔下单和撤单在 POST 前持久保存原身份；响应丢失后查询 realtime 提交/撤单回执，未知结果保持待确认，刷新或重启不重发原写入。行情、账户、订单及回执仍走 realtime；验收中的 Core 查询仅用于独立对账。先更新 gateway 的合约可见性，再发布两端，沿用已完成的回执迁移与导出；[业务和复现说明](docs/realtime-command-results.md#u-本位交割结算中减仓与恢复2026-10-19)。

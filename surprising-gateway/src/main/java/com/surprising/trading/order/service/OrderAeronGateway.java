@@ -5,7 +5,6 @@ import io.aeron.driver.MediaDriver;
 import org.springframework.beans.factory.annotation.Qualifier;
 import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.protocol.CoreMessageType;
-import com.surprising.aeron.protocol.CoreLeverageView;
 import com.surprising.aeron.protocol.CoreOpenOrdersQuery;
 import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreResponse;
@@ -139,14 +138,6 @@ public class OrderAeronGateway implements AutoCloseable {
             throw new IllegalStateException(response.resultCode().name() + ": Aeron open orders query failed");
         }
         return CoreStateQueryCodec.decodeOpenOrders(response.data()).orders();
-    }
-
-    public CoreLeverageView leverage(long userId, String instrumentId, com.surprising.aeron.protocol.CoreMarginMode mode) {
-        CoreUserStateView user = userState(userId);
-        if (user == null) return null;
-        return user.leverages().stream()
-                .filter(value -> value.instrumentId().equalsIgnoreCase(instrumentId) && value.marginMode() == mode)
-                .findFirst().orElse(null);
     }
 
     public List<CoreOrderStateView> lifecycleOpenOrders(String instrumentId, int limit) {

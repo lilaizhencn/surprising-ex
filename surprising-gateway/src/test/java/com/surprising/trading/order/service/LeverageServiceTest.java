@@ -24,11 +24,42 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class LeverageServiceTest {
+    private final com.surprising.realtime.api.ValkeyUserQueries queries = mock(com.surprising.realtime.api.ValkeyUserQueries.class);
+
+    @org.junit.jupiter.api.BeforeEach
+    void projectedAccount() {
+        org.mockito.Mockito.when(queries.require(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.isNull()))
+                .thenAnswer(call -> view(call.getArgument(0), call.getArgument(1), java.util.List.of()));
+    }
+
+    private com.surprising.realtime.api.UserReadView view(ProductLine line, long user, java.util.List<CoreLeverageView> leverages) {
+        var account = new com.surprising.aeron.protocol.CoreUserStateView(line, user, 1,
+                com.surprising.aeron.protocol.CorePositionMode.ONE_WAY, java.util.List.of(), java.util.List.of(), java.util.List.of(), leverages);
+        return new com.surprising.realtime.api.UserReadView("READY", "1", 1, account, java.util.List.of(), java.util.List.of(), 1, java.util.List.of());
+    }
+
+    @Test
+    void allProductsReadOnlyTheirRealtimeLeverageAndRejectUnavailableOrWrongAccounts() {
+        for (var type : ContractType.values()) {
+            var line = type.productLine();
+            var aeron = mock(OrderAeronGateway.class);
+            var service = new LeverageService(id -> Optional.of(rule(id, type)), aeron, queries);
+            org.mockito.Mockito.when(queries.require(line, 1001L, null))
+                    .thenReturn(view(line, 1001L, java.util.List.of(new CoreLeverageView("73", CoreMarginMode.CROSS, 5_000_000L))));
+            assertThat(service.get(1001L, "73", MarginMode.CROSS, line).leveragePpm()).isEqualTo(5_000_000L);
+            org.mockito.Mockito.when(queries.require(line, 1001L, null)).thenReturn(view(line, 1002L, java.util.List.of()));
+            assertThatThrownBy(() -> service.get(1001L, "73", MarginMode.CROSS, line)).hasMessageContaining("503");
+            org.mockito.Mockito.when(queries.require(line, 1001L, null)).thenThrow(new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_STALE"));
+            assertThatThrownBy(() -> service.get(1001L, "73", MarginMode.CROSS, line)).hasMessageContaining("READ_VIEW_STALE");
+            org.mockito.Mockito.verifyNoInteractions(aeron);
+            org.mockito.Mockito.reset(queries);
+        }
+    }
 
     @Test
     void explicitCrossMarginRepricingIsEncodedInTheJournalCommand() {
         OrderAeronGateway aeron = mock(OrderAeronGateway.class);
-        LeverageService service = new LeverageService(id -> Optional.of(rule(id)), aeron);
+        LeverageService service = new LeverageService(id -> Optional.of(rule(id)), aeron, queries);
         service.set(new LeverageSettingRequest(1001, ProductLine.LINEAR_PERPETUAL, "1", MarginMode.CROSS,
                 5_000_000, "fund maker margin", true));
         ArgumentCaptor<byte[]> payload = ArgumentCaptor.forClass(byte[].class);
@@ -41,7 +72,7 @@ class LeverageServiceTest {
     void setLeverageNormalizesSymbolAndPublishesFactWithoutDatabaseWrite() {
         InstrumentRuleLookup lookup = instrumentId -> Optional.of(rule(instrumentId));
         OrderAeronGateway aeron = mock(OrderAeronGateway.class);
-        LeverageService service = new LeverageService(lookup, aeron);
+        LeverageService service = new LeverageService(lookup, aeron, queries);
 
         LeverageSettingResponse response = service.set(new LeverageSettingRequest(1001L,
                 ProductLine.LINEAR_PERPETUAL, "1", MarginMode.ISOLATED, 10_000_000L,
@@ -60,7 +91,7 @@ class LeverageServiceTest {
     @Test
     void rejectsLeverageAboveInstrumentMaximum() {
         LeverageService service = new LeverageService(instrumentId -> Optional.of(rule(instrumentId)),
-                mock(OrderAeronGateway.class));
+                mock(OrderAeronGateway.class), queries);
 
         assertThatThrownBy(() -> service.set(new LeverageSettingRequest(1001L,
                 ProductLine.LINEAR_PERPETUAL, "1", MarginMode.CROSS, 125_000_000L, "too high")))
@@ -71,7 +102,7 @@ class LeverageServiceTest {
     @Test
     void retryAfterRejectedAttemptUsesNewCommandId() {
         OrderAeronGateway aeron = mock(OrderAeronGateway.class);
-        LeverageService service = new LeverageService(instrumentId -> Optional.of(rule(instrumentId)), aeron);
+        LeverageService service = new LeverageService(instrumentId -> Optional.of(rule(instrumentId)), aeron, queries);
         LeverageSettingRequest request = new LeverageSettingRequest(1001L,
                 ProductLine.LINEAR_PERPETUAL, "1", MarginMode.CROSS, 10_000_000L,
                 "retry after canceling orders");
@@ -93,7 +124,7 @@ class LeverageServiceTest {
     @Test
     void getFallsBackToInstrumentDefaultWhenUserSettingIsMissing() {
         InstrumentRuleLookup lookup = instrumentId -> Optional.of(rule(instrumentId));
-        LeverageService service = new LeverageService(lookup, mock(OrderAeronGateway.class));
+        LeverageService service = new LeverageService(lookup, mock(OrderAeronGateway.class), queries);
 
         assertThat(service.get(1001L, "1", null).source()).isEqualTo("INSTRUMENT_DEFAULT");
     }
@@ -101,7 +132,7 @@ class LeverageServiceTest {
     @Test
     void getDerivesProductLineFromInstrumentContractType() {
         InstrumentRuleLookup lookup = instrumentId -> Optional.of(rule(instrumentId, ContractType.INVERSE_DELIVERY));
-        LeverageService service = new LeverageService(lookup, mock(OrderAeronGateway.class));
+        LeverageService service = new LeverageService(lookup, mock(OrderAeronGateway.class), queries);
 
         assertThat(service.get(1001L, "54", null).productLine())
                 .isEqualTo(ProductLine.INVERSE_DELIVERY);
@@ -110,7 +141,7 @@ class LeverageServiceTest {
     @Test
     void rejectsProductLineThatDoesNotMatchInstrumentContractType() {
         InstrumentRuleLookup lookup = instrumentId -> Optional.of(rule(instrumentId, ContractType.INVERSE_DELIVERY));
-        LeverageService service = new LeverageService(lookup, mock(OrderAeronGateway.class));
+        LeverageService service = new LeverageService(lookup, mock(OrderAeronGateway.class), queries);
 
         assertThatThrownBy(() -> service.set(new LeverageSettingRequest(1001L, ProductLine.LINEAR_PERPETUAL,
                 "54", MarginMode.CROSS, 10_000_000L, "wrong line")))
@@ -119,15 +150,49 @@ class LeverageServiceTest {
     }
 
     @Test
-    void getReturnsAeronAuthoritativeSetting() {
+    void getReturnsRealtimeSettingWithoutCoreQuery() {
         OrderAeronGateway aeron = mock(OrderAeronGateway.class);
-        org.mockito.Mockito.when(aeron.leverage(1001L, "1", CoreMarginMode.CROSS))
-                .thenReturn(new CoreLeverageView("1", CoreMarginMode.CROSS, 5_000_000L));
-        LeverageService service = new LeverageService(instrumentId -> Optional.of(rule(instrumentId)), aeron);
+        org.mockito.Mockito.when(queries.require(ProductLine.LINEAR_PERPETUAL, 1001L, null))
+                .thenReturn(view(ProductLine.LINEAR_PERPETUAL, 1001L, java.util.List.of(new CoreLeverageView("1", CoreMarginMode.CROSS, 5_000_000L))));
+        LeverageService service = new LeverageService(instrumentId -> Optional.of(rule(instrumentId)), aeron, queries);
 
         assertThat(service.get(1001L, "1", MarginMode.CROSS))
                 .extracting(LeverageSettingResponse::leveragePpm, LeverageSettingResponse::source)
                 .containsExactly(5_000_000L, "USER");
+    }
+
+    @Test
+    void settlingLinearDeliveryReadsProjectedLeverageButStillRejectsUpdates() {
+        var aeron = mock(OrderAeronGateway.class);
+        org.mockito.Mockito.when(queries.require(ProductLine.LINEAR_DELIVERY, 1001L, null))
+                .thenReturn(view(ProductLine.LINEAR_DELIVERY, 1001L, java.util.List.of(new CoreLeverageView("73", CoreMarginMode.CROSS, 5_000_000L))));
+        var service = new LeverageService(id -> Optional.of(rule(id, ContractType.LINEAR_DELIVERY, "SETTLING")), aeron, queries);
+        assertThat(service.get(1001L, "73", MarginMode.CROSS, ProductLine.LINEAR_DELIVERY).leveragePpm()).isEqualTo(5_000_000L);
+        assertThatThrownBy(() -> service.set(new LeverageSettingRequest(1001L, ProductLine.LINEAR_DELIVERY,
+                "73", MarginMode.CROSS, 10_000_000L, "settling"))).hasMessageContaining("not trading");
+        verify(queries).require(ProductLine.LINEAR_DELIVERY, 1001L, null);
+        org.mockito.Mockito.verifyNoInteractions(aeron);
+    }
+
+    @Test
+    void settlingLeverageReadCannotCrossProductBoundary() {
+        var aeron = mock(OrderAeronGateway.class);
+        var service = new LeverageService(id -> Optional.of(rule(id, ContractType.LINEAR_DELIVERY, "SETTLING")), aeron, queries);
+        assertThatThrownBy(() -> service.get(1001L, "73", MarginMode.CROSS, ProductLine.INVERSE_DELIVERY))
+                .hasMessageContaining("productLine");
+        org.mockito.Mockito.verifyNoInteractions(aeron);
+    }
+
+    @Test
+    void otherUnlistedLeverageReadsRetainTheirExistingRestrictions() {
+        for (var type : ContractType.values()) for (var status : java.util.List.of("DRAFT", "PRE_TRADING", "HALT", "SETTLING", "CLOSED")) {
+            if (type == ContractType.LINEAR_DELIVERY && status.equals("SETTLING")) continue;
+            var aeron = mock(OrderAeronGateway.class);
+            var service = new LeverageService(id -> Optional.of(rule(id, type, status)), aeron, queries);
+            assertThatThrownBy(() -> service.get(1001L, "73", MarginMode.CROSS, type.productLine()))
+                    .hasMessageContaining("not trading");
+            org.mockito.Mockito.verifyNoInteractions(aeron);
+        }
     }
 
     private InstrumentRule rule(String instrumentId) {
@@ -135,7 +200,11 @@ class LeverageServiceTest {
     }
 
     private InstrumentRule rule(String instrumentId, ContractType contractType) {
-        return new InstrumentRule(instrumentId, 1L, "TRADING", contractType,
+        return rule(instrumentId, contractType, "TRADING");
+    }
+
+    private InstrumentRule rule(String instrumentId, ContractType contractType, String status) {
+        return new InstrumentRule(instrumentId, 1L, status, contractType,
                 Set.of("LIMIT", "MARKET"), Set.of("GTC", "IOC"), true, true, true,
                 1L, 100_000L, 1L, 1_000_000_000L, 10_000L, 100_000_000L, 10_000L);
     }

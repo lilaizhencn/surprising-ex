@@ -112,3 +112,21 @@ Web 188 项、lint/build，client 166 项及 analyze 通过。浏览器对交易
 复现需先按当前脚本启动单节点 SPOT、realtime 导出、独立数据库/Kafka/Valkey 和测试外部 ticker。启动 `SixProductLineContractLiveTest` 时同时显式设置原 `SIX_LINE_LIVE_*` 参数及 `SIX_LINE_LIVE_UI_FIXTURE=/tmp/surprising-spot-fused-<run>/client-fixture.json`。在四分钟交接窗口内，将该路径交给两端的 `SPOT_FUSED_LIVE_FIXTURE`，并把所属运行目录的 `pids/realtime.pid` 交给 `SPOT_FUSED_REALTIME_PID_FILE`；两个消费者都校验 PID 的 launcher identity 后才注入暂停。Web 的 `scripts/spot-fused-live.mjs` 使用网关允许的本地开发地址 127.0.0.1:5173，需要现有 Playwright 包（可用 `SPOT_FUSED_PLAYWRIGHT_MODULE` 指定模块路径）和 Chromium（可用 `SPOT_FUSED_CHROMIUM` 指定已有二进制）。Flutter 使用 `flutter test test/spot_fused_live_test.dart --reporter expanded`。两端均退出 0 后，向 fixture 路径加 `.done` 的文件写入 PASS，父验收继续核对余额、成交和进程身份。未设置显式 fixture 时 Flutter 实栈用例默认跳过，普通回归不会连接外部服务。
 
 该结果补充了上轮受控 API/WS 的证据；尚未在 iOS/Android 设备安装运行，也未验收交割、期权或批量下单/改单的全部异常恢复。本轮只修改 schema 说明与验收代码，未增加 Core 查询或更改交易协议、在线状态。详见 [实际运行与清理记录](validation/spot-fused-clients-20261019.json)。
+
+## U 本位交割结算中减仓与恢复（2026-10-19）
+
+本轮只验证 `LINEAR_DELIVERY`。`InstrumentRequestService` 的公开列表与按 ID 查询需保留 SETTLING 合约，否则刷新后仍有持仓却无法找到合约。可见性仅提供元数据，不授予交易权限；普通订单由既有交易校验决定，SETTLING 仅允许直接 reduceOnly，HALT 禁止下单，结算中不新增 TP/SL。
+
+Web `TradePage` 的开/平按钮按此规则启用；client `ApiClient.linearDeliveryInstruments` 额外取得该产品的可见生命周期目录，`AppState.refreshInstruments` 成功后统一发布，目录失败保留上次完整结果。client 减仓校验持仓方向、保证金模式和剩余数量，HEDGE 平仓显式发送 reduceOnly；320px 票据显示“买入平空/卖出平多”，距到期使用 expiryTime。
+
+两端沿用现货已有的单笔恢复存储，扩展至 U 本位交割：POST 前保存 user/product/instrument/clientOrderId 或原 cancelOrderId，保存失败不提交。响应不完整、丢失或查询未知均保留待确认；恢复只 GET 原提交或撤单回执，不重复 POST，不靠订单是否存在推断撤单结果。其他产品与批量下单、改单的恢复需继续逐项验收。
+
+实栈入口仍为 `SixProductLineContractLiveTest`，设置 `SIX_LINE_LIVE_PRODUCT=LINEAR_DELIVERY`、`SIX_LINE_LIVE_TRADING=true`、隔离 JDBC 和 `SIX_LINE_LIVE_UI_FIXTURE=/tmp/surprising-linear-delivery-fused-<run>/delivery-fixture.json`。依照仓库启动器，仅启该产品的单节点 FUSED、gateway、price、realtime、derivatives-lifecycle、maker。显式建一个未来到期合约、开两张真实持仓，再经管理 API 转 SETTLING；真实做市账户提供两张 reduceOnly 平仓流动性。此阶段不等于实际到期交割结算。
+
+交接窗口限四分钟；凭据 0600，父用例 finally 删除。两个消费者设置 `LINEAR_DELIVERY_LIVE_FIXTURE` 和 `LINEAR_DELIVERY_REALTIME_PID_FILE`：Web 执行 `node scripts/linear-delivery-fused-live.mjs`，使用允许的 127.0.0.1:5173，已有 Playwright/Chromium 可由 `LINEAR_DELIVERY_PLAYWRIGHT_MODULE`/`LINEAR_DELIVERY_CHROMIUM` 指定；client 执行 `flutter test test/linear_delivery_fused_live_test.dart --reporter expanded`。Web 先平一张，client 再平剩余一张；都校验所属 launcher identity 后才能暂停 realtime。仅丢弃真实已处理响应，不伪造结果。两个消费者退出 0 后才向 fixture 同名加 `.done` 写入 PASS，父用例继续核对资金和进程身份。普通 Flutter 回归没有显式 fixture 时跳过实栈测试。
+
+实测还发现两个后端阻塞点：`IndexInstrumentConfigLoader` 在 SETTLING 过滤指数源，导致新配置版本的市价单报 `mark price unavailable`；现已为 U 本位交割保留指数源至 CLOSED，不放宽市价保护校验。`LeverageService.get` 现从 `ValkeyUserQueries` 读取认证用户和产品的杠杆覆盖值，删除 `OrderAeronGateway.leverage` 的 Core 查询入口；就绪账户没有覆盖值时使用合约定义的默认设置，未就绪/过期或身份不匹配返回 503。GET 允许本产品 SETTLING，杠杆 POST 仍要求 TRADING。
+
+Web 在结算中禁止调整杠杆，直接减仓不依赖开仓杠杆设置；保证金模式能独立切换，并与持仓行平仓入口保持一致。平仓摘要显示对应保证金模式与持仓方向的可平张数；U 本位交割手续费估算按 ticks × contracts × notionalMultiplierUnits × feeRatePpm 向上取整到结算资产单位，保留小额费用精度，不再把一张合约当一整枚基础币。
+
+风险验收先有限等待账户与持仓风险的盈亏/维持保证金一致，再按返回标记价独立核算，避免跨两次价格更新比较。不会取消盈亏、权益、保证金或资金守恒断言。共享杠杆 GET 的六产品隔离与未就绪行为有定向测试；完整运行仍只启动 LINEAR_DELIVERY，其他产品风险、算法/管理/生命周期的剩余 Core 读取和批量写入需后续继续检查，不能据此宣称全部查询迁移或全部交割功能验收完成。

@@ -59,6 +59,18 @@ class IndexInstrumentConfigLoaderTest {
                 .containsExactly("1", "2");
     }
 
+    @Test
+    void linearDeliveryKeepsItsIndexSourceWhileSettlingAndRemovesItWhenClosed() {
+        var properties = new IndexPriceProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        var cache = new InstrumentSnapshotCache();
+        cache.replace(ProductLine.LINEAR_DELIVERY, List.of(instrument("73", 7L, true, ContractType.LINEAR_DELIVERY, InstrumentStatus.SETTLING)));
+        var loader = new IndexInstrumentConfigLoader(properties, cache);
+        assertThat(loader.load()).extracting(IndexPriceProperties.SymbolConfig::getInstrumentId).containsExactly("73");
+        cache.replace(ProductLine.LINEAR_DELIVERY, List.of(instrument("73", 8L, true, ContractType.LINEAR_DELIVERY, InstrumentStatus.CLOSED)));
+        assertThat(loader.load()).isEmpty();
+    }
+
     private IndexSourceConfig source() {
         return new IndexSourceConfig(
                 "BINANCE",
@@ -83,13 +95,17 @@ class IndexInstrumentConfigLoaderTest {
     }
 
     private InstrumentResponse instrument(String instrumentId, long version, boolean withSource) {
+        return instrument(instrumentId, version, withSource, ContractType.LINEAR_PERPETUAL, InstrumentStatus.TRADING);
+    }
+
+    private InstrumentResponse instrument(String instrumentId, long version, boolean withSource, ContractType type, InstrumentStatus status) {
         Instant now = Instant.parse("2026-07-31T00:00:00Z");
-        return new InstrumentResponse(Integer.parseInt(instrumentId), 3, 1, 1, 3, instrumentId, version, InstrumentType.PERPETUAL, ContractType.LINEAR_PERPETUAL,
+        return new InstrumentResponse(Integer.parseInt(instrumentId), 3, 1, 1, 3, instrumentId, version, type == ContractType.LINEAR_DELIVERY ? InstrumentType.DELIVERY : InstrumentType.PERPETUAL, type,
                 "BTC", "USDT", "USDT", 1_000_000L, "BTC", 10L, 1L, 1L, 1_000_000L,
                 1L, 1_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTC"), true,
                 true, true, 100_000_000L, 10_000L, 5_000L, 100L, 500L,
                 1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,
                 10_000_000L, withSource ? 2 : 3, null, null, null, null, null, null, null, null,
-                InstrumentStatus.TRADING, now, now, now, List.of(), withSource ? List.of(source()) : List.of());
+                status, now, now, now, List.of(), withSource ? List.of(source()) : List.of());
     }
 }

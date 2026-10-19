@@ -14,6 +14,9 @@ import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import org.springframework.stereotype.Service;
+import com.surprising.realtime.api.ValkeyUserQueries;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class LeverageService {
@@ -22,12 +25,14 @@ public class LeverageService {
 
     private final InstrumentRuleLookup instrumentRuleLookup;
     private final OrderAeronGateway aeron;
+    private final ValkeyUserQueries realtimeQueries;
 
     @org.springframework.beans.factory.annotation.Autowired
     public LeverageService(InstrumentRuleLookup instrumentRuleLookup,
-                           OrderAeronGateway aeron) {
+                           OrderAeronGateway aeron, ValkeyUserQueries realtimeQueries) {
         this.instrumentRuleLookup = instrumentRuleLookup;
         this.aeron = aeron;
+        this.realtimeQueries = realtimeQueries;
     }
 
     public LeverageSettingResponse set(LeverageSettingRequest request) {
@@ -69,10 +74,19 @@ public class LeverageService {
         }
         String normalizedSymbol = normalizeSymbol(instrumentId);
         MarginMode normalizedMarginMode = MarginMode.defaultIfNull(marginMode);
-        InstrumentRule rule = tradingRule(normalizedSymbol);
+        InstrumentRule rule = instrumentRuleLookup.currentRule(normalizedSymbol)
+                .orElseThrow(() -> new IllegalStateException("instrument not found: " + normalizedSymbol));
         ProductLine resolvedProductLine = productLine(rule, productLine);
-        var configured = aeron.leverage(userId, normalizedSymbol,
-                CoreMarginMode.valueOf(normalizedMarginMode.name()));
+        if (!"TRADING".equals(rule.status())
+                && !(resolvedProductLine == ProductLine.LINEAR_DELIVERY && "SETTLING".equals(rule.status()))) {
+            throw new IllegalStateException("instrument is not trading: " + normalizedSymbol);
+        }
+        var account = realtimeQueries.require(resolvedProductLine, userId, null).account();
+        if (account == null || account.productLine() != resolvedProductLine || account.userId() != userId) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_ACCOUNT_UNAVAILABLE");
+        }
+        var configured = account.leverages().stream().filter(value -> value.instrumentId().equals(normalizedSymbol)
+                && value.marginMode() == CoreMarginMode.valueOf(normalizedMarginMode.name())).findFirst().orElse(null);
         return configured == null ? instrumentDefault(userId, resolvedProductLine, normalizedSymbol,
                 normalizedMarginMode, rule) : new LeverageSettingResponse(userId, resolvedProductLine,
                 normalizedSymbol, normalizedMarginMode, configured.leveragePpm(), rule.maxLeveragePpm(),

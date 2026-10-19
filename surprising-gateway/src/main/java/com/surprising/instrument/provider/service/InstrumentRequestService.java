@@ -39,7 +39,7 @@ public class InstrumentRequestService {
     public InstrumentResponse latest(int instrumentId, String productLineHeader, String productLineValue) {
         try {
             var result = instrumentService.latest(instrumentId, requiredProductLine(productLineValue, productLineHeader));
-            if (!result.status().visible()) throw new IllegalStateException("instrument is not listed");
+            if (!publiclyVisible(result)) throw new IllegalStateException("instrument is not listed");
             return result;
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
@@ -60,6 +60,13 @@ public class InstrumentRequestService {
         }
     }
 
+    // 结算中的 U 本位交割合约仍需供持仓查询、直接减仓及撤单定位；开仓权限由交易校验控制。
+    private static boolean publiclyVisible(InstrumentResponse instrument) {
+        return instrument.status().visible()
+                || (instrument.contractType().productLine() == ProductLine.LINEAR_DELIVERY
+                    && instrument.status() == InstrumentStatus.SETTLING);
+    }
+
     public Map<String, String> assetScales() {
         return instrumentService.assetScales().entrySet().stream().collect(java.util.stream.Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> Long.toString(entry.getValue())));
     }
@@ -68,7 +75,7 @@ public class InstrumentRequestService {
                        String productLineValue, boolean includeMarketSummary, boolean includeTrend) {
         try {
             var all = instrumentService.list(productLine(productLineValue, productLineHeader), type, status);
-            var visible = all.instruments().stream().filter(value -> value.status().visible()).toList();
+            var visible = all.instruments().stream().filter(InstrumentRequestService::publiclyVisible).toList();
             var instruments = new InstrumentQueryResponse(visible.size(), visible);
             if (!includeMarketSummary) return instruments;
             var summaries = marketSummaries.summaries(
