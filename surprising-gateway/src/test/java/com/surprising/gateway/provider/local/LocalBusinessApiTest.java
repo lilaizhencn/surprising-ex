@@ -16,6 +16,34 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
 class LocalBusinessApiTest {
+    @Test void amendmentPostRequiresAnExplicitClientRequestIdBeforeCallingTheOrderService() {
+        var receipt = new com.surprising.trading.api.model.OrderCommandReceipt(new java.util.UUID(9, 10),
+                "TERMINAL", "NONE", "completed", null, java.util.List.of(), null, null);
+        when(orders.amend(any())).thenReturn(CompletableFuture.completedFuture(ResponseEntity.ok(receipt)));
+        String body = "{\"userId\":42,\"orderId\":91,\"newClientOrderId\":\"replacement-1\",\"priceTicks\":100,\"quantitySteps\":2}";
+        assertThat(invoke("trading", "/api/v1/trading/orders/amend", HttpMethod.POST, userHeaders(), body).getStatusCode())
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        verifyNoInteractions(orders);
+        String valid = body.substring(0, body.length()-1) + ",\"clientRequestId\":\"edit-1\"}";
+        assertThat(invoke("trading", "/api/v1/trading/orders/amend", HttpMethod.POST, userHeaders(), valid).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        var request = org.mockito.ArgumentCaptor.forClass(com.surprising.trading.api.model.AmendOrderRequest.class);
+        verify(orders).amend(request.capture());
+        assertThat(request.getValue().clientRequestId()).isEqualTo("edit-1");
+    }
+
+    @Test void amendmentLookupBindsAuthenticationAndPreservesEncodedRequestIdentity() {
+        var receipt = new com.surprising.trading.api.model.OrderCommandReceipt(new java.util.UUID(6, 7),
+                "RESULT_UNKNOWN", "RESULT_UNKNOWN", "pending", null, java.util.List.of(), null, null);
+        when(orders.amendment(42, "a+b")).thenReturn(ResponseEntity.accepted().cacheControl(CacheControl.noStore()).body(receipt));
+        var response = invoke("trading", "/api/v1/trading/orders/amendments?clientRequestId=a%2Bb", HttpMethod.GET, userHeaders(), null);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-store");
+        verify(orders).amendment(42, "a+b");
+        assertThat(invoke("trading", "/api/v1/trading/orders/amendments?userId=43&clientRequestId=x", HttpMethod.GET, userHeaders(), null).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
     @Test void cancellationLookupBindsTheUserAndKeepsUnknownResultsUncached() {
         var receipt = new com.surprising.trading.api.model.OrderCommandReceipt(new java.util.UUID(8, 9),
                 "RESULT_UNKNOWN", "RESULT_UNKNOWN", "pending", null, java.util.List.of(91L), null, null);

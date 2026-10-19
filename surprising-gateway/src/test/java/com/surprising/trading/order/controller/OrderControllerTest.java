@@ -26,6 +26,20 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.server.ResponseStatusException;
 
 class OrderControllerTest {
+    @Test void amendmentLookupReturnsTerminalUnknownAndUnavailableWithoutCaching() {
+        var service = mock(OrderService.class);
+        var controller = new OrderInternalController(new com.surprising.trading.order.service.OrderRequestService(
+                service, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
+        when(service.amendment(1001, "edit-1")).thenReturn(receipt("TERMINAL", "NONE"));
+        assertThat(controller.amendment(1001, "edit-1").getStatusCode()).isEqualTo(HttpStatus.OK);
+        when(service.amendment(1001, "edit-1")).thenReturn(receipt("RESULT_UNKNOWN", "RESULT_UNKNOWN"));
+        assertThat(controller.amendment(1001, "edit-1").getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(controller.amendment(1001, "edit-1").getHeaders().getCacheControl()).isEqualTo("no-store");
+        doThrow(new org.springframework.dao.DataAccessResourceFailureException("offline")).when(service).amendment(1001, "edit-1");
+        assertThatThrownBy(() -> controller.amendment(1001, "edit-1")).isInstanceOf(ResponseStatusException.class)
+                .satisfies(error -> assertThat(((ResponseStatusException)error).getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+    }
+
     @Test void cancellationLookupDistinguishesTerminalUnknownInvalidAndUnavailable() {
         var service = mock(OrderService.class);
         var controller = new OrderInternalController(new com.surprising.trading.order.service.OrderRequestService(

@@ -1,0 +1,230 @@
+{
+  "date": "2026-10-19",
+  "productDebugScope": "SPOT only; shared public query identity tested over the six product-line enum values",
+  "releaseOrder": [
+    "ensure prior ae61e530d SQL receipt migration, realtime exporter upgrade and required historical receipt backfill are complete",
+    "update gateway with amendment query route",
+    "update Web/client; no new SQL migration or Core/exporter deployment change in this round"
+  ],
+  "limits": [
+    "Missing or unavailable receipt remains unknown; no automatic POST resend or inferred original refusal.",
+    "This query confirms processing, not the latest state of the original or replacement order; realtime account/order views remain authoritative.",
+    "New quantity is independent of prior executed quantity; the form starts with the original remaining quantity.",
+    "The original fee buffer after a partial fill is retained until replacement/cancel; financial tests use initial reserve minus actual fill spending."
+  ],
+  "notVerified": [
+    "complete FUSED service stack and live maker in this round",
+    "iOS/Android device installation",
+    "online deployment or historical backfill",
+    "batch placement/amendment/cancellation recovery",
+    "other product UIs",
+    "durable negative confirmation for requests never committed to Core"
+  ],
+  "cleanup": {
+    "status": "complete",
+    "ownedDatabase": "surprising_amend_18a0b15630",
+    "databaseDroppedAndVerified": true,
+    "ownedVitePid": 89674,
+    "ownedVitePort": 5193,
+    "portClosed": true,
+    "browserClosed": true,
+    "historicalUiRoot": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-amend-ui-eoqw78xg",
+    "uiRootRemoved": true,
+    "rawLogsRemovedAfterSummaryAndHashArchive": true,
+    "ownedSurefireReportsRemoved": [
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreSpotAssetUnitsTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreSpotAssetUnitsTest.txt",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.LaneReplacementResponseTest.xml",
+      "surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.LaneReplacementResponseTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.repository.CommittedCommandResultQueryPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.repository.CommittedCommandResultQueryPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.OrderServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.OrderServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.LocalBusinessApiTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.LocalBusinessApiTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.controller.OrderControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.controller.OrderControllerTest.txt"
+    ],
+    "historicalUiArtifacts": {
+      "trade-390-light.png": {
+        "sha256": "98fdd556f1e7f0aca175c1dece4e7a9b7e5869d1c519468bfc603ac042400d35",
+        "bytes": 97415
+      },
+      "orders-390-light-editor.png": {
+        "sha256": "e51ed070aa14744e3eb6a8926ec41d02f7732cd495769647a08956cf124e5b80",
+        "bytes": 67382
+      },
+      "orders-1440-light.png": {
+        "sha256": "1572671ee74ac38d911dc45b1f0f74c5badd964c1bef5b53236e3a4966bb287f",
+        "bytes": 117299
+      },
+      "orders-1440-dark.png": {
+        "sha256": "0e149ad516fddb70f250dfbbff1671487c98a9acce11a06edcd21a849072aed2",
+        "bytes": 118143
+      },
+      "trade-390-light-editor.png": {
+        "sha256": "2f1f75b176399f5ad404c8509e06c673e52f6d438b22a9b448d0adbb0a9204d6",
+        "bytes": 99293
+      },
+      "result.json": {
+        "sha256": "79289b4c80b22c4bd5d8a32e6091321e053f1fc040576d5383a4f74a97372fd6",
+        "bytes": 7702
+      },
+      "trade-1440-light.png": {
+        "sha256": "9733376a85512614d9a46ca581250c5de4b699e6feef98d5cf4630f9f8984abb",
+        "bytes": 122652
+      },
+      "orders-390-dark-editor.png": {
+        "sha256": "ce07cbb46dcad0b363c48102b1fa821415ee77d81b5cdd54fd2b6831ca99d75d",
+        "bytes": 64593
+      },
+      "orders-390-dark.png": {
+        "sha256": "c4197020bb6067362a00cd981cf9f9455c30a60e18e896a979f6f49aca00121d",
+        "bytes": 68151
+      },
+      "orders-390-light.png": {
+        "sha256": "29efd4906f24a5fc641dd2e7b8852e60fa6db8e1ab7f1b4e07a17de2c1038771",
+        "bytes": 67531
+      },
+      "check.mjs": {
+        "sha256": "a8f5c255ccff0a0b98b9dc0f612f0ad372fb6d4a39f8d10ffbce7f0070964cf8",
+        "bytes": 8518
+      },
+      "trade-1440-dark.png": {
+        "sha256": "62a7c9f1d892dcccc5110bed77181f0586b0ad1a9f98dd70f6527398ad3c234a",
+        "bytes": 120182
+      },
+      "orders-1440-light-editor.png": {
+        "sha256": "73cc1b1b57177c52b0d89d16b4303ad53d2cd17706729b9812543d72ff56bcc0",
+        "bytes": 130045
+      },
+      "orders-1440-dark-editor.png": {
+        "sha256": "0938e7fd82110577081351f3fce5304a78d15269314c02f3527f30e3409bd8f4",
+        "bytes": 126027
+      },
+      "trade-1440-dark-editor.png": {
+        "sha256": "79a957ed335f3c51a627a8aecf41a9019b2b060aa7dbae1ec2ba576c1c2bf2ed",
+        "bytes": 131844
+      },
+      "trade-390-dark-editor.png": {
+        "sha256": "02bb582413339caf28967abecdfce089ce735c9651798741697edd1146828ad7",
+        "bytes": 97442
+      },
+      "trade-1440-light-editor.png": {
+        "sha256": "75e30e0117c436346a5b803ccb41553c977c8b774f4763940bcaf275ee07007a",
+        "bytes": 135178
+      },
+      "trade-390-dark.png": {
+        "sha256": "80f5f807e55adf2460cb1ae3a359efc9efe65ffdb683c637cf251d414d03f014",
+        "bytes": 96606
+      }
+    },
+    "preserved": "System PostgreSQL and unrelated databases/data, installed dependencies and compiled build outputs; no wallet or persistent FUSED trading stack started.",
+    "note": "Historical paths refer to removed temporary evidence; results, class counts and checksums remain here."
+  },
+  "baseCommit": "1369ecb96066bc92e655c8817f2e81e6cd87c66b",
+  "change": "Read original amendment processing receipts from realtime SQL by authenticated user/product/clientRequestId; no Core queries. No trading production code changes.",
+  "verification": {
+    "jdk": "Amazon Corretto HotSpot 27",
+    "maven": "3.9.16",
+    "uniqueTests": 162,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "classes": [
+      {
+        "name": "com.surprising.aeron.service.orchestration.CoreSpotAssetUnitsTest",
+        "tests": "16",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "7.604"
+      },
+      {
+        "name": "com.surprising.aeron.service.orchestration.LaneReplacementResponseTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.439"
+      },
+      {
+        "name": "com.surprising.trading.order.repository.CommittedCommandResultQueryPostgresTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.861"
+      },
+      {
+        "name": "com.surprising.trading.order.service.OrderServiceTest",
+        "tests": "100",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.742"
+      },
+      {
+        "name": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+        "tests": "28",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.798"
+      },
+      {
+        "name": "com.surprising.trading.order.controller.OrderControllerTest",
+        "tests": "11",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.087"
+      }
+    ],
+    "package": "gateway and dependencies built; tests were skipped only for package after successful test invocations"
+  },
+  "commands": [
+    "INSTRUMENT_TEST_JDBC_URL=<owned JDBC URL> INSTRUMENT_TEST_DB_USER=atomex INSTRUMENT_TEST_DB_PASSWORD='' mvn -o -pl surprising-gateway -am -Dtest=CoreSpotAssetUnitsTest,LaneReplacementResponseTest,CommittedCommandResultQueryPostgresTest,OrderServiceTest,LocalBusinessApiTest,OrderControllerTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "INSTRUMENT_TEST_JDBC_URL=<owned JDBC URL> INSTRUMENT_TEST_DB_USER=atomex INSTRUMENT_TEST_DB_PASSWORD='' mvn -o -pl surprising-gateway -am -Dtest=CommittedCommandResultQueryPostgresTest,OrderServiceTest,LocalBusinessApiTest,OrderControllerTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "mvn -o -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=CoreSpotAssetUnitsTest,LaneReplacementResponseTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "mvn -o -pl surprising-gateway -am -DskipTests package"
+  ],
+  "assertions": [
+    "Missing clientRequestId POST is rejected 400 before the request service; explicit valid identity binds correctly",
+    "Authenticated user and product isolate the SQL result; AMEND_ORDER type required; unknown returns 202, terminal 200, unavailable 503, no-store",
+    "Real isolated PostgreSQL query of the original stable replacement command identity; no Aeron gateway interaction",
+    "Four new native SPOT amendment cases cover unfilled/partially filled original orders and restoration before amendment: insufficient funds preserves original reserve; success cancels original and reserves independent new quantity; subsequent maker counterparty fills conserve base/quote balances and treasury fees",
+    "Twelve prior native SPOT fill/cancel/snapshot cases and three replacement response encoding cases also passed"
+  ],
+  "corrections": [
+    "Partial-fill original reserve expectation initially used proportional remaining fee; corrected to initial reserve 8,004,000,000 minus actual first fill 4,000,800,000 = 4,003,200,000, with no trading code change.",
+    "Local Biome CLI did not support an attempted organize-import option; used supported check --write and fixed the optional-chain warning; final lint passed."
+  ],
+  "query": "GET /api/v1/gateway/trading/amendments?clientRequestId=<original request> with original product and authenticated user; derives StableOrderIdentity.replacementCommandId and reads core_command_result_projection",
+  "artifacts": {
+    "surprising-amend-backend.log": {
+      "historicalPath": "/tmp/surprising-amend-backend.log",
+      "sha256": "6a9aead3808787ab3b25741ffb8f26ea67a79a5367e0968aea34c04f0ad43eb8",
+      "bytes": 33733,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-amend-funds.log": {
+      "historicalPath": "/tmp/surprising-amend-funds.log",
+      "sha256": "5b50e20cd3cd33ad4211355f4ca49872a391d8f1a95ada2ccd199b5f78c69cf0",
+      "bytes": 13113,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-amend-gateway.log": {
+      "historicalPath": "/tmp/surprising-amend-gateway.log",
+      "sha256": "36e1c097a0373ab65a17443881c5b7f912f6ad03e41e4c75e8b3cdc0cfb847db",
+      "bytes": 31782,
+      "status": "passed or routine diagnostic"
+    },
+    "surprising-amend-package.log": {
+      "historicalPath": "/tmp/surprising-amend-package.log",
+      "sha256": "41eb96a92ff649f323428f295c43719bc068b6e54b7accb16358c98e57caf2d1",
+      "bytes": 39664,
+      "status": "passed or routine diagnostic"
+    }
+  }
+}

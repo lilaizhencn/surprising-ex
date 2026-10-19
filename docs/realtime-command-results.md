@@ -60,3 +60,19 @@ Web `api/endpoints.ts.cancelOrder` 和 client `AppState.cancelOrder` 在现货 P
 先保证上一节的回执迁移、realtime 更新与所需历史回补已完成，再发布本轮 gateway，最后更新 Web/client。无需追加迁移或重置导出 checkpoint。请求未到 Core、尚在途中或不在已回补范围内时仍未决，不能强制解锁；本轮只扩展普通现货单笔撤单，批量、改单等写入的完整异常恢复仍需继续验收。
 
 本轮 145 项后端定向测试无失败或跳过（gateway 133 + 原生 SPOT 资金 12），Web 181 项、lint/build 和 client 155 项、analyze 通过。真实隔离 PostgreSQL 验证原命令身份、用户/产品隔离及命令类型不符时关闭查询；真实本机 HTTP 在接收撤单 POST 后断开连接，再以两次 GET 恢复，包含 64 位订单号。受控 API/WS 浏览器检查覆盖交易页、订单页各 1440/390px 深浅主题，共八组，每组仅一条 POST；Flutter 覆盖 320px 深浅色撤单锁定与查询。本轮未启动完整 FUSED 服务栈、wallet 或真机，也未验收其他产品 UI。详见 [撤单验证与清理记录](validation/spot-cancel-recovery-20261019.json)。
+
+## 现货改单与恢复（2026-10-19）
+
+现货单笔改单现在从 Web 交易页、订单页和 client 订单行进入。编辑的是新委托价格及新委托数量，默认取原单剩余数量；不会把原单已成交数量再次加到新单。两端按真实资产精度和步长做整数转换、检查数量/名义价值范围，保留原有效方式及 Post Only。Web 高级操作的单笔改单也补齐请求身份；批量改单另行验收。
+
+`AmendOrderRequest.clientRequestId` 原本就是必填字段，两端旧调用漏传会在网关校验时返回 400。当前为一次改单生成随机请求号和新客户订单号，发送前保存在原有 pending 集合；保存失败不发送。client 的 API 方法在调用方只指定新客户订单号时，也会显式生成相应请求身份。响应需要包含匹配的已撤原单与有效新单，不能把空结果或未决回执当成成功。
+
+新增用户查询 `GET /api/v1/gateway/trading/amendments?clientRequestId=<原请求号>`，带原 productLine 和认证身份；`OrderService.amendment` 使用实际改单同一 `StableOrderIdentity.replacementCommandId`，`AeronOrderProjectionRepository.amendment` 读取 realtime 的既有 SQL 回执并验证类型为 AMEND_ORDER。200 / TERMINAL、202 / RESULT_UNKNOWN、503 不可用，no-store；认证用户不能被 query 覆盖。没有访问 Core，也没有重新发送改单。该查询确认的是命令处理结果，不返回新的订单镜像；原单与新单的最终状态仍从 realtime 账户视图读取。
+
+响应中断、资料错误或服务异常保持待确认，刷新/冷启动后按原请求号查询；确认成功或拒绝才解除锁定。新建的两个界面文件只拥有编辑器输入、弹窗及控制器生命周期，使用原有 Dialog/BottomSheet 和状态模块，不增加订单状态副本、服务进程或 Core 热路径逻辑。Web 弹窗补充局部样式，避免继承订单表格的 nowrap 和对齐方式导致横向溢出。
+
+本轮未改 Core 交易生产代码、导出、Topic、snapshot 或 SQL 表。仍依赖此前 ae61e530d 的回执迁移、realtime 更新和所需历史回补；先发布支持该查询的 gateway，再更新两端，不重置正常导出 checkpoint。请求未到 Core 或回执尚不可见时仍不能作负确认；批量下单/改单/撤单、其他产品 UI 及全栈验收继续进行。
+
+HotSpot JDK 27 下 162 项后端定向测试无失败或跳过：gateway 143、SPOT 原生资金 16、替换响应编码 3。原生新增四组覆盖未成交/部分成交及改单前快照恢复：资金不足保留原单冻结，改单成功取消原单并按新数量预留，做市对手成交后的用户/做市/财库资金守恒。部分成交前的原始手续费缓冲直到替换/撤单才释放，测试按初始预留减实际成交支出核对，而非机械按剩余数量重算。
+
+Web 188 项、lint/build，client 166 项及 analyze 通过。浏览器对交易页、订单页各做 1440/390px 深浅主题八组受控 API/WS 检查，含弹窗边界、非法精度、原剩余数量、64 位订单号、发送前保存、断响应/刷新、未决锁定及两次 GET 恢复；每组仅一条 POST。Flutter 覆盖 320px 深浅主题、真实本机 HTTP 的改单字段/两张订单解码，以及丢失 POST 响应后只读恢复。本轮未启动完整 FUSED 交易服务栈、wallet 或原生真机，没有调试其他产品界面。见 [改单验证及清理记录](validation/spot-amendment-20261019.json)。

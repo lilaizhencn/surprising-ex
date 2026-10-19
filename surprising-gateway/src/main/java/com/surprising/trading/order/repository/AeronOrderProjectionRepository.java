@@ -91,6 +91,13 @@ public class AeronOrderProjectionRepository {
         return commandReceipt(product, commandId, result, List.of(orderId));
     }
 
+    public OrderCommandReceipt amendment(ProductLine product, long userId, UUID commandId) {
+        var result = submittedCommand(product, userId, commandId);
+        if (result != null && !"AMEND_ORDER".equals(result.commandType()))
+            throw new IllegalStateException("amendment command identity does not match");
+        return commandReceipt(product, commandId, result, List.of());
+    }
+
     private OrderCommandReceipt commandReceipt(ProductLine product, UUID commandId, SubmittedCommand result,
                                                 List<Long> orderIds) {
         return new OrderCommandReceipt(commandId, result == null ? "RESULT_UNKNOWN" : "TERMINAL",

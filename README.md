@@ -220,3 +220,7 @@ realtime 现从已提交 Archive 回放生成普通用户命令回执，与订�
 ## 现货撤单恢复（2026-10-19）
 
 网关新增按认证用户、产品和原订单号查询已提交撤单的 `GET /api/v1/gateway/trading/cancellations/{orderId}`；结果来自 realtime SQL 投影，不查询 Core。Web/client 在现货撤单前持久保存原订单身份，响应丢失后保持待确认，只以 GET 恢复；未知结果不当作成功。145 项后端定向测试、Web 181 项和 client 155 项通过，详情与发布顺序见 [回执说明](docs/realtime-command-results.md)。本轮没有启动完整 FUSED 服务栈或原生设备。
+
+## 现货改单（2026-10-19）
+
+Web/client 补齐单笔现货订单行改单和请求身份，响应丢失时只从 realtime 查询原请求；网关新增 `GET /api/v1/gateway/trading/amendments?clientRequestId=...`，不访问 Core。162 项后端定向测试、Web 188 项、client 166 项通过，覆盖部分成交及改单前快照恢复的冻结/费用/资金守恒。先更新 gateway 再更新两端，沿用已提交回执迁移与历史回补；本轮未运行完整 FUSED 栈或真机。详见 [业务及发布说明](docs/realtime-command-results.md)。

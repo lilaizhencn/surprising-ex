@@ -135,6 +135,12 @@ public class OrderInternalController {
         return requests.submission(userId, clientOrderId);
     }
 
+    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/amendments")
+    public ResponseEntity<OrderCommandReceipt> amendment(@RequestParam("userId") long userId,
+            @RequestParam("clientRequestId") String clientRequestId) {
+        return requests.amendment(userId, clientRequestId);
+    }
+
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/cancellations/{orderId}")
     public ResponseEntity<OrderCommandReceipt> cancellation(@RequestParam("userId") long userId,
             @PathVariable("orderId") long orderId) {

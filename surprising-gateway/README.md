@@ -431,3 +431,7 @@ HotSpot JDK 27，对比 `243158a8` 的该方法与当前实现，使用相同 Ob
 ## 现货撤单恢复查询（2026-10-19）
 
 `OrderService.cancellation` 沿用实际撤单的 StableOrderIdentity，只向 `AeronOrderProjectionRepository` 查询 realtime 已提交回执，并验证类型为 CANCEL_ORDER。用户入口 `GET /api/v1/gateway/trading/cancellations/{orderId}` 与 MVC/local FUSED 路由一致，认证用户不能被 query 覆盖。200 确认、202 未知、503 不可用，no-store；不回查 Core、不重发撤单。两端提前持久保存原订单号，响应中断后通过该入口恢复。部署顺序、边界和本轮 145 项定向后端测试范围见 [说明](../docs/realtime-command-results.md)。
+
+## 现货改单处理结果查询（2026-10-19）
+
+`GET /api/v1/gateway/trading/amendments?clientRequestId=<原请求号>` 通过原产品与认证用户的 replacementCommandId 读取 realtime 已提交回执，并验证类型为 AMEND_ORDER。MVC/local FUSED 路由及路径清单同步，未知返回 202，不可用 503，no-store；不访问 Core。两端补齐 clientRequestId 并在发送前保存，响应丢失后只读恢复。先更新 gateway 再更新两端，沿用既有 SQL 回执表和历史回补；详见 [说明](../docs/realtime-command-results.md)。

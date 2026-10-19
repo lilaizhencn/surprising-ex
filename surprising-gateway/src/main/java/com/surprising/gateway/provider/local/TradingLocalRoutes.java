@@ -43,6 +43,7 @@ import org.springframework.web.util.pattern.PathPatternParser;
 
 /** 网关协议到订单入口的本地调用；不建立内部 HTTP 连接。 */
 public final class TradingLocalRoutes {
+    private static final PathPattern AMENDMENT = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/amendments");
     private static final PathPattern CANCELLATION = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/cancellations/{orderId}");
     private static final PathPattern SUBMISSION = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/submission");
     private static final PathPattern PRICE_PROTECTION = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/price-protection");
@@ -129,6 +130,8 @@ public final class TradingLocalRoutes {
     }
 
     public Object invoke(LocalApiRequest r) {
+        if (r.matches(HttpMethod.GET, AMENDMENT)) return orderRequests.amendment(
+                r.query("userId", long.class, null, true), r.query("clientRequestId", String.class, null, true));
         if (r.matches(HttpMethod.GET, CANCELLATION)) return orderRequests.cancellation(
                 r.query("userId", long.class, null, true), r.path("orderId", long.class));
         if (r.matches(HttpMethod.GET, SUBMISSION)) return orderRequests.submission(

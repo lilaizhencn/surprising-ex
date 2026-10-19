@@ -57,6 +57,17 @@ import org.mockito.quality.Strictness;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class OrderServiceTest {
     @ParameterizedTest @EnumSource(ProductLine.class)
+    void amendmentLookupUsesTheReplacementCommandNamespaceAndNoCoreQuery(ProductLine line) {
+        var service = service(line, aeronOrders);
+        var id = StableOrderIdentity.replacementCommandId(line, 1001, "amend-91");
+        var receipt = new com.surprising.trading.api.model.OrderCommandReceipt(id, "TERMINAL", "NONE",
+                "committed", null, List.of(), null, null);
+        when(projection.amendment(line, 1001, id)).thenReturn(receipt);
+        assertThat(service.amendment(1001, " amend-91 ")).isSameAs(receipt);
+        verifyNoInteractions(aeronOrders);
+    }
+
+    @ParameterizedTest @EnumSource(ProductLine.class)
     void cancellationLookupUsesTheOriginalStableIdentityAndOnlyTheProjection(ProductLine line) {
         var service = service(line, aeronOrders);
         var id = StableOrderIdentity.commandId(line, 1001, "cancel:91");

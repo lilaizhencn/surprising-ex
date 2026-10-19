@@ -87,6 +87,60 @@ class CoreSpotAssetUnitsTest {
         }
     }
 
+    @ParameterizedTest @CsvSource({"false,false", "true,false", "false,true", "true,true"})
+    void amendedSpotReserveSurvivesRestoreAndInsufficientFundsLeaveTheOriginalOpen(boolean restore, boolean partiallyFilled) {
+        var original = new TradingCoreRuntime(ProductLine.SPOT);
+        TradingCoreRuntime runtime = original;
+        try {
+            var registration = new RegisterInstrumentCommand("1", 0, "BTC", "USDT", "USDT",
+                    10_000, 10_000_000, 1, 1_000_000, 1_000_000, 200, 500, 0, -1, 0,
+                    1_000_000, 1_000_000_000_000_000L, 0, 1_000_000_000_000_000L,
+                    List.of(new CoreRiskLimitBracket(1, 0, 1_000_000_000_000_000L, 1_000_000, 1_000_000, 1_000_000)),
+                    1, true, true, false, 0b11, 0b1111, 100_000);
+            apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration));
+            fund(runtime, 101, "USDT", 100_000_000_000L);
+            fund(runtime, 202, "BTC", 1_000_000L);
+            place(runtime, 101, 41, CoreOrderSide.BUY, 2, 400_000, CoreTimeInForce.GTC);
+            if (partiallyFilled) place(runtime, 202, 40, CoreOrderSide.SELL, 1, 400_000, CoreTimeInForce.IOC);
+            if (restore) runtime = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, original.snapshot(73));
+            // Until replacement/cancel, the original reservation retains its unused fee
+            // buffer: initial 8_004_000_000 minus the 4_000_800_000 actual maker fill.
+            long originalReserve = runtime.tradingState().user(101).balances().get("USDT").lockedUnits();
+            assertThat(originalReserve).isEqualTo(partiallyFilled ? 4_003_200_000L : 8_004_000_000L);
+            var rejected = execute(runtime, CoreMessageType.AMEND_ORDER, 101,
+                    TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(41, 42, "amend-rejected",
+                            450_000L, 1000L, CoreTimeInForce.GTC, false)));
+            assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
+            assertThat(runtime.tradingState().user(101).balances().get("USDT").lockedUnits()).isEqualTo(originalReserve);
+            var amended = apply(runtime, CoreMessageType.AMEND_ORDER, 101,
+                    TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(41, 43, "amend-valid",
+                            450_000L, 3L, CoreTimeInForce.GTC, false)));
+            var result = CoreCommandResultCodec.decode(amended.data()).orders();
+            assertThat(result).anySatisfy(order -> { assertThat(order.orderId()).isEqualTo(41); assertThat(order.status()).isEqualTo("CANCELED"); });
+            assertThat(result).anySatisfy(order -> { assertThat(order.orderId()).isEqualTo(43); assertThat(order.status()).isEqualTo("OPEN"); });
+            assertThat(runtime.tradingState().user(101).balances().get("USDT").lockedUnits()).isEqualTo(13_506_750_000L);
+            place(runtime, 202, 44, CoreOrderSide.SELL, 3, 450_000, CoreTimeInForce.IOC);
+            var state = runtime.tradingState();
+            assertThat(state.user(101).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(state.user(101).totalUnits("USDT")).isEqualTo(partiallyFilled ? 82_496_500_000L : 86_497_300_000L);
+            assertThat(state.user(202).totalUnits("USDT")).isEqualTo(partiallyFilled ? 17_491_250_000L : 13_493_250_000L);
+            assertThat(state.treasuryState().feeBalances().get("USDT")).isEqualTo(partiallyFilled ? 12_250_000L : 9_450_000L);
+            assertThat(state.user(101).totalUnits("BTC")).isEqualTo(partiallyFilled ? 400_000 : 300_000);
+            assertThat(state.user(202).totalUnits("BTC")).isEqualTo(partiallyFilled ? 600_000 : 700_000);
+            assertThat(state.user(101).totalUnits("USDT") + state.user(202).totalUnits("USDT")
+                    + state.treasuryState().feeBalances().get("USDT")).isEqualTo(100_000_000_000L);
+        } finally {
+            if (runtime != original) runtime.close();
+            original.close();
+        }
+    }
+
+    private CoreResponse apply(TradingCoreRuntime runtime, CoreMessageType type, long user, byte[] payload) {
+        var result = execute(runtime, type, user, payload);
+        assertThat(result.commandStatus()).as(type + " " + result.resultCode()).isEqualTo(ResponseStatus.APPLIED);
+        return result;
+    }
+
     private void fund(TradingCoreRuntime runtime, long user, String asset, long units) {
         apply(runtime, CoreMessageType.ADJUST_BALANCE, user,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, units)));
@@ -105,7 +159,7 @@ class CoreSpotAssetUnitsTest {
                 .filter(order -> order.orderId() == id).findFirst().orElseThrow();
     }
 
-    private CoreResponse apply(TradingCoreRuntime runtime, CoreMessageType type, long user, byte[] payload) {
+    private CoreResponse execute(TradingCoreRuntime runtime, CoreMessageType type, long user, byte[] payload) {
         long seq = ++sequence;
         var message = new CoreMessage(CoreMessageHeader.command(type, UUID.randomUUID(), ProductLine.SPOT,
                 CommandSource.OPERATIONS, 991, seq, user, 1_700_000_000_000L + seq, seq), payload);
@@ -122,7 +176,6 @@ class CoreSpotAssetUnitsTest {
             result = com.surprising.aeron.service.orchestration.CoreTestCompletion.completeMatchingSynchronously(
                     runtime, runtime.matchingSequence(message.header().commandId()), 1_700_000_000_000L + seq, seq);
         }
-        assertThat(result.commandStatus()).as(type + " " + result.resultCode()).isEqualTo(ResponseStatus.APPLIED);
         return result;
     }
 }

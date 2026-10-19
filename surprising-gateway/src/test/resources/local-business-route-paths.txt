@@ -85,3 +85,4 @@
 /api/v1/trading/orders/price-protection
 /api/v1/trading/orders/submission
 /api/v1/trading/orders/cancellations/{orderId}
+/api/v1/trading/orders/amendments

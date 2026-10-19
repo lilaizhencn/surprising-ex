@@ -296,6 +296,13 @@ public class OrderService {
         return requireProjection().submission(product, userId, key, StableOrderIdentity.commandId(product, userId, key));
     }
 
+    public OrderCommandReceipt amendment(long userId, String clientRequestId) {
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        var product = currentProductLine();
+        return requireProjection().amendment(product, userId,
+                StableOrderIdentity.replacementCommandId(product, userId, normalizeClientOrderId(clientRequestId)));
+    }
+
     public OrderCommandReceipt cancellation(long userId, long orderId) {
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         requireOrderId(orderId);

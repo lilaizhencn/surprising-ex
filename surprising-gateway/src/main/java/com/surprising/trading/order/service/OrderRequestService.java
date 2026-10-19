@@ -234,6 +234,16 @@ public class OrderRequestService {
         }
     }
 
+    public ResponseEntity<OrderCommandReceipt> amendment(long userId, String clientRequestId) {
+        try {
+            return commandResponse(orderService.amendment(userId, clientRequestId));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (org.springframework.dao.DataAccessException | IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "committed amendment result is unavailable", ex);
+        }
+    }
+
     public ResponseEntity<OrderCommandReceipt> cancellation(long userId, long orderId) {
         try {
             return commandResponse(orderService.cancellation(userId, orderId));

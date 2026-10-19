@@ -68,6 +68,19 @@ class CommittedCommandResultQueryPostgresTest {
                 .isInstanceOf(IllegalStateException.class);
     }
 
+    @Test void amendmentQueriesOnlyTheCommittedOriginalRequestAndRejectsOtherCommandTypes() {
+        var amend = StableOrderIdentity.replacementCommandId(ProductLine.SPOT, 7, "edit-91");
+        assertThat(repository.amendment(ProductLine.SPOT, 7, amend).outcome()).isEqualTo("RESULT_UNKNOWN");
+        jdbc.update("""
+                INSERT INTO core_command_result_projection VALUES ('SPOT',?,7,'AMEND_ORDER',null,null,
+                  'APPLIED','NONE',3,96,1700000000002)
+                """, amend);
+        assertThat(repository.amendment(ProductLine.SPOT, 7, amend).code()).isEqualTo("NONE");
+        assertThat(repository.amendment(ProductLine.SPOT, 8, amend).outcome()).isEqualTo("RESULT_UNKNOWN");
+        assertThat(repository.amendment(ProductLine.OPTION, 7, amend).outcome()).isEqualTo("RESULT_UNKNOWN");
+        assertThatThrownBy(() -> repository.amendment(ProductLine.SPOT, 7, id)).isInstanceOf(IllegalStateException.class);
+    }
+
     @Test void missingResultsAndDifferentUsersOrProductsRemainUnknown() {
         assertThat(repository.commandResult(ProductLine.SPOT, 8, id).outcome()).isEqualTo("RESULT_UNKNOWN");
         assertThat(repository.commandResult(ProductLine.OPTION, 7, id).outcome()).isEqualTo("RESULT_UNKNOWN");
