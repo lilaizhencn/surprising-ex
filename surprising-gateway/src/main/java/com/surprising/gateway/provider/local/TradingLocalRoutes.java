@@ -43,6 +43,7 @@ import org.springframework.web.util.pattern.PathPatternParser;
 
 /** 网关协议到订单入口的本地调用；不建立内部 HTTP 连接。 */
 public final class TradingLocalRoutes {
+    private static final PathPattern ADMIN_TRADES = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/trades");
     private static final PathPattern TRIGGER_OCO_SUBMISSION = PathPatternParser.defaultInstance.parse("/api/v1/trading/trigger-orders/oco-submission");
     private static final PathPattern CANCELLATION_PLAN = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/cancellation-plan");
     private static final PathPattern CANCELLATION_BATCH = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/cancellation-batches");
@@ -133,6 +134,13 @@ public final class TradingLocalRoutes {
     }
 
     public Object invoke(LocalApiRequest r) {
+        if (r.matches(HttpMethod.GET, ADMIN_TRADES)) {
+            return adminOrderRequests.trades(r.header("X-Admin-User-Id", String.class, null, true),
+                    r.header("X-Product-Line", String.class, null, false), r.query("productLine", String.class, null, false),
+                    r.query("userId", Long.class, null, false), r.query("instrumentId", String.class, null, false),
+                    r.query("orderId", Long.class, null, false), r.query("limit", int.class, "100", false),
+                    r.query("cursor", String.class, null, false), r.query("sort", String.class, null, false));
+        }
         if (r.matches(HttpMethod.GET, CANCELLATION_PLAN)) return orderRequests.cancellationPlan(
                 r.query("userId", long.class, null, true), r.query("instrumentId", String.class, null, false));
         if (r.matches(HttpMethod.GET, CANCELLATION_BATCH)) return orderRequests.cancellationBatch(

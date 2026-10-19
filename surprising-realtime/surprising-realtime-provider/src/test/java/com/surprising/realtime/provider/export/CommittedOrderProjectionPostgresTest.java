@@ -30,6 +30,8 @@ class CommittedOrderProjectionPostgresTest {
         jdbc.execute("CREATE TABLE core_command_result_projection (LIKE public.core_command_result_projection INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_trigger_order_projection (LIKE public.core_trigger_order_projection INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_trigger_projection_initialization (LIKE public.core_trigger_projection_initialization INCLUDING ALL)");
+        jdbc.execute("CREATE TABLE core_execution_projection (LIKE public.core_execution_projection INCLUDING ALL)");
+        jdbc.execute("CREATE TABLE core_execution_projection_initialization (LIKE public.core_execution_projection_initialization INCLUDING ALL)");
         jdbc.execute("CREATE TABLE market_maker_strategies (product_line text, account_ids bigint[])");
         jdbc.execute("CREATE TABLE market_maker_business_settings (product_line text, settings jsonb)");
         repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
@@ -43,6 +45,99 @@ class CommittedOrderProjectionPostgresTest {
                 CoreOrderType.MARKET,CoreTimeInForce.IOC,0,1,CoreMarginMode.CROSS,CorePositionSide.NET,status,
                 0,0,0,"",0,0,1000,1000+revision,revision,0,0,CoreTriggerPriceSource.LAST);
         return new RealtimeFrame(ProductLine.OPTION,RealtimeFrame.Kind.TRIGGER,user,10,0,1000,0,"74",Long.toString(id),CoreTriggerOrderCodec.encodeList(List.of(v)));
+    }
+
+    @Test void actualOptionCommittedReplayContainsTheExecutionMetadataNeededBySqlWithoutCoreReads() {
+        var line = ProductLine.OPTION;
+        try (var replay = new com.surprising.aeron.service.orchestration.CommittedTradeReplay(line,null)) {
+            var frames = new java.util.ArrayList<RealtimeFrame>();
+            long seq = 0;
+            frames.addAll(replayed(replay,++seq,CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(
+                    new RegisterInstrumentCommand("604",com.surprising.instrument.api.model.ContractType.VANILLA_OPTION.ordinal(),
+                            "BTC","USDT","USDT",1,1,1,100000,50000,0,0,2000000000000L,0,100))));
+            for(long user:new long[]{7,8})frames.addAll(replayed(replay,++seq,CoreMessageType.ADJUST_BALANCE,user,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1000000))));
+            frames.addAll(replayed(replay,++seq,CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(
+                    new ApplyMarkPriceCommand("604",100,100,100,1,1700000000000L))));
+            for(boolean maker:new boolean[]{true,false})frames.addAll(replayed(replay,++seq,CoreMessageType.PLACE_ORDER,maker?7:8,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(maker?201:202,"604",maker?CoreOrderSide.SELL:CoreOrderSide.BUY,
+                            100,2,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,maker?"maker":"taker"))));
+            assertThat(frames).anyMatch(f->f.kind()==RealtimeFrame.Kind.TRADE);
+            long before = replay.businessHash();
+            repository.persist(line,frames,List.of(),replay.exportSequence());
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM core_execution_projection",Integer.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT taker_order_id FROM core_execution_projection",Long.class)).isEqualTo(202);
+            assertThat(jdbc.queryForObject("SELECT maker_order_id FROM core_execution_projection",Long.class)).isEqualTo(201);
+            assertThat(jdbc.queryForObject("SELECT quantity_steps FROM core_execution_projection",Long.class)).isEqualTo(2);
+            assertThat(replay.businessHash()).isEqualTo(before);
+        }
+    }
+
+    private static List<RealtimeFrame> replayed(com.surprising.aeron.service.orchestration.CommittedTradeReplay replay,
+            long seq,CoreMessageType type,long user,byte[] payload) {
+        long time=1700000000000L+seq;
+        var command=new CoreMessage(CoreMessageHeader.command(type,new java.util.UUID(99,seq),ProductLine.OPTION,
+                CommandSource.OPERATIONS,991,seq,user,time,seq),payload);
+        return replay.apply(CoreMessageCodec.encode(command),time,seq);
+    }
+
+    @Test void executionsKeepBothSidesEvenForMakerOnlyTradesAndReplayIdempotentlyAcrossSixProducts() {
+        for (var line : ProductLine.values()) {
+            jdbc.update("INSERT INTO market_maker_strategies VALUES (?,ARRAY[7,8]::bigint[])", line.name());
+            var frames = matched(line, 100, 1000, 3);
+            repository.persist(line, frames, List.of(), 1);
+            repository.persist(line, frames, List.of(), 1);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM core_execution_projection WHERE product_line=?", Integer.class, line.name())).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT taker_order_id FROM core_execution_projection WHERE product_line=?", Long.class, line.name())).isEqualTo(Long.MAX_VALUE);
+            assertThat(jdbc.queryForObject("SELECT taker_fee_rate_ppm FROM core_execution_projection WHERE product_line=?", Long.class, line.name())).isEqualTo(4);
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_execution_projection", Integer.class)).isEqualTo(6);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_order_projection", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_execution_projection WHERE instrument_change_id IS NOT NULL", Integer.class)).isZero();
+    }
+
+    @Test void executionConflictAndMissingLegCannotAdvanceTheOrderWatermark() {
+        var line = ProductLine.OPTION;
+        repository.persist(line, matched(line, 100, 1000, 3), List.of(), 10);
+        assertThatThrownBy(() -> repository.persist(line, matched(line, 100, 1001, 3), List.of(), 11))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("conflicting");
+        assertThat(jdbc.queryForObject("SELECT occurred_at_epoch_ms FROM core_execution_projection", Long.class)).isEqualTo(1000);
+        assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark", Long.class)).isEqualTo(10);
+        var missing = matched(line, 200, 1002, 4);
+        assertThatThrownBy(() -> repository.persist(line, missing.subList(0, missing.size()-1), List.of(), 12)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_execution_projection", Integer.class)).isEqualTo(1);
+    }
+
+    @Test void executionRepairUsesEachCommandsFeeMetadataAndWritesNoOrdersReceiptsOrWatermark() {
+        var frames = new java.util.ArrayList<>(matched(ProductLine.OPTION, 100, 1000, 3));
+        frames.addAll(matched(ProductLine.OPTION, 200, 1001, 9));
+        repository.repairExecutions(ProductLine.OPTION, frames);
+        assertThat(jdbc.queryForList("SELECT taker_fee_rate_ppm FROM core_execution_projection ORDER BY export_sequence", Long.class)).containsExactly(4L, 10L);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_order_projection", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_command_result_projection", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_projection_watermark", Integer.class)).isZero();
+        assertThat(repository.executionsInitialized(ProductLine.OPTION)).isFalse();
+        repository.initializeExecutions(ProductLine.OPTION, 200);
+        assertThat(repository.executionsInitialized(ProductLine.OPTION)).isTrue();
+        assertThat(repository.executionsInitialized(ProductLine.SPOT)).isFalse();
+    }
+
+    private static List<RealtimeFrame> matched(ProductLine line, long position, long time, long fee) {
+        long taker = Long.MAX_VALUE, maker = 9007199254740993L;
+        String id = line+":"+position+":1:"+taker+":0";
+        var frames = new java.util.ArrayList<RealtimeFrame>();
+        for (boolean isMaker : new boolean[]{false,true}) {
+            long order = isMaker ? maker : taker, user = isMaker ? 8 : 7;
+            var side = isMaker ? CoreOrderSide.SELL : CoreOrderSide.BUY;
+            var state = new CoreOrderStateView(order,line,user,"604",side,100,1,1,0,false,CoreMarginMode.CROSS,
+                    CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"client-"+order,new java.util.UUID(0,order),
+                    fee,fee+1,0,0,100,time,time,position,"FILLED",2);
+            frames.add(RealtimeFrameCodec.decode(RealtimeFrameCodec.encodeOrder(state,position,frames.size(),time,0)));
+        }
+        frames.add(RealtimeFrameCodec.decode(RealtimeFrameCodec.encodeTradePayload(line,position,2,time,0,"604",id,100,1,1,(byte)0)));
+        frames.add(RealtimeFrameCodec.decode(RealtimeFrameCodec.encodeExecutionPayload(line,7,position,3,time,0,"604",id,taker,100,1,(byte)0,false)));
+        frames.add(RealtimeFrameCodec.decode(RealtimeFrameCodec.encodeExecutionPayload(line,8,position,4,time,0,"604",id,maker,100,1,(byte)1,true)));
+        return frames;
     }
 
     @Test void triggerVersionsTerminalHistoryAndReceiptsCommitWithTheWatermark() {

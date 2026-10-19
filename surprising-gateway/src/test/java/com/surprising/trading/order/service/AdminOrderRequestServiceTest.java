@@ -11,6 +11,19 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 class AdminOrderRequestServiceTest {
+    @Test void tradeHistoryRequiresAnAdminAndPreservesTheSelectedProductAndExactOrderId() {
+        var service = mock(OrderService.class);
+        var requests = new AdminOrderRequestService(service);
+        assertThatThrownBy(() -> requests.trades(null,"OPTION",null,7L,"604",Long.MAX_VALUE,10,null,null))
+                .isInstanceOf(ResponseStatusException.class);
+        org.mockito.Mockito.verifyNoInteractions(service);
+        requests.trades("admin-1","OPTION",null,7L,"604",Long.MAX_VALUE,10,"cursor","eventTime.asc");
+        org.mockito.Mockito.verify(service).adminTrades(7L,"604",Long.MAX_VALUE,10,"cursor","eventTime.asc",com.surprising.product.api.ProductLine.OPTION);
+        when(service.adminTrades(null,null,null,0,null,null,com.surprising.product.api.ProductLine.OPTION))
+                .thenThrow(new IllegalArgumentException("invalid limit"));
+        assertThatThrownBy(() -> requests.trades("admin-1","OPTION",null,null,null,null,0,null,null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+    }
 
     @Test
     void oversizedAdminProjectionReadIsTypedAndCarriesContinuationCursor() {

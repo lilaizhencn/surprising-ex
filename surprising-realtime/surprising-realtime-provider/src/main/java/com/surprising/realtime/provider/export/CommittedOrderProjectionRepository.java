@@ -76,6 +76,118 @@ public class CommittedOrderProjectionRepository {
     }
 
     /** The detached replay checkpoint owns initialization; HTTP never materializes Core state. */
+    boolean executionsInitialized(ProductLine product) {
+        return Integer.valueOf(1).equals(jdbc.queryForObject(
+                "SELECT count(*) FROM core_execution_projection_initialization WHERE product_line=?", Integer.class, product.name()));
+    }
+
+    void initializeExecutions(ProductLine product, long position) {
+        jdbc.update("INSERT INTO core_execution_projection_initialization(product_line,snapshot_log_position) VALUES (?,?) ON CONFLICT DO NOTHING",
+                product.name(), position);
+    }
+
+    /** Finite history repair writes executions only, without the normal order watermark. */
+    void repairExecutions(ProductLine product, List<RealtimeFrame> frames) {
+        var writes = committedExecutions(product, frames);
+        transaction.executeWithoutResult(tx -> persistExecutions(product, writes));
+    }
+
+    private record ExecutionWrite(String tradeId, long position, int index, long takerOrder, long makerOrder,
+            long takerUser, long makerUser, String instrument, String side, String takerPositionSide,
+            String makerPositionSide, long takerFeeRate, long makerFeeRate, long price, long quantity, long timestamp) {}
+
+    private List<ExecutionWrite> committedExecutions(ProductLine product, List<RealtimeFrame> frames) {
+        if (frames.stream().noneMatch(f -> f.kind() == RealtimeFrame.Kind.TRADE)) return List.of();
+        var writes = new ArrayList<ExecutionWrite>();
+        // Metadata belongs to the command which produced this fill. A later amend must not
+        // lend its fee rates or position side to an earlier execution in the same SQL batch.
+        for (int start = 0; start < frames.size();) {
+            long position = frames.get(start).sequence();
+            int end = start + 1;
+            while (end < frames.size() && frames.get(end).sequence() == position) end++;
+            var command = frames.subList(start, end); start = end;
+            if (command.stream().noneMatch(f -> f.kind() == RealtimeFrame.Kind.TRADE)) continue;
+            var states = new HashMap<Long, CoreOrderStateView>();
+            var legs = new HashMap<String, RealtimeFrame[]>();
+            var trades = new ArrayList<RealtimeFrame>();
+            for (var frame : command) {
+                if (frame.productLine() != product) throw new IllegalArgumentException("cross-product execution frame");
+                if (frame.kind() == RealtimeFrame.Kind.ORDER) {
+                    var order = CoreStateQueryCodec.decodeOrderState(frame.payload());
+                    if (order.productLine() != product || order.userId() != frame.userId()
+                            || !order.instrumentId().equals(frame.instrumentId()) || !Long.toString(order.orderId()).equals(frame.entityId()))
+                        throw new IllegalArgumentException("execution order identity mismatch");
+                    var prior = states.get(order.orderId());
+                    if (prior == null || prior.revision() < order.revision()) states.put(order.orderId(), order);
+                } else if (frame.kind() == RealtimeFrame.Kind.EXECUTION) {
+                    byte[] raw = frame.payload();
+                    if (raw.length != 26 || raw[25] < 0 || raw[25] > 1) throw new IllegalArgumentException("invalid execution leg");
+                    var pair = legs.computeIfAbsent(frame.entityId(), ignored -> new RealtimeFrame[2]);
+                    if (pair[raw[25]] != null) throw new IllegalArgumentException("duplicate execution leg");
+                    pair[raw[25]] = frame;
+                } else if (frame.kind() == RealtimeFrame.Kind.TRADE) trades.add(frame);
+            }
+            int index = 0;
+            for (var trade : trades) {
+                var pair = legs.remove(trade.entityId());
+                if (trade.payloadLength() != 25 || pair == null || pair[0] == null || pair[1] == null || position <= 0
+                        || trade.timestamp() <= 0 || !trade.entityId().startsWith(product.name() + ":"))
+                    throw new IllegalArgumentException("incomplete committed trade");
+                var data = ByteBuffer.wrap(trade.payload()).order(ByteOrder.LITTLE_ENDIAN);
+                long price = data.getLong(), quantity = data.getLong(); data.getLong(); int side = data.get();
+                if (price <= 0 || quantity <= 0 || side < 0 || side > 1) throw new IllegalArgumentException("invalid committed trade value");
+                var taker = executionOrder(pair[0], states, trade, price, quantity, side);
+                var maker = executionOrder(pair[1], states, trade, price, quantity, 1 - side);
+                writes.add(new ExecutionWrite(trade.entityId(), position, index++, taker.orderId(), maker.orderId(),
+                        taker.userId(), maker.userId(), trade.instrumentId(), taker.side().name(), taker.positionSide().name(),
+                        maker.positionSide().name(), taker.takerFeeRatePpm(), maker.makerFeeRatePpm(), price, quantity, trade.timestamp()));
+            }
+            if (!legs.isEmpty()) throw new IllegalArgumentException("execution without public trade");
+        }
+        return writes;
+    }
+
+    private CoreOrderStateView executionOrder(RealtimeFrame frame, Map<Long, CoreOrderStateView> states,
+            RealtimeFrame trade, long price, long quantity, int side) {
+        var data = ByteBuffer.wrap(frame.payload()).order(ByteOrder.LITTLE_ENDIAN);
+        var order = states.get(data.getLong());
+        if (order == null || order.userId() != frame.userId() || !order.instrumentId().equals(trade.instrumentId())
+                || !frame.instrumentId().equals(trade.instrumentId()) || frame.timestamp() != trade.timestamp()
+                || data.getLong() != price || data.getLong() != quantity || data.get() != side || order.side().ordinal() != side)
+            throw new IllegalArgumentException("execution metadata mismatch");
+        return order;
+    }
+
+    private void persistExecutions(ProductLine product, List<ExecutionWrite> writes) {
+        if (writes.isEmpty()) return;
+        jdbc.batchUpdate("""
+                INSERT INTO core_execution_projection(product_line,trade_id,export_sequence,execution_index,
+                  taker_order_id,maker_order_id,taker_user_id,maker_user_id,instrument_id,taker_side,
+                  taker_position_side,maker_position_side,taker_fee_rate_ppm,maker_fee_rate_ppm,price_ticks,quantity_steps,occurred_at_epoch_ms)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING
+                """, writes, 512, (s, v) -> {
+            s.setString(1, product.name()); s.setString(2, v.tradeId()); s.setLong(3, v.position()); s.setInt(4, v.index());
+            s.setLong(5, v.takerOrder()); s.setLong(6, v.makerOrder()); s.setLong(7, v.takerUser()); s.setLong(8, v.makerUser());
+            s.setString(9, v.instrument()); s.setString(10, v.side()); s.setString(11, v.takerPositionSide()); s.setString(12, v.makerPositionSide());
+            s.setLong(13, v.takerFeeRate()); s.setLong(14, v.makerFeeRate()); s.setLong(15, v.price()); s.setLong(16, v.quantity()); s.setLong(17, v.timestamp());
+        });
+        var expected = new HashMap<String, ExecutionWrite>();
+        for (var write : writes) {
+            var prior = expected.putIfAbsent(write.tradeId(), write);
+            if (prior != null && !prior.equals(write)) throw new IllegalStateException("conflicting committed execution");
+        }
+        var args = new ArrayList<Object>(); args.add(product.name()); args.addAll(expected.keySet());
+        jdbc.query("SELECT * FROM core_execution_projection WHERE product_line=? AND trade_id IN ("
+                + String.join(",", Collections.nCopies(expected.size(), "?")) + ") ORDER BY trade_id FOR UPDATE", rs -> {
+            var actual = new ExecutionWrite(rs.getString("trade_id"), rs.getLong("export_sequence"), rs.getInt("execution_index"),
+                    rs.getLong("taker_order_id"), rs.getLong("maker_order_id"), rs.getLong("taker_user_id"), rs.getLong("maker_user_id"),
+                    rs.getString("instrument_id"), rs.getString("taker_side"), rs.getString("taker_position_side"), rs.getString("maker_position_side"),
+                    rs.getLong("taker_fee_rate_ppm"), rs.getLong("maker_fee_rate_ppm"), rs.getLong("price_ticks"), rs.getLong("quantity_steps"), rs.getLong("occurred_at_epoch_ms"));
+            if (!actual.equals(expected.remove(actual.tradeId()))) throw new IllegalStateException("conflicting committed execution");
+        }, args.toArray());
+        if (!expected.isEmpty()) throw new IllegalStateException("incomplete committed executions");
+    }
+
     void initializeTriggers(ProductLine product, CommittedTradeReplay replay, long checkpointPosition) {
         if (Integer.valueOf(1).equals(jdbc.queryForObject("SELECT count(*) FROM core_trigger_projection_initialization WHERE product_line=?",
                 Integer.class, product.name()))) return;
@@ -236,6 +348,7 @@ public class CommittedOrderProjectionRepository {
         for (var frame : orders) {
             if (frame.productLine() != product)
                 throw new IllegalArgumentException("cross-product projection frame");
+            if (frame.kind() == RealtimeFrame.Kind.TRADE) continue;
             if (frame.kind() == RealtimeFrame.Kind.TRIGGER) {
                 var decoded = CoreTriggerOrderCodec.decodeList(frame.payload());
                 if (decoded.size() != 1) throw new IllegalArgumentException("trigger frame must contain one entity");
@@ -284,8 +397,10 @@ public class CommittedOrderProjectionRepository {
                 latest.put(order.orderId(), new OrderWrite(order, raw));
         }
         if (!executions.isEmpty()) throw new IllegalArgumentException("incomplete execution pair");
+        var fills = committedExecutions(product, orders);
         transaction.executeWithoutResult(status -> {
             persistCommandResults(product, receipts);
+            persistExecutions(product, fills);
             persistTriggers(product, triggers.values(), exportSequence);
             // A stored maker order is the durable proof of a previous ordinary-user fill.
             // Reuse it across batches/restarts instead of checkpointing a second history index.

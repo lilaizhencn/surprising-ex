@@ -1,0 +1,438 @@
+{
+  "date": "2026-10-20",
+  "status": "已验证本轮成交读取；总体目标继续",
+  "scope": "后台成交审计恢复至 realtime 的已提交 SQL 投影；与公开成交身份一致，保留完整双方身份",
+  "java": "HotSpot Corretto 27 27+33-FR",
+  "branches": {
+    "backend": "master",
+    "admin": "main"
+  },
+  "backend": {
+    "uniqueRegressionTests": 98,
+    "realtime": {
+      "tests": 61,
+      "classes": [
+        {
+          "class": "com.surprising.realtime.provider.MarketApplicationContextTest",
+          "tests": 20,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.ExportBatchTest",
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.TradeExportCheckpointTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest",
+          "tests": 18,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.TradeExportServiceTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "command": "INSTRUMENT_TEST_JDBC_URL=<owned-db> INSTRUMENT_TEST_DB_USER=<local-user> INSTRUMENT_TEST_DB_PASSWORD=<local-test-password> mvn -o -pl surprising-gateway,surprising-realtime/surprising-realtime-provider -am -Dtest=CommittedOrderProjectionPostgresTest,TradeProjectionPostgresTest,ExportBatchTest,TradeExportCheckpointTest,TradeExportServiceTest,MarketApplicationContextTest,AdminOrderRequestServiceTest,LocalBusinessApiTest,CommittedTradeExportIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test",
+      "result": "realtime module SUCCESS; this run later failed gateway route manifest, corrected and verified below"
+    },
+    "gateway": {
+      "tests": 37,
+      "classes": [
+        {
+          "class": "com.surprising.trading.order.repository.TradeProjectionPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.AdminOrderRequestServiceTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 31,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "command": "INSTRUMENT_TEST_JDBC_URL=<owned-db> INSTRUMENT_TEST_DB_USER=<local-user> INSTRUMENT_TEST_DB_PASSWORD=<local-test-password> mvn -o -pl surprising-gateway -am -Dtest=TradeProjectionPostgresTest,AdminOrderRequestServiceTest,LocalBusinessApiTest -Dsurefire.failIfNoSpecifiedTests=false test",
+      "result": "BUILD SUCCESS"
+    },
+    "repairsDuringRegression": [
+      "TRADE frames now intentionally reach the SQL batch; corrected the previous non-ORDER guard to accept them.",
+      "Route manifest now includes admin execution query and the previously added OCO receipt route. Restored original manifest order with an identical expected set."
+    ],
+    "package": "mvn -o -pl surprising-gateway,surprising-realtime/surprising-realtime-provider,surprising-aeron-core/surprising-aeron-tools -am -DskipTests package: BUILD SUCCESS",
+    "runtimeClasses": "Changed gateway and realtime classes verified byte-for-byte between compiled target/classes and executable JAR before startup.",
+    "migration": "fresh init.sql and migration reapplication succeeded; exact SQL suffix parity verified"
+  },
+  "live": {
+    "product": "OPTION",
+    "mode": "FUSED",
+    "makerRunning": true,
+    "walletStarted": false,
+    "jfrStarted": false,
+    "instrumentId": 867,
+    "retailUser": 5,
+    "makerUser": 6,
+    "tests": 1,
+    "result": "BUILD SUCCESS",
+    "command": "SIX_LINE_LIVE_PRODUCT=OPTION SIX_LINE_LIVE_RUN_ID=<owned-run> SIX_LINE_LIVE_TRADING=true SIX_LINE_LIVE_OPTION_REFERENCE=true SIX_LINE_LIVE_TRADE_READ_VIEW=true SIX_LINE_LIVE_UI_FIXTURE=<owned-fixture> SIX_LINE_LIVE_JDBC_URL=<owned-db> mvn -o -pl surprising-gateway -am -Dtest=SixProductLineContractLiveTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "realTrades": 2,
+    "wsRestAuditIdsEqual": true,
+    "depthEvents": 24,
+    "terminalOrderLookup": true,
+    "publicBalancesEqualCore": true,
+    "positions": 0,
+    "reservations": 0,
+    "locked": 0,
+    "combinedFundsDifference": 0,
+    "firstAttempt": "Initial product activation exceeded its 40-second bound with Aeron NOT_CONNECTED / closing-publication warnings. No trading or account funding occurred. Runtime later authoritatively reported OPTION active; a second test passed against the same app PIDs. No stack restart was used to mask an observation timeout."
+  },
+  "admin": {
+    "lint": "npm run lint: exit 0",
+    "build": "npm run build: exit 0",
+    "nodeCheck": "node --check scripts/trade-query-fused-live.mjs: exit 0",
+    "script": "scripts/trade-query-fused-live.mjs",
+    "actual": {
+      "productLine": "OPTION",
+      "tradeIds": [
+        "OPTION:879616:1144:5690884151796863636:0",
+        "OPTION:884672:1151:1088782920180089195:0"
+      ],
+      "pageErrors": [],
+      "completeIdTitles": true,
+      "exactInt64OrderFilter": true,
+      "userAndOrderSameSide": true,
+      "cursorPaging": true,
+      "ascendingAndDescending": true,
+      "unavailableClearsRows": true,
+      "mobileTableScrolls": true,
+      "noBodyOverflow": true,
+      "widths": [
+        1440,
+        360
+      ]
+    },
+    "faultInjection": "One 503 on the audit GET; real order/trade data otherwise used. No admin financial writes.",
+    "recheck": "After restoring the backend SQL projection, reran read-only browser checks with complete ID titles and mobile table scrolling."
+  },
+  "coreAndHistoryIsolation": {
+    "productLine": "OPTION",
+    "corePausedReads": 8,
+    "maxReadMs": 25.24,
+    "sorts": [
+      "eventTime.asc",
+      "eventTime.desc"
+    ],
+    "sameSideUserOrder": true,
+    "crossUserCursorRejected": true,
+    "reconstruction": {
+      "rows": 2,
+      "rawRowsUnchanged": true,
+      "snapshotLogPosition": 1076160,
+      "mainTradeSequence": 2,
+      "initializing503": true,
+      "oldRealtimePid": 50353,
+      "newRealtimePid": 53997,
+      "repairCheckpointRemoved": true,
+      "kafkaOffsetsBefore": "surprising.option.match.trades.v1:0:4",
+      "kafkaOffsetsAfter": "surprising.option.match.trades.v1:0:4",
+      "historicalKafkaNotRepublished": true,
+      "watermarkBefore": "135",
+      "watermarkAfter": "135"
+    }
+  },
+  "runtimeArtifactSha256": {
+    "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar": "ab63cd40d3d747ae95913d32615f17a4d95c3630129dd17ee13224cf22032bdd",
+    "surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar": "bbcab250dc95dcfdebf6b837f4a0fa8a90e844df3af1c2911fc51db9f3bc04ac",
+    "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar": "c643f00e759e617d98e272f4a0645ed26628541da07a72f8a74bf1dd9cecc670",
+    "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar": "852f0898638f170fb1d1964f8eba5c177336f72daa001d34e6adabf605797736",
+    "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar": "e50223f53246b9b5ce319480f5fe4f20e3006ea9a43af6fb85d66a76c78bdfe0",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar": "4a8daf561ba016b262eec87f25891bf8659515699979f7f095268e6cd302f8de",
+    "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar": "7c13acce6ab5b26b5d1ec5f98e2597f45970537e1bf8a2d0760f63e7256b678d"
+  },
+  "notRepeated": [
+    "Full native Flutter / user Web suites: source and public contracts unchanged this round.",
+    "Other full product runtimes; six products covered in PostgreSQL isolation and a sequential embedded SPOT committed-export recovery test.",
+    "Production deployment, JMH/JFR, wallet or native platform configuration."
+  ],
+  "knownRemaining": [
+    "完整 /api/v1/admin/trading/metrics 仍返回404；需要完整数据源，不能用部分订阅持仓和过滤过报价的订单推断全平台统计。",
+    "既有 SQL 做市账户过滤目录与 maker 驻进程配置的归属同步仍需核对；本轮成交投影保留双方真实成交，不依赖该目录。",
+    "冷启动产品激活的 Aeron 瞬时连接问题未在本轮重构；仅记录状态变化与重跑依据。",
+    "其他非永续产品和 client 功能/UI 对齐仍需逐条继续，不据本轮检查宣布总体目标完成。"
+  ],
+  "evidenceArtifacts": [
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.MarketApplicationContextTest.xml",
+      "bytes": 137906,
+      "sha256": "8c27f3c757b3ebccf1869e80f7364b141faad4946be3b61b832f38a4df61d0c6"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.TradeExportCheckpointTest.txt",
+      "bytes": 380,
+      "sha256": "05b8a71bbe84119053e127a205612ec550e6654376438223ba0ed824236446f5"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest.txt",
+      "bytes": 403,
+      "sha256": "c5757eeaf33bd22372f27d81699d8d1b672e8bd1b9d7faebebc54ae777abf641"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.ExportBatchTest.xml",
+      "bytes": 54374,
+      "sha256": "da04fcd9b28a7f31870cf0e1379cbd1228ff65a53ff9f031ad8644d354ea4af6"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.TradeExportServiceTest.txt",
+      "bytes": 374,
+      "sha256": "a0c99d70f0b99ec889e9f269da006531a3dfcc17f5a4c8213519f5d8e5a19b38"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.ExportBatchTest.txt",
+      "bytes": 361,
+      "sha256": "8be896ebac2fa84460dec58490d6dce75c72dd966cfb46a7024dae74fea894c3"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.TradeExportServiceTest.xml",
+      "bytes": 53710,
+      "sha256": "be6f06ae239d6259629c40724fb99d23e72aadfa6fe0614dc4a1c5f8c556d895"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest.txt",
+      "bytes": 400,
+      "sha256": "643f53bac046d1b8725835d19718dec4137709cb7f734f8a444ca9a1a43a0100"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest.xml",
+      "bytes": 709979,
+      "sha256": "03e93abf4e966346cd7aadc5bfd90f4377b94557c1cb089ca3e8f65f0b750b34"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.TradeExportCheckpointTest.xml",
+      "bytes": 52074,
+      "sha256": "760b8a880c67d60c7da866a35524cdb3a3dbbcaea49585229ef397f9b78fc164"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.MarketApplicationContextTest.txt",
+      "bytes": 373,
+      "sha256": "3aaf2f310a861476b316d61aa7d4a89934be4cc72a406c31837f023dffed38eb"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest.xml",
+      "bytes": 55067,
+      "sha256": "0063d39c881a478aaf2631ca75325a576dba835b4df43b9e830da19809ceba84"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.AdminOrderRequestServiceTest.txt",
+      "bytes": 380,
+      "sha256": "ce0938afbd3a17854569982b50e6676ddf076cf6f96babdf5d9d797d0e0e992a"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.LocalBusinessApiTest.txt",
+      "bytes": 367,
+      "sha256": "dcdad77da69abac21172675d9a58b2591a4185360e6255f3ace9306e33421d51"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.SixProductLineContractLiveTest.xml",
+      "bytes": 45532,
+      "sha256": "656feda5388185d766a9109a4ba8c7cbb87a2f9c076681e1a0592d715861f464"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.SixProductLineContractLiveTest.txt",
+      "bytes": 386,
+      "sha256": "25b571ee0760665f104cb12c82cbff08da0816a758f2e98d38ea98616681b3f6"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.AdminOrderRequestServiceTest.xml",
+      "bytes": 45648,
+      "sha256": "4cf72af10e5a6649d6647b39dc5d2a92fd338bdfd5b7d3f4cb38c3da82702890"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.repository.TradeProjectionPostgresTest.xml",
+      "bytes": 45190,
+      "sha256": "9dda135e45dfbae4a2e6d58dfe406a25e4b1e0985e9eb4d5759a711a6f9a7b52"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.order.repository.TradeProjectionPostgresTest.txt",
+      "bytes": 384,
+      "sha256": "661620bd2a29ca741160ab8e2680deb7b463463f936add2a485c3a9ab4463702"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.LocalBusinessApiTest.xml",
+      "bytes": 50380,
+      "sha256": "1fa9cdb7f37ccd28a45d08dc4bf94cf808caa17ccbb216ee257bedc0086ba81d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/kafka.log",
+      "bytes": 490431,
+      "sha256": "66a213f55bfddf6437ac9756f087eb31fb4274bfad0c97d64ed883900618f2e1"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/live-maven.log",
+      "bytes": 31304,
+      "sha256": "b361fe51495f6a46ccc8eb326192fc97049e758d82d2a093d6d5fd3409bdb9ec"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/admin-vite.log",
+      "bytes": 209,
+      "sha256": "49c6f0705bf7d8ed2f3f3583a06923ecb7b2ffe496fd3995a6b90a2e254540db"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/start.log",
+      "bytes": 261,
+      "sha256": "9de9a6f44bca32e9bcfb106e748a5ab6cdd147fd51fb45ebc4cf8bef18a2a421"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/trade-runtime-check.log",
+      "bytes": 144,
+      "sha256": "6d985239668e70155c458eeeb4f01fcc2f436d4ba9dfa88220d4fa15749043ff"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/redis.log",
+      "bytes": 1005,
+      "sha256": "66c57af828b471623fc6a0626306c0d10524a76c30b93cab60ec36fd87046e3f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/admin-live2.log",
+      "bytes": 108,
+      "sha256": "aa34476629989c56c79accfab71a8b73c8d975318cade25a5eb328cd35e5e020"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/migration-idempotency.log",
+      "bytes": 1389,
+      "sha256": "ead812084e3ab548fc54c4d4f95fe720ac4b3272c41e0e7af2952ecf792a0267"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/admin-live3.log",
+      "bytes": 108,
+      "sha256": "aa34476629989c56c79accfab71a8b73c8d975318cade25a5eb328cd35e5e020"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/live-maven2.log",
+      "bytes": 30380,
+      "sha256": "15eb3c8c6c1f968d31eff4bddef3cd238a0d45a3b06c5b1641432dcbf617d3ba"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/database-init.log",
+      "bytes": 11796,
+      "sha256": "086d452c4a9781da49a5e4f98d81414fd747184c2dd84bf6dc55522c4a30b34b"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/ticker.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/stop.log",
+      "bytes": 77,
+      "sha256": "288e2f921c2bb2a70d3d630ce790ce82454cd1ee31e60986c37ce49b2f2be360"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/admin-live.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/kafka-format.log",
+      "bytes": 992,
+      "sha256": "8ab5a97d2e8090eefad3d4145ed51dac80319e44c956f463880e889187235b0e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/trade-admin-mobile.png",
+      "bytes": 15071,
+      "sha256": "614c1e1733c970b0dee2fac7eaf105b3635ecae39c7204c6b5880567f4413f74"
+    },
+    {
+      "historicalPath": "/tmp/surprising-option-fused-20261020-0445/trade-admin-desktop.png",
+      "bytes": 24274,
+      "sha256": "95f7108f21aa3d1f6723b3829117ce1eb36fb6af454f8714ed03c7e612883029"
+    },
+    {
+      "historicalPath": "/tmp/surprising-execution-projection-admin-build.log",
+      "bytes": 417,
+      "sha256": "393903ecfe4db9759d007cd1ae58abc7aa0c0cd9b5ec6278575b69d6e9333c86"
+    },
+    {
+      "historicalPath": "/tmp/surprising-execution-projection-gateway-final.log",
+      "bytes": 31558,
+      "sha256": "c9d7d1e3ccb08a5730bfe900f648682ffdf786738bc09f1046934d438f6abbff"
+    },
+    {
+      "historicalPath": "/tmp/surprising-execution-projection-admin-build-final.log",
+      "bytes": 417,
+      "sha256": "2f72ef65bc95acca7e52d7825cef52850a89173445fa5c2a8105ab81b8c41c3a"
+    },
+    {
+      "historicalPath": "/tmp/surprising-execution-projection-admin-lint-final.log",
+      "bytes": 60,
+      "sha256": "d42c3636f32ef74a518f6843324ee65ae8148aa3ee49633d0e42886017d64845"
+    },
+    {
+      "historicalPath": "/tmp/surprising-execution-projection-admin-lint.log",
+      "bytes": 60,
+      "sha256": "d42c3636f32ef74a518f6843324ee65ae8148aa3ee49633d0e42886017d64845"
+    },
+    {
+      "historicalPath": "/tmp/surprising-execution-projection-target.log",
+      "bytes": 772822,
+      "sha256": "0d23f08bed45c63f9d17575205123f2e2042c9af7c9c6f25196fe97ae1b971f2"
+    },
+    {
+      "historicalPath": "/tmp/surprising-execution-projection-target2.log",
+      "bytes": 797793,
+      "sha256": "70b376d2105a2b86b6d0a4fb20b334aad8002315693431f4b6029c65b033f63f"
+    },
+    {
+      "historicalPath": "/tmp/surprising-execution-projection-package.log",
+      "bytes": 54308,
+      "sha256": "d495c3238813d72ad1b1b7ce0531773179f115a8eda01eec18396e713163d0ed"
+    },
+    {
+      "historicalPath": "/tmp/surprising-execution-projection-compile.log",
+      "bytes": 119397,
+      "sha256": "2bcfb0fd9e4f8e494b8d6c997e44813a7058a4a2efdf5a8be31ddb707ea8a717"
+    }
+  ],
+  "cleanup": {
+    "ownedRootHistoricalPath": "/tmp/surprising-option-fused-20261020-0445",
+    "ownedDatabase": "surprising_option_20261020_0445",
+    "apps": "six owned services stopped; broker, Redis, ticker and Vite stopped",
+    "databaseDropped": true,
+    "ownedRootDeleted": true,
+    "ownedReportsRemoved": true,
+    "existingPostgresPid": 1435,
+    "adminCodegraph": "preserved, excluded generated index",
+    "portsReleased": true,
+    "existingPostgresPreserved": true
+  }
+}

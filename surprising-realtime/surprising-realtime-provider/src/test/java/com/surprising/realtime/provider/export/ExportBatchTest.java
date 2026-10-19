@@ -13,6 +13,15 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class ExportBatchTest {
+    @Test void executionRepairNeverPublishesKafkaOrWritesOrdersAndReceipts() {
+        var repository = mock(CommittedOrderProjectionRepository.class);
+        var sink = mock(ReliableTradeKafkaSink.class);
+        var batch = new CommittedTradeExporter.ExportBatch(ProductLine.OPTION,repository,sink,CommittedTradeExporter.ExportMode.EXECUTION_REPAIR);
+        batch.add(List.of(frame(ProductLine.OPTION,RealtimeFrame.Kind.TRADE,1)),null,1,0);
+        batch.flush(1);
+        verify(repository).repairExecutions(eq(ProductLine.OPTION),anyList());
+        verifyNoMoreInteractions(repository); verifyNoInteractions(sink);
+    }
     @Test void receiptRepairNeverPublishesTradesOrAdvancesTheOrderProjection() {
         var repository = mock(CommittedOrderProjectionRepository.class);
         var sink = mock(ReliableTradeKafkaSink.class);
@@ -81,7 +90,7 @@ class ExportBatchTest {
         order.verify(orders).persist(eq(product), anyList(), anyList(), eq(99L));
         order.verify(sink).publish(anyList());
         assertThat(projected).extracting(RealtimeFrame::sequence).containsExactlyElementsOf(
-                java.util.stream.LongStream.range(0,100).boxed().toList());
+                java.util.stream.LongStream.range(0,100).boxed().flatMap(i -> java.util.stream.Stream.of(i,i)).toList());
         assertThat(published).hasSize(100);
         batch.flush(99);
         verifyNoMoreInteractions(orders, sink);

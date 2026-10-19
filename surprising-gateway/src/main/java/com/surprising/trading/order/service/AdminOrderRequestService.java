@@ -38,6 +38,16 @@ public class AdminOrderRequestService {
         }
     }
 
+    public com.surprising.trading.api.model.AdminTradeQueryResponse trades(String adminUserId, String productLineHeader,
+            String productLineValue, Long userId, String instrumentId, Long orderId, int limit, String cursor, String sort) {
+        requireAdmin(adminUserId);
+        try {
+            return orderService.adminTrades(userId, instrumentId, orderId, limit, cursor, sort, productLine(productLineValue, productLineHeader));
+        } catch (IllegalArgumentException invalid) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
+        }
+    }
+
     public AdminCancelOrderResult cancelOrder(String adminUserId, String productLineHeader, String productLineValue, long orderId, AdminCancelOrderRequest request) {
         requireAdmin(adminUserId);
         try {

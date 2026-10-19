@@ -38,6 +38,7 @@ class SixProductLineContractLiveTest {
     private String approver;
     private int optionCompanion;
     private Map<String, Object> triggerQueryFixture;
+    private Map<String, Object> tradeQueryFixture;
 
     @Test
     void createListEditAndPauseThroughAdminRequestsWithoutRestart() throws Exception {
@@ -245,6 +246,10 @@ class SixProductLineContractLiveTest {
                 content.put("triggerQuery", triggerQueryFixture);
                 content.put("adminAccessToken", admin);
             }
+            if (tradeQueryFixture != null) {
+                content.put("tradeQuery", tradeQueryFixture);
+                content.put("adminAccessToken", admin);
+            }
             java.nio.file.Files.writeString(fixture, json.writeValueAsString(content),
                     java.nio.file.StandardOpenOption.CREATE_NEW);
             java.nio.file.Files.setPosixFilePermissions(fixture, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
@@ -255,7 +260,7 @@ class SixProductLineContractLiveTest {
                 Thread.sleep(250);
             }
             assertThat(java.nio.file.Files.readString(done).trim()).isEqualTo("PASS");
-            if (triggerQueryFixture != null) System.out.printf("ADMIN_QUERY_HANDOFF_PASS productLine=%s browser=true%n", line);
+            if (triggerQueryFixture != null || tradeQueryFixture != null) System.out.printf("ADMIN_QUERY_HANDOFF_PASS productLine=%s browser=true%n", line);
             else System.out.printf("CLIENT_HANDOFF_PASS productLine=%s browserAndFlutter=true%n", line);
         } finally {
             java.nio.file.Files.deleteIfExists(fixture);
@@ -722,6 +727,27 @@ class SixProductLineContractLiveTest {
             var restTradeIds = new HashSet<String>();
             for (var trade : recent.path("trades")) restTradeIds.add(trade.path("tradeId").asString());
             assertThat(restTradeIds).containsAll(user.trades.keySet());
+            if ("true".equals(System.getenv("SIX_LINE_LIVE_TRADE_READ_VIEW"))) {
+                String historyPath = "/api/v1/admin/gateway/trading-orders/trades?productLine=" + line + "&userId=" + user.id + "&instrumentId=" + instrumentId;
+                JsonNode history = null;
+                for (int attempt = 0; attempt < 100; attempt++) {
+                    history = request("GET", historyPath,"",admin,null,200,503);
+                    if (history.path("trades").size() == 2) break;
+                    Thread.sleep(100);
+                }
+                assertThat(history.path("trades").size()).as("committed admin execution history " + history).isEqualTo(2);
+                var executionTradeIds = new HashSet<String>();
+                for (var trade : history.path("trades")) {
+                    executionTradeIds.add(trade.path("tradeId").asString());
+                    assertThat(trade.path("takerUserId").asLong()).isEqualTo(user.id);
+                    assertThat(trade.path("makerUserId").asLong()).isEqualTo(maker.id);
+                    assertThat(trade.path("takerOrderId").asLong()).isIn(bought.path("orderId").asLong(),sold.path("orderId").asLong());
+                    assertThat(trade.path("quantitySteps").asLong()).isEqualTo(1);
+                }
+                assertThat(executionTradeIds).containsExactlyInAnyOrderElementsOf(restTradeIds);
+                tradeQueryFixture = Map.of("userId",user.id,"makerId",maker.id,"historyPath",historyPath,"tradeIds",executionTradeIds);
+                System.out.println("OPTION_ADMIN_TRADES_PASS realMatches=2 userOrderSides=true wsRestAndAuditIdsEqual=true");
+            }
             System.out.printf("SIX_LINE_REALTIME_PASS productLine=%s depthEvents=%d wsTrades=%d restTrades=%d identitiesMatch=true%n",
                     line, user.depth.size(), user.trades.size(), restTradeIds.size());
             if (line == ProductLine.SPOT || line == ProductLine.OPTION) awaitClientVerification(user, maker, instrumentId, bid);

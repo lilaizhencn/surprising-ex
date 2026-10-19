@@ -23,7 +23,7 @@ import java.util.concurrent.locks.LockSupport;
 /** Single-threaded committed Archive replay; all replay state belongs to the calling export worker. */
 @Slf4j
 final class CommittedTradeExporter {
-    enum ExportMode { LIVE, FUNDING_REPAIR, COMMAND_RESULT_REPAIR, DELIVERY_REPAIR }
+    enum ExportMode { LIVE, FUNDING_REPAIR, COMMAND_RESULT_REPAIR, DELIVERY_REPAIR, EXECUTION_REPAIR }
     private final TradeExportProperties config;
     private final ProductLine product;
     private final String bootstrapServers;
@@ -65,12 +65,33 @@ final class CommittedTradeExporter {
         run(new java.util.concurrent.atomic.AtomicBoolean(true), ready -> {}, stopAfter, ExportMode.DELIVERY_REPAIR);
     }
 
+    private void initializeExecutions(TradeExportCheckpoint checkpoint, java.util.concurrent.atomic.AtomicBoolean running) throws Exception {
+        Path repair = config.checkpoint().toAbsolutePath().resolveSibling(config.checkpoint().getFileName() + ".execution-repair");
+        if (!orders.executionsInitialized(product)) {
+            if (checkpoint.logPosition() > 0) {
+                var repairConfig = new TradeExportProperties(config.clusterDirectory(), config.aeronDirectory(), config.archiveControlChannel(),
+                        repair, config.clusterId(), config.kafkaConfig(), config.checkpointInterval(), config.retryInterval());
+                new CommittedTradeExporter(repairConfig, product, null, orders).run(running, ready -> {}, checkpoint.logPosition(), ExportMode.EXECUTION_REPAIR);
+                if (TradeExportCheckpoint.read(repair, product).logPosition() < checkpoint.logPosition())
+                    throw new IllegalStateException("execution history reconstruction incomplete");
+            }
+            if (!running.get() || Thread.currentThread().isInterrupted()) throw new IllegalStateException("execution history initialization stopped");
+            orders.initializeExecutions(product, checkpoint.logPosition());
+        }
+        // After SQL readiness commits, no historical replay checkpoint is needed. A future
+        // deliberate table rebuild starts from the full Archive, retaining the live checkpoint.
+        Files.deleteIfExists(repair);
+        Files.deleteIfExists(repair.resolveSibling(repair.getFileName() + ".lock"));
+        Files.deleteIfExists(repair.resolveSibling(repair.getFileName() + ".next"));
+    }
+
     private void run(java.util.concurrent.atomic.AtomicBoolean running,
             java.util.function.Consumer<Boolean> connected, long stopAfter, ExportMode mode) throws Exception {
         Path checkpointPath = config.checkpoint().toAbsolutePath();
         if (mode == ExportMode.LIVE && (checkpointPath.getFileName().toString().endsWith(".command-repair")
                 || checkpointPath.getFileName().toString().endsWith(".funding-repair")
-                || checkpointPath.getFileName().toString().endsWith(".delivery-repair")))
+                || checkpointPath.getFileName().toString().endsWith(".delivery-repair")
+                || checkpointPath.getFileName().toString().endsWith(".execution-repair")))
             throw new IllegalArgumentException("live exporter cannot use a repair checkpoint");
         Files.createDirectories(checkpointPath.getParent());
         int clusterId = config.clusterId() == null
@@ -114,6 +135,7 @@ final class CommittedTradeExporter {
             if (lock == null)
                 throw new IllegalStateException("trade exporter checkpoint is already in use");
             TradeExportCheckpoint checkpoint = TradeExportCheckpoint.read(checkpointPath, product);
+            if (mode == ExportMode.LIVE) initializeExecutions(checkpoint, running);
             try (var replay = new CommittedTradeReplay(product, checkpoint.snapshot());
                     var sink =
                             mode != ExportMode.LIVE ? null : new ReliableTradeKafkaSink(
@@ -317,10 +339,10 @@ final class CommittedTradeExporter {
                  long sequence, long now) {
             if (mode == ExportMode.FUNDING_REPAIR || mode == ExportMode.DELIVERY_REPAIR) return;
             if (messages++ == 0) startedAt = now;
-            if (commandResult != null) commandResults.add(commandResult);
-            for (var change : mode == ExportMode.LIVE ? changes : List.<RealtimeFrame>of()) {
-                if (change.kind() == RealtimeFrame.Kind.TRADE) trades.add(change);
-                else orderChanges.add(change);
+            if (commandResult != null && mode != ExportMode.EXECUTION_REPAIR) commandResults.add(commandResult);
+            for (var change : mode == ExportMode.LIVE || mode == ExportMode.EXECUTION_REPAIR ? changes : List.<RealtimeFrame>of()) {
+                if (change.kind() == RealtimeFrame.Kind.TRADE && mode == ExportMode.LIVE) trades.add(change);
+                orderChanges.add(change);
             }
             if (messages >= 256 || trades.size() + orderChanges.size() >= 4096
                     || now - startedAt >= maxDelayNanos) flush(sequence);
@@ -339,6 +361,7 @@ final class CommittedTradeExporter {
             if (mode == ExportMode.FUNDING_REPAIR || mode == ExportMode.DELIVERY_REPAIR) return;
             if (sequence != flushedSequence || !orderChanges.isEmpty() || !trades.isEmpty() || !commandResults.isEmpty()) {
                 if (mode == ExportMode.COMMAND_RESULT_REPAIR) orders.repairCommandResults(product, commandResults);
+                else if (mode == ExportMode.EXECUTION_REPAIR) orders.repairExecutions(product, orderChanges);
                 else {
                     orders.persist(product, orderChanges, commandResults, sequence);
                     sink.publish(trades);

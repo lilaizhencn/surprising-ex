@@ -42,6 +42,8 @@ The Maven modules follow these boundaries: [`surprising-aeron-core`](surprising-
 
 条件单终态单笔查询及后台列表、详情、时间线现改由 realtime 的已提交 SQL 投影提供，Core 继续承担交易控制。投影缺失或重建未完成返回明确 503；首次启动从 realtime 自身检查点重建保留状态。升级需先应用 `deployment/migrations/20261020-trigger-read-projection.sql`，详见 [条件单查询与回执边界](docs/trigger-realtime-queries.md)。
 
+后台全局成交列表已接入 realtime 的已提交成交投影，支持同侧用户/订单筛选、双向游标分页，tradeId 与公开行情保持一致。已有主检查点会通过独立有限重放补齐历史，不重发 Kafka 或交易命令。需应用 `deployment/migrations/20261020-execution-read-projection.sql`，详见 [成交查询与重建](docs/execution-realtime-queries.md)。完整交易统计仍需补齐，不能用部分活动数据代替。
+
 现货余额比例下单继续对齐（2026-10-19）：`GET /api/v1/gateway/trading/price-protection` 经既有
 `TradingLocalRoutes → OrderRequestService → OrderService` 返回当前产品的 `marketMaxSlippagePpm`。
 该只读接口直接读取现有业务配置，不查询 Core、不保存第二份状态；热更新后的配置可立即读取。

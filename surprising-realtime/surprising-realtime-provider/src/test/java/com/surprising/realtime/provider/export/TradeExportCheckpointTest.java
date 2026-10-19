@@ -12,6 +12,16 @@ import java.nio.file.*;
 class TradeExportCheckpointTest {
     @TempDir Path directory;
 
+    @Test void executionRepairCannotReuseTheLiveCheckpointPurpose() throws Exception {
+        var live = directory.resolve("online.bin");
+        var repair = directory.resolve("online.bin.execution-repair");
+        var checkpoint = new TradeExportCheckpoint(ProductLine.OPTION, 100, 7, new byte[]{1,2,3});
+        checkpoint.write(live); Files.copy(live,repair);
+        assertThatThrownBy(() -> TradeExportCheckpoint.read(repair,ProductLine.OPTION)).isInstanceOf(java.io.IOException.class).hasMessageContaining("purpose");
+        checkpoint.write(repair);
+        assertThat(TradeExportCheckpoint.read(repair,ProductLine.OPTION).logPosition()).isEqualTo(100);
+    }
+
     @Test void commandRepairCannotStartFromARenamedOnlineCheckpoint() throws Exception {
         var online = directory.resolve("online.checkpoint");
         var repair = directory.resolve("receipts.command-repair");

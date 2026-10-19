@@ -16,6 +16,17 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
 class LocalBusinessApiTest {
+    private final com.surprising.trading.order.service.AdminOrderRequestService adminOrders = mock(com.surprising.trading.order.service.AdminOrderRequestService.class);
+
+    @Test void executionAuditRouteRequiresAdminAndPreservesExactOrderIdentityAndProductScope() {
+        var headers = new HttpHeaders(); headers.set("X-Admin-User-Id","7"); headers.set("X-Product-Line","LINEAR_PERPETUAL");
+        var response = invoke("trading-orders","/api/v1/admin/trading/orders/trades?productLine=LINEAR_PERPETUAL&userId=42&instrumentId=604&orderId="
+                +Long.MAX_VALUE+"&limit=10&cursor=cursor&sort=eventTime.asc",HttpMethod.GET,headers,null);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(adminOrders).trades("7","LINEAR_PERPETUAL","LINEAR_PERPETUAL",42L,"604",Long.MAX_VALUE,10,"cursor","eventTime.asc");
+        assertThat(invoke("trading-orders","/api/v1/admin/trading/orders/trades",HttpMethod.GET,userHeaders(),null).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
     @Test void cancellationPlanAndBatchBindTheAuthenticatedUserAndPreserveKeys() {
         var plan = new com.surprising.trading.api.model.CancellationPlanResponse(42, ProductLine.SPOT,
                 "1", java.util.List.of(9007199254740993L));
@@ -191,7 +202,7 @@ class LocalBusinessApiTest {
     }
 
     private LocalBusinessApi api() {
-        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, mock(com.surprising.trading.trigger.service.TriggerOrderRequestService.class), mock(com.surprising.trading.trigger.service.AdminTriggerOrderRequestService.class), leverage, mock(com.surprising.trading.order.service.TradingFeeRequestService.class), orders, mock(com.surprising.trading.order.service.AdminOrderRequestService.class), mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments, mock(com.surprising.trading.order.config.OrderBusinessSettingsService.class)), mapper, Validation.buildDefaultValidatorFactory().getValidator(), websocket, accountProperties, tradingProperties);
+        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, mock(com.surprising.trading.trigger.service.TriggerOrderRequestService.class), mock(com.surprising.trading.trigger.service.AdminTriggerOrderRequestService.class), leverage, mock(com.surprising.trading.order.service.TradingFeeRequestService.class), orders, adminOrders, mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments, mock(com.surprising.trading.order.config.OrderBusinessSettingsService.class)), mapper, Validation.buildDefaultValidatorFactory().getValidator(), websocket, accountProperties, tradingProperties);
     }
 
     private ResponseEntity<byte[]> invoke(String service, String path, HttpMethod method, HttpHeaders headers, String body) {

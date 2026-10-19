@@ -50,6 +50,19 @@ import org.springframework.stereotype.Service;
 @Service
 public class OrderService {
     @org.springframework.beans.factory.annotation.Autowired
+    private com.surprising.trading.order.repository.TradeProjectionRepository tradeProjection;
+
+    public com.surprising.trading.api.model.AdminTradeQueryResponse adminTrades(Long userId, String instrumentId,
+            Long orderId, int limit, String cursor, String sort, ProductLine requestedProduct) {
+        ProductLine product = currentProductLine();
+        if (requestedProduct != null && requestedProduct != product)
+            throw new IllegalArgumentException("product line does not match provider");
+        if (tradeProjection == null) throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "TRADE_READ_VIEW_UNAVAILABLE");
+        String instrument = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
+        return tradeProjection.search(product, userId, instrument, orderId, limit, cursor, sort);
+    }
+    @org.springframework.beans.factory.annotation.Autowired
     private com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
 
     private static final int MAX_CANCEL_BATCH_SIZE = 50;
