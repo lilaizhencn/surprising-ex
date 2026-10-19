@@ -18,6 +18,17 @@ import tools.jackson.databind.json.JsonMapper;
 class LocalBusinessApiTest {
 
     @Test
+    void publicBookUnavailabilityKeepsThe503Response() {
+        when(market.orderBookSnapshot("1", 30)).thenThrow(
+                new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "MARKET_BOOK_UNAVAILABLE"));
+        var response = invoke("trading-market", "/api/v1/trading/market/orderbook?instrumentId=1",
+                HttpMethod.GET, new HttpHeaders(), null);
+        assertThat(response.getStatusCode().value()).isEqualTo(503);
+        assertThat(new String(response.getBody(), java.nio.charset.StandardCharsets.UTF_8))
+                .contains("MARKET_BOOK_UNAVAILABLE");
+    }
+
+    @Test
     void distinguishesUnknownOutcomeFromNotAcceptedWithoutExposingTransportExceptions() {
         String body = "{\"userId\":42,\"instrumentId\":\"604\",\"marginMode\":\"CROSS\",\"leveragePpm\":1000000}";
         when(leverage.set(any(), any(), any())).thenThrow(new java.util.concurrent.CompletionException(

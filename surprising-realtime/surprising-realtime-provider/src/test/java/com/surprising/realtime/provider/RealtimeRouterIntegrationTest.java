@@ -214,6 +214,25 @@ class RealtimeRouterIntegrationTest {
                 Thread.sleep(250);
                 assertThat(receivedA).noneMatch(f -> f.sequence() == 5000 && f.userId() == 42);
                 assertThat(receivedB).noneMatch(f -> f.userId() == 42);
+                // REST demand must be served even without any WebSocket subscriber.
+                var market = new ValkeyMarketData(redis);
+                offer(publication, frame(RealtimeFrame.Kind.COMMIT_BEGIN, 0, 6000, 0, 0, "", "", new byte[0]));
+                offer(publication, frame(RealtimeFrame.Kind.BOOK, 0, 6000, 1, 0, "7", "7",
+                        CoreStateQueryCodec.encodeOrderBookView(new CoreOrderBookView(6000, List.of(
+                                new CoreBookLevelView("7", CoreOrderSide.BUY, 99, 12, 2))))));
+                Thread.sleep(100);
+                assertThatThrownBy(() -> market.requireBook(ProductLine.SPOT, "7"))
+                        .hasMessageContaining("MARKET_BOOK_UNAVAILABLE");
+                offer(publication, frame(RealtimeFrame.Kind.COMMIT_END, 0, 6000, 2, 0, "", "", new byte[0]));
+                await(() -> {
+                    try { return market.requireBook(ProductLine.SPOT, "7").view().exportSequence() == 6000; }
+                    catch (org.springframework.web.server.ResponseStatusException pending) { return false; }
+                });
+                assertThat(market.requireBook(ProductLine.SPOT, "7").view().levels().getFirst().quantitySteps())
+                        .isEqualTo(12);
+                // Discard only this REST test's demand before checking the 20-instrument sweep.
+                redis.opsForZSet().remove("rt:books:SPOT", "7");
+                control.clear();
                 var bookRequests = new ValkeySnapshotRequests(redis);
                 for (int i = 0; i < 20; i++)
                     bookRequests.renewBook(ProductLine.SPOT, Integer.toString(10000 + i), System.currentTimeMillis() + 30000);

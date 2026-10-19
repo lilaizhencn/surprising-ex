@@ -28,6 +28,7 @@ public final class RealtimeRouter implements AutoCloseable {
     private final RealtimeRouterProperties config;
     private final ValkeyRouteDirectory routes;
     private final ValkeyReadViewStore views;
+    private final ValkeyMarketData marketData;
     private final ValkeySnapshotRequests requests;
     private final SnapshotAssembler snapshots = new SnapshotAssembler();
     private final SnapshotAssembler commits = new SnapshotAssembler();
@@ -79,6 +80,7 @@ public final class RealtimeRouter implements AutoCloseable {
         this.config = config;
         routes = new ValkeyRouteDirectory(redis);
         views = new ValkeyReadViewStore(redis);
+        marketData = new ValkeyMarketData(redis);
         requests = new ValkeySnapshotRequests(redis);
         receiver =
                 new AeronRealtimeReceiver(
@@ -252,6 +254,8 @@ public final class RealtimeRouter implements AutoCloseable {
                 for (var event : batch) {
                     if (event.kind() == RealtimeFrame.Kind.COMMIT_BEGIN
                             || event.kind() == RealtimeFrame.Kind.COMMIT_END) continue;
+                    if (event.kind() == RealtimeFrame.Kind.BOOK)
+                        marketData.install(event, epochs.get(event.productLine()), now);
                     send(aeron, event, now, targets);
                 }
         } catch (RuntimeException failure) {

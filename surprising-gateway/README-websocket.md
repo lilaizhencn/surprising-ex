@@ -194,3 +194,14 @@ ORDER 与 `/api/v1/realtime/{productLine}/state` 的 `openOrders` 使用同一�
 `CoreOrderStateView`。新增 `executedValueTicks`（累计实际成交价 ticks × 成交 steps，字符串）、
 `averagePriceTicks`（数量加权平均 ticks，允许小数、无成交为空）、`cumulativeFeeUnits`（累计手续费）。
 这些是绝对值；客户端按订单 ID 和版本覆盖旧值，不把多次推送累加。创建时间不会随成交或撤单变更。
+
+## 公共成交标识与查询来源（2026-10-19）
+
+`RealtimeWebSocketBridge.publicTrade` 解码 TRADE 后向 `data.value` 写入 `tradeId`、`instrumentId`、
+`priceTicks`、`quantitySteps`、`coreSequence`、`side`、`eventTime`。tradeId 使用原帧 entityId，
+与 `ReliableTradeKafkaSink` / 最近成交 REST 的标识一致。`coreSequence` 是 matcher 序号，
+不能与 REST 的成交导出 sequence 比较；客户端以 tradeId 去重并精确比较其中的日志位置及成交索引。
+盘口 WS 的 SNAPSHOT/DELTA 格式、previousSequence 和产品隔离规则保持不变。
+
+公共盘口 REST 及 BBO 参考价改为读取 realtime Router 的 Valkey 视图，无回查 Core 分支。
+初始化/过期/源 epoch 改变时返回 503；盘口刷新依靠原有 Router 需求租约与异步 BOOK 输出。

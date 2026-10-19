@@ -56,7 +56,7 @@ public class OrderService {
 
     private final TradingOrderProperties properties;
     private final OrderValidator orderValidator;
-    private final OrderAeronGateway bboOrderBook;
+    private final com.surprising.trading.matching.service.MatchingMarketDataService bboOrderBook;
     private final OrderPlacementStateService placementStateService;
     private final AeronOrderCommandService aeronOrders;
     private final AeronOrderProjectionRepository aeronOrderProjection;
@@ -72,7 +72,7 @@ public class OrderService {
     @Autowired
     public OrderService(TradingOrderProperties properties, OrderValidator orderValidator,
                         OrderPlacementStateService placementStateService, AeronOrderCommandService aeronOrders,
-                        AeronOrderProjectionRepository aeronOrderProjection, OrderAeronGateway bboOrderBook) {
+                        AeronOrderProjectionRepository aeronOrderProjection, com.surprising.trading.matching.service.MatchingMarketDataService bboOrderBook) {
         this.bboOrderBook = bboOrderBook;
         this.properties = properties;
         this.orderValidator = orderValidator;
@@ -764,11 +764,11 @@ public class OrderService {
         boolean buyBook = (request.side() == OrderSide.BUY) == mode.sameSide();
         var bookSide = buyBook ? com.surprising.aeron.protocol.CoreOrderSide.BUY
                 : com.surprising.aeron.protocol.CoreOrderSide.SELL;
-        var book = bboOrderBook.orderBook(new com.surprising.aeron.protocol.CoreOrderBookQuery(instrumentId, mode.depth()));
-        // Core book views do not promise iteration order: rank distinct live price levels explicitly.
-        var prices = book.levels().stream()
-                .filter(level -> level.side() == bookSide && level.quantitySteps() > 0 && level.priceTicks() > 0)
-                .map(com.surprising.aeron.protocol.CoreBookLevelView::priceTicks).distinct()
+        var book = bboOrderBook.orderBookSnapshot(instrumentId, mode.depth());
+        // Rank the realtime reference before validation; Core still decides order acceptance.
+        var prices = (buyBook ? book.bids() : book.asks()).stream()
+                .filter(level -> level.quantitySteps() > 0 && level.priceTicks() > 0)
+                .map(com.surprising.trading.api.model.OrderBookLevel::priceTicks).distinct()
                 .sorted(buyBook ? Comparator.reverseOrder() : Comparator.naturalOrder()).toList();
         if (prices.size() < mode.depth()) {
             throw new IllegalArgumentException("BBO_DEPTH_UNAVAILABLE: requested " + mode.depth()

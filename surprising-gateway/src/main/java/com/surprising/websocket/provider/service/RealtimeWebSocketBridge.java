@@ -191,20 +191,7 @@ public final class RealtimeWebSocketBridge
                     case TRIGGER -> CoreTriggerOrderCodec.decodeList(f.payload());
                     case USER, BALANCE, METADATA, RESERVATION, LEVERAGE, POSITION ->
                             CoreStateQueryCodec.decodeUserState(f.payload());
-                    case TRADE -> {
-                        var b =
-                                java.nio.ByteBuffer.wrap(f.payload())
-                                        .order(java.nio.ByteOrder.LITTLE_ENDIAN);
-                        yield Map.of(
-                                "priceTicks",
-                                b.getLong(),
-                                "quantitySteps",
-                                b.getLong(),
-                                "coreSequence",
-                                Long.toString(b.getLong()),
-                                "side",
-                                CoreOrderSide.values()[b.get()].name());
-                    }
+                    case TRADE -> publicTrade(f);
                     default -> mapper.readTree(f.payload());
                 };
         String instrumentId = f.instrumentId().isBlank() ? SubscriptionTopic.WILDCARD : f.instrumentId();
@@ -256,6 +243,19 @@ public final class RealtimeWebSocketBridge
                             RealtimeVersion.of(f.sequence(), f.ordinal()), f.entityId(), ticker),
                     Instant.ofEpochMilli(f.timestamp()));
         }
+    }
+
+    /** Public REST history uses this same entity ID; matcher sequence is a separate domain. */
+    static Map<String, Object> publicTrade(RealtimeFrame frame) {
+        var payload = java.nio.ByteBuffer.wrap(frame.payload()).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        return Map.of(
+                "tradeId", frame.entityId(),
+                "instrumentId", frame.instrumentId(),
+                "priceTicks", payload.getLong(),
+                "quantitySteps", payload.getLong(),
+                "coreSequence", Long.toString(payload.getLong()),
+                "side", CoreOrderSide.values()[payload.get()].name(),
+                "eventTime", Instant.ofEpochMilli(frame.timestamp()).toString());
     }
 
     private static RealtimeRoute route(SubscriptionTopic topic) {

@@ -70,6 +70,44 @@ class ValkeyReadViewIntegrationTest {
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
+    void publicBooksAreIsolatedExpireAndRejectPreviousRouterEpoch(ProductLine product) {
+        long now = System.currentTimeMillis();
+        var market = new ValkeyMarketData(redis);
+        store.sourceEpoch(product, "current");
+        assertThatThrownBy(() -> market.requireBook(product, "1"))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("503");
+        assertThat(new ValkeySnapshotRequests(redis).books(product, now, 0, 10)).contains("1");
+        var frame = new RealtimeFrame(product, RealtimeFrame.Kind.BOOK, 0, 100, 1,
+                1234, 0, "1", "1", CoreStateQueryCodec.encodeOrderBookView(
+                        new CoreOrderBookView(100, List.of(
+                                new CoreBookLevelView("1", CoreOrderSide.BUY, 99, 12, 2)))));
+        market.install(frame, "current", now);
+        var book = market.requireBook(product, "1");
+        assertThat(book.view().exportSequence()).isEqualTo(100);
+        assertThat(book.refreshedAt()).isEqualTo(now);
+        assertThat(market.requireBook(product, "1").refreshedAt()).isEqualTo(now);
+        assertThat(book.view().levels().getFirst().quantitySteps()).isEqualTo(12);
+        assertThatThrownBy(() -> market.requireBook(product, "2"))
+                .hasMessageContaining("MARKET_BOOK_UNAVAILABLE");
+        var other = ProductLine.values()[(product.ordinal() + 1) % ProductLine.values().length];
+        assertThatThrownBy(() -> market.requireBook(other, "1"))
+                .hasMessageContaining("MARKET_BOOK_UNAVAILABLE");
+        market.install(frame, "current", now - 5_001);
+        assertThatThrownBy(() -> market.requireBook(product, "1"))
+                .hasMessageContaining("MARKET_BOOK_UNAVAILABLE");
+        market.install(frame, "previous", now);
+        assertThatThrownBy(() -> market.requireBook(product, "1"))
+                .hasMessageContaining("MARKET_BOOK_UNAVAILABLE");
+        // A new router epoch may legitimately restart at a lower sequence; empty replaces old depth.
+        var empty = new RealtimeFrame(product, RealtimeFrame.Kind.BOOK, 0, 1, 1,
+                2345, 0, "1", "1", CoreStateQueryCodec.encodeOrderBookView(new CoreOrderBookView(1, List.of())));
+        market.install(empty, "current", System.currentTimeMillis());
+        assertThat(market.requireBook(product, "1").view().levels()).isEmpty();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
     void pointQueriesReadOnlyTargetEntitiesAndPreserveReadGuards(ProductLine product) {
         long now = System.currentTimeMillis();
         var state = new CoreUserStateView(product, 42, 1, CorePositionMode.ONE_WAY,

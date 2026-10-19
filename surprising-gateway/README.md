@@ -409,3 +409,10 @@ HotSpot JDK 27，对比 `243158a8` 的该方法与当前实现，使用相同 Ob
 不再为单项查询解码无关订单。全量查询沿用原入口；不可用读视图不会回查数据库或 Core。
 六产品线 HTTP 测试使用真实 Redis 快照和真实 `AccountService`，验证库存单位、账户顺序和产品隔离；
 有效费率在该测试中模拟，另由原 `TradingFeeServiceTest` / `FeeScheduleSnapshotCacheTest` 覆盖费率选择。
+
+## realtime 盘口查询（2026-10-19）
+
+`MatchingMarketDataService` 的 HTTP 盘口及 BBO 参考价使用 `ValkeyMarketData`，不再依赖
+`OrderAeronGateway` 的 BOOK_STATE_QUERY。公共和内部 URL 不变，按产品/合约读取最多每侧
+50 档的完整视图。无视图、超过 5 秒未刷新或 source epoch 已改变返回 503，不返回伪空盘口。
+详细状态所有权、初始化和部署顺序见 [realtime README](../surprising-realtime/README.md#行情查询与交易-core-分离2026-10-19)。

@@ -11,7 +11,7 @@
 HTTP 热缓存与 WebSocket 都使用同一完整 OHLCV 快照，前端无需用张数重算基础币成交量。
 
 `surprising-realtime-provider` 现在同时运行可靠成交导出、K 线与实时路由，默认 HTTP 端口 **9095**。
-盘口查询已迁入 gateway；不再部署 market-data provider。原有实时协议、Valkey 查询视图和 Core 权威状态保持不变。
+盘口 HTTP 入口位于 gateway，查询读取 realtime 的 Valkey 盘口视图；不再部署 market-data provider。原有实时协议、Valkey 查询视图和 Core 权威状态保持不变。
 
 ## K 线链路
 
@@ -494,3 +494,39 @@ HotSpot JDK 27 定向测试 61 个测试类，按最后一次类结果去重共 
 
 余额和仓位的点查询仍显式读取 `USER:user`，按原有规则将基线和更新叠加；不能为减少分配丢弃基线。
 快照安装及晚到更新的版本、顺序和防复活校验保持不变。
+
+## 行情查询与交易 Core 分离（2026-10-19）
+
+公共盘口 `/api/v1/gateway/trading-market/orderbook`、内部 maker 盘口入口和 BBO 参考价统一由
+`MatchingMarketDataService` 调用 `ValkeyMarketData.requireBook`；已移除 `OrderAeronGateway.orderBook`。
+`RealtimeRouter.publishReady` 只在完整 BOOK commit 收齐后写入 `rt:book:{产品:合约}`，无 WS
+订阅也会保存。每个视图只保存当前完整盘口，5 秒过期；读者续期原有盘口需求租约，由 Router
+合并 REST/WS 需求，不因 HTTP 请求直接访问交易 Core。Router source epoch 改变后旧视图立即不可读。
+不存在、过期、错产品/合约、损坏或 Valkey 不可用返回 `503 MARKET_BOOK_UNAVAILABLE`；空盘口是有效结果。
+REST 返回买价降序、卖价升序，最多每侧 50 档，保留盘口序号，eventTime 为 Router 收到完整快照的刷新时间；HTTP 读取不刷新该时间。
+安静盘口的 Cluster 时间可能停留在最后一笔交易，不能拿它代替本次快照刷新时间，否则 maker 会误判失效。
+
+Core 仍拥有权威撮合订单簿，按现有异步控制通道输出已提交盘口与账户恢复快照；本次没有删除
+恢复/运维控制协议，也没有在 realtime 裁决订单或资产。用户行情查询、K 线、最近成交均从交易处理路径外读取。
+最近成交 REST 保持 realtime 内的 `RecentTradeQueryService`，K 线仍沿原聚合/历史路径。
+WS `trades.data.value` 新增与可靠导出完全一致的 `tradeId`、`instrumentId`、`eventTime`，保留
+`priceTicks/quantitySteps/coreSequence/side`。`coreSequence` 是 matcher 序号，不能与 REST 成交导出 sequence
+混用；两端按 tradeId 去重并按其中的精确整数位置排序，避免重复和丢成交。
+
+本次新增状态只有 Router 拥有的可过期盘口查询视图，读取方为 HTTP 和 BBO；无新增权威账本、线程或撮合缓存。
+部署时需先更新 realtime，再更新 gateway；同一 Valkey 和 source epoch 为必要依赖。冷启动首个 REST 可能返回
+503 并登记需求，客户端继续接收 WS 基线，K 线和逐笔历史加载不被盘口初始化阻断。
+
+### 本轮验证与边界
+
+HotSpot JDK 27（Corretto 27）下执行 realtime-api、realtime-provider 和 gateway 的 14 个相关测试类，
+共 243 项通过、0 失败、0 跳过。涵盖真实 Redis/Aeron 完整提交后才发布可查询盘口、无 WS 订阅的
+REST 需求、六产品隔离、epoch/过期失效、HTTP 503 传递、BBO 模式和订单入口，以及 WS 成交标识。
+命令：`mvn -pl surprising-realtime/surprising-realtime-api,surprising-realtime/surprising-realtime-provider,surprising-gateway -am -Dtest=MarketDataLocalTest,BboOrderServiceTest,OrderServiceTest,RealtimePublicTradeTest,DepthUpdateTest,SubscriptionRegistryTest,SubscriptionRegistryMetricsTest,ValkeyReadViewIntegrationTest,RealtimeRouterIntegrationTest,RecentTradeQueryServiceTest,MarketApplicationContextTest,LocalBusinessApiTest,GatewayProxyServiceTest,ProductBusinessConfigurationTest -Dsurefire.failIfNoSpecifiedTests=false test`。
+
+Web lint/build 和 147 项测试通过；Flutter analyze 无问题、126 项测试通过。客户端 50 档保留测试
+已验证旧 20 档截断失败、恢复修复后通过。桌面 1440px / 手机 390px 的公开页面与登录页冒烟检查
+未发现 JS 运行异常或横向溢出；未登录交易页进入登录流程，因此不把它算作真实盘口端到端验收。
+未做线上部署、真实下单资金对账或 iOS/Android 真机验收；本次未修改交易裁决、资金或持仓模型，
+验证范围按行情查询/推送及直接相关订单入口界定。测试使用本轮临时 Redis、Aeron 目录并在测试结束关闭；
+磁盘可用约 297GiB，临时前端服务与日志在汇总后清理，不删除既有集群或运行数据。
