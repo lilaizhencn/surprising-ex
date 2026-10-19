@@ -40,6 +40,7 @@ class SixProductLineContractLiveTest {
     private Map<String, Object> triggerQueryFixture;
     private Map<String, Object> tradeQueryFixture;
     private Map<String, Object> statisticsFixture;
+    private String deliveryProtectionPhase;
 
     @Test
     void createListEditAndPauseThroughAdminRequestsWithoutRestart() throws Exception {
@@ -254,6 +255,7 @@ class SixProductLineContractLiveTest {
             if(statisticsFixture!=null) {
                 content.put("statistics",statisticsFixture);content.put("adminAccessToken",admin);
             }
+            if (deliveryProtectionPhase != null) content.put("deliveryProtectionPhase", deliveryProtectionPhase);
             java.nio.file.Files.writeString(fixture, json.writeValueAsString(content),
                     java.nio.file.StandardOpenOption.CREATE_NEW);
             java.nio.file.Files.setPosixFilePermissions(fixture, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
@@ -288,14 +290,73 @@ class SixProductLineContractLiveTest {
         String settlementAsset = line == ProductLine.INVERSE_DELIVERY ? "BTC" : "USDT";
         long initialFunds = line == ProductLine.INVERSE_DELIVERY ? 1_000_000_000L : 10_000_000_000_000L;
         fund(user, settlementAsset, initialFunds); fund(maker, settlementAsset, initialFunds);
+        boolean protection = "true".equals(System.getenv("SIX_LINE_LIVE_DELIVERY_PROTECTION"));
+        if (protection) assertThat(line).isEqualTo(ProductLine.LINEAR_DELIVERY);
+        String strategy = "qa-delivery-protection-" + run;
+        boolean strategyCreated = false;
         try (var core = SurprisingAeronClient.connect(line, List.of("127.0.0.1"), "127.0.0.1", Duration.ofSeconds(10))) {
             var before = combinedFunds(core, user.id, maker.id);
+            if (protection) user.connect(id);
             place(maker, id, "SELL", "LIMIT", 500_000, "GTC", false, 2);
             place(user, id, "BUY", "LIMIT", 500_000, "IOC", false, 2);
+            if (protection) {
+                var definition = new LinkedHashMap<String, Object>();
+                definition.put("strategyId", strategy); definition.put("productLine", line.name());
+                definition.put("enabled", true); definition.put("accountIds", List.of(maker.id));
+                definition.put("instrumentIds", List.of(String.valueOf(id))); definition.put("baseQuantitySteps", 10);
+                definition.put("marginMode", "CROSS"); definition.put("spreadTicks", 20); definition.put("levelSpacingTicks", 10);
+                definition.put("maxInventorySteps", 1_000_000); definition.put("maxInventorySkewPpm", 0);
+                definition.put("orderLevels", 3); definition.put("initialAnchorPriceTicks", 500_000); definition.put("version", 0);
+                write("market-maker", "/strategy-definitions?reason=delivery-protection-qa", definition, 200);
+                strategyCreated = true;
+                long ready = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+                while (userState(core, maker.id).reservations().size() < 2) {
+                    assertThat(System.nanoTime()).as("real maker quote readiness").isLessThan(ready);
+                    Thread.sleep(100);
+                }
+                deliveryProtectionPhase = "TRADING";
+                awaitClientVerification(user, maker, id, 500_000);
+                var directory = java.nio.file.Path.of(System.getenv("SIX_LINE_LIVE_UI_FIXTURE")).getParent();
+                var web = json.readTree(java.nio.file.Files.readString(directory.resolve("delivery-protection-web-evidence.json")));
+                var client = json.readTree(java.nio.file.Files.readString(directory.resolve("delivery-protection-client-evidence.json")));
+                for (var trigger : web.path("triggerIds")) {
+                    var retained = CoreTriggerOrderCodec.decodeList(query(core, CoreMessageType.TRIGGER_ORDER_QUERY, user.id,
+                            CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(Long.parseLong(trigger.asString()), "", 0, 1))).data()).getFirst();
+                    assertThat(retained.status()).isEqualTo(CoreTriggerOrderStatus.CANCELED);
+                }
+                assertThat(web.path("triggerIds").size()).isEqualTo(3);
+                assertThat(client.path("triggerIds").size()).isEqualTo(2);
+                for (int i = 0; i < 2; i++) {
+                    var retained = CoreTriggerOrderCodec.decodeList(query(core, CoreMessageType.TRIGGER_ORDER_QUERY, user.id,
+                            CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(Long.parseLong(client.path("triggerIds").get(i).asString()), "", 0, 1))).data()).getFirst();
+                    assertThat(retained.status()).isEqualTo(i == 0 ? CoreTriggerOrderStatus.TRIGGERED : CoreTriggerOrderStatus.CANCELED);
+                    if (i == 0) assertThat(retained.placedOrderId()).isPositive();
+                }
+                assertThat(userState(core, user.id).positions()).anyMatch(pos -> pos.signedQuantitySteps() == 1);
+                assertThat(userState(core, maker.id).positions()).anyMatch(pos -> pos.signedQuantitySteps() == -1);
+                write("market-maker", "/strategies/" + strategy + "/pause?productLine=" + line, null, 200);
+                System.out.println("LINEAR_DELIVERY_PROTECTION_CORE_PASS webCanceled=3 clientTriggered=1 siblingCanceled=1 remainingPosition=1");
+            }
             var settling = changeStatus(id, trading, "SETTLING", 200);
             awaitSync(id, settling.path("lastChangeId").asLong());
             assertThat(get("/api/v1/gateway/instrument/list?productLine=" + line, null).toString()).contains("QA-DELIVERY-CLOSE-" + run.toUpperCase(Locale.ROOT));
-            place(maker, id, "BUY", "LIMIT", 500_000, "GTC", true, 2);
+            place(maker, id, "BUY", "LIMIT", 500_000, "GTC", true, protection ? 1 : 2);
+            if (protection) {
+                deliveryProtectionPhase = "SETTLING";
+                var legs = new ArrayList<Map<String, Object>>();
+                for (boolean tp : new boolean[]{true, false}) {
+                    var leg = new LinkedHashMap<String, Object>();
+                    leg.put("userId", user.id); leg.put("clientTriggerOrderId", "settling-" + run + (tp ? "-tp" : "-sl"));
+                    leg.put("ocoGroupId", "settling-" + run); leg.put("instrumentId", String.valueOf(id));
+                    leg.put("side", "SELL"); leg.put("triggerType", tp ? "TAKE_PROFIT" : "STOP_LOSS");
+                    leg.put("triggerPriceTicks", tp ? 600_000 : 400_000); leg.put("orderType", "MARKET");
+                    leg.put("timeInForce", "IOC"); leg.put("priceTicks", 0); leg.put("quantitySteps", 1);
+                    leg.put("marginMode", "CROSS"); leg.put("positionSide", "NET"); legs.add(leg);
+                }
+                request("POST", "/api/v1/gateway/trading-trigger", json.writeValueAsString(legs.getFirst()), user.token, null, 409);
+                request("POST", "/api/v1/gateway/trading-trigger/batch", json.writeValueAsString(Map.of("atomic", true, "orders", legs)), user.token, null, 409);
+                System.out.println("LINEAR_DELIVERY_SETTLING_TRIGGER_REJECT_PASS single=409 oco=409 directReductionStillAllowed=true");
+            }
             long leverageDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
             JsonNode leverage;
             do {
@@ -315,7 +376,30 @@ class SixProductLineContractLiveTest {
                 assertThat(state.balances()).allMatch(b -> b.lockedUnits() == 0);
             }
             assertThat(combinedFunds(core, user.id, maker.id)).as("delivery close funds conservation").isEqualTo(before);
+            if (protection) {
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(15);
+                while (user.trades.size() < 3 || user.executions.size() < 3) {
+                    assertThat(System.nanoTime()).as("trigger child and settling reduction realtime events").isLessThan(deadline);
+                    Thread.sleep(100);
+                }
+                assertThat(user.errors).isEmpty();
+                JsonNode recent;
+                do {
+                    recent = get("/api/v1/gateway/candlestick/trades/recent?instrumentId=" + id + "&limit=50", user.token);
+                    if (recent.path("trades").size() >= 3) break;
+                    assertThat(System.nanoTime()).as("committed recent-trade projection").isLessThan(deadline);
+                    Thread.sleep(100);
+                } while (true);
+                var ids = new HashSet<String>();
+                for (var trade : recent.path("trades")) ids.add(trade.path("tradeId").asString());
+                assertThat(ids).containsExactlyInAnyOrderElementsOf(user.trades.keySet());
+                assertThat(ids).hasSize(3);
+                System.out.println("LINEAR_DELIVERY_PROTECTION_REALTIME_PASS trades=3 wsRestIdentitiesMatch=true positions=0 reservations=0 locked=0 fundsDifference=0");
+            }
             System.out.printf("%s_CLIENTS_PASS instrumentId=%d trader=%d maker=%d status=SETTLING positions=0 locked=0 fundsDifference=0%n", line, id, user.id, maker.id);
+        } finally {
+            if (strategyCreated) write("market-maker", "/strategies/" + strategy + "/pause?productLine=" + line, null, 200);
+            if (user.socket != null) user.socket.abort();
         }
     }
 
@@ -904,7 +988,23 @@ class SixProductLineContractLiveTest {
         body.put("userId", actor.id); body.put("asset", asset); body.put("amountUnits", units);
         body.put("referenceId", "qa-" + run + "-" + actor.id + "-" + asset); body.put("reason", "isolated live QA funding");
         if (line != ProductLine.SPOT) body.put("accountType", line.accountTypeCode());
-        write("account", line == ProductLine.SPOT ? "/balance-adjustments" : "/product-balance-adjustments", body, 200);
+        // Retry only REQUEST_NOT_ACCEPTED, preserving the approved body and stable Core
+        // commandId. The refusal can also concern the post-command balance read, so the
+        // same reference is essential; the returned balance must prove one credit.
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(20);
+        for (;;) {
+            var response = write("account", line == ProductLine.SPOT ? "/balance-adjustments" : "/product-balance-adjustments", body, 200, 503);
+            if (!"REQUEST_NOT_ACCEPTED".equals(response.path("code").asString())) {
+                assertThat(response.path("userId").asLong()).isEqualTo(actor.id);
+                assertThat(response.path("asset").asString()).isEqualTo(asset);
+                assertThat(response.path("availableUnits").asLong()).as("fund once before any trading").isEqualTo(units);
+                assertThat(response.path("lockedUnits").asLong()).isZero();
+                return;
+            }
+            System.out.printf("QA_FUND_NOT_ADMITTED product=%s userId=%d referenceId=%s unchanged=true%n", line, actor.id, body.get("referenceId"));
+            assertThat(System.nanoTime()).as("bounded REQUEST_NOT_ACCEPTED retry with unchanged financial identity").isLessThan(deadline);
+            Thread.sleep(100);
+        }
     }
 
     private JsonNode place(Participant actor, int instrumentId, String side, String type, long price, String tif, boolean reduceOnly) throws Exception {
@@ -917,7 +1017,20 @@ class SixProductLineContractLiveTest {
         body.put("instrumentId", String.valueOf(instrumentId)); body.put("side", side); body.put("orderType", type);
         body.put("priceTicks", price); body.put("quantitySteps", quantity); body.put("timeInForce", tif);
         body.put("marginMode", "CROSS"); body.put("positionSide", "NET"); body.put("reduceOnly", reduceOnly); body.put("postOnly", false);
-        var receipt = request("POST", "/api/v1/gateway/trading", json.writeValueAsString(body), actor.token, null, 200);
+        String serialized = json.writeValueAsString(body);
+        JsonNode receipt;
+        long admissionDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(20);
+        for (;;) {
+            receipt = request("POST", "/api/v1/gateway/trading", serialized, actor.token, null, 200, 503);
+            // A negative offer proves this attempt was not admitted. Keep the original
+            // clientOrderId and body; unknown or accepted outcomes must never be resent.
+            if (!"NOT_ACCEPTED".equals(receipt.path("outcome").asString())
+                    || !Set.of("CLOSED", "NOT_CONNECTED").contains(receipt.path("code").asString())) break;
+            System.out.printf("QA_ORDER_NOT_ADMITTED product=%s userId=%d commandId=%s unchanged=true%n",
+                    line, actor.id, receipt.path("commandId").asString());
+            assertThat(System.nanoTime()).as("bounded negative-offer retry with original order identity").isLessThan(admissionDeadline);
+            Thread.sleep(100);
+        }
         String resultUrl = receipt.path("commandResultUrl").asString();
         assertThat(resultUrl).startsWith("/api/v1/gateway/trading/commands/");
         JsonNode confirmed = null;
@@ -1020,7 +1133,7 @@ class SixProductLineContractLiveTest {
                 + "&reason=six-line-qa&expectedChangeId=" + previous.path("lastChangeId").asLong(), null, expected);
     }
 
-    private JsonNode write(String service, String suffix, Object body, int expected) throws Exception {
+    private JsonNode write(String service, String suffix, Object body, int... expected) throws Exception {
         String path = "/api/v1/admin/gateway/" + service + suffix;
         String serialized = body == null ? "" : json.writeValueAsString(body);
         boolean settlementConfirmation = service.equals("instrument-admin") && path.contains("/settlement?");
