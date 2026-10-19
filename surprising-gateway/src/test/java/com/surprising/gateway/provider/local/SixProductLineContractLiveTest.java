@@ -6,6 +6,7 @@ import com.surprising.asset.repository.AssetRepository;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.provider.repository.*;
 import com.surprising.instrument.provider.service.InstrumentStorageService;
+import com.surprising.instrument.provider.service.InstrumentLifecycleReadinessService;
 import com.surprising.product.api.ProductLine;
 import java.net.URI;
 import java.net.http.*;
@@ -128,8 +129,10 @@ class SixProductLineContractLiveTest {
         assertThat(processIdentities()).isEqualTo(started);
         var changes = get("/api/v1/admin/gateway/instrument-admin/" + id + "/changes?productLine=" + line + "&limit=20", admin);
         assertThat(changes.size()).isEqualTo(5);
-        if (line == ProductLine.LINEAR_DELIVERY && System.getenv("SIX_LINE_LIVE_UI_FIXTURE") != null)
-            exerciseLinearDeliveryClients(jdbc, created);
+        if (line == ProductLine.LINEAR_DELIVERY) {
+            if ("true".equals(System.getenv("SIX_LINE_LIVE_EXPIRY"))) exerciseLinearDeliveryExpiry(jdbc, created);
+            else if (System.getenv("SIX_LINE_LIVE_UI_FIXTURE") != null) exerciseLinearDeliveryClients(jdbc, created);
+        }
         assertThat(processIdentities()).isEqualTo(started);
         System.out.printf("SIX_LINE_CONTRACT_PASS productLine=%s instrumentId=%d version=%d transitions=DRAFT,PRE_TRADING,TRADING,EDIT,HALT processes=%s%n",
                 line, id, halted.path("lastChangeId").asLong(), started.keySet());
@@ -223,6 +226,123 @@ class SixProductLineContractLiveTest {
             }
             assertThat(combinedFunds(core, user.id, maker.id)).as("delivery close funds conservation").isEqualTo(before);
             System.out.printf("LINEAR_DELIVERY_CLIENTS_PASS instrumentId=%d trader=%d maker=%d status=SETTLING positions=0 locked=0 fundsDifference=0%n", id, user.id, maker.id);
+        }
+    }
+
+    /** 真实时钟到期，排空普通订单，再经管理入口确认结算价；资金及流水均不能靠 UI 猜测。 */
+    private void exerciseLinearDeliveryExpiry(JdbcTemplate jdbc, JsonNode template) throws Exception {
+        var draft = ((ObjectNode) template).deepCopy();
+        draft.remove(List.of("changeId", "lastChangeId", "createdAt", "updatedAt", "baseAsset", "quoteAsset", "settleAsset", "contractValueAsset"));
+        draft.putNull("instrumentId"); draft.put("symbol", "QA-DELIVERY-EXPIRY-" + run.toUpperCase(Locale.ROOT));
+        draft.put("status", "DRAFT");
+        var expiry = Instant.now().plusSeconds(45);
+        draft.put("expiryTime", expiry.toString()); draft.put("deliveryTime", expiry.plusSeconds(5).toString());
+        var created = write("instrument-admin", "/upsert?reason=delivery-expiry-qa&expectedChangeId=0", draft, 200);
+        int id = created.path("instrumentId").asInt();
+        var listed = changeStatus(id, created, "PRE_TRADING", 200);
+        var trading = changeStatus(id, listed, "TRADING", 200);
+        awaitSync(id, trading.path("lastChangeId").asLong());
+        var user = participantFixture(jdbc, "expiry-trader", false);
+        var maker = participantFixture(jdbc, "expiry-maker", false);
+        for (var actor : List.of(user, maker)) fund(actor, "USDT", 10_000_000_000_000L);
+        String expiryStrategy = "qa-expiry-" + run;
+        boolean expiryStrategyCreated = false;
+        try (var core = SurprisingAeronClient.connect(line, List.of("127.0.0.1"), "127.0.0.1", Duration.ofSeconds(10))) {
+            var before = combinedFunds(core, user.id, maker.id);
+            user.connect(id);
+            place(maker, id, "SELL", "LIMIT", 500_000, "GTC", false, 2);
+            place(user, id, "BUY", "LIMIT", 500_000, "IOC", false, 2);
+            var resting = place(user, id, "BUY", "LIMIT", 490_000, "GTC", false, 1);
+            assertThat(userState(core, user.id).positions()).anyMatch(p -> p.signedQuantitySteps() == 2);
+            var legs = new ArrayList<Map<String, Object>>();
+            for (boolean tp : new boolean[]{true, false}) {
+                var leg = new LinkedHashMap<String, Object>();
+                leg.put("userId", user.id); leg.put("clientTriggerOrderId", "expiry-" + run + (tp ? "-tp" : "-sl"));
+                leg.put("ocoGroupId", "expiry-" + run); leg.put("instrumentId", String.valueOf(id));
+                leg.put("side", "SELL"); leg.put("triggerType", tp ? "TAKE_PROFIT" : "STOP_LOSS");
+                leg.put("triggerPriceTicks", tp ? 600_000 : 400_000); leg.put("orderType", "MARKET");
+                leg.put("timeInForce", "IOC"); leg.put("priceTicks", 0); leg.put("quantitySteps", 2);
+                leg.put("marginMode", "CROSS"); leg.put("positionSide", "NET"); leg.put("reduceOnly", true);
+                legs.add(leg);
+            }
+            var stops = request("POST", "/api/v1/gateway/trading-trigger/batch", json.writeValueAsString(Map.of("orders", legs, "atomic", true)), user.token, null, 200);
+            assertThat(stops.path("completed").asInt()).isEqualTo(2);
+            var definition = new LinkedHashMap<String, Object>();
+            definition.put("strategyId", expiryStrategy); definition.put("productLine", line.name());
+            definition.put("enabled", true); definition.put("accountIds", List.of(maker.id));
+            definition.put("instrumentIds", List.of(String.valueOf(id))); definition.put("baseQuantitySteps", 1);
+            definition.put("marginMode", "CROSS"); definition.put("spreadTicks", 20); definition.put("levelSpacingTicks", 10);
+            definition.put("maxInventorySteps", 1_000_000); definition.put("maxInventorySkewPpm", 0);
+            definition.put("orderLevels", 1); definition.put("initialAnchorPriceTicks", 500_000); definition.put("version", 0);
+            write("market-maker", "/strategy-definitions?reason=delivery-expiry-qa", definition, 200);
+            expiryStrategyCreated = true;
+            long quoteDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+            while (userState(core, maker.id).reservations().size() < 2) {
+                assertThat(System.nanoTime()).as("live maker quotes before expiry").isLessThan(quoteDeadline);
+                Thread.sleep(100);
+            }
+            write("instrument-admin", "/" + id + "/settlement?productLine=" + line + "&settlementPriceTicks=510000&reason=too-early", null, 409);
+            var repository = new InstrumentRepository(jdbc);
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(90);
+            for (;;) {
+                var current = repository.current(id, line).orElseThrow();
+                if (current.status() == com.surprising.instrument.api.model.InstrumentStatus.SETTLING) break;
+                assertThat(System.nanoTime()).as("automatic expiry to SETTLING").isLessThan(deadline);
+                Thread.sleep(200);
+            }
+            var current = repository.current(id, line).orElseThrow();
+            awaitSync(id, current.lastChangeId());
+            var readiness = new InstrumentLifecycleReadinessService(new InstrumentLifecycleDrainRepository(jdbc));
+            while (!readiness.isReady(line, String.valueOf(id), current.lastChangeId()) || Instant.now().isBefore(expiry.plusSeconds(5))) {
+                assertThat(System.nanoTime()).as("delivery time and committed ORDER drain acknowledgement").isLessThan(deadline);
+                Thread.sleep(200);
+            }
+            JsonNode canceled;
+            do {
+                canceled = request("GET", "/api/v1/gateway/trading/" + resting.path("orderId").asLong() + "?userId=" + user.id, "", user.token, null, 200, 404, 503);
+                if ("CANCELED".equals(canceled.path("status").asString())) break;
+                assertThat(System.nanoTime()).as("committed expiry cancellation projection").isLessThan(deadline);
+                Thread.sleep(100);
+            } while (true);
+            assertThat(canceled.path("status").asString()).isEqualTo("CANCELED");
+            for (var stop : stops.path("results")) {
+                long triggerId = stop.path("order").path("triggerOrderId").asLong();
+                var retained = CoreTriggerOrderCodec.decodeList(query(core, CoreMessageType.TRIGGER_ORDER_QUERY, user.id,
+                        CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(triggerId, "", 0, 1))).data());
+                assertThat(retained).hasSize(1);
+                assertThat(retained.getFirst().status().name()).isEqualTo("CANCELED");
+            }
+            var closed = write("instrument-admin", "/" + id + "/settlement?productLine=" + line + "&settlementPriceTicks=510000&reason=expiry-qa", null, 200);
+            assertThat(closed.path("status").asString()).isEqualTo("CLOSED");
+            for (var actor : List.of(user, maker)) {
+                for (;;) {
+                    var state = userState(core, actor.id);
+                    if (state.positions().stream().allMatch(p -> p.signedQuantitySteps() == 0 && p.positionMarginUnits() == 0)
+                            && state.reservations().isEmpty() && state.balances().stream().allMatch(b -> b.lockedUnits() == 0)) break;
+                    assertThat(System.nanoTime()).as("committed expiry settlement for " + actor.id).isLessThan(deadline);
+                    Thread.sleep(100);
+                }
+            }
+            assertThat(combinedFunds(core, user.id, maker.id)).as("delivery settlement funds conservation").isEqualTo(before);
+            var again = write("instrument-admin", "/" + id + "/settlement?productLine=" + line + "&settlementPriceTicks=510000&reason=expiry-retry", null, 200);
+            assertThat(again.path("lastChangeId").asLong()).isEqualTo(closed.path("lastChangeId").asLong());
+            JsonNode ledger;
+            long ledgerDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+            do {
+                ledger = get("/api/v1/gateway/account/product-ledger?userId=" + user.id + "&accountType=USDT_DELIVERY&referenceType=DELIVERY_SETTLEMENT&limit=100", user.token);
+                if (!ledger.path("entries").isEmpty() || System.nanoTime() >= ledgerDeadline) break;
+                Thread.sleep(100);
+            } while (true);
+            assertThat(ledger.path("entries")).as("real user delivery settlement history " + ledger).hasSize(1);
+            assertThat(ledger.path("entries").get(0).path("amountUnits").asLong()).isEqualTo(200_000_000L);
+            assertThat(ledger.path("entries").get(0).path("instrumentId").asString()).isEqualTo(String.valueOf(id));
+            var makerLedger = get("/api/v1/gateway/account/product-ledger?userId=" + maker.id + "&accountType=USDT_DELIVERY&referenceType=DELIVERY_SETTLEMENT&limit=100", maker.token);
+            assertThat(makerLedger.path("entries")).hasSize(1);
+            assertThat(makerLedger.path("entries").get(0).path("amountUnits").asLong()).isEqualTo(-200_000_000L);
+            System.out.printf("LINEAR_DELIVERY_EXPIRY_PASS instrumentId=%d userId=%d makerId=%d expiry=%s status=CLOSED pnl=200000000 canceled=1 stopsCanceled=2 makerQuotes=true positions=0 locked=0 fundsDifference=0%n", id, user.id, maker.id, expiry);
+        } finally {
+            if (expiryStrategyCreated) write("market-maker", "/strategies/" + expiryStrategy + "/pause?productLine=" + line, null, 200);
+            if (user.socket != null) user.socket.sendClose(WebSocket.NORMAL_CLOSURE, "expiry QA complete").join();
         }
     }
 
@@ -518,9 +638,13 @@ class SixProductLineContractLiveTest {
     }
 
     private CoreResponse query(SurprisingAeronClient core, CoreMessageType type, long user) {
+        return query(core, type, user, new byte[0]);
+    }
+
+    private CoreResponse query(SurprisingAeronClient core, CoreMessageType type, long user, byte[] payload) {
         long now = System.currentTimeMillis();
         var response = core.submit(new CoreMessage(CoreMessageHeader.query(type, UUID.randomUUID(), line,
-                CommandSource.OPERATIONS, 0, now, user, now, now), new byte[0]));
+                CommandSource.OPERATIONS, 0, now, user, now, now), payload));
         assertThat(response.status()).isEqualTo(ResponseStatus.OK);
         return response;
     }
@@ -597,7 +721,8 @@ class SixProductLineContractLiveTest {
     private JsonNode write(String service, String suffix, Object body, int expected) throws Exception {
         String path = "/api/v1/admin/gateway/" + service + suffix;
         String serialized = body == null ? "" : json.writeValueAsString(body);
-        if (!service.equals("account")) {
+        boolean settlementConfirmation = service.equals("instrument-admin") && path.contains("/settlement?");
+        if (!service.equals("account") && !settlementConfirmation) {
             return request("POST", path, serialized, admin, null, expected);
         }
         URI uri = URI.create(path);

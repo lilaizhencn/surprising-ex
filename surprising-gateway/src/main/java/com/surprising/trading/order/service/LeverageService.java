@@ -78,7 +78,7 @@ public class LeverageService {
                 .orElseThrow(() -> new IllegalStateException("instrument not found: " + normalizedSymbol));
         ProductLine resolvedProductLine = productLine(rule, productLine);
         if (!"TRADING".equals(rule.status())
-                && !(resolvedProductLine == ProductLine.LINEAR_DELIVERY && "SETTLING".equals(rule.status()))) {
+                && !(resolvedProductLine == ProductLine.LINEAR_DELIVERY && ("SETTLING".equals(rule.status()) || "CLOSED".equals(rule.status())))) {
             throw new IllegalStateException("instrument is not trading: " + normalizedSymbol);
         }
         var account = realtimeQueries.require(resolvedProductLine, userId, null).account();

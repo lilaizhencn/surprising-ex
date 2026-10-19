@@ -19,6 +19,35 @@ import org.springframework.transaction.support.TransactionTemplate;
 @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
         prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
 public class CommittedOrderProjectionRepository {
+    /** 一页交割现金变动原子入账；只写历史投影，不触发任何在线账户命令。 */
+    void persistDelivery(com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedDeliveryPage page) {
+        transaction.executeWithoutResult(tx -> {
+            String reference = page.product().name() + ':' + page.command().instrumentId() + ':' + page.command().settlementId();
+            String account = page.product().accountTypeCode();
+            var occurred = java.sql.Timestamp.from(java.time.Instant.ofEpochMilli(page.occurredAt()));
+            for (var flow : page.cashFlows()) {
+                int inserted = jdbc.update("""
+                        INSERT INTO account_product_ledger_entries
+                          (entry_id,user_id,account_type,asset,amount_units,balance_after_units,
+                           reference_type,reference_id,instrument_id,reason,created_at)
+                        VALUES(nextval('account_product_ledger_entry_seq'),?,?,?,?,?,'DELIVERY_SETTLEMENT',?,?,'交割结算',?)
+                        ON CONFLICT(reference_type,reference_id,user_id,account_type,asset) DO NOTHING
+                        """, flow.userId(), account, flow.asset(), flow.amountUnits(), flow.balanceAfterUnits(),
+                        reference, page.command().instrumentId(), occurred);
+                if (inserted == 0) {
+                    Integer matches = jdbc.queryForObject("""
+                            SELECT count(*) FROM account_product_ledger_entries
+                            WHERE reference_type='DELIVERY_SETTLEMENT' AND reference_id=? AND user_id=?
+                              AND account_type=? AND asset=? AND amount_units=? AND balance_after_units=?
+                              AND instrument_id=? AND reason='交割结算' AND created_at=?
+                            """, Integer.class, reference, flow.userId(), account, flow.asset(), flow.amountUnits(),
+                            flow.balanceAfterUnits(), page.command().instrumentId(), occurred);
+                    if (matches == null || matches != 1) throw new IllegalStateException("conflicting committed delivery cash flow");
+                }
+            }
+        });
+    }
+
     private static final String UPSERT = """
             INSERT INTO core_order_projection
               (product_line,order_id,user_id,client_order_id,instrument_id,status,

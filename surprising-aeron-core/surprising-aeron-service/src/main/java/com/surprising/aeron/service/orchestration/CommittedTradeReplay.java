@@ -14,6 +14,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
     private final com.surprising.aeron.service.state.realtime.RealtimeStateCapture capture;
     private com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor.FundingResult fundingResult;
     private CommittedFundingPage fundingPage;
+    private CommittedDeliveryPage deliveryPage;
     private CommittedCommandResult commandResult;
 
     public CommittedTradeReplay(ProductLine product, byte[] snapshot) {
@@ -29,12 +30,15 @@ public final class CommittedTradeReplay implements AutoCloseable {
 
     public List<RealtimeFrame> apply(byte[] bytes, long timestamp, long logPosition) {
         fundingPage = null;
+        deliveryPage = null;
         commandResult = null;
         fundingResult = null;
         CoreMessage command = CoreMessageCodec.decode(bytes);
         if (command.header().productLine() != state.productLine())
             throw new IllegalArgumentException("cross-product replay message");
         if (command.header().kind() == WireMessageKind.QUERY) return List.of();
+        var delivery = deliveryCommand(command);
+        var deliveryBalances = delivery == null ? List.<BeforeDeliveryBalance>of() : deliveryBalances(delivery, timestamp, logPosition);
         long dropped = outbox.droppedBatches(), failures = capture.failures();
         capture.begin(logPosition, timestamp, 0, state.realtimeExportSequence());
         try {
@@ -123,6 +127,17 @@ public final class CommittedTradeReplay implements AutoCloseable {
                         response.resultCode().name(), fundingResult.payments());
                 fundingResult = null;
             }
+            var retainedDelivery = delivery == null ? null : state.resultLedger.get(command.header().commandId());
+            var deliveryStatus = retainedDelivery == null ? response.commandStatus() : retainedDelivery.status();
+            if (delivery != null && deliveryStatus == ResponseStatus.APPLIED) {
+                var flows = new ArrayList<DeliveryCashFlow>();
+                for (var before : deliveryBalances) {
+                    long total = deliveryBalance(before.userId(), before.asset(), timestamp, logPosition);
+                    long amount = Math.subtractExact(total, before.totalUnits());
+                    if (amount != 0) flows.add(new DeliveryCashFlow(before.userId(), before.asset(), amount, total));
+                }
+                if (!flows.isEmpty()) deliveryPage = new CommittedDeliveryPage(state.productLine(), logPosition, timestamp, delivery, flows);
+            }
             capture.commit(state.realtimeExportSequence());
             if (outbox.droppedBatches() != dropped || capture.failures() != failures)
                 throw new IllegalStateException(
@@ -142,7 +157,88 @@ public final class CommittedTradeReplay implements AutoCloseable {
     }
 
     public CommittedFundingPage fundingPage() { return fundingPage; }
+    public CommittedDeliveryPage deliveryPage() { return deliveryPage; }
     public CommittedCommandResult commandResult() { return commandResult; }
+
+    private SettleInstrumentCommand deliveryCommand(CoreMessage message) {
+        if (!state.productLine().isDeliveryProduct() || message.header().messageType() != CoreMessageType.SETTLE_INSTRUMENT) return null;
+        try { return TradingCommandCodec.decodeSettleInstrument(message.payloadUnsafe()); }
+        catch (RuntimeException malformed) { return null; } // Authoritative replay still records the Core rejection below.
+    }
+
+    /** 与结算命令共用全局 user cursor；仅在独立导出进程复制本页受影响用户的三个标量。
+     * 余额使用可用+冻结总额，释放委托/持仓保证金不会伪造现金收入；保险补偿已包含在真实已提交差额中。 */
+    private List<BeforeDeliveryBalance> deliveryBalances(SettleInstrumentCommand command, long timestamp, long position) {
+        var runtime = state.runtimeState();
+        var instrument = runtime.instrument(command.instrumentId());
+        if (instrument == null) return List.of();
+        var balances = new ArrayList<BeforeDeliveryBalance>();
+        long cursor = command.cursorUserId();
+        while (balances.size() < command.maxUsers()) {
+            var page = CoreMaintenanceCodec.decodePage(replayQuery(CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY, 0,
+                    CoreMaintenanceCodec.encodeQuery(new CoreMaintenanceCodec.Query(command.instrumentId(), cursor,
+                            Math.min(32, command.maxUsers() - balances.size()))), timestamp, position).data());
+            for (long user : page.userIds()) {
+                if (user <= cursor) throw new IllegalStateException("nonadvancing committed delivery user page");
+                balances.add(new BeforeDeliveryBalance(user, instrument.settleAsset(), deliveryBalance(user, instrument.settleAsset(), timestamp, position)));
+                cursor = user;
+            }
+            if (!page.hasMore()) break;
+            if (page.userIds().isEmpty()) throw new IllegalStateException("empty committed delivery user cursor");
+        }
+        return List.copyOf(balances);
+    }
+
+    private long deliveryBalance(long user, String asset, long timestamp, long position) {
+        var view = CoreStateQueryCodec.decodeUserState(replayQuery(CoreMessageType.USER_STATE_QUERY, user, new byte[0], timestamp, position).data());
+        if (view.userId() != user || view.productLine() != state.productLine())
+            throw new IllegalStateException("committed delivery account identity mismatch");
+        var balance = view.balances().stream().filter(value -> value.asset().equals(asset)).findFirst()
+                .orElseThrow(() -> new IllegalStateException("delivery position has no settlement balance"));
+        return Math.addExact(balance.availableUnits(), balance.lockedUnits());
+    }
+
+    /** 只查询本进程的独立重放状态，沿既有所有者派发与结果通道读取，绝不连接在线交易 Core。 */
+    private CoreResponse replayQuery(CoreMessageType type, long user, byte[] payload, long timestamp, long position) {
+        var request = new CoreMessage(CoreMessageHeader.query(type, UUID.randomUUID(), state.productLine(),
+                CommandSource.OPERATIONS, 0, timestamp, user, timestamp, timestamp), payload);
+        var response = state.apply(request, timestamp, position);
+        if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
+            long id = state.bookQueries.querySequence(request.header().commandId());
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while ((response = state.bookQueries.takeQueryResult(id)) == null) {
+                state.assertHealthy();
+                if (System.nanoTime() >= deadline) throw new IllegalStateException("committed delivery read timeout; checkpoint must not advance");
+                java.util.concurrent.locks.LockSupport.parkNanos(1_000L);
+            }
+        }
+        if (response.status() != ResponseStatus.OK) throw new IllegalStateException("committed delivery read failed: " + response.resultCode());
+        state.assertClusterCallbackComplete();
+        return response;
+    }
+
+    private record BeforeDeliveryBalance(long userId, String asset, long totalUnits) {}
+
+    /** Only settlement cash changes observed in this bounded replay page; no live Core state copy. */
+    public record CommittedDeliveryPage(ProductLine product, long clusterPosition, long occurredAt,
+                                         SettleInstrumentCommand command, List<DeliveryCashFlow> cashFlows) {
+        public CommittedDeliveryPage {
+            cashFlows = List.copyOf(cashFlows);
+            if (product == null || !product.isDeliveryProduct() || clusterPosition <= 0 || occurredAt <= 0
+                    || command == null || cashFlows.isEmpty() || cashFlows.size() > command.maxUsers())
+                throw new IllegalArgumentException("invalid committed delivery cash page");
+            var users = new HashSet<Long>();
+            for (var flow : cashFlows) if (!users.add(flow.userId()))
+                throw new IllegalArgumentException("duplicate delivery cash user");
+        }
+    }
+
+    public record DeliveryCashFlow(long userId, String asset, long amountUnits, long balanceAfterUnits) {
+        public DeliveryCashFlow {
+            if (userId <= 0 || asset == null || asset.isBlank() || amountUnits == 0 || balanceAfterUnits < 0)
+                throw new IllegalArgumentException("invalid delivery cash flow");
+        }
+    }
 
     public long exportSequence() {
         return state.realtimeExportSequence();

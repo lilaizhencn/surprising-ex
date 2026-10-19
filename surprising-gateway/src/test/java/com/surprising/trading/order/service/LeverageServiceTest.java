@@ -175,6 +175,18 @@ class LeverageServiceTest {
     }
 
     @Test
+    void closedDeliveryLeverageRemainsReadOnlyAndUsesRealtime() {
+        var aeron = mock(OrderAeronGateway.class);
+        org.mockito.Mockito.when(queries.require(ProductLine.LINEAR_DELIVERY, 1001L, null))
+                .thenReturn(view(ProductLine.LINEAR_DELIVERY, 1001L, java.util.List.of()));
+        var service = new LeverageService(id -> Optional.of(rule(id, ContractType.LINEAR_DELIVERY, "CLOSED")), aeron, queries);
+        assertThat(service.get(1001L, "73", MarginMode.CROSS, ProductLine.LINEAR_DELIVERY).source()).isEqualTo("INSTRUMENT_DEFAULT");
+        assertThatThrownBy(() -> service.set(new LeverageSettingRequest(1001L, ProductLine.LINEAR_DELIVERY,
+                "73", MarginMode.CROSS, 10_000_000L, "closed"))).hasMessageContaining("not trading");
+        org.mockito.Mockito.verifyNoInteractions(aeron);
+    }
+
+    @Test
     void settlingLeverageReadCannotCrossProductBoundary() {
         var aeron = mock(OrderAeronGateway.class);
         var service = new LeverageService(id -> Optional.of(rule(id, ContractType.LINEAR_DELIVERY, "SETTLING")), aeron, queries);
@@ -186,7 +198,7 @@ class LeverageServiceTest {
     @Test
     void otherUnlistedLeverageReadsRetainTheirExistingRestrictions() {
         for (var type : ContractType.values()) for (var status : java.util.List.of("DRAFT", "PRE_TRADING", "HALT", "SETTLING", "CLOSED")) {
-            if (type == ContractType.LINEAR_DELIVERY && status.equals("SETTLING")) continue;
+            if (type == ContractType.LINEAR_DELIVERY && (status.equals("SETTLING") || status.equals("CLOSED"))) continue;
             var aeron = mock(OrderAeronGateway.class);
             var service = new LeverageService(id -> Optional.of(rule(id, type, status)), aeron, queries);
             assertThatThrownBy(() -> service.get(1001L, "73", MarginMode.CROSS, type.productLine()))

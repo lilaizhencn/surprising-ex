@@ -165,8 +165,8 @@ java -jar surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar
 - Instrument 是全系统唯一产品配置源，不要在撮合、风控、行情服务里再维护第二套 symbol 规则。
 - 查询接口无状态，可以多节点水平部署；写接口共享 PostgreSQL，通过币对登记行锁串行修改，并在同一事务写入操作日志与 outbox 事件。
 - instrument 配置、状态变更、交割和行权事件先与业务状态一起写入 `instrument_outbox_events`；发布器收到 Kafka ACK 后才标记成功，失败事件按指数退避重试，同一 `topic + event_key` 在多节点下保持顺序。
-- 到期合约进入 `SETTLING` 后，trading provider 先排空订单；Aeron Core 内的条件单状态随核心状态机一起收敛，account 再核对预占、成交消耗和释放。只有同一次 SETTLING 操作的 `ORDER`、`ACCOUNT` 确认全部写入 `instrument_lifecycle_drain_acks`，调度器才允许进入 `CLOSED` 并发布交割或行权事件。
-- 生命周期清理确认使用共享 topic `surprising.instrument.lifecycle-drain.v1`，以 symbol 为 key；重复确认按 `(symbol, instrument_change_id, component)` 幂等。
+- 到期合约进入 `SETTLING` 后，trading 接入沿 Core 命令排空普通委托和条件单；订单、成交和预占释放由同一交易 Core 提交完成。`InstrumentLifecycleDrainRepository` 只接受当前产品线、合约和 SETTLING 版本的 `ORDER` 确认；已移除的 account reducer 不再发布 `ACCOUNT`，历史 ACCOUNT 确认不能替代当前 ORDER。到期时间、排空确认及明确的结算价格均满足后，双人审批的结算入口才可进入 `CLOSED` 并发布交割事件。自动时钟只推进到 SETTLING，不推测结算价。
+- 生命周期清理确认使用既有 topic 和产品线/合约身份；重复确认按 `(product_line, instrument_id, instrument_change_id, component)` 幂等。
 - Instrument Service 才负责聚合当前主表、风险档位、指数源和资产精度；单表 Repository 不执行跨表 JOIN。
 - 下游核心服务启动时加载快照，运行中消费 Kafka 增量事件；不要在每笔请求、撮合或风控计算时查询主库。
 - 状态修改保留交易计算引用；修改 tick/step、费率或风险参数会关联新的审计记录，Core 在有挂单或持仓时拒绝替换计算配置。
@@ -204,3 +204,9 @@ Operational audit entries preserve actor, reason, time and before/after values. 
 数据库建表和种子数据初始化不是重复的 JVM 缓存初始化，不能一并删除。
 
 API 清理：只供 gateway 使用的请求、响应和工具类型已迁回 gateway（保留 Java 包名）；删除无调用的旧 Feign 接口及废弃模型。仍用于跨进程调用、共享事件和 Core 的类型继续留在 API 模块。
+
+### U 本位交割结束后的公开查询
+
+`InstrumentRequestService.latest` 允许通过明确的 LINEAR_DELIVERY 合约 ID 查询 CLOSED 元数据；默认公开目录仍排除 CLOSED。Web 与 client 在当前合约从目录消失时按 ID 重新读取，保留历史查询页面并禁止新委托及杠杆修改。杠杆 GET 沿 realtime 用户投影读取，Core 不承担该用户查询。其他产品线的可见性限制保持原契约。
+
+到期清理中的 TP/SL 由 `InstrumentOrderDrainService` 调用 `TriggerOrderService.cancelLifecycleOrders`，从 Core 交易控制状态分批撤销原生条件单，并再次确认条件单、算法单及普通单均无活动记录后才发 ORDER 确认。只排空算法单与普通单会遗漏 PENDING 的 TP/SL；真实到期回归同时覆盖一组未触发 OCO 和运行中的做市报价。

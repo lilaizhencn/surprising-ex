@@ -60,6 +60,23 @@ public class TriggerOrderService {
         this.aeronGateway = aeronGateway;
     }
 
+    /** 到期清理属于交易控制：按 Core 当前活动状态撤单，不依赖可能滞后的用户查询投影。 */
+    public int cancelLifecycleOrders(String instrumentId, int limit) {
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("lifecycle trigger limit must be in [1, 1000]");
+        String id = normalizeSymbol(instrumentId);
+        var orders = aeronGateway.openOrders(0, id, 0, limit);
+        for (var order : orders) {
+            if (order.productLine() != currentProductLine() || !id.equals(order.instrumentId()))
+                throw new IllegalStateException("lifecycle trigger identity mismatch");
+            aeronGateway.cancel(order.userId(), order.triggerOrderId());
+        }
+        return orders.size();
+    }
+
+    public boolean hasLifecycleActiveOrders(String instrumentId) {
+        return !aeronGateway.openOrders(0, normalizeSymbol(instrumentId), 0, 1).isEmpty();
+    }
+
     public TriggerOrderResponse place(PlaceTriggerOrderRequest request) {
         PreparedTriggerOrder prepared = prepareTriggerOrder(request);
         CoreTriggerOrderStateView persisted = aeronGateway.place(

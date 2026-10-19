@@ -16,6 +16,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 class InstrumentOrderDrainServiceTest {
+    private final com.surprising.trading.trigger.service.TriggerOrderService triggers = mock(com.surprising.trading.trigger.service.TriggerOrderService.class);
 
     @Test
     void waitsUntilOrdinaryOrdersReachTerminalState() {
@@ -45,7 +46,7 @@ class InstrumentOrderDrainServiceTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         new InstrumentOrderDrainService(
-                new ObjectMapper(), properties, orderService, algoOrderService,
+                new ObjectMapper(), properties, orderService, algoOrderService, triggers,
                 kafkaTemplate).drain(event());
 
         verify(kafkaTemplate).send(
@@ -54,13 +55,24 @@ class InstrumentOrderDrainServiceTest {
                 any(String.class));
     }
 
+    @Test
+    void pendingStopsPreventReadyAcknowledgement() {
+        var orders = mock(OrderService.class);
+        var algos = mock(AlgoOrderService.class);
+        var kafka = kafkaTemplate();
+        when(triggers.hasLifecycleActiveOrders("1")).thenReturn(true);
+        assertThatThrownBy(() -> service(orders, algos, kafka).drain(event())).hasMessageContaining("尚未完成");
+        verify(triggers).cancelLifecycleOrders("1", 1000);
+        org.mockito.Mockito.verifyNoInteractions(kafka);
+    }
+
     private InstrumentOrderDrainService service(OrderService orderService,
                                                 AlgoOrderService algoOrderService,
                                                 KafkaTemplate<String, String> kafkaTemplate) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
         return new InstrumentOrderDrainService(
-                new ObjectMapper(), properties, orderService, algoOrderService, kafkaTemplate);
+                new ObjectMapper(), properties, orderService, algoOrderService, triggers, kafkaTemplate);
     }
 
     private InstrumentEvent event() {

@@ -23,7 +23,7 @@ import java.util.concurrent.locks.LockSupport;
 /** Single-threaded committed Archive replay; all replay state belongs to the calling export worker. */
 @Slf4j
 final class CommittedTradeExporter {
-    enum ExportMode { LIVE, FUNDING_REPAIR, COMMAND_RESULT_REPAIR }
+    enum ExportMode { LIVE, FUNDING_REPAIR, COMMAND_RESULT_REPAIR, DELIVERY_REPAIR }
     private final TradeExportProperties config;
     private final ProductLine product;
     private final String bootstrapServers;
@@ -57,11 +57,21 @@ final class CommittedTradeExporter {
         run(new java.util.concurrent.atomic.AtomicBoolean(true), ready -> {}, stopAfter, ExportMode.COMMAND_RESULT_REPAIR);
     }
 
+    /** 仅回补交割现金账本；独立有限检查点，不写订单/回执水位或发送 Kafka。 */
+    void repairDelivery(long stopAfter) throws Exception {
+        if (!product.isDeliveryProduct() || stopAfter <= 0 || stopAfter == Long.MAX_VALUE
+                || !config.checkpoint().getFileName().toString().endsWith(".delivery-repair"))
+            throw new IllegalArgumentException("delivery repair requires a delivery product, finite end and separate .delivery-repair checkpoint");
+        run(new java.util.concurrent.atomic.AtomicBoolean(true), ready -> {}, stopAfter, ExportMode.DELIVERY_REPAIR);
+    }
+
     private void run(java.util.concurrent.atomic.AtomicBoolean running,
             java.util.function.Consumer<Boolean> connected, long stopAfter, ExportMode mode) throws Exception {
         Path checkpointPath = config.checkpoint().toAbsolutePath();
-        if (mode == ExportMode.LIVE && checkpointPath.getFileName().toString().endsWith(".command-repair"))
-            throw new IllegalArgumentException("live exporter cannot use a command repair checkpoint");
+        if (mode == ExportMode.LIVE && (checkpointPath.getFileName().toString().endsWith(".command-repair")
+                || checkpointPath.getFileName().toString().endsWith(".funding-repair")
+                || checkpointPath.getFileName().toString().endsWith(".delivery-repair")))
+            throw new IllegalArgumentException("live exporter cannot use a repair checkpoint");
         Files.createDirectories(checkpointPath.getParent());
         int clusterId = config.clusterId() == null
                 ? com.surprising.aeron.protocol.ProductLineClusterLayout.clusterId(product) : config.clusterId();
@@ -138,12 +148,16 @@ final class CommittedTradeExporter {
                         byte[] bytes = new byte[bodyLength];
                         buffer.getBytes(bodyOffset, bytes);
                         var changes = replay.apply(bytes, sessionHeader.timestamp(), header.position());
-                        if (replay.fundingPage() != null && mode != ExportMode.COMMAND_RESULT_REPAIR) {
+                        if (replay.fundingPage() != null && (mode == ExportMode.LIVE || mode == ExportMode.FUNDING_REPAIR)) {
                             // Flush earlier commands, then atomically persist this exact funding
                             // page. A SQL failure prevents checkpoint advancement and is retried
                             // from the old committed replay state; SQL identity makes it idempotent.
                             batch.flush(replay.exportSequence());
                             orders.persistFunding(replay.fundingPage());
+                        }
+                        if (replay.deliveryPage() != null && (mode == ExportMode.LIVE || mode == ExportMode.DELIVERY_REPAIR)) {
+                            batch.flush(replay.exportSequence());
+                            orders.persistDelivery(replay.deliveryPage());
                         }
                         batch.add(changes,
                                 replay.commandResult(), replay.exportSequence(), System.nanoTime());
@@ -300,7 +314,7 @@ final class CommittedTradeExporter {
 
         void add(List<RealtimeFrame> changes, CommittedTradeReplay.CommittedCommandResult commandResult,
                  long sequence, long now) {
-            if (mode == ExportMode.FUNDING_REPAIR) return;
+            if (mode == ExportMode.FUNDING_REPAIR || mode == ExportMode.DELIVERY_REPAIR) return;
             if (messages++ == 0) startedAt = now;
             if (commandResult != null) commandResults.add(commandResult);
             for (var change : mode == ExportMode.LIVE ? changes : List.<RealtimeFrame>of()) {
@@ -321,7 +335,7 @@ final class CommittedTradeExporter {
         }
 
         void flush(long sequence) {
-            if (mode == ExportMode.FUNDING_REPAIR) return;
+            if (mode == ExportMode.FUNDING_REPAIR || mode == ExportMode.DELIVERY_REPAIR) return;
             if (sequence != flushedSequence || !orderChanges.isEmpty() || !trades.isEmpty() || !commandResults.isEmpty()) {
                 if (mode == ExportMode.COMMAND_RESULT_REPAIR) orders.repairCommandResults(product, commandResults);
                 else {

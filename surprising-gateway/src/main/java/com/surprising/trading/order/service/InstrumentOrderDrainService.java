@@ -5,6 +5,7 @@ import com.surprising.instrument.api.model.InstrumentLifecycleDrainComponent;
 import com.surprising.instrument.api.model.InstrumentLifecycleDrainEvent;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.trading.order.config.TradingOrderProperties;
+import com.surprising.trading.trigger.service.TriggerOrderService;
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,17 +23,20 @@ public class InstrumentOrderDrainService {
     private final TradingOrderProperties properties;
     private final OrderService orderService;
     private final AlgoOrderService algoOrderService;
+    private final TriggerOrderService triggerOrderService;
     private final KafkaTemplate<String, String> kafkaTemplate;
     @Autowired
     public InstrumentOrderDrainService(ObjectMapper objectMapper,
                                        TradingOrderProperties properties,
                                        OrderService orderService,
                                        AlgoOrderService algoOrderService,
+                                       TriggerOrderService triggerOrderService,
                                        @Qualifier("orderKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.orderService = orderService;
         this.algoOrderService = algoOrderService;
+        this.triggerOrderService = triggerOrderService;
         this.kafkaTemplate = kafkaTemplate;
     }
 
@@ -42,8 +46,10 @@ public class InstrumentOrderDrainService {
             return;
         }
         algoOrderService.cancelLifecycleOrders(Integer.toString(event.instrumentId()), BATCH_SIZE);
+        triggerOrderService.cancelLifecycleOrders(Integer.toString(event.instrumentId()), BATCH_SIZE);
         orderService.requestLifecycleCancellation(Integer.toString(event.instrumentId()), BATCH_SIZE);
         if (algoOrderService.hasLifecycleActiveOrders(Integer.toString(event.instrumentId()))
+                || triggerOrderService.hasLifecycleActiveOrders(Integer.toString(event.instrumentId()))
                 || orderService.hasLifecycleActiveOrders(Integer.toString(event.instrumentId()))) {
             throw new IllegalStateException("订单尚未完成到期清理: " + Integer.toString(event.instrumentId()));
         }

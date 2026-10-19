@@ -236,3 +236,7 @@ Web/client 从 realtime 获取完整固定目标，保存批次键和发送断�
 `InstrumentRequestService.latest/list` 保留 `LINEAR_DELIVERY + SETTLING` 的公开合约元数据，供用户定位已有持仓、直接减仓与撤单；DRAFT/CLOSED 和其他产品的可见规则保持原有约束。普通交易仍由 `OrderValidator`/Core 校验：结算中仅接受 reduceOnly，HALT 不允许下单。此处不改变结算调度或资金模型。
 
 Web/client 的单笔下单和撤单在 POST 前持久保存原身份；响应丢失后查询 realtime 提交/撤单回执，未知结果保持待确认，刷新或重启不重发原写入。行情、账户、订单及回执仍走 realtime；验收中的 Core 查询仅用于独立对账。先更新 price（SETTLING 指数源）与 gateway（合约可见性和 realtime 杠杆读取），再发布两端，沿用已完成的回执迁移与导出；[业务和复现说明](docs/realtime-command-results.md#u-本位交割结算中减仓与恢复2026-10-19)。
+
+### U 本位交割到期与现金记录（2026-10-20）
+
+到期自动进入 SETTLING，Core 提交排空普通委托及条件单并释放预占，当前版本 ORDER 确认后仍需双人审批确认结算价。Core 负责结算，realtime 的独立已提交回放负责交割现金账本投影；Gateway/Web/client 查询该投影，已结束合约可按明确 ID 保留查询页面。有限历史回补、幂等与异常处理见 [realtime 说明](surprising-realtime/README.md#交割现金流水与有限回补2026-10-20)。这次本地实际产品线限定 LINEAR_DELIVERY；其他产品线的共享测试不代表已完成其真实到期流程或原生设备验收。

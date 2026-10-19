@@ -12,9 +12,13 @@ record TradeExportCheckpoint(
         ProductLine product, long logPosition, long tradeSequence, byte[] snapshot) {
     private static final int MAGIC = 0x54584331;
     private static final int COMMAND_REPAIR_MAGIC = 0x54584332;
+    private static final int DELIVERY_REPAIR_MAGIC = 0x54584333;
 
     private static int magic(Path path) {
-        return path.getFileName().toString().endsWith(".command-repair") ? COMMAND_REPAIR_MAGIC : MAGIC;
+        String name = path.getFileName().toString();
+        if (name.endsWith(".command-repair")) return COMMAND_REPAIR_MAGIC;
+        if (name.endsWith(".delivery-repair")) return DELIVERY_REPAIR_MAGIC;
+        return MAGIC;
     }
 
     static TradeExportCheckpoint read(Path path, ProductLine expected) throws IOException {

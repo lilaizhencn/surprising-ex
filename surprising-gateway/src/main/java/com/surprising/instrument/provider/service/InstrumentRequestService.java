@@ -39,7 +39,8 @@ public class InstrumentRequestService {
     public InstrumentResponse latest(int instrumentId, String productLineHeader, String productLineValue) {
         try {
             var result = instrumentService.latest(instrumentId, requiredProductLine(productLineValue, productLineHeader));
-            if (!publiclyVisible(result)) throw new IllegalStateException("instrument is not listed");
+            if (!publiclyVisible(result) && !(result.contractType().productLine() == ProductLine.LINEAR_DELIVERY
+                    && result.status() == InstrumentStatus.CLOSED)) throw new IllegalStateException("instrument is not listed");
             return result;
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);

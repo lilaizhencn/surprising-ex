@@ -1,21 +1,15 @@
 package com.surprising.instrument.provider.repository;
 
-import com.surprising.instrument.api.model.InstrumentLifecycleDrainComponent;
 import com.surprising.instrument.api.model.InstrumentLifecycleDrainEvent;
 import com.surprising.product.api.ProductLine;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.Set;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /** 只负责 {@code instrument_lifecycle_drain_acks} 表。 */
 @Repository
 public class InstrumentLifecycleDrainRepository {
-
-    private static final Set<InstrumentLifecycleDrainComponent> REQUIRED_COMPONENTS =
-            Set.of(InstrumentLifecycleDrainComponent.ORDER,
-                    InstrumentLifecycleDrainComponent.ACCOUNT);
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -47,8 +41,10 @@ public class InstrumentLifecycleDrainRepository {
                  WHERE product_line = ?
                    AND instrument_id = ?
                    AND instrument_change_id = ?
-                   AND component IN ('ORDER', 'ACCOUNT')
+                   AND component = 'ORDER'
                 """, Integer.class, productLine.name(), com.surprising.product.api.InstrumentIds.parse(instrumentId), instrumentChangeId);
-        return count != null && count == REQUIRED_COMPONENTS.size();
+        // 订单终态、预占释放和成交结算已由同一个交易 Core 提交；当前只有 ORDER 发布者。
+        // 旧 ACCOUNT 账户 reducer 不再存在，其历史确认不能替代当前版本的 Core 订单确认。
+        return count != null && count == 1;
     }
 }

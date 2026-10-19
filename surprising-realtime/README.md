@@ -540,3 +540,17 @@ Web lint/build 和 147 项测试通过；Flutter analyze 无问题、126 项测�
 ### 逐项批量撤单回执（2026-10-19）
 
 提交回放增加有界 `cancel_batch_results`，保存原批次的 index/orderId/success/code，供两端确认部分失败和继续未发送批次。正常导出与订单/回执/水位同事务；历史回补仅能补充 NULL，非空事实冲突则回滚，不复制订单状态。先执行 `20261019-cancel-batch-results.sql`，再更新 realtime 并按需使用全新的独立 `.command-repair` checkpoint 回补历史，最后更新 gateway/Web/client。原 checkpoint 不回溯旧回执，不重置 live 断点、不重发 Kafka；详见 [查询和发布契约](../docs/realtime-command-results.md#现货批量撤单与固定目标恢复2026-10-19)。
+
+### 交割现金流水与有限回补（2026-10-20）
+
+`CommittedTradeReplay` 在独立的已提交日志回放进程处理 SETTLE_INSTRUMENT 时，通过本地所有者查询读取同一全局用户游标页的结算资产余额，比较结算前后的可用加冻结总额。真实现金差额包括实际保险补偿；释放保证金不是收入，平价结算没有现金变动则不生成流水。不复制在线 Core 状态，不新增撮合或账户热路径阶段，不向在线 Core 发查询。
+
+`CommittedTradeExporter` 在写检查点前调用 `CommittedOrderProjectionRepository.persistDelivery`，原子写入现有 `account_product_ledger_entries` 与 `account_product_ledger_entry_seq`。类型为 DELIVERY_SETTLEMENT，参考号为产品线:合约ID:结算ID；自然键重复时逐字段核对，内容冲突回滚整页并阻止检查点推进。Gateway 的产品账本 repository 只读，JSON 资金整数和流水 ID 用字符串返回，并提供 instrumentId；Web/client 依币种精度格式化，不经浮点转换。这里提供现金流水，不代表包含零盈亏记录的完整交割报告。
+
+旧 live checkpoint 不自动回溯。历史补齐入口为 `com.surprising.realtime.provider.export.CommittedDeliveryLedgerRepair`，使用 HotSpot JDK 27、部署运行依赖 classpath 和 SPRING_DATASOURCE_URL/USERNAME/PASSWORD。六个位置参数为：
+
+```text
+LINEAR_DELIVERY <cluster-directory> <aeron-directory> <archive-control-channel> <独立路径>.delivery-repair <有限的已提交end-position>
+```
+
+首次使用不存在的独立回补检查点，从保留的日志前缀回放；后续只续用本任务自己的检查点。`.delivery-repair` 有独立文件标识，复制或重命名 live 检查点会拒绝。不得清零、替换 live 检查点，不重复提交结算。回补只写交割现金流水，不连接 Kafka，不写订单、回执、资金费或水位，不向在线 Core 发送命令。外层限制堆、时间与磁盘，并核对保留日志覆盖范围；缺失前缀不能从后续 snapshot 猜测。

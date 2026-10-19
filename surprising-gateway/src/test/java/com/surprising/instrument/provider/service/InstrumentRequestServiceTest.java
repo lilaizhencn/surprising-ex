@@ -35,7 +35,7 @@ class InstrumentRequestServiceTest {
     void unlistedStatusesAndOtherProductVisibilityRemainRestricted() {
         for (var type : ContractType.values()) {
             for (var status : List.of(InstrumentStatus.DRAFT, InstrumentStatus.CLOSED, InstrumentStatus.SETTLING)) {
-                if (type == ContractType.LINEAR_DELIVERY && status == InstrumentStatus.SETTLING) continue;
+                if (type == ContractType.LINEAR_DELIVERY && (status == InstrumentStatus.SETTLING || status == InstrumentStatus.CLOSED)) continue;
                 var value = instrument(type, status);
                 when(instruments.latest(73, type.productLine())).thenReturn(value);
                 assertThatThrownBy(() -> requests.latest(73, null, type.productLine().name()))
@@ -43,6 +43,16 @@ class InstrumentRequestServiceTest {
                         .hasMessageContaining("404");
             }
         }
+    }
+
+    @Test
+    void closedDeliveryCanBeReadByIdentityButIsAbsentFromDefaultCatalog() {
+        var closed = instrument(ContractType.LINEAR_DELIVERY, InstrumentStatus.CLOSED);
+        when(instruments.latest(73, ProductLine.LINEAR_DELIVERY)).thenReturn(closed);
+        when(instruments.list(ProductLine.LINEAR_DELIVERY, null, null))
+                .thenReturn(new InstrumentQueryResponse(1, List.of(closed)));
+        assertThat(requests.latest(73, null, "LINEAR_DELIVERY")).isSameAs(closed);
+        assertThat(((InstrumentQueryResponse) requests.list(null, null, null, "LINEAR_DELIVERY", false, false)).instruments()).isEmpty();
     }
 
     private InstrumentResponse instrument(ContractType type, InstrumentStatus status) {
