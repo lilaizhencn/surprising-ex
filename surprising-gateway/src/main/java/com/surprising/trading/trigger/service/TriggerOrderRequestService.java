@@ -23,9 +23,22 @@ import org.springframework.stereotype.Service;
 public class TriggerOrderRequestService {
 
     private final TriggerOrderService triggerOrderService;
+    private final com.surprising.trading.order.service.OrderService orderResults;
 
-    public TriggerOrderRequestService(TriggerOrderService triggerOrderService) {
+    public TriggerOrderRequestService(TriggerOrderService triggerOrderService,
+            com.surprising.trading.order.service.OrderService orderResults) {
         this.triggerOrderService = triggerOrderService;
+        this.orderResults = orderResults;
+    }
+
+    public com.surprising.trading.api.model.OrderCommandReceipt ocoSubmission(
+            long userId, String takeProfitClientId, String stopLossClientId) {
+        try {
+            return orderResults.commandResult(userId,
+                    triggerOrderService.ocoCommandId(userId, takeProfitClientId, stopLossClientId));
+        } catch (IllegalArgumentException invalid) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
+        }
     }
 
     public CompletionStage<TriggerOrderResponse> place(PlaceTriggerOrderRequest request) {

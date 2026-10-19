@@ -143,3 +143,7 @@ Web 在结算中禁止调整杠杆，直接减仓不依赖开仓杠杆设置；�
 到期矩阵同一 OPTION 集群创建 CALL/PUT 各三种行权价，在同一时钟到期。每组两张、权利金 10 USDT；本轮标的结算价 52000，行权价为 50000/52000/54000，价内每组现金 4 USDT。普通挂单、OCO TP/SL、做市报价均经已有生命周期排空，双人审批确认后读取 realtime 产品账本。重复确认不产生新结算版本，零现金不造流水；所有参与账户与财库资金守恒。client 的现有两个实栈测试通过 DELIVERY_LIVE_PRODUCT/DELIVERY_EXPIRY_PRODUCT=OPTION 选择此产品，未设置隔离 fixture 时仍跳过。
 
 发布顺序和分类迁移见 realtime README。既有 Core 日志中价格单位错误的结算不会因读端更新而自动改写，必须独立对账。此次没有原生设备安装、生产部署、希腊值报价、非本轮产品实栈或全面强平/ADL 验收；[完整验证记录](validation/option-trading-20261020.json)。
+
+### 期权 OCO 原请求（2026-10-20）
+
+`GET /api/v1/gateway/trading-trigger/oco-submission` 使用原 takeProfitClientId、stopLossClientId 和当前用户/产品，查询同一次 `PLACE_TRIGGER_OCO_PAIR` 的已有已提交回执。不存在、尚未导出或查询异常不能作原请求负确认。Web/client 在一次原子写入前持久保存两腿身份，刷新/重建后只读恢复；其中一腿已触发、另一腿已撤销也不重发。详情见 [期权保护委托](option-protection.md) 和 `docs/validation/option-protection-20261020.json`。

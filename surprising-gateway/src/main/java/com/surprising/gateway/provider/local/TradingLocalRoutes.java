@@ -43,6 +43,7 @@ import org.springframework.web.util.pattern.PathPatternParser;
 
 /** 网关协议到订单入口的本地调用；不建立内部 HTTP 连接。 */
 public final class TradingLocalRoutes {
+    private static final PathPattern TRIGGER_OCO_SUBMISSION = PathPatternParser.defaultInstance.parse("/api/v1/trading/trigger-orders/oco-submission");
     private static final PathPattern CANCELLATION_PLAN = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/cancellation-plan");
     private static final PathPattern CANCELLATION_BATCH = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/cancellation-batches");
     private static final PathPattern AMENDMENT = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/amendments");
@@ -244,6 +245,11 @@ public final class TradingLocalRoutes {
                     r.query("instrumentId", String.class, null, false),
                     r.query("limit", int.class, "100", false),
                     r.query("cursor", String.class, null, false));
+        }
+        if (r.matches(HttpMethod.GET, TRIGGER_OCO_SUBMISSION)) {
+            return triggerOrderRequests.ocoSubmission(r.query("userId", long.class, null, true),
+                    r.query("takeProfitClientId", String.class, null, true),
+                    r.query("stopLossClientId", String.class, null, true));
         }
         if (r.matches(HttpMethod.POST, ORDER_CONTROLLER_CANCELBATCH)) {
             return orderRequests.cancelBatch(r.body(BatchCancelOrdersRequest.class, true, true));

@@ -168,8 +168,7 @@ public class TriggerOrderService {
                     : a.triggerPriceTicks() >= b.triggerPriceTicks())) {
             throw new IllegalArgumentException("invalid take-profit / stop-loss OCO pair");
         }
-        UUID id = UUID.nameUUIDFromBytes((currentProductLine().name() + ":OCO:" + a.userId()
-                + ":" + a.clientTriggerOrderId() + ":" + b.clientTriggerOrderId()).getBytes(StandardCharsets.UTF_8));
+        UUID id = ocoCommandId(a.userId(), a.clientTriggerOrderId(), b.clientTriggerOrderId());
         var placed = aeronGateway.placeOcoPair(id, a.userId(), List.of(a, b));
         var results = new ArrayList<TriggerOrderBatchItemResponse>();
         for (int i = 0; i < orders.size(); i++) {
@@ -179,6 +178,19 @@ public class TriggerOrderService {
             results.add(new TriggerOrderBatchItemResponse(i, true, "completed", TriggerOrderAeronGateway.response(view)));
         }
         return triggerBatchResponse(results);
+    }
+
+    /** 与原子下单共用原始身份；只计算查询键，不向 Core 发送命令或查询。 */
+    public UUID ocoCommandId(long userId, String takeProfitClientId, String stopLossClientId) {
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        if (takeProfitClientId == null || stopLossClientId == null
+                || takeProfitClientId.isBlank() || takeProfitClientId.length() > 64
+                || stopLossClientId.isBlank() || stopLossClientId.length() > 64
+                || takeProfitClientId.indexOf(':') >= 0 || stopLossClientId.indexOf(':') >= 0
+                || takeProfitClientId.equals(stopLossClientId))
+            throw new IllegalArgumentException("two distinct client trigger identities are required");
+        return UUID.nameUUIDFromBytes((currentProductLine().name() + ":OCO:" + userId
+                + ":" + takeProfitClientId + ":" + stopLossClientId).getBytes(StandardCharsets.UTF_8));
     }
 
     public TriggerOrderResponse get(long triggerOrderId) {

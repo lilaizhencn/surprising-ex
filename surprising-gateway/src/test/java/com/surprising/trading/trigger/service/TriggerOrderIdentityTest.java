@@ -24,6 +24,19 @@ import org.junit.jupiter.api.Test;
 class TriggerOrderIdentityTest {
 
     @Test
+    void ocoLookupUsesTheExistingProductUserAndOrderedLegIdentity() {
+        var core = mock(TriggerOrderAeronGateway.class);
+        var option = properties(); option.setProductLine(ProductLine.OPTION);
+        var service = new TriggerOrderService(option, core);
+        var id = service.ocoCommandId(1001, "tp", "sl");
+        assertThat(id).isEqualTo(UUID.nameUUIDFromBytes("OPTION:OCO:1001:tp:sl".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        assertThat(service.ocoCommandId(1002, "tp", "sl")).isNotEqualTo(id);
+        assertThat(service.ocoCommandId(1001, "sl", "tp")).isNotEqualTo(id);
+        assertThat(new TriggerOrderService(properties(), core).ocoCommandId(1001, "tp", "sl")).isNotEqualTo(id);
+        org.mockito.Mockito.verifyNoInteractions(core);
+    }
+
+    @Test
     void privateTriggerQueryDoesNotReturnToCoreOnAReadViewMiss() {
         var gateway=mock(TriggerOrderAeronGateway.class);var service=new TriggerOrderService(properties(),gateway);
         var queries=mock(com.surprising.realtime.api.ValkeyUserQueries.class);

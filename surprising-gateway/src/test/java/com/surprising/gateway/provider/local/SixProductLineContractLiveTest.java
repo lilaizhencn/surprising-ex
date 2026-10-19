@@ -568,6 +568,21 @@ class SixProductLineContractLiveTest {
         String strategy = "qa-" + run;
         boolean strategyCreated = false, strategyPaused = false;
         try (var core = SurprisingAeronClient.connect(line, List.of("127.0.0.1"), "127.0.0.1", Duration.ofSeconds(10))) {
+            String previousFixture = System.getenv("SIX_LINE_LIVE_PREVIOUS_UI_FIXTURE");
+            if (previousFixture != null) {
+                assertThat(line).isEqualTo(ProductLine.OPTION);
+                assertThat(previousFixture).startsWith("/tmp/surprising-option-fused-");
+                var previous = json.readTree(java.nio.file.Files.readString(java.nio.file.Path.of(previousFixture)));
+                long previousUser = previous.path("userId").asLong(), previousMaker = previous.path("makerId").asLong();
+                for (long actor : new long[]{previousUser, previousMaker}) {
+                    var state = userState(core, actor);
+                    assertThat(state.positions()).allMatch(p -> p.signedQuantitySteps() == 0 && p.positionMarginUnits() == 0);
+                    assertThat(state.reservations()).isEmpty();
+                    assertThat(state.balances()).allMatch(b -> b.lockedUnits() == 0);
+                }
+                assertThat(combinedFunds(core, previousUser, previousMaker)).containsExactlyEntriesOf(Map.of("USDT", 20_000_000_000_000L));
+                System.out.println("OPTION_PREVIOUS_QA_FUNDS_PASS positions=0 reservations=0 locked=0 fundsDifference=0");
+            }
             var before = combinedFunds(core, user.id, maker.id);
             user.connect(instrumentId);
             var settings = get("/api/v1/admin/gateway/market-maker/business-settings?productLine=" + line, admin);
@@ -646,6 +661,24 @@ class SixProductLineContractLiveTest {
             System.out.printf("SIX_LINE_REALTIME_PASS productLine=%s depthEvents=%d wsTrades=%d restTrades=%d identitiesMatch=true%n",
                     line, user.depth.size(), user.trades.size(), restTradeIds.size());
             if (line == ProductLine.SPOT || line == ProductLine.OPTION) awaitClientVerification(user, maker, instrumentId, bid);
+            if (line == ProductLine.OPTION && "true".equals(System.getenv("SIX_LINE_LIVE_OPTION_PROTECTION"))) {
+                var directory = java.nio.file.Path.of(System.getenv("SIX_LINE_LIVE_UI_FIXTURE")).getParent();
+                for (String client : List.of("web", "client")) {
+                    var evidence = json.readTree(java.nio.file.Files.readString(directory.resolve("protection-" + client + "-evidence.json")));
+                    var ids = evidence.path("triggerIds");
+                    assertThat(ids.size()).isEqualTo(2);
+                    for (int i = 0; i < 2; i++) {
+                        long triggerId = Long.parseLong(ids.get(i).asString());
+                        var retained = CoreTriggerOrderCodec.decodeList(query(core, CoreMessageType.TRIGGER_ORDER_QUERY, user.id,
+                                CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(triggerId, "", 0, 1))).data()).getFirst();
+                        assertThat(retained.instrumentId()).isEqualTo(String.valueOf(instrumentId));
+                        assertThat(retained.status()).isEqualTo(client.equals("client") && i == 0
+                                ? CoreTriggerOrderStatus.TRIGGERED : CoreTriggerOrderStatus.CANCELED);
+                        if (client.equals("client") && i == 0) assertThat(retained.placedOrderId()).isPositive();
+                    }
+                }
+                System.out.println("OPTION_PROTECTION_CORE_PASS webCanceled=2 clientTriggered=1 siblingCanceled=1");
+            }
             write("market-maker", "/strategies/" + strategy + "/pause?productLine=" + line, null, 200);
             strategyPaused = true;
             for (int attempt = 0; attempt < 100; attempt++) {
