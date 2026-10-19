@@ -76,3 +76,23 @@ Web `api/endpoints.ts.cancelOrder` 和 client `AppState.cancelOrder` 在现货 P
 HotSpot JDK 27 下 162 项后端定向测试无失败或跳过：gateway 143、SPOT 原生资金 16、替换响应编码 3。原生新增四组覆盖未成交/部分成交及改单前快照恢复：资金不足保留原单冻结，改单成功取消原单并按新数量预留，做市对手成交后的用户/做市/财库资金守恒。部分成交前的原始手续费缓冲直到替换/撤单才释放，测试按初始预留减实际成交支出核对，而非机械按剩余数量重算。
 
 Web 188 项、lint/build，client 166 项及 analyze 通过。浏览器对交易页、订单页各做 1440/390px 深浅主题八组受控 API/WS 检查，含弹窗边界、非法精度、原剩余数量、64 位订单号、发送前保存、断响应/刷新、未决锁定及两次 GET 恢复；每组仅一条 POST。Flutter 覆盖 320px 深浅主题、真实本机 HTTP 的改单字段/两张订单解码，以及丢失 POST 响应后只读恢复。本轮未启动完整 FUSED 交易服务栈、wallet 或原生真机，没有调试其他产品界面。见 [改单验证及清理记录](validation/spot-amendment-20261019.json)。
+
+## 现货批量撤单与固定目标恢复（2026-10-19）
+
+业务顺序：用户确认“当前交易对”或“全部现货” → 网关从 realtime 用户完整活动视图一次读取固定订单 ID → Web/client 在发送前保存全部目标、每批键和进度 → 原生批次最多 50 笔，逐批提交 → 按逐项结果统计 → 响应丢失时查询原批次，确认后仅继续尚未发送的批次。新产生的委托不进入原请求；计划查询没有列表分页或 1000 笔截断。
+
+- `GET /api/v1/gateway/trading/cancellation-plan`：当前认证用户，`instrumentId` 可选；返回 `CancellationPlanResponse`（用户、产品、范围、完整订单 ID）。`OrderService.cancellationPlan` 只读 `ValkeyUserQueries`，视图未就绪拒绝，不查询 Core。
+- `POST /api/v1/gateway/trading/batch-cancel`：必须显式携带 `batchKey`，以及同一账户的 `orders`，每批 1–50 笔。原生顶层 `NONE` 仍可能包含逐项失败；批次包含其他账户订单时整批 `ORDER_OWNER_MISMATCH`，不能按单项跳过归属校验。
+- `GET /api/v1/gateway/trading/cancellation-batches?batchKey=...`：只读 realtime 提交投影，以认证用户、产品和原生 `batch:cancel:` 命名空间定位请求，返回原目标与逐项业务结果，`Cache-Control: no-store`。结果未知返回 202；已提交的业务拒绝按现有 `commandResponse` 状态契约返回，客户端必须检查 outcome/code/逐项结果。
+
+`CommittedTradeReplay` 在原有撮合、账户 Lane 与账本提交边界之后，提取最多 50 个 index/orderId/success/code；不复制订单或账户快照。`CommittedOrderProjectionRepository` 将这些事实与原命令回执、订单和水位写入同一事务。已有回执只能由确定性提交回放补充 NULL 字段；非空内容冲突会回滚，不能覆盖原结果。`CancellationPlanResponse` 是只读 HTTP 契约，不增加交易业务状态；两端保存的是尚未确认的用户操作目标和发送断点，不作为账户或订单权威视图。
+
+发布顺序：
+
+1. 确保此前命令回执表已存在，执行 `deployment/migrations/20261019-cancel-batch-results.sql`。
+2. 更新 realtime 导出程序；需要恢复旧批次时，按上面的 `CommittedCommandResultRepair` 六参数流程新建独立 `*.command-repair` checkpoint，从保留日志前缀回补到指定截止位置。此前已经完成的回补 checkpoint 不会自动重新处理旧命令。不可复制、清零或覆盖 live checkpoint，不重发 Kafka 成交。
+3. 核对所需批次 `cancel_batch_results` 及回补截止位置后，发布新 gateway，再发布 Web/client。无需更改在线 Core 协议、交易代码或 snapshot 格式。
+
+恢复按钮“确认并继续撤单”只查询已发送的当前批；确认结果后可以继续 POST 原计划中尚未发送的后续批次。已发送批次不会再次 POST。初始保存失败不提交；进度保存失败停在原断点；查询失败、回执目标/命令号/计数不符均保持锁定；换账户不会继续发送原账户后续批次。Web 使用同账户 Web Locks 串行恢复，不支持该能力的浏览器在发送前明确报错。client 随安全设置保存断点，重启后恢复。
+
+本轮范围为普通现货批量撤单。旧直接 `cancel-open` 聚合端点、client 的旧底层直接聚合调用、算法/触发单批量操作、批量下单/改单及其他产品 UI 的完整异常恢复不在此次验收范围。没有部署或重跑完整 FUSED 服务栈，也没有安装原生 iOS/Android；实际验证见 [批量撤单记录](validation/spot-bulk-cancellation-20261019.json)。

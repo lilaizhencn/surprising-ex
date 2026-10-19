@@ -519,7 +519,7 @@ public class AeronOrderCommandService {
         return view == null ? null : requireOrder(view, "order result is missing");
     }
 
-    private static UUID batchCommandId(ProductLine productLine, long userId, String kind, String batchKey) {
+    static UUID batchCommandId(ProductLine productLine, long userId, String kind, String batchKey) {
         return StableOrderIdentity.commandId(productLine, userId, "batch:" + kind + ':' + batchKey);
     }
 

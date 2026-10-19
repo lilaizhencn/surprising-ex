@@ -4,6 +4,7 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.api.model.AmendOrderBatchResponse;
 import com.surprising.trading.api.model.AmendOrderRequest;
+import com.surprising.trading.api.model.CancellationPlanResponse;
 import com.surprising.trading.api.model.AmendOrderResponse;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
 import com.surprising.trading.api.model.AdminCancelBySymbolRequest;
@@ -294,6 +295,23 @@ public class OrderService {
         String key = normalizeClientOrderId(clientOrderId);
         var product = currentProductLine();
         return requireProjection().submission(product, userId, key, StableOrderIdentity.commandId(product, userId, key));
+    }
+
+    public CancellationPlanResponse cancellationPlan(long userId, String instrumentId) {
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        var product = currentProductLine();
+        String instrument = instrumentId == null ? null : normalizeSymbol(instrumentId);
+        var view = requireRealtimeQueries().require(product, userId, null);
+        var ids = view.openOrders().stream().filter(v -> instrument == null || instrument.equals(v.instrumentId()))
+                .map(com.surprising.aeron.protocol.CoreOrderStateView::orderId).distinct().sorted().toList();
+        return new CancellationPlanResponse(userId, product, instrument, ids);
+    }
+
+    public OrderCommandReceipt cancellationBatch(long userId, String batchKey) {
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        var product = currentProductLine();
+        return requireProjection().cancellationBatch(product, userId,
+                AeronOrderCommandService.batchCommandId(product, userId, "cancel", normalizeClientOrderId(batchKey)));
     }
 
     public OrderCommandReceipt amendment(long userId, String clientRequestId) {

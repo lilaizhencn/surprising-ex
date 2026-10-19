@@ -21,7 +21,7 @@ class ExportBatchTest {
         var result = new com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult(
                 ProductLine.SPOT, 7, new java.util.UUID(0, 1), com.surprising.aeron.protocol.CoreMessageType.CANCEL_ORDER,
                 null, null, com.surprising.aeron.protocol.ResponseStatus.REJECTED,
-                com.surprising.aeron.protocol.CoreResultCode.ORDER_NOT_FOUND, 1, 10, 1000);
+                com.surprising.aeron.protocol.CoreResultCode.ORDER_NOT_FOUND, 1, 10, 1000, List.of());
         doAnswer(call -> {
             assertThat(call.<List<?>>getArgument(1)).isEqualTo(List.of(result));
             return null;
@@ -41,7 +41,7 @@ class ExportBatchTest {
         var result = new com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult(
                 ProductLine.SPOT, 7, new java.util.UUID(0, 1), com.surprising.aeron.protocol.CoreMessageType.CANCEL_ORDER,
                 null, null, com.surprising.aeron.protocol.ResponseStatus.REJECTED,
-                com.surprising.aeron.protocol.CoreResultCode.ORDER_NOT_FOUND, 1, 10, 1000);
+                com.surprising.aeron.protocol.CoreResultCode.ORDER_NOT_FOUND, 1, 10, 1000, List.of());
         batch.add(List.of(), result, 0, 1);
         var attempts = new java.util.concurrent.atomic.AtomicInteger();
         doAnswer(call -> {

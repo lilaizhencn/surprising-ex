@@ -88,9 +88,32 @@ public final class CommittedTradeReplay implements AutoCloseable {
                         if (code != CoreResultCode.INVALID_COMMAND) throw invalidCommand;
                     }
                 }
+                List<CancelBatchItem> cancelResults = List.of();
+                if (command.header().messageType() == CoreMessageType.CANCEL_ORDER_BATCH) {
+                    List<CancelOrderCommand> requested;
+                    try { requested = TradingOrderBatchCodec.decodeCancelOrderBatch(command.payloadUnsafe()).orders(); }
+                    catch (IllegalArgumentException invalid) {
+                        if (code != CoreResultCode.INVALID_COMMAND) throw invalid;
+                        requested = List.of();
+                    }
+                    var items = new ArrayList<CancelBatchItem>(requested.size());
+                    if (status == ResponseStatus.APPLIED && !requested.isEmpty()) {
+                        var result = TradingOrderBatchCodec.decodeResult(retained == null ? response.data() : retained.responseData());
+                        if (result.items().size() != requested.size()) throw new IllegalStateException("incomplete committed cancel batch");
+                        for (var item : result.items()) {
+                            long orderId = requested.get(item.index()).orderId();
+                            if (item.orderId() != orderId) throw new IllegalStateException("committed cancel batch identity mismatch");
+                            items.add(new CancelBatchItem(item.index(), orderId, item.status() == ResponseStatus.APPLIED, item.resultCode().name()));
+                        }
+                    } else {
+                        for (int i = 0; i < requested.size(); i++)
+                            items.add(new CancelBatchItem(i, requested.get(i).orderId(), false, code.name()));
+                    }
+                    cancelResults = List.copyOf(items);
+                }
                 commandResult = new CommittedCommandResult(state.productLine(), command.header().userId(),
                         command.header().commandId(), command.header().messageType(), clientOrderId, instrumentId,
-                        status, code, applied, logPosition, timestamp);
+                        status, code, applied, logPosition, timestamp, cancelResults);
             }
             if (fundingResult != null) {
                 if (response.commandStatus() != ResponseStatus.APPLIED)
@@ -160,14 +183,29 @@ public final class CommittedTradeReplay implements AutoCloseable {
     public record CommittedCommandResult(ProductLine product, long userId, UUID commandId,
                                          CoreMessageType commandType, String clientOrderId, String instrumentId,
                                          ResponseStatus status, CoreResultCode code, long appliedCommandCount,
-                                         long clusterPosition, long occurredAt) {
+                                         long clusterPosition, long occurredAt, List<CancelBatchItem> cancelResults) {
         public CommittedCommandResult {
+            cancelResults = List.copyOf(cancelResults);
+            if (cancelResults.size() > 50 || (!cancelResults.isEmpty() && commandType != CoreMessageType.CANCEL_ORDER_BATCH))
+                throw new IllegalArgumentException("invalid committed cancellation items");
+            for (int i = 0; i < cancelResults.size(); i++)
+                if (cancelResults.get(i).index() != i) throw new IllegalArgumentException("noncontiguous cancellation items");
             if (product == null || userId <= 0 || commandId == null || commandType == null
                     || commandType.kind() != WireMessageKind.COMMAND
                     || (status != ResponseStatus.APPLIED && status != ResponseStatus.REJECTED) || code == null
                     || code == CoreResultCode.MATCHING_PENDING || appliedCommandCount < 0
                     || clusterPosition <= 0 || occurredAt <= 0)
                 throw new IllegalArgumentException("invalid committed command result");
+        }
+    }
+
+    /** Bounded command outcome facts; never another order-state image. */
+    public record CancelBatchItem(int index, long orderId, boolean success, String code) {
+        public CancelBatchItem {
+            if (index < 0 || orderId <= 0 || code == null || code.isBlank()
+                    || CoreResultCode.valueOf(code) == CoreResultCode.MATCHING_PENDING
+                    || success != (CoreResultCode.valueOf(code) == CoreResultCode.NONE))
+                throw new IllegalArgumentException("invalid cancellation result item");
         }
     }
 }

@@ -35,6 +35,29 @@ class CommittedOrderProjectionPostgresTest {
 
     @AfterEach void clean() { if (jdbc != null) jdbc.execute("DROP SCHEMA order_projection_it CASCADE"); }
 
+    @Test void cancelBatchFactsPersistAndEnrichOnlyMissingHistoricalDetails() {
+        var receipt = batchResult(false);
+        repository.persist(ProductLine.SPOT, List.of(), List.of(receipt), 10);
+        assertThat(jdbc.queryForObject("SELECT jsonb_array_length(cancel_batch_results) FROM core_command_result_projection", Integer.class)).isEqualTo(2);
+        repository.persist(ProductLine.SPOT, List.of(), List.of(receipt), 10);
+        jdbc.update("UPDATE core_command_result_projection SET cancel_batch_results=NULL");
+        repository.repairCommandResults(ProductLine.SPOT, List.of(receipt));
+        assertThat(jdbc.queryForObject("SELECT cancel_batch_results->1->>'code' FROM core_command_result_projection", String.class)).isEqualTo("ORDER_NOT_FOUND");
+        assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark WHERE product_line='SPOT'", Long.class)).isEqualTo(10);
+        assertThatThrownBy(() -> repository.persist(ProductLine.SPOT, List.of(), List.of(batchResult(true)), 11))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("conflicting");
+        assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark WHERE product_line='SPOT'", Long.class)).isEqualTo(10);
+        assertThat(jdbc.queryForObject("SELECT cancel_batch_results->0->>'success' FROM core_command_result_projection", String.class)).isEqualTo("true");
+    }
+
+    private static com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult batchResult(boolean conflict) {
+        return new com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult(
+                ProductLine.SPOT, 7, new java.util.UUID(3, 4), CoreMessageType.CANCEL_ORDER_BATCH, null, null,
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 9, 288, 1700000000009L, List.of(
+                    new com.surprising.aeron.service.orchestration.CommittedTradeReplay.CancelBatchItem(0, 91, !conflict, conflict ? "ORDER_NOT_FOUND" : "NONE"),
+                    new com.surprising.aeron.service.orchestration.CommittedTradeReplay.CancelBatchItem(1, 92, false, "ORDER_NOT_FOUND")));
+    }
+
     @Test void rejectedCommandsWithoutOrdersRemainQueryableAfterRestartAndMoreThan128OtherResults() {
         var result = result(1, 7, CoreResultCode.ORDER_NOT_FOUND);
         repository.persist(ProductLine.SPOT, List.of(), List.of(result), 0);
@@ -82,7 +105,7 @@ class CommittedOrderProjectionPostgresTest {
         return new com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedCommandResult(
                 ProductLine.SPOT, user, new java.util.UUID(0, id), CoreMessageType.CANCEL_ORDER,
                 null, null, code == CoreResultCode.NONE ? ResponseStatus.APPLIED : ResponseStatus.REJECTED,
-                code, id, id * 32, 1700000000000L + id);
+                code, id, id * 32, 1700000000000L + id, List.of());
     }
 
     @Test void emptyOrderBatchesAdvanceOnlyWatermarkWithoutDependingOnMakerCatalog() {

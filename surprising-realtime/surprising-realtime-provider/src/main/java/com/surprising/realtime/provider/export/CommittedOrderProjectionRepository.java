@@ -32,6 +32,7 @@ public class CommittedOrderProjectionRepository {
               export_sequence=EXCLUDED.export_sequence,raw_order_state=EXCLUDED.raw_order_state
             WHERE core_order_projection.order_revision < EXCLUDED.order_revision
             """;
+    private final tools.jackson.databind.ObjectMapper json = new tools.jackson.databind.ObjectMapper();
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
 
@@ -233,7 +234,10 @@ public class CommittedOrderProjectionRepository {
             // Do not retain every transient quote from accounts owned by a maker strategy.
             if (marketMakerAccounts.contains(receipt.userId())) continue;
             var prior = receipts.putIfAbsent(receipt.commandId(), receipt);
-            if (prior != null) requireSameResult(prior, receipt);
+            if (prior != null) {
+                requireSameResult(prior, receipt);
+                if (prior.cancelResults().isEmpty() && !receipt.cancelResults().isEmpty()) receipts.put(receipt.commandId(), receipt);
+            }
         }
         return receipts;
     }
@@ -243,7 +247,7 @@ public class CommittedOrderProjectionRepository {
         jdbc.batchUpdate("""
                 INSERT INTO core_command_result_projection(product_line,command_id,user_id,command_type,
                   client_order_id,instrument_id,command_status,result_code,applied_command_count,
-                  cluster_position,occurred_at_epoch_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                  cluster_position,occurred_at_epoch_ms,cancel_batch_results) VALUES (?,?,?,?,?,?,?,?,?,?,?,?::jsonb)
                 ON CONFLICT (product_line,command_id) DO NOTHING
                 """, receipts.values(), 256, (s, receipt) -> {
             s.setString(1, product.name()); s.setObject(2, receipt.commandId()); s.setLong(3, receipt.userId());
@@ -251,6 +255,7 @@ public class CommittedOrderProjectionRepository {
             s.setString(6, receipt.instrumentId()); s.setString(7, receipt.status().name());
             s.setString(8, receipt.code().name()); s.setLong(9, receipt.appliedCommandCount());
             s.setLong(10, receipt.clusterPosition()); s.setLong(11, receipt.occurredAt());
+            s.setString(12, receipt.cancelResults().isEmpty() ? null : json.writeValueAsString(receipt.cancelResults()));
         });
         // Replays can revisit already-persisted commands. Verify their immutable outcome;
         // a conflicting row aborts the same transaction as orders and their watermark.
@@ -258,16 +263,30 @@ public class CommittedOrderProjectionRepository {
         arguments.add(product.name()); arguments.addAll(receipts.keySet());
         var stored = jdbc.query("""
                 SELECT * FROM core_command_result_projection WHERE product_line=? AND command_id IN (
-                """ + String.join(",", Collections.nCopies(receipts.size(), "?")) + ")", (r, row) ->
+                """ + String.join(",", Collections.nCopies(receipts.size(), "?")) + ") ORDER BY command_id FOR UPDATE", (r, row) ->
                 new CommittedCommandResult(product, r.getLong("user_id"), r.getObject("command_id", UUID.class),
                     com.surprising.aeron.protocol.CoreMessageType.valueOf(r.getString("command_type")),
                     r.getString("client_order_id"), r.getString("instrument_id"),
                     com.surprising.aeron.protocol.ResponseStatus.valueOf(r.getString("command_status")),
                     com.surprising.aeron.protocol.CoreResultCode.valueOf(r.getString("result_code")),
-                    r.getLong("applied_command_count"), r.getLong("cluster_position"), r.getLong("occurred_at_epoch_ms")),
+                    r.getLong("applied_command_count"), r.getLong("cluster_position"), r.getLong("occurred_at_epoch_ms"),
+                    cancelItems(r.getString("cancel_batch_results"))),
                 arguments.toArray());
         if (stored.size() != receipts.size()) throw new IllegalStateException("incomplete committed command results");
-        for (var receipt : stored) requireSameResult(receipts.get(receipt.commandId()), receipt);
+        for (var receipt : stored) {
+            var expected = receipts.get(receipt.commandId());
+            requireSameResult(expected, receipt);
+            // Old rows may lack the newly introduced item facts. Only committed replay
+            // may enrich NULL, under the same row lock; existing facts are immutable.
+            if (receipt.cancelResults().isEmpty() && !expected.cancelResults().isEmpty())
+                jdbc.update("UPDATE core_command_result_projection SET cancel_batch_results=?::jsonb WHERE product_line=? AND command_id=? AND cancel_batch_results IS NULL",
+                        json.writeValueAsString(expected.cancelResults()), product.name(), receipt.commandId());
+        }
+    }
+
+    private List<com.surprising.aeron.service.orchestration.CommittedTradeReplay.CancelBatchItem> cancelItems(String raw) {
+        return raw == null ? List.of() : List.of(json.readValue(raw,
+                com.surprising.aeron.service.orchestration.CommittedTradeReplay.CancelBatchItem[].class));
     }
 
     private static void requireSameResult(CommittedCommandResult expected, CommittedCommandResult actual) {
@@ -275,7 +294,9 @@ public class CommittedOrderProjectionRepository {
                 || !Objects.equals(expected.clientOrderId(), actual.clientOrderId())
                 || !Objects.equals(expected.instrumentId(), actual.instrumentId())
                 || expected.status() != actual.status() || expected.code() != actual.code()
-                || expected.appliedCommandCount() != actual.appliedCommandCount())
+                || expected.appliedCommandCount() != actual.appliedCommandCount()
+                || (!expected.cancelResults().isEmpty() && !actual.cancelResults().isEmpty()
+                    && !expected.cancelResults().equals(actual.cancelResults())))
             throw new IllegalStateException("conflicting committed command result");
     }
     private void advanceWatermark(ProductLine product, long exportSequence) {

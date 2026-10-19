@@ -447,6 +447,42 @@ class OrderServiceTest {
         verify(aeronOrders, never()).cancel(anyLong(), anyLong());
     }
 
+    @ParameterizedTest @EnumSource(ProductLine.class)
+    void cancellationPlanIsUnpagedProductScopedAndReadOnly(ProductLine line) {
+        var service = service(line, aeronOrders);
+        var view = readView(openOrders(1205));
+        when(realtimeQueries.require(line, 1001L, null)).thenReturn(view);
+        assertThatThrownBy(() -> service.cancellationPlan(1001, " ")).isInstanceOf(IllegalArgumentException.class);
+        var all = service.cancellationPlan(1001, null);
+        assertThat(all.productLine()).isEqualTo(line);
+        assertThat(all.userId()).isEqualTo(1001);
+        assertThat(all.instrumentId()).isNull();
+        assertThat(all.orderIds()).hasSize(1205).isSorted();
+        assertThat(all.orderIds().getFirst()).isEqualTo(10000);
+        assertThat(all.orderIds().getLast()).isEqualTo(11204);
+        assertThat(service.cancellationPlan(1001, " 1 ").orderIds()).isEqualTo(all.orderIds());
+        assertThat(service.cancellationPlan(1001, "2").orderIds()).isEmpty();
+        verifyNoInteractions(aeronOrders, projection);
+        when(realtimeQueries.require(line, 1001L, null)).thenThrow(new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
+        assertThatThrownBy(() -> service.cancellationPlan(1001, null))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        verifyNoInteractions(aeronOrders, projection);
+    }
+
+    @ParameterizedTest @EnumSource(ProductLine.class)
+    void cancellationBatchLookupUsesExactlyTheNativeCancelNamespace(ProductLine line) {
+        var service = service(line, aeronOrders);
+        var id = StableOrderIdentity.commandId(line, 1001, "batch:cancel:fixed-key");
+        var expected = new OrderCommandReceipt(id, "RESULT_UNKNOWN", "RESULT_UNKNOWN", "pending",
+                null, List.of(), null, null);
+        when(projection.cancellationBatch(line, 1001, id)).thenReturn(expected);
+        assertThat(service.cancellationBatch(1001, " fixed-key ")).isSameAs(expected);
+        assertThatThrownBy(() -> service.cancellationBatch(0, "fixed-key")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.cancellationBatch(1001, " ")).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(aeronOrders);
+    }
+
     @Test
     void lifecycleCancellationUsesAeronAuthorityInsteadOfStaleProjection() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);

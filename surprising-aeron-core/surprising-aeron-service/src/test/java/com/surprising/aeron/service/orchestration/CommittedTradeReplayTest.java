@@ -10,6 +10,28 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.api.Test;
 
 class CommittedTradeReplayTest {
+    @Test void committedCancelBatchRetainsItsMixedOutcomesBeyondTheCoreCache() {
+        try (var replay = new CommittedTradeReplay(ProductLine.SPOT, null)) {
+            send(replay, ProductLine.SPOT, CoreMessageType.REGISTER_INSTRUMENT, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("604", 0,
+                            "BTC", "USDT", "USDT", 1, 1, 1, 100000, 50000, 0, 0, 0, -1, 0)));
+            send(replay, ProductLine.SPOT, CoreMessageType.ADJUST_BALANCE, 7,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1000000)));
+            place(replay, ProductLine.SPOT, 7, 201, CoreOrderSide.BUY);
+            send(replay, ProductLine.SPOT, CoreMessageType.CANCEL_ORDER_BATCH, 7,
+                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
+                            new CancelOrderCommand(201), new CancelOrderCommand(999)))));
+            var receipt = replay.commandResult();
+            assertThat(receipt.code()).isEqualTo(CoreResultCode.NONE);
+            assertThat(receipt.cancelResults()).containsExactly(
+                    new CommittedTradeReplay.CancelBatchItem(0, 201, true, "NONE"),
+                    new CommittedTradeReplay.CancelBatchItem(1, 999, false, "ORDER_NOT_FOUND"));
+            for (int i = 0; i < 140; i++) send(replay, ProductLine.SPOT, CoreMessageType.ADJUST_BALANCE, 7,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1)));
+            assertThat(receipt.cancelResults().get(1).code()).isEqualTo("ORDER_NOT_FOUND");
+        }
+    }
+
     private static final long TIME = 1_700_000_000_000L;
     private long sequence;
 

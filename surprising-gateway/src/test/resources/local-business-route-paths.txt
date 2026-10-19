@@ -86,3 +86,5 @@
 /api/v1/trading/orders/submission
 /api/v1/trading/orders/cancellations/{orderId}
 /api/v1/trading/orders/amendments
+/api/v1/trading/orders/cancellation-plan
+/api/v1/trading/orders/cancellation-batches

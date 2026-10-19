@@ -224,3 +224,7 @@ realtime 现从已提交 Archive 回放生成普通用户命令回执，与订�
 ## 现货改单（2026-10-19）
 
 Web/client 补齐单笔现货订单行改单和请求身份，响应丢失时只从 realtime 查询原请求；网关新增 `GET /api/v1/gateway/trading/amendments?clientRequestId=...`，不访问 Core。162 项后端定向测试、Web 188 项、client 166 项通过，覆盖部分成交及改单前快照恢复的冻结/费用/资金守恒。先更新 gateway 再更新两端，沿用已提交回执迁移与历史回补；本轮未运行完整 FUSED 栈或真机。详见 [业务及发布说明](docs/realtime-command-results.md)。
+
+### 现货批量撤单（2026-10-19）
+
+Web/client 从 realtime 获取完整固定目标，保存批次键和发送断点后按原生每批 50 笔撤单，展示成功/失败及失败订单。响应丢失时查询 realtime 提交投影；确认当前批次后只继续原计划未发送的批次，不重新读取目标或重发已发送批次。Core 保持交易职责，本次未改在线撮合/账户/账本交易逻辑。发布前需要 SQL 迁移、realtime 更新及必要的历史逐项结果回补；[完整契约和发布顺序](docs/realtime-command-results.md#现货批量撤单与固定目标恢复2026-10-19)，[验证与清理记录](docs/validation/spot-bulk-cancellation-20261019.json)。

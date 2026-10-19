@@ -91,6 +91,39 @@ public class AeronOrderProjectionRepository {
         return commandReceipt(product, commandId, result, List.of(orderId));
     }
 
+    public OrderCommandReceipt cancellationBatch(ProductLine product, long userId, UUID commandId) {
+        var result = submittedCommand(product, userId, commandId);
+        if (result == null) return commandReceipt(product, commandId, null, List.of());
+        if (!"CANCEL_ORDER_BATCH".equals(result.commandType())) throw new IllegalStateException("cancellation batch type mismatch");
+        String raw = jdbcTemplate.queryForObject("SELECT cancel_batch_results::text FROM core_command_result_projection WHERE product_line=? AND user_id=? AND command_id=?",
+                String.class, product.name(), userId, commandId);
+        // A pre-upgrade receipt needs committed replay enrichment, not Core fallback.
+        if (raw == null) return commandReceipt(product, commandId, null, List.of());
+        try {
+            var facts = objectMapper.readValue(raw, CancelBatchFact[].class);
+            if (facts.length == 0 || facts.length > 50) throw new IllegalStateException("invalid cancellation batch size");
+            var ids = new ArrayList<Long>();
+            var items = new ArrayList<com.surprising.trading.api.model.OrderBatchItemResponse>();
+            for (int i = 0; i < facts.length; i++) {
+                var fact = facts[i];
+                if (fact == null || fact.index() != i || fact.orderId() <= 0 || fact.code() == null || fact.code().isBlank()
+                        || com.surprising.aeron.protocol.CoreResultCode.valueOf(fact.code()) == com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING
+                        || fact.success() != (com.surprising.aeron.protocol.CoreResultCode.valueOf(fact.code()) == com.surprising.aeron.protocol.CoreResultCode.NONE))
+                    throw new IllegalStateException("invalid cancellation batch item");
+                ids.add(fact.orderId());
+                items.add(new com.surprising.trading.api.model.OrderBatchItemResponse(i, fact.success(), fact.code(), null));
+            }
+            int completed = (int) items.stream().filter(com.surprising.trading.api.model.OrderBatchItemResponse::success).count();
+            return new OrderCommandReceipt(commandId, "TERMINAL", result.code(), "committed cancellation batch",
+                    OrderCommandReceipt.commandResultUrl(commandId) + "?productLine=" + product.name(), ids,
+                    new com.surprising.trading.api.model.OrderBatchResponse(items.size(), completed, items.size()-completed, items), null);
+        } catch (IllegalArgumentException | tools.jackson.core.JacksonException ex) {
+            throw new org.springframework.dao.DataRetrievalFailureException("invalid cancellation batch projection", ex);
+        }
+    }
+
+    private record CancelBatchFact(int index, long orderId, boolean success, String code) {}
+
     public OrderCommandReceipt amendment(ProductLine product, long userId, UUID commandId) {
         var result = submittedCommand(product, userId, commandId);
         if (result != null && !"AMEND_ORDER".equals(result.commandType()))

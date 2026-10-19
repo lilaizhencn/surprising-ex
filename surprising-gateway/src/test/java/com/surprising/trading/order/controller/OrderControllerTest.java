@@ -26,6 +26,31 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.server.ResponseStatusException;
 
 class OrderControllerTest {
+    @Test void cancellationPlanAndBatchAreReadOnlyUncachedAndReportUnavailability() {
+        var service = mock(OrderService.class);
+        var controller = new OrderInternalController(new com.surprising.trading.order.service.OrderRequestService(
+                service, mock(AlgoOrderService.class), mock(CancelAllAfterService.class)));
+        var plan = new com.surprising.trading.api.model.CancellationPlanResponse(1001,
+                com.surprising.product.api.ProductLine.SPOT, "1", List.of(91L));
+        when(service.cancellationPlan(1001, "1")).thenReturn(plan);
+        assertThat(controller.cancellationPlan(1001, "1").getBody()).isEqualTo(plan);
+        assertThat(controller.cancellationPlan(1001, "1").getHeaders().getCacheControl()).isEqualTo("no-store");
+        for (var outcome : List.of("RESULT_UNKNOWN", "TERMINAL")) {
+            when(service.cancellationBatch(1001, "batch-1")).thenReturn(receipt(outcome, outcome.equals("TERMINAL") ? "NONE" : outcome));
+            var response = controller.cancellationBatch(1001, "batch-1");
+            assertThat(response.getStatusCode()).isEqualTo(outcome.equals("TERMINAL") ? HttpStatus.OK : HttpStatus.ACCEPTED);
+            assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-store");
+        }
+        when(service.cancellationBatch(1001, "batch-1")).thenReturn(receipt("TERMINAL", "ORDER_OWNER_MISMATCH"));
+        assertThat(controller.cancellationBatch(1001, "batch-1").getStatusCode()).isEqualTo(HttpStatus.OK);
+        doThrow(new IllegalArgumentException("batchKey required")).when(service).cancellationBatch(1001, "");
+        assertThatThrownBy(() -> controller.cancellationBatch(1001, "")).isInstanceOf(ResponseStatusException.class)
+                .satisfies(error -> assertThat(((ResponseStatusException)error).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+        doThrow(new org.springframework.dao.DataAccessResourceFailureException("offline")).when(service).cancellationBatch(1001, "batch-1");
+        assertThatThrownBy(() -> controller.cancellationBatch(1001, "batch-1")).isInstanceOf(ResponseStatusException.class)
+                .satisfies(error -> assertThat(((ResponseStatusException)error).getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+    }
+
     @Test void amendmentLookupReturnsTerminalUnknownAndUnavailableWithoutCaching() {
         var service = mock(OrderService.class);
         var controller = new OrderInternalController(new com.surprising.trading.order.service.OrderRequestService(

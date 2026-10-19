@@ -3223,6 +3223,9 @@ CREATE TABLE IF NOT EXISTS core_command_result_projection (
     applied_command_count bigint NOT NULL CHECK (applied_command_count >= 0),
     cluster_position bigint NOT NULL CHECK (cluster_position > 0),
     occurred_at_epoch_ms bigint NOT NULL CHECK (occurred_at_epoch_ms > 0),
+    cancel_batch_results jsonb CHECK (cancel_batch_results IS NULL OR (
+        command_type = 'CANCEL_ORDER_BATCH' AND jsonb_typeof(cancel_batch_results) = 'array'
+        AND jsonb_array_length(cancel_batch_results) BETWEEN 1 AND 50)),
     PRIMARY KEY (product_line, command_id),
     CHECK (result_code <> 'MATCHING_PENDING'),
     CHECK (command_status IN ('APPLIED', 'REJECTED'))

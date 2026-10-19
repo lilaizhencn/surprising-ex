@@ -16,6 +16,39 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
 class LocalBusinessApiTest {
+    @Test void cancellationPlanAndBatchBindTheAuthenticatedUserAndPreserveKeys() {
+        var plan = new com.surprising.trading.api.model.CancellationPlanResponse(42, ProductLine.SPOT,
+                "1", java.util.List.of(9007199254740993L));
+        when(orders.cancellationPlan(42, "1")).thenReturn(ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(plan));
+        var response = invoke("trading", "/api/v1/trading/orders/cancellation-plan?instrumentId=1", HttpMethod.GET, userHeaders(), null);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-store");
+        verify(orders).cancellationPlan(42, "1");
+        var receipt = new com.surprising.trading.api.model.OrderCommandReceipt(new java.util.UUID(8, 9),
+                "RESULT_UNKNOWN", "RESULT_UNKNOWN", "pending", null, java.util.List.of(), null, null);
+        when(orders.cancellationBatch(42, "a+b")).thenReturn(ResponseEntity.accepted().cacheControl(CacheControl.noStore()).body(receipt));
+        assertThat(invoke("trading", "/api/v1/trading/orders/cancellation-batches?batchKey=a%2Bb", HttpMethod.GET, userHeaders(), null).getStatusCode())
+                .isEqualTo(HttpStatus.ACCEPTED);
+        verify(orders).cancellationBatch(42, "a+b");
+        for (var path : java.util.List.of("cancellation-plan?instrumentId=1", "cancellation-batches?batchKey=x")) {
+            assertThat(invoke("trading", "/api/v1/trading/orders/"+path+"&userId=43", HttpMethod.GET, userHeaders(), null).getStatusCode())
+                    .isEqualTo(HttpStatus.FORBIDDEN);
+        }
+    }
+
+    @Test void batchCancelRequiresAnExplicitBatchKeyBeforeSubmitting() {
+        var receipt = new com.surprising.trading.api.model.OrderCommandReceipt(new java.util.UUID(9, 10),
+                "RESULT_UNKNOWN", "RESULT_UNKNOWN", "pending", null, java.util.List.of(91L), null, null);
+        when(orders.cancelBatch(any())).thenReturn(CompletableFuture.completedFuture(ResponseEntity.accepted().body(receipt)));
+        String invalid = "{\"orders\":[{\"userId\":42,\"orderId\":91}]}";
+        assertThat(invoke("trading", "/api/v1/trading/orders/batch-cancel", HttpMethod.POST, userHeaders(), invalid).getStatusCode())
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        verifyNoInteractions(orders);
+        String valid = "{\"batchKey\":\"fixed-1\",\"orders\":[{\"userId\":42,\"orderId\":91}]}";
+        assertThat(invoke("trading", "/api/v1/trading/orders/batch-cancel", HttpMethod.POST, userHeaders(), valid).getStatusCode())
+                .isEqualTo(HttpStatus.ACCEPTED);
+    }
+
     @Test void amendmentPostRequiresAnExplicitClientRequestIdBeforeCallingTheOrderService() {
         var receipt = new com.surprising.trading.api.model.OrderCommandReceipt(new java.util.UUID(9, 10),
                 "TERMINAL", "NONE", "completed", null, java.util.List.of(), null, null);

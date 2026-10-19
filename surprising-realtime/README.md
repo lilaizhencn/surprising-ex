@@ -536,3 +536,7 @@ Web lint/build 和 147 项测试通过；Flutter analyze 无问题、126 项测�
 `CommittedTradeReplay` 在独立回放完成全部提交后交出命令结果；`CommittedOrderProjectionRepository` 将普通用户处理回执、订单和水位同事务提交，重放冲突会回滚。新表 `core_command_result_projection` 不保存账户或订单当前状态，做市策略内部报价被过滤。拒单没有订单事件时仍导出回执，网关用户查询改读该投影而不访问 Core 结果缓存。
 
 已有 live checkpoint 不回溯旧回执。先应用 `deployment/migrations/20261019-committed-command-results.sql`，再通过 `CommittedCommandResultRepair` 从日志前缀有限回补；必须新建独立 `*.command-repair` checkpoint，不能复制 live checkpoint。该回补只写回执，不写 Kafka、订单、资金费或水位。完整发布顺序、六个参数、范围与限制见 [说明](../docs/realtime-command-results.md)。
+
+### 逐项批量撤单回执（2026-10-19）
+
+提交回放增加有界 `cancel_batch_results`，保存原批次的 index/orderId/success/code，供两端确认部分失败和继续未发送批次。正常导出与订单/回执/水位同事务；历史回补仅能补充 NULL，非空事实冲突则回滚，不复制订单状态。先执行 `20261019-cancel-batch-results.sql`，再更新 realtime 并按需使用全新的独立 `.command-repair` checkpoint 回补历史，最后更新 gateway/Web/client。原 checkpoint 不回溯旧回执，不重置 live 断点、不重发 Kafka；详见 [查询和发布契约](../docs/realtime-command-results.md#现货批量撤单与固定目标恢复2026-10-19)。

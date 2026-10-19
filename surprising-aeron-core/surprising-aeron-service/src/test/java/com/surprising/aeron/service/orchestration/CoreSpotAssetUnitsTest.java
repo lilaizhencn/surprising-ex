@@ -135,6 +135,52 @@ class CoreSpotAssetUnitsTest {
         }
     }
 
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void cancelBatchReleasesOnlyOwnedOrdersAndPreservesMixedResultsAfterRestore(boolean restore) {
+        var original = new TradingCoreRuntime(ProductLine.SPOT);
+        TradingCoreRuntime runtime = original;
+        try {
+            var registration = new RegisterInstrumentCommand("1", 0, "BTC", "USDT", "USDT",
+                    10_000, 10_000_000, 1, 1_000_000, 1_000_000, 200, 500, 0, -1, 0,
+                    1_000_000, 1_000_000_000_000_000L, 0, 1_000_000_000_000_000L,
+                    List.of(new CoreRiskLimitBracket(1, 0, 1_000_000_000_000_000L, 1_000_000, 1_000_000, 1_000_000)),
+                    1, true, true, false, 0b11, 0b1111, 100_000);
+            apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration));
+            fund(runtime, 101, "USDT", 100_000_000_000L); fund(runtime, 202, "BTC", 1_000_000L);
+            place(runtime, 101, 41, CoreOrderSide.BUY, 2, 400_000, CoreTimeInForce.GTC);
+            place(runtime, 101, 43, CoreOrderSide.BUY, 3, 410_000, CoreTimeInForce.GTC);
+            place(runtime, 202, 40, CoreOrderSide.SELL, 1, 410_000, CoreTimeInForce.IOC);
+            place(runtime, 202, 44, CoreOrderSide.SELL, 1, 500_000, CoreTimeInForce.GTC);
+            if (restore) runtime = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, original.snapshot(74));
+            long beforeRejected = runtime.tradingState().user(101).balances().get("USDT").lockedUnits();
+            var rejected = execute(runtime, CoreMessageType.CANCEL_ORDER_BATCH, 101,
+                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
+                            new CancelOrderCommand(41), new CancelOrderCommand(44)))));
+            assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.ORDER_OWNER_MISMATCH);
+            assertThat(runtime.tradingState().user(101).balances().get("USDT").lockedUnits()).isEqualTo(beforeRejected);
+            var result = apply(runtime, CoreMessageType.CANCEL_ORDER_BATCH, 101,
+                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
+                            new CancelOrderCommand(41), new CancelOrderCommand(43),
+                            new CancelOrderCommand(999)))));
+            var items = TradingOrderBatchCodec.decodeResult(result.data()).items();
+            assertThat(items).extracting(CoreOrderBatchResult.Item::status).containsExactly(
+                    ResponseStatus.APPLIED, ResponseStatus.APPLIED, ResponseStatus.REJECTED);
+            assertThat(items.get(2).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
+            var state = runtime.tradingState();
+            assertThat(state.user(101).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(state.user(202).balances().get("BTC").lockedUnits()).isEqualTo(100_000);
+            assertThat(state.user(101).totalUnits("BTC")).isEqualTo(100_000);
+            assertThat(state.user(202).totalUnits("BTC")).isEqualTo(900_000);
+            assertThat(state.user(101).totalUnits("USDT")).isEqualTo(95_899_180_000L);
+            assertThat(state.user(202).totalUnits("USDT")).isEqualTo(4_097_950_000L);
+            assertThat(state.treasuryState().feeBalances().get("USDT")).isEqualTo(2_870_000L);
+            assertThat(state.user(101).totalUnits("USDT") + state.user(202).totalUnits("USDT")
+                    + state.treasuryState().feeBalances().get("USDT")).isEqualTo(100_000_000_000L);
+            apply(runtime, CoreMessageType.CANCEL_ORDER, 202, TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(44)));
+            assertThat(runtime.tradingState().user(202).balances().get("BTC").lockedUnits()).isZero();
+        } finally { if (runtime != original) runtime.close(); original.close(); }
+    }
+
     private CoreResponse apply(TradingCoreRuntime runtime, CoreMessageType type, long user, byte[] payload) {
         var result = execute(runtime, type, user, payload);
         assertThat(result.commandStatus()).as(type + " " + result.resultCode()).isEqualTo(ResponseStatus.APPLIED);

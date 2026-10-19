@@ -4,6 +4,7 @@ import com.surprising.trading.order.service.OrderRequestService;
 
 import com.surprising.trading.api.TradingApiPaths;
 import com.surprising.trading.api.model.AmendOrderRequest;
+import com.surprising.trading.api.model.CancellationPlanResponse;
 import com.surprising.trading.api.model.AlgoOrderBatchResponse;
 import com.surprising.trading.api.model.AlgoOrderQueryResponse;
 import com.surprising.trading.api.model.AlgoOrderResponse;
@@ -134,6 +135,16 @@ public class OrderInternalController {
             @RequestParam("clientOrderId") String clientOrderId) {
         return requests.submission(userId, clientOrderId);
     }
+
+    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/cancellation-plan")
+    public ResponseEntity<CancellationPlanResponse> cancellationPlan(@RequestParam("userId") long userId,
+            @RequestParam(value = "instrumentId", required = false) String instrumentId) {
+        return requests.cancellationPlan(userId, instrumentId);
+    }
+
+    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/cancellation-batches")
+    public ResponseEntity<OrderCommandReceipt> cancellationBatch(@RequestParam("userId") long userId,
+            @RequestParam("batchKey") String batchKey) { return requests.cancellationBatch(userId, batchKey); }
 
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/amendments")
     public ResponseEntity<OrderCommandReceipt> amendment(@RequestParam("userId") long userId,

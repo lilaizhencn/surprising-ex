@@ -1,6 +1,7 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.trading.api.model.AmendOrderRequest;
+import com.surprising.trading.api.model.CancellationPlanResponse;
 import com.surprising.trading.api.model.AlgoOrderBatchResponse;
 import com.surprising.trading.api.model.AlgoOrderQueryResponse;
 import com.surprising.trading.api.model.AlgoOrderResponse;
@@ -231,6 +232,25 @@ public class OrderRequestService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (org.springframework.dao.DataAccessException | IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "committed command result is unavailable", ex);
+        }
+    }
+
+    public ResponseEntity<CancellationPlanResponse> cancellationPlan(long userId, String instrumentId) {
+        try {
+            return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore())
+                    .body(orderService.cancellationPlan(userId, instrumentId));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
+    public ResponseEntity<OrderCommandReceipt> cancellationBatch(long userId, String batchKey) {
+        try {
+            return commandResponse(orderService.cancellationBatch(userId, batchKey));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (org.springframework.dao.DataAccessException | IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "committed cancellation batch is unavailable", ex);
         }
     }
 
