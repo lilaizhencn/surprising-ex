@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 /**
  * 账户异步投影查询入口。
  *
- * <p>余额、负债、持仓和仓位模式由 {@link AccountService} 读取本地用户状态快照；本服务只保留
+ * <p>余额、负债、持仓和仓位模式由 {@link AccountService} 读取 realtime 用户视图；本服务只保留
  * 账本、转账记录和后台审计查询，避免任何调用者误把数据库余额投影当成实时事实源。</p>
  */
 @Service

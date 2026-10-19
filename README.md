@@ -38,6 +38,8 @@ The Maven modules follow these boundaries: [`surprising-aeron-core`](surprising-
 
 本轮 261 项订单簿回归、85 项后端定向回归及单节点 FUSED 现货实链路通过。真实做市下完成市价 IOC/FOK、限价 FOK、挂单撤单及数量不足拒单；WS 与 REST 的 6 笔成交标识一致，撤去做市挂单后冻结清零，用户、做市与财库逐资产守恒差额为 0。本轮未验收原生移动端/浏览器 UI、余额比例、未取得命令号即断网恢复及其余产品线，详见 [验证与清理记录](docs/validation/spot-realtime-market-fok-20261019.json)。
 
+进一步修复查询装配：产品线容器现在显式注册 `ValkeyUserQueries`，普通订单、余额持仓及用户触发单当前查询不再退回 Core。普通订单离开活动视图后从 realtime 提交投影查询终态；后台普通订单全局查询和撤单预览也使用提交投影。Web/client 回执恢复已统一到 `/api/v1/gateway/trading/commands/{commandId}`。192 项查询回归、Web 151 项及 Flutter 131 项测试通过；独立 FUSED 现货实测确认回执地址、终态查询、余额一致和资金守恒。全栈启动默认开启 realtime 与提交导出。专用查询及其他产品线仍按范围逐项验收，详见 [查询与清理记录](docs/validation/public-realtime-query-20261019.json)。
+
 ### 当前 Core 线程职责（2026-10-13）
 
 用户余额、预留、仓位、订单、算法单、触发单、清算及风险记录由所属 `AccountLaneState` 的实际 worker 读写。`SettlementLaneWorker` 在启动前绑定线程；运行中的 Owner 不能直接读取账户表、进入 Lane 写作用域或执行账户闭包。已删除四张 `published*` 业务镜像，`ActiveOrderIndex` 仅保存订单 ID、用户 ID、币对；触发、算法及清算索引只保存路由与候选筛选键。Owner 定序、检查路由身份、派发任务并按日志顺序发布完成结果；命令内的不可变回执在提交后清理，不留第二份业务状态。

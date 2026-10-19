@@ -2,14 +2,12 @@ package com.surprising.realtime.api;
 
 import com.surprising.product.api.ProductLine;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
 @Component
-@ConditionalOnProperty(name = "surprising.realtime.enabled", havingValue = "true")
 public final class ValkeyUserQueries {
     private final ValkeyReadViewStore views;
     private final ValkeySnapshotRequests requests;

@@ -45,7 +45,7 @@ import org.springframework.stereotype.Service;
 @Service
 @Slf4j
 public class TriggerOrderService {
-    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    @org.springframework.beans.factory.annotation.Autowired
     private com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
 
     private static final long MIN_TRAILING_CALLBACK_RATE_PPM = 1_000L;
@@ -172,8 +172,7 @@ public class TriggerOrderService {
         if (userId <= 0 || triggerOrderId <= 0) {
             throw new IllegalArgumentException("userId and triggerOrderId must be positive");
         }
-        CoreTriggerOrderStateView value = realtimeQueries == null ? aeronGateway.get(userId, triggerOrderId)
-                : realtimeQueries.require(currentProductLine(), userId, null).triggerOrders().stream()
+        CoreTriggerOrderStateView value = requireRealtimeQueries().require(currentProductLine(), userId, null).triggerOrders().stream()
                     .filter(order -> order.triggerOrderId() == triggerOrderId).findFirst().orElse(null);
         if (value == null || value.userId() != userId || value.productLine() != currentProductLine()) {
             throw new IllegalStateException("trigger order not found: " + triggerOrderId);
@@ -285,8 +284,7 @@ public class TriggerOrderService {
         }
         String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         long before = decodeOpenTriggerCursor(cursor);
-        List<CoreTriggerOrderStateView> states=realtimeQueries==null ? aeronGateway.openOrders(userId,normalizedSymbol,before,limit+1)
-                : realtimeQueries.require(currentProductLine(),userId,null).triggerOrders().stream()
+        List<CoreTriggerOrderStateView> states = requireRealtimeQueries().require(currentProductLine(),userId,null).triggerOrders().stream()
                 .filter(v->normalizedSymbol==null || normalizedSymbol.equals(v.instrumentId()))
                 .filter(v->before==0 || v.triggerOrderId()<before)
                 .sorted(java.util.Comparator.comparingLong(CoreTriggerOrderStateView::triggerOrderId).reversed()).limit(limit+1).toList();
@@ -302,6 +300,12 @@ public class TriggerOrderService {
     public TriggerOrderQueryResponse adminOrders(Long userId, String instrumentId, String status,
                                                  Long triggerOrderId, int limit) {
         return adminOrders(userId, instrumentId, status, triggerOrderId, limit, null, null, null);
+    }
+
+    private com.surprising.realtime.api.ValkeyUserQueries requireRealtimeQueries() {
+        if (realtimeQueries == null) throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_UNAVAILABLE");
+        return realtimeQueries;
     }
 
     public TriggerOrderQueryResponse adminOrders(Long userId, String instrumentId, String status,

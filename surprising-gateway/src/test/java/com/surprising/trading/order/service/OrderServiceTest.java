@@ -52,7 +52,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
-/** 订单入口只编排 JVM 用户事实流，不允许通过数据库仓储回退。 */
+/** 普通订单当前状态读取 realtime，终态与历史读取已提交投影；写入交由 Core 裁决。 */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class OrderServiceTest {
@@ -65,6 +65,8 @@ class OrderServiceTest {
     private AeronOrderCommandService aeronOrders;
     @Mock
     private AeronOrderProjectionRepository projection;
+    @Mock
+    private com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
 
     @ParameterizedTest @EnumSource(ProductLine.class)
     void enabledOpenOrderQueryUsesOnlyValkeyAndPassesTheRequiredWatermark(ProductLine product) {
@@ -97,6 +99,60 @@ class OrderServiceTest {
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
         org.mockito.Mockito.verify(queries, never()).require(any(), anyLong(), any());
         verifyNoInteractions(aeronOrders, projection);
+    }
+
+    @Test
+    void missingRealtimeDependencyCannotFallBackToCore() {
+        var service = service(ProductLine.SPOT, aeronOrders);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "realtimeQueries", null);
+        assertThatThrownBy(() -> service.get(1001, 91))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("READ_VIEW_UNAVAILABLE");
+        verifyNoInteractions(aeronOrders, projection);
+    }
+
+    @ParameterizedTest @EnumSource(ProductLine.class)
+    void terminalOrderRemainsQueryableFromCommittedRealtimeProjection(ProductLine product) {
+        var service = service(product, aeronOrders);
+        var queries = org.mockito.Mockito.mock(com.surprising.realtime.api.ValkeyUserQueries.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "realtimeQueries", queries);
+        var filled = response(91, "client-91", OrderStatus.FILLED);
+        when(projection.byOrder(product, 1001L, 91, 9L))
+                .thenReturn(ProjectionReadResult.ok(List.of(filled), null, false, 9, 9));
+        assertThat(service.get(1001, 91, 9L)).isEqualTo(filled);
+        verifyNoInteractions(aeronOrders);
+    }
+
+    @ParameterizedTest @EnumSource(ProductLine.class)
+    void terminalClientOrderRemainsQueryableAfterItLeavesTheActiveReadView(ProductLine product) {
+        var service = service(product, aeronOrders);
+        var queries = org.mockito.Mockito.mock(com.surprising.realtime.api.ValkeyUserQueries.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "realtimeQueries", queries);
+        when(queries.require(product, 1001, 9L)).thenReturn(new com.surprising.realtime.api.UserReadView(
+                "READY", "v", 1, null, List.of(), List.of(), 9, List.of()));
+        var filled = response(91, "client-91", OrderStatus.FILLED);
+        when(projection.byClientOrderId(product, 1001, "client-91", 9L))
+                .thenReturn(ProjectionReadResult.ok(List.of(filled), null, false, 9, 9));
+        assertThat(service.getByClientOrderId(1001, "client-91", 9L)).isEqualTo(filled);
+        verifyNoInteractions(aeronOrders);
+    }
+
+    @Test
+    void staleProjectedOpenOrderCannotReplaceAnAbsentRealtimeOrder() {
+        var service = service(ProductLine.SPOT, aeronOrders);
+        when(projection.byOrder(ProductLine.SPOT, 1001L, 91, null)).thenReturn(
+                ProjectionReadResult.ok(List.of(response(91, "client-91", OrderStatus.ACCEPTED)), null, false, 1, 0));
+        assertThatThrownBy(() -> service.get(1001, 91)).hasMessageContaining("order not found");
+        verifyNoInteractions(aeronOrders);
+    }
+
+    @Test
+    void terminalOrderQueryPreservesCommittedProjectionLag() {
+        var service = service(ProductLine.SPOT, aeronOrders);
+        when(projection.byOrder(ProductLine.SPOT, 1001L, 91, 9L)).thenReturn(ProjectionReadResult.lag(8, 9));
+        assertThatThrownBy(() -> service.get(1001, 91, 9L))
+                .isInstanceOf(ProjectionReadResult.ProjectionLagException.class);
+        verifyNoInteractions(aeronOrders);
     }
 
     @Test
@@ -229,10 +285,11 @@ class OrderServiceTest {
     }
 
     @Test
-    void adminCancelSelectsOpenOrdersFromCore() {
+    void adminCancelSelectsOpenOrdersFromCommittedRealtimeProjection() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
         List<OrderResponse> open = openOrders(123);
-        when(aeronOrders.openOrders(0, "1", 0, 123)).thenReturn(open);
+        when(projection.openOrders(ProductLine.LINEAR_PERPETUAL, null, "1", null, 123, null))
+                .thenReturn(ProjectionReadResult.ok(open, null, false, 1, 0));
         stubCancelBatches();
 
         AdminCancelOrdersResponse result = service.adminCancelOrders(
@@ -241,22 +298,23 @@ class OrderServiceTest {
         assertThat(result.requested()).isEqualTo(123);
         assertThat(result.canceled()).isEqualTo(123);
         assertThat(result.skipped()).isZero();
-        verify(aeronOrders).openOrders(0, "1", 0, 123);
+        verify(aeronOrders, never()).openOrders(anyLong(), any(), anyLong(), org.mockito.ArgumentMatchers.anyInt());
         verify(aeronOrders, times(3)).cancelBatchCommand(anyString(), anyList());
         verify(aeronOrders, never()).cancel(anyLong(), anyLong());
     }
 
     @Test
-    void adminSingleCancelUsesTheProductLineScopedCoreOrder() {
+    void adminSingleCancelUsesTheProductLineScopedCommittedOrder() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
         OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
         OrderResponse canceled = response(91, "client-91", OrderStatus.CANCELED);
-        when(aeronOrders.orderState(0, 91L)).thenReturn(open);
+        when(projection.byOrder(ProductLine.LINEAR_PERPETUAL, null, 91L, null))
+                .thenReturn(ProjectionReadResult.ok(List.of(open), null, false, 1, 0));
         when(aeronOrders.cancel(1001L, 91L)).thenReturn(canceled);
 
         assertThat(service.adminCancelOrder(91L, "risk", ProductLine.LINEAR_PERPETUAL).orderId()).isEqualTo(91L);
 
-        verify(aeronOrders).orderState(0, 91L);
+        verify(aeronOrders, never()).orderState(anyLong(), anyLong());
         verify(aeronOrders).cancel(1001L, 91L);
     }
 
@@ -271,24 +329,24 @@ class OrderServiceTest {
     }
 
     @Test
-    void currentOrderReadUsesCoreEvenWhenExportSequenceIsProvided() {
+    void currentOrderReadUsesRealtimeWithTheRequiredExportSequence() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
         OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
-        when(aeronOrders.orderState(1001L, 91L)).thenReturn(open);
+        when(realtimeQueries.order(ProductLine.LINEAR_PERPETUAL, 1001L, 91L, 12L)).thenReturn(view(open));
 
         OrderResponse result = service.get(1001L, 91L, 12L);
 
         assertThat(result).isEqualTo(open);
-        verify(aeronOrders).orderState(1001L, 91L);
-        verifyNoInteractions(projection);
+        verify(realtimeQueries).order(ProductLine.LINEAR_PERPETUAL, 1001L, 91L, 12L);
+        verifyNoInteractions(aeronOrders, projection);
     }
 
     @Test
-    void currentReadsUseCoreWhileHistoryUsesProjection() {
+    void currentReadsUseRealtimeWhileHistoryUsesCommittedProjection() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
         OrderResponse open = response(91, "client-91", OrderStatus.ACCEPTED);
-        when(aeronOrders.orderStateByClientOrderId(1001L, "client-91")).thenReturn(open);
-        when(aeronOrders.openOrders(1001L, "1", 0, 11)).thenReturn(java.util.List.of(open));
+        when(realtimeQueries.require(ProductLine.LINEAR_PERPETUAL, 1001L, null))
+                .thenReturn(readView(List.of(open)));
         when(projection.historyOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "1", 10,
                 null, null, null, null, null))
                 .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
@@ -298,17 +356,16 @@ class OrderServiceTest {
         assertThat(service.historyOrders(1001L, "1", 10, null, null, null).orders())
                 .containsExactly(open);
 
-        verify(aeronOrders).orderStateByClientOrderId(1001L, "client-91");
-        verify(aeronOrders).openOrders(1001L, "1", 0, 11);
+        verifyNoInteractions(aeronOrders);
         verify(projection).historyOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "1", 10,
                 null, null, null, null, null);
     }
 
     @Test
-    void cancelOpenOrdersSelectsFromCoreAndSendsOnlyCancelCommandToAeron() {
+    void cancelOpenOrdersSelectsFromRealtimeAndSendsOnlyCancelCommandToAeron() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
         List<OrderResponse> open = openOrders(123);
-        when(aeronOrders.openOrders(1001L, "1", 0, 1000)).thenReturn(open);
+        when(realtimeQueries.require(ProductLine.LINEAR_PERPETUAL, 1001L, null)).thenReturn(readView(open));
         stubCancelBatches();
 
         OrderBatchResponse first = service.cancelOpenOrders(
@@ -319,10 +376,11 @@ class OrderServiceTest {
         assertThat(first.completed()).isEqualTo(123);
         assertThat(first.results()).extracting(OrderBatchItemResponse::index)
                 .containsExactlyElementsOf(java.util.stream.IntStream.range(0, 123).boxed().toList());
-        assertThat(first.results().getFirst().order().orderId()).isEqualTo(10_000L);
-        assertThat(first.results().getLast().order().orderId()).isEqualTo(10_122L);
+        assertThat(first.results().getFirst().order().orderId()).isEqualTo(10_122L);
+        assertThat(first.results().getLast().order().orderId()).isEqualTo(10_000L);
         assertThat(second).isEqualTo(first);
-        verify(aeronOrders, times(2)).openOrders(1001L, "1", 0, 1000);
+        verify(realtimeQueries, times(2)).require(ProductLine.LINEAR_PERPETUAL, 1001L, null);
+        verify(aeronOrders, never()).openOrders(anyLong(), any(), anyLong(), org.mockito.ArgumentMatchers.anyInt());
         ArgumentCaptor<String> batchKeys = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<List> batchOrders = ArgumentCaptor.forClass(List.class);
         verify(aeronOrders, times(6)).cancelBatchCommand(batchKeys.capture(), batchOrders.capture());
@@ -371,17 +429,19 @@ class OrderServiceTest {
     }
 
     @Test
-    void currentOpenOrdersPaginatesWithCoreCursor() {
+    void currentOpenOrdersPaginatesTheRealtimeView() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
-        when(aeronOrders.openOrders(1001L, "1", 0, 3)).thenReturn(openOrders(3));
+        when(realtimeQueries.require(ProductLine.LINEAR_PERPETUAL, 1001L, null)).thenReturn(readView(openOrders(3)));
 
         OrderQueryResponse first = service.openOrders(1001L, "1", 2);
 
         assertThat(first.orders()).hasSize(2);
         assertThat(first.hasMore()).isTrue();
         assertThat(first.nextCursor()).isNotBlank();
-        verify(aeronOrders).openOrders(1001L, "1", 0, 3);
-        verifyNoInteractions(projection);
+        var second = service.openOrders(1001L, "1", 2, first.nextCursor());
+        assertThat(second.orders()).extracting(OrderResponse::orderId).containsExactly(10_000L);
+        assertThat(second.hasMore()).isFalse();
+        verifyNoInteractions(aeronOrders, projection);
     }
 
     private OrderService service(ProductLine productLine) {
@@ -394,7 +454,10 @@ class OrderServiceTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(productLine);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        return new OrderService(properties, orderValidator, placementStateService, aeron, projection);
+        var service = new OrderService(properties, orderValidator, placementStateService, aeron, projection);
+        when(realtimeQueries.require(productLine, 1001L, null)).thenReturn(readView(List.of()));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "realtimeQueries", realtimeQueries);
+        return service;
     }
 
     private PlaceOrderRequest request(String clientOrderId) {
@@ -406,7 +469,23 @@ class OrderServiceTest {
         Instant now = Instant.parse("2026-08-02T00:00:00Z");
         return new OrderResponse(orderId, 1001L, clientOrderId, "1", OrderSide.BUY,
                 OrderType.LIMIT, TimeInForce.GTC, 60_000L, 10L, 0L, 10L, MarginMode.CROSS,
-                PositionSide.NET, 100L, 200L, true, false, status, null, now, now);
+                PositionSide.NET, 100L, 200L, true, false, status, null, now, now, 0, "0", null);
+    }
+
+    private com.surprising.aeron.protocol.CoreOrderStateView view(OrderResponse order) {
+        return new com.surprising.aeron.protocol.CoreOrderStateView(order.orderId(), ProductLine.LINEAR_PERPETUAL,
+                order.userId(), order.instrumentId(), com.surprising.aeron.protocol.CoreOrderSide.BUY,
+                order.priceTicks(), order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
+                order.reduceOnly(), com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT,
+                com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, order.clientOrderId(), new UUID(0, order.orderId()),
+                order.makerFeeRatePpm(), order.takerFeeRatePpm(), order.createdAt().toEpochMilli(),
+                order.updatedAt().toEpochMilli(), 1, "OPEN", 1);
+    }
+
+    private com.surprising.realtime.api.UserReadView readView(List<OrderResponse> orders) {
+        return new com.surprising.realtime.api.UserReadView("READY", "v", 1, null,
+                orders.stream().map(this::view).toList(), List.of(), 1, List.of());
     }
 
     private List<OrderResponse> openOrders(int count) {

@@ -52,9 +52,7 @@ class MakerQuoteInputsControllerTest {
         var core = mock(com.surprising.account.provider.service.AccountAeronGateway.class);
         var projection = mock(com.surprising.account.provider.service.AccountQueryService.class);
         var accounts = new AccountService(properties(line), mock(com.surprising.account.provider.service.AccountCommandGateway.class),
-                core, projection);
-        org.springframework.test.util.ReflectionTestUtils.setField(accounts, "realtimeQueries",
-                new com.surprising.realtime.api.ValkeyUserQueries(redis));
+                new com.surprising.realtime.api.ValkeyUserQueries(redis), projection);
         var fees = mock(TradingFeeService.class);
         var cache = mock(InstrumentSnapshotCache.class);
         var instrument = mock(InstrumentResponse.class);

@@ -282,6 +282,26 @@ class SixProductLineContractLiveTest {
                 assertThat(state.balances()).allMatch(b -> b.lockedUnits() == 0);
             }
             assertThat(combinedFunds(core, user.id, maker.id)).as("users + maker + treasury asset conservation").isEqualTo(before);
+            verifyPublicOrderRead(user, bought);
+            verifyPublicOrderRead(user, sold);
+            for (var actor : List.of(user, maker)) {
+                var expected = userState(core, actor.id).balances();
+                JsonNode balances = null;
+                boolean matched = false;
+                for (int attempt = 0; attempt < 100; attempt++) {
+                    balances = request("GET", "/api/v1/gateway/account/product-balances?userId=" + actor.id
+                            + "&accountType=" + line.accountTypeCode(), "", actor.token, null, 200, 503);
+                    var rows = new HashMap<String, JsonNode>();
+                    for (var row : balances.path("balances")) rows.put(row.path("asset").asString(), row);
+                    matched = expected.stream().allMatch(balance -> rows.containsKey(balance.asset())
+                            && rows.get(balance.asset()).path("availableUnits").asLong() == balance.availableUnits()
+                            && rows.get(balance.asset()).path("lockedUnits").asLong() == balance.lockedUnits());
+                    if (matched) break;
+                    Thread.sleep(100);
+                }
+                assertThat(matched).as("public realtime balance agrees with committed core state " + balances).isTrue();
+            }
+            System.out.printf("SIX_LINE_PUBLIC_QUERY_PASS productLine=%s terminalByOrderAndClient=true balancesMatch=true%n", line);
             System.out.printf("SIX_LINE_TRADING_PASS productLine=%s instrumentId=%d trader=%d maker=%d executions=%d fundsDifference=0%n",
                     line, instrumentId, user.id, maker.id, user.executions.size());
         } finally {
@@ -331,6 +351,22 @@ class SixProductLineContractLiveTest {
                 line, instrumentId, pnl, notional, maintenance, equity);
     }
 
+    private void verifyPublicOrderRead(Participant actor, JsonNode placed) throws Exception {
+        for (String suffix : List.of("/" + placed.path("orderId").asLong(),
+                "/by-client-order-id?clientOrderId=" + placed.path("clientOrderId").asString())) {
+            String separator = suffix.contains("?") ? "&" : "?";
+            JsonNode result = null;
+            for (int attempt = 0; attempt < 100; attempt++) {
+                result = request("GET", "/api/v1/gateway/trading" + suffix + separator + "userId=" + actor.id,
+                        "", actor.token, null, 200, 404, 503);
+                if (result.path("orderId").asLong() == placed.path("orderId").asLong()) break;
+                Thread.sleep(100);
+            }
+            assertThat(result.path("orderId").asLong()).as("terminal query " + result).isEqualTo(placed.path("orderId").asLong());
+            assertThat(result.path("status").asString()).isEqualTo("FILLED");
+        }
+    }
+
     private void fund(Participant actor, String asset, long units) throws Exception {
         var body = new LinkedHashMap<String, Object>();
         body.put("userId", actor.id); body.put("asset", asset); body.put("amountUnits", units);
@@ -349,7 +385,13 @@ class SixProductLineContractLiveTest {
         body.put("instrumentId", String.valueOf(instrumentId)); body.put("side", side); body.put("orderType", type);
         body.put("priceTicks", price); body.put("quantitySteps", quantity); body.put("timeInForce", tif);
         body.put("marginMode", "CROSS"); body.put("positionSide", "NET"); body.put("reduceOnly", reduceOnly); body.put("postOnly", false);
-        return orderResult(request("POST", "/api/v1/gateway/trading", json.writeValueAsString(body), actor.token, null, 200));
+        var receipt = request("POST", "/api/v1/gateway/trading", json.writeValueAsString(body), actor.token, null, 200);
+        String resultUrl = receipt.path("commandResultUrl").asString();
+        assertThat(resultUrl).startsWith("/api/v1/gateway/trading/commands/");
+        var confirmed = get(resultUrl, actor.token);
+        assertThat(confirmed.path("commandId").asString()).isEqualTo(receipt.path("commandId").asString());
+        assertThat(confirmed.path("outcome").asString()).isEqualTo("TERMINAL");
+        return orderResult(receipt);
     }
 
     private JsonNode orderResult(JsonNode receipt) {

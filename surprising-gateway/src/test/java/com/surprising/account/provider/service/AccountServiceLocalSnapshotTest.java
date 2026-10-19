@@ -21,11 +21,27 @@ import org.junit.jupiter.api.Test;
 
 class AccountServiceLocalSnapshotTest {
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
+    void everyProductReadsItsOwnAssetBalanceWithoutTradingCommands(ProductLine line) {
+        var queries = mock(com.surprising.realtime.api.ValkeyUserQueries.class);
+        var commands = mock(AccountCommandGateway.class);
+        var projection = mock(AccountQueryService.class);
+        var properties = properties();
+        properties.getKafka().setProductLine(line);
+        var service = new AccountService(properties, commands, queries, projection);
+        when(queries.balance(line, 1001, "USDT", null))
+                .thenReturn(java.util.Optional.of(new CoreBalanceView("USDT", 800, 200)));
+        assertThat(service.balance(1001, "usdt").availableUnits()).isEqualTo(800);
+        assertThat(service.productBalance(1001, AccountType.valueOf(line.accountTypeCode()), "usdt").lockedUnits())
+                .isEqualTo(200);
+        verifyNoInteractions(commands, projection);
+    }
+
     @Test
     void enabledReadViewNeverCallsCoreEvenWhenValkeyIsUnavailable() {
-        var projection=mock(AccountQueryService.class);var aeron=mock(AccountAeronGateway.class);
-        var queries=mock(com.surprising.realtime.api.ValkeyUserQueries.class);var service=service(aeron,projection);
-        org.springframework.test.util.ReflectionTestUtils.setField(service,"realtimeQueries",queries);
+        var projection=mock(AccountQueryService.class);
+        var queries=mock(com.surprising.realtime.api.ValkeyUserQueries.class);var service=service(queries,projection);
         when(queries.require(ProductLine.LINEAR_PERPETUAL,1001L,null)).thenReturn(
             new com.surprising.realtime.api.UserReadView("READY","v",1,snapshot(),List.of(),List.of(),1,List.of()));
         when(queries.balance(ProductLine.LINEAR_PERPETUAL,1001L,"USDT",null))
@@ -37,16 +53,14 @@ class AccountServiceLocalSnapshotTest {
         when(queries.balance(ProductLine.LINEAR_PERPETUAL,1001L,"USDT",null)).thenThrow(
             new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
         assertThatThrownBy(()->service.balance(1001L,"USDT")).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
-        verifyNoInteractions(aeron,projection);
+        verifyNoInteractions(projection);
     }
 
     @Test
     void individualPositionMarginAndProductBalanceUseOnlyTargetReadViewQueries() {
         var projection = mock(AccountQueryService.class);
-        var aeron = mock(AccountAeronGateway.class);
         var queries = mock(com.surprising.realtime.api.ValkeyUserQueries.class);
-        var service = service(aeron, projection);
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "realtimeQueries", queries);
+        var service = service(queries, projection);
         when(queries.position(ProductLine.LINEAR_PERPETUAL, 1001, "1", CoreMarginMode.CROSS, CorePositionSide.NET, null))
                 .thenReturn(java.util.Optional.of(snapshot().positions().getFirst()));
         when(queries.balance(ProductLine.LINEAR_PERPETUAL, 1001, "USDT", null))
@@ -59,15 +73,20 @@ class AccountServiceLocalSnapshotTest {
         assertThat(service.position(1001, "1").signedQuantitySteps()).isZero();
         org.mockito.Mockito.verify(queries, org.mockito.Mockito.never()).require(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any());
-        verifyNoInteractions(aeron, projection);
+        verifyNoInteractions(projection);
     }
 
     @Test
-    void balanceAndPositionsReadOnlyAeronStrongState() {
+    void balanceAndPositionsReadOnlyRealtimeState() {
         AccountQueryService projection = mock(AccountQueryService.class);
-        AccountAeronGateway aeron = mock(AccountAeronGateway.class);
-        when(aeron.userState(1001L)).thenReturn(snapshot());
-        AccountService service = service(aeron, projection);
+        com.surprising.realtime.api.ValkeyUserQueries queries = mock(com.surprising.realtime.api.ValkeyUserQueries.class);
+        when(queries.require(ProductLine.LINEAR_PERPETUAL,1001L,null)).thenReturn(
+                new com.surprising.realtime.api.UserReadView("READY","v",1,snapshot(),List.of(),List.of(),1,List.of()));
+        when(queries.balance(ProductLine.LINEAR_PERPETUAL,1001L,"USDT",null))
+                .thenReturn(java.util.Optional.of(snapshot().balances().getFirst()));
+        when(queries.position(ProductLine.LINEAR_PERPETUAL,1001L,"1",CoreMarginMode.CROSS,CorePositionSide.NET,null))
+                .thenReturn(java.util.Optional.of(snapshot().positions().getFirst()));
+        AccountService service = service(queries, projection);
 
         assertThat(service.balance(1001L, "usdt").availableUnits()).isEqualTo(800L);
         assertThat(service.position(1001L, "1").signedQuantitySteps()).isEqualTo(10L);
@@ -77,13 +96,17 @@ class AccountServiceLocalSnapshotTest {
     }
 
     @Test
-    void missingAeronStateFailsClosedInsteadOfQueryingProjectionDatabase() {
+    void unavailableReadViewFailsClosedInsteadOfQueryingProjectionDatabase() {
         AccountQueryService projection = mock(AccountQueryService.class);
-        AccountAeronGateway aeron = mock(AccountAeronGateway.class);
-        AccountService service = service(aeron, projection);
+        com.surprising.realtime.api.ValkeyUserQueries queries = mock(com.surprising.realtime.api.ValkeyUserQueries.class);
+        AccountService service = service(queries, projection);
 
+        when(queries.balance(ProductLine.LINEAR_PERPETUAL,1001L,"USDT",null)).thenThrow(
+                new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"READ_VIEW_UNAVAILABLE"));
         assertThatThrownBy(() -> service.balance(1001L, "USDT"))
-                .isInstanceOf(AccountStateUnavailableException.class);
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("READ_VIEW_UNAVAILABLE");
         verifyNoInteractions(projection);
     }
 
@@ -91,8 +114,8 @@ class AccountServiceLocalSnapshotTest {
     void unsupportedProductLineAndTransferDoNotFallBackToDatabase() {
         AccountQueryService projection = mock(AccountQueryService.class);
         AccountCommandGateway gateway = mock(AccountCommandGateway.class);
-        AccountAeronGateway aeron = mock(AccountAeronGateway.class);
-        AccountService service = new AccountService(properties(), gateway, aeron, projection);
+        com.surprising.realtime.api.ValkeyUserQueries queries = mock(com.surprising.realtime.api.ValkeyUserQueries.class);
+        AccountService service = new AccountService(properties(), gateway, queries, projection);
 
         assertThatThrownBy(() -> service.positionMode(ProductLine.LINEAR_DELIVERY, 1001L))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -102,8 +125,8 @@ class AccountServiceLocalSnapshotTest {
         verifyNoInteractions(projection);
     }
 
-    private static AccountService service(AccountAeronGateway aeron, AccountQueryService projection) {
-        return new AccountService(properties(), mock(AccountCommandGateway.class), aeron, projection);
+    private static AccountService service(com.surprising.realtime.api.ValkeyUserQueries queries, AccountQueryService projection) {
+        return new AccountService(properties(), mock(AccountCommandGateway.class), queries, projection);
     }
 
     private static AccountProperties properties() {

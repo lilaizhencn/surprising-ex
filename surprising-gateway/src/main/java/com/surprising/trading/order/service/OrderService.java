@@ -48,7 +48,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class OrderService {
-    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    @org.springframework.beans.factory.annotation.Autowired
     private com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
 
     private static final int MAX_CANCEL_BATCH_SIZE = 50;
@@ -315,13 +315,10 @@ public class OrderService {
             throw new IllegalArgumentException("userId must be positive");
         }
         requireOrderId(orderId);
-        OrderResponse current;
-        if (realtimeQueries == null) {
-            current = requireAeron().orderState(userId, orderId);
-        } else {
-            var order = realtimeQueries.order(currentProductLine(), userId, orderId, minExportSequence);
-            current = order == null ? null : AeronOrderCommandService.toOrder(order);
-        }
+        var order = requireRealtimeQueries().order(currentProductLine(), userId, orderId, minExportSequence);
+        OrderResponse current = order == null
+                ? terminalOrder(requireProjection().byOrder(currentProductLine(), userId, orderId, minExportSequence))
+                : AeronOrderCommandService.toOrder(order);
         if (current == null) throw new IllegalStateException("order not found: " + orderId);
         return current;
     }
@@ -335,9 +332,10 @@ public class OrderService {
             throw new IllegalArgumentException("userId must be positive");
         }
         String normalized = normalizeClientOrderId(clientOrderId);
-        OrderResponse current = realtimeQueries==null ? requireAeron().orderStateByClientOrderId(userId,normalized)
-                : realtimeQueries.require(currentProductLine(),userId,minExportSequence).openOrders().stream()
+        OrderResponse current = requireRealtimeQueries().require(currentProductLine(),userId,minExportSequence).openOrders().stream()
                 .filter(v->normalized.equals(v.clientOrderId())).map(AeronOrderCommandService::toOrder).findFirst().orElse(null);
+        if (current == null) current = terminalOrder(requireProjection().byClientOrderId(
+                currentProductLine(), userId, normalized, minExportSequence));
         if (current == null) throw new IllegalStateException("order not found: " + normalized);
         return current;
     }
@@ -360,8 +358,7 @@ public class OrderService {
         }
         String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         long beforeOrderId = decodeActiveOrderCursor(cursor);
-        List<OrderResponse> orders = realtimeQueries==null ? requireAeron().openOrders(userId, normalizedSymbol, beforeOrderId, limit + 1)
-                : realtimeQueries.require(currentProductLine(),userId,minExportSequence).openOrders().stream()
+        List<OrderResponse> orders = requireRealtimeQueries().require(currentProductLine(),userId,minExportSequence).openOrders().stream()
                 .filter(v->normalizedSymbol==null || normalizedSymbol.equals(v.instrumentId()))
                 .filter(v->beforeOrderId==0 || v.orderId()<beforeOrderId)
                 .sorted(java.util.Comparator.comparingLong(com.surprising.aeron.protocol.CoreOrderStateView::orderId).reversed())
@@ -378,7 +375,8 @@ public class OrderService {
         if (productLine != currentProductLine()) {
             throw new IllegalArgumentException("product line does not match this order core");
         }
-        return requireAeron().openOrders(userId == null ? 0 : userId, instrumentId, 0, limit);
+        if (userId != null) return openOrders(userId, instrumentId, limit).orders();
+        return readyProjection(requireProjection().openOrders(productLine, null, instrumentId, null, limit, null));
     }
 
     public OrderQueryResponse historyOrders(long userId,
@@ -468,7 +466,8 @@ public class OrderService {
         requireOrderId(orderId);
         ProductLine resolved = productLine == null ? currentProductLine() : productLine;
         requireCurrentProductLine(resolved);
-        OrderResponse selected = requireAeron().orderState(0, orderId);
+        OrderResponse selected = readyProjection(requireProjection().byOrder(resolved, null, orderId, null))
+                .stream().findFirst().orElse(null);
         if (selected == null) throw new IllegalStateException("order not found: " + orderId);
         requireAeron();
         OrderResponse canceled = aeronOrders.cancel(selected.userId(), selected.orderId());
@@ -575,6 +574,19 @@ public class OrderService {
             throw new IllegalStateException("order projection repository is required");
         }
         return aeronOrderProjection;
+    }
+
+    private com.surprising.realtime.api.ValkeyUserQueries requireRealtimeQueries() {
+        if (realtimeQueries == null) throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_UNAVAILABLE");
+        return realtimeQueries;
+    }
+
+    private OrderResponse terminalOrder(ProjectionReadResult result) {
+        return readyProjection(result).stream().filter(order -> switch (order.status()) {
+            case FILLED, CANCELED, REJECTED -> true;
+            default -> false;
+        }).findFirst().orElse(null);
     }
 
     private List<OrderResponse> readyProjection(ProjectionReadResult result) {

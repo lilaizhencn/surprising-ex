@@ -24,9 +24,20 @@ Core 仍独立。公共接口继续经过 Gateway 的身份、审批与审计，
 `OrderMarginMath` 仅保留实际订单名义价值校验使用的价格上下界，资金及保证金裁决继续由 Core 承担。
 同步命令结果的防御性载荷只读取一次，用于空值检查和解码，不改变命令 ID、回执或未知结果语义。
 
-按订单 ID 查询在启用实时视图时调用 `ValkeyUserQueries.order`，只读取目标 `ORDER:<id>` 和
-快照/水位元数据，不加载账户基线或完整用户视图。已完成或不存在的订单保持原有未找到语义；
-读视图未初始化、过期、源 epoch 改变或水位不足仍直接报错，不切换数据源。
+`ProductBusinessConfiguration` 显式注册必需的 `ValkeyUserQueries`。普通订单、余额、持仓及用户
+触发单的当前查询读取 realtime 视图，不因发布开关关闭或视图不可用回查 Core。按订单 ID 查询
+只读取目标 `ORDER:<id>` 与快照/水位元数据；活动视图内没有该普通订单时，只从 realtime 可靠
+导出提交的 `core_order_projection` 读取 FILLED/CANCELED/REJECTED 终态，避免旧的 OPEN 投影
+覆盖当前视图。按 clientOrderId 查询同样保留终态与 minExportSequence 检查。读视图未初始化、
+过期、源 epoch 改变或水位不足直接报错；已提交历史投影的水位不足返回 PROJECTION_LAG。
+后台跨用户普通订单查询与撤单预览复用提交投影，选中订单之后仍由 Core 裁决撤单。
+
+用户命令回执查询入口是 `/api/v1/gateway/trading/commands/{commandId}`，网关将内部回执地址
+改写为该路径并保留产品参数；`trading-orders` 仅属于后台服务路由。Web/client 已修正误用此名
+导致的查询 404。全栈启动默认启用 realtime 和可靠提交导出。2026-10-19 单节点 FUSED 现货实测
+确认真实回执 URL 可回查命令、已成交订单可按订单号和客户端订单号查询、余额与 Core 一致；
+见 [查询验证记录](../docs/validation/public-realtime-query-20261019.json)。维护、恢复与交易预检控制
+协议仍保留，本轮没有迁移算法委托和后台触发单等专用查询。
 
 ## 用户安全与设备限制
 
