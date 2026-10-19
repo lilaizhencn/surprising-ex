@@ -33,7 +33,7 @@ public class IndexInstrumentConfigLoader {
         }
         return snapshotCache.current(productLine).stream()
                 .filter(instrument -> instrument.status().visible()
-                        || (productLine == com.surprising.product.api.ProductLine.LINEAR_DELIVERY
+                        || (productLine.isDeliveryProduct()
                             && instrument.status() == com.surprising.instrument.api.model.InstrumentStatus.SETTLING))
                 .map(this::toSymbol)
                 .filter(instrumentId -> !instrumentId.getSources().isEmpty())

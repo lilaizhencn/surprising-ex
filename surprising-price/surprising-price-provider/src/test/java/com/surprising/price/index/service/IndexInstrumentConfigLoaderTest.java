@@ -13,6 +13,8 @@ import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class IndexInstrumentConfigLoaderTest {
 
@@ -59,15 +61,16 @@ class IndexInstrumentConfigLoaderTest {
                 .containsExactly("1", "2");
     }
 
-    @Test
-    void linearDeliveryKeepsItsIndexSourceWhileSettlingAndRemovesItWhenClosed() {
+    @ParameterizedTest
+    @EnumSource(value=ContractType.class, names={"LINEAR_DELIVERY","INVERSE_DELIVERY"})
+    void deliveryKeepsItsIndexSourceWhileSettlingAndRemovesItWhenClosed(ContractType type) {
         var properties = new IndexPriceProperties();
-        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
+        properties.getKafka().setProductLine(type.productLine());
         var cache = new InstrumentSnapshotCache();
-        cache.replace(ProductLine.LINEAR_DELIVERY, List.of(instrument("73", 7L, true, ContractType.LINEAR_DELIVERY, InstrumentStatus.SETTLING)));
+        cache.replace(type.productLine(), List.of(instrument("73", 7L, true, type, InstrumentStatus.SETTLING)));
         var loader = new IndexInstrumentConfigLoader(properties, cache);
         assertThat(loader.load()).extracting(IndexPriceProperties.SymbolConfig::getInstrumentId).containsExactly("73");
-        cache.replace(ProductLine.LINEAR_DELIVERY, List.of(instrument("73", 8L, true, ContractType.LINEAR_DELIVERY, InstrumentStatus.CLOSED)));
+        cache.replace(type.productLine(), List.of(instrument("73", 8L, true, type, InstrumentStatus.CLOSED)));
         assertThat(loader.load()).isEmpty();
     }
 
@@ -100,7 +103,7 @@ class IndexInstrumentConfigLoaderTest {
 
     private InstrumentResponse instrument(String instrumentId, long version, boolean withSource, ContractType type, InstrumentStatus status) {
         Instant now = Instant.parse("2026-07-31T00:00:00Z");
-        return new InstrumentResponse(Integer.parseInt(instrumentId), 3, 1, 1, 3, instrumentId, version, type == ContractType.LINEAR_DELIVERY ? InstrumentType.DELIVERY : InstrumentType.PERPETUAL, type,
+        return new InstrumentResponse(Integer.parseInt(instrumentId), 3, 1, 1, 3, instrumentId, version, type.productLine().isDeliveryProduct() ? InstrumentType.DELIVERY : InstrumentType.PERPETUAL, type,
                 "BTC", "USDT", "USDT", 1_000_000L, "BTC", 10L, 1L, 1L, 1_000_000L,
                 1L, 1_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTC"), true,
                 true, true, 100_000_000L, 10_000L, 5_000L, 100L, 500L,

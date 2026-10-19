@@ -240,3 +240,9 @@ Web/client 的单笔下单和撤单在 POST 前持久保存原身份；响应丢
 ### U 本位交割到期与现金记录（2026-10-20）
 
 到期自动进入 SETTLING，Core 提交排空普通委托及条件单并释放预占，当前版本 ORDER 确认后仍需双人审批确认结算价。Core 负责结算，realtime 的独立已提交回放负责交割现金账本投影；Gateway/Web/client 查询该投影，已结束合约可按明确 ID 保留查询页面。有限历史回补、幂等与异常处理见 [realtime 说明](surprising-realtime/README.md#交割现金流水与有限回补2026-10-20)。这次本地实际产品线限定 LINEAR_DELIVERY；其他产品线的共享测试不代表已完成其真实到期流程或原生设备验收。
+
+### 币本位交割 Web/client 链路（2026-10-20）
+
+INVERSE_DELIVERY 的 SETTLING 合约继续提供目录、指数源与 realtime 杠杆只读查询，只允许直接减仓；CLOSED 可按 ID 查询历史元数据，默认目录仍排除。Web/client 单笔下单及撤单先持久化意图，响应不明时查询原回执，不重复发送交易。到期清理继续覆盖普通单、TP/SL 与做市报价，交割现金流水由 realtime 的已提交回放写入既有产品账本。币本位的余额、保证金、手续费与盈亏使用 BTC 单位，固定报价面值不能套用线性乘价公式。
+
+本轮只实际启动 INVERSE_DELIVERY 单节点 FUSED；真实用户和做市账户完成成交、减仓、响应丢失恢复及自动到期，核对资金守恒与 BTC 流水。Web 390/1440、Flutter 主机 320 深浅色检查见 docs/validation/inverse-delivery-trading-20261020.json。该记录不代表其他产品线、批量故障、强平/ADL 或原生真机已完成验收。

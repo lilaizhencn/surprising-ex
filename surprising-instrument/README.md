@@ -205,8 +205,8 @@ Operational audit entries preserve actor, reason, time and before/after values. 
 
 API 清理：只供 gateway 使用的请求、响应和工具类型已迁回 gateway（保留 Java 包名）；删除无调用的旧 Feign 接口及废弃模型。仍用于跨进程调用、共享事件和 Core 的类型继续留在 API 模块。
 
-### U 本位交割结束后的公开查询
+### 交割合约结束后的公开查询
 
-`InstrumentRequestService.latest` 允许通过明确的 LINEAR_DELIVERY 合约 ID 查询 CLOSED 元数据；默认公开目录仍排除 CLOSED。Web 与 client 在当前合约从目录消失时按 ID 重新读取，保留历史查询页面并禁止新委托及杠杆修改。杠杆 GET 沿 realtime 用户投影读取，Core 不承担该用户查询。其他产品线的可见性限制保持原契约。
+`InstrumentRequestService.latest` 允许通过明确的 LINEAR_DELIVERY/INVERSE_DELIVERY 合约 ID 查询 CLOSED 元数据；默认公开目录仍排除 CLOSED。Web 与 client 在当前合约从目录消失时按 ID 重新读取，保留历史查询页面并禁止新委托及杠杆修改。杠杆 GET 沿 realtime 用户投影读取，Core 不承担该用户查询。其他产品线的可见性限制保持原契约。
 
 到期清理中的 TP/SL 由 `InstrumentOrderDrainService` 调用 `TriggerOrderService.cancelLifecycleOrders`，从 Core 交易控制状态分批撤销原生条件单，并再次确认条件单、算法单及普通单均无活动记录后才发 ORDER 确认。只排空算法单与普通单会遗漏 PENDING 的 TP/SL；真实到期回归同时覆盖一组未触发 OCO 和运行中的做市报价。

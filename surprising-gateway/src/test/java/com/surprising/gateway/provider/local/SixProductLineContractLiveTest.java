@@ -40,7 +40,7 @@ class SixProductLineContractLiveTest {
     @Test
     void createListEditAndPauseThroughAdminRequestsWithoutRestart() throws Exception {
         String jdbcUrl = System.getenv("SIX_LINE_LIVE_JDBC_URL");
-        assertThat(jdbcUrl).matches("jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/(sixline_live|surprising_spot_[0-9_]+|surprising_delivery_[0-9_]+)");
+        assertThat(jdbcUrl).matches("jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/(sixline_live|surprising_spot_[0-9_]+|surprising_delivery_[0-9_]+|surprising_inverse_delivery_[0-9_]+)");
         var jdbc = new JdbcTemplate(new DriverManagerDataSource(jdbcUrl,
                 System.getenv().getOrDefault("SIX_LINE_LIVE_JDBC_USER", "sixline_qa"),
                 System.getenv().getOrDefault("SIX_LINE_LIVE_JDBC_PASSWORD", "qa")));
@@ -129,9 +129,9 @@ class SixProductLineContractLiveTest {
         assertThat(processIdentities()).isEqualTo(started);
         var changes = get("/api/v1/admin/gateway/instrument-admin/" + id + "/changes?productLine=" + line + "&limit=20", admin);
         assertThat(changes.size()).isEqualTo(5);
-        if (line == ProductLine.LINEAR_DELIVERY) {
-            if ("true".equals(System.getenv("SIX_LINE_LIVE_EXPIRY"))) exerciseLinearDeliveryExpiry(jdbc, created);
-            else if (System.getenv("SIX_LINE_LIVE_UI_FIXTURE") != null) exerciseLinearDeliveryClients(jdbc, created);
+        if (line.isDeliveryProduct()) {
+            if (System.getenv("SIX_LINE_LIVE_UI_FIXTURE") != null) exerciseDeliveryClients(jdbc, created);
+            if ("true".equals(System.getenv("SIX_LINE_LIVE_EXPIRY"))) exerciseDeliveryExpiry(jdbc, created);
         }
         assertThat(processIdentities()).isEqualTo(started);
         System.out.printf("SIX_LINE_CONTRACT_PASS productLine=%s instrumentId=%d version=%d transitions=DRAFT,PRE_TRADING,TRADING,EDIT,HALT processes=%s%n",
@@ -159,7 +159,7 @@ class SixProductLineContractLiveTest {
         if (output == null || output.isBlank()) return;
         var fixture = java.nio.file.Path.of(output).toAbsolutePath().normalize();
         assertThat(fixture.toString()).startsWith(line == ProductLine.SPOT
-                ? "/tmp/surprising-spot-fused-" : "/tmp/surprising-linear-delivery-fused-");
+                ? "/tmp/surprising-spot-fused-" : line == ProductLine.INVERSE_DELIVERY ? "/tmp/surprising-inverse-delivery-fused-" : "/tmp/surprising-linear-delivery-fused-");
         var done = fixture.resolveSibling(fixture.getFileName() + ".done");
         assertThat(java.nio.file.Files.exists(fixture)).isFalse();
         assertThat(java.nio.file.Files.exists(done)).isFalse();
@@ -185,7 +185,7 @@ class SixProductLineContractLiveTest {
     }
 
     /** A separate contract enters SETTLING once; both clients close one of two contracts without reopening it. */
-    private void exerciseLinearDeliveryClients(JdbcTemplate jdbc, JsonNode template) throws Exception {
+    private void exerciseDeliveryClients(JdbcTemplate jdbc, JsonNode template) throws Exception {
         var draft = ((ObjectNode) template).deepCopy();
         draft.remove(List.of("changeId", "lastChangeId", "createdAt", "updatedAt", "baseAsset", "quoteAsset", "settleAsset", "contractValueAsset"));
         draft.putNull("instrumentId"); draft.put("symbol", "QA-DELIVERY-CLOSE-" + run.toUpperCase(Locale.ROOT));
@@ -197,14 +197,16 @@ class SixProductLineContractLiveTest {
         awaitSync(id, trading.path("lastChangeId").asLong());
         var user = participantFixture(jdbc, "delivery-trader", false);
         var maker = participantFixture(jdbc, "delivery-maker", false);
-        fund(user, "USDT", 10_000_000_000_000L); fund(maker, "USDT", 10_000_000_000_000L);
+        String settlementAsset = line == ProductLine.INVERSE_DELIVERY ? "BTC" : "USDT";
+        long initialFunds = line == ProductLine.INVERSE_DELIVERY ? 1_000_000_000L : 10_000_000_000_000L;
+        fund(user, settlementAsset, initialFunds); fund(maker, settlementAsset, initialFunds);
         try (var core = SurprisingAeronClient.connect(line, List.of("127.0.0.1"), "127.0.0.1", Duration.ofSeconds(10))) {
             var before = combinedFunds(core, user.id, maker.id);
             place(maker, id, "SELL", "LIMIT", 500_000, "GTC", false, 2);
             place(user, id, "BUY", "LIMIT", 500_000, "IOC", false, 2);
             var settling = changeStatus(id, trading, "SETTLING", 200);
             awaitSync(id, settling.path("lastChangeId").asLong());
-            assertThat(get("/api/v1/gateway/instrument/list?productLine=LINEAR_DELIVERY", null).toString()).contains("QA-DELIVERY-CLOSE-" + run.toUpperCase(Locale.ROOT));
+            assertThat(get("/api/v1/gateway/instrument/list?productLine=" + line, null).toString()).contains("QA-DELIVERY-CLOSE-" + run.toUpperCase(Locale.ROOT));
             place(maker, id, "BUY", "LIMIT", 500_000, "GTC", true, 2);
             long leverageDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
             JsonNode leverage;
@@ -225,12 +227,12 @@ class SixProductLineContractLiveTest {
                 assertThat(state.balances()).allMatch(b -> b.lockedUnits() == 0);
             }
             assertThat(combinedFunds(core, user.id, maker.id)).as("delivery close funds conservation").isEqualTo(before);
-            System.out.printf("LINEAR_DELIVERY_CLIENTS_PASS instrumentId=%d trader=%d maker=%d status=SETTLING positions=0 locked=0 fundsDifference=0%n", id, user.id, maker.id);
+            System.out.printf("%s_CLIENTS_PASS instrumentId=%d trader=%d maker=%d status=SETTLING positions=0 locked=0 fundsDifference=0%n", line, id, user.id, maker.id);
         }
     }
 
     /** 真实时钟到期，排空普通订单，再经管理入口确认结算价；资金及流水均不能靠 UI 猜测。 */
-    private void exerciseLinearDeliveryExpiry(JdbcTemplate jdbc, JsonNode template) throws Exception {
+    private void exerciseDeliveryExpiry(JdbcTemplate jdbc, JsonNode template) throws Exception {
         var draft = ((ObjectNode) template).deepCopy();
         draft.remove(List.of("changeId", "lastChangeId", "createdAt", "updatedAt", "baseAsset", "quoteAsset", "settleAsset", "contractValueAsset"));
         draft.putNull("instrumentId"); draft.put("symbol", "QA-DELIVERY-EXPIRY-" + run.toUpperCase(Locale.ROOT));
@@ -244,7 +246,9 @@ class SixProductLineContractLiveTest {
         awaitSync(id, trading.path("lastChangeId").asLong());
         var user = participantFixture(jdbc, "expiry-trader", false);
         var maker = participantFixture(jdbc, "expiry-maker", false);
-        for (var actor : List.of(user, maker)) fund(actor, "USDT", 10_000_000_000_000L);
+        String settlementAsset = line == ProductLine.INVERSE_DELIVERY ? "BTC" : "USDT";
+        long expectedPnl = line == ProductLine.INVERSE_DELIVERY ? 78_431L : 200_000_000L;
+        for (var actor : List.of(user, maker)) fund(actor, settlementAsset, line == ProductLine.INVERSE_DELIVERY ? 1_000_000_000L : 10_000_000_000_000L);
         String expiryStrategy = "qa-expiry-" + run;
         boolean expiryStrategyCreated = false;
         try (var core = SurprisingAeronClient.connect(line, List.of("127.0.0.1"), "127.0.0.1", Duration.ofSeconds(10))) {
@@ -329,17 +333,17 @@ class SixProductLineContractLiveTest {
             JsonNode ledger;
             long ledgerDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
             do {
-                ledger = get("/api/v1/gateway/account/product-ledger?userId=" + user.id + "&accountType=USDT_DELIVERY&referenceType=DELIVERY_SETTLEMENT&limit=100", user.token);
+                ledger = get("/api/v1/gateway/account/product-ledger?userId=" + user.id + "&accountType=" + line.accountTypeCode() + "&referenceType=DELIVERY_SETTLEMENT&limit=100", user.token);
                 if (!ledger.path("entries").isEmpty() || System.nanoTime() >= ledgerDeadline) break;
                 Thread.sleep(100);
             } while (true);
             assertThat(ledger.path("entries")).as("real user delivery settlement history " + ledger).hasSize(1);
-            assertThat(ledger.path("entries").get(0).path("amountUnits").asLong()).isEqualTo(200_000_000L);
+            assertThat(ledger.path("entries").get(0).path("amountUnits").asLong()).isEqualTo(expectedPnl);
             assertThat(ledger.path("entries").get(0).path("instrumentId").asString()).isEqualTo(String.valueOf(id));
-            var makerLedger = get("/api/v1/gateway/account/product-ledger?userId=" + maker.id + "&accountType=USDT_DELIVERY&referenceType=DELIVERY_SETTLEMENT&limit=100", maker.token);
+            var makerLedger = get("/api/v1/gateway/account/product-ledger?userId=" + maker.id + "&accountType=" + line.accountTypeCode() + "&referenceType=DELIVERY_SETTLEMENT&limit=100", maker.token);
             assertThat(makerLedger.path("entries")).hasSize(1);
-            assertThat(makerLedger.path("entries").get(0).path("amountUnits").asLong()).isEqualTo(-200_000_000L);
-            System.out.printf("LINEAR_DELIVERY_EXPIRY_PASS instrumentId=%d userId=%d makerId=%d expiry=%s status=CLOSED pnl=200000000 canceled=1 stopsCanceled=2 makerQuotes=true positions=0 locked=0 fundsDifference=0%n", id, user.id, maker.id, expiry);
+            assertThat(makerLedger.path("entries").get(0).path("amountUnits").asLong()).isEqualTo(-expectedPnl);
+            System.out.printf("%s_EXPIRY_PASS instrumentId=%d userId=%d makerId=%d expiry=%s status=CLOSED pnl=%d canceled=1 stopsCanceled=2 makerQuotes=true positions=0 locked=0 fundsDifference=0%n", line, id, user.id, maker.id, expiry, expectedPnl);
         } finally {
             if (expiryStrategyCreated) write("market-maker", "/strategies/" + expiryStrategy + "/pause?productLine=" + line, null, 200);
             if (user.socket != null) user.socket.sendClose(WebSocket.NORMAL_CLOSURE, "expiry QA complete").join();

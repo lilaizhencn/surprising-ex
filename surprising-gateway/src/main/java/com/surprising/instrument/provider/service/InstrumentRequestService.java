@@ -39,7 +39,7 @@ public class InstrumentRequestService {
     public InstrumentResponse latest(int instrumentId, String productLineHeader, String productLineValue) {
         try {
             var result = instrumentService.latest(instrumentId, requiredProductLine(productLineValue, productLineHeader));
-            if (!publiclyVisible(result) && !(result.contractType().productLine() == ProductLine.LINEAR_DELIVERY
+            if (!publiclyVisible(result) && !(result.contractType().productLine().isDeliveryProduct()
                     && result.status() == InstrumentStatus.CLOSED)) throw new IllegalStateException("instrument is not listed");
             return result;
         } catch (IllegalArgumentException ex) {
@@ -61,10 +61,10 @@ public class InstrumentRequestService {
         }
     }
 
-    // 结算中的 U 本位交割合约仍需供持仓查询、直接减仓及撤单定位；开仓权限由交易校验控制。
+    // 结算中的交割合约仍需供持仓查询、直接减仓及撤单定位；开仓权限由交易校验控制。
     private static boolean publiclyVisible(InstrumentResponse instrument) {
         return instrument.status().visible()
-                || (instrument.contractType().productLine() == ProductLine.LINEAR_DELIVERY
+                || (instrument.contractType().productLine().isDeliveryProduct()
                     && instrument.status() == InstrumentStatus.SETTLING);
     }
 

@@ -22,6 +22,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class LeverageServiceTest {
     private final com.surprising.realtime.api.ValkeyUserQueries queries = mock(com.surprising.realtime.api.ValkeyUserQueries.class);
@@ -161,27 +163,29 @@ class LeverageServiceTest {
                 .containsExactly(5_000_000L, "USER");
     }
 
-    @Test
-    void settlingLinearDeliveryReadsProjectedLeverageButStillRejectsUpdates() {
+    @ParameterizedTest
+    @EnumSource(value=ContractType.class, names={"LINEAR_DELIVERY","INVERSE_DELIVERY"})
+    void settlingLinearDeliveryReadsProjectedLeverageButStillRejectsUpdates(ContractType type) {
         var aeron = mock(OrderAeronGateway.class);
-        org.mockito.Mockito.when(queries.require(ProductLine.LINEAR_DELIVERY, 1001L, null))
-                .thenReturn(view(ProductLine.LINEAR_DELIVERY, 1001L, java.util.List.of(new CoreLeverageView("73", CoreMarginMode.CROSS, 5_000_000L))));
-        var service = new LeverageService(id -> Optional.of(rule(id, ContractType.LINEAR_DELIVERY, "SETTLING")), aeron, queries);
-        assertThat(service.get(1001L, "73", MarginMode.CROSS, ProductLine.LINEAR_DELIVERY).leveragePpm()).isEqualTo(5_000_000L);
-        assertThatThrownBy(() -> service.set(new LeverageSettingRequest(1001L, ProductLine.LINEAR_DELIVERY,
+        org.mockito.Mockito.when(queries.require(type.productLine(), 1001L, null))
+                .thenReturn(view(type.productLine(), 1001L, java.util.List.of(new CoreLeverageView("73", CoreMarginMode.CROSS, 5_000_000L))));
+        var service = new LeverageService(id -> Optional.of(rule(id, type, "SETTLING")), aeron, queries);
+        assertThat(service.get(1001L, "73", MarginMode.CROSS, type.productLine()).leveragePpm()).isEqualTo(5_000_000L);
+        assertThatThrownBy(() -> service.set(new LeverageSettingRequest(1001L, type.productLine(),
                 "73", MarginMode.CROSS, 10_000_000L, "settling"))).hasMessageContaining("not trading");
-        verify(queries).require(ProductLine.LINEAR_DELIVERY, 1001L, null);
+        verify(queries).require(type.productLine(), 1001L, null);
         org.mockito.Mockito.verifyNoInteractions(aeron);
     }
 
-    @Test
-    void closedDeliveryLeverageRemainsReadOnlyAndUsesRealtime() {
+    @ParameterizedTest
+    @EnumSource(value=ContractType.class, names={"LINEAR_DELIVERY","INVERSE_DELIVERY"})
+    void closedDeliveryLeverageRemainsReadOnlyAndUsesRealtime(ContractType type) {
         var aeron = mock(OrderAeronGateway.class);
-        org.mockito.Mockito.when(queries.require(ProductLine.LINEAR_DELIVERY, 1001L, null))
-                .thenReturn(view(ProductLine.LINEAR_DELIVERY, 1001L, java.util.List.of()));
-        var service = new LeverageService(id -> Optional.of(rule(id, ContractType.LINEAR_DELIVERY, "CLOSED")), aeron, queries);
-        assertThat(service.get(1001L, "73", MarginMode.CROSS, ProductLine.LINEAR_DELIVERY).source()).isEqualTo("INSTRUMENT_DEFAULT");
-        assertThatThrownBy(() -> service.set(new LeverageSettingRequest(1001L, ProductLine.LINEAR_DELIVERY,
+        org.mockito.Mockito.when(queries.require(type.productLine(), 1001L, null))
+                .thenReturn(view(type.productLine(), 1001L, java.util.List.of()));
+        var service = new LeverageService(id -> Optional.of(rule(id, type, "CLOSED")), aeron, queries);
+        assertThat(service.get(1001L, "73", MarginMode.CROSS, type.productLine()).source()).isEqualTo("INSTRUMENT_DEFAULT");
+        assertThatThrownBy(() -> service.set(new LeverageSettingRequest(1001L, type.productLine(),
                 "73", MarginMode.CROSS, 10_000_000L, "closed"))).hasMessageContaining("not trading");
         org.mockito.Mockito.verifyNoInteractions(aeron);
     }
@@ -198,7 +202,7 @@ class LeverageServiceTest {
     @Test
     void otherUnlistedLeverageReadsRetainTheirExistingRestrictions() {
         for (var type : ContractType.values()) for (var status : java.util.List.of("DRAFT", "PRE_TRADING", "HALT", "SETTLING", "CLOSED")) {
-            if (type == ContractType.LINEAR_DELIVERY && (status.equals("SETTLING") || status.equals("CLOSED"))) continue;
+            if (type.productLine().isDeliveryProduct() && (status.equals("SETTLING") || status.equals("CLOSED"))) continue;
             var aeron = mock(OrderAeronGateway.class);
             var service = new LeverageService(id -> Optional.of(rule(id, type, status)), aeron, queries);
             assertThatThrownBy(() -> service.get(1001L, "73", MarginMode.CROSS, type.productLine()))
