@@ -117,18 +117,15 @@ public class OrderValidator {
         if (!rule.marketOrderEnabled()) {
             return ValidationResult.reject("market order is disabled", rule.changeId(), rule.instrumentType());
         }
-        // 现货市价单需要按订单簿可成交价或报价金额预占余额；标记价只属于衍生品风险价格。
-        // 在订单簿保护价接入前保持拒绝，不能把衍生品标记价当成现货成交依据。
-        if (rule.spot()) {
-            return ValidationResult.reject("spot market order requires order-book reference price",
-                    rule.changeId(), rule.instrumentType());
-        }
         if (request.priceTicks() != 0) {
             return ValidationResult.reject("market order priceTicks must be zero", rule.changeId(), rule.instrumentType());
         }
         if (request.timeInForce() != TimeInForce.IOC && request.timeInForce() != TimeInForce.FOK) {
             return ValidationResult.reject("market order requires IOC or FOK", rule.changeId(), rule.instrumentType());
         }
+        // SPOT protection is sourced from realtime when building the command. Core checks its
+        // bound, notional, fee-inclusive reservation and actual matching result authoritatively.
+        if (rule.spot()) return ValidationResult.ok(rule.changeId(), rule.instrumentType());
         OptionalLong markPriceTicks = markPriceLookup.latestMarkPriceTicks(request.instrumentId(), rule.changeId(),
                 properties.getRisk().getMarketMaxMarkAgeMs());
         if (markPriceTicks.isEmpty()) {

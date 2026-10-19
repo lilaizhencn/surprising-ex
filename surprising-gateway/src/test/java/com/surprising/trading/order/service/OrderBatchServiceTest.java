@@ -43,7 +43,8 @@ class OrderBatchServiceTest {
     void setUp() {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        service = new AeronOrderCommandService(aeron, properties);
+        service = new AeronOrderCommandService(aeron, properties,
+                org.mockito.Mockito.mock(com.surprising.trading.matching.service.MatchingMarketDataService.class));
         when(aeron.commandOutcome(any(), any(), anyLong(), any(byte[].class)))
                 .thenReturn(new CoreCommandOutcome.Terminal(new CoreResponse(
                         ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,

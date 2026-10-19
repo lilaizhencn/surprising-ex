@@ -39,8 +39,10 @@ class SixProductLineContractLiveTest {
     @Test
     void createListEditAndPauseThroughAdminRequestsWithoutRestart() throws Exception {
         String jdbcUrl = System.getenv("SIX_LINE_LIVE_JDBC_URL");
-        assertThat(jdbcUrl).startsWith("jdbc:postgresql://127.0.0.1:").endsWith("/sixline_live");
-        var jdbc = new JdbcTemplate(new DriverManagerDataSource(jdbcUrl, "sixline_qa", "qa"));
+        assertThat(jdbcUrl).matches("jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/(sixline_live|surprising_spot_[0-9_]+)");
+        var jdbc = new JdbcTemplate(new DriverManagerDataSource(jdbcUrl,
+                System.getenv().getOrDefault("SIX_LINE_LIVE_JDBC_USER", "sixline_qa"),
+                System.getenv().getOrDefault("SIX_LINE_LIVE_JDBC_PASSWORD", "qa")));
         admin = adminFixture(jdbc, "requester");
         approver = adminFixture(jdbc, "approver");
         assertThat(get("/api/v1/runtime", null).path("productLines").get(0).asString()).isEqualTo(line.name());
@@ -193,7 +195,7 @@ class SixProductLineContractLiveTest {
         String strategy = "qa-" + run;
         try (var core = SurprisingAeronClient.connect(line, List.of("127.0.0.1"), "127.0.0.1", Duration.ofSeconds(10))) {
             var before = combinedFunds(core, user.id, maker.id);
-            user.connect();
+            user.connect(instrumentId);
             var settings = get("/api/v1/admin/gateway/market-maker/business-settings?productLine=" + line, admin);
             var business = ((ObjectNode) settings.path("settings")).deepCopy();
             ((ObjectNode) business.path("engine")).put("enabled", true);
@@ -226,13 +228,24 @@ class SixProductLineContractLiveTest {
             var canceled = orderResult(request("POST", "/api/v1/gateway/trading/cancel",
                     json.writeValueAsString(Map.of("userId", user.id, "orderId", resting.path("orderId").asLong())), user.token, null, 200));
             assertThat(canceled.path("status").asString()).isEqualTo("CANCELED");
-            var bought = place(user, instrumentId, "BUY", line == ProductLine.SPOT ? "LIMIT" : "MARKET",
-                    line == ProductLine.SPOT ? book.path("asks").get(0).path("priceTicks").asLong() * 101 / 100 : 0, "IOC", false);
+            var bought = place(user, instrumentId, "BUY", "MARKET", 0, "IOC", false);
             assertThat(bought.path("status").asString()).isEqualTo("FILLED");
             if (line != ProductLine.SPOT) verifyCurrentRisk(core, user, instrumentId, settlement, instrument);
-            var sold = place(user, instrumentId, "SELL", line == ProductLine.SPOT ? "LIMIT" : "MARKET",
-                    line == ProductLine.SPOT ? bid * 99 / 100 : 0, "IOC", line != ProductLine.SPOT);
+            var sold = place(user, instrumentId, "SELL", "MARKET", 0, "IOC", line != ProductLine.SPOT);
             assertThat(sold.path("status").asString()).isEqualTo("FILLED");
+            if (line == ProductLine.SPOT) {
+                for (String side : List.of("BUY", "SELL")) {
+                    var fok = place(user, instrumentId, side, "MARKET", 0, "FOK", false);
+                    assertThat(fok.path("status").asString()).isEqualTo("FILLED");
+                    assertThat(fok.path("orderType").asString()).isEqualTo("MARKET");
+                    var limitFok = place(user, instrumentId, side, "LIMIT",
+                            side.equals("BUY") ? bid * 101 / 100 : bid * 99 / 100, "FOK", false);
+                    assertThat(limitFok.path("status").asString()).isEqualTo("FILLED");
+                }
+                var insufficient = place(user, instrumentId, "BUY", "LIMIT", bid * 101 / 100, "FOK", false, 1000);
+                assertThat(insufficient.path("executedQuantitySteps").asLong()).isZero();
+                assertThat(insufficient.path("status").asString()).isIn("CANCELED", "REJECTED");
+            }
             for (int attempt = 0; attempt < 100 && user.executions.size() < 2; attempt++) Thread.sleep(100);
             assertThat(user.errors).isEmpty();
             assertThat(user.executions.size()).as("execution reports arrived over WebSocket").isGreaterThanOrEqualTo(2);
@@ -243,6 +256,20 @@ class SixProductLineContractLiveTest {
                 executionOrders.add(event.path("data").path("value").path("orderId").asLong());
             }
             assertThat(executionOrders).contains(bought.path("orderId").asLong(), sold.path("orderId").asLong());
+            for (int attempt = 0; attempt < 100 && (user.trades.isEmpty() || user.depth.isEmpty()); attempt++) Thread.sleep(100);
+            assertThat(user.depth).as("realtime depth over WebSocket").isNotEmpty();
+            assertThat(user.trades).as("realtime public trades over WebSocket").isNotEmpty();
+            JsonNode recent = null;
+            for (int attempt = 0; attempt < 100; attempt++) {
+                recent = get("/api/v1/gateway/candlestick/trades/recent?instrumentId=" + instrumentId + "&limit=50", user.token);
+                if (recent.path("trades").size() >= (line == ProductLine.SPOT ? 6 : 2)) break;
+                Thread.sleep(100);
+            }
+            var restTradeIds = new HashSet<String>();
+            for (var trade : recent.path("trades")) restTradeIds.add(trade.path("tradeId").asString());
+            assertThat(restTradeIds).containsAll(user.trades.keySet());
+            System.out.printf("SIX_LINE_REALTIME_PASS productLine=%s depthEvents=%d wsTrades=%d restTrades=%d identitiesMatch=true%n",
+                    line, user.depth.size(), user.trades.size(), restTradeIds.size());
             write("market-maker", "/strategies/" + strategy + "/pause?productLine=" + line, null, 200);
             for (int attempt = 0; attempt < 100; attempt++) {
                 if (userState(core, maker.id).reservations().isEmpty()) break;
@@ -313,10 +340,14 @@ class SixProductLineContractLiveTest {
     }
 
     private JsonNode place(Participant actor, int instrumentId, String side, String type, long price, String tif, boolean reduceOnly) throws Exception {
+        return place(actor, instrumentId, side, type, price, tif, reduceOnly, 1);
+    }
+
+    private JsonNode place(Participant actor, int instrumentId, String side, String type, long price, String tif, boolean reduceOnly, long quantity) throws Exception {
         var body = new LinkedHashMap<String, Object>();
         body.put("userId", actor.id); body.put("clientOrderId", "qa-" + UUID.randomUUID());
         body.put("instrumentId", String.valueOf(instrumentId)); body.put("side", side); body.put("orderType", type);
-        body.put("priceTicks", price); body.put("quantitySteps", 1); body.put("timeInForce", tif);
+        body.put("priceTicks", price); body.put("quantitySteps", quantity); body.put("timeInForce", tif);
         body.put("marginMode", "CROSS"); body.put("positionSide", "NET"); body.put("reduceOnly", reduceOnly); body.put("postOnly", false);
         return orderResult(request("POST", "/api/v1/gateway/trading", json.writeValueAsString(body), actor.token, null, 200));
     }
@@ -357,15 +388,20 @@ class SixProductLineContractLiveTest {
         final String token;
         final CompletableFuture<Void> subscribed = new CompletableFuture<>();
         final Map<String, JsonNode> executions = new ConcurrentHashMap<>();
+        final Map<String, JsonNode> trades = new ConcurrentHashMap<>();
+        final List<JsonNode> depth = new CopyOnWriteArrayList<>();
         final List<String> errors = new CopyOnWriteArrayList<>();
         final StringBuilder fragments = new StringBuilder();
         WebSocket socket;
         Participant(long id, String token) { this.id = id; this.token = token; }
-        void connect() {
+        void connect(int instrumentId) {
             socket = http.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(10))
                     .buildAsync(URI.create("ws://127.0.0.1:9094/ws/v1"), this).join();
             socket.sendText(json.writeValueAsString(Map.of("op", "authenticate", "id", "auth", "token", token)), true).join();
             subscribed.orTimeout(15, TimeUnit.SECONDS).join();
+            for (String channel : List.of("trades", "depth")) socket.sendText(json.writeValueAsString(Map.of(
+                    "op", "subscribe", "id", channel, "channel", channel, "productLine", line.name(),
+                    "instrumentId", String.valueOf(instrumentId))), true).join();
         }
         @Override public void onOpen(WebSocket socket) { socket.request(1); }
         @Override public CompletionStage<?> onText(WebSocket socket, CharSequence data, boolean last) {
@@ -379,6 +415,14 @@ class SixProductLineContractLiveTest {
                 if (op.equals("error")) { errors.add(event.toString()); subscribed.completeExceptionally(new IllegalStateException(event.toString())); }
                 if (op.equals("event") && event.path("channel").asString().equals("executionReports"))
                     executions.put(event.path("data").path("version").asString(), event);
+                if (op.equals("event") && event.path("channel").asString().equals("depth")) depth.add(event);
+                if (op.equals("event") && event.path("channel").asString().equals("trades")) {
+                    var trade = event.path("data").path("value");
+                    assertThat(trade.path("tradeId").asString()).isNotBlank();
+                    assertThat(trade.path("instrumentId").asString()).isEqualTo(event.path("instrumentId").asString());
+                    assertThat(trade.path("eventTime").asString()).isNotBlank();
+                    trades.put(trade.path("tradeId").asString(), trade);
+                }
             }
             socket.request(1);
             return CompletableFuture.completedFuture(null);
@@ -435,7 +479,8 @@ class SixProductLineContractLiveTest {
 
     private Map<Long, Instant> processIdentities() {
         var result = new TreeMap<Long, Instant>();
-        ProcessHandle.allProcesses().filter(p -> p.info().commandLine().orElse("").contains("surprising-six-lines-20261005")
+        String runId = System.getenv().getOrDefault("SIX_LINE_LIVE_RUN_ID", "surprising-six-lines-20261005");
+        ProcessHandle.allProcesses().filter(p -> p.info().commandLine().orElse("").contains(runId)
                 && p.info().command().orElse("").endsWith("/java") && p.info().commandLine().orElse("").contains("-jar"))
                 .forEach(p -> result.put(p.pid(), p.info().startInstant().orElseThrow()));
         assertThat(result.size()).isGreaterThanOrEqualTo(line == ProductLine.SPOT ? 5 : 6);

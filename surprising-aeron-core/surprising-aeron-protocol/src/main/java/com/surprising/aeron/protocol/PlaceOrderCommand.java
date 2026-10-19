@@ -108,7 +108,6 @@ public final class PlaceOrderCommand {
                 || orderType == null || timeInForce == null
                 || clientOrderId == null || clientOrderId.length() > 64
                 || orderType == CoreOrderType.LIMIT && limitPriceTicks <= 0
-                || orderType == CoreOrderType.MARKET && limitPriceTicks != 0
                 || postOnly && (orderType != CoreOrderType.LIMIT || timeInForce != CoreTimeInForce.GTX)) {
             throw new IllegalArgumentException("invalid place order command");
         }
@@ -142,6 +141,7 @@ public final class PlaceOrderCommand {
     public long orderId() { return orderId; }
     public String instrumentId() { return instrumentId; }
     public CoreOrderSide side() { return side; }
+    /** LIMIT price, or an explicit SPOT MARKET protection bound; derivatives MARKET requires zero. */
     public long limitPriceTicks() { return limitPriceTicks; }
     public long quantitySteps() { return quantitySteps; }
     public boolean reduceOnly() { return reduceOnly; }

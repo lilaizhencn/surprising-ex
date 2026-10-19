@@ -63,7 +63,8 @@ class AeronOrderCommandServiceTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getAeron().setNodeId(3);
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        service = new AeronOrderCommandService(aeron, properties);
+        service = new AeronOrderCommandService(aeron, properties,
+                org.mockito.Mockito.mock(com.surprising.trading.matching.service.MatchingMarketDataService.class));
     }
 
     @Test

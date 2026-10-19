@@ -3120,6 +3120,7 @@ CREATE TABLE IF NOT EXISTS core_funding_page_projection (
     CHECK (NOT complete OR next_cursor_user_id=0)
 );
 COMMENT ON TABLE core_funding_page_projection IS '只保存Archive已提交的真实结算页；幂等页与流水同事务持久化';
+COMMENT ON COLUMN core_funding_page_projection.complete IS '处理本页后该合约本次资金费结算是否已完成；仅末页为true且下一用户游标为0';
 
 CREATE TABLE IF NOT EXISTS core_funding_settlement_projection (
     product_line VARCHAR(32) NOT NULL,

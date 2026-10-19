@@ -91,7 +91,8 @@ class StableOrderIdentityTest {
     }
 
     private static AeronOrderCommandService service(OrderAeronGateway aeron, TradingOrderProperties properties) {
-        return new AeronOrderCommandService(aeron, properties);
+        return new AeronOrderCommandService(aeron, properties,
+                org.mockito.Mockito.mock(com.surprising.trading.matching.service.MatchingMarketDataService.class));
     }
 
     private static PlaceOrderRequest request() {

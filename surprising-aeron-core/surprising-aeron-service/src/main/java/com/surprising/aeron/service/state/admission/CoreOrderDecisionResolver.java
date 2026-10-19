@@ -125,18 +125,22 @@ public final class CoreOrderDecisionResolver {
         instrument.requireOrderEnabled(intent);
         if (instrument.expiryEpochMillis() > 0 && clusterTimestamp >= instrument.expiryEpochMillis())
             throw new CoreStateRejectedException(lifecycleSettled ? "INSTRUMENT_SETTLED" : "INVALID_COMMAND", "expired instrument cannot accept new orders");
-        boolean spotLimit = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
-                && intent.orderType() == CoreOrderType.LIMIT;
-        if (!spotLimit) {
+        boolean spot = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT;
+        if (spot && intent.orderType() == CoreOrderType.MARKET && intent.limitPriceTicks() <= 0)
+            throw new CoreStateRejectedException("INVALID_COMMAND", "spot market order requires a protection bound");
+        if (!spot && intent.orderType() == CoreOrderType.MARKET && intent.limitPriceTicks() != 0)
+            throw new CoreStateRejectedException("INVALID_COMMAND", "derivative market order price must be zero");
+        if (!spot) {
             requireFreshMark(mark, instrument, clusterTimestamp);
             if (intent.orderType() == CoreOrderType.LIMIT && instrument.orderProtection().limitPriceProtectionEnabled()
                     && clusterTimestamp - mark.generatedAtEpochMillis() > instrument.orderProtection().limitPriceMaxMarkAgeMs())
                 throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price is outside the limit protection freshness bound");
         }
-        long markPriceTicks = spotLimit ? intent.limitPriceTicks() : mark.markPriceTicks();
-        long indexPriceTicks = spotLimit ? 0 : mark.indexPriceTicks();
-        long forwardPriceTicks = spotLimit ? 0 : mark.forwardPriceTicks();
-        long matchingPriceTicks = intent.orderType() == CoreOrderType.LIMIT
+        // Spot's bound is a logged order instruction, never a synthetic derivative mark-price fact.
+        long markPriceTicks = spot ? intent.limitPriceTicks() : mark.markPriceTicks();
+        long indexPriceTicks = spot ? 0 : mark.indexPriceTicks();
+        long forwardPriceTicks = spot ? 0 : mark.forwardPriceTicks();
+        long matchingPriceTicks = spot || intent.orderType() == CoreOrderType.LIMIT
                 ? intent.limitPriceTicks() : protectedPrice(intent.side(), markPriceTicks, instrument.orderProtection().marketMaxSlippagePpm());
         requireLimitPriceBand(intent, instrument, markPriceTicks);
         long reservationPriceTicks = reservationPrice(intent, instrument, markPriceTicks, matchingPriceTicks);
@@ -167,16 +171,19 @@ public final class CoreOrderDecisionResolver {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
         instrument.requireOrderEnabled(intent);
-        boolean spotLimit = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
-                && intent.orderType() == CoreOrderType.LIMIT;
-        CoreMarkPriceState mark = spotLimit ? null : state.riskState().markPrices().get(instrument.instrumentId());
-        if (!spotLimit && mark == null) {
+        boolean spot = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT;
+        if (spot && intent.orderType() == CoreOrderType.MARKET && intent.limitPriceTicks() <= 0)
+            throw new CoreStateRejectedException("INVALID_COMMAND", "spot market order requires a protection bound");
+        if (!spot && intent.orderType() == CoreOrderType.MARKET && intent.limitPriceTicks() != 0)
+            throw new CoreStateRejectedException("INVALID_COMMAND", "derivative market order price must be zero");
+        CoreMarkPriceState mark = spot ? null : state.riskState().markPrices().get(instrument.instrumentId());
+        if (!spot && mark == null) {
             throw new CoreStateRejectedException("MARK_PRICE_MISSING", "current instrument mark price is required");
         }
-        long markPriceTicks = spotLimit ? intent.limitPriceTicks() : mark.markPriceTicks();
-        long indexPriceTicks = spotLimit ? 0 : mark.indexPriceTicks();
-        long forwardPriceTicks = spotLimit ? 0 : mark.forwardPriceTicks();
-        long matchingPriceTicks = intent.orderType() == CoreOrderType.LIMIT
+        long markPriceTicks = spot ? intent.limitPriceTicks() : mark.markPriceTicks();
+        long indexPriceTicks = spot ? 0 : mark.indexPriceTicks();
+        long forwardPriceTicks = spot ? 0 : mark.forwardPriceTicks();
+        long matchingPriceTicks = spot || intent.orderType() == CoreOrderType.LIMIT
                 ? intent.limitPriceTicks() : protectedPrice(intent.side(), markPriceTicks, instrument.orderProtection().marketMaxSlippagePpm());
         requireLimitPriceBand(intent, instrument, markPriceTicks);
         long reservationPriceTicks = reservationPrice(intent, instrument, markPriceTicks, matchingPriceTicks);

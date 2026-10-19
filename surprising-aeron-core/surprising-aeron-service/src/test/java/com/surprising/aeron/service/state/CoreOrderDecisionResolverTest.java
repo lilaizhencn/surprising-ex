@@ -157,6 +157,44 @@ class CoreOrderDecisionResolverTest {
     }
 
     @Test
+    void spotMarketUsesItsLoggedProtectionBoundWithoutAMark() {
+        var identities = new RuntimeIdentityRegistry();
+        identities.symbolId("1");
+        try (var runtime = runtime(spotInstrument())) {
+            for (var side : CoreOrderSide.values()) {
+                for (var tif : List.of(CoreTimeInForce.IOC, CoreTimeInForce.FOK)) {
+                    var command = new PlaceOrderCommand(91, "1", side, 60_000, 2, false,
+                            CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET, tif, false, "market");
+                    var decoded = com.surprising.aeron.protocol.TradingCommandCodec.decodePlaceOrder(
+                            com.surprising.aeron.protocol.TradingCommandCodec.encodePlaceOrder(command));
+                    assertThat(decoded).isEqualTo(command);
+                    var resolved = CoreOrderDecisionResolver.resolve(runtime, identities, 1001, decoded, 1_500);
+                    assertThat(resolved.matchingPriceTicks()).isEqualTo(60_000);
+                    assertThat(resolved.reservationPriceTicks()).isEqualTo(60_000);
+                    assertThat(resolved.reservationKind()).isEqualTo(ReservationKind.SPOT_ASSET);
+                    assertThat(resolved.reservationAsset()).isEqualTo(side == CoreOrderSide.BUY ? "USDT" : "BTC");
+                }
+            }
+        }
+    }
+
+    @Test
+    void marketPriceContractIsValidatedInsideItsProductCore() {
+        var identities = new RuntimeIdentityRegistry();
+        identities.symbolId("1");
+        try (var spot = runtime(spotInstrument()); var derivative = runtime(linearInstrument())) {
+            var unboundedSpot = new PlaceOrderCommand(91, "1", CoreOrderSide.BUY, 0, 2, false,
+                    CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET, CoreTimeInForce.IOC, false, "spot");
+            assertThatThrownBy(() -> CoreOrderDecisionResolver.resolve(spot, identities, 1001, unboundedSpot, 1_500))
+                    .isInstanceOf(CoreStateRejectedException.class).hasMessageContaining("protection bound");
+            var boundedDerivative = new PlaceOrderCommand(92, "1", CoreOrderSide.BUY, 60_000, 2, false,
+                    CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET, CoreTimeInForce.IOC, false, "derivative");
+            assertThatThrownBy(() -> CoreOrderDecisionResolver.resolve(derivative, identities, 1001, boundedDerivative, 1_500))
+                    .isInstanceOf(CoreStateRejectedException.class).hasMessageContaining("price must be zero");
+        }
+    }
+
+    @Test
     void scalesPricesWithoutOverflowingTheIntermediateProduct() {
         long value = 9_000_000_000_000_001L;
 

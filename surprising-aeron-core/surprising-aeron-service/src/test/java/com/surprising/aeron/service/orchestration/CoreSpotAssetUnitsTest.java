@@ -14,8 +14,11 @@ class CoreSpotAssetUnitsTest {
     private long sequence;
 
     @ParameterizedTest
-    @CsvSource({"false,false", "true,false", "false,true", "true,true"})
-    void freezesSettlesAndReleasesConfiguredAssetUnits(boolean fragmented, boolean restoreBeforeFill) {
+    @CsvSource({"false,false,LIMIT,IOC", "true,false,LIMIT,IOC", "false,true,LIMIT,IOC", "true,true,LIMIT,IOC",
+            "false,false,MARKET,IOC", "true,false,MARKET,IOC", "false,true,MARKET,IOC", "true,true,MARKET,IOC",
+            "false,false,MARKET,FOK", "true,false,MARKET,FOK", "false,true,MARKET,FOK", "true,true,MARKET,FOK"})
+    void freezesSettlesAndReleasesConfiguredAssetUnits(boolean fragmented, boolean restoreBeforeFill,
+            CoreOrderType type, CoreTimeInForce tif) {
         var original = new TradingCoreRuntime(ProductLine.SPOT);
         TradingCoreRuntime runtime = original;
         try {
@@ -43,7 +46,7 @@ class CoreSpotAssetUnitsTest {
 
             if (restoreBeforeFill) runtime = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, original.snapshot(71));
             assertThat(runtime.tradingState().instruments().get("1").quantityStepUnits()).isEqualTo(100_000);
-            var filled = place(runtime, 101, 3, CoreOrderSide.BUY, 3, 500_000, CoreTimeInForce.IOC);
+            var filled = place(runtime, 101, 3, CoreOrderSide.BUY, 3, type == CoreOrderType.MARKET ? 500_050 : 500_000, tif, type);
 
             var state = runtime.tradingState();
             assertThat(filled.remainingQuantitySteps()).isZero();
@@ -66,6 +69,18 @@ class CoreSpotAssetUnitsTest {
             apply(runtime, CoreMessageType.CANCEL_ORDER, 101, TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(4)));
             assertThat(runtime.tradingState().user(101).balances().get("USDT").lockedUnits()).isZero();
             assertThat(runtime.tradingState().user(101).totalUnits("USDT")).isEqualTo(84_992_500_000L);
+            if (type == CoreOrderType.MARKET) {
+                place(runtime, 101, 5, CoreOrderSide.BUY, 2, 400_000, CoreTimeInForce.GTC);
+                var sell = place(runtime, 202, 6, CoreOrderSide.SELL, 2, 399_960, tif, CoreOrderType.MARKET);
+                assertThat(sell.status()).isEqualTo("FILLED");
+                assertThat(runtime.tradingState().user(101).totalUnits("BTC")).isEqualTo(500_000);
+                assertThat(runtime.tradingState().user(202).totalUnits("BTC")).isEqualTo(500_000);
+                assertThat(runtime.tradingState().user(101).totalUnits("USDT")).isEqualTo(76_990_900_000L);
+                assertThat(runtime.tradingState().user(202).totalUnits("USDT")).isEqualTo(22_993_000_000L);
+                assertThat(runtime.tradingState().treasuryState().feeBalances().get("USDT")).isEqualTo(16_100_000L);
+                assertThat(runtime.tradingState().user(101).balances().get("USDT").lockedUnits()).isZero();
+                assertThat(runtime.tradingState().user(202).balances().get("BTC").lockedUnits()).isZero();
+            }
         } finally {
             if (runtime != original) runtime.close();
             original.close();
@@ -78,9 +93,14 @@ class CoreSpotAssetUnitsTest {
     }
 
     private CoreOrderStateView place(TradingCoreRuntime runtime, long user, long id, CoreOrderSide side, long quantity, long price, CoreTimeInForce tif) {
+        return place(runtime, user, id, side, quantity, price, tif, CoreOrderType.LIMIT);
+    }
+
+    private CoreOrderStateView place(TradingCoreRuntime runtime, long user, long id, CoreOrderSide side,
+            long quantity, long price, CoreTimeInForce tif, CoreOrderType type) {
         var response = apply(runtime, CoreMessageType.PLACE_ORDER, user, TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
                 id, "1", side, price, quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET,
-                CoreOrderType.LIMIT, tif, false, "spot-units-" + id)));
+                type, tif, false, "spot-units-" + id)));
         return CoreCommandResultCodec.decode(response.data()).orders().stream()
                 .filter(order -> order.orderId() == id).findFirst().orElseThrow();
     }

@@ -34,6 +34,10 @@ Gateway sends trading commands to the single-member Aeron Cluster. Core owns tra
 
 The Maven modules follow these boundaries: [`surprising-aeron-core`](surprising-aeron-core/) contains the cluster and client; [`surprising-gateway`](surprising-gateway/) contains the consolidated identity, instrument, trading, and account application; [`surprising-price`](surprising-price/), [`surprising-realtime`](surprising-realtime/), [`surprising-derivatives-lifecycle`](surprising-derivatives-lifecycle/), and [`surprising-maker`](surprising-maker/) contain the other four processes. Shared API modules define product-line and business contracts.
 
+现货市价单已接通 realtime 盘口保护价（2026-10-19）：外部请求仍为 `MARKET`、`priceTicks=0`、`IOC/FOK`。`AeronOrderCommandService` 从 `MatchingMarketDataService` 读取 Valkey 中的完整可用盘口，买单取卖一、卖单取买一并应用既有滑点配置；无可用盘口或对手方流动性时拒绝提交。保护边界随原 MARKET 命令写入 Core 日志，`CoreOrderDecisionResolver` 负责现货资金准入，衍生品市价单仍要求零价格及新鲜标记价。原生订单簿已补齐限价 FOK：同一撮合线程先检查限价内数量，足量才全部成交，不足不消耗挂单。撮合依赖需从 `exchange-core-lilaizhencn` 的 `5363426` 干净提交构建安装，再构建并配套更新 Core/gateway；行情查询和推送继续由 realtime 提供。
+
+本轮 261 项订单簿回归、85 项后端定向回归及单节点 FUSED 现货实链路通过。真实做市下完成市价 IOC/FOK、限价 FOK、挂单撤单及数量不足拒单；WS 与 REST 的 6 笔成交标识一致，撤去做市挂单后冻结清零，用户、做市与财库逐资产守恒差额为 0。本轮未验收原生移动端/浏览器 UI、余额比例、未取得命令号即断网恢复及其余产品线，详见 [验证与清理记录](docs/validation/spot-realtime-market-fok-20261019.json)。
+
 ### 当前 Core 线程职责（2026-10-13）
 
 用户余额、预留、仓位、订单、算法单、触发单、清算及风险记录由所属 `AccountLaneState` 的实际 worker 读写。`SettlementLaneWorker` 在启动前绑定线程；运行中的 Owner 不能直接读取账户表、进入 Lane 写作用域或执行账户闭包。已删除四张 `published*` 业务镜像，`ActiveOrderIndex` 仅保存订单 ID、用户 ID、币对；触发、算法及清算索引只保存路由与候选筛选键。Owner 定序、检查路由身份、派发任务并按日志顺序发布完成结果；命令内的不可变回执在提交后清理，不留第二份业务状态。

@@ -114,13 +114,12 @@ class OrderValidatorTest {
     }
 
     @Test
-    void rejectsSpotMarketOrderWithoutOrderBookReferenceInsteadOfMarkPrice() {
+    void spotMarketOrderDefersBookBoundAndFundAdmissionToCoreWithoutAMarkPrice() {
         OrderValidator validator = validator(spotMarketRule(), OptionalLong.empty(), 10_000L);
 
         var result = validator.validate(market(10L));
 
-        assertThat(result.accepted()).isFalse();
-        assertThat(result.rejectReason()).isEqualTo("spot market order requires order-book reference price");
+        assertThat(result.accepted()).isTrue();
     }
 
     @Test

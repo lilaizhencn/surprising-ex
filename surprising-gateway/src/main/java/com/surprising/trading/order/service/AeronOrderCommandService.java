@@ -27,6 +27,7 @@ import com.surprising.trading.api.model.BatchAmendOrdersRequest;
 import com.surprising.trading.api.model.BatchCancelOrdersRequest;
 import com.surprising.trading.api.model.BatchPlaceOrderRequest;
 import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.MarketPriceProtection;
 import com.surprising.trading.api.model.OrderBatchItemResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.OrderCommandReceipt;
@@ -38,6 +39,7 @@ import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
+import com.surprising.trading.matching.service.MatchingMarketDataService;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -49,10 +51,13 @@ public class AeronOrderCommandService {
 
     private final OrderAeronGateway aeron;
     private final TradingOrderProperties properties;
+    private final MatchingMarketDataService marketData;
 
-    public AeronOrderCommandService(OrderAeronGateway aeron, TradingOrderProperties properties) {
+    public AeronOrderCommandService(OrderAeronGateway aeron, TradingOrderProperties properties,
+            MatchingMarketDataService marketData) {
         this.aeron = aeron;
         this.properties = properties;
+        this.marketData = marketData;
     }
 
     public OrderResponse place(
@@ -135,6 +140,13 @@ public class AeronOrderCommandService {
             long orderId,
             com.surprising.trading.api.model.PlaceOrderRequest request) {
         long limitPriceTicks = request.orderType() == OrderType.LIMIT ? request.priceTicks() : 0;
+        if (request.orderType() == OrderType.MARKET && configuredProductLine() == ProductLine.SPOT) {
+            var book = marketData.orderBookSnapshot(request.instrumentId(), 1);
+            var side = request.side() == OrderSide.BUY ? book.asks() : book.bids();
+            if (side.isEmpty()) throw new IllegalArgumentException("SPOT_MARKET_LIQUIDITY_UNAVAILABLE");
+            limitPriceTicks = MarketPriceProtection.protectedPriceTicks(
+                    request.side(), side.getFirst().priceTicks(), properties.getRisk().getMarketMaxSlippagePpm());
+        }
         return new PlaceOrderCommand(orderId, request.instrumentId(),
                 side(request.side()), limitPriceTicks, request.quantitySteps(), request.reduceOnly(),
                 marginMode(request.marginMode()), positionSide(request.positionSide()),
