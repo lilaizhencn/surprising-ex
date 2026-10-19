@@ -37,12 +37,10 @@ public final class ClusterCommandWindow {
     private long lastMatchingSequence;
     private long lastMatchingAbsSeq;
 
-    private final org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap userLastAbsSeq =
-            new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap(512);
-    private org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap activeOrderLastAbsSeq =
-            new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap(4096);
-    private org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap previousOrderLastAbsSeq =
-            new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap(4096);
+    private final org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap userLastAbsSeq;
+    private org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap activeOrderLastAbsSeq;
+    private org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap previousOrderLastAbsSeq;
+    private final int orderIndexRotationThreshold;
     private long previousOrderMaxAbsSeq;
     private int activeOrderInserts;
 
@@ -66,6 +64,12 @@ public final class ClusterCommandWindow {
             throw new IllegalArgumentException("owner command window must be a power of two in [64,4096]");
         entries = new Entry[capacity];
         indexMask = capacity - 1;
+        int userMapCapacity = Math.max(512, capacity << 1);
+        int orderMapCapacity = Math.max(4096, capacity << 4);
+        userLastAbsSeq = new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap(userMapCapacity);
+        activeOrderLastAbsSeq = new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap(orderMapCapacity);
+        previousOrderLastAbsSeq = new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap(orderMapCapacity);
+        orderIndexRotationThreshold = orderMapCapacity;
         for (int i = 0; i < entries.length; i++) entries[i] = new Entry();
     }
 
@@ -213,7 +217,7 @@ public final class ClusterCommandWindow {
     /** Index exact identities belonging to this admitted command entry in O(1) without per-entry array clearing. */
     private void indexTrackedOrderIds(long absSeq) {
         if (routedSource == null || routedSource != decodedSource || decoded == null) return;
-        if (activeOrderInserts >= ORDER_INDEX_ROTATION_THRESHOLD && headAbsSeq > previousOrderMaxAbsSeq) {
+        if (activeOrderInserts >= orderIndexRotationThreshold && headAbsSeq > previousOrderMaxAbsSeq) {
             previousOrderLastAbsSeq.clear();
             var swap = previousOrderLastAbsSeq;
             previousOrderLastAbsSeq = activeOrderLastAbsSeq;
@@ -292,7 +296,7 @@ public final class ClusterCommandWindow {
             lastMatchingSequence = 0;
             lastMatchingAbsSeq = 0;
         }
-        if (size == 0 && userLastAbsSeq.size() > ORDER_INDEX_ROTATION_THRESHOLD) {
+        if (size == 0 && userLastAbsSeq.size() > orderIndexRotationThreshold) {
             userLastAbsSeq.clear();
         }
     }

@@ -423,7 +423,7 @@ D1 补充审查：`ClusterServiceEgress.TransportSession` 仍实现 `ClientSessi
 
 交易准入时原 `ClusterCommandWindow` 接管消息租约，然后释放输入槽。控制命令直接保留原环头，异步完成及响应交接后才前进。退出时先停止交易 workers 并清理已准入窗口，再归还环内未准入消息；服务输入发布失败也归还其 decoder 租约。角色和终止边界保留顺序，只等待动作前面的命令，不把自身或后续输入纳入等待条件。
 
-唯一待处理预算为 8192 槽 / 64 MiB，去掉了原第二 FIFO 叠加的积压。原 `surprising.aeron.owner-input-batch-size` 配置保留为每轮直接交易准入上限（1–64、默认 64）；完成推进预算、超时及响应背压仍沿用原流程。`transportToOwner` 每条输入记录一次，`ingressToAdmission` / `ingressToControl` 使用同一入队时刻，已没有中继 FIFO 的单独计时起点。
+唯一待处理预算为 8192 槽 / 64 MiB，去掉了原第二 FIFO 叠加的积压。原 `surprising.aeron.owner-input-batch-size` 配置保留为每轮直接交易准入上限（1–256、默认 64）；完成推进预算、超时及响应背压仍沿用原流程。`transportToOwner` 每条输入记录一次，`ingressToAdmission` / `ingressToControl` 使用同一入队时刻，已没有中继 FIFO 的单独计时起点。
 
 85 项必要功能用例通过：服务端 83、基准夹具 2，覆盖满环/预算背压、两次完整绕回、中断、租约释放、边界前缀和六产品线命令，见 [D4 功能验证](../../docs/validation/d4-complete-20261015.json)。新增类只承担实际线程交接，没有新业务镜像、接口、worker 或额外 FIFO。未运行压测、JMH/JFR、快照/恢复或 wallet，不给出性能收益结论。
 

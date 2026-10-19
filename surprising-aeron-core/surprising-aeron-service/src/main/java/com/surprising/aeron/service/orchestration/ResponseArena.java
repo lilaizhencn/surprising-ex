@@ -68,7 +68,16 @@ final class ResponseArena {
     }
 
     ResponseArena() {
-        this(DEFAULT_SLOT_COUNT, DEFAULT_SLOT_BYTES);
+        this(defaultSlotCount(), DEFAULT_SLOT_BYTES);
+    }
+
+    private static int defaultSlotCount() {
+        int configuredWindow = Integer.getInteger(
+                "surprising.aeron.owner-command-window", ClusterCommandWindow.DEFAULT_CAPACITY);
+        int required = Math.max(DEFAULT_SLOT_COUNT, Math.max(64, configuredWindow) + 256);
+        int slots = DEFAULT_SLOT_COUNT;
+        while (slots < required) slots <<= 1;
+        return slots;
     }
 
     ResponseArena(int slotCount, int slotBytes) {

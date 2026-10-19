@@ -117,10 +117,10 @@ public final class TradingCoreOwner {
         String property = "surprising.aeron.owner-input-batch-size";
         try {
             int value = Integer.parseInt(System.getProperty(property, "64").trim());
-            if (value < 1 || value > 64) throw new IllegalArgumentException();
+            if (value < 1 || value > 256) throw new IllegalArgumentException();
             return value;
         } catch (RuntimeException failure) {
-            throw new IllegalArgumentException(property + " must be an integer in [1,64]", failure);
+            throw new IllegalArgumentException(property + " must be an integer in [1,256]", failure);
         }
     }
 
@@ -208,6 +208,16 @@ public final class TradingCoreOwner {
             boolean retry = eligible && !state.pendingMatching.isEmpty()
                     && state.matchingSequence(next.command.header().commandIdMsb(), next.command.header().commandIdLsb()) != 0;
             int prefix = !eligible || retry ? window.size() : window.conflictingPrefixSize();
+            if (prefix != 0 && window.size() != 0) {
+                if (!commandPipeline.hasCommittingHead()) {
+                    beginCommandCommit();
+                }
+                if (pollCommandCommitBatch(true, OwnerCommandPipelineState.COMPLETION_BATCH_SIZE) > 0) {
+                    retry = eligible && !state.pendingMatching.isEmpty()
+                            && state.matchingSequence(next.command.header().commandIdMsb(), next.command.header().commandIdLsb()) != 0;
+                    prefix = !eligible || retry ? window.size() : window.conflictingPrefixSize();
+                }
+            }
             if (prefix != 0) {
                 commandPipeline.rememberBlockedIngress(next.command, prefix);
                 if (!eligible) commandPipeline.recordControlFence();

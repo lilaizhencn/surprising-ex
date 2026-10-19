@@ -280,20 +280,24 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         // Complete any funding cut before trading the affected instrumentId; response-dependent pages
         // are control work. Trading itself is an independently submitted FIFO command stream.
         for(int i=0;i<SYMBOLS;i++)while(fundingCursor[i]!=0)funding(i);
+        long[] askLiquidity=new long[SYMBOLS];
         long[][] quotes=new long[SYMBOLS][];
-        for(int i=0;i<SYMBOLS;i++)quotes[i]=batch(i,maker(i),CoreOrderSide.SELL,102,2,CoreTimeInForce.GTC);
-        for(int i=0;i<SYMBOLS;i++)cancelBatch(maker(i),quotes[i]);
-        long[] liquidity=new long[SYMBOLS];
-        for(int i=0;i<SYMBOLS;i++)liquidity[i]=place(i,maker(i),CoreOrderSide.SELL,101,40,CoreTimeInForce.GTC);
+        long[] bidLiquidity=new long[SYMBOLS];
+        for(int i=0;i<SYMBOLS;i++)askLiquidity[i]=place(i,maker(i),CoreOrderSide.SELL,101,40,CoreTimeInForce.GTC);
         for(int i=0;i<SYMBOLS;i++)batch(i,taker(i),CoreOrderSide.BUY,101,1,CoreTimeInForce.IOC);
-        for(int i=0;i<SYMBOLS;i++)cancel(maker(i),liquidity[i]);
-        for(int i=0;i<SYMBOLS;i++)liquidity[i]=place(i,maker(i),CoreOrderSide.BUY,99,40,CoreTimeInForce.GTC);
-        if (fillHeavy)
+        for(int i=0;i<SYMBOLS;i++)cancel(maker(i),askLiquidity[i]);
+        for(int i=0;i<SYMBOLS;i++)quotes[i]=batch(i,positionMaker(i),CoreOrderSide.SELL,102,2,CoreTimeInForce.GTC);
+        for(int i=0;i<SYMBOLS;i++)bidLiquidity[i]=place(i,maker(i),CoreOrderSide.BUY,99,40,CoreTimeInForce.GTC);
+        if (fillHeavy) {
             for(int i=0;i<SYMBOLS;i++)batch(i,taker(i),CoreOrderSide.SELL,99,1,CoreTimeInForce.IOC);
-        for(int i=0;i<SYMBOLS;i++)cancel(maker(i),liquidity[i]);
-        // Preserve original mixed workload: bid cancellation precedes the sell IOC batch.
-        if (!fillHeavy)
+            for(int i=0;i<SYMBOLS;i++)cancel(maker(i),bidLiquidity[i]);
+            for(int i=0;i<SYMBOLS;i++)cancelBatch(positionMaker(i),quotes[i]);
+        } else {
+            for(int i=0;i<SYMBOLS;i++)cancelBatch(positionMaker(i),quotes[i]);
+            for(int i=0;i<SYMBOLS;i++)cancel(maker(i),bidLiquidity[i]);
+            // Preserve original mixed workload: bid cancellation precedes the sell IOC batch.
             for(int i=0;i<SYMBOLS;i++)batch(i,taker(i),CoreOrderSide.SELL,99,1,CoreTimeInForce.IOC);
+        }
         if (tradingStream) return; // FIFO order also spans cycles; no cycle drain in this mode.
         drain();
         for(int n=0;n<32;n++)trigger((lifecycleCursor+n)%SYMBOLS);
