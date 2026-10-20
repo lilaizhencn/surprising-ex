@@ -66,6 +66,14 @@ class TelegramOidcClientTest {
     }
 
     @Test
+    void preservesCombinedEmojiAndNeverSplitsUnicodeNickname() throws Exception {
+        var emoji = decoder.decode(signed(claims().claim("name", "开发者 👩‍💻").build(), key));
+        assertThat(TelegramOidcClient.validate(emoji, "expected-nonce", now).displayName()).isEqualTo("开发者 👩‍💻");
+        var longName = decoder.decode(signed(claims().claim("name", "🚀".repeat(129)).build(), key));
+        assertThat(TelegramOidcClient.validate(longName, "expected-nonce", now).displayName()).isEqualTo("🚀".repeat(128));
+    }
+
+    @Test
     void rejectsForgedSignature() throws Exception {
         String forged = signed(claims().build(), new RSAKeyGenerator(2048).generate());
         assertThatThrownBy(() -> decoder.decode(forged)).isInstanceOf(JwtException.class);

@@ -96,9 +96,9 @@ public class TelegramOidcClient {
         String name = token.getClaimAsString("name");
         if (name == null || name.isBlank()) name = token.getClaimAsString("preferred_username");
         if (name == null || name.isBlank()) name = "Telegram";
-        name = name.replaceAll("[\\p{Cc}\\p{Cf}]", "").strip();
+        name = name.replaceAll("[\\p{Cc}\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}]", "").strip();
         if (name.isBlank()) name = "Telegram";
-        name = name.substring(0, Math.min(name.length(), 128));
+        name = name.substring(0, name.offsetByCodePoints(0, Math.min(name.codePointCount(0, name.length()), 128)));
         return new Profile(token.getSubject(), name);
     }
 
