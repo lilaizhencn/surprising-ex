@@ -33,7 +33,7 @@ TELEGRAM_TEST_JDBC_URL=jdbc:postgresql://127.0.0.1:5432/postgres TELEGRAM_TEST_D
   -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
-65 项通过、0 跳过。覆盖真实 RSA 签名及伪造签名、错误 issuer/audience、过期/nonce、MFA 保留、冻结账户、无密码注册、跨设备/错误 verifier/重复领取、重复回调，以及真实 PostgreSQL 并发首登只创建一个账户。
+最新联合验收加入 `TelegramLoginControllerTest`、`UserCardControllerTest` 后为 73 项通过、0 跳过。覆盖真实 RSA 签名及伪造签名、错误 issuer/audience、过期/nonce、Unicode 昵称、MFA 保留、冻结账户、无密码注册、跨设备/错误 verifier/重复领取、重复回调，以及真实 PostgreSQL 并发首登只创建一个账户。浏览器以 `Accept: text/html` 访问过期/异常回调时返回不含授权代码、令牌及内部异常的 HTML，避免 JSON 异常处理造成 500。
 
 真实 Telegram 用户授权仍需配置有效的登录专用 Secret 后验收；模拟身份提供方和数据库测试不代替该项验收。此特性当前未满足整体移动端改版及合并条件。
 

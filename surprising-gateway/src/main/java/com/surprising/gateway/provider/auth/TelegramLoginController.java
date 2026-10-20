@@ -24,12 +24,23 @@ public class TelegramLoginController {
     }
 
     @GetMapping(value = "/callback", produces = MediaType.TEXT_HTML_VALUE)
-    public ResponseEntity<String> callback(@RequestParam String state,
+    public ResponseEntity<String> callback(@RequestParam(required = false) String state,
             @RequestParam(required = false) String code, @RequestParam(required = false) String error) {
-        boolean success = login.callback(state, code, error);
+        boolean success = false;
+        int status = 200;
+        try {
+            success = login.callback(state, code, error);
+        } catch (IllegalArgumentException invalid) {
+            status = 400;
+        } catch (RuntimeException unavailable) {
+            status = 503;
+        }
         String title = success ? "授权完成" : "授权未完成";
         String message = success ? "请返回 Surprising 继续登录。" : "请返回 Surprising 重新发起登录。";
-        return noStore().header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+        // Browsers negotiate text/html. JSON exception handlers cannot serialize
+        // under that content type and previously turned expired callbacks into 500s.
+        return ResponseEntity.status(status).cacheControl(CacheControl.noStore())
+                .header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
                 .header("Referrer-Policy", "no-referrer").contentType(MediaType.TEXT_HTML)
                 .body("<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\">"
                         + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
