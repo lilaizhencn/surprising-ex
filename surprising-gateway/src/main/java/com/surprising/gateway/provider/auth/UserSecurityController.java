@@ -63,17 +63,20 @@ public class UserSecurityController {
     public LoginVerificationService.BindingResponse beginMfaEnrollment(
             @RequestHeader("Authorization") String authorization,
             @Valid @RequestBody MfaChangeStartRequest request) {
-        return loginVerification.beginBinding(principal(authorization).userId(), "TOTP",
-                new LoginVerificationService.SettingRequest(request.currentPassword(), null, true), Instant.now());
+        var principal = principal(authorization);
+        return loginVerification.beginBinding(principal.userId(), "TOTP",
+                new LoginVerificationService.SettingRequest(request.currentPassword(), null, true), Instant.now(),
+                authService.primaryAuthenticatedAt(principal));
     }
 
     @PostMapping("/mfa/confirm")
     public UserSecurityService.UserMfaStatus confirmMfaEnrollment(
             @RequestHeader("Authorization") String authorization,
             @Valid @RequestBody MfaChangeConfirmation request) {
-        long userId = principal(authorization).userId();
+        var principal = principal(authorization);
+        long userId = principal.userId();
         loginVerification.confirmBinding(userId, "TOTP", new LoginVerificationService.SettingConfirmation(
-                request.currentPassword(), request.codes()), Instant.now());
+                request.currentPassword(), request.codes()), Instant.now(), authService.primaryAuthenticatedAt(principal));
         return securityService.status(userId);
     }
 
@@ -81,17 +84,20 @@ public class UserSecurityController {
     public LoginVerificationService.BindingResponse beginMfaDisable(
             @RequestHeader("Authorization") String authorization,
             @Valid @RequestBody MfaChangeStartRequest request) {
-        return loginVerification.beginBinding(principal(authorization).userId(), "TOTP",
-                new LoginVerificationService.SettingRequest(request.currentPassword(), null, false), Instant.now());
+        var principal = principal(authorization);
+        return loginVerification.beginBinding(principal.userId(), "TOTP",
+                new LoginVerificationService.SettingRequest(request.currentPassword(), null, false), Instant.now(),
+                authService.primaryAuthenticatedAt(principal));
     }
 
     @PostMapping("/mfa/disable/confirm")
     public UserSecurityService.UserMfaStatus confirmMfaDisable(
             @RequestHeader("Authorization") String authorization,
             @Valid @RequestBody MfaChangeConfirmation request) {
-        long userId = principal(authorization).userId();
+        var principal = principal(authorization);
+        long userId = principal.userId();
         loginVerification.confirmBinding(userId, "TOTP", new LoginVerificationService.SettingConfirmation(
-                request.currentPassword(), request.codes()), Instant.now());
+                request.currentPassword(), request.codes()), Instant.now(), authService.primaryAuthenticatedAt(principal));
         return securityService.status(userId);
     }
 
@@ -351,8 +357,8 @@ public class UserSecurityController {
 
     public record AccessChangeRequest(String emailCode, String totpCode) {}
     public record IpAccessChangeRequest(String ipAddress, String emailCode, String totpCode) {}
-    public record MfaChangeStartRequest(@jakarta.validation.constraints.NotBlank String currentPassword) {}
-    public record MfaChangeConfirmation(@jakarta.validation.constraints.NotBlank String currentPassword,
+    public record MfaChangeStartRequest(@jakarta.validation.constraints.Size(max = 128) String currentPassword) {}
+    public record MfaChangeConfirmation(@jakarta.validation.constraints.Size(max = 128) String currentPassword,
                                         @Valid @jakarta.validation.constraints.NotNull
                                         LoginVerificationService.VerifyRequest codes) {}
     public record DeviceStatus(long sessionId, String deviceId, String userAgent, String ipAddress,

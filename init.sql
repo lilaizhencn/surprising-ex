@@ -2832,12 +2832,14 @@ CREATE TABLE IF NOT EXISTS gateway_refresh_sessions (
     user_agent          TEXT,
     ip_address          TEXT,
     device_id           UUID,
+    authenticated_at    TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT gateway_refresh_sessions_hash_present CHECK (length(token_hash) > 0)
 );
 
 ALTER TABLE gateway_refresh_sessions ADD COLUMN IF NOT EXISTS device_id UUID;
+ALTER TABLE gateway_refresh_sessions ADD COLUMN IF NOT EXISTS authenticated_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS gateway_refresh_sessions_user_device_idx
     ON gateway_refresh_sessions (user_id, device_id, created_at DESC)

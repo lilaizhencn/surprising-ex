@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -263,6 +266,20 @@ class AuthServiceTest {
         assertThat(response.accessToken()).isEqualTo("access");
         verify(repository).consumeRefreshSession(eq(88L), any());
         verify(repository, org.mockito.Mockito.never()).revokeRefreshSession(any(Long.class), any());
+        verify(repository).saveRefreshSession(eq(42L), anyString(), any(), any(), any(), any(), any(), isNull());
+    }
+
+    @Test
+    void refreshPreservesOriginalPrimaryAuthenticationInsteadOfRenewingIt() {
+        Instant now = Instant.now(), original = now.minusSeconds(3600);
+        when(repository.refreshSession(any())).thenReturn(Optional.of(
+                new GatewayRefreshSessionRepository.RefreshSession(88L, 42L, now.plusSeconds(3600),
+                        null, null, null, original)));
+        when(repository.consumeRefreshSession(eq(88L), any())).thenReturn(1);
+        when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
+                42L, null, null, "NORMAL", List.of("USER"), now)));
+        service.refresh(new RefreshRequest("refresh-token"), new MockHttpServletRequest());
+        verify(repository).saveRefreshSession(eq(42L), anyString(), any(), any(), any(), any(), any(), eq(original));
     }
 
     @Test

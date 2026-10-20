@@ -35,26 +35,41 @@ public class GatewayRefreshSessionRepository {
                      String ipAddress,
                      String deviceId,
                      Instant now) {
+        return save(userId, tokenHash, expiresAt, userAgent, ipAddress, deviceId, now, now);
+    }
+
+    public long save(long userId, String tokenHash, Instant expiresAt, String userAgent,
+                     String ipAddress, String deviceId, Instant now, Instant authenticatedAt) {
         return jdbcTemplate.queryForObject("""
                 INSERT INTO gateway_refresh_sessions (
-                    user_id, token_hash, expires_at, user_agent, ip_address, device_id, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, CAST(? AS uuid), ?, ?)
+                    user_id, token_hash, expires_at, user_agent, ip_address, device_id, created_at, updated_at, authenticated_at
+                ) VALUES (?, ?, ?, ?, ?, CAST(? AS uuid), ?, ?, ?)
                 RETURNING session_id
                 """, Long.class, userId, tokenHash, Timestamp.from(expiresAt), userAgent, ipAddress, deviceId,
-                Timestamp.from(now), Timestamp.from(now));
+                Timestamp.from(now), Timestamp.from(now), authenticatedAt == null ? null : Timestamp.from(authenticatedAt));
     }
 
     public Optional<RefreshSession> find(String tokenHash) {
         return jdbcTemplate.query("""
-                SELECT session_id, user_id, expires_at, revoked_at, device_id, ip_address
+                SELECT session_id, user_id, expires_at, revoked_at, device_id, ip_address, authenticated_at
                   FROM gateway_refresh_sessions
                  WHERE token_hash = ?
                 """, (rs, rowNum) -> new RefreshSession(
                         rs.getLong("session_id"),
                         rs.getLong("user_id"),
                         rs.getTimestamp("expires_at").toInstant(),
-                        nullableInstant(rs, "revoked_at"), rs.getString("device_id"), rs.getString("ip_address")),
+                        nullableInstant(rs, "revoked_at"), rs.getString("device_id"), rs.getString("ip_address"),
+                        nullableInstant(rs, "authenticated_at")),
                 tokenHash).stream().findFirst();
+    }
+
+    public Optional<Instant> authenticatedAt(long userId, long sessionId, Instant now) {
+        return jdbcTemplate.query("""
+                SELECT authenticated_at FROM gateway_refresh_sessions
+                 WHERE user_id = ? AND session_id = ? AND revoked_at IS NULL AND expires_at > ?
+                   AND authenticated_at IS NOT NULL
+                """, (rs, row) -> rs.getTimestamp(1).toInstant(), userId, sessionId, Timestamp.from(now))
+                .stream().findFirst();
     }
 
     public boolean active(long userId, long sessionId, Instant now) {
@@ -252,9 +267,14 @@ public class GatewayRefreshSessionRepository {
             Instant expiresAt,
             Instant revokedAt,
             String deviceId,
-            String ipAddress) {
+            String ipAddress,
+            Instant authenticatedAt) {
         public RefreshSession(long sessionId, long userId, Instant expiresAt, Instant revokedAt) {
-            this(sessionId, userId, expiresAt, revokedAt, null, null);
+            this(sessionId, userId, expiresAt, revokedAt, null, null, null);
+        }
+        public RefreshSession(long sessionId, long userId, Instant expiresAt, Instant revokedAt,
+                              String deviceId, String ipAddress) {
+            this(sessionId, userId, expiresAt, revokedAt, deviceId, ipAddress, null);
         }
     }
 

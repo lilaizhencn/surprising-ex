@@ -4,7 +4,7 @@ Web 与 Flutter 使用同一条服务端 OIDC 授权链路，注册不要求密�
 
 ## 部署配置
 
-先执行 `deployment/migrations/20261020-telegram-login.sql`，新数据库使用 `init.sql`。在服务端配置环境变量：
+先执行 `deployment/migrations/20261020-telegram-login.sql` 和 `deployment/migrations/20261020-primary-authentication.sql`，新数据库使用 `init.sql`。在服务端配置环境变量：
 
 - `TELEGRAM_CLIENT_ID`：BotFather > Login Widget 的 Client ID。
 - `TELEGRAM_CLIENT_SECRET`：登录专用 Secret，不能放在前端、日志或版本库。
@@ -38,6 +38,14 @@ TELEGRAM_TEST_JDBC_URL=jdbc:postgresql://127.0.0.1:5432/postgres TELEGRAM_TEST_D
 真实 Telegram 用户授权仍需配置有效的登录专用 Secret 后验收；模拟身份提供方和数据库测试不代替该项验收。此特性当前未满足整体移动端改版及合并条件。
 
 协议来源：https://core.telegram.org/bots/telegram-login
+
+## 无密码账户绑定安全验证方式
+
+`GET /api/v1/security/login-verification/authentication` 返回 `passwordRequired`、`reauthenticationRequired` 和 `authenticatedUntil`，响应禁止缓存。有密码的账户始终需要当前密码；无密码账户需要当前有效会话在最近 5 分钟内完成首次身份验证，过期后应重新登录。绑定发起及确认会分别校验，邮箱、手机和 TOTP 的验证码、已有验证因素、失败次数、指纹及一次性挑战保护继续生效。绑定 TOTP 前仍需先绑定邮箱或手机。
+
+服务端从经过 Bearer 验证的用户及 session ID 读取数据库 `authenticated_at`。新登录在所有登录验证完成后写入该时间；刷新令牌轮换严格继承原值，不能把 JWT 的新签发时间或新会话行的创建时间当作重新验证。迁移前的旧会话保持空值，需要重新登录，不回填为当前时间。请求正文不能提供此证明。
+
+JDK 27 的联合验证包含 `PrimaryAuthenticationDatabaseTest`、`LoginVerificationSettingsControllerTest`、既有登录因素/Telegram/认证/用户安全测试，94 项通过、0 跳过。真实 PostgreSQL 覆盖迁移重复执行、旧会话空值、用户归属、撤销/过期、实际 `AuthService` 连续刷新保持原验证时间。Web/App 的安全设置需要消费该上下文，以便无密码账户无需填写不存在的密码。
 
 ## App 用户二维码
 

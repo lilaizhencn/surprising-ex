@@ -169,18 +169,36 @@ public class LoginVerificationService {
         return List.copyOf(result);
     }
 
-    /** First UI step only; binding and confirmation independently check the password again. */
+    /** First UI step only; binding and confirmation independently check primary authentication again. */
     public void verifySettingPassword(long userId, String method, String currentPassword) {
+        verifySettingPassword(userId, method, currentPassword, Instant.now(), null);
+    }
+
+    public void verifySettingPassword(long userId, String method, String currentPassword,
+                                      Instant now, Instant authenticatedAt) {
         requireSettingMethod(method);
-        requirePassword(userId, currentPassword);
+        requirePassword(userId, currentPassword, now, authenticatedAt);
+    }
+
+    public PrimaryAuthentication primaryAuthentication(long userId, Instant now, Instant authenticatedAt) {
+        boolean passwordRequired = users.credential(userId).orElseThrow().passwordHash() != null;
+        return new PrimaryAuthentication(passwordRequired,
+                !passwordRequired && !recent(authenticatedAt, now),
+                passwordRequired || authenticatedAt == null ? null : authenticatedAt.plusSeconds(300));
     }
 
     @Transactional(noRollbackFor = VerificationFailure.class)
     public BindingResponse beginBinding(
             long userId, String method, SettingRequest request, Instant now) {
+        return beginBinding(userId, method, request, now, null);
+    }
+
+    @Transactional(noRollbackFor = VerificationFailure.class)
+    public BindingResponse beginBinding(
+            long userId, String method, SettingRequest request, Instant now, Instant authenticatedAt) {
         requireSettingMethod(method);
         challenges.lockUser(userId);
-        requirePassword(userId, request.currentPassword());
+        requirePassword(userId, request.currentPassword(), now, authenticatedAt);
         var account = users.credential(userId).orElseThrow();
         if ("TOTP".equals(method)
                 && !request.enabled()
@@ -196,6 +214,9 @@ public class LoginVerificationService {
                         .orElse(null);
         String destination = null;
         String enrollmentSecret = null;
+        List<Setting> currentSettings = settings(userId);
+        String enrollmentContact = "TOTP".equals(method) && request.enabled()
+                ? availableContactMethod(currentSettings, account.email(), account.phone()) : null;
         if ("TOTP".equals(method)) {
             var mfa = users.mfaCredential(userId).orElse(null);
             if (mfa == null || mfa.verifiedAt() == null) {
@@ -223,14 +244,13 @@ public class LoginVerificationService {
         }
         // 绑定/开启时，注册联系方式与其他已绑定因素都要验证，与其登录开关无关。
         List<Method> required = new ArrayList<>();
-        List<Setting> currentSettings = settings(userId);
         for (Setting setting : currentSettings) {
             if (setting.type().equals(method)) required.add(new Method(method, mask(destination)));
             else if (request.enabled() && setting.bound() && !"TOTP".equals(method))
                 required.add(new Method(setting.type(), setting.destination()));
         }
         if ("TOTP".equals(method) && request.enabled()) {
-            String contactMethod = availableContactMethod(currentSettings, account.email(), account.phone());
+            String contactMethod = enrollmentContact;
             if (required.stream().noneMatch(item -> item.type().equals(contactMethod))) {
                 required.add(new Method(contactMethod,
                         mask("EMAIL".equals(contactMethod) ? account.email() : account.phone())));
@@ -272,11 +292,17 @@ public class LoginVerificationService {
     @Transactional(noRollbackFor = VerificationFailure.class)
     public void confirmBinding(
             long userId, String method, SettingConfirmation request, Instant now) {
+        confirmBinding(userId, method, request, now, null);
+    }
+
+    @Transactional(noRollbackFor = VerificationFailure.class)
+    public void confirmBinding(
+            long userId, String method, SettingConfirmation request, Instant now, Instant authenticatedAt) {
         requireSettingMethod(method);
         var challenge = active(request.codes().challengeToken(), method, now);
         if (challenge.userId() != userId) throw new VerificationFailure("LOGIN_CHALLENGE_EXPIRED");
         try {
-            requirePassword(userId, request.currentPassword());
+            requirePassword(userId, request.currentPassword(), now, authenticatedAt);
         } catch (VerificationFailure failure) {
             challenges.failed(challenge.tokenHash());
             throw failure;
@@ -311,9 +337,20 @@ public class LoginVerificationService {
             throw new IllegalArgumentException("unsupported verification method");
     }
 
-    private void requirePassword(long userId, String password) {
-        if (!passwordHasher.matches(
-                password, users.credential(userId).orElseThrow().passwordHash()))
+    private boolean recent(Instant authenticatedAt, Instant now) {
+        return authenticatedAt != null && !authenticatedAt.isAfter(now)
+                && authenticatedAt.isAfter(now.minusSeconds(300));
+    }
+
+    private void requirePassword(long userId, String password, Instant now, Instant authenticatedAt) {
+        var credential = users.credential(userId).orElseThrow();
+        if ("FROZEN".equals(credential.status())) throw new VerificationFailure("LOGIN_CHALLENGE_EXPIRED");
+        if (credential.passwordHash() == null) {
+            if (!recent(authenticatedAt, now))
+                throw new VerificationFailure("LOGIN_RECENT_AUTHENTICATION_REQUIRED");
+            return;
+        }
+        if (!passwordHasher.matches(password, credential.passwordHash()))
             throw new VerificationFailure("LOGIN_PASSWORD_INVALID");
     }
 
@@ -462,14 +499,17 @@ public class LoginVerificationService {
 
     public record Setting(String type, boolean bound, boolean enabled, String destination) {}
 
+    public record PrimaryAuthentication(boolean passwordRequired, boolean reauthenticationRequired,
+                                        Instant authenticatedUntil) {}
+
     public record SettingRequest(
-            @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 128)
+            @jakarta.validation.constraints.Size(max = 128)
                     String currentPassword,
             @jakarta.validation.constraints.Size(max = 254) String destination,
             boolean enabled) {}
 
     public record SettingConfirmation(
-            @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 128)
+            @jakarta.validation.constraints.Size(max = 128)
                     String currentPassword,
             @jakarta.validation.Valid @jakarta.validation.constraints.NotNull
                     VerifyRequest codes) {}
