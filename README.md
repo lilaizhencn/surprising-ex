@@ -1,5 +1,7 @@
 # Surprising EX
 
+大额划转验证由 `ProductTransferSecurityService` 按 `assets.scale_units` 把最小单位换算为币种数量后估值，不假定所有币种为 8 位精度。`ProductTransferSecurityServiceTest` 覆盖 6/8/18 位精度、阈值边界及未知币种拒绝；与代理、划转协调器联合 58 项测试通过（HotSpot JDK 27）。
+
 C2C 首轮服务端功能位于 [Gateway c2c 包](surprising-gateway/src/main/java/com/surprising/gateway/c2c/README.md)，部署及业务默认关闭。复用现货 Core 资金、realtime 查询、既有身份认证、审批和审计；新增 SQL 只持有广告、订单、库存分配和不可变资金意图。已验证真实托管/放币/退款、超时及双人申诉裁决、原请求恢复与 Gateway 崩溃续办，18 个资金核对阶段差额 0。Web、Flutter、管理端 C2C 页面和消息/私有凭证仍在开发，未发布服务器；测试范围、协议旧向量已知失败及清理状态见 [验证记录](docs/validation/c2c-foundation-20261020.json)。
 
 ## Project overview

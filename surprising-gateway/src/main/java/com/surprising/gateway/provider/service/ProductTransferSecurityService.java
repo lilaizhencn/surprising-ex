@@ -2,6 +2,7 @@ package com.surprising.gateway.provider.service;
 
 import com.surprising.gateway.provider.auth.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.config.GatewayProperties;
+import com.surprising.asset.repository.AssetRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Map;
@@ -14,30 +15,35 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class ProductTransferSecurityService {
 
-    private static final BigDecimal ACCOUNT_UNIT = new BigDecimal("100000000");
     private final GatewayProperties properties;
     private final WithdrawalValuationClient valuationClient;
     private final SensitiveActionVerificationService verificationService;
     private final ObjectMapper objectMapper;
+    private final AssetRepository assets;
 
     public ProductTransferSecurityService(GatewayProperties properties,
                                           WithdrawalValuationClient valuationClient,
                                           SensitiveActionVerificationService verificationService,
+                                          AssetRepository assets,
                                           ObjectMapper objectMapper) {
         this.properties = properties;
         this.valuationClient = valuationClient;
         this.verificationService = verificationService;
         this.objectMapper = objectMapper;
+        this.assets = assets;
     }
 
     public void requireIfNeeded(long userId, byte[] body, String emailCode, String totpCode, Instant now) {
         TransferAmount transfer = transferAmount(body);
+        long scale = assets.byAccountingCode(transfer.asset())
+                .orElseThrow(() -> new IllegalArgumentException("transfer asset is not supported"))
+                .scaleUnits();
         BigDecimal threshold = properties.getProductTransfer().getVerificationThresholdUsdt();
         if (threshold.signum() > 0) {
             BigDecimal usdtValue;
             try {
                 usdtValue = valuationClient.toUsdt(transfer.asset(), transfer.amountUnits()
-                        .divide(ACCOUNT_UNIT));
+                        .divide(BigDecimal.valueOf(scale)));
             } catch (WithdrawalValuationClient.ValuationUnavailableException ex) {
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                         "transfer valuation is unavailable", ex);
@@ -56,7 +62,8 @@ public class ProductTransferSecurityService {
         }
         try {
             Map<?, ?> payload = objectMapper.readValue(body, Map.class);
-            String asset = payload.get("asset") == null ? "" : String.valueOf(payload.get("asset")).trim();
+            String asset = payload.get("asset") == null ? "" : String.valueOf(payload.get("asset"))
+                    .trim().toUpperCase(java.util.Locale.ROOT);
             if (asset.isBlank()) throw new IllegalArgumentException("transfer asset is required");
             BigDecimal amountUnits = new BigDecimal(String.valueOf(payload.get("amountUnits")));
             if (amountUnits.signum() <= 0 || amountUnits.scale() > 0) {
