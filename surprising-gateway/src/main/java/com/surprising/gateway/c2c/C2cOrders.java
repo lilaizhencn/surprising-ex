@@ -227,6 +227,7 @@ public class C2cOrders {
         if(!ad.status().equals("ACTIVE") || ad.availableUnits()<=0) throw new IllegalStateException("广告暂不可交易");
         if(ad.makerUserId()==user.userId()) throw new IllegalArgumentException("不能与本人广告成交");
         access.requireTrading(user,market);access.requireCounterparty(ad.makerUserId(),market);
+        markets.requireMerchantBond(ad.makerUserId());
         if(!Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM c2c_merchants WHERE user_id=? AND status='APPROVED')",Boolean.class,ad.makerUserId())))
             throw new IllegalStateException("商家当前不可交易");
         if(Boolean.TRUE.equals(jdbc.queryForObject("""

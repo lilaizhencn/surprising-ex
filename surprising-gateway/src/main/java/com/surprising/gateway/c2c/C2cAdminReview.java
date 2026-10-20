@@ -48,6 +48,7 @@ public class C2cAdminReview {
         String state;
         String tier=(String)current.get("tier");
         if("APPROVE".equals(input.decision())) {
+            markets.requireMerchantBond(userId);
             var user=users.find(userId).orElseThrow();var kyc=compliance.kyc(userId);
             if(!"NORMAL".equals(user.status()) || kyc==null || !"VERIFIED".equals(kyc.status())
                     || (kyc.expiresAt()!=null && !kyc.expiresAt().isAfter(Instant.now()))) throw new IllegalStateException("用户当前没有有效身份认证或账户受限");

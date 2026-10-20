@@ -42,6 +42,7 @@ class C2cOrdersPostgresTest {
                 """,marketId);
         jdbc.update("UPDATE c2c_payment_methods SET enabled=true,currencies=ARRAY['CNY'] WHERE code='ALIPAY'");
         jdbc.update("INSERT INTO c2c_merchants(user_id,status,application_text) VALUES(11,'APPROVED','QA')");
+        db.seedMerchantBond(11);
         var properties=new GatewayProperties();properties.getSecurity().setMfaSecretEncryptionKey("c2c-fixture-encryption-key-not-for-deployment");
         payments=new C2cPaymentAccounts(jdbc,new TotpService(properties),json,null);
         makerAccount=payments.save(11,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Seller","qa-seller-account","",null)).id();

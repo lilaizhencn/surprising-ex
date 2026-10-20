@@ -61,6 +61,7 @@ final class C2cHttpFixture implements AutoCloseable {
                     """,marketId);
             jdbc.update("UPDATE c2c_payment_methods SET enabled=true,currencies=ARRAY['CNY'] WHERE code IN ('ALIPAY','BANK_TRANSFER')");
             jdbc.update("INSERT INTO c2c_merchants(user_id,status,application_text) VALUES(11,'APPROVED','Synthetic merchant application')");
+            db.seedMerchantBond(11);
             jdbc.update("INSERT INTO c2c_profiles(user_id,nickname) VALUES(11,'QA Maker'),(12,'QA Buyer'),(13,'QA Other')");
             jdbc.update("INSERT INTO gateway_user_kyc_profiles(user_id,kyc_level,status,country) VALUES(11,'STANDARD','VERIFIED','CN'),(12,'STANDARD','VERIFIED','CN'),(13,'STANDARD','VERIFIED','CN')");
             jdbc.execute("CREATE TABLE c2c_otp_attempts(attempts INTEGER NOT NULL)");
@@ -104,6 +105,7 @@ final class C2cHttpFixture implements AutoCloseable {
             properties.getSecurity().setRequireApprovalForHighRiskAdminWrites(false);
             properties.getSecurity().setMfaSecretEncryptionKey("c2c-synthetic-http-test-key-not-for-deployment");
             r2.setEnabled(true);r2.setType("filesystem");r2.setRootPath(attachmentRoot.toString());
+            context.getEnvironment().getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource("c2c-test",Map.of("surprising.c2c.enabled","true")));
             context.register(Transactions.class);
             context.registerBean(PlatformTransactionManager.class,db.transactions::getTransactionManager);
             context.registerBean(C2cMarkets.class,()->new C2cMarkets(jdbc));
@@ -127,6 +129,7 @@ final class C2cHttpFixture implements AutoCloseable {
             context.registerBean(AdminApprovalService.class,()->new AdminApprovalService(auth,bean(AdminAuditRepository.class),bean(AdminApprovalRepository.class),properties));
             context.registerBean(C2cAdminAccess.class,()->new C2cAdminAccess(auth,bean(AdminApprovalService.class),bean(AdminApprovalRepository.class),bean(AdminAuditRepository.class),new GatewayUserRepository(jdbc)));
             context.registerBean(C2cAdminMarkets.class,()->new C2cAdminMarkets(jdbc,bean(C2cMarkets.class),bean(C2cQueries.class),bean(C2cAdminAccess.class),products));
+            context.registerBean(C2cMerchantBonds.class,()->new C2cMerchantBonds(jdbc,bean(C2cFundsRepository.class),bean(C2cMarkets.class),bean(C2cAccess.class),bean(C2cAdminAccess.class),products));
             context.registerBean(C2cAdminInitialization.class,()->new C2cAdminInitialization(bean(C2cAdminAccess.class),bean(C2cMarkets.class),products,db.transactions.getTransactionManager()));
             context.registerBean(C2cAdminQueries.class,()->new C2cAdminQueries(jdbc,bean(C2cMarkets.class),bean(C2cAdsRepository.class),bean(C2cOrdersRepository.class)));
             context.registerBean(C2cAdminReview.class,()->new C2cAdminReview(bean(C2cAdminAccess.class),jdbc,bean(C2cMarkets.class),bean(C2cAdsRepository.class),bean(C2cAds.class),
@@ -143,7 +146,7 @@ final class C2cHttpFixture implements AutoCloseable {
             var controller=new C2cController(bean(C2cAccess.class),bean(C2cMarkets.class),bean(C2cAds.class),bean(C2cAdsRepository.class),
                     bean(C2cOrders.class),bean(C2cOrdersRepository.class),bean(C2cSubmissions.class),bean(C2cQueries.class),
                     bean(C2cPaymentAccounts.class),products,json);
-            mvc=MockMvcBuilders.standaloneSetup(controller,new C2cStatusController(true,bean(C2cMarkets.class),products),
+            mvc=MockMvcBuilders.standaloneSetup(controller,new C2cMerchantController(bean(C2cMerchantBonds.class),bean(C2cAccess.class),bean(C2cAdminAccess.class),json),new C2cStatusController(true,bean(C2cMarkets.class),products),
                     new C2cMeController(bean(C2cAccess.class),bean(C2cProfiles.class)),
                     new C2cChatController(bean(C2cAccess.class),bean(C2cConversations.class),bean(C2cMessages.class),bean(C2cAttachments.class)),
                     new C2cAdminChatController(bean(C2cAdminAccess.class),bean(C2cAdminChat.class),json),

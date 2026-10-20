@@ -88,7 +88,7 @@ public class C2cProfiles {
         } else {
             var row=rows.getFirst();
             if(((Number)row.get("revision")).longValue()!=revision) throw new IllegalStateException("商家申请状态已变更");
-            if(!List.of("PENDING","REJECTED").contains(row.get("status"))) throw new IllegalStateException("请联系客服处理当前商家状态");
+            if(!List.of("PENDING","REJECTED","WITHDRAWN").contains(row.get("status"))) throw new IllegalStateException("请联系客服处理当前商家状态");
             jdbc.update("""
                     UPDATE c2c_merchants SET status='PENDING',application_text=?,review_reason=NULL,reviewed_by=NULL,reviewed_at=NULL,
                         revision=revision+1,updated_at=now() WHERE user_id=?
@@ -237,13 +237,14 @@ public class C2cProfiles {
     private List<Map<String,Object>> escrow(long userId) {
         return jdbc.query("""
                 SELECT f.asset,a.scale_units,
-                    COALESCE(sum(CASE WHEN f.status='APPLIED' AND f.purpose IN ('AD_RESERVE','ORDER_RESERVE') THEN f.amount_units::numeric
+                    COALESCE(sum(CASE WHEN f.status='APPLIED' AND f.purpose IN ('AD_RESERVE','ORDER_RESERVE','MERCHANT_BOND') THEN f.amount_units::numeric
                         WHEN f.status='APPLIED' THEN -f.amount_units::numeric ELSE 0 END),0) AS held,
                     count(*) FILTER(WHERE f.status NOT IN ('APPLIED','REJECTED')) AS pending,
-                    count(*) FILTER(WHERE f.status='REJECTED' AND f.purpose NOT IN ('AD_RESERVE','ORDER_RESERVE')) AS failed
+                    count(*) FILTER(WHERE f.status='REJECTED' AND f.purpose NOT IN ('AD_RESERVE','ORDER_RESERVE','MERCHANT_BOND')) AS failed
                 FROM c2c_fund_intents f LEFT JOIN c2c_ads ad ON f.owner_type='AD' AND f.owner_id=ad.ad_id
-                LEFT JOIN c2c_orders o ON f.owner_type='ORDER' AND f.owner_id=o.order_id JOIN assets a ON a.asset=f.asset
-                WHERE COALESCE(ad.maker_user_id,o.seller_user_id)=? GROUP BY f.asset,a.scale_units
+                LEFT JOIN c2c_orders o ON f.owner_type='ORDER' AND f.owner_id=o.order_id
+                LEFT JOIN c2c_merchant_bonds b ON f.owner_type='MERCHANT' AND f.owner_id=b.bond_id JOIN assets a ON a.asset=f.asset
+                WHERE COALESCE(ad.maker_user_id,o.seller_user_id,b.user_id)=? GROUP BY f.asset,a.scale_units
                 """,(r,n)->{
                     var result=new LinkedHashMap<String,Object>();var held=r.getBigDecimal("held");
                     boolean known=r.getLong("pending")==0 && r.getLong("failed")==0 && held.signum()>=0

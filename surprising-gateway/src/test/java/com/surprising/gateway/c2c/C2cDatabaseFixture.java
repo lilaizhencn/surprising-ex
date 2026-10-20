@@ -37,6 +37,7 @@ final class C2cDatabaseFixture implements AutoCloseable {
             cloneSerialTable("gateway_admin_operation_logs","operation_id");
             jdbc.execute(Files.readString(Path.of("../deployment/migrations/20261020-c2c.sql")));
             jdbc.execute(Files.readString(Path.of("../deployment/migrations/20261020-c2c-chat.sql")));
+            jdbc.execute(Files.readString(Path.of("../deployment/migrations/20261020-c2c-merchant-bond.sql")));
         } catch(Exception failure) {close();throw failure;}
     }
     private void cloneSerialTable(String table,String column) {
@@ -44,6 +45,12 @@ final class C2cDatabaseFixture implements AutoCloseable {
         // LIKE 的 BIGSERIAL 默认会指向原序列，必须改用本用例 schema 自己的序列。
         jdbc.execute("CREATE SEQUENCE "+table+"_qa_sequence");
         jdbc.execute("ALTER TABLE "+table+" ALTER COLUMN "+column+" SET DEFAULT nextval('"+table+"_qa_sequence')");
+    }
+    // Controlled Core fixture: a pre-existing approved merchant has already committed its bond.
+    void seedMerchantBond(long userId) {
+        jdbc.update("INSERT INTO c2c_merchant_bond_policy(singleton,asset,amount_units,updated_by) VALUES(true,'USDT',100000000,9) ON CONFLICT DO NOTHING");
+        jdbc.update("INSERT INTO c2c_merchant_bonds(bond_id,user_id,request_id,asset,amount_units,status) VALUES(?,?,?,'USDT',100000000,'LOCKED')",
+                UUID.randomUUID(),userId,UUID.randomUUID());
     }
     <T> T transaction(Supplier<T> work) {return transactions.execute(status->work.get());}
     @Override public void close() {

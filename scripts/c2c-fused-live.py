@@ -18,7 +18,13 @@ DB_USER = os.environ['C2C_LIVE_DB_USER']
 processes = json.loads((ROOT / 'processes.json').read_text())
 gateway_pid = processes['gateway']['pid']
 gateway_command = subprocess.check_output(['ps', '-p', str(gateway_pid), '-o', 'command='], text=True)
-if str(ROOT) not in gateway_command or 'surprising-gateway' not in gateway_command:
+immutable_gateway = ROOT / 'artifacts' / 'gateway.jar'
+owned_immutable = str(immutable_gateway) in gateway_command and immutable_gateway.is_file()
+if owned_immutable:
+    proof = json.loads((ROOT / 'verified-artifact.json').read_text())
+    if hashlib.sha256(immutable_gateway.read_bytes()).hexdigest() != proof['sha256']:
+        raise RuntimeError('The owned immutable Gateway does not match its build evidence')
+if str(ROOT) not in gateway_command or not ('surprising-gateway' in gateway_command or owned_immutable):
     raise RuntimeError('The local Gateway is not owned by the named QA runtime')
 listeners = subprocess.check_output(['lsof', '-nP', '-t', '-iTCP:9094', '-sTCP:LISTEN'], text=True).split()
 if str(gateway_pid) not in listeners:
@@ -127,6 +133,20 @@ def setup_market():
         application = req('POST', '/api/v1/c2c/me/merchant-application', 'seller', {'revision': '0', 'application': 'Synthetic merchant for isolated Core QA'})
         fixture['merchant'] = application
         save()
+    policy = req('GET', '/api/v1/admin/c2c/merchant-bond-policy', 'admin')
+    if not policy['configured']:
+        policy = approved('PUT', '/api/v1/admin/c2c/merchant-bond-policy', {'revision': '0', 'asset': 'USDT', 'amount': '100', 'reason': 'Isolated QA merchant guarantee rule; never a deployment default'})
+    guarantee = req('GET', '/api/v1/c2c/me/merchant-bond', 'seller')
+    if guarantee['bond'] is None or guarantee['bond']['status'] == 'RETURNED':
+        uid = fixture['users']['seller']['user']['userId']
+        account = await_value(lambda: req('GET', f'/api/v1/admin/gateway/account/balances?userId={uid}', 'admin', expected=(200, 503)), lambda row: 'balances' in row, 'Merchant realtime funding')
+        available = sum(int(row['availableUnits']) for row in account['balances'] if row['asset'] == policy['asset'])
+        assert available >= int(policy['amountUnits']), 'Run the trading funding phase before market setup; no bond command sent'
+        fixture['merchantBondRequestId'] = str(uuid.uuid4())
+        save()
+        req('POST', '/api/v1/c2c/me/merchant-bond', 'seller', {'requestId': fixture['merchantBondRequestId'], 'policyRevision': policy['revision'], 'verification': challenge('seller')})
+    guarantee = await_value(lambda: req('GET', '/api/v1/c2c/me/merchant-bond', 'seller'), lambda row: row['bond'] is not None and row['bond']['status'] in ('LOCKED', 'FAILED'), 'Merchant real Core guarantee confirmation')
+    assert guarantee['bond']['status'] == 'LOCKED', 'Original guarantee debit rejected; inspect and fund the synthetic account before a new request'
     uid = fixture['users']['seller']['user']['userId']
     merchants = req('GET', '/api/v1/admin/c2c/merchants?userId=' + str(uid), 'admin')['items']
     if merchants[0]['status'] != 'APPROVED':
@@ -373,12 +393,13 @@ def uncertain_core():
     save()
 
 def finish_funds():
-    for ad in (fixture['sellAd'], fixture['buyAd']):
-        close_ad(ad)
+    for row in req('GET', '/api/v1/c2c/me/ads', 'seller')['items']:
+        if row['status'] not in ('CLOSED', 'REJECTED'):
+            close_ad(row['adId'])
     reconcile('all-ads-closed-final')
     assert sql("SELECT count(*) FROM c2c_fund_intents WHERE status<>'APPLIED'") == '0'
     assert sql("SELECT count(*) FROM c2c_orders WHERE status NOT IN ('COMPLETED','CANCELED','EXPIRED','FAILED')") == '0'
-    assert sql("SELECT count(*) FROM c2c_ads WHERE status<>'CLOSED'") == '0'
+    assert sql("SELECT count(*) FROM c2c_ads WHERE status NOT IN ('CLOSED','REJECTED')") == '0'
     fixture['allFundsTerminal'] = True
     save()
     print('All C2C orders, ads and original fund intents terminal', flush=True)

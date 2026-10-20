@@ -130,6 +130,21 @@ class C2cAdminHttpPostgresTest {
         fixture.settle();assertThat(fixture.bean(C2cOrdersRepository.class).get(order,false).status()).isEqualTo(C2cOrderStatus.COMPLETED);
     }
 
+    @Test void coldReadViewsRequestBothInternalAccountsAndKeepTradingClosedUntilReady() throws Exception {
+        var configuration=fixture.bean(C2cMarkets.class).configuration();
+        fixture.db.jdbc.update("UPDATE c2c_configuration SET enabled=false");
+        when(fixture.accountQueries.balances(anyLong())).thenThrow(new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"READ_VIEW_STALE"));
+        assertThat(fixture.call(HttpMethod.GET,"/api/v1/admin/c2c/reconciliation",9,null,200).get("status")).isEqualTo("UNAVAILABLE");
+        verify(fixture.accountQueries).balances(configuration.escrowUserId());
+        verify(fixture.accountQueries).balances(configuration.feeUserId());
+        assertThat(fixture.db.jdbc.queryForObject("SELECT enabled FROM c2c_configuration",Boolean.class)).isFalse();
+        doReturn(new BalanceQueryResponse(0,List.of())).when(fixture.accountQueries).balances(anyLong());
+        assertThat(fixture.call(HttpMethod.GET,"/api/v1/admin/c2c/reconciliation",9,null,200).get("status")).isEqualTo("MATCHED");
+        assertThat(fixture.db.jdbc.queryForObject("SELECT enabled FROM c2c_configuration",Boolean.class)).isFalse();
+        verifyNoInteractions(fixture.core);
+    }
+
     @Test void configurationCannotReopenUntilIntentsAndRealtimeBalancesReconcile() throws Exception {
         fixture.call(HttpMethod.POST,"/api/v1/c2c/ads",11,new C2cController.PublishRequest("qa-pending-"+UUID.randomUUID(),fixture.payload("SELL"),new C2cVerification("123456","")),200);
         fixture.call(HttpMethod.PUT,"/api/v1/admin/c2c/configuration",9,new C2cAdminMarkets.ConfigurationInput("1",false,20,"Synthetic market closure"),200);

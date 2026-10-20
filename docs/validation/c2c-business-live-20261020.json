@@ -1,0 +1,1369 @@
+{
+  "date": "2026-10-21",
+  "purpose": "C2C local merchant/buyer/seller real Core business QA",
+  "scope": {
+    "productLine": "SPOT",
+    "executionMode": "FUSED",
+    "real": [
+      "registered trading JWT",
+      "PostgreSQL",
+      "Kafka",
+      "Redis",
+      "Core transfers",
+      "realtime account queries",
+      "maker orders",
+      "shared market/chat WebSocket",
+      "admin permissions/audit/two-person approvals"
+    ],
+    "simulated": [
+      "KYC fixture",
+      "OTP fixture",
+      "off-platform fiat payment confirmation",
+      "market-price input"
+    ],
+    "notPerformed": [
+      "remote server release",
+      "APK installation",
+      "real bank payment",
+      "other product live stacks",
+      "live R2 upload this round"
+    ]
+  },
+  "tests": {
+    "backendUniquePassed": 102,
+    "backendConditionalSkipped": 3,
+    "backendFinalCandidatePassed": 32,
+    "webPassed": 324,
+    "adminPassed": 16,
+    "flutterPassed": 398,
+    "flutterConditionalSkipped": 11,
+    "nativeLivePassed": 2,
+    "browserStepsPassed": 8,
+    "webAndAdminLintBuild": "passed",
+    "flutterAnalyze": "passed"
+  },
+  "evidence": {
+    "business-browser-evidence.json": {
+      "scope": "真实本地交易鉴权、Core 资金及 realtime；合成 KYC、验证码与站外法币付款",
+      "steps": [
+        "商家在页面确认质押，真实 Core 扣减后显示 LOCKED",
+        "后台按原请求经另一管理员审批后通过商家审核",
+        "商家发布出售广告，真实托管确认后上架",
+        "已提交订单丢失响应后查询原回执，未产生第二次下单 POST",
+        "买家读取订单收款快照、确认已付款，卖家核实后通过安全验证放币，Core 完成净额和手续费",
+        "原订单直接进入会话，真实鉴权的聊天和行情帧来自同一条 WebSocket；第三方无法加入",
+        "390 宽度卖家向商家买入广告出售，商家确认付款，卖家验证后放币",
+        "用户新增实名收款账户，后台审计查阅、人工核验和另一管理员审批后通过"
+      ],
+      "errors": [],
+      "orders": [
+        "0c38723b-6856-41d6-9732-5557f37ff4ca",
+        "dc503522-41e0-4aec-bfab-5312962d3c73"
+      ],
+      "passed": true,
+      "sockets": {
+        "seller": {
+          "opened": 2,
+          "frames": [
+            {
+              "socket": 2,
+              "op": "authenticated",
+              "channel": null
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "accountState"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "accountState"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "orders"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "orders"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "triggerOrders"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "triggerOrders"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "positions"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "positions"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "positionRisk"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "positionRisk"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "executionReports"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "executionReports"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": null
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": null
+            },
+            {
+              "socket": 2,
+              "op": "c2c.subscribed",
+              "channel": "c2c.inbox"
+            },
+            {
+              "socket": 2,
+              "op": "c2c.messages",
+              "channel": "c2c.messages"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": null
+            },
+            {
+              "socket": 2,
+              "op": "c2c.changed",
+              "channel": "c2c.inbox"
+            },
+            {
+              "socket": 2,
+              "op": "c2c.messages",
+              "channel": "c2c.messages"
+            },
+            {
+              "socket": 2,
+              "op": "c2c.changed",
+              "channel": "c2c.inbox"
+            },
+            {
+              "socket": 2,
+              "op": "c2c.messages",
+              "channel": "c2c.messages"
+            },
+            {
+              "socket": 2,
+              "op": "c2c.changed",
+              "channel": "c2c.inbox"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": null
+            },
+            {
+              "socket": 2,
+              "op": "event",
+              "channel": "accountState"
+            },
+            {
+              "socket": 2,
+              "op": "event",
+              "channel": "accountState"
+            }
+          ]
+        },
+        "admin": {
+          "opened": 0,
+          "frames": []
+        },
+        "buyer": {
+          "opened": 2,
+          "frames": [
+            {
+              "socket": 2,
+              "op": "authenticated",
+              "channel": null
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "accountState"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "accountState"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "orders"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "orders"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "triggerOrders"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "triggerOrders"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "positions"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "positions"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "positionRisk"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "positionRisk"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "executionReports"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "executionReports"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": null
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": null
+            },
+            {
+              "socket": 2,
+              "op": "event",
+              "channel": "accountState"
+            },
+            {
+              "socket": 2,
+              "op": "event",
+              "channel": "accountState"
+            },
+            {
+              "socket": 2,
+              "op": "c2c.subscribed",
+              "channel": "c2c.inbox"
+            },
+            {
+              "socket": 2,
+              "op": "c2c.messages",
+              "channel": "c2c.messages"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "trades"
+            },
+            {
+              "socket": 2,
+              "op": "c2c.changed",
+              "channel": "c2c.inbox"
+            },
+            {
+              "socket": 2,
+              "op": "c2c.messages",
+              "channel": "c2c.messages"
+            },
+            {
+              "socket": 2,
+              "op": "unsubscribed",
+              "channel": "trades"
+            },
+            {
+              "socket": 2,
+              "op": "c2c.changed",
+              "channel": "c2c.inbox"
+            },
+            {
+              "socket": 2,
+              "op": "c2c.messages",
+              "channel": "c2c.messages"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": null
+            }
+          ]
+        },
+        "other": {
+          "opened": 2,
+          "frames": [
+            {
+              "socket": 2,
+              "op": "authenticated",
+              "channel": null
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "accountState"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "accountState"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "orders"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "orders"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "triggerOrders"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "triggerOrders"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "positions"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "positions"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "positionRisk"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "positionRisk"
+            },
+            {
+              "socket": 2,
+              "op": "subscribed",
+              "channel": "executionReports"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": "executionReports"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": null
+            },
+            {
+              "socket": 2,
+              "op": "event",
+              "channel": "accountState"
+            },
+            {
+              "socket": 2,
+              "op": "event",
+              "channel": "accountState"
+            },
+            {
+              "socket": 2,
+              "op": "snapshot",
+              "channel": null
+            }
+          ]
+        }
+      }
+    },
+    "mobile-business-evidence.json": {
+      "scope": "Flutter real HTTP/Core widgets at 320 and 390; synthetic KYC/OTP; injected lost response only",
+      "steps": [
+        "320px native buyer recovers real committed 0.5 USDT order, exact fee/net, no second POST, cancels it",
+        "390px native merchant submits real 100 USDT bond, waits for Core confirmation, exits and receives the same bond back"
+      ],
+      "passed": true,
+      "mobileOrderId": "13199bbb-187e-4cf0-bbb9-1d7749df9997",
+      "orderPostCount": 1
+    },
+    "merchant-bond-live-evidence.json": {
+      "scope": "owned local real Core; synthetic identity and verification only",
+      "userId": "7",
+      "before": {
+        "USDT": 100300000000000,
+        "BTC": 1000000000
+      },
+      "passed": true,
+      "originalIntent": {
+        "intentId": "da213d06-3322-46af-9209-0de1c1a4d4fd",
+        "transferId": "8305298108146336274",
+        "ownerType": "MERCHANT",
+        "ownerId": "696bab79-b8fb-484d-86b4-15fc101b5b3c",
+        "purpose": "MERCHANT_BOND",
+        "sourceUserId": "7",
+        "targetUserId": "1",
+        "asset": "USDT",
+        "amountUnits": "10000000000",
+        "status": "PREPARED",
+        "errorCode": null,
+        "attempts": 0,
+        "retryAfter": "2026-10-20T15:24:56.180494Z",
+        "updatedAt": "2026-10-20T15:24:56.180494Z"
+      },
+      "bondId": "696bab79-b8fb-484d-86b4-15fc101b5b3c",
+      "intents": [
+        {
+          "intentId": "2eb8142c-87f8-47ec-81e9-faeabe47c15e",
+          "transferId": "4367792552976384836",
+          "ownerType": "MERCHANT",
+          "ownerId": "696bab79-b8fb-484d-86b4-15fc101b5b3c",
+          "purpose": "MERCHANT_BOND_REFUND",
+          "sourceUserId": "1",
+          "targetUserId": "7",
+          "asset": "USDT",
+          "amountUnits": "10000000000",
+          "status": "APPLIED",
+          "errorCode": null,
+          "attempts": 0,
+          "retryAfter": "2026-10-20T15:25:05.976191Z",
+          "updatedAt": "2026-10-20T15:25:05.976191Z"
+        },
+        {
+          "intentId": "da213d06-3322-46af-9209-0de1c1a4d4fd",
+          "transferId": "8305298108146336274",
+          "ownerType": "MERCHANT",
+          "ownerId": "696bab79-b8fb-484d-86b4-15fc101b5b3c",
+          "purpose": "MERCHANT_BOND",
+          "sourceUserId": "7",
+          "targetUserId": "1",
+          "asset": "USDT",
+          "amountUnits": "10000000000",
+          "status": "APPLIED",
+          "errorCode": null,
+          "attempts": 0,
+          "retryAfter": "2026-10-20T15:25:04.924089Z",
+          "updatedAt": "2026-10-20T15:25:04.924089Z"
+        }
+      ],
+      "after": {
+        "USDT": 100300000000000,
+        "BTC": 1000000000
+      }
+    },
+    "merchant-bond-gateway-crash-evidence.json": {
+      "scope": "owned local real Core; synthetic identity and verification only",
+      "userId": "7",
+      "before": {
+        "USDT": 100300000000000,
+        "BTC": 1000000000
+      },
+      "passed": true,
+      "originalIntent": {
+        "intentId": "bb4c154d-f8d7-413b-9ca6-934bf411fc16",
+        "transferId": "2380430013922422413",
+        "ownerType": "MERCHANT",
+        "ownerId": "0025f15b-3726-42cb-b549-82b573ebfa94",
+        "purpose": "MERCHANT_BOND",
+        "sourceUserId": "7",
+        "targetUserId": "1",
+        "asset": "USDT",
+        "amountUnits": "10000000000",
+        "status": "PREPARED",
+        "errorCode": null,
+        "attempts": 0,
+        "retryAfter": "2026-10-20T15:30:36.421507Z",
+        "updatedAt": "2026-10-20T15:30:36.421507Z"
+      },
+      "gatewayCrashRecovered": true,
+      "bondId": "0025f15b-3726-42cb-b549-82b573ebfa94",
+      "intents": [
+        {
+          "intentId": "26d0e55c-96ef-42bf-8cd4-88f76a12b796",
+          "transferId": "180828074301041705",
+          "ownerType": "MERCHANT",
+          "ownerId": "0025f15b-3726-42cb-b549-82b573ebfa94",
+          "purpose": "MERCHANT_BOND_REFUND",
+          "sourceUserId": "1",
+          "targetUserId": "7",
+          "asset": "USDT",
+          "amountUnits": "10000000000",
+          "status": "APPLIED",
+          "errorCode": null,
+          "attempts": 0,
+          "retryAfter": "2026-10-20T15:31:29.071237Z",
+          "updatedAt": "2026-10-20T15:31:29.071237Z"
+        },
+        {
+          "intentId": "bb4c154d-f8d7-413b-9ca6-934bf411fc16",
+          "transferId": "2380430013922422413",
+          "ownerType": "MERCHANT",
+          "ownerId": "0025f15b-3726-42cb-b549-82b573ebfa94",
+          "purpose": "MERCHANT_BOND",
+          "sourceUserId": "7",
+          "targetUserId": "1",
+          "asset": "USDT",
+          "amountUnits": "10000000000",
+          "status": "APPLIED",
+          "errorCode": null,
+          "attempts": 0,
+          "retryAfter": "2026-10-20T15:31:26.987026Z",
+          "updatedAt": "2026-10-20T15:31:26.987026Z"
+        }
+      ],
+      "after": {
+        "USDT": 100300000000000,
+        "BTC": 1000000000
+      }
+    },
+    "business-final-funds.json": {
+      "passed": true,
+      "scope": "Local SPOT FUSED Core, real JWT, PostgreSQL, realtime and maker; synthetic KYC, OTP and off-platform fiat",
+      "suspensionBlocksNewOrdersAndWithdrawal": true,
+      "existingPaidOrderCompleted": "0a744cc7-75bc-4a19-b706-b88488cbea1a",
+      "merchantBondOriginalOwnerAndAmountReturned": true,
+      "allC2cObjectsTerminal": true,
+      "merchantEscrowSummaryAfterRefund": "0",
+      "allLockedUnits": "0",
+      "initialTotals": {
+        "USDT": 100300000000000,
+        "BTC": 1000000000
+      },
+      "finalTotals": {
+        "USDT": 100300000000000,
+        "BTC": 1000000000
+      },
+      "fundsDifference": {
+        "USDT": 0,
+        "BTC": 0
+      },
+      "accounts": {
+        "5": [
+          {
+            "userId": 5,
+            "asset": "USDT",
+            "availableUnits": 99299600000,
+            "lockedUnits": 0,
+            "equityUnits": 99299600000,
+            "updatedAt": "2026-10-20T16:00:28.295454Z"
+          }
+        ],
+        "6": [
+          {
+            "userId": 6,
+            "asset": "USDT",
+            "availableUnits": 101098900000,
+            "lockedUnits": 0,
+            "equityUnits": 101098900000,
+            "updatedAt": "2026-10-20T16:00:28.333291Z"
+          }
+        ],
+        "7": [
+          {
+            "userId": 7,
+            "asset": "USDT",
+            "availableUnits": 99600000000,
+            "lockedUnits": 0,
+            "equityUnits": 99600000000,
+            "updatedAt": "2026-10-20T16:00:28.342068Z"
+          }
+        ],
+        "8": [
+          {
+            "userId": 8,
+            "asset": "BTC",
+            "availableUnits": 1000000000,
+            "lockedUnits": 0,
+            "equityUnits": 1000000000,
+            "updatedAt": "2026-10-20T16:00:28.348831Z"
+          },
+          {
+            "userId": 8,
+            "asset": "USDT",
+            "availableUnits": 100000000000000,
+            "lockedUnits": 0,
+            "equityUnits": 100000000000000,
+            "updatedAt": "2026-10-20T16:00:28.348833Z"
+          }
+        ],
+        "1": [
+          {
+            "userId": 1,
+            "asset": "USDT",
+            "availableUnits": 0,
+            "lockedUnits": 0,
+            "equityUnits": 0,
+            "updatedAt": "2026-10-20T16:00:28.356730Z"
+          }
+        ],
+        "2": [
+          {
+            "userId": 2,
+            "asset": "USDT",
+            "availableUnits": 1500000,
+            "lockedUnits": 0,
+            "equityUnits": 1500000,
+            "updatedAt": "2026-10-20T16:00:28.379148Z"
+          }
+        ]
+      },
+      "reconciliation": {
+        "status": "MATCHED",
+        "assets": [
+          {
+            "actualEscrowUnits": "0",
+            "feeLockedUnits": "0",
+            "asset": "USDT",
+            "escrowLockedUnits": "0",
+            "expectedEscrowUnits": "0",
+            "expectedFeeUnits": "1500000",
+            "matches": true,
+            "actualFeeUnits": "1500000"
+          }
+        ],
+        "pendingIntentCount": "0"
+      }
+    },
+    "backend-test-cases.json": [
+      {
+        "name": "appealLocksSellerReleaseAndRefundDecisionCannotBeChangedAfterFundsIntentIsFixed",
+        "class": "com.surprising.gateway.c2c.C2cOrdersPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "buyAdOnlyStartsPaymentClockAfterSellerEscrowAndExpiryWaitsForRealRefundReceipt",
+        "class": "com.surprising.gateway.c2c.C2cOrdersPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "quoteCannotBeStolenOrUsedAfterPriceChangeAndOrderRetainsOldPaymentSnapshot",
+        "class": "com.surprising.gateway.c2c.C2cOrdersPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "concurrentBuyersCannotAllocateMoreThanTheHeldAdvertisementStock",
+        "class": "com.surprising.gateway.c2c.C2cOrdersPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "unpaidCancellationRestoresAlreadyEscrowedSellAdInventoryWithoutASecondRefund",
+        "class": "com.surprising.gateway.c2c.C2cOrdersPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "buyerPaidNeverReleasesMoneyAndSellerReleaseKeepsFeeAndNetEqualToGross",
+        "class": "com.surprising.gateway.c2c.C2cOrdersPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "presignedUploadRequiresConfirmationAndGatewayAuthorizesEveryEvidenceRead",
+        "class": "com.surprising.gateway.c2c.C2cR2GatewayLiveTest",
+        "status": "skipped"
+      },
+      {
+        "name": "committedMessagesFromAnotherNodeAndReadReceiptsAreObservedFromSharedStorage",
+        "class": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "onlyTradingAuthenticationCanAuthorizeTheSocketAndHistoryReplaysFromTheOriginalCursor",
+        "class": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "anAuthenticatedConnectionCannotSwitchTradingUsers",
+        "class": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "forgedHandshakeIdentityAndForeignConversationNeverGrantAccess",
+        "class": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "aChatStorageFailureStopsOnlyChatAndKeepsTheMarketQueueOpen",
+        "class": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "chatSubscriptionCapacityIsBoundedWithoutClosingMarketConnections",
+        "class": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "logoutOrRevocationClosesTheConnectionBeforeAnyFurtherPrivateDelivery",
+        "class": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "qrReadUsesTheOriginalOrderSnapshotAfterPaymentAccountChanges",
+        "class": "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "rollingUploadQuotaIncludesAbandonedReservationsButDoesNotPermanentlyBlockOldUsers",
+        "class": "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "privateUploadIsVerifiedAndIdempotentAndNeverExposesStorageKeys",
+        "class": "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "messageAttachmentsAreScopedAndNotReadableBeforeSending",
+        "class": "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "unknownLookupDoesNotCreateUploadsAndDisabledStorageFailsTruthfully",
+        "class": "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "incompleteUploadCanResumeOnlyWithItsOriginalContents",
+        "class": "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "rejectsMimeSpoofingQrPdfAndForeignOrderProof",
+        "class": "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "aChatErrorDoesNotBecomeAMarketConnectionError",
+        "class": "com.surprising.websocket.provider.service.ClientWebSocketHandlerTest",
+        "status": "passed"
+      },
+      {
+        "name": "handshakeHeadersAndQueryParametersNeverAuthenticateAUser",
+        "class": "com.surprising.websocket.provider.service.ClientWebSocketHandlerTest",
+        "status": "passed"
+      },
+      {
+        "name": "marketChatAndHeartbeatUseTheExactSameAuthenticatedConnectionAndQueue",
+        "class": "com.surprising.websocket.provider.service.ClientWebSocketHandlerTest",
+        "status": "passed"
+      },
+      {
+        "name": "privateSubscriptionsRecheckTheTradingSessionAndRejectAnotherUser",
+        "class": "com.surprising.websocket.provider.service.ClientWebSocketHandlerTest",
+        "status": "passed"
+      },
+      {
+        "name": "disconnectCleansChatSubscriptionsAlongWithMarketSubscriptions",
+        "class": "com.surprising.websocket.provider.service.ClientWebSocketHandlerTest",
+        "status": "passed"
+      },
+      {
+        "name": "lostDebitReplyAcrossRestartReusesTheIdenticalCommandAndNeverRefunds",
+        "class": "com.surprising.gateway.c2c.C2cFundsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "internalAccountsCannotBeImportedAsLoginUsersOrReassigned",
+        "class": "com.surprising.gateway.c2c.C2cFundsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "explicitSourceRejectionCreatesNoCounterpartyCredit",
+        "class": "com.surprising.gateway.c2c.C2cFundsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "creditAndCompletionFailuresNeverRepeatTheSourceDebit",
+        "class": "com.surprising.gateway.c2c.C2cFundsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "concurrentSameIntentCannotAllocateTwoTransfersOrChangeItsMoney",
+        "class": "com.surprising.gateway.c2c.C2cFundsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "aCorruptIntentCannotSendEscrowMoneyToAnArbitraryReserveRecipient",
+        "class": "com.surprising.gateway.c2c.C2cFundsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "recoveryExpirySkipsARealInFlightTransactionButRejectsUnstartedWork",
+        "class": "com.surprising.gateway.c2c.C2cSubmissionsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "stopBeforeAdmissionFencesALateOriginalPost",
+        "class": "com.surprising.gateway.c2c.C2cSubmissionsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "queryingAnUnknownRequestNeverSubmitsOrCancelsIt",
+        "class": "com.surprising.gateway.c2c.C2cSubmissionsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "stopRacingACommittingBusinessTransactionReturnsTheAcceptedResult",
+        "class": "com.surprising.gateway.c2c.C2cSubmissionsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "failedSecurityVerificationRollsBackAdAndItsFundIntent",
+        "class": "com.surprising.gateway.c2c.C2cAdsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "publishingPersistsOneIntentBeforeTheAdCanAcceptOrdersAndRetryNeedsNoNewVerification",
+        "class": "com.surprising.gateway.c2c.C2cAdsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "otherUsersCannotCloseAdsAndSameKeyCannotChangeOriginalAmounts",
+        "class": "com.surprising.gateway.c2c.C2cAdsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "concurrentAllocationCannotOversellAndCloseRefundsOnlyUnallocatedStock",
+        "class": "com.surprising.gateway.c2c.C2cAdsPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "actualR2PresignedUploadIsPrivateReadableAndCannotOverwriteEvidence",
+        "class": "com.surprising.gateway.c2c.C2cR2StorageLiveTest",
+        "status": "skipped"
+      },
+      {
+        "name": "policyNeedsPermissionAuditAndCannotChangeWhileBondsExist",
+        "class": "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "insufficientBalanceAndInvalidSecurityNeverBecomeLockedBonds",
+        "class": "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "openAdsAndOrdersAndRiskSuspensionPreventDepositWithdrawal",
+        "class": "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "approvalRequiresCommittedBondAndDuplicateDepositUsesOnlyOneOriginalIntent",
+        "class": "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "simultaneousDepositRequestsCannotDoubleChargeAndOldReceiptsStayOnTheirOwnCycle",
+        "class": "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "withdrawalReturnsOnlyTheOriginalOwnerAmountAfterConfirmedSettlement",
+        "class": "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "unknownDebitKeepsTheOriginalTransferAndCannotUnlockOrCreateAnotherDeposit",
+        "class": "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "appealAlwaysRequiresAnotherAdministratorEvenWhenGeneralApprovalIsDisabled",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "merchantSuspensionPausesAdsAndForceCloseRequiresApprovedFixedRecipientRefund",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "initializationUsesOnlyFixedInternalAccountsAndZeroAmountsOutsideDatabaseTransactions",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "initializationApprovalAndAuditMustCommitBeforeAnyCoreCommand",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "configurationCannotReopenUntilIntentsAndRealtimeBalancesReconcile",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "bodyAndPathBoundApprovalCannotBeReusedForAnotherDecisionAndReleaseKeepsOriginalParties",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "ordinaryUsersCannotUseAdminRoutesAndSupportDefaultsExcludeMoneyAndSensitiveAccess",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "ordinaryAdminWritesRespectGlobalApprovalAndRollbackConsumptionOnBadVersion",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "intentFactsAndSettlementProgressCannotBeMutatedBySqlUpdates",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "aCounterpartyCannotServeAsApproverEvenIfItAlsoHasAnAdminRole",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "changingMarketInvalidatesQuotesAndPausesAdsButExistingOrderKeepsItsOriginalFee",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "unknownInitializationRetriesTheSameZeroCommandAndDoesNotPretendQueriesAreReady",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "manualPaymentReviewRequiresAttestationAndSensitiveReadsRequireAnAuditWrite",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "coldReadViewsRequestBothInternalAccountsAndKeepTradingClosedUntilReady",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "selfApprovalAndRevokedApproverPermissionAreRejected",
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "concurrentIdenticalSendsHaveOneCommittedMessage",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "originalMessagesCannotBeEditedOrDeletedAndSearchEscapesWildcards",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "approvedSupportReplyCanBeRecoveredAfterApprovalConsumptionWithoutAnotherWrite",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "supportMessagesRequireSensitivePermissionAndAuditAndAreMarkedByServer",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "historyCursorsAndReadMarkersCannotCrossConversationsAndNeverMoveBackwards",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "anUninitializedProfileKeepsTheDefaultStrangerPrivacyPolicy",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "strangerAndBlockPoliciesApplyAtSendButDoNotEraseHistoryOrKnownReceipts",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "ongoingOrderCanCommunicateWhileBlockedAndKeepsAuthoritativeOrderEvents",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "lostAckIsRecoveredWithoutResendingAndConflictingReuseIsRejected",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "openingALongConversationLoadsRecentMessagesAndOlderPagingKeepsTheResumeCursor",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "endpointsRejectMissingIdentityInvalidContentAndClientAssignedSystemRole",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "orderConversationUsesFixedPartiesAndSeparatesRepeatedOrders",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "adminRecentHistoryAndOwnSupportReceiptAreAuditedWithoutSendingAgain",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "latestHistoryIncludesTheLargestSignedInt64MessageIdentity",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "supportCanStartAnOrderConversationWithoutBecomingAParticipantOrCreatingFundIntents",
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "alwaysVerifyAndSettingsNeverReuseTheFundsGrant",
+        "class": "com.surprising.gateway.c2c.C2cAccessPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "cachedVerificationCannotDeadlockWithTheOrderQuotaLockOrCrossSessions",
+        "class": "com.surprising.gateway.c2c.C2cAccessPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "failedCodeAttemptsSurviveTheRejectedBusinessTransaction",
+        "class": "com.surprising.gateway.c2c.C2cAccessPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "verifiedKycUsesTheExistingContractAndRejectsExpiredOrUnverifiedProfiles",
+        "class": "com.surprising.gateway.c2c.C2cAccessPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "fullHttpOrderFlowUsesRealTransactionsAndKeepsImmutablePaymentSnapshot",
+        "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "businessClosureStillSettlesAlreadyAcceptedFundsAndNeverTimesOutPaidOrders",
+        "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "anonymousRequestsCannotReadPrivateDataOrCreateSubmissions",
+        "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "unknownRecoveryIsReadOnlyAndExplicitStopFencesALateCreation",
+        "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "runtimeOffDoesNotCreateControllersWorkersOrRequireTheNewTables",
+        "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "invalidFundsVerificationRollsBackOrderAndStockButKeepsAttemptsAndReceipt",
+        "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "concurrentHttpBuyersCannotOversellTheSameAd",
+        "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "marketFiltersUseActualKycBlocksAndUnknownStatisticsStayUnknown",
+        "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "anAcceptedReceiptSurvivesLostResponseAndClosedMarketWithoutResubmission",
+        "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "unsettledIntentAmountsStayUnknownAndConfirmedEscrowTracksReleaseAndAdRefund",
+        "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "quickRepliesAreIdempotentForTheirOwnerAndCannotBeOverwrittenByAnotherUser",
+        "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "reportsVerifyOrderPartiesAndAnIdenticalReportDoesNotDuplicate",
+        "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "priceAlertsNotifyOncePerArmingAndReadMarkersRemainOwnerScoped",
+        "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "followAndBlockArePrivateAndRejectSelfOrInternalEscrowAccounts",
+        "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "merchantApplicationRequiresExistingVerifiedKycAndCannotUndoSuspension",
+        "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "nicknameAndStrangerSettingsHaveVersionProtectionAndCannotTakeAnotherNickname",
+        "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "myC2cShowsRealEmptyCountsWithoutCallingCoreOrLeakingAccountDetails",
+        "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "changingVerificationWindowRequiresItsOwnCodeAndInvalidatesAllCachedGrants",
+        "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "alertsRespectBlockedOrExpiredMerchantsAndClosedMarket",
+        "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+        "status": "passed"
+      },
+      {
+        "name": "paidOrdersNeverAutomaticallyRefundAndPendingFundsCannotBeReleased",
+        "class": "com.surprising.gateway.c2c.C2cMoneyTest",
+        "status": "passed"
+      },
+      {
+        "name": "invalidPrecisionOverflowAndUnknownScaleAreRejected",
+        "class": "com.surprising.gateway.c2c.C2cMoneyTest",
+        "status": "passed"
+      },
+      {
+        "name": "quoteNeverUsesFloatingPointOrRoundsUpCrypto",
+        "class": "com.surprising.gateway.c2c.C2cMoneyTest",
+        "status": "passed"
+      },
+      {
+        "name": "serveOwnedBrowserFixtureUntilDone",
+        "class": "com.surprising.gateway.c2c.C2cBrowserQaTest",
+        "status": "skipped"
+      }
+    ],
+    "verified-artifact.json": {
+      "file": "/tmp/surprising-c2c-20261020_222008/live/artifacts/surprising-gateway-final-exec.jar",
+      "bytes": 92324791,
+      "sha256": "d6cbf7d8be8190b2e52a55e8583b56d91ba344b9d264ed334bbcf403f6b46be0",
+      "algorithmWorkIncluded": false,
+      "serverReleased": false
+    },
+    "verified-source-manifest.json": {
+      "base": "fcdb716a6f49c7fcf7e963efd16d7185488a115f",
+      "files": [
+        "init.sql",
+        "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminMarkets.java",
+        "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminQueries.java",
+        "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminReview.java",
+        "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAds.java",
+        "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cFunds.java",
+        "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cMarkets.java",
+        "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cOrders.java",
+        "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cProfiles.java",
+        "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cQueries.java",
+        "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAdminHttpPostgresTest.java",
+        "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAdsPostgresTest.java",
+        "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cDatabaseFixture.java",
+        "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cHttpFixture.java",
+        "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cOrdersPostgresTest.java",
+        "deployment/migrations/20261020-c2c-merchant-bond.sql",
+        "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cMerchantBonds.java",
+        "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cMerchantController.java",
+        "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cMerchantBondPostgresTest.java"
+      ],
+      "algorithmWorkIncluded": false
+    }
+  },
+  "logDigests": {
+    "native-business-tests-v5.log": {
+      "sha256": "30726306898afc8895d8a387b3406e8fcc33d1e0369f81ee2147ff3ea691237e",
+      "bytes": 2907
+    },
+    "native-business-tests.log": {
+      "sha256": "70397565d458c2a49173a90b6d08b4eaaceab050c21a709dbb8761a6be251275",
+      "bytes": 4019
+    },
+    "native-business-tests-v4.log": {
+      "sha256": "28bb533f30f5968a4cce9be389fb7cdba943fbdc7344c712aebad8ef46e5c136",
+      "bytes": 2701
+    },
+    "native-business-tests-v6.log": {
+      "sha256": "fb792010f857f29c66747d7915f69a86f36d7d0b37a7f335e23f85e9ead70dc8",
+      "bytes": 3823
+    },
+    "native-business-tests-v7.log": {
+      "sha256": "f6c6a28aa3ef5df25e995fa652462d2d55cb632a45d1e61524b6e9974b8a96f9",
+      "bytes": 2905
+    },
+    "native-business-tests-v3.log": {
+      "sha256": "4f05c78bdaf382431fc9b171f80589845af8c32b3bf88322d46532acfd0b1cf2",
+      "bytes": 2701
+    },
+    "native-business-tests-v2.log": {
+      "sha256": "7bef46b62a2e117ed85a4f599fdce0c6689105f8b95f346676a09b73e895ed3d",
+      "bytes": 4679
+    },
+    "c2c-full-tests.log": {
+      "sha256": "92f2e725e4cef5744cb77c763ad45f1e13f3cd213fdce66d180d9a82099e69f6",
+      "bytes": 78434
+    },
+    "native-business-tests-final.log": {
+      "sha256": "815403fb75164e3c557f2a424ba024ca58768e8f9fa91bd6c0c83445a4e07024",
+      "bytes": 2637
+    },
+    "merchant-bond-tests-v2.log": {
+      "sha256": "8729488ef6f1e2b4bc90b73d6bf392f760eaf1f0e5a0e9ea510ec793bfbdd64e",
+      "bytes": 48479
+    },
+    "merchant-bond-tests.log": {
+      "sha256": "6cae9e1f8e80d8ea487e7223d55269b1eff509bde98e6ca91a84101c50e49ff1",
+      "bytes": 52443
+    },
+    "final-entitlement-tests-package.log": {
+      "sha256": "9229817ebcf57d14c4c98f5e6cf460d256893dcb15f83f3c866aaf90cef04539",
+      "bytes": 53449
+    },
+    "native-business-tests-v9.log": {
+      "sha256": "ab489bd529516954a2b0d5aeb57feaab8e8ac772d1d7973cd51e9ebbf059859b",
+      "bytes": 614
+    },
+    "native-business-tests-v8.log": {
+      "sha256": "0b703aa337e28d5af1d6bcb898ba99f0f619653d7defc67d1fcae7909af68f06",
+      "bytes": 2907
+    },
+    "cold-accounts-red.log": {
+      "sha256": "a97ea43c273f6df567e345ee7c7a43cf2d7d86352cb9f843b74caa740160e2d9",
+      "bytes": 33269
+    },
+    "cold-accounts-green-v2.log": {
+      "sha256": "0c7fbaacad07dbff387ea40d2d7f7008ca640f9795652abcb7f8cc99a0b7d45d",
+      "bytes": 38647
+    },
+    "surprising-c2c-business-web-lint.log": {
+      "sha256": "10ef2c8c76d139195769ce1593514a951660dabcdb4da87b5314e96702d5d137",
+      "bytes": 19414
+    },
+    "surprising-c2c-business-admin-build.log": {
+      "sha256": "6c95d3f813724848162054b82de0c0437914bc5a1fe0031f8716008f9bc5615e",
+      "bytes": 777
+    },
+    "surprising-c2c-business-admin-tests.log": {
+      "sha256": "824d5a5a2d56f70e67107c242cad5cc5a422e2fae74809a9c95af2798e6a6897",
+      "bytes": 1668
+    },
+    "surprising-c2c-business-web-format-final.log": {
+      "sha256": "c8e099a8a457cb1434a76a35c083c6ad741938d322bda07274ed61086309a736",
+      "bytes": 1180
+    },
+    "surprising-c2c-business-client-tests.log": {
+      "sha256": "66a9f93633c13893ab5a688b19e324f939606dd0090aaca1f571e935f97c215e",
+      "bytes": 70385
+    },
+    "surprising-c2c-business-web-tests.log": {
+      "sha256": "5d433faebfe15ea0b03a1c23c29127daf7ace366e994767fd837925c58a6bec3",
+      "bytes": 288
+    },
+    "surprising-c2c-business-web-build.log": {
+      "sha256": "843c9ada7b646fbce4308b9c637a755fadbf0fefde542f3449c76b2f77c31737",
+      "bytes": 3906
+    },
+    "surprising-c2c-business-client-analyze.log": {
+      "sha256": "74f52998dfe13c971b72e17c383ef04592b7f5d6017fe8f0fc175652308528ea",
+      "bytes": 2119
+    },
+    "surprising-c2c-business-admin-lint.log": {
+      "sha256": "d42c3636f32ef74a518f6843324ee65ae8148aa3ee49633d0e42886017d64845",
+      "bytes": 60
+    }
+  },
+  "cleanup": {
+    "status": "complete",
+    "ownedProcessesStopped": true,
+    "ownedDatabaseDropped": "surprising_c2c_20261020_222008",
+    "temporaryIntegrationSchemasRemaining": 0,
+    "ownedPortsReleased": [
+      9094,
+      9095,
+      9096,
+      16379,
+      19092,
+      19093,
+      5173,
+      5174
+    ],
+    "sharedPostgresRunning": true,
+    "sharedServicesAndOtherWorkPreserved": true,
+    "ownedRuntimeRemoved": true,
+    "rawLogsRemovedAfterHashing": true,
+    "privateFixtureRemoved": true
+  },
+  "adminFinalRead": {
+    "passed": true,
+    "escrow": "0",
+    "fees": "1500000",
+    "actualRowStatus": "一致",
+    "desktopOverflow": false
+  },
+  "artifactPreservedAt": "/tmp/surprising-c2c-business-verified-20261021/surprising-gateway-final-exec.jar"
+}

@@ -40,6 +40,23 @@ public class C2cMarkets {
         return rows.getFirst();
     }
 
+    boolean validMerchantBondIntent(C2cFundsRepository.Intent intent) {
+        boolean reserve=intent.purpose().equals("MERCHANT_BOND");
+        long escrow=configuration().escrowUserId();
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM c2c_merchant_bonds WHERE bond_id=? AND asset=? AND amount_units=? AND user_id=?)
+                """,Boolean.class,intent.ownerId(),intent.asset(),intent.amountUnits(),reserve?intent.sourceUserId():intent.targetUserId()))
+                && (reserve?intent.targetUserId():intent.sourceUserId())==escrow;
+    }
+
+    void requireMerchantBond(long userId) {
+        if (!Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM c2c_merchant_bonds b JOIN c2c_merchant_bond_policy p
+                    ON p.asset=b.asset AND b.amount_units>=p.amount_units
+                    WHERE b.user_id=? AND b.status='LOCKED')
+                """,Boolean.class,userId))) throw new IllegalStateException("商家质押尚未确认，请先完成质押");
+    }
+
     void requireOpen() {
         if (!configuration().enabled()) throw new IllegalStateException("C2C 暂未开放");
     }

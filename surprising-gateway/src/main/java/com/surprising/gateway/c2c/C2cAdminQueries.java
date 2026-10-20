@@ -15,10 +15,12 @@ public class C2cAdminQueries {
         this.jdbc=jdbc;this.markets=markets;this.ads=ads;this.orders=orders;
     }
     Map<String,Object> merchants(String status,Long userId,int limit,int offset) {
-        page(limit,offset);state(status,List.of("PENDING","APPROVED","REJECTED","SUSPENDED"));
+        page(limit,offset);state(status,List.of("PENDING","APPROVED","REJECTED","SUSPENDED","WITHDRAWN"));
         var rows=jdbc.query("""
-                SELECT c.*,COALESCE(p.nickname,'用户'||right(c.user_id::text,6)) AS nickname,k.status AS kyc_status,k.expires_at AS kyc_expires_at
+                SELECT c.*,COALESCE(p.nickname,'用户'||right(c.user_id::text,6)) AS nickname,k.status AS kyc_status,k.expires_at AS kyc_expires_at,b.status AS bond_status,b.asset AS bond_asset,b.amount_units AS bond_units,ba.scale_units AS bond_scale
                 FROM c2c_merchants c LEFT JOIN c2c_profiles p USING(user_id) LEFT JOIN gateway_user_kyc_profiles k USING(user_id)
+                LEFT JOIN LATERAL(SELECT * FROM c2c_merchant_bonds WHERE user_id=c.user_id ORDER BY created_at DESC,bond_id DESC LIMIT 1) b ON true
+                LEFT JOIN assets ba ON ba.asset=b.asset
                 WHERE (CAST(? AS text) IS NULL OR c.status=?) AND (CAST(? AS bigint) IS NULL OR c.user_id=?)
                 ORDER BY c.updated_at DESC,c.user_id DESC LIMIT ? OFFSET ?
                 """,(r,n)->{
@@ -26,6 +28,8 @@ public class C2cAdminQueries {
                     view.put("nickname",r.getString("nickname"));view.put("status",r.getString("status"));view.put("tier",r.getString("tier"));
                     view.put("application",r.getString("application_text"));view.put("reviewReason",r.getString("review_reason"));
                     view.put("revision",Long.toString(r.getLong("revision")));view.put("kycStatus",r.getString("kyc_status"));
+                    view.put("bondStatus",r.getString("bond_status"));view.put("bondAsset",r.getString("bond_asset"));
+                    view.put("bondAmount",r.getObject("bond_units")==null?null:C2cViews.quantity(r.getLong("bond_units"),r.getLong("bond_scale")));
                     view.put("kycExpiresAt",r.getTimestamp("kyc_expires_at")==null?null:r.getTimestamp("kyc_expires_at").toInstant().toString());
                     view.put("createdAt",r.getTimestamp("created_at").toInstant().toString());return view;
                 },status,status,userId,userId,limit+1,offset);

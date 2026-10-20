@@ -62,6 +62,8 @@ public class C2cQueries {
                     s.completed_30d,s.ended_30d,s.completed_total,s.paid_seconds,s.released_seconds
                 FROM c2c_ads a
                 JOIN c2c_merchants c ON c.user_id=a.maker_user_id AND c.status='APPROVED'
+                JOIN c2c_merchant_bonds b ON b.user_id=c.user_id AND b.status='LOCKED'
+                JOIN c2c_merchant_bond_policy bp ON bp.asset=b.asset AND b.amount_units>=bp.amount_units
                 JOIN gateway_users u ON u.user_id=a.maker_user_id AND u.status='NORMAL'
                 LEFT JOIN c2c_profiles p ON p.user_id=a.maker_user_id
                 LEFT JOIN gateway_user_kyc_profiles k ON k.user_id=a.maker_user_id

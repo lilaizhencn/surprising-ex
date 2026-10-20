@@ -131,18 +131,18 @@ public class C2cAdminMarkets {
     private Map<String,Object> reconciliation() {
         long pending=jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents WHERE status NOT IN ('APPLIED','REJECTED')",Long.class);
         if(pending>0) return Map.of("status","PENDING","pendingIntentCount",Long.toString(pending),"assets",List.of());
-        long failed=jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents WHERE status='REJECTED' AND purpose NOT IN ('AD_RESERVE','ORDER_RESERVE')",Long.class);
+        long failed=jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents WHERE status='REJECTED' AND purpose NOT IN ('AD_RESERVE','ORDER_RESERVE','MERCHANT_BOND')",Long.class);
         if(failed>0) return Map.of("status","REVIEW_REQUIRED","failedSettlementCount",Long.toString(failed),"assets",List.of());
         if(!products.enabled().contains(ProductLine.SPOT)) return Map.of("status","UNAVAILABLE","reason","现货资金查询暂不可用","assets",List.of());
         var config=markets.configuration();var accountQueries=products.service(ProductLine.SPOT,AccountRequestService.class);
-        final Map<String,BalanceResponse> escrow;
-        final Map<String,BalanceResponse> fees;
-        try {
-            escrow=balances(accountQueries.balances(config.escrowUserId()).balances());
-            fees=balances(accountQueries.balances(config.feeUserId()).balances());
-        } catch(org.springframework.web.server.ResponseStatusException unavailable) {
+        Map<String,BalanceResponse> escrow=null,fees=null;
+        // 两个账户都续租并请求 realtime 同步；冷视图不能因首个异常一直阻塞另一个账户。
+        try { escrow=balances(accountQueries.balances(config.escrowUserId()).balances()); }
+        catch(org.springframework.web.server.ResponseStatusException unavailable) { /* 仍请求手续费账户 */ }
+        try { fees=balances(accountQueries.balances(config.feeUserId()).balances()); }
+        catch(org.springframework.web.server.ResponseStatusException unavailable) { /* 未就绪不能按零放行 */ }
+        if(escrow==null || fees==null)
             return Map.of("status","UNAVAILABLE","reason","资金查询视图暂不可用，请稍后核对","assets",List.of());
-        }
         var expected=jdbc.query("""
                 SELECT asset,COALESCE(sum(CASE WHEN target_user_id=? THEN amount_units::numeric WHEN source_user_id=? THEN -amount_units::numeric ELSE 0 END),0) AS escrow,
                     COALESCE(sum(CASE WHEN target_user_id=? THEN amount_units::numeric WHEN source_user_id=? THEN -amount_units::numeric ELSE 0 END),0) AS fees

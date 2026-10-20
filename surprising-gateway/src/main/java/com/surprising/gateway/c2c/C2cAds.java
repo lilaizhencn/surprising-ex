@@ -169,6 +169,7 @@ public class C2cAds {
                 try {
                     var current=markets.market(ad.marketId(),true);
                     access.requireCounterparty(ad.makerUserId(),current);
+                    markets.requireMerchantBond(ad.makerUserId());
                     validateTerms(current,ad.price().toPlainString(),ad.minFiat().toPlainString(),ad.maxFiat().toPlainString(),ad.terms(),ad.minCompleted());
                     marketReady=ad.paymentWindowSeconds()<=current.paymentWindowSeconds();
                 } catch(IllegalArgumentException | IllegalStateException unavailable) {marketReady=false;}
@@ -178,6 +179,7 @@ public class C2cAds {
     }
 
     private void requireMerchant(long userId) {
+        markets.requireMerchantBond(userId);
         if(!Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM c2c_merchants WHERE user_id=? AND status='APPROVED')",Boolean.class,userId)))
             throw new IllegalStateException("请先完成认证商家申请");
     }

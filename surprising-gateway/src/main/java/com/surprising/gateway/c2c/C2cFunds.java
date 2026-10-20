@@ -27,6 +27,7 @@ public class C2cFunds {
             boolean valid = switch (intent.purpose()) {
                 case "AD_RESERVE", "ORDER_RESERVE" -> intent.targetUserId() == configuration.escrowUserId()
                         && intent.sourceUserId() != configuration.escrowUserId() && intent.sourceUserId() != configuration.feeUserId();
+                case "MERCHANT_BOND", "MERCHANT_BOND_REFUND" -> markets.validMerchantBondIntent(intent);
                 case "BUYER_FEE" -> intent.sourceUserId() == configuration.escrowUserId()
                         && intent.targetUserId() == configuration.feeUserId();
                 case "AD_REFUND", "ORDER_REFUND", "ORDER_RELEASE" -> intent.sourceUserId() == configuration.escrowUserId()

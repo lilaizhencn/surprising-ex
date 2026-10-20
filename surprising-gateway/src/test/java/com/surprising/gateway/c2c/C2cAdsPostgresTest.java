@@ -34,6 +34,7 @@ class C2cAdsPostgresTest {
                 """,marketId);
         jdbc.update("UPDATE c2c_payment_methods SET enabled=true,currencies=ARRAY['CNY'] WHERE code='ALIPAY'");
         jdbc.update("INSERT INTO c2c_merchants(user_id,status,application_text) VALUES(11,'APPROVED','QA fixture')");
+        db.seedMerchantBond(11);
         jdbc.update("""
                 INSERT INTO c2c_payment_accounts(account_id,user_id,fiat,method_code,details_ciphertext,masked_label,status)
                 VALUES(?,11,'CNY','ALIPAY','fixture ciphertext','****0000','APPROVED')
