@@ -169,8 +169,8 @@ public class OrderInternalController {
     }
 
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/history")
-    public OrderQueryResponse historyOrders(@RequestParam("userId") long userId, @RequestParam(value = "instrumentId", required = false) String instrumentId, @RequestParam(value = "limit", defaultValue = "100") int limit, @RequestParam(value = "orderId", required = false) Long orderId, @RequestParam(value = "startTime", required = false) Long startTime, @RequestParam(value = "endTime", required = false) Long endTime, @RequestParam(value = "cursor", required = false) String cursor, @RequestParam(value = "minExportSequence", required = false) Long minExportSequence) {
-        return requests.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, cursor, minExportSequence);
+    public OrderQueryResponse historyOrders(@RequestParam("userId") long userId, @RequestParam(value = "instrumentId", required = false) String instrumentId, @RequestParam(value = "limit", defaultValue = "100") int limit, @RequestParam(value = "orderId", required = false) Long orderId, @RequestParam(value = "startTime", required = false) Long startTime, @RequestParam(value = "endTime", required = false) Long endTime, @RequestParam(value = "cursor", required = false) String cursor, @RequestParam(value = "minExportSequence", required = false) Long minExportSequence, @RequestParam(value = "status", required = false) String status) {
+        return requests.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, cursor, minExportSequence, status);
     }
 
     private final OrderRequestService requests;

@@ -40,6 +40,7 @@ class SixProductLineContractLiveTest {
     private Map<String, Object> triggerQueryFixture;
     private Map<String, Object> tradeQueryFixture;
     private Map<String, Object> userFillFixture;
+    private Map<String, Object> userHistoryFixture;
     private Map<String, Object> statisticsFixture;
     private String deliveryProtectionPhase;
 
@@ -230,6 +231,30 @@ class SixProductLineContractLiveTest {
         }
     }
 
+    private java.util.List<JsonNode> privateHistory(Participant user, int instrumentId, String status) throws Exception {
+        var rows = new java.util.ArrayList<JsonNode>();
+        var cursors = new java.util.HashSet<String>();
+        String cursor = null;
+        do {
+            String path = "/api/v1/gateway/trading/history?userId=" + user.id + "&instrumentId=" + instrumentId + "&limit=1"
+                    + (status == null ? "" : "&status=" + status) + (cursor == null ? "" : "&cursor=" + java.net.URLEncoder.encode(cursor, java.nio.charset.StandardCharsets.UTF_8));
+            var page = get(path, user.token);
+            assertThat(page.path("sort").asString()).isEqualTo("updatedAt.desc");
+            assertThat(page.path("count").asInt()).isEqualTo(page.path("orders").size());
+            for (var row : page.path("orders")) {
+                assertThat(row.path("userId").asLong()).isEqualTo(user.id);
+                assertThat(row.path("instrumentId").asString()).isEqualTo(String.valueOf(instrumentId));
+                assertThat(row.path("status").asString()).isIn("FILLED", "CANCELED", "REJECTED");
+                if (status != null) assertThat(row.path("status").asString()).isEqualTo(status);
+                rows.add(row);
+            }
+            cursor = page.path("hasMore").asBoolean() ? page.path("nextCursor").asString() : null;
+            if (cursor != null) assertThat(!cursor.isBlank() && cursors.add(cursor) && cursors.size() < 100).isTrue();
+        } while (cursor != null);
+        assertThat(rows.stream().map(row -> row.path("orderId").asLong()).distinct().count()).isEqualTo(rows.size());
+        return rows;
+    }
+
     /** Optional local UI handoff: keep the real maker running until both clients finish. */
     private void awaitClientVerification(Participant user, Participant maker, int instrumentId, long bid) throws Exception {
         String output = System.getenv("SIX_LINE_LIVE_UI_FIXTURE");
@@ -254,6 +279,7 @@ class SixProductLineContractLiveTest {
                 content.put("adminAccessToken", admin);
             }
             if (userFillFixture != null) content.put("userFills", userFillFixture);
+            if (userHistoryFixture != null) content.put("orderHistory", userHistoryFixture);
             if(statisticsFixture!=null) {
                 content.put("statistics",statisticsFixture);content.put("adminAccessToken",admin);
             }
@@ -834,6 +860,24 @@ class SixProductLineContractLiveTest {
             var restTradeIds = new HashSet<String>();
             for (var trade : recent.path("trades")) restTradeIds.add(trade.path("tradeId").asString());
             assertThat(restTradeIds).containsAll(user.trades.keySet());
+            if ("true".equals(System.getenv("SIX_LINE_LIVE_USER_HISTORY"))) {
+                assertThat(line).isEqualTo(ProductLine.SPOT);
+                var history = privateHistory(user, instrumentId, null);
+                var filled = privateHistory(user, instrumentId, "FILLED");
+                var historyCanceled = privateHistory(user, instrumentId, "CANCELED");
+                var rejected = privateHistory(user, instrumentId, "REJECTED");
+                var ids = history.stream().map(row -> row.path("orderId").asString()).collect(java.util.stream.Collectors.toSet());
+                assertThat(ids).contains(bought.path("orderId").asString(), sold.path("orderId").asString());
+                assertThat(filled).hasSize(6);
+                assertThat(historyCanceled).isNotEmpty();
+                assertThat(history.size()).isEqualTo(filled.size() + historyCanceled.size() + rejected.size());
+                request("GET", "/api/v1/gateway/trading/history?userId=" + maker.id, "", user.token, null, 403);
+                request("GET", "/api/v1/gateway/trading/history", "", null, null, 401);
+                request("GET", "/api/v1/gateway/trading/history?userId=" + user.id + "&status=ACCEPTED", "", user.token, null, 400);
+                userHistoryFixture = Map.of("orderIds", ids, "count", ids.size(), "filledOrderIds", filled.stream().map(row -> row.path("orderId").asString()).toList(),
+                        "canceledOrderIds", historyCanceled.stream().map(row -> row.path("orderId").asString()).toList());
+                System.out.printf("SPOT_ORDER_HISTORY_PASS user=%d total=%d filled=%d canceled=%d rejected=%d pages=1 sort=updatedAt.desc%n", user.id, history.size(), filled.size(), historyCanceled.size(), rejected.size());
+            }
             if ("true".equals(System.getenv("SIX_LINE_LIVE_USER_FILLS"))) {
                 assertThat(line).isEqualTo(ProductLine.SPOT);
                 var own = privateFills(user, instrumentId, restTradeIds);

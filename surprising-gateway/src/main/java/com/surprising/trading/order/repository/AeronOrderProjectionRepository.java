@@ -195,8 +195,10 @@ public class AeronOrderProjectionRepository {
 
     public ProjectionReadResult historyOrders(ProductLine productLine, long userId, String instrumentId,
                                               int limit, Long minimumOrderId, Long startTimeMillis,
-                                              Long endTimeMillis, String cursor, Long minExportSequence) {
+                                              Long endTimeMillis, String cursor, Long minExportSequence, OrderStatus status) {
         requireUserId(userId);
+        if (status != null && !java.util.Set.of(OrderStatus.FILLED, OrderStatus.CANCELED, OrderStatus.REJECTED).contains(status))
+            throw new IllegalArgumentException("history status must be terminal");
         requireLimit(limit);
         if (minimumOrderId != null) requirePositive(minimumOrderId, "orderId");
         if (startTimeMillis != null && startTimeMillis < 0) {
@@ -210,7 +212,7 @@ public class AeronOrderProjectionRepository {
         }
         return execute(productLine, minExportSequence,
                 Query.history(userId, instrumentId, minimumOrderId, startTimeMillis, endTimeMillis,
-                        decodeCursor(cursor), limit));
+                        decodeCursor(cursor), limit, status));
     }
 
     public ProjectionReadResult search(ProductLine productLine, Long userId, String instrumentId,
@@ -377,10 +379,11 @@ public class AeronOrderProjectionRepository {
         }
 
         private static Query history(Long userId, String instrumentId, Long minimumOrderId,
-                                     Long startTimeMillis, Long endTimeMillis, Cursor cursor, int limit) {
+                                     Long startTimeMillis, Long endTimeMillis, Cursor cursor, int limit, OrderStatus status) {
             StringBuilder sql = new StringBuilder(base(userId)).append(" AND status <> 'OPEN'");
             List<Object> arguments = new ArrayList<>(args(userId));
             appendSymbol(sql, arguments, instrumentId);
+            if (status != null) append(sql, arguments, " AND status = ?", status.name());
             append(sql, arguments, " AND order_id >= ?", minimumOrderId);
             append(sql, arguments, " AND created_at_epoch_ms >= ?", startTimeMillis);
             append(sql, arguments, " AND created_at_epoch_ms <= ?", endTimeMillis);

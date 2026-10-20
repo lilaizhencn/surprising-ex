@@ -332,7 +332,8 @@ public final class TradingLocalRoutes {
                     r.query("startTime", Long.class, null, false),
                     r.query("endTime", Long.class, null, false),
                     r.query("cursor", String.class, null, false),
-                    r.query("minExportSequence", Long.class, null, false));
+                    r.query("minExportSequence", Long.class, null, false),
+                    r.query("status", String.class, null, false));
         }
         if (r.matches(HttpMethod.POST, ORDER_CONTROLLER_CANCEL)) {
             return orderRequests.cancel(r.body(CancelOrderRequest.class, true, false));

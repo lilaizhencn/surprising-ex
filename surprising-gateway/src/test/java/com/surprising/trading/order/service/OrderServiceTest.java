@@ -57,6 +57,21 @@ import org.mockito.quality.Strictness;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class OrderServiceTest {
     @ParameterizedTest @EnumSource(ProductLine.class)
+    void terminalHistoryFiltersBeforePaginationWithoutCoreQueries(ProductLine line) {
+        var service = service(line, aeronOrders);
+        when(projection.historyOrders(line, 1001L, "1", 1, null, 1000L, 2000L, "cursor", null, OrderStatus.FILLED))
+                .thenReturn(ProjectionReadResult.ok(List.of(response(91, "own", OrderStatus.FILLED)), "next", true, 12L, 0L));
+        var page = service.historyOrders(1001L, " 1 ", 1, null, 1000L, 2000L, "cursor", null, " filled ");
+        assertThat(page.sort()).isEqualTo("updatedAt.desc");
+        assertThat(page.hasMore()).isTrue();
+        assertThat(page.nextCursor()).isEqualTo("next");
+        assertThat(page.orders()).extracting(OrderResponse::status).containsExactly(OrderStatus.FILLED);
+        verifyNoInteractions(aeronOrders, realtimeQueries);
+        assertThatThrownBy(() -> service.historyOrders(1001L, "1", 1, null, null, null, null, null, "ACCEPTED"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @ParameterizedTest @EnumSource(ProductLine.class)
     void ownFillsReadOnlyTheCommittedProductProjection(ProductLine line) {
         var service = service(line, aeronOrders);
         var trades = org.mockito.Mockito.mock(com.surprising.trading.order.repository.TradeProjectionRepository.class);
@@ -414,17 +429,18 @@ class OrderServiceTest {
         when(realtimeQueries.require(ProductLine.LINEAR_PERPETUAL, 1001L, null))
                 .thenReturn(readView(List.of(open)));
         when(projection.historyOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "1", 10,
-                null, null, null, null, null))
+                null, null, null, null, null, null))
                 .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
 
         assertThat(service.getByClientOrderId(1001L, "client-91")).isEqualTo(open);
         assertThat(service.openOrders(1001L, "1", 10).orders()).containsExactly(open);
-        assertThat(service.historyOrders(1001L, "1", 10, null, null, null).orders())
-                .containsExactly(open);
+        var history = service.historyOrders(1001L, "1", 10, null, null, null);
+        assertThat(history.orders()).containsExactly(open);
+        assertThat(history.sort()).isEqualTo("updatedAt.desc");
 
         verifyNoInteractions(aeronOrders);
         verify(projection).historyOrders(ProductLine.LINEAR_PERPETUAL, 1001L, "1", 10,
-                null, null, null, null, null);
+                null, null, null, null, null, null);
     }
 
     @Test

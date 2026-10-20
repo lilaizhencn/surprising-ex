@@ -1,0 +1,1578 @@
+{
+  "date": "2026-10-20",
+  "scope": "SPOT 本人历史委托分页、状态筛选、精度和 Web/client 界面；只实测现货；完整原目标保持 active。",
+  "previousGoalTurnClassification": {
+    "classification": "progress",
+    "evidence": "上轮成交记录功能已提交推送，本轮起始重新核对干净工作树及下面的真实 HEAD。"
+  },
+  "baselines": {
+    "surprising-ex": "c25da1be67ea27ac00455f896e2d70396418025f",
+    "surprising-ex-web": "b785ea16a8abb845a692aa47024107a53c74457a",
+    "surprising-client": "1bd222e4fa4953b23b50b60ed6c37621f9ef8b24",
+    "surprising-admin-web": "ac8fe282228c1a18082665e56a08adccab577cea"
+  },
+  "rootCauses": [
+    "Web 丢弃历史返回的 nextCursor，只能读取首 100 条，分类记录按金融流水模板展示订单。",
+    "client 加载更多读取当前筛选输入，而 cursor 属于先前查询；泛用卡片缺少已成交量、剩余量、均价及原累计手续费。",
+    "历史状态原来只在已加载页本地过滤，后续页的匹配订单可能不可见；后端 SQL 已按更新时间排序，却把 sort 标为 createdAt.desc。",
+    "client 的交易目录不包含已下线合约；历史记录缺失资产精度。",
+    "日期范围错误使 _load 提前返回；产品切换未清空旧结果和在途请求，旧产品历史仍显示。"
+  ],
+  "businessFlow": [
+    "认证路由绑定账户/产品，沿用 OrderInternalController / TradingLocalRoutes → OrderRequestService → OrderService → AeronOrderProjectionRepository。",
+    "status 仅 FILLED/CANCELED/REJECTED；先在 realtime exporter 已提交的 core_order_projection 上过滤，再 LIMIT/cursor 翻页；按 updated_at_epoch_ms/order_id 倒序，响应 sort=updatedAt.desc，创建日期范围仍含两端。",
+    "Web 保留两处游标、拒绝原账户/合约/状态不匹配及重复游标，按原查询归属丢弃迟到页；分类记录的条件变化会清页再查询。",
+    "client 固定 appliedFilters，草稿改动不会混入旧游标；非法日期先使旧请求失效并清空旧页/游标/元数据；历史合约按原永久身份加载资料。",
+    "两端使用精确十进制乘 tick/step 和真实资产 scale，允许均价小数 tick，显示原累计手续费，不按新费率重算；桌面表格与手机卡片共用只读历史内容。"
+  ],
+  "newTypesAndState": [
+    {
+      "type": "OrderHistoryTable",
+      "reason": "两处入口共用只读终态字段，避免携带当前委托的撤销/改单操作。"
+    },
+    {
+      "type": "_RecordFilters",
+      "reason": "游标必须绑定已应用的查询，不能读取可变输入控制器。生命周期为当前账户的一次查询。"
+    },
+    {
+      "type": "FundingRecordsPage.recordInstruments",
+      "reason": "仅为当前页及后续页索引真实合约资料；当前交易目录没有已下线合约。按账户/查询清空，没有复制订单或资金状态。"
+    },
+    {
+      "type": "decimalStepUnitsToDecimal / formatExecutionPrice",
+      "reason": "展示边界保留小数 tick 与完整 int64，不能先转 Number/double。"
+    }
+  ],
+  "contract": {
+    "get": "/api/v1/gateway/trading/history",
+    "internal": "/api/v1/trading/orders/history",
+    "status": [
+      "FILLED",
+      "CANCELED",
+      "REJECTED"
+    ],
+    "sort": "updatedAt.desc",
+    "timeFilters": "创建时间毫秒，含 startTime/endTime；排序为更新时间",
+    "coreQueriesForHistory": false,
+    "newMigration": false,
+    "newTopic": false,
+    "newCoreFinancialState": false,
+    "publication": "需配套 gateway/Web/client 发布 status 与 sort 修正，既有 realtime 投影导出须就绪。"
+  },
+  "backend": {
+    "java": "Corretto HotSpot 27.0.0",
+    "maven": "3.9.16",
+    "targetedTestsPassed": 207,
+    "spotFusedLiveTestsPassed": 1,
+    "results": [
+      {
+        "class": "com.surprising.trading.order.service.OrderServiceTest",
+        "tests": 124,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.trading.order.repository.ProjectedOrderQueryRepositoryTest",
+        "tests": 7,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.trading.order.repository.OrderHistoryPostgresTest",
+        "tests": 2,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+        "tests": 34,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.gateway.provider.service.GatewayProxyServiceTest",
+        "tests": 40,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.gateway.provider.local.SixProductLineContractLiveTest",
+        "tests": 1,
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0
+      }
+    ],
+    "commands": [
+      "JAVA_HOME=<HotSpot27> mvn -o -pl surprising-gateway -am -Dtest=OrderServiceTest,ProjectedOrderQueryRepositoryTest,OrderHistoryPostgresTest,LocalBusinessApiTest,GatewayProxyServiceTest -Dsurefire.failIfNoSpecifiedTests=false package",
+      "SIX_LINE_LIVE_PRODUCT=SPOT SIX_LINE_LIVE_TRADING=true SIX_LINE_LIVE_USER_HISTORY=true SIX_LINE_LIVE_UI_FIXTURE=<owned fixture> mvn -o -pl surprising-gateway -am -Dtest=SixProductLineContractLiveTest -Dsurefire.failIfNoSpecifiedTests=false test"
+    ],
+    "coverage": [
+      "真实 PostgreSQL 验证终态筛选在 LIMIT 前、相同更新时间的大订单号分页、OPEN 排除、本人/产品/合约/含端创建日期隔离。",
+      "六产品 enum 的 service 测试验证只查已提交投影，无 Core / realtime RPC 查询交互；拒绝非终态筛选。",
+      "SPOT 实栈逐页读取 8 本人终态（6 成交、2 撤销），三种状态的并集与全部历史一致；未登录 401、越权 403、ACCEPTED 状态 400。"
+    ]
+  },
+  "web": {
+    "testsPassed": 296,
+    "testFilesPassed": 38,
+    "lint": {
+      "exit": 0,
+      "errors": 0,
+      "warnings": 0,
+      "infos": 535,
+      "note": "含本轮新增源文件诊断，不把所有 info 归为历史项。"
+    },
+    "build": {
+      "exit": 0,
+      "existingLargeChunkAdvisory": true
+    },
+    "browserCases": [
+      {
+        "page": "/orders",
+        "width": 1440,
+        "theme": "dark",
+        "rows": 8,
+        "realOneRowPages": 8,
+        "originalOwnIds": true,
+        "serverFilteredFilledRows": 6,
+        "reloadReadsCommittedHistory": true,
+        "overflow": false,
+        "writes": 0,
+        "errors": [],
+        "screenshot": "history-orders-1440-dark.png"
+      },
+      {
+        "page": "/orders",
+        "width": 320,
+        "theme": "dark",
+        "rows": 8,
+        "realOneRowPages": 8,
+        "originalOwnIds": true,
+        "serverFilteredFilledRows": 6,
+        "reloadReadsCommittedHistory": true,
+        "overflow": false,
+        "writes": 0,
+        "errors": [],
+        "screenshot": "history-orders-320-dark.png"
+      },
+      {
+        "page": "/orders",
+        "width": 320,
+        "theme": "light",
+        "rows": 8,
+        "realOneRowPages": 8,
+        "originalOwnIds": true,
+        "serverFilteredFilledRows": 6,
+        "reloadReadsCommittedHistory": true,
+        "overflow": false,
+        "writes": 0,
+        "errors": [],
+        "screenshot": "history-orders-320-light.png"
+      },
+      {
+        "page": "/assets/ledger?category=order",
+        "width": 1440,
+        "theme": "dark",
+        "rows": 8,
+        "realOneRowPages": 9,
+        "originalOwnIds": true,
+        "serverFilteredFilledRows": 6,
+        "reloadReadsCommittedHistory": true,
+        "overflow": false,
+        "writes": 0,
+        "errors": [],
+        "screenshot": "history-ledger-1440-dark.png"
+      },
+      {
+        "page": "/assets/ledger?category=order",
+        "width": 320,
+        "theme": "dark",
+        "rows": 8,
+        "realOneRowPages": 9,
+        "originalOwnIds": true,
+        "serverFilteredFilledRows": 6,
+        "reloadReadsCommittedHistory": true,
+        "overflow": false,
+        "writes": 0,
+        "errors": [],
+        "screenshot": "history-ledger-320-dark.png"
+      },
+      {
+        "page": "/assets/ledger?category=order",
+        "width": 320,
+        "theme": "light",
+        "rows": 8,
+        "realOneRowPages": 9,
+        "originalOwnIds": true,
+        "serverFilteredFilledRows": 6,
+        "reloadReadsCommittedHistory": true,
+        "overflow": false,
+        "writes": 0,
+        "errors": [],
+        "screenshot": "history-ledger-320-light.png"
+      }
+    ],
+    "mode": "真实 gateway 响应；只把 history GET limit 改为 1，route.fetch 后原样转发，不合成金融数据。",
+    "script": "scripts/spot-order-history-fused-live.mjs"
+  },
+  "client": {
+    "fullTestsBeforeFinalBoundary": 295,
+    "optInSkippedBeforeNewLiveFile": 9,
+    "finalFullSuite": "passed",
+    "newOrderHistoryCases": 11,
+    "invalidDateScopeRegression": "实测先红，旧订单 SelectableText 仍存在；修复后真实日期选择与产品切换通过，未发送新查询。",
+    "realApiAndWidgets": {
+      "productLine": "SPOT",
+      "orders": 8,
+      "filled": 6,
+      "themes": [
+        "dark",
+        "light"
+      ],
+      "width": 320,
+      "writes": [],
+      "historyGets": 22,
+      "realApiAndWidgets": true
+    },
+    "shipLiveExit": 0,
+    "liveScript": "test/spot_order_history_fused_live_test.dart",
+    "mode": "主机 Flutter 实际点击、滚动与真实 HTTP；loopback proxy 仅将 history limit 降为 1，逐字节转发真实响应，0 金融写入。",
+    "fullTestsPassed": 296,
+    "optInLiveSkipped": 10,
+    "fullTestExit": 0,
+    "analyze": "No issues found; exit 0",
+    "commands": [
+      "flutter analyze",
+      "flutter test --concurrency=2 --reporter expanded",
+      "SPOT_HISTORY_LIVE_FIXTURE=<owned fixture or review fixture> flutter test test/spot_order_history_fused_live_test.dart --reporter expanded"
+    ]
+  },
+  "runtime": {
+    "root": "/tmp/surprising-spot-fused-history-20261020_085340",
+    "database": "surprising_spot_20261020_085340",
+    "runId": "spot-history-20261020-085340",
+    "product": "SPOT",
+    "mode": "FUSED",
+    "coreProcesses": 1,
+    "roles": {
+      "realtime": {
+        "pid": "36247",
+        "runs": "1",
+        "last exit code": "(never exited)"
+      },
+      "price": {
+        "pid": "36121",
+        "runs": "1",
+        "last exit code": "(never exited)"
+      },
+      "core-node0": {
+        "pid": "35959",
+        "runs": "1",
+        "last exit code": "(never exited)"
+      },
+      "gateway": {
+        "pid": "36003",
+        "runs": "1",
+        "last exit code": "(never exited)"
+      },
+      "maker": {
+        "pid": "36411",
+        "runs": "1",
+        "last exit code": "(never exited)"
+      }
+    },
+    "heapCapsMiB": {
+      "core": 256,
+      "gateway": 384,
+      "price": 256,
+      "realtime": 256,
+      "maker": 256,
+      "kafka": 256
+    },
+    "minimumHeapMiB": 64,
+    "redisMiB": 128,
+    "hikariMax": 4,
+    "streamThreads": 1,
+    "jfr": false,
+    "wallet": false,
+    "logs": "应用滚动 8MB/32MB；GC 5×20MB；Kafka 自有配置/stdout/GC 均在本轮目录；单分区 16MB segment/1h；未测总体 RSS/性能。"
+  },
+  "financialReconciliation": {
+    "fundedUsers": [
+      3,
+      4
+    ],
+    "instrumentId": "867",
+    "executions": 6,
+    "fundsDifference": 0,
+    "nonzeroPositions": 0,
+    "reservations": 0,
+    "lockedUnits": 0,
+    "publicRealtimeBalancesEqualCore": true,
+    "basis": "Maven UI handoff 完成后暂停 maker，再核对两个用户/做市/财库的逐资产资金守恒、冻结、预留及零持仓；ship 复核仅有真实 GET、0 写入。",
+    "note": "只读诊断工具的 Core 审计不属于用户历史查询路径。"
+  },
+  "redAndCorrections": [
+    "Web 原行为 4 个分页/身份用例失败；client 初始 8 个 API/界面/草稿混页用例失败；后端 sort 断言明确失败（expected updatedAt.desc, actual createdAt.desc）。",
+    "状态参数扩展首次遗漏 MVC controller，编译失败；已同步既有 controller、本地路由及调用方。新增 live 块首次与已有 canceled 变量重名，改为 historyCanceled 后 package 通过。",
+    "首次 biome unsafe 格式化扩大既有字面键 diff，已从 HEAD 恢复不相关更改，仅保留本轮业务修改并使用安全格式化。",
+    "ticker 的 launchd 进程持续运行但无监听；sample 证实停在 node::fs::Open/__open。确认所有权后撤下旧实例，将 ws 依赖复制至 owned /tmp 再启动，立即监听；没有因观察超时盲目启动重复实例。",
+    "首次 Flutter live 等待尚未构建的离屏加载更多按钮失败；改为实际滚动至按钮后点击，同一批 QA 数据重试通过，未重跑金融交易或重置数据。",
+    "最后 UI 边界复现非法日期切换产品仍显示旧订单；generation 作废旧请求并清空页/游标/元数据后通过。"
+  ],
+  "knownLimits": [
+    "本轮仅 SPOT 实栈；共享六产品 enum/SQL 隔离测试不替代其他产品完整实栈验收。",
+    "未安装 iOS/Android 真机、未验证原生 secure-storage；无原生配置变化。",
+    "未做生产发布、线上回填、JMH/JFR、整体 RSS 或长时间稳定性验收。",
+    "此前 NOT_ACCEPTED 回执恢复及 SDK 瞬态负 offer 根因不在本模块内，不宣称本轮修复。",
+    "CodeGraph 工具本轮不可用，使用原生源码检查；没有启动子代理。"
+  ],
+  "cleanup": {
+    "status": "complete",
+    "shutdownExit": 0,
+    "appPidsGone": [
+      35959,
+      36003,
+      36121,
+      36247,
+      36411
+    ],
+    "dependencyAndVitePidsGone": [
+      34072,
+      34076,
+      35734,
+      35982
+    ],
+    "allOwnedLabelsAbsent": true,
+    "ownedPortsReleased": [
+      5173,
+      19092,
+      19093,
+      16379,
+      19194,
+      19195,
+      9094,
+      9082,
+      9095,
+      9096
+    ],
+    "openFilesUnderRoot": 0,
+    "externalAeronOwnedResiduals": 0,
+    "databaseRemoved": "surprising_spot_20261020_085340",
+    "connectionsBeforeDrop": 0,
+    "sharedPostgreSQLRetained": true,
+    "viteSessionExit": 143,
+    "note": "保留现有构建缓存、其他任务的进程/文件和无法证明属于本轮的共享临时文件；已删除路径只作历史定位。",
+    "rootRemoved": "/tmp/surprising-spot-fused-history-20261020_085340",
+    "allocatedKiBRemoved": 2934084,
+    "ownedTempLogsRemoved": 44,
+    "selectedSurefireReportsRemoved": 12,
+    "metadataRemoved": true,
+    "completedAt": "2026-10-20T01:17:34.315341+00:00"
+  },
+  "evidencePolicy": "只提交摘要与哈希；不提交截图、日志、JWT、会话 fixture、运行配置。已删除路径仅作历史定位。",
+  "generatedAt": "2026-10-20T01:11:58.214614+00:00",
+  "evidenceManifest": [
+    {
+      "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.LocalBusinessApiTest.xml",
+      "bytes": 51804,
+      "sha256": "7565d717169edb64b8ccce4d2c6595d10f23b69df137a76902c4fc555dc4a17b"
+    },
+    {
+      "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.SixProductLineContractLiveTest.xml",
+      "bytes": 45408,
+      "sha256": "9a02d37e5c8b5f23d274a0a94bdd839949a166c808834ab7ece23136510d9824"
+    },
+    {
+      "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.GatewayProxyServiceTest.xml",
+      "bytes": 52108,
+      "sha256": "c5e9e5eeab4b4c9bffd753fc74726968c41824bc91bb9d6d678cf217511a876c"
+    },
+    {
+      "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.repository.OrderHistoryPostgresTest.xml",
+      "bytes": 45733,
+      "sha256": "63325bb857cada880f5258c33150b6dabe6f7c5387d9d68ab89af6357cc8f280"
+    },
+    {
+      "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.repository.ProjectedOrderQueryRepositoryTest.xml",
+      "bytes": 47407,
+      "sha256": "39004e547ec64254d06e416252c5b563fd08571931b5db875b5d0cd0a1ca52d3"
+    },
+    {
+      "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.OrderServiceTest.xml",
+      "bytes": 66981,
+      "sha256": "d0f040920caa28317c58bfa765dd2be65cdcb62105c9fe3349a9549989718f42"
+    },
+    {
+      "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.LocalBusinessApiTest.txt",
+      "bytes": 367,
+      "sha256": "45d29dcd9e880ea1e316dddb73574609e404d809d38e252fe46567b244049804"
+    },
+    {
+      "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.SixProductLineContractLiveTest.txt",
+      "bytes": 386,
+      "sha256": "80ff498d1d5c9c0101e1c2a0b0f25490586fd93711ea9b1706184e665f978f0b"
+    },
+    {
+      "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.GatewayProxyServiceTest.txt",
+      "bytes": 377,
+      "sha256": "85ee82439b5c51e033eca3cf1043e00f804a95534cef44f3276e562b64be0bd0"
+    },
+    {
+      "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.order.repository.OrderHistoryPostgresTest.txt",
+      "bytes": 378,
+      "sha256": "aa14b871b5f6d7c998dd2ffb6d79167cfd52c1acf79845c95f8f7b44858d2863"
+    },
+    {
+      "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.order.repository.ProjectedOrderQueryRepositoryTest.txt",
+      "bytes": 396,
+      "sha256": "f143e06014b445b915d6328657a35368aace548b0b50c93822df159a7bc433e1"
+    },
+    {
+      "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.OrderServiceTest.txt",
+      "bytes": 358,
+      "sha256": "4e37e021251018c42a98803943057a4d1710e33386ec70b720a4598efb2b2721"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/application-core-node0.log",
+      "bytes": 1325,
+      "sha256": "e684a1d1c79fbd0253d3a42e139399e6f44ce78eb4abb225a945ed69c9c4835c"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/application-gateway.log",
+      "bytes": 830173,
+      "sha256": "5b88b5dc1f6ed63157390e764184b4ee672abfc495dc20a262b99e68f948f994"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/application-maker.log",
+      "bytes": 359198,
+      "sha256": "b2951a67a4acf621e36ce0ed3f714e526d38eabbd1e9975e02d571c4d2c88e1c"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/application-price.log",
+      "bytes": 1246744,
+      "sha256": "6c7b7149ff864cda86d10050228cc0b4e6b3e77bc3d8db00da89646ffb7fc924"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/application-realtime.log",
+      "bytes": 411699,
+      "sha256": "362ff4decb1ebce5629b5a80d832c53aac7cdfab79ad204a353346b85ddd7225"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/artifacts/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+      "bytes": 141969553,
+      "sha256": "70cc36a9c510d79e322f83e7f1685687b1c0a798e1b0f6be1822f1b169a9e516"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/artifacts/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar",
+      "bytes": 143166173,
+      "sha256": "f6d7b9e5609818d6395414545c42dab34ba6bb32b5995c44ae8713de19caa9b9"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/artifacts/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar",
+      "bytes": 81293445,
+      "sha256": "1b2c12abed6653a075031d31d2d589ab727c8bb40faece04f272ae1771dedb71"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/artifacts/surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar",
+      "bytes": 62011609,
+      "sha256": "7c13acce6ab5b26b5d1ec5f98e2597f45970537e1bf8a2d0760f63e7256b678d"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/artifacts/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar",
+      "bytes": 78089340,
+      "sha256": "e50223f53246b9b5ce319480f5fe4f20e3006ea9a43af6fb85d66a76c78bdfe0"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/artifacts/surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar",
+      "bytes": 188391071,
+      "sha256": "37b7c962816e4a7ad696c7b013146726e454ba8d68d644ad90ac94cc0e7afe1f"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/client-history-live-first.log",
+      "bytes": 2794,
+      "sha256": "61deb73311b2a25c5a44432a7c7137bdf6804092c108fb93b4ce8af579ac8a0c"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/client-history-live.log",
+      "bytes": 228,
+      "sha256": "eebc9c8872ab7590b9b082ce0b8f083d77d08b949fd29c95aa605e8f9a0c4e52"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/client-history-ship.log",
+      "bytes": 228,
+      "sha256": "919ba430c022a1acdf9cc21fb7d6a73f66c8a9159d9b2ae4d7de03fa278c7813"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/database-cleanup.json",
+      "bytes": 149,
+      "sha256": "4ab7c64295cab8743734387b1667198f70f4ed9bc73b19a9a4128b107ef1be2d"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/database-init.log",
+      "bytes": 11848,
+      "sha256": "a011e654dee809b8bfe3f5192cd39120eff0ec4e92769c4510912930d68c3884"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/dependencies-stopped.json",
+      "bytes": 96,
+      "sha256": "a9dd655dd86d2e6725fd127ca41196b54b5ef24c163fecb2f9f53bb46c7e53e6"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/final-resource-check.json",
+      "bytes": 201,
+      "sha256": "6d34fa664e9c6b40014eba51e7a65f399c5457f5359b67f3d5e5920edd47ed60"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/fused-contract.log",
+      "bytes": 30254,
+      "sha256": "a26f4d958d7d18c7412132495890ef349a535b0940ed7aeb5ce45c3d030edcc4"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/history-ledger-1440-dark.png",
+      "bytes": 168898,
+      "sha256": "6b715db08990028ddeae8a4f96d2e634e0d8634a4ead003bab533727a26f662e"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/history-ledger-320-dark.png",
+      "bytes": 282635,
+      "sha256": "a55dc467fa4cb0614482ef6a2d19a288de4a7e62bc298d78105d3fb7bea5e2ac"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/history-ledger-320-light.png",
+      "bytes": 279382,
+      "sha256": "7d5b592725eb4e4b942115e7ac12701e4c622ef81bf5541ea43b3ee6a05d4c41"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/history-orders-1440-dark.png",
+      "bytes": 193351,
+      "sha256": "52eb947e2dd2a1e19a28348aab39717955114bd7ea63e9130d8106150b489fb3"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/history-orders-320-dark.png",
+      "bytes": 296860,
+      "sha256": "1532dd07e05548721dff18bec07ffa74cefd63e05fcc6c295b8b6cdcc807fe8d"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/history-orders-320-light.png",
+      "bytes": 295731,
+      "sha256": "1f44046e68b2a11988e90600196cef3e56d87417d603f9af9befca1c6b5e7a3d"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__cluster_metadata-0/00000000000000000000.log",
+      "bytes": 107826,
+      "sha256": "f42b1fbc96c6e33b1179c0c5a529c9e755083df9253fc154fe19c36af75f99fb"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-0/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-1/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-10/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-11/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-12/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-13/00000000000000000000.log",
+      "bytes": 2021,
+      "sha256": "3f76c06836e4b43d4348ba1cff0a857e7877308ca1375bebdc114a14f288914a"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-14/00000000000000000000.log",
+      "bytes": 1873,
+      "sha256": "7b7b1b5e754f3076637f87be356047180d8c5fbda08bdd2fdb822e0e66f21d08"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-15/00000000000000000000.log",
+      "bytes": 1818,
+      "sha256": "a45b38f4e3d3c3eb1003673a94c30be27b5b8e22bb3213ce6a44f38d2fd28b5e"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-16/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-17/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-18/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-19/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-2/00000000000000000000.log",
+      "bytes": 411460,
+      "sha256": "c5aa39c61de7b502a78db22028a18142304593bc06594c8aeb059b784153e319"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-20/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-21/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-22/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-23/00000000000000000000.log",
+      "bytes": 166821,
+      "sha256": "c69c2ea958d4482f04364722f74b77096f7a4a0cc33faefac874b2877f151d81"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-24/00000000000000000000.log",
+      "bytes": 1264,
+      "sha256": "123b63597daeb453cf08e6472a1400465265a1eabd93a18465f693f18d416971"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-25/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-26/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-27/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-28/00000000000000000000.log",
+      "bytes": 2009,
+      "sha256": "f302e59d4268185f27b788b9bd1262192f9a23a143ccd72e2c918967b792e1ed"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-29/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-3/00000000000000000000.log",
+      "bytes": 1807,
+      "sha256": "ba5ead2570fbfa6026c34ef9adc6111e293e31c0680f18432554cfee964413cb"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-30/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-31/00000000000000000000.log",
+      "bytes": 163198,
+      "sha256": "79b7936af726e087b6d15e0160493db96148b644c30044edf696c72abf4c5a17"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-32/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-33/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-34/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-35/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-36/00000000000000000000.log",
+      "bytes": 1833,
+      "sha256": "c755c667f68fad704b777dc313b82f9dfd9d298aed752d142cc2e0584dcc0a60"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-37/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-38/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-39/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-4/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-40/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-41/00000000000000000000.log",
+      "bytes": 96275,
+      "sha256": "6d8d353354551ab39637281834efaa0ba7623ffe00f132b028138d2f934d4e23"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-42/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-43/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-44/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-45/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-46/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-47/00000000000000000000.log",
+      "bytes": 2394,
+      "sha256": "920a433896410ed9797d30307db14ca83f0b6d3468ecdac9c65d88675db976e0"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-48/00000000000000000000.log",
+      "bytes": 816,
+      "sha256": "f5dc261aaa4a7cd08f20bdbb7846b418103618d8a2ba66cd4952869a97a9fc29"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-49/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-5/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-6/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-7/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-8/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__consumer_offsets-9/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-0/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-1/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-10/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-11/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-12/00000000000000000000.log",
+      "bytes": 3390,
+      "sha256": "6b06d2f530f8baf1ba39a8da7ef2abab5f039f042d2e82581f1adf931805d75b"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-13/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-14/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-15/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-16/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-17/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-18/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-19/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-2/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-20/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-21/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-22/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-23/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-24/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-25/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-26/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-27/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-28/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-29/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-3/00000000000000000000.log",
+      "bytes": 236043,
+      "sha256": "55d1c3dcf6a77dc301ce2c89e8e9e3cfbbc05fc0707245afb472a8b8397ba8ff"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-30/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-31/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-32/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-33/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-34/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-35/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-36/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-37/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-38/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-39/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-4/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-40/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-41/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-42/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-43/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-44/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-45/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-46/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-47/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-48/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-49/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-5/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-6/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-7/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-8/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/__transaction_state-9/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/surprising-spot-candlestick-v1-candlestick-candles-changelog-0/00000000000000000000.log",
+      "bytes": 3663,
+      "sha256": "4513a9eacd2131f7b30a0b89397a04e588c266265c0aa9ffab38557a0e5d3224"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/surprising-spot-candlestick-v1-candlestick-closed-one-minute-watermarks-changelog-0/00000000000000000000.log",
+      "bytes": 162,
+      "sha256": "57ee16c347100dfb8f57d843fa385105a43b4e2289c14893eb1642c735f9833b"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/surprising-spot-candlestick-v1-candlestick-dirty-candles-changelog-0/00000000000000000000.log",
+      "bytes": 3649,
+      "sha256": "71c30d17b66cac88b137e8217171999b73075ca483be7e2d5d336dcc3ce2b303"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/surprising-spot-candlestick-v1-candlestick-instrumentId-sequences-changelog-0/00000000000000000000.log",
+      "bytes": 600,
+      "sha256": "b271a17b20db9b688f9260e9b7384463da98213563845691cb7f380d1f9101bd"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/surprising-spot-candlestick-v1-candlestick-rollup-seen-minutes-changelog-0/00000000000000000000.log",
+      "bytes": 465,
+      "sha256": "ef2dd4892ce285d7bdccf4c12bf085147df9d3f1aa001263afc24d57dbe64aab"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/surprising-spot-candlestick-v1-candlestick-rollup-watermarks-changelog-0/00000000000000000000.log",
+      "bytes": 297,
+      "sha256": "cd4f3e3d284171b689723a78458509b47eee70b899ba00db4d6d69bdb2c4045e"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/surprising-spot-candlestick-v1-candlestick-rollups-changelog-0/00000000000000000000.log",
+      "bytes": 38021,
+      "sha256": "c70e70e77df61a975e030b4b1c2d45abfbcf0b14b8defc7cd96fe283ae75dbc2"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/surprising-spot-candlestick-v1-candlestick-trade-dedupe-changelog-0/00000000000000000000.log",
+      "bytes": 855,
+      "sha256": "0e4515f00c24063df05b99ad8eeed761b59d0cfe24d9992b8a4298de4d40179e"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/surprising.instrument.events.v1-0/00000000000000000000.log",
+      "bytes": 16891,
+      "sha256": "74c253d71d07664e4bf7b9c0bcfc07f91c44aa2b43d82f4c7e7ace9c7b725f01"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/surprising.instrument.lifecycle-drain.v1-0/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/surprising.spot.candle.events.v1-0/00000000000000000000.log",
+      "bytes": 29572,
+      "sha256": "d57dde917873e8fc86552e0e17696661bc9d5b08470066c83ccdc1b8b77422cb"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/surprising.spot.fee.schedule.events.v1-0/00000000000000000000.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/surprising.spot.match.trades.v1-0/00000000000000000000.log",
+      "bytes": 2305,
+      "sha256": "5419b69b59f26469ec1752adabc2b579a192ae06e8349ce2bfc3ddbbd31a59de"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-data/surprising.spot.price.events.v1-0/00000000000000000000.log",
+      "bytes": 639694,
+      "sha256": "5b595b9030458f5f5628ea6bdd4c3d3b8a56589ba2c004e03defebd82c73ed60"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-format.log",
+      "bytes": 986,
+      "sha256": "87419580d1e09e0d9e8b3fb942221c876b819acb9e07787633f4ec4531d43dcc"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka-gc.log",
+      "bytes": 122492,
+      "sha256": "242b65e62cd0f524db169e138b81e7321dad97e4347775668518b5bcac7be198"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/kafka.log",
+      "bytes": 1634,
+      "sha256": "62184427572eecdb007f82af3ddf403b3030dd35ac4915587d3214e54818868e"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/order-history-client-evidence.json",
+      "bytes": 137,
+      "sha256": "c33c0fce39618a5a79f7e218d0ca79e100989d1b79d424b6995c8a6701cf0046"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/order-history-web-evidence.json",
+      "bytes": 2009,
+      "sha256": "dc46a67fc4690626e1f43a24fd42130df9b66c39d95c5e53887e204247f75333"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/redis.log",
+      "bytes": 1136,
+      "sha256": "112e90dc502bcb1b08313e4d91a023d34a54b6e7c7496affc4ddd91dd0fe45b6"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime/spot-history-20261020-085340/aeron/spot/node0/cluster/recording.log",
+      "bytes": 64,
+      "sha256": "3c46b79bfc3971d2f19b4f2da4acf94cd78c2dec44a96779215b9b0cdf66721b"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime/spot-history-20261020-085340/logs/core-node0-gc.log",
+      "bytes": 16238,
+      "sha256": "6af70c39ca4b11e4bfce21f29c8a767fb3b95aab16d1c98be364af7f920fa6c2"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime/spot-history-20261020-085340/logs/core-node0.log",
+      "bytes": 429,
+      "sha256": "00b575c4f10663fcbbcb22023cb3dc03ac421cd628282283de805994b296c57a"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime/spot-history-20261020-085340/logs/core-probe-gc.log",
+      "bytes": 3164,
+      "sha256": "3da21b28b80b7b950feec6c7e19e74988abaa90aa62b760eb09d6d94f3086d4b"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime/spot-history-20261020-085340/logs/core-probe.log",
+      "bytes": 106,
+      "sha256": "a81287e7529abc554e4637586b66e2cbe80cf3a4b6428b9c15549ee739570359"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime/spot-history-20261020-085340/logs/gateway-gc.log",
+      "bytes": 119836,
+      "sha256": "2d2a207a6db812773c6c81d9136c1030d27ad6ead4d2ad6bdc51358b6e82f196"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime/spot-history-20261020-085340/logs/gateway.log",
+      "bytes": 362,
+      "sha256": "d0516eff9a6337940e8a4e76b161ff4fd41fe911e450b1f9eb060157c81006f2"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime/spot-history-20261020-085340/logs/maker-gc.log",
+      "bytes": 74627,
+      "sha256": "ee072e16d6118f43b5a247748ad39d4e0a1884055d6ce0c511f230ef86c488fa"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime/spot-history-20261020-085340/logs/maker.log",
+      "bytes": 295,
+      "sha256": "10c7d78afacf9b44cc07813e510d7e4247536c8857f6a49461aa30097d9da022"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime/spot-history-20261020-085340/logs/price-gc.log",
+      "bytes": 92282,
+      "sha256": "6ea95309b13c7f01447f3071d228b2cc2dc9ebe71ff7f81339e659240223e3f2"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime/spot-history-20261020-085340/logs/price.log",
+      "bytes": 429,
+      "sha256": "00b575c4f10663fcbbcb22023cb3dc03ac421cd628282283de805994b296c57a"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime/spot-history-20261020-085340/logs/realtime-gc.log",
+      "bytes": 9952,
+      "sha256": "ebfa788bbec085f34e2ee40639614157e4c80e63f301907affddb0812f5b3365"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime/spot-history-20261020-085340/logs/realtime-gc.log.0",
+      "bytes": 127019,
+      "sha256": "8b3c49348e2388f8d6a319a259af06faec8371d712015d672c5390eb91d9931c"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime/spot-history-20261020-085340/logs/realtime.log",
+      "bytes": 1012,
+      "sha256": "120ed52e6f4b54c6d8fd3a70327e82d3354e2e91709ca31956d8fe658f779162"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime-final-processes.json",
+      "bytes": 483,
+      "sha256": "259b7d9dd1ca1e0d582c73029001f07921406c0fbc3c38d0980f6433b5ccdf9e"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/runtime-final-status.log",
+      "bytes": 210,
+      "sha256": "6e154d3f7b47fb56a769c926e7ce807b55e76345201a8ee4481ecfc4836adb11"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/shutdown.log",
+      "bytes": 81,
+      "sha256": "01c2133e87757960c2c26c44662689ea45ddfd6307de3b1986e1c5440d23a092"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/startup.log",
+      "bytes": 237,
+      "sha256": "15b9a58a1d86153d87bceadf0ce5e985ad19e623e35f948bab9b7e5762e4f73b"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/streams/surprising-spot-candlestick-v1/0_0/rocksdb/candlestick-candles/000004.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/streams/surprising-spot-candlestick-v1/0_0/rocksdb/candlestick-closed-one-minute-watermarks/000004.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/streams/surprising-spot-candlestick-v1/0_0/rocksdb/candlestick-dirty-candles/000004.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/streams/surprising-spot-candlestick-v1/0_0/rocksdb/candlestick-instrumentId-sequences/000004.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/streams/surprising-spot-candlestick-v1/0_0/rocksdb/candlestick-trade-dedupe/000004.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/streams/surprising-spot-candlestick-v1/1_0/rocksdb/candlestick-rollup-seen-minutes/000004.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/streams/surprising-spot-candlestick-v1/1_0/rocksdb/candlestick-rollup-watermarks/000004.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/streams/surprising-spot-candlestick-v1/1_0/rocksdb/candlestick-rollups/000004.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/ticker-sample.log",
+      "bytes": 243,
+      "sha256": "321f34b21ce99ec5ae5381af4e7b29f52b30de39e904b75a79b869ffb180a900"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/ticker-sample.txt",
+      "bytes": 74744,
+      "sha256": "454251f6ea18d14aaf67fd2558b355aafa486ed1c9143e2f99d2f9e26b94a3c9"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/ticker-startup-fix.json",
+      "bytes": 242,
+      "sha256": "2ad98b684831eefd909bd2f03edfab9361ab924678bf599c15a7ca79a3e406ee"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/ticker.log",
+      "bytes": 49,
+      "sha256": "4a908625a27b01464a6c575092134155e99d5fa9adb0789f961cb0094aedc1ef"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/ui-orchestrator.json",
+      "bytes": 134,
+      "sha256": "7fdf446b9657a1292b0426ec36b76d6e2679a533ca9e067f705543fca88506b4"
+    },
+    {
+      "path": "/tmp/surprising-spot-fused-history-20261020_085340/web-history-live.log",
+      "bytes": 45,
+      "sha256": "fddede6a0efded62ea46081965672f5e937c9e9e51d45f6ce73b2218361b9131"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-backend-green-20261020.log",
+      "bytes": 39749,
+      "sha256": "aa8995e3e3a2b5c53fb0077c8039a5a1742b5d4747592a0f208e451f61e5fef0"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-backend-green-final-20261020.log",
+      "bytes": 40438,
+      "sha256": "cdde55539df992299daffb2d58ff411c3157f94f2188c747108663afe545ec23"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-backend-package-20261020.log",
+      "bytes": 42495,
+      "sha256": "74f81a0a47b26bce3005781e56dfe00c958fb1d1fb68a18d05592d2bcc53e030"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-backend-red-20261020.log",
+      "bytes": 31873,
+      "sha256": "5da5a972051ded6eddb4554cbf7080d5d83c21ab9d353710cde772444aa315f4"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-analyze-20261020.log",
+      "bytes": 1296,
+      "sha256": "82dc6787520e3e6f7fc831edf90b3890085bfe6463f397695136c2ce03efa975"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-analyze-final-20261020.log",
+      "bytes": 666,
+      "sha256": "f6db020138679c1b9efef002009e0efcc2be3dd41ee4ae00065ef460dcf4994a"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-analyze-final-ship-20261020.log",
+      "bytes": 96,
+      "sha256": "66e533dcffe402d4106634ca445fc0ad5405c605c6cdaa9a3cc22022eb94932a"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-analyze-final2-20261020.log",
+      "bytes": 96,
+      "sha256": "4956d557c20d4734c4faf6423186bf6466fdf141c38741035b9232abe539a1c0"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-analyze-live-20261020.log",
+      "bytes": 484,
+      "sha256": "ed2e0737d1ef58341b247d56e284d992a93c6ee6b7a7a163dadbe618407cc1d8"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-analyze-ship-20261020.log",
+      "bytes": 96,
+      "sha256": "7b969c6318a348de9096023f528faeed0744556b4df0803d3906748259901e2d"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-format-20261020.log",
+      "bytes": 246,
+      "sha256": "60eaed33d52907b416aae161b41d0d86aabb3796de240f89577cc5dfa5476c55"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-format-final-20261020.log",
+      "bytes": 91,
+      "sha256": "8d9f0302da1e140a26a63ee394e3f6b694f641d36851676402821c97101ac49b"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-format-final2-20261020.log",
+      "bytes": 118,
+      "sha256": "32896daad7ba4f4b688895d12e262757fd98bcef663220c86ad389ba138e6bd1"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-full-20261020.log",
+      "bytes": 52540,
+      "sha256": "5997b1c6799c006e6d3b56f8da7900f61087807c3c822352cb8bdc2924720838"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-full-final-20261020.log",
+      "bytes": 53217,
+      "sha256": "26166dddda4da8f05444d0f051b20fa98b27ee5ef703ff0aee314e0e4385617f"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-green-20261020.log",
+      "bytes": 3316,
+      "sha256": "aaef03ddb7015f0eea0f7d9e31cfbc514e448651df93436a9a706bcc165a61be"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-green-final-20261020.log",
+      "bytes": 3833,
+      "sha256": "f58ddd1fbd696326838ecfd73f8c1b93fb8314972e9d65517c0b4a6422fe7450"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-live-format-20261020.log",
+      "bytes": 101,
+      "sha256": "7b0e0263dec20b06e75d66a7de8bf3a3819c4ec6eba3255df6f04c8288b4ec72"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-live-format-corrected-20261020.log",
+      "bytes": 101,
+      "sha256": "f31147036465e5dfb69040dd66703ca9094280c460f4158f4dea7619960f6d68"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-live-format-final-20261020.log",
+      "bytes": 1235,
+      "sha256": "33cb93cf8375bb27e06e19b545a7c3934edbb99c250edf6cd037fe63f462f273"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-live-format-final2-20261020.log",
+      "bytes": 46,
+      "sha256": "ebf8691cd9669b02dd9d748aaf543551b337b2beb44f2d128dc7ffbfa0318f03"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-live-format-ship-20261020.log",
+      "bytes": 46,
+      "sha256": "201363ae23832375357c5580f6a07ce89f48c2a27211bd100d74e34f26295c71"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-red-20261020.log",
+      "bytes": 11163,
+      "sha256": "668808700e6f4a6a97313131f39e79b3afd3d8cb9703f410bcba39002595e9b2"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-scope-format-20261020.log",
+      "bytes": 90,
+      "sha256": "1ec091a3f20576c53350891e493125a32bd313d26ab6d13576cf2a01363948f2"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-scope-format-final-20261020.log",
+      "bytes": 90,
+      "sha256": "9152ab2006613de59704bdeb0b66b160b858e10328a4592f122f623afa60563e"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-scope-green-20261020.log",
+      "bytes": 217,
+      "sha256": "d8d13c25bdc379f65f598187639216e3b20985f80839d30801b3665daaf88806"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-scope-red-20261020.log",
+      "bytes": 3708,
+      "sha256": "5dbefe6f2aeea38139a504424cd231343965b3511b065a7a46edf6a576ee3d00"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-style-20261020.log",
+      "bytes": 176,
+      "sha256": "a8b18884b74dd1c0e2577df4add6342ca4cb8fd915735c787f2b2020f6ca8ebd"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-style-final-20261020.log",
+      "bytes": 170,
+      "sha256": "4bbcc3e13ba829a0d7ac6b502f867d974ee1f8f860cc74f8e8f6c5dd70dda0e8"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-client-test-format-20261020.log",
+      "bytes": 90,
+      "sha256": "08a6ca1f25d5336e39e457ce8f95132c16cb952279e3d43a8f2aed11b6df8de5"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-web-build-20261020.log",
+      "bytes": 3511,
+      "sha256": "7de46de67a7d05f3e6338d0211f817914c4cdd4aa5414ab995229153495bb6b2"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-web-build-final-20261020.log",
+      "bytes": 3511,
+      "sha256": "430b2928fcc675c155de0ec2339111a293395ad26dd222a1ec4a4485a9335229"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-web-format-20261020.log",
+      "bytes": 41,
+      "sha256": "b18fc8edc51fe9039ec633601cd604348291c8039654d2e5e14f8451cdd41a1b"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-web-format-final-20261020.log",
+      "bytes": 44,
+      "sha256": "f671c58a94335752594abf65abcc4da5f9725374f6ed221552973d9617de7bd6"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-web-format-final2-20261020.log",
+      "bytes": 42,
+      "sha256": "81b902a9a0fbb11af6e176df8546dfe7ff2182764f3401d15d950cbe82d288a6"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-web-format-final3-20261020.log",
+      "bytes": 42,
+      "sha256": "55ebad61d109c017c4e1ab6a55ee65ae1eb4c7acf20219c93c61b888fc740a02"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-web-format-safe-20261020.log",
+      "bytes": 22601,
+      "sha256": "2a3a68d286923d6363d8bcad7fb68b04d1548b33cfbf25e824752614690f347a"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-web-full-20261020.log",
+      "bytes": 288,
+      "sha256": "8310540f449e728365255a6635f97dfa0e56515b4ea4129e76a1db521ae9080b"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-web-green-20261020.log",
+      "bytes": 364,
+      "sha256": "7dc3c44a583ef491b6a989db4ace8ffa1e1ffd86f7437d7c76b67bd40b26ab73"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-web-lint-20261020.log",
+      "bytes": 19654,
+      "sha256": "75003383f0cd8462c636026e92df3269ac041a6b5473a0e64bc36928eac976d4"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-web-lint-final-20261020.log",
+      "bytes": 19292,
+      "sha256": "5e5a1675f6bcec6a1760ffae44e40723f24eb686c2060ae899ec8d1e164291c2"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-web-red-20261020.log",
+      "bytes": 5678,
+      "sha256": "26362a4b672688f1b7aed6b2e8a05c3eaa4ab4d28f58aae0e17172f8ba772ac5"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-web-types-20261020.log",
+      "bytes": 3024,
+      "sha256": "1549941eb0c8f721d45617a098c7b7c1da01870329587b1f46f9800c8448dfbc"
+    },
+    {
+      "path": "/tmp/surprising-spot-history-web-types-final-20261020.log",
+      "bytes": 62,
+      "sha256": "28151c3ea8607c70d336e2411d9d846f0256865ee60b5ed04f089f44b9aaca8a"
+    }
+  ],
+  "liveOwnOrderIds": {
+    "orderIds": [
+      "1365777917197240311",
+      "3421294585917955190",
+      "5040298958950084406",
+      "7393277200566605120",
+      "5112657080214140400",
+      "37272057425741537",
+      "6144157083990668497",
+      "6518504992834765546"
+    ],
+    "count": 8,
+    "filledOrderIds": [
+      "37272057425741537",
+      "5040298958950084406",
+      "6518504992834765546",
+      "5112657080214140400",
+      "1365777917197240311",
+      "7393277200566605120"
+    ],
+    "canceledOrderIds": [
+      "6144157083990668497",
+      "3421294585917955190"
+    ]
+  }
+}

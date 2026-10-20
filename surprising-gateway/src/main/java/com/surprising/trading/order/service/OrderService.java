@@ -460,7 +460,7 @@ public class OrderService {
                                             Long minimumOrderId,
                                             Long startTimeMillis,
                                             Long endTimeMillis) {
-        return historyOrders(userId, instrumentId, limit, minimumOrderId, startTimeMillis, endTimeMillis, null, null);
+        return historyOrders(userId, instrumentId, limit, minimumOrderId, startTimeMillis, endTimeMillis, null, null, null);
     }
 
     public OrderQueryResponse historyOrders(long userId,
@@ -470,7 +470,7 @@ public class OrderService {
                                             Long startTimeMillis,
                                             Long endTimeMillis,
                                             String cursor,
-                                            Long minExportSequence) {
+                                            Long minExportSequence, String status) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
@@ -485,10 +485,13 @@ public class OrderService {
         if (startTime != null && endTime != null && startTime.isAfter(endTime)) {
             throw new IllegalArgumentException("startTime must not be after endTime");
         }
+        OrderStatus historyStatus = status == null || status.isBlank() ? null : OrderStatus.valueOf(status.trim().toUpperCase(java.util.Locale.ROOT));
+        if (historyStatus != null && !java.util.Set.of(OrderStatus.FILLED, OrderStatus.CANCELED, OrderStatus.REJECTED).contains(historyStatus))
+            throw new IllegalArgumentException("history status must be FILLED, CANCELED or REJECTED");
         String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         return toQueryResponse(requireProjection().historyOrders(currentProductLine(), userId, normalizedSymbol,
-                limit, minimumOrderId, startTimeMillis, endTimeMillis, cursor, minExportSequence),
-                "createdAt.desc", limit);
+                limit, minimumOrderId, startTimeMillis, endTimeMillis, cursor, minExportSequence, historyStatus),
+                "updatedAt.desc", limit);
     }
 
     public OrderQueryResponse adminOrders(Long userId, String instrumentId, String status, Long orderId, int limit) {

@@ -322,9 +322,9 @@ public class OrderRequestService {
         }
     }
 
-    public OrderQueryResponse historyOrders(long userId, String instrumentId, int limit, Long orderId, Long startTime, Long endTime, String cursor, Long minExportSequence) {
+    public OrderQueryResponse historyOrders(long userId, String instrumentId, int limit, Long orderId, Long startTime, Long endTime, String cursor, Long minExportSequence, String status) {
         try {
-            return orderService.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, cursor, minExportSequence);
+            return orderService.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, cursor, minExportSequence, status);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (ProjectionReadResult.ProjectionLagException ex) {
