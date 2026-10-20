@@ -92,4 +92,15 @@ class C2cChatRealtimePostgresTest {
         var session=session("one-user");command(session,Map.of("op","authenticate","token","qa-12"));awaitFrame("authenticated");
         assertThatThrownBy(()->command(session,Map.of("op","authenticate","token","qa-13"))).isInstanceOf(IllegalArgumentException.class);
     }
+    @Test void aChatStorageFailureStopsOnlyChatAndKeepsTheMarketQueueOpen() throws Exception {
+        var conversations=mock(C2cConversations.class);
+        when(conversations.signal(12)).thenThrow(new org.springframework.dao.TransientDataAccessResourceException("synthetic storage outage"));
+        socket=new C2cChatRealtime(fixture.json,fixture.bean(C2cAccess.class),conversations,fixture.bean(C2cMessages.class),2);
+        var session=session("storage-outage");command(session,Map.of("op","authenticate","token","qa-12"));
+        command(session,Map.of("op","c2c.inbox"));socket.poll();awaitFrame("c2c.error");
+        verify(session,never()).close(any(CloseStatus.class));
+        wires.get(session.getId()).send("{\"channel\":\"trades\",\"data\":\"market-still-live\"}");
+        awaitFrame("market-still-live");
+        assertThat(frames.stream().noneMatch(frame->frame.contains("synthetic storage outage"))).isTrue();
+    }
 }

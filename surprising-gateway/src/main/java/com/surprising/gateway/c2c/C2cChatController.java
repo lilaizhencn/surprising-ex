@@ -34,8 +34,14 @@ public class C2cChatController {
     @GetMapping("/conversations/{id}/messages")
     public Map<String,Object> page(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID id,
             @RequestParam(defaultValue="0") String after,@RequestParam(required=false) String before,
-            @RequestParam(defaultValue="0") String afterEvent,@RequestParam(defaultValue="50") int limit) {
-        return messages.page(access.user(auth).userId(),id,C2cMessages.cursor(after),before==null?null:C2cMessages.cursor(before),C2cMessages.cursor(afterEvent),limit);
+            @RequestParam(defaultValue="0") String afterEvent,@RequestParam(defaultValue="50") int limit,
+            @RequestParam(defaultValue="false") boolean latest) {
+        var user=access.user(auth);
+        if(latest) {
+            if(!"0".equals(after) || before!=null || !"0".equals(afterEvent)) throw new IllegalArgumentException("最近消息不能混用其他游标");
+            return messages.latest(user.userId(),id,limit);
+        }
+        return messages.page(user.userId(),id,C2cMessages.cursor(after),before==null?null:C2cMessages.cursor(before),C2cMessages.cursor(afterEvent),limit);
     }
     @PostMapping("/conversations/{id}/messages")
     public Map<String,Object> send(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID id,@RequestBody Send request) {

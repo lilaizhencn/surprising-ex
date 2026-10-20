@@ -109,6 +109,20 @@ class C2cChatPostgresTest {
         var latest=fixture.call(HttpMethod.GET,base+"/messages?after="+first.get("messageId"),12,null,200);
         assertThat(((Map<?,?>)latest.get("conversation")).get("unreadCount")).isEqualTo("0");
     }
+    @Test void openingALongConversationLoadsRecentMessagesAndOlderPagingKeepsTheResumeCursor() throws Exception {
+        UUID conversation=direct(12,11);
+        for(int i=0;i<13;i++)send(11,conversation,UUID.randomUUID(),"消息 "+i,200);
+        String base="/api/v1/c2c/conversations/"+conversation+"/messages";
+        var page=fixture.call(HttpMethod.GET,base+"?latest=true&limit=5",12,null,200);
+        var rows=(List<Map<String,Object>>)page.get("messages");
+        assertThat(rows.stream().map(row->row.get("text"))).containsExactly("消息 8","消息 9","消息 10","消息 11","消息 12");
+        assertThat(page.get("hasMore")).isEqualTo(true);
+        var older=fixture.call(HttpMethod.GET,base+"?before="+rows.getFirst().get("messageId")+"&limit=5",12,null,200);
+        assertThat(((List<Map<String,Object>>)older.get("messages")).stream().map(row->row.get("text")))
+                .containsExactly("消息 3","消息 4","消息 5","消息 6","消息 7");
+        assertThat((List<?>)fixture.call(HttpMethod.GET,base+"?after="+rows.getLast().get("messageId"),12,null,200).get("messages")).isEmpty();
+        fixture.call(HttpMethod.GET,base+"?latest=true&after=1",12,null,400);
+    }
     @Test void originalMessagesCannotBeEditedOrDeletedAndSearchEscapesWildcards() throws Exception {
         UUID conversation=direct(12,11);send(12,conversation,UUID.randomUUID(),"原始证据",200);
         assertThatThrownBy(()->fixture.db.jdbc.update("UPDATE c2c_messages SET text='changed' WHERE conversation_id=?",conversation))
@@ -116,6 +130,13 @@ class C2cChatPostgresTest {
         assertThatThrownBy(()->fixture.db.jdbc.update("DELETE FROM c2c_messages WHERE conversation_id=?",conversation))
                 .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
         assertThat((List<?>)fixture.call(HttpMethod.GET,"/api/v1/c2c/conversations?search=%25",12,null,200).get("items")).isEmpty();
+    }
+    @Test void latestHistoryIncludesTheLargestSignedInt64MessageIdentity() throws Exception {
+        UUID conversation=direct(12,11);
+        fixture.db.jdbc.update("INSERT INTO c2c_messages(message_id,conversation_id,sender_user_id,request_id,text) VALUES(?,?,?,?,?)",
+                Long.MAX_VALUE,conversation,11,UUID.randomUUID(),"最大消息标识");
+        var page=fixture.call(HttpMethod.GET,"/api/v1/c2c/conversations/"+conversation+"/messages?latest=true",12,null,200);
+        assertThat(((List<Map<String,Object>>)page.get("messages")).getFirst().get("messageId")).isEqualTo("9223372036854775807");
     }
     @Test void supportMessagesRequireSensitivePermissionAndAuditAndAreMarkedByServer() throws Exception {
         UUID order=order(),conversation=orderConversation(order,12);send(12,conversation,UUID.randomUUID(),"订单证据",200);

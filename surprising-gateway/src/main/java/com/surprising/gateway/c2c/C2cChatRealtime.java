@@ -84,7 +84,10 @@ public class C2cChatRealtime {
                 if(subscription.conversation!=null) deliver(subscription,
                         messages.page(user,subscription.conversation,subscription.after,null,subscription.event,20),false);
             } catch(Exception failure) {
-                closed(entry.getKey());subscription.connection.close(org.springframework.web.socket.CloseStatus.POLICY_VIOLATION);
+                closed(entry.getKey());
+                // 身份失效由 requireUser 关闭整个连接；聊天存储暂不可用只停止聊天，保留行情。
+                if(subscription.connection.isOpen()) send(subscription,Map.of("op","c2c.error","channel","c2c.messages",
+                        "message","聊天暂不可用，请重新订阅"));
             } finally {subscription.lock.unlock();}
         }
     }

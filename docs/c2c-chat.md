@@ -71,3 +71,9 @@ R2 的条件写入说明见 [Cloudflare S3 API](https://developers.cloudflare.co
 新增迁移 `deployment/migrations/20261020-c2c-chat.sql` 已同步 `init.sql`。验证覆盖和当前未交付的前端范围应以本轮验证记录为准；未验收项不宣称完成。
 
 本轮实际 R2 SDK 和 Gateway MVC 链路均已验证，测试对象已清理。现有桶对本轮浏览器来源的直传预检为 403，且凭据无权读取桶 CORS；Web 采用已有的 Gateway multipart 上传入口写入 R2，保持 social 桶配置原样。原生客户端可使用已验证的临时凭证直传。详细用例与范围见 [后端验证记录](validation/c2c-chat-backend-20261020.json)。
+
+## Web 页面接入验证（2026-10-20）
+
+`GET /conversations/{id}/messages?latest=true` 返回最近的有界历史，禁止与其他游标混用；返回的最大消息及事件位置用于同连接的 `c2c.watch`。加载更早消息仍使用 `before`，不会改变实时补拉水位。最大合法 int64 消息标识同样包含在最近历史中。
+
+聊天轮询遇到存储错误时停止聊天订阅并返回 `c2c.error`，不关闭行情连接；登录失效继续按统一鉴权规则关闭连接。Web 已接入会话、订单查询、私有附件和已读，提交 `cd35f91`；本机双账号浏览器完成 12 个场景，包括同连接行情 ACK、消息收发、离线恢复、未知发送结果去重、账号隔离及桌面/移动端主题。详情见 [Web 联调与后端增量验证](validation/c2c-chat-web-20261020.json)。此记录使用合成身份、受控 Core 和私有文件夹具，不替代实际资金链路、手机或管理端验收，未发布服务器。

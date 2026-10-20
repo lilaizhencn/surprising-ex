@@ -1,0 +1,81 @@
+package com.surprising.gateway.c2c;
+
+import com.surprising.websocket.provider.config.WebSocketProperties;
+import com.surprising.websocket.provider.service.*;
+import jakarta.servlet.MultipartConfigElement;
+import java.nio.file.*;
+import java.time.Duration;
+import java.util.*;
+import org.apache.catalina.startup.Tomcat;
+import org.apache.tomcat.websocket.server.WsSci;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.context.annotation.*;
+import org.springframework.http.HttpMethod;
+import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
+import org.springframework.web.multipart.support.StandardServletMultipartResolver;
+import org.springframework.web.servlet.DispatcherServlet;
+import org.springframework.web.servlet.config.annotation.EnableWebMvc;
+import org.springframework.web.socket.config.annotation.*;
+
+/** 显式启用的浏览器联调夹具：仅本机、独占 schema、合成身份及受控 Core；不代表资金端到端验收。 */
+@EnabledIfEnvironmentVariable(named="C2C_BROWSER_QA_DIR",matches=".+")
+class C2cBrowserQaTest {
+    private static C2cHttpFixture fixture;
+    @Configuration
+    @EnableWebMvc
+    @EnableWebSocket
+    static class Web implements WebSocketConfigurer {
+        @Bean C2cChatController chat() {return new C2cChatController(fixture.bean(C2cAccess.class),fixture.bean(C2cConversations.class),fixture.bean(C2cMessages.class),fixture.bean(C2cAttachments.class));}
+        @Bean C2cStatusController status() {return new C2cStatusController(true,fixture.bean(C2cMarkets.class),fixture.products);}
+        @Bean C2cMeController me() {return new C2cMeController(fixture.bean(C2cAccess.class),fixture.bean(C2cProfiles.class));}
+        @Bean C2cController orders() {return new C2cController(fixture.bean(C2cAccess.class),fixture.bean(C2cMarkets.class),fixture.bean(C2cAds.class),fixture.bean(C2cAdsRepository.class),fixture.bean(C2cOrders.class),fixture.bean(C2cOrdersRepository.class),fixture.bean(C2cSubmissions.class),fixture.bean(C2cQueries.class),fixture.bean(C2cPaymentAccounts.class),fixture.products,fixture.json);}
+        @Bean C2cHttpErrors errors() {return new C2cHttpErrors();}
+        @Bean StandardServletMultipartResolver multipartResolver() {return new StandardServletMultipartResolver();}
+        @Bean C2cChatRealtime realtime() {return new C2cChatRealtime(fixture.json,fixture.bean(C2cAccess.class),fixture.bean(C2cConversations.class),fixture.bean(C2cMessages.class),10);}
+        @Bean SubscriptionRegistry registry() {return new SubscriptionRegistry(fixture.json,new WebSocketProperties());}
+        @Bean ClientWebSocketHandler handler() {return new ClientWebSocketHandler(fixture.json,registry(),new WebSocketProperties(),new WebSocketJwtAuthenticator(fixture.auth),fixture.products);}
+        @Override public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {registry.addHandler(handler(),"/ws/v1").setAllowedOriginPatterns("http://127.0.0.1:17173");}
+    }
+
+    @Test @Timeout(900)
+    void serveOwnedBrowserFixtureUntilDone() throws Exception {
+        Path output=Path.of(System.getenv("C2C_BROWSER_QA_DIR")).toAbsolutePath();
+        if(!output.startsWith(Path.of("/tmp")) || !output.getFileName().toString().startsWith("surprising-c2c-web-qa-")) throw new IllegalArgumentException("QA output must be an owned temporary directory");
+        Files.createDirectories(output);
+        Path runtime=Files.createTempDirectory("surprising-c2c-tomcat-");
+        var tomcat=new Tomcat();var web=new AnnotationConfigWebApplicationContext();
+        var scheduler=new org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler();
+        C2cHttpFixture owned=null;
+        try {
+            owned=new C2cHttpFixture();fixture=owned;
+            var ad=fixture.publish("SELL");
+            var created=fixture.create(fixture.quote(ad,12,"1"),12,"qa-browser-"+UUID.randomUUID(),"123456",200);
+            fixture.settle();
+            UUID order=UUID.fromString((String)created.get("resultId"));
+            var conversation=fixture.call(HttpMethod.POST,"/api/v1/c2c/conversations",12,Map.of("orderId",order),200);
+            String id=(String)conversation.get("conversationId");
+            for(int i=0;i<80;i++) fixture.call(HttpMethod.POST,"/api/v1/c2c/conversations/"+id+"/messages",i%2==0?11:12,
+                    Map.of("requestId",UUID.randomUUID(),"text",String.format("QA history %02d",i)),200);
+            tomcat.setBaseDir(runtime.toString());tomcat.setPort(0);
+            tomcat.getConnector().setProperty("address","127.0.0.1");
+            var context=tomcat.addContext("",runtime.toString());
+            context.addServletContainerInitializer(new WsSci(),Set.of());
+            web.register(Web.class);
+            var servlet=Tomcat.addServlet(context,"gateway",new DispatcherServlet(web));
+            servlet.setLoadOnStartup(1);servlet.setMultipartConfigElement(new MultipartConfigElement(runtime.toString(),10485760,11000000,0));
+            context.addServletMappingDecoded("/","gateway");
+            tomcat.start();
+            scheduler.setPoolSize(1);scheduler.setThreadNamePrefix("c2c-browser-qa-");scheduler.initialize();
+            scheduler.scheduleWithFixedDelay(web.getBean(C2cChatRealtime.class)::poll,Duration.ofSeconds(1));
+            Files.writeString(output.resolve("runtime.json"),fixture.json.writeValueAsString(Map.of("port",tomcat.getConnector().getLocalPort(),"orderId",order,"conversationId",id,"fixture","synthetic-auth-controlled-core-real-postgres")));
+            long deadline=System.nanoTime()+840_000_000_000L;
+            while(!Files.exists(output.resolve("done")) && System.nanoTime()<deadline) Thread.sleep(100);
+        } finally {
+            scheduler.shutdown();tomcat.stop();tomcat.destroy();web.close();
+            if(owned!=null)owned.close();fixture=null;
+            try(var paths=Files.walk(runtime)) {for(var path:paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);}
+        }
+    }
+}

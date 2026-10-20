@@ -67,21 +67,29 @@ public class C2cMessages {
     Map<String,Object> page(long user,UUID id,long after,Long before,long afterEvent,int limit) {
         return page(conversations.get(user,id,false),user,after,before,afterEvent,limit);
     }
+    Map<String,Object> latest(long user,UUID id,int limit) {
+        return page(conversations.get(user,id,false),user,0,null,0,limit,true);
+    }
     Map<String,Object> adminPage(UUID order,long after,Long before,long afterEvent,int limit) {
         var ids=jdbc.query("SELECT conversation_id FROM c2c_conversations WHERE order_id=?",(r,n)->r.getObject(1,UUID.class),order);
         if(ids.isEmpty()) return Map.of("messages",List.of(),"orderEvents",List.of(),"hasMore",false,"eventsHaveMore",false);
         return page(conversations.byId(ids.getFirst(),false),0,after,before,afterEvent,limit);
     }
     private Map<String,Object> page(C2cConversations.Conversation conversation,long user,long after,Long before,long afterEvent,int limit) {
+        return page(conversation,user,after,before,afterEvent,limit,false);
+    }
+    private Map<String,Object> page(C2cConversations.Conversation conversation,long user,long after,Long before,long afterEvent,int limit,boolean latest) {
         if(after<0 || afterEvent<0 || (before!=null && (before<1 || after!=0)) || limit<1 || limit>50)
             throw new IllegalArgumentException("消息查询条件无效");
         if(after>0) requireMessage(conversation.id(),after);
         if(before!=null) requireMessage(conversation.id(),before);
         if(afterEvent>0) requireEvent(conversation.orderId(),afterEvent);
-        var rows=jdbc.query("SELECT * FROM c2c_messages WHERE conversation_id=? AND message_id "+(before==null?">":"<")
-                +" ? ORDER BY message_id "+(before==null?"ASC":"DESC")+" LIMIT ?",this::read,conversation.id(),before==null?after:before,limit+1);
+        boolean older=latest || before!=null;
+        long boundary=latest?Long.MAX_VALUE:before==null?after:before;
+        var rows=jdbc.query("SELECT * FROM c2c_messages WHERE conversation_id=? AND message_id "+(latest?"<=":older?"<":">")
+                +" ? ORDER BY message_id "+(older?"DESC":"ASC")+" LIMIT ?",this::read,conversation.id(),boundary,limit+1);
         var messages=new ArrayList<>(rows.stream().limit(limit).toList());
-        if(before!=null) Collections.reverse(messages);
+        if(older) Collections.reverse(messages);
         var events=events(conversation.orderId(),afterEvent,limit+1);
         var result=new LinkedHashMap<String,Object>();
         result.put("conversationId",conversation.id().toString());result.put("messages",messages.stream().map(this::view).toList());
