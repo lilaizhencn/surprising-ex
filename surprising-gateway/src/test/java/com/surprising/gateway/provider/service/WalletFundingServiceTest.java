@@ -18,7 +18,7 @@ class WalletFundingServiceTest {
     private Network network(boolean deposit) { return new Network(1, 1, "ETH", "Ethereum", "0x123", false, 6, deposit, true,
         BigDecimal.ONE, BigDecimal.TEN, BigDecimal.ONE, 12, 1, Instant.now()); }
     private Map<String, Object> chain(boolean scan) { return Map.of("chain", "ETH", "status", "ACTIVE", "enabled", true,
-        "scanEnabled", scan, "withdrawalEnabled", true, "assetSymbols", List.of("ETH", "USDT")); }
+        "scanEnabled", scan, "withdrawalEnabled", true, "assetSymbols", List.of("ETH", "USDT"), "family", "evm"); }
     private void setup() {
         when(assets.byAccountingCode("USDT")).thenReturn(Optional.of(asset()));
         when(networks.list(1)).thenReturn(List.of(network(true)));
@@ -26,12 +26,34 @@ class WalletFundingServiceTest {
         when(custody.subject(42)).thenReturn("user:42");
     }
     @Test void catalogIntersectsAdminConfigurationAndCustodyCapabilities() {
-        when(assets.list(true)).thenReturn(List.of(asset()));
+        when(assets.list(false)).thenReturn(List.of(asset()));
         when(networks.enabled()).thenReturn(List.of(network(true)));
         when(custody.chains()).thenReturn(List.of(chain(false)));
         assertThat(service.catalog("deposit")).isEmpty();
         assertThat(service.catalog("withdraw")).hasSize(1);
         assertThatThrownBy(() -> service.catalog("unsupported")).isInstanceOf(IllegalArgumentException.class);
+    }
+    @Test void withdrawalCatalogUsesFundingFlagsIndependentlyOfTradingAndKeepsJsonContract() throws Exception {
+        var listed = new Asset(1, "USDT", "Tether", "", 100000000, true, false, 1, Instant.now());
+        when(assets.list(false)).thenReturn(List.of(listed));
+        when(networks.enabled()).thenReturn(List.of(network(true)));
+        when(custody.chains()).thenReturn(List.of(chain(true)));
+        var catalog = service.catalog("withdraw");
+        assertThat(catalog).hasSize(1);
+        var json = new tools.jackson.databind.ObjectMapper().valueToTree(catalog);
+        assertThat(json.at("/0/networks/0/networkCode").asText()).isEqualTo("ETH");
+        assertThat(json.at("/0/networks/0/family").asText()).isEqualTo("evm");
+        assertThat(json.at("/0/networks/0/chainDecimals").asInt()).isEqualTo(6);
+        assertThat(json.at("/0/networks/0/minWithdrawal").asText()).isEqualTo("10");
+        assertThat(json.at("/0/networks/0").has("configuration")).isFalse();
+    }
+    @Test void missingCustodyFamilyCannotPublishAnUnvalidatedWithdrawalNetwork() {
+        when(assets.list(false)).thenReturn(List.of(asset()));
+        when(networks.enabled()).thenReturn(List.of(network(true)));
+        var incomplete = new HashMap<>(chain(true)); incomplete.remove("family");
+        when(custody.chains()).thenReturn(List.of(incomplete));
+        assertThatThrownBy(() -> service.catalog("withdraw"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("network family");
     }
     @Test void disabledOrWrongAssetNetworkCannotAllocateAnAddress() {
         setup();when(networks.list(1)).thenReturn(List.of(network(false)));

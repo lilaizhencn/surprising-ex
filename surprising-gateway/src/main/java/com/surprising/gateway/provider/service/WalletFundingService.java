@@ -23,11 +23,21 @@ public class WalletFundingService {
         if (!Set.of("deposit", "withdraw").contains(operation)) throw new IllegalArgumentException("invalid funding operation");
         var chains = custody.chains();
         var routes = networks.enabled();
-        return assets.list(true).stream().map(asset -> new FundingAsset(asset.asset(), asset.displayName(), asset.logoUrl(),
-                routes.stream().filter(n -> n.assetId() == asset.assetId())
-                        .filter(n -> "deposit".equals(operation) ? n.depositEnabled() : n.withdrawalEnabled())
-                        .filter(n -> chains.stream().anyMatch(c -> supports(c, asset.asset(), n.networkCode(), operation)))
-                        .toList())).filter(a -> !a.networks().isEmpty()).toList();
+        return assets.list(false).stream().filter(Asset::listed).map(asset -> {
+            var supported = new ArrayList<FundingNetwork>();
+            for (var route : routes) {
+                if (route.assetId() != asset.assetId()
+                        || !("deposit".equals(operation) ? route.depositEnabled() : route.withdrawalEnabled())) continue;
+                var chain = chains.stream().filter(c -> supports(c, asset.asset(), route.networkCode(), operation))
+                        .findFirst().orElse(null);
+                if (chain == null) continue;
+                if (!(chain.get("family") instanceof String family) || family.isBlank()) {
+                    throw new IllegalStateException("custody network family is unavailable");
+                }
+                supported.add(new FundingNetwork(route, family));
+            }
+            return new FundingAsset(asset.asset(), asset.displayName(), asset.logoUrl(), List.copyOf(supported));
+        }).filter(a -> !a.networks().isEmpty()).toList();
     }
 
     public DepositAddress depositAddress(long userId, String assetCode, String networkCode) {
@@ -72,6 +82,8 @@ public class WalletFundingService {
         return chain.get("assetSymbols") instanceof Collection<?> symbols && symbols.contains(asset);
     }
 
-    public record FundingAsset(String asset, String displayName, String logoUrl, List<Network> networks) {}
+    public record FundingAsset(String asset, String displayName, String logoUrl, List<FundingNetwork> networks) {}
+    /** Preserve the configured network JSON fields and add custody's canonical address family. */
+    public record FundingNetwork(@com.fasterxml.jackson.annotation.JsonUnwrapped Network configuration, String family) {}
     public record DepositAddress(String asset, String network, String address, String memo) {}
 }
