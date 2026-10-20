@@ -28,6 +28,7 @@ public class ClientConnection implements AutoCloseable {
 
     private final WebSocketSession session;
     private volatile Long authenticatedUserId;
+    private volatile String accessToken;
     /** 有界环形队列；满载时主动断开慢连接，背压不会传回 Kafka 消费线程。 */
     private final BlockingQueue<OutboundMessage> outbound;
     private final long sendTimeoutNanos;
@@ -60,6 +61,13 @@ public class ClientConnection implements AutoCloseable {
 
     public Long authenticatedUserId() {
         return authenticatedUserId;
+    }
+
+    public String accessToken() {return accessToken;}
+    public boolean isOpen() {return open.get();}
+    public synchronized void authenticate(long userId,String token) {
+        authenticate(userId);
+        accessToken=token;
     }
 
     public synchronized void authenticate(long userId) {
@@ -223,6 +231,7 @@ public class ClientConnection implements AutoCloseable {
         } finally {
             sendStateLock.unlock();
         }
+        accessToken=null;
         writerThread.interrupt();
         timeoutWatcher.interrupt();
         Thread.ofVirtual().name("websocket-close-" + session.getId()).start(() -> {

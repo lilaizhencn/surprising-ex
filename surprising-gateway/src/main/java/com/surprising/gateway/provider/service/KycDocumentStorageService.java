@@ -98,7 +98,14 @@ public class KycDocumentStorageService {
         try {
             Path path = filesystemPath(config, objectKey);
             Files.createDirectories(path.getParent());
-            Files.write(path, content, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+            // 完整写入后再原子建立最终文件名；进程中断不能留下可被重试误认的半份文件。
+            Path temporary = Files.createTempFile(path.getParent(), ".upload-", ".tmp");
+            try {
+                Files.write(temporary, content, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+                Files.createLink(path, temporary);
+            } finally {
+                Files.deleteIfExists(temporary);
+            }
         } catch (IOException ex) {
             throw new KycDocumentStorageException("KYC document write failed", ex);
         }

@@ -36,6 +36,7 @@ final class C2cDatabaseFixture implements AutoCloseable {
             cloneSerialTable("gateway_admin_approval_requests","approval_id");
             cloneSerialTable("gateway_admin_operation_logs","operation_id");
             jdbc.execute(Files.readString(Path.of("../deployment/migrations/20261020-c2c.sql")));
+            jdbc.execute(Files.readString(Path.of("../deployment/migrations/20261020-c2c-chat.sql")));
         } catch(Exception failure) {close();throw failure;}
     }
     private void cloneSerialTable(String table,String column) {

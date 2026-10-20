@@ -134,7 +134,7 @@ public class C2cPaymentAccounts {
         if(methods.getFirst().get("bank") && (details.bankName()==null || details.bankName().isBlank()
                 || !details.accountNumber().trim().matches("[0-9]{8,40}"))) throw new IllegalArgumentException("请填写正确的银行名称和卡号");
         if(details.qrAttachmentId()!=null && (!methods.getFirst().get("qr") || !Boolean.TRUE.equals(jdbc.queryForObject("""
-                SELECT EXISTS(SELECT 1 FROM c2c_attachments WHERE attachment_id=? AND user_id=? AND purpose='PAYMENT_QR')
+                SELECT EXISTS(SELECT 1 FROM c2c_attachments WHERE attachment_id=? AND user_id=? AND purpose='PAYMENT_QR' AND status='READY')
                 """,Boolean.class,details.qrAttachmentId(),userId)))) throw new IllegalArgumentException("收款码归属不匹配");
     }
 

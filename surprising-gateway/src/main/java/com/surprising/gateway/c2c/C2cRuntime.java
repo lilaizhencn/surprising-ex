@@ -17,4 +17,10 @@ public class C2cRuntime {
         scheduler.setAwaitTerminationSeconds(3);
         return scheduler;
     }
+    @Bean("c2cChatScheduler")
+    ThreadPoolTaskScheduler c2cChatScheduler() {
+        var scheduler=new ThreadPoolTaskScheduler();scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("gateway-c2c-chat-");scheduler.setDaemon(true);scheduler.setAwaitTerminationSeconds(3);
+        return scheduler;
+    }
 }

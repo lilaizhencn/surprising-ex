@@ -67,7 +67,8 @@ public class C2cAdminAccess {
         } catch(IllegalArgumentException | IllegalStateException failure) {throw approvalRequired();}
     }
     void audit(JwtPrincipal administrator,Request request,byte[] body) {
-        audit.recordRequired(record(administrator,request,body,200,true,null));
+        try {audit.recordRequired(record(administrator,request,body,200,true,null));}
+        catch(org.springframework.dao.DataAccessException failure) {throw C2cProblem.unavailable("审计暂不可用，请稍后重试");}
     }
     void failure(String authorization,Request request,byte[] body,RuntimeException failure) {
         JwtPrincipal administrator=null;

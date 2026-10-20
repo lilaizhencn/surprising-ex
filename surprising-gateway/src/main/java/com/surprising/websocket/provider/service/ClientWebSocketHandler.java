@@ -4,7 +4,6 @@ import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsClientCommand;
 import com.surprising.websocket.api.model.WsServerMessage;
 import com.surprising.websocket.provider.config.WebSocketProperties;
-import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -16,6 +15,9 @@ import tools.jackson.databind.ObjectMapper;
 public class ClientWebSocketHandler extends TextWebSocketHandler {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ClientWebSocketHandler.class);
 
+    private com.surprising.gateway.c2c.C2cChatRealtime c2c;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    void c2c(com.surprising.gateway.c2c.C2cChatRealtime chat) {this.c2c=chat;}
     private RealtimeWebSocketBridge realtime;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     void realtime(RealtimeWebSocketBridge bridge) {this.realtime=bridge;}
@@ -39,8 +41,7 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
-        Long userId = authenticatedUserId(session);
-        registry.add(new ClientConnection(session, userId,
+        registry.add(new ClientConnection(session, null,
                 properties.getSession().getOutboundQueueCapacity(),
                 properties.getSession().getSendTimeout()));
     }
@@ -54,8 +55,17 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
 
     private void handleTracedMessage(WebSocketSession session, TextMessage message) {
         ClientConnection connection = connection(session);
+        String operation="";
         try {
-            WsClientCommand command = objectMapper.readValue(message.getPayload(), WsClientCommand.class);
+            var envelope=objectMapper.readTree(message.getPayload());
+            if(!envelope.isObject()) throw new IllegalArgumentException("invalid websocket command");
+            operation=envelope.path("op").asString("");
+            if(operation.startsWith("c2c.")) {
+                if(c2c==null) throw new IllegalArgumentException("C2C is not available");
+                c2c.handle(connection,objectMapper.treeToValue(envelope,com.surprising.gateway.c2c.C2cChatRealtime.Command.class));
+                return;
+            }
+            WsClientCommand command = objectMapper.treeToValue(envelope, WsClientCommand.class);
             String op = command.op() == null ? "" : command.op().trim().toLowerCase();
             log.info("ws.command.start session={} op={}", session.getId(), op);
             switch (op) {
@@ -68,17 +78,24 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
             log.info("ws.command.end session={} op={} result=OK", session.getId(), op);
         } catch (Exception ex) {
             log.warn("ws.command.failed session={} error={}", session.getId(), ex.getClass().getSimpleName());
-            connection.send(objectMapper.writeValueAsString(WsServerMessage.error(null, ex.getMessage())));
+            if(operation.startsWith("c2c.")) {
+                String error=(ex instanceof IllegalArgumentException || ex instanceof IllegalStateException) && ex.getMessage()!=null
+                        ?ex.getMessage():"聊天请求未完成，请稍后重试";
+                connection.send(objectMapper.writeValueAsString(java.util.Map.of("op","c2c.error","channel","c2c.messages","message",error)));
+            } else connection.send(objectMapper.writeValueAsString(WsServerMessage.error(null, ex.getMessage())));
         }
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+        if(c2c!=null)c2c.closed(session.getId());
         registry.remove(session.getId());
     }
 
     private void subscribe(ClientConnection connection, WsClientCommand command) {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(command, connection.authenticatedUserId());
+        if(topic.userId()!=null && jwtAuthenticator.authenticate(connection.accessToken())!=topic.userId())
+            throw new IllegalArgumentException("websocket identity mismatch");
         products.requireEnabled(topic.productLine());
         if (topic.channel() == com.surprising.websocket.api.model.WsChannel.OPEN_INTEREST) {
             if (topic.productLine() == com.surprising.product.api.ProductLine.SPOT)
@@ -95,7 +112,7 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
 
     private void authenticate(ClientConnection connection, WsClientCommand command) {
         long userId = jwtAuthenticator.authenticate(command.token());
-        connection.authenticate(userId);
+        connection.authenticate(userId,command.token());
         connection.send(objectMapper.writeValueAsString(WsServerMessage.authenticated(command.id(), userId)));
     }
 
@@ -109,24 +126,4 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
         return registry.connection(session.getId());
     }
 
-    Long authenticatedUserId(WebSocketSession session) {
-        HttpHeaders headers = session.getHandshakeHeaders();
-        String headerValue = headers.getFirst(properties.getSecurity().getUserIdHeader());
-        if (headerValue != null && !headerValue.isBlank()) {
-            return requirePositiveUserId(headerValue);
-        }
-        return null;
-    }
-
-    private static long requirePositiveUserId(String value) {
-        try {
-            long userId = Long.parseLong(value.trim());
-            if (userId <= 0L) {
-                throw new IllegalArgumentException("websocket userId must be positive");
-            }
-            return userId;
-        } catch (NumberFormatException ex) {
-            throw new IllegalArgumentException("websocket userId must be a positive integer", ex);
-        }
-    }
 }

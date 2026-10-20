@@ -93,7 +93,7 @@ public class C2cOrders {
         order.status().requirePayment();
         if(order.paymentExpiresAt()==null || !order.paymentExpiresAt().isAfter(Instant.now())) throw new IllegalStateException("付款时间已结束，请勿继续转账");
         if(proofId!=null && !Boolean.TRUE.equals(jdbc.queryForObject("""
-                SELECT EXISTS(SELECT 1 FROM c2c_attachments WHERE attachment_id=? AND user_id=? AND order_id=? AND purpose='PROOF')
+                SELECT EXISTS(SELECT 1 FROM c2c_attachments WHERE attachment_id=? AND user_id=? AND order_id=? AND purpose='PROOF' AND status='READY')
                 """,Boolean.class,proofId,user.userId(),id))) throw new IllegalArgumentException("付款证明归属不匹配");
         orders.markPaid(order,proofId);
         return orders.get(id,false);

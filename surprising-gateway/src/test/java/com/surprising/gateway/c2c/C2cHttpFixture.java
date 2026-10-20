@@ -41,6 +41,8 @@ final class C2cHttpFixture implements AutoCloseable {
     final AccountCommandGateway accountCommands = mock(AccountCommandGateway.class);
     final ProductAccountClient core = mock(ProductAccountClient.class);
     final GatewayProductServices products = mock(GatewayProductServices.class);
+    final C2cR2Properties r2 = new C2cR2Properties();
+    final java.nio.file.Path attachmentRoot = java.nio.file.Files.createTempDirectory("surprising-c2c-chat-test-");
     final MockMvc mvc;
     final UUID marketId = UUID.randomUUID();
     final UUID makerAccount;
@@ -101,6 +103,7 @@ final class C2cHttpFixture implements AutoCloseable {
             when(accountQueries.balances(anyLong())).thenReturn(new BalanceQueryResponse(0,List.of()));
             properties.getSecurity().setRequireApprovalForHighRiskAdminWrites(false);
             properties.getSecurity().setMfaSecretEncryptionKey("c2c-synthetic-http-test-key-not-for-deployment");
+            r2.setEnabled(true);r2.setType("filesystem");r2.setRootPath(attachmentRoot.toString());
             context.register(Transactions.class);
             context.registerBean(PlatformTransactionManager.class,db.transactions::getTransactionManager);
             context.registerBean(C2cMarkets.class,()->new C2cMarkets(jdbc));
@@ -128,6 +131,11 @@ final class C2cHttpFixture implements AutoCloseable {
             context.registerBean(C2cAdminQueries.class,()->new C2cAdminQueries(jdbc,bean(C2cMarkets.class),bean(C2cAdsRepository.class),bean(C2cOrdersRepository.class)));
             context.registerBean(C2cAdminReview.class,()->new C2cAdminReview(bean(C2cAdminAccess.class),jdbc,bean(C2cMarkets.class),bean(C2cAdsRepository.class),bean(C2cAds.class),
                     bean(C2cOrdersRepository.class),bean(C2cOrders.class),bean(C2cPaymentAccounts.class),bean(C2cQueries.class),compliance,new GatewayUserRepository(jdbc)));
+            context.registerBean(C2cConversations.class,()->new C2cConversations(jdbc,bean(C2cOrdersRepository.class)));
+            context.registerBean(C2cAttachments.class,()->new C2cAttachments(jdbc,bean(C2cConversations.class),bean(C2cOrdersRepository.class),
+                    bean(C2cPaymentAccounts.class),new C2cR2Storage(r2),db.transactions.getTransactionManager()));
+            context.registerBean(C2cMessages.class,()->new C2cMessages(jdbc,bean(C2cConversations.class),bean(C2cAttachments.class),json));
+            context.registerBean(C2cAdminChat.class,()->new C2cAdminChat(bean(C2cAdminAccess.class),bean(C2cOrdersRepository.class),bean(C2cMessages.class),bean(C2cAttachments.class)));
             context.refresh();
             makerAccount=bean(C2cPaymentAccounts.class).save(11,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Maker","qa-maker-account","",null)).id();
             takerAccount=bean(C2cPaymentAccounts.class).save(12,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Taker","qa-taker-account","",null)).id();
@@ -137,6 +145,8 @@ final class C2cHttpFixture implements AutoCloseable {
                     bean(C2cPaymentAccounts.class),products,json);
             mvc=MockMvcBuilders.standaloneSetup(controller,new C2cStatusController(true,bean(C2cMarkets.class),products),
                     new C2cMeController(bean(C2cAccess.class),bean(C2cProfiles.class)),
+                    new C2cChatController(bean(C2cAccess.class),bean(C2cConversations.class),bean(C2cMessages.class),bean(C2cAttachments.class)),
+                    new C2cAdminChatController(bean(C2cAdminAccess.class),bean(C2cAdminChat.class),json),
                     new C2cAdminController(bean(C2cAdminAccess.class),bean(C2cAdminMarkets.class),bean(C2cAdminReview.class),bean(C2cAdminQueries.class),bean(C2cAdminInitialization.class),json))
                     .setControllerAdvice(new C2cHttpErrors()).build();
         } catch(Exception failure) {close();throw failure;}
@@ -185,5 +195,10 @@ final class C2cHttpFixture implements AutoCloseable {
         new C2cSettlement(bean(C2cFundsRepository.class),bean(C2cFunds.class),bean(C2cAdsRepository.class),bean(C2cAds.class),
                 bean(C2cOrdersRepository.class),bean(C2cOrders.class),bean(C2cSubmissions.class),products).settle();
     }
-    @Override public void close() {context.close();if(db!=null)db.close();}
+    @Override public void close() {
+        context.close();if(db!=null)db.close();
+        try(var paths=java.nio.file.Files.walk(attachmentRoot)) {
+            for(var path:paths.sorted(java.util.Comparator.reverseOrder()).toList()) java.nio.file.Files.deleteIfExists(path);
+        } catch(java.io.IOException failure) {throw new java.io.UncheckedIOException(failure);}
+    }
 }

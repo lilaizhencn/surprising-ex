@@ -41,6 +41,14 @@ public class C2cHttpErrors {
     ResponseEntity<?> storage(DataAccessException failure) {
         return error(HttpStatus.SERVICE_UNAVAILABLE, "C2C_STORAGE_UNAVAILABLE", "C2C 数据暂不可用，请查询原请求，勿重复提交");
     }
+    @ExceptionHandler(com.surprising.gateway.provider.service.KycDocumentStorageException.class)
+    ResponseEntity<?> attachmentStorage(RuntimeException failure) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE,"C2C_ATTACHMENT_UNAVAILABLE","文件存储暂不可用，请使用原上传请求查询或重试");
+    }
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    ResponseEntity<?> tooLarge(RuntimeException failure) {
+        return error(HttpStatus.PAYLOAD_TOO_LARGE,"C2C_ATTACHMENT_TOO_LARGE","文件超过上传限制");
+    }
     private ResponseEntity<?> error(HttpStatus status, String code, String message) {
         return ResponseEntity.status(status).header("Cache-Control", "no-store")
                 .body(Map.of("code", code, "message", message == null ? "操作未完成" : message));

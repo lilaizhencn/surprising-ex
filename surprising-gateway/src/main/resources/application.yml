@@ -45,6 +45,20 @@ management:
         include: health,info,metrics,prometheus
 
 surprising:
+  c2c:
+    enabled: ${C2C_ENABLED:false}
+    r2:
+      enabled: ${C2C_R2_ENABLED:false}
+      type: ${C2C_R2_TYPE:s3}
+      endpoint: ${C2C_R2_ENDPOINT:}
+      account-id: ${C2C_R2_ACCOUNT_ID:}
+      access-key-id: ${C2C_R2_ACCESS_KEY_ID:}
+      secret-access-key: ${C2C_R2_SECRET_ACCESS_KEY:}
+      bucket: ${C2C_R2_BUCKET:app-private}
+      region: ${C2C_R2_REGION:us-east-1}
+      prefix: ${C2C_R2_PREFIX:private/trading/c2c/}
+      presigned-url-expiry-seconds: ${C2C_R2_PRESIGNED_URL_EXPIRY_SECONDS:300}
+      root-path: ${C2C_R2_ROOT_PATH:/tmp/surprising-c2c-attachments}
   gateway:
     products:
       cores:
@@ -617,9 +631,6 @@ surprising:
       outbound-queue-capacity: 1000
       send-timeout: 5s
     security:
-      user-id-header: X-User-Id
-      issuer: surprising-ex-gateway
-      jwt-secret: ${GATEWAY_JWT_SECRET:local-dev-change-me-surprising-ex-gateway-secret-2026}
       allowed-origins:
         - ${SURPRISING_WS_ALLOWED_ORIGIN:*}
     fanout:

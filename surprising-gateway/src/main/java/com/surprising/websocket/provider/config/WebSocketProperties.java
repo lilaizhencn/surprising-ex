@@ -103,10 +103,7 @@ public class WebSocketProperties {
     @Getter
     @Setter
     public static class Security {
-        private String userIdHeader = "X-User-Id";
         private List<String> allowedOrigins = new ArrayList<>(List.of("*"));
-        private String issuer = "surprising-ex-gateway";
-        private String jwtSecret = "local-dev-change-me-surprising-ex-gateway-secret-2026";
 
     }
 

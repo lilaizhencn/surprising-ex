@@ -59,7 +59,8 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
         String path = uri.substring("/api/v1/admin".length()).toLowerCase(Locale.ROOT);
         if (path.equals("/c2c") || path.startsWith("/c2c/")) {
             if (read && (path.matches("/c2c/payment-accounts/[^/]+")
-                    || path.matches("/c2c/orders/[^/]+/payment"))) {
+                    || path.matches("/c2c/orders/[^/]+/payment")
+                    || path.matches("/c2c/orders/[^/]+/chat(?:/.*)?"))) {
                 return "admin.c2c.sensitive.read";
             }
             if (!read && (path.matches("/c2c/appeals/[^/]+/decision")

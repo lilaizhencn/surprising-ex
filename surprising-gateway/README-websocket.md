@@ -43,7 +43,7 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 {"op":"subscribe","id":"r2","channel":"accountRisk"}
 ```
 
-私有频道必须先完成认证。客户端通过第一条 `authenticate` 命令在 WebSocket 消息体中发送 access token，收到 `op=authenticated` 后再发送私有订阅；token 不得放入 URL query。生产环境也可以由 ingress/auth 层注入 `X-User-Id`，本地调试可以用 query 参数传用户 id，但这不是生产安全模型。
+私有频道必须先完成认证。客户端通过第一条 `authenticate` 命令在 WebSocket 消息体中发送 access token，收到 `op=authenticated` 后再发送私有订阅；token 不得放入 URL query。握手身份头和 URL 用户 ID 不作为认证依据；HTTP 和 WebSocket 均调用交易 `AuthService` 检查登录。
 
 ## 频道
 
@@ -205,3 +205,7 @@ ORDER 与 `/api/v1/realtime/{productLine}/state` 的 `openOrders` 使用同一�
 
 公共盘口 REST 及 BBO 参考价改为读取 realtime Router 的 Valkey 视图，无回查 Core 分支。
 初始化/过期/源 epoch 改变时返回 503；盘口刷新依靠原有 Router 需求租约与异步 BOOK 输出。
+
+## C2C 聊天
+
+C2C 与行情共用 `/ws/v1`，复用 authenticate、ping、发送队列和客户端重连。聊天由 `c2c.*` 命令及频道隔离，不作为某个交易产品线的行情订阅，也不流入 Core。完整消息、附件和 R2 配置说明见 [C2C 聊天整合](../docs/c2c-chat.md)。
