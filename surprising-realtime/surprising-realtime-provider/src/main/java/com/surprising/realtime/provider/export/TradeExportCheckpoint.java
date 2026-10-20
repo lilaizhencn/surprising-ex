@@ -7,7 +7,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.*;
 import java.security.*;
 
-/** Atomic local recovery state, written only after order projection commit and Kafka acknowledgement. */
+/** Atomic local recovery state, written after the mode's SQL writes and optional Kafka acknowledgement. */
 record TradeExportCheckpoint(
         ProductLine product, long logPosition, long tradeSequence, byte[] snapshot) {
     private static final int MAGIC = 0x54584331;
@@ -15,6 +15,7 @@ record TradeExportCheckpoint(
     private static final int DELIVERY_REPAIR_MAGIC = 0x54584333;
     private static final int EXECUTION_REPAIR_MAGIC = 0x54584334;
     private static final int STATISTICS_REPAIR_MAGIC = 0x54584335;
+    private static final int PORTFOLIO_REPAIR_MAGIC = 0x54584336;
 
     private static int magic(Path path) {
         String name = path.getFileName().toString();
@@ -22,6 +23,7 @@ record TradeExportCheckpoint(
         if (name.endsWith(".delivery-repair")) return DELIVERY_REPAIR_MAGIC;
         if (name.endsWith(".execution-repair")) return EXECUTION_REPAIR_MAGIC;
         if (name.endsWith(".statistics-repair")) return STATISTICS_REPAIR_MAGIC;
+        if (name.endsWith(".portfolio-repair")) return PORTFOLIO_REPAIR_MAGIC;
         return MAGIC;
     }
 

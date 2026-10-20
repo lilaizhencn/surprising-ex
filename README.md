@@ -327,3 +327,8 @@ Web 最近订单更新曾在直接切换已登录账户时保留前一账户缓�
 ### 移动端资产与未启用产品（2026-10-20）
 
 `GatewayProductServices.disabled()` 只读取产品线数据库开关，`/api/v1/runtime` 增加 `disabledProductLines`。`AccountAssetsController` 在本人身份及产品归属检查后为未启用产品返回空余额列表（估值为零）；已启用产品沿用 realtime 查询，故障继续报错，不能按零隐藏。交易写入入口不变，查询禁止缓存。验证及当前测试服务器发布边界见 [验收记录](docs/validation/mobile-assets-disabled-products-20261020.json)。
+
+
+### 移动端完整权益与今日收益
+
+首页和资产页通过本人认证的 `/api/v1/portfolio/income` 读取已提交 Archive 分析投影。六产品使用共同分钟切点，期初和外部本金按历史实际价格估值，避免充值或内部划转变成收益；缺失/过期显示未知。该分析不替代可用余额或交易资金事实源。需配套迁移、realtime/gateway/client，详见 [权益与收益口径、恢复及发布](docs/portfolio-income.md)。

@@ -70,16 +70,19 @@ public class CommittedOrderProjectionRepository {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
     private final CommittedTradingStatistics statistics;
+    private final CommittedPortfolioHistory portfolio;
     private final CommittedAlgoProjection algos;
     public CommittedAlgoProjection algos() { return algos; }
 
     /** Use a method so Spring repository proxies delegate to the initialized target instance. */
     public CommittedTradingStatistics statistics() { return statistics; }
+    public CommittedPortfolioHistory portfolio() { return portfolio; }
 
     public CommittedOrderProjectionRepository(JdbcTemplate jdbc, PlatformTransactionManager transactions) {
         this.jdbc = jdbc;
         this.transaction = new TransactionTemplate(transactions);
         this.statistics = new CommittedTradingStatistics(jdbc,transaction);
+        this.portfolio = new CommittedPortfolioHistory(jdbc, transaction);
         this.algos = new CommittedAlgoProjection(jdbc,transaction);
     }
 

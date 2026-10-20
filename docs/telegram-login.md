@@ -45,7 +45,7 @@ TELEGRAM_TEST_JDBC_URL=jdbc:postgresql://127.0.0.1:5432/postgres TELEGRAM_TEST_D
 
 服务端从经过 Bearer 验证的用户及 session ID 读取数据库 `authenticated_at`。新登录在所有登录验证完成后写入该时间；刷新令牌轮换严格继承原值，不能把 JWT 的新签发时间或新会话行的创建时间当作重新验证。迁移前的旧会话保持空值，需要重新登录，不回填为当前时间。请求正文不能提供此证明。
 
-JDK 27 的联合验证包含 `PrimaryAuthenticationDatabaseTest`、`LoginVerificationSettingsControllerTest`、既有登录因素/Telegram/认证/用户安全测试，94 项通过、0 跳过。真实 PostgreSQL 覆盖迁移重复执行、旧会话空值、用户归属、撤销/过期、实际 `AuthService` 连续刷新保持原验证时间。Web/App 的安全设置需要消费该上下文，以便无密码账户无需填写不存在的密码。
+JDK 27 的联合验证包含 `PrimaryAuthenticationDatabaseTest`、`LoginVerificationSettingsControllerTest`、既有登录因素/Telegram/认证/用户安全测试，94 项通过、0 跳过。真实 PostgreSQL 覆盖迁移重复执行、旧会话空值、用户归属、撤销/过期、实际 `AuthService` 连续刷新保持原验证时间。Web/App 的安全设置已消费该上下文：无密码账户无需填写不存在的密码，过期则提示重新登录；跨账户的迟到响应不会打开旧账户绑定对话框。
 
 ## App 用户二维码
 
