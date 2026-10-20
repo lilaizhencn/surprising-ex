@@ -25,9 +25,7 @@ public class C2cMessages {
     }
     @Transactional
     Map<String,Object> support(long administrator,UUID order,UUID request,String text) {
-        var ids=jdbc.query("SELECT conversation_id FROM c2c_conversations WHERE order_id=?",(r,n)->r.getObject(1,UUID.class),order);
-        if(ids.isEmpty()) throw new IllegalArgumentException("订单尚无聊天会话");
-        return append(administrator,ids.getFirst(),request,text,null,true);
+        return append(administrator,conversations.forOrder(order).id(),request,text,null,true);
     }
     private Map<String,Object> append(long user,UUID id,UUID request,String raw,UUID attachment,boolean support) {
         String text=normalize(raw);
@@ -71,9 +69,20 @@ public class C2cMessages {
         return page(conversations.get(user,id,false),user,0,null,0,limit,true);
     }
     Map<String,Object> adminPage(UUID order,long after,Long before,long afterEvent,int limit) {
+        return adminPage(order,after,before,afterEvent,limit,false);
+    }
+    Map<String,Object> adminLatest(UUID order,int limit) {return adminPage(order,0,null,0,limit,true);}
+    private Map<String,Object> adminPage(UUID order,long after,Long before,long afterEvent,int limit,boolean latest) {
         var ids=jdbc.query("SELECT conversation_id FROM c2c_conversations WHERE order_id=?",(r,n)->r.getObject(1,UUID.class),order);
         if(ids.isEmpty()) return Map.of("messages",List.of(),"orderEvents",List.of(),"hasMore",false,"eventsHaveMore",false);
-        return page(conversations.byId(ids.getFirst(),false),0,after,before,afterEvent,limit);
+        return page(conversations.byId(ids.getFirst(),false),0,after,before,afterEvent,limit,latest);
+    }
+    Map<String,Object> adminReceipt(long administrator,UUID order,UUID request) {
+        var ids=jdbc.query("SELECT conversation_id FROM c2c_conversations WHERE order_id=?",(r,n)->r.getObject(1,UUID.class),order);
+        Message message=ids.isEmpty()?null:byRequest(ids.getFirst(),request);
+        if(message==null || !"SUPPORT".equals(message.kind()) || !Objects.equals(message.sender(),administrator))
+            return Map.of("status","UNKNOWN");
+        return Map.of("status","SENT","message",view(message));
     }
     private Map<String,Object> page(C2cConversations.Conversation conversation,long user,long after,Long before,long afterEvent,int limit) {
         return page(conversation,user,after,before,afterEvent,limit,false);

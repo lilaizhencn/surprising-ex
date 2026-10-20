@@ -1,0 +1,191 @@
+{
+  "date": "2026-10-20",
+  "java": "Corretto HotSpot JDK 27",
+  "isolatedSource": {
+    "purpose": "C2C gateway staged source without algorithm worktree changes",
+    "head": "a308b82d4686216f953efeb95ae68d4a0c9c01cd",
+    "patchSha256": "d15c9081746b3cd844e050b0aa988940303e25d96c858f10e21ca15007876fc2"
+  },
+  "package": {
+    "artifact": "/tmp/surprising-c2c-verified-build-20261020/surprising-gateway-1.0.0-SNAPSHOT-exec.jar",
+    "bytes": 92311937,
+    "sha256": "4b8cdc504c696d3b529e049b57a06da4c76fbf328d0bd5cc4324f66c4b4dc56b",
+    "source": {
+      "purpose": "C2C gateway staged source without algorithm worktree changes",
+      "head": "a308b82d4686216f953efeb95ae68d4a0c9c01cd",
+      "patchSha256": "d15c9081746b3cd844e050b0aa988940303e25d96c858f10e21ca15007876fc2"
+    },
+    "published": false,
+    "includesUncommittedAlgorithmChanges": false
+  },
+  "tests": {
+    "passed": 41,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "classes": [
+      {
+        "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          "concurrentIdenticalSendsHaveOneCommittedMessage",
+          "originalMessagesCannotBeEditedOrDeletedAndSearchEscapesWildcards",
+          "approvedSupportReplyCanBeRecoveredAfterApprovalConsumptionWithoutAnotherWrite",
+          "supportMessagesRequireSensitivePermissionAndAuditAndAreMarkedByServer",
+          "historyCursorsAndReadMarkersCannotCrossConversationsAndNeverMoveBackwards",
+          "anUninitializedProfileKeepsTheDefaultStrangerPrivacyPolicy",
+          "strangerAndBlockPoliciesApplyAtSendButDoNotEraseHistoryOrKnownReceipts",
+          "ongoingOrderCanCommunicateWhileBlockedAndKeepsAuthoritativeOrderEvents",
+          "lostAckIsRecoveredWithoutResendingAndConflictingReuseIsRejected",
+          "openingALongConversationLoadsRecentMessagesAndOlderPagingKeepsTheResumeCursor",
+          "endpointsRejectMissingIdentityInvalidContentAndClientAssignedSystemRole",
+          "orderConversationUsesFixedPartiesAndSeparatesRepeatedOrders",
+          "adminRecentHistoryAndOwnSupportReceiptAreAuditedWithoutSendingAgain",
+          "latestHistoryIncludesTheLargestSignedInt64MessageIdentity",
+          "supportCanStartAnOrderConversationWithoutBecomingAParticipantOrCreatingFundIntents"
+        ],
+        "reportSha256": "ea680c8a34460127401aaadeb5a0039e450e8561216f115a941caeefdb4ff6db"
+      },
+      {
+        "class": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          "committedMessagesFromAnotherNodeAndReadReceiptsAreObservedFromSharedStorage",
+          "onlyTradingAuthenticationCanAuthorizeTheSocketAndHistoryReplaysFromTheOriginalCursor",
+          "anAuthenticatedConnectionCannotSwitchTradingUsers",
+          "forgedHandshakeIdentityAndForeignConversationNeverGrantAccess",
+          "aChatStorageFailureStopsOnlyChatAndKeepsTheMarketQueueOpen",
+          "chatSubscriptionCapacityIsBoundedWithoutClosingMarketConnections",
+          "logoutOrRevocationClosesTheConnectionBeforeAnyFurtherPrivateDelivery"
+        ],
+        "reportSha256": "370ca9abc4130369a0eb688918d4b0ce8eecadaee8d6c407f9ceaae2415b2fce"
+      },
+      {
+        "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "tests": 14,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          "appealAlwaysRequiresAnotherAdministratorEvenWhenGeneralApprovalIsDisabled",
+          "merchantSuspensionPausesAdsAndForceCloseRequiresApprovedFixedRecipientRefund",
+          "initializationUsesOnlyFixedInternalAccountsAndZeroAmountsOutsideDatabaseTransactions",
+          "initializationApprovalAndAuditMustCommitBeforeAnyCoreCommand",
+          "configurationCannotReopenUntilIntentsAndRealtimeBalancesReconcile",
+          "bodyAndPathBoundApprovalCannotBeReusedForAnotherDecisionAndReleaseKeepsOriginalParties",
+          "ordinaryUsersCannotUseAdminRoutesAndSupportDefaultsExcludeMoneyAndSensitiveAccess",
+          "ordinaryAdminWritesRespectGlobalApprovalAndRollbackConsumptionOnBadVersion",
+          "intentFactsAndSettlementProgressCannotBeMutatedBySqlUpdates",
+          "aCounterpartyCannotServeAsApproverEvenIfItAlsoHasAnAdminRole",
+          "changingMarketInvalidatesQuotesAndPausesAdsButExistingOrderKeepsItsOriginalFee",
+          "unknownInitializationRetriesTheSameZeroCommandAndDoesNotPretendQueriesAreReady",
+          "manualPaymentReviewRequiresAttestationAndSensitiveReadsRequireAnAuditWrite",
+          "selfApprovalAndRevokedApproverPermissionAreRejected"
+        ],
+        "reportSha256": "df02cba8a3386793f3b43aa747d4e01ae34d9dc2db22edc3090eef1a0aaf7d58"
+      },
+      {
+        "class": "com.surprising.websocket.provider.service.ClientWebSocketHandlerTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          "aChatErrorDoesNotBecomeAMarketConnectionError",
+          "handshakeHeadersAndQueryParametersNeverAuthenticateAUser",
+          "marketChatAndHeartbeatUseTheExactSameAuthenticatedConnectionAndQueue",
+          "privateSubscriptionsRecheckTheTradingSessionAndRejectAnotherUser",
+          "disconnectCleansChatSubscriptionsAlongWithMarketSubscriptions"
+        ],
+        "reportSha256": "771ca3fc85d74989c55521e99d7f8786657a29dfdd1d5782c57ef102f3415d2b"
+      }
+    ]
+  },
+  "browser": {
+    "admin": {
+      "fixture": "synthetic-auth-controlled-core-real-postgres",
+      "steps": [
+        "admin reads the real C2C order list and its recent audited conversation",
+        "older admin history uses keyset pagination and preserves the current viewport",
+        "private evidence preview is fetched through the audited order endpoint",
+        "an actual support reply is labeled by the server and reaches the customer shared socket",
+        "lost support response recovers from its audited receipt without another POST",
+        "explicit automatic updates show customer messages without granting admin conversation membership",
+        "desktop and narrow admin layouts keep long order and message fields within the viewport",
+        "switching admin identity removes the prior conversation and revokes its private Blob URL"
+      ],
+      "pageErrors": [],
+      "scope": "real PostgreSQL and gateway controllers; synthetic trading/admin auth and controlled Core; filesystem attachments; no server release",
+      "passed": true
+    },
+    "web": {
+      "fixture": "synthetic-auth-controlled-core-real-postgres",
+      "steps": [
+        "actual recent history baseline contains exactly 50 persisted messages",
+        "earlier pages retain the 80 seeded messages and preserve the scroll anchor",
+        "real order dialog reads the order and exact fee fields",
+        "market subscription and chat use the one existing physical socket",
+        "persisted message reaches the other logged-in browser through shared websocket",
+        "a lost committed response recovers by receipt without posting twice",
+        "visible messages arriving during a delayed read are acknowledged without another interaction",
+        "offline messages replay once on the existing shared transport",
+        "private authenticated image upload is delivered and displayed for the other party",
+        "desktop light and dark layouts have no horizontal overflow",
+        "mobile layout opens the conversation, fits the composer and returns to the list",
+        "consultation privacy rejection remains visible inside its dialog",
+        "changing accounts removes all prior conversation content"
+      ],
+      "sockets": {
+        "buyer": [
+          "ws://127.0.0.1:17173/ws/v1",
+          "ws://127.0.0.1:17173/ws/v1"
+        ],
+        "maker": [
+          "ws://127.0.0.1:17173/ws/v1",
+          "ws://127.0.0.1:17173/ws/v1"
+        ]
+      },
+      "errors": [],
+      "passed": true
+    },
+    "webInboxFault": {
+      "scope": "isolated UI with empty HTTP fixtures and injected WebSocket subscription failure",
+      "passed": true,
+      "inboxRequests": 2,
+      "retryOpenedAnotherConnection": false,
+      "connections": 2
+    }
+  },
+  "cleanup": {
+    "privateSchemasRemaining": 0,
+    "embeddedTomcatStopped": true,
+    "browserContextsClosed": true,
+    "coreStarted": false,
+    "walletStarted": false
+  },
+  "serverDeployed": false,
+  "phoneInstalled": false,
+  "logs": [
+    {
+      "originalPath": "/tmp/surprising-c2c-admin-final-backend-tests-20261020.log",
+      "sha256": "d0e8ad06c913320aaed129ec0e82a5ae034a44eba3f782ea2c4aa373da76b9f1",
+      "buildSuccess": true
+    },
+    {
+      "originalPath": "/tmp/surprising-c2c-admin-isolated-backend-package-20261020.log",
+      "sha256": "87e682a0bdd473d519a9ef7b6e9834e29fae078a5b9efa6a77425ba112d11c5e",
+      "buildSuccess": true
+    },
+    {
+      "originalPath": "/tmp/surprising-c2c-admin-browser-backend-20261020.log",
+      "sha256": "920ddb5d2ae193653f9398e3278a7eb1094e5380139dc9e9677f6dec9763db20",
+      "buildSuccess": true
+    }
+  ]
+}

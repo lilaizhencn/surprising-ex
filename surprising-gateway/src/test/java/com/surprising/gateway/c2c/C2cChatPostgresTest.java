@@ -138,6 +138,55 @@ class C2cChatPostgresTest {
         var page=fixture.call(HttpMethod.GET,"/api/v1/c2c/conversations/"+conversation+"/messages?latest=true",12,null,200);
         assertThat(((List<Map<String,Object>>)page.get("messages")).getFirst().get("messageId")).isEqualTo("9223372036854775807");
     }
+    @Test void adminRecentHistoryAndOwnSupportReceiptAreAuditedWithoutSendingAgain() throws Exception {
+        UUID order=order(),conversation=orderConversation(order,12),request=UUID.randomUUID();
+        for(int i=0;i<6;i++)send(12,conversation,UUID.randomUUID(),"订单消息 "+i,200);
+        String path="/api/v1/admin/c2c/orders/"+order+"/chat";
+        var page=fixture.call(HttpMethod.GET,path+"?latest=true&limit=2",9,null,200);
+        assertThat(((List<Map<String,Object>>)page.get("messages")).stream().map(row->row.get("text"))).containsExactly("订单消息 4","订单消息 5");
+        fixture.call(HttpMethod.GET,path+"?latest=true&after=1",9,null,400);
+        assertThat(fixture.call(HttpMethod.GET,path+"/requests/"+request,9,null,200).get("status")).isEqualTo("UNKNOWN");
+        assertThat(fixture.db.jdbc.queryForObject("SELECT count(*) FROM c2c_messages",Integer.class)).isEqualTo(6);
+        var reply=fixture.call(HttpMethod.POST,path,9,new C2cChatController.Send(request,"客服回复",null),200);
+        var recovered=fixture.call(HttpMethod.GET,path+"/requests/"+request,9,null,200);
+        assertThat(recovered.get("status")).isEqualTo("SENT");assertThat(((Map<?,?>)recovered.get("message")).get("messageId")).isEqualTo(reply.get("messageId"));
+        assertThat(fixture.call(HttpMethod.GET,path+"/requests/"+request,10,null,200).get("status")).isEqualTo("UNKNOWN");
+        fixture.call(HttpMethod.GET,path+"/requests/"+request,12,null,403);
+        assertThat(fixture.db.jdbc.queryForObject("SELECT count(*) FROM gateway_admin_operation_logs",Integer.class)).isEqualTo(5);
+        fixture.db.jdbc.execute("ALTER TABLE gateway_admin_operation_logs ADD CONSTRAINT fail_receipt_audit CHECK(false) NOT VALID");
+        fixture.call(HttpMethod.GET,path+"/requests/"+request,9,null,503);
+        assertThat(fixture.db.jdbc.queryForObject("SELECT count(*) FROM c2c_messages",Integer.class)).isEqualTo(7);
+    }
+    @Test void supportCanStartAnOrderConversationWithoutBecomingAParticipantOrCreatingFundIntents() throws Exception {
+        UUID order=order();String path="/api/v1/admin/c2c/orders/"+order+"/chat";
+        int funds=fixture.db.jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents",Integer.class);
+        assertThat((List<?>)fixture.call(HttpMethod.GET,path+"?latest=true",9,null,200).get("messages")).isEmpty();
+        fixture.call(HttpMethod.POST,path,9,new C2cChatController.Send(UUID.randomUUID(),"客服主动核实订单",null),200);
+        var conversation=fixture.db.jdbc.queryForMap("SELECT * FROM c2c_conversations WHERE order_id=?",order);
+        assertThat(conversation.get("low_user_id")).isEqualTo(11L);assertThat(conversation.get("high_user_id")).isEqualTo(12L);
+        var id=conversation.get("conversation_id");
+        var history=fixture.call(HttpMethod.GET,"/api/v1/c2c/conversations/"+id+"/messages?latest=true",12,null,200);
+        assertThat(((Map<?,?>)((List<?>)history.get("messages")).getFirst()).get("authorKind")).isEqualTo("SUPPORT");
+        fixture.call(HttpMethod.GET,"/api/v1/c2c/conversations/"+id+"/messages",9,null,403);
+        assertThat(fixture.db.jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents",Integer.class)).isEqualTo(funds);
+    }
+    @Test void approvedSupportReplyCanBeRecoveredAfterApprovalConsumptionWithoutAnotherWrite() throws Exception {
+        fixture.properties.getSecurity().setRequireApprovalForHighRiskAdminWrites(true);
+        UUID order=order();String path="/api/v1/admin/c2c/orders/"+order+"/chat";
+        var body=new C2cChatController.Send(UUID.randomUUID(),"经审批的客服回复",null);
+        fixture.call(HttpMethod.POST,path,9,body,403);
+        assertThat(fixture.db.jdbc.queryForObject("SELECT count(*) FROM c2c_conversations",Integer.class)).isZero();
+        var approvals=fixture.bean(com.surprising.gateway.provider.auth.AdminApprovalService.class);
+        var request=new com.surprising.gateway.provider.auth.AuthModels.AdminApprovalCreateRequest("c2c","POST",path,null,
+                C2cAdminAccess.hash(fixture.json.writeValueAsBytes(body)),"Synthetic support reply approval");
+        long approval=approvals.create("Bearer qa-9",request).approvalId();approvals.approve("Bearer qa-10",approval,"Synthetic independent review");
+        var headers=Map.of("X-Admin-Approval-Id",Long.toString(approval));
+        assertThat(fixture.perform(HttpMethod.POST,path,9,new C2cChatController.Send(body.requestId(),"不同正文",null),headers).getResponse().getStatus()).isEqualTo(403);
+        assertThat(fixture.perform(HttpMethod.POST,path,9,body,headers).getResponse().getStatus()).isEqualTo(200);
+        assertThat(fixture.db.jdbc.queryForObject("SELECT status FROM gateway_admin_approval_requests WHERE approval_id=?",String.class,approval)).isEqualTo("CONSUMED");
+        assertThat(fixture.call(HttpMethod.GET,path+"/requests/"+body.requestId(),9,null,200).get("status")).isEqualTo("SENT");
+        assertThat(fixture.db.jdbc.queryForObject("SELECT count(*) FROM c2c_messages",Integer.class)).isEqualTo(1);
+    }
     @Test void supportMessagesRequireSensitivePermissionAndAuditAndAreMarkedByServer() throws Exception {
         UUID order=order(),conversation=orderConversation(order,12);send(12,conversation,UUID.randomUUID(),"订单证据",200);
         String path="/api/v1/admin/c2c/orders/"+order+"/chat";

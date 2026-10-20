@@ -18,8 +18,18 @@ public class C2cAdminChatController {
     @GetMapping
     public Map<String,Object> history(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID order,
             @RequestParam(defaultValue="0") String after,@RequestParam(required=false) String before,
-            @RequestParam(defaultValue="0") String afterEvent,@RequestParam(defaultValue="50") int limit,HttpServletRequest request) {
+            @RequestParam(defaultValue="0") String afterEvent,@RequestParam(defaultValue="50") int limit,
+            @RequestParam(defaultValue="false") boolean latest,HttpServletRequest request) {
+        if(latest) {
+            if(!"0".equals(after) || before!=null || !"0".equals(afterEvent)) throw new IllegalArgumentException("最近消息不能混用其他游标");
+            return chat.latest(auth,access.request(request),order,limit);
+        }
         return chat.history(auth,access.request(request),order,C2cMessages.cursor(after),before==null?null:C2cMessages.cursor(before),C2cMessages.cursor(afterEvent),limit);
+    }
+    @GetMapping("/requests/{messageRequest}")
+    public Map<String,Object> receipt(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID order,
+            @PathVariable UUID messageRequest,HttpServletRequest request) {
+        return chat.receipt(auth,access.request(request),order,messageRequest);
     }
     @GetMapping("/attachments/{attachment}")
     public ResponseEntity<byte[]> attachment(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID order,

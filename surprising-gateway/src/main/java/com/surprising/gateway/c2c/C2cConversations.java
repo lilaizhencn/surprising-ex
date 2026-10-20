@@ -31,6 +31,15 @@ public class C2cConversations {
             requireDirectAllowed(user,other);
         }
         long low=Math.min(user,other),high=Math.max(user,other);
+        UUID id=ensure(low,high,orderId);
+        return view(user,get(user,id,false));
+    }
+    Conversation forOrder(UUID orderId) {
+        var order=orders.get(orderId,false);
+        UUID id=ensure(Math.min(order.buyerUserId(),order.sellerUserId()),Math.max(order.buyerUserId(),order.sellerUserId()),orderId);
+        return byId(id,false);
+    }
+    private UUID ensure(long low,long high,UUID orderId) {
         // 两个并发入口只能建立一个订单/咨询会话，不借客户端输入指定参与者。
         jdbc.update("""
                 INSERT INTO c2c_conversations(conversation_id,low_user_id,high_user_id,order_id)
@@ -43,7 +52,7 @@ public class C2cConversations {
         jdbc.update("""
                 INSERT INTO c2c_message_reads(conversation_id,user_id) VALUES(?,?),(?,?) ON CONFLICT DO NOTHING
                 """,id,low,id,high);
-        return view(user,get(user,id,false));
+        return id;
     }
 
     Conversation get(long user,UUID id,boolean lock) {

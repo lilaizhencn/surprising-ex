@@ -20,6 +20,16 @@ public class C2cAdminChat {
         return messages.adminPage(order,after,before,event,limit);
     }
     @Transactional
+    Map<String,Object> latest(String auth,C2cAdminAccess.Request request,UUID order,int limit) {
+        var administrator=access.read(auth,true);orders.get(order,false);access.audit(administrator,request,new byte[0]);
+        return messages.adminLatest(order,limit);
+    }
+    @Transactional
+    Map<String,Object> receipt(String auth,C2cAdminAccess.Request request,UUID order,UUID messageRequest) {
+        var administrator=access.read(auth,true);orders.get(order,false);access.audit(administrator,request,new byte[0]);
+        return messages.adminReceipt(administrator.userId(),order,messageRequest);
+    }
+    @Transactional
     C2cAttachments.Content attachment(String auth,C2cAdminAccess.Request request,UUID order,UUID attachment) {
         var administrator=access.read(auth,true);access.audit(administrator,request,new byte[0]);
         return attachments.adminDownload(attachment,order);
