@@ -299,3 +299,10 @@ realtime 同步修正币本位交割基础币成交量、结算/关闭后真实�
 历史委托继续从 realtime 已提交的订单投影查询。状态 FILLED/CANCELED/REJECTED 在 SQL 分页之前过滤；按更新时间及订单号倒序翻页，响应 sort 修正为 updatedAt.desc，起止日期仍按创建时间且含两端。Web 两处入口保留游标与原账户/产品/筛选，桌面和手机共用只读历史展示；client 固定已应用查询，编辑草稿不会把新条件与旧游标混页。两端保留大订单号、实际 tick/step/资产精度和小数 tick 均价，展示成交量、剩余量及原累计手续费；client 对不在交易目录的历史合约按永久身份取资料。
 
 需配套发布 gateway、Web、client；无新表、迁移、topic 或 Core 交易状态变化。实栈一次只运行 SPOT、FUSED，不启动 wallet。隔离脚本分别为 Web 的 scripts/spot-order-history-fused-live.mjs、client 的 test/spot_order_history_fused_live_test.dart，显式传 SPOT_HISTORY_LIVE_FIXTURE（/tmp/surprising-spot-fused-history- 下、Maven SIX_LINE_LIVE_USER_HISTORY=true 生成）；Web 可用 SPOT_HISTORY_PLAYWRIGHT_MODULE / SPOT_HISTORY_CHROMIUM 指定已有浏览器。脚本只把真实 GET 的 limit 降为 1 以验证分页，不生成金融响应或提交交易。实测与清理见 docs/validation/spot-order-history-20261020.json。
+
+
+### 现货当前委托的精确价格与价值（2026-10-20）
+
+Web `TradingAccountTables` 与 client `OrderRow` 的现货价格/均价显示复用整数十进制换算，保留大于 JS 安全整数的原 tick 与小数 tick 均价。现货委托价值按 priceTicks × quantitySteps × notionalMultiplierUnits，成交价值按原 executedValueTicks × notionalMultiplierUnits，以真实报价币 scale 展示。原累计手续费直接显示，不使用平均价或最新费率反算；市价单不猜限价价值，缺少乘数/执行累计值时保持缺失。现货明确显示“计价币种”和 Post-only，隐藏不适用的全仓/逐仓、持仓方向与 reduce-only 文案。Web 小屏现货操作列随表格滚动，避免固定按钮遮住长价格和金额。
+
+本轮为展示层修复，无 API、realtime、Core 交易或资金模型变化，无迁移/topic/新服务；未启动后端、wallet 或其他产品实栈。Web 只读展示验证脚本 scripts/spot-order-details-qa.mjs 使用显式 SPOT_DETAILS_QA_ROOT（/tmp/surprising-spot-details- 前缀、owner.json 标识本轮 QA）及可选 SPOT_DETAILS_QA_BASE、SPOT_DETAILS_PLAYWRIGHT_MODULE、SPOT_DETAILS_CHROMIUM。它挂载真正生产组件及显式整数测试数据，不拦截金融 API 响应；不代表本轮真实 FUSED 成交/资金对账。证据与清理见 docs/validation/spot-current-order-details-20261020.json。

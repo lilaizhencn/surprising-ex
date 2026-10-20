@@ -1,0 +1,640 @@
+{
+  "date": "2026-10-20",
+  "scope": "现货当前委托展示：精确价格/均价、原委托/成交价值、计价币种及小屏可读性。原完整目标保持 active。",
+  "previousGoalTurnClassification": {
+    "classification": "progress",
+    "evidence": "上一轮历史委托的 backend/Web/client 已提交推送；本轮开始再次检查工作树，基线见下。"
+  },
+  "baselines": {
+    "surprising-ex": "7eafc7392db680907cf7336c695fb4fbd7386bdf",
+    "surprising-ex-web": "65f8fd5881dae0e3382184b48f5acc4faa49e689",
+    "surprising-client": "b468cca543ae78316536629eb92794f22d76ede7",
+    "surprising-admin-web": "ac8fe282228c1a18082665e56a08adccab577cea"
+  },
+  "rootCauses": [
+    "当前委托的现货 price/average 使用 Number/double 和价格小数位显示，丢失完整 int64 及 sub-tick 均价。",
+    "valueAtLimit/filledValue 与 client OrderRow 只支持线性产品，现货即便具备真实乘数和原执行累计值也显示缺失。",
+    "现货共用衍生品结算币种、全仓/逐仓、持仓方向及 reduce-only 文案。",
+    "手机上固定的操作列遮住长价格和金额；单元格 bounding box 在视口内不能证明文本没有被盖住。"
+  ],
+  "changes": [
+    "现货价格/均价复用现有 decimalStepUnitsToDecimal / formatExecutionPrice，不经浮点数换算显示；非现货合法输入的既有精度策略保留。",
+    "现货委托价值=priceTicks×quantitySteps×notionalMultiplierUnits；成交价值=原 executedValueTicks×notionalMultiplierUnits；按真实 quote scale 显示。市价单不猜限价价值，缺少乘数/原累计值时保持缺失。",
+    "原累计手续费仍直接读取，不按均价或当前费率反算；现货以 quoteAsset 标注币种，仅展示 Post-only。",
+    "320px 现货操作列改为随表格滚动；桌面及其他产品的固定列规则保留。"
+  ],
+  "ownership": {
+    "newDomainState": false,
+    "newFramework": false,
+    "reusedHelpers": [
+      "decimalStepUnitsToDecimal",
+      "formatExecutionPrice",
+      "units",
+      "tradingAmount"
+    ],
+    "quoteUnitAuthority": "CoreContractMath.spotQuoteUnits 与 RuntimeSpotMatchProcessor 的 quote 资产收费；只读核对其源码，没有修改 Core。",
+    "dataSource": "继续使用原 realtime 委托字段与既有 instrument metadata；未新增查询、API、迁移、topic 或 Core 资金状态。"
+  },
+  "web": {
+    "testsPassed": 300,
+    "testFilesPassed": 39,
+    "lint": {
+      "exit": 0,
+      "errors": 0,
+      "warnings": 0,
+      "infos": 536,
+      "note": "包括本轮新增源文件诊断，不全部归为历史项。"
+    },
+    "build": {
+      "exit": 0,
+      "existing594KBChunkAdvisory": true
+    },
+    "newUnitCases": 4,
+    "redBeforeFix": "3 failed / 1 passed：现货价格、原成交价值、限价价值缺失；非法/缺失数据原保护用例保持通过。",
+    "browserMode": "controlled production-component presentation QA",
+    "browserCases": [
+      {
+        "width": 1440,
+        "theme": "dark",
+        "scenario": "normal",
+        "exactValues": [
+          "61.7225",
+          "123.445 USDT",
+          "308.625 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 0
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 0
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-normal-1440-dark.png",
+        "productionComponent": true,
+        "controlledFixture": true
+      },
+      {
+        "width": 1440,
+        "theme": "dark",
+        "scenario": "large",
+        "exactValues": [
+          "45035996273704.965",
+          "45035996273704.9675",
+          "90071992547409.935 USDT",
+          "225179981368524.825 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 0
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 0
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-large-1440-dark.png",
+        "productionComponent": true,
+        "controlledFixture": true
+      },
+      {
+        "width": 1440,
+        "theme": "light",
+        "scenario": "normal",
+        "exactValues": [
+          "61.7225",
+          "123.445 USDT",
+          "308.625 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 0
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 0
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-normal-1440-light.png",
+        "productionComponent": true,
+        "controlledFixture": true
+      },
+      {
+        "width": 1440,
+        "theme": "light",
+        "scenario": "large",
+        "exactValues": [
+          "45035996273704.965",
+          "45035996273704.9675",
+          "90071992547409.935 USDT",
+          "225179981368524.825 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 0
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 0
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-large-1440-light.png",
+        "productionComponent": true,
+        "controlledFixture": true
+      },
+      {
+        "width": 320,
+        "theme": "dark",
+        "scenario": "normal",
+        "exactValues": [
+          "61.7225",
+          "123.445 USDT",
+          "308.625 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 97
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 630
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-normal-320-dark.png",
+        "productionComponent": true,
+        "controlledFixture": true
+      },
+      {
+        "width": 320,
+        "theme": "dark",
+        "scenario": "large",
+        "exactValues": [
+          "45035996273704.965",
+          "45035996273704.9675",
+          "90071992547409.935 USDT",
+          "225179981368524.825 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 97
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 639
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-large-320-dark.png",
+        "productionComponent": true,
+        "controlledFixture": true
+      },
+      {
+        "width": 320,
+        "theme": "light",
+        "scenario": "normal",
+        "exactValues": [
+          "61.7225",
+          "123.445 USDT",
+          "308.625 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 97
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 630
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-normal-320-light.png",
+        "productionComponent": true,
+        "controlledFixture": true
+      },
+      {
+        "width": 320,
+        "theme": "light",
+        "scenario": "large",
+        "exactValues": [
+          "45035996273704.965",
+          "45035996273704.9675",
+          "90071992547409.935 USDT",
+          "225179981368524.825 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 97
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 639
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-large-320-light.png",
+        "productionComponent": true,
+        "controlledFixture": true
+      }
+    ],
+    "script": "scripts/spot-order-details-qa.mjs",
+    "commands": [
+      "npm test",
+      "npm run lint",
+      "npm run build",
+      "SPOT_DETAILS_QA_ROOT=<owned root> SPOT_DETAILS_PLAYWRIGHT_MODULE=<existing module> SPOT_DETAILS_CHROMIUM=<existing Chromium> node scripts/spot-order-details-qa.mjs"
+    ]
+  },
+  "client": {
+    "analyze": "No issues found; exit 0",
+    "testsPassed": 301,
+    "optInLiveSkipped": 10,
+    "newUnitCases": 5,
+    "redBeforeFix": "原 4 项全部失败；新增第 5 项验证缺少乘数时不能造出名义价值。",
+    "coverage": [
+      "320px 深浅主题，61.725 限价、61.7225 小数 tick 均价、308.625 委托价值、123.445 原成交价值、signed 原手续费与真实 base/quote scale。",
+      "完整 int64 tick 与累计执行值，45035996273704.965 / 45035996273704.9675 / 90071992547409.935 USDT，无布局异常。",
+      "市价单保留真实成交价值，未知乘数保持缺失；现货没有全仓/逐仓等无关字段。",
+      "既有共享非现货展示与状态回归由全量 Flutter 测试覆盖，没有启动其他产品实栈。"
+    ],
+    "commands": [
+      "flutter analyze",
+      "flutter test --concurrency=2 --reporter expanded"
+    ]
+  },
+  "visualVerification": {
+    "contexts": 8,
+    "widths": [
+      1440,
+      320
+    ],
+    "themes": [
+      "dark",
+      "light"
+    ],
+    "scenarios": [
+      "normal",
+      "large"
+    ],
+    "noBodyOverflow": true,
+    "priceAndValueUnobscured": "每个单元格先滚动到视口，检查左右/中间三个 elementFromPoint 均属于该单元格；随后截图人工检查。",
+    "occlusionRed": "web-qa-occlusion-red.log 先以 must not be covered by sticky actions 失败；加入现货小屏 CSS 后通过。",
+    "harnessCorrection": "首次读取 innerText 检查 Quote asset，受 CSS uppercase 影响而失败；改检查 thead.textContent，未改变生产数据或忽略页面错误。",
+    "apiRequests": 0,
+    "temporaryHarnessRemoved": true
+  },
+  "runtime": {
+    "root": "/tmp/surprising-spot-details-20261020_092758",
+    "backendStarted": false,
+    "backendMode": "本轮未启动后端；没有切换或修改既有 FUSED 设置。",
+    "productsDebugged": [
+      "SPOT"
+    ],
+    "databaseCreated": false,
+    "kafkaStarted": false,
+    "redisStarted": false,
+    "walletStarted": false,
+    "jfrEnabled": false,
+    "vitePort": 5178,
+    "vitePid": 61900,
+    "resources": "一个 Vite；一个测试 Chromium 顺序创建/关闭上下文；Flutter 单元测试并发 2。未测整体 RSS。"
+  },
+  "knownLimits": [
+    "展示数据为显式整数测试资料，只挂载真正生产组件；没有拦截或伪造金融 API 成功响应。",
+    "本轮未重新完成真实 FUSED 成交、资金守恒、网络断线恢复或资金操作验收，不能将此前实栈记录当作本轮新证据。",
+    "未进行 iOS/Android 真机安装、原生 secure-storage、其他产品实栈、生产发布或性能基准。",
+    "CodeGraph 工具不可用，使用现有文件/源码检查；没有子代理。"
+  ],
+  "cleanup": {
+    "status": "complete",
+    "vitePidGone": 61900,
+    "port5178Released": true,
+    "temporaryHarnessRemoved": true,
+    "openFilesUnderRoot": 0,
+    "note": "本轮未创建 DB/Archive/Kafka/Redis/JFR。保留现有构建缓存和其他任务文件。",
+    "rootRemoved": "/tmp/surprising-spot-details-20261020_092758",
+    "allocatedKiBRemoved": 412,
+    "ownedTempLogsRemoved": 28,
+    "metadataRemoved": true,
+    "completedAt": "2026-10-20T01:39:08.470181+00:00"
+  },
+  "evidencePolicy": "仅提交摘要与 SHA256，不提交截图、日志、受控临时 JSX、缓存或设备产物。清理后原路径只用于历史定位。",
+  "generatedAt": "2026-10-20T01:38:13.641108+00:00",
+  "evidenceManifest": [
+    {
+      "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeSpotMatchProcessor.java",
+      "bytes": 29511,
+      "sha256": "3c49a999e3153a523f5de4ae377fa10340f87b2f50bec6e26d8052d63288cd1f"
+    },
+    {
+      "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/math/CoreContractMath.java",
+      "bytes": 12536,
+      "sha256": "24f234e1daae81799b050639b188f4761c52ef912a3166091be5439a2f8d4dcd"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-large-1440-dark.png",
+      "bytes": 37089,
+      "sha256": "728d4b64fd217de7b0373e413bbfc24fa35fcc2c1275749a392245b0e72c6d07"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-large-1440-light.png",
+      "bytes": 36969,
+      "sha256": "642cfb5df061418e130204cb386efdbd375781b1a0097e63c61842cf15a2a294"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-large-320-dark-price.png",
+      "bytes": 16826,
+      "sha256": "2918dac318d60d745790d001c6f201b604b1589c24e51250f12ca6ea84e86d9e"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-large-320-dark-value.png",
+      "bytes": 17248,
+      "sha256": "de9bb773c95fe0728a83d235dcf5d77a682105f8141caf2a197afee93627ae4c"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-large-320-dark.png",
+      "bytes": 16821,
+      "sha256": "b499c2522eb36e511311c7ee053e77bb52a6e6abf177f073ba19a54227d78e8b"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-large-320-light-price.png",
+      "bytes": 16633,
+      "sha256": "89b7c355c4071047220f7b910556d54e87c01424fe002f7063ef6bdfe197ce1b"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-large-320-light-value.png",
+      "bytes": 16982,
+      "sha256": "d913320feb39b3ac375090d532d8da0d9cb42b649047971fed1f5590454394af"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-large-320-light.png",
+      "bytes": 16637,
+      "sha256": "0088f25b114feff272d3f17f943fa28dbbaf87b6d1484495a57bc27f8adb0b47"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-normal-1440-dark.png",
+      "bytes": 33557,
+      "sha256": "145efe27d0bf3601c1255f2db24286dac14e0ca21a617d9fcb68f2b58d7a851e"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-normal-1440-light.png",
+      "bytes": 34886,
+      "sha256": "48104f76e390b20a2a5d273b60ab2fa428dd1417f2eaeddb4f20051f2cc6f6e1"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-normal-320-dark-price.png",
+      "bytes": 14251,
+      "sha256": "526fe988fa5359a12621b43f7fca19dd4527e8a3c07cc2bdb62fdbded7b9dcd2"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-normal-320-dark-value.png",
+      "bytes": 16084,
+      "sha256": "4c102055fc7856db32ec78fb461442910820aca3c36d4471b9f2da9ee61994c3"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-normal-320-dark.png",
+      "bytes": 15907,
+      "sha256": "1ec87d4035a4e31563a9834a755add862435dece0392e8462534c8d7a7b4bbee"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-normal-320-light-price.png",
+      "bytes": 14104,
+      "sha256": "51a39dbd909a1fbd05d67078a8246111bd03ed9b04bd5572a28e2b94d9824811"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-normal-320-light-value.png",
+      "bytes": 15909,
+      "sha256": "dc4c71c6f78189bef1db1f4718a250baef714cf279669b82cf88949a21f873e9"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/details-normal-320-light.png",
+      "bytes": 15766,
+      "sha256": "5cbf5e3f83c5deb5ff7c5cb5e57c335402e79200c12b79b3df7462935442033b"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/web-details-evidence.json",
+      "bytes": 4675,
+      "sha256": "aaacb8ae9acd0b692b983281a7d0c704a7f1a05110377df8ca92160d1f252b99"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/web-qa-before-labels.log",
+      "bytes": 85,
+      "sha256": "5763487697b5e42bd76c17562beb8f398622a894151ad8035704185c905ca3f1"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/web-qa-before-occlusion-fix.log",
+      "bytes": 85,
+      "sha256": "5763487697b5e42bd76c17562beb8f398622a894151ad8035704185c905ca3f1"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/web-qa-first.log",
+      "bytes": 471,
+      "sha256": "b0b69e6b475d963a223877cc8d5940b98beb991d86d337c25a3a9772b5bce536"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/web-qa-occlusion-red.log",
+      "bytes": 413,
+      "sha256": "71e5e9c90252c421b052ab77bfa6277d3d8f35a828443c2538ac9180c35aa6e5"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/web-qa-pre-scroll.log",
+      "bytes": 85,
+      "sha256": "5763487697b5e42bd76c17562beb8f398622a894151ad8035704185c905ca3f1"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/web-qa-rect-only.log",
+      "bytes": 85,
+      "sha256": "5763487697b5e42bd76c17562beb8f398622a894151ad8035704185c905ca3f1"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_092758/web-qa.log",
+      "bytes": 85,
+      "sha256": "5763487697b5e42bd76c17562beb8f398622a894151ad8035704185c905ca3f1"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-client-analyze-20261020.log",
+      "bytes": 628,
+      "sha256": "ceceed4029cb50c76134aec4d9f47cfc4e0376799b802e10db5637049fb79458"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-client-analyze-final-20261020.log",
+      "bytes": 96,
+      "sha256": "aea541ffd868ec88e2e6f566a0c1853b8b42a8473b78fb5fd9090fe7bb6b535f"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-client-analyze-ship-20261020.log",
+      "bytes": 96,
+      "sha256": "74534e377188b208301051ee0c4b056b675d78675d3823cb568b3f64685ddb7e"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-client-format-20261020.log",
+      "bytes": 90,
+      "sha256": "1f026712ad500647628b191a9fbcc628295c7e6b5a8577bead04baa7115edc2e"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-client-format-final-20261020.log",
+      "bytes": 73,
+      "sha256": "a891e4d2b9b79aa94350b46e51bf191636b7ee63c801e3cacbdea378f4d81e52"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-client-format-final2-20261020.log",
+      "bytes": 90,
+      "sha256": "1f026712ad500647628b191a9fbcc628295c7e6b5a8577bead04baa7115edc2e"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-client-format-last-20261020.log",
+      "bytes": 74,
+      "sha256": "e03efd3b6ce286534ffc2104e6a8b942f1a83c116928ee06fb4dec723971792a"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-client-format-ship-20261020.log",
+      "bytes": 47,
+      "sha256": "292bd196baff57c57d8fcab273d55b8a6326f79b65f3554bf97d49c8e985e6e9"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-client-full-20261020.log",
+      "bytes": 53649,
+      "sha256": "bf98f1e36f67f818ffeb604b63e5de71e813b6db9d9b904699ad67d29a019620"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-client-full-final-20261020.log",
+      "bytes": 53681,
+      "sha256": "b7237f1930fffe7d1616afd75bd74d5e6295060f977466587f14dfcf01dc4416"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-client-full-ship-20261020.log",
+      "bytes": 53748,
+      "sha256": "f49a2bcf1122f587841dce6f1e054bb4195d24434f9ffc96f292c5d0cddfe15e"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-client-green-20261020.log",
+      "bytes": 2788,
+      "sha256": "9733b8ce31c793218033a008dbc9cfb71a0d7f007ff17aa8b2bb54a0aef963c7"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-client-red-20261020.log",
+      "bytes": 8484,
+      "sha256": "13aec158c1c783c617b27e875c7efb43b0ed588386a1f70c75176065f79adc8e"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-client-style-20261020.log",
+      "bytes": 172,
+      "sha256": "f5d8ea2981ff6045651115a4f5fc8f3abe0826b94159229ae4b30aab3066a3ee"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-web-build-20261020.log",
+      "bytes": 3511,
+      "sha256": "2fa0abb1a12ca1d6cf841e89f2fa2fe3c3ed6ce2cc71ded68389602b96ab52a5"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-web-build-final-20261020.log",
+      "bytes": 3511,
+      "sha256": "bddaec205e4b10826c547fc4dcd4cf63f9ff7a0dbd8e77c58cc22d3f13e88698"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-web-build-ship-20261020.log",
+      "bytes": 3511,
+      "sha256": "4bdfc849f306d65ce6b717259eb738535d1613a5e5a5f71d98c3f71c989e8825"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-web-format-20261020.log",
+      "bytes": 19458,
+      "sha256": "f5cef36911281f4dce08332d55ffb96b1dc23463591a798694a2a236b6467a38"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-web-format-css-20261020.log",
+      "bytes": 19457,
+      "sha256": "7f9bce71c5e01c18942a9362c25ab36174cc415ff44fce9d39017c5cc88483e9"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-web-format-ship-20261020.log",
+      "bytes": 19457,
+      "sha256": "3e737cd7db65074fb37bf5786ab05a266e4992b3fd7c7abbfe99610354c6abb7"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-web-full-20261020.log",
+      "bytes": 288,
+      "sha256": "808d16a319c3d12f7734f5e0e2e97129037739ea82908e012dc12226887877c6"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-web-full-final-20261020.log",
+      "bytes": 288,
+      "sha256": "0f6f32e2de7524746b4004ff99d545c00c85129874f63e6e078252a6ee2c0be7"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-web-full-ship-20261020.log",
+      "bytes": 288,
+      "sha256": "1f7b91555678fdb59c0a40cdfa6ef9fc196757a6189df510f0fe8d6986a9d23d"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-web-green-20261020.log",
+      "bytes": 383,
+      "sha256": "67826ee1b0931e3dc21ba7528476a654e70ee1b84799bb9dda816099391cc992"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-web-lint-20261020.log",
+      "bytes": 19292,
+      "sha256": "72dc0b1ecc00ae756156e01905dea5b46724020911ee15e1b5671fc8262f5423"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-web-lint-final-20261020.log",
+      "bytes": 19292,
+      "sha256": "f98b7cb6d93e955ffb425ff5a35a4cfbd95a0e45bd469ab6c6bc2e368ef4e754"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-web-lint-ship-20261020.log",
+      "bytes": 19253,
+      "sha256": "a187aab00746d4ad4bbed675b0ad074fc7a2a8f687900989e333c3748d4a41e9"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-web-red-20261020.log",
+      "bytes": 6011,
+      "sha256": "6a66c29fd485eef07c9c196024e4be92bd4d9d21532211100451f78f3a357269"
+    }
+  ]
+}
