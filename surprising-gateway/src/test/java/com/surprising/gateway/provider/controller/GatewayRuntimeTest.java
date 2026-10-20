@@ -16,6 +16,8 @@ class GatewayRuntimeTest {
         var local = mock(GatewayProductServices.class);
         when(local.enabled()).thenReturn(java.util.List.of(product));
         var controller = new GatewayProxyController(mock(GatewayProxyService.class), local);
+        when(local.disabled()).thenReturn(java.util.List.of(ProductLine.values()).stream().filter(p -> p != product).toList());
         assertThat(controller.runtime().get("productLines")).containsExactly(product);
+        assertThat(controller.runtime().get("disabledProductLines")).doesNotContain(product).hasSize(5);
     }
 }

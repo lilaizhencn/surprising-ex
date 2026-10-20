@@ -319,3 +319,7 @@ Web 最近订单更新曾在直接切换已登录账户时保留前一账户缓�
 ### 现货算法委托查询迁移（2026-10-20）
 
 用户算法单查询现读取 realtime 的已提交 Archive 投影；Core 在子单回收前保留父单成交累计，修复历史子单已回收导致查询失败的问题。需配套 SQL、Core/realtime/gateway 发布。现货 FUSED 的算法成交、撤销、Core 暂停读查询及资金对账结果、历史快照已知缺口和移动端待办见 [查询与恢复契约](docs/algo-read-projection.md)；本轮不代表客户端算法功能或全部产品验收。
+
+### 移动端资产与未启用产品（2026-10-20）
+
+`GatewayProductServices.disabled()` 只读取产品线数据库开关，`/api/v1/runtime` 增加 `disabledProductLines`。`AccountAssetsController` 在本人身份及产品归属检查后为未启用产品返回空余额列表（估值为零）；已启用产品沿用 realtime 查询，故障继续报错，不能按零隐藏。交易写入入口不变，查询禁止缓存。验证及当前测试服务器发布边界见 [验收记录](docs/validation/mobile-assets-disabled-products-20261020.json)。

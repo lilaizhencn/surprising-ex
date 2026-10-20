@@ -96,6 +96,12 @@ public final class GatewayProductServices implements AutoCloseable {
 
     public List<ProductLine> enabled() { return List.copyOf(products.keySet()); }
     public Map<ProductLine, String> errors() { return errors; }
+    /** 只有数据库明确未启用的产品可按零资产展示；连接失败与初始化中不能归为零。 */
+    public List<ProductLine> disabled() {
+        return settings.list().stream().filter(setting -> !setting.enabled())
+                .map(GatewayProductSettings.Setting::productLine).toList();
+    }
+
     public void requireEnabled(ProductLine product) {
         if (product == null || !products.containsKey(product))
             throw new org.springframework.web.server.ResponseStatusException(

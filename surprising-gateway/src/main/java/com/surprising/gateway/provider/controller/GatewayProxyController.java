@@ -32,7 +32,7 @@ public class GatewayProxyController {
     /** All enabled products share this Gateway and its public WebSocket endpoint. */
     @GetMapping("/api/v1/runtime")
     public Map<String, List<ProductLine>> runtime() {
-        return Map.of("productLines", products.enabled());
+        return Map.of("productLines", products.enabled(), "disabledProductLines", products.disabled());
     }
 
     @RequestMapping(path = {
