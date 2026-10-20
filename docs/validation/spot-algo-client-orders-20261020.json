@@ -1,0 +1,393 @@
+{
+  "date": "2026-10-20",
+  "goalStatus": "progress",
+  "product": "SPOT",
+  "module": "client 现货算法单读取、精确展示与父单撤销交互",
+  "previousTurn": {
+    "classification": "progress",
+    "commit": "54bfcbe2c5a5aefc45a61f6fbf064bc3c1d63b89",
+    "evidence": "surprising-ex/docs/validation/spot-algo-read-projection-20261020.json",
+    "sha256": "09b06b4f7667af50d96b70878eefddc7b46965f89eb30b7c267b0c46d7693ef5",
+    "outcome": "已完成后端已提交算法单读投影、子单累计和本地撤销并发修复及 SPOT FUSED 实栈，整体目标未完成。"
+  },
+  "baseline": {
+    "surprising-ex": "54bfcbe2c5a5aefc45a61f6fbf064bc3c1d63b89",
+    "surprising-ex-web": "b7d1877e9f82a2ebc4cfc4ad6ad6932fa8286b92",
+    "surprising-client": "12420964b2ee0d841b53d98d10b51e832539bc93",
+    "surprising-admin-web": "ac8fe282228c1a18082665e56a08adccab577cea"
+  },
+  "flow": [
+    "账户刷新及策略页签进入使用既有 algo/open GET，传当前产品、认证用户、永久 instrumentId 和最多 1000 笔；全产品筛选只移除合约条件。",
+    "模型保留 int64 用户、父子单及永久合约身份，拒绝非法枚举、数量、精度和查询归属；未知视图和 503 显示为错误。",
+    "已成交量、挂单量和切片数量分开展示，用真实 tick/step 与币种 scale 进行整数换算，不经 double；320px 深浅主题点击和展示验证。",
+    "缺少目录资料时按永久 ID 读取对应产品的 instrument/latest，资料保存在当前查询的有界映射；不改变交易目录。",
+    "撤销锁定原用户、产品和父单，核验响应，取消中单独呈现；已确认响应使此前在途查询失效，拒绝旧账户响应。",
+    "账户刷新、策略查询、普通委托分页使用各自请求编号，防止相互作废及加载提示不收敛。"
+  ],
+  "stateOwnership": {
+    "algoOrders": "现有 openAlgoOrders 保存当前查询结果，visibleAlgoOrders 按当前用户/产品/合约筛选。",
+    "metadata": "AppState._algoOrderInstruments 只保存这次查询所需且未在目录中的合约资料；最多与 1000 条记录对应的合约数，账户/产品/合约/筛选改变时清空。",
+    "requestCounters": "三个独立异步查询的代次；钱包会话及产品选择代次阻止迟到回写和 dispose 后通知。",
+    "layersAdded": 0,
+    "runtimeCoreStateChanged": false
+  },
+  "clientVerification": {
+    "commands": {
+      "format": {
+        "command": [
+          "dart",
+          "format",
+          "--output=none",
+          "--set-exit-if-changed",
+          "lib/src/api.dart",
+          "lib/src/app.dart",
+          "lib/src/app_state.dart",
+          "lib/src/models.dart",
+          "test/spot_algo_orders_test.dart"
+        ],
+        "exit": 0,
+        "log": "/tmp/surprising-spot-algo-client-20261020_113209-final/format.log"
+      },
+      "analyze": {
+        "command": [
+          "flutter",
+          "analyze"
+        ],
+        "exit": 0,
+        "log": "/tmp/surprising-spot-algo-client-20261020_113209-final/analyze.log"
+      },
+      "tests": {
+        "command": [
+          "flutter",
+          "test",
+          "--machine"
+        ],
+        "exit": 0,
+        "log": "/tmp/surprising-spot-algo-client-20261020_113209-final/tests.log"
+      }
+    },
+    "allTestsPassed": 334,
+    "skippedCount": 10,
+    "skipped": [
+      {
+        "file": "/Users/atomex/Desktop/surprising/surprising-client/test/linear_delivery_fused_live_test.dart",
+        "name": "LINEAR_DELIVERY FUSED settling closes and recovers a lost response without another order"
+      },
+      {
+        "file": "/Users/atomex/Desktop/surprising/surprising-client/test/option_reference_fee_live_test.dart",
+        "name": "OPTION public fee revision enables exact premium in the real ticket"
+      },
+      {
+        "file": "/Users/atomex/Desktop/surprising/surprising-client/test/spot_trade_history_fused_live_test.dart",
+        "name": "SPOT real committed private fills and 320px record pages remain readable"
+      },
+      {
+        "file": "/Users/atomex/Desktop/surprising/surprising-client/test/linear_delivery_expiry_live_test.dart",
+        "name": "LINEAR_DELIVERY FUSED ended contract and actual cash ledger remain queryable"
+      },
+      {
+        "file": "/Users/atomex/Desktop/surprising/surprising-client/test/spot_fused_live_test.dart",
+        "name": "SPOT FUSED real HTTP/WS bulk cancellation survives projection pause and restart"
+      },
+      {
+        "file": "/Users/atomex/Desktop/surprising/surprising-client/test/option_single_trigger_fused_live_test.dart",
+        "name": "OPTION FUSED independent trigger and cancellation survive real lost replies and state reconstruction"
+      },
+      {
+        "file": "/Users/atomex/Desktop/surprising/surprising-client/test/inverse_delivery_market_live_test.dart",
+        "name": "inverse delivery market replay retains committed fills and actual base volume"
+      },
+      {
+        "file": "/Users/atomex/Desktop/surprising/surprising-client/test/spot_order_history_fused_live_test.dart",
+        "name": "SPOT real history entry, status and continuation retain original own orders"
+      },
+      {
+        "file": "/Users/atomex/Desktop/surprising/surprising-client/test/delivery_protection_fused_live_test.dart",
+        "name": "LINEAR_DELIVERY FUSED protection and settling preserve original results"
+      },
+      {
+        "file": "/Users/atomex/Desktop/surprising/surprising-client/test/option_protection_fused_live_test.dart",
+        "name": "OPTION FUSED atomic protection triggers a real close and recovers only its original receipt"
+      }
+    ],
+    "newModule": [
+      {
+        "name": "algo identity and progress preserve int64 without counting working quantity as fills",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {algoOrderId: 9223372036854775808}",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {quantitySteps: 1.5}",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {executedQuantitySteps: -1}",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {activeQuantitySteps: 76}",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {childQuantitySteps: 101}",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {userId: 0}",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {instrumentId: }",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {productLine: OPTION}",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {status: UNKNOWN}",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {algoType: OTHER}",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {positionSide: LONG}",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {reduceOnly: true}",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {postOnly: false}",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {currentOrderId: 1e3}",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "algo model rejects malformed {clientAlgoOrderId: }",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "real HTTP adapter sends product, owner and permanent instrument query",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "spot private refresh loads algo reads without derivative liquidation calls",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "late responses cannot cross account, instrument, product or filter generations",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "failed refresh clears obsolete rows and exposes an error instead of an empty success",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "cancellation uses the immutable target once and reports cancel-requested truthfully",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "cancellation replies cannot populate a switched account",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "an older SQL read cannot resurrect the parent after its cancellation response",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "halted instruments are resolved by immutable identity without entering the trading catalog",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "ordinary order pagination cannot leave private refresh loading forever",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "switching product during cancellation releases its original busy flag without importing its response",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "320px Brightness.dark strategy row separates fills and working quantity with exact precision",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "320px Brightness.light strategy row separates fills and working quantity with exact precision",
+        "result": "success",
+        "skipped": false
+      },
+      {
+        "name": "unknown instrument never inherits selected precision; query errors remain visible",
+        "result": "success",
+        "skipped": false
+      }
+    ],
+    "analyzeIssues": 0,
+    "formatExit": 0,
+    "machineDoneSuccess": true,
+    "machineErrors": [],
+    "paginationRed": {
+      "exit": 1,
+      "scope": "Restore only the prior shared request counter in refreshPrivateData, then run the pagination regression",
+      "originalSourceSha256": "f9b77ed702c93894146d25e890cb4a3269c647c547abbab7d6ab65c5d6e3cd5c",
+      "restoredAfterRun": true,
+      "sourceIdentityNote": "该 SHA 是临时红测试开始时的源码，后续增加了取消过程中切产品的 busy 收敛修复；最终 sourceSha256 与最终全量测试另行记录。"
+    },
+    "paginationGreen": "同一回归包含在本轮 333 个成功用例中。",
+    "httpEvidence": "真实 Dart HttpClient 连接本轮随机端口 loopback HttpServer，验证路径、Authorization、用户和产品 header、永久合约 query、枚举/用户/进度/重复记录校验。响应为显式契约样本。",
+    "lateProductSwitch": "旧撤销请求结束时仅释放同一钱包会话的 busy 标记，不将旧产品响应写入当前列表。新增用例在最终全量测试中通过。"
+  },
+  "limits": [
+    "现货 TWAP/冰山创建入口和原创建请求持久化恢复仍未实现；整体目标保持 active，不计完整产品或算法单生命周期验收。",
+    "本轮未启动后端、wallet、任何其他产品实栈、浏览器或原生设备；未新增 FUSED 成交/冻结/资金守恒验收，也不以此前实栈代替本轮端侧集成证据。",
+    "策略状态沿用 Web 的主动读取方式，进入页签、账户刷新/重连或点击刷新时查询；未新增实时算法单频道或后台轮询。",
+    "取消未知结果保留原策略并提示刷新，不自动重发；本轮未新增创建/取消专用回执接口或跨进程原请求恢复。",
+    "1000 条达到上限时提示按交易对筛选；该既有后端接口尚无分页游标。",
+    "已知六产品历史快照资金指纹冲突及多 gateway 在途子单竞态仍未解决，见上一轮后端证据。",
+    "Web/admin 本轮无业务改动，admin .codegraph/ 生成物保留且不提交。"
+  ],
+  "backendVerification": {
+    "runtimeSourceChanged": false,
+    "documentsOnly": true,
+    "mavenRun": false,
+    "requiredCheck": "git diff --check",
+    "coreQueriesAdded": false
+  },
+  "sourceSha256": {
+    "README.md": "cac12988333e0796fc3312257ecc0bf6f5ee195416463167dfd10e72bbed577b",
+    "lib/src/api.dart": "fc650d7f97122f693c45c3e49fe611b0d69d158acff56feb2d454d4e8511061e",
+    "lib/src/app.dart": "d5b7077b556bdb9e5b3aef0f823e2c01066439c16280c5ed6582ac4b3fde5593",
+    "lib/src/app_state.dart": "dd34d1f4ecac9cec3977bd2664af5a239f0324c3c04881461d3f8c58a77141aa",
+    "lib/src/models.dart": "650f5abea2ab9d82e439140c3aedaa6ab6f2908ebb1151a786bfbc394d0b2122",
+    "test/spot_algo_orders_test.dart": "c34fb8301b79e0ac6fd6847134f2c7f5636c3cb03348cc6d2c6797241b040af3"
+  },
+  "artifactManifest": [
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_112524/analyze.log",
+      "bytes": 96,
+      "sha256": "2f182441afb0daa53f289a2a26f91a0201d48fd1c4a65412c5a8ff1dd22d1b15"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_112524/baselines.json",
+      "bytes": 688,
+      "sha256": "6c9dac624ff2324802bdd20e74ba07b81c043f2765be978d8329c04965da314e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_112524/checks.json",
+      "bytes": 715,
+      "sha256": "d42d6e5612ad8d1e46dba76cb993a0160e8508e225fe677e84f00c74254d13bb"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_112524/format.log",
+      "bytes": 47,
+      "sha256": "4c1691f4c19f1bf2084f422461867b8ddadb4f63a2cf4dbeeaf0bdc3150aea01"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_112524/intermediate-analyze.log",
+      "bytes": 276,
+      "sha256": "5bf066665e3af6946695ef037b800f0e03c09e262b7106c8d4403b652e293273"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_112524/intermediate-checks.json",
+      "bytes": 537,
+      "sha256": "04b7a8631c4168200d5f6263a63cae28ea1f7f4d9106539396e38ecfa8adac8e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_112524/machine-summary.json",
+      "bytes": 6343,
+      "sha256": "dab85fe9dff6341d09ad90067f6031cbf023fb65016ea60025cdf0ca80366d15"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_112524/owner.json",
+      "bytes": 143,
+      "sha256": "ade9edfa08ea9b8918c28d6fa7216b851deb6258aa36d0720b72922d5a138ad5"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_112524/pagination-red-proof.json",
+      "bytes": 256,
+      "sha256": "4e6715f0d91fca29f66c41eea579c4e6dc1f0dfeacc2cb027515dd1bd6676787"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_112524/pagination-red.log",
+      "bytes": 1189,
+      "sha256": "c8c54871592b88a7d2a34181c1c1af0153c85747e059a662d8e321ed0264ad4b"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_112524/tests.log",
+      "bytes": 182186,
+      "sha256": "70223c61c08847a8ea319c6c5e228013c271edb6575b769469508d7c6792ff11"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_113209-final/analyze.log",
+      "bytes": 96,
+      "sha256": "7969802ab7f28b3548e56c470b93ffbbdf61d8dfb8c1bf315e009c3230210687"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_113209-final/checks.json",
+      "bytes": 733,
+      "sha256": "97c097e44eabc8cbe00f42f5e8ab1077e2724f968af569b0544914dbc8e1c833"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_113209-final/format.log",
+      "bytes": 47,
+      "sha256": "5afe02c2f10e6cc02b72380ba5e27f831d7ff2a89f079784051a2bdabaa4fb6c"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_113209-final/owner.json",
+      "bytes": 149,
+      "sha256": "318435a231dbc48aa6accf82abdaa5979fc0c94e329edfcf97219badc363f150"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-client-20261020_113209-final/tests.log",
+      "bytes": 182656,
+      "sha256": "ebd4457abbbb13aa3bc0b0af1f6499cae5ea70dae0c05dc533c17e749287f28c"
+    }
+  ],
+  "cleanup": {
+    "status": "verified",
+    "qaRoot": "/tmp/surprising-spot-algo-client-20261020_112524",
+    "qaRootRemoved": true,
+    "currentMetadataRemoved": true,
+    "persistentBackendBrowserDeviceOrDatabaseCreated": false,
+    "testProcesses": "最终 flutter test --machine exit 0；每个自建 HTTP server 在 addTearDown 关闭。",
+    "temporarySourceExperiment": "pagination-red 在 finally 以原始 SHA 身份校验后恢复本轮源码；最终格式、analyze 和全量测试运行于恢复后的最终代码。",
+    "unrelatedResourcesTouched": false,
+    "additionalFinalQaRoot": "/tmp/surprising-spot-algo-client-20261020_113209-final",
+    "additionalFinalQaRootRemoved": true
+  }
+}
