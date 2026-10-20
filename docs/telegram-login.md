@@ -38,3 +38,9 @@ TELEGRAM_TEST_JDBC_URL=jdbc:postgresql://127.0.0.1:5432/postgres TELEGRAM_TEST_D
 真实 Telegram 用户授权仍需配置有效的登录专用 Secret 后验收；模拟身份提供方和数据库测试不代替该项验收。此特性当前未满足整体移动端改版及合并条件。
 
 协议来源：https://core.telegram.org/bots/telegram-login
+
+## App 用户二维码
+
+App 的公开名片二维码仅包含 `surprising://user/<UID>`，不含会话、邮箱、手机号或余额。`POST /api/v1/users/scan` 要求现有 Bearer 会话，正文 `{qrCode}`；服务端严格解析平台 URI 并返回 `{userId, displayName}`。客户端显示服务端解析的昵称，不信任二维码中附加的名称，也不执行转账、外部跳转或登录动作。冻结或不存在的账户返回不可用。
+
+`UserCardControllerTest` 4 项通过，覆盖公开资料范围、外部地址、非法/溢出 UID、冻结或不存在账户，以及无效会话。
