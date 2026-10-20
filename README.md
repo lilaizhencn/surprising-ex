@@ -315,3 +315,7 @@ client 现货默认打开当前委托，隐藏持仓入口和保证金风险摘�
 Web 最近订单更新曾在直接切换已登录账户时保留前一账户缓存。现按账户、登录状态、产品及永久 instrumentId 重新挂载面板，清除页签、筛选、订单更新与风险局部状态；仅收录根事件 userId 属于当前账户、channel=orders 且产品匹配的更新，跳过无订单号的空事件。现货不再展示持仓页签，衍生品入口保留。
 
 本轮只调试现货界面与状态隔离，无 API、realtime 或 Core 逻辑改动，无迁移/topic/服务新增；查询继续使用既有 realtime 路径。未启动后端、wallet 或其他产品实栈，不能据此宣称新的 FUSED 成交/资金对账通过。scripts/spot-order-details-qa.mjs 新增账户、退出登录、交易对往返、错误产品事件与页签切换回归，沿用既有 SPOT_DETAILS_QA_ROOT / SPOT_DETAILS_QA_BASE / SPOT_DETAILS_PLAYWRIGHT_MODULE / SPOT_DETAILS_CHROMIUM 参数。受控真实组件验证、原生 widget 覆盖与资源清理见 [验证记录](docs/validation/spot-trading-panel-scope-20261020.json)。
+
+### 现货算法委托查询迁移（2026-10-20）
+
+用户算法单查询现读取 realtime 的已提交 Archive 投影；Core 在子单回收前保留父单成交累计，修复历史子单已回收导致查询失败的问题。需配套 SQL、Core/realtime/gateway 发布。现货 FUSED 的算法成交、撤销、Core 暂停读查询及资金对账结果、历史快照已知缺口和移动端待办见 [查询与恢复契约](docs/algo-read-projection.md)；本轮不代表客户端算法功能或全部产品验收。

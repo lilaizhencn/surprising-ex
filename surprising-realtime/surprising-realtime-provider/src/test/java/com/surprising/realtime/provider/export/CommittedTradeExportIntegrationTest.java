@@ -36,6 +36,7 @@ class CommittedTradeExportIntegrationTest {
     @TempDir Path temp;
     private final CommittedOrderProjectionRepository orders = org.mockito.Mockito.mock(CommittedOrderProjectionRepository.class);
     {
+        org.mockito.Mockito.when(orders.algos()).thenReturn(org.mockito.Mockito.mock(CommittedAlgoProjection.class));
         var statistics=org.mockito.Mockito.mock(CommittedTradingStatistics.class);
         org.mockito.Mockito.when(statistics.initialized(org.mockito.ArgumentMatchers.any())).thenReturn(true);
         org.mockito.Mockito.when(orders.statistics()).thenReturn(statistics);
@@ -49,7 +50,7 @@ class CommittedTradeExportIntegrationTest {
             if (projectionUnavailable.getAndSet(false)) throw new IllegalStateException("projection unavailable");
             projected.addAll(call.<List<RealtimeFrame>>getArgument(1));
             return null;
-        }).when(orders).persist(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyLong());
+        }).when(orders).persist(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyList());
         String topic = ProductTopicNames.of(ProductLine.SPOT).matchTradesTopic();
         var broker =
                 new EmbeddedKafkaKraftBroker(1, 1, topic)

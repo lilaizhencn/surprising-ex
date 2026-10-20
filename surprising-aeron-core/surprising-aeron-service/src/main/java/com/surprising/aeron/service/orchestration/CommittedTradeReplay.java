@@ -16,6 +16,10 @@ public final class CommittedTradeReplay implements AutoCloseable {
     private CommittedFundingPage fundingPage;
     private CommittedDeliveryPage deliveryPage;
     private CommittedCommandResult commandResult;
+    // Read-model routing only, owned by this separate replay worker. Active child IDs locate
+    // their parent when a fill/cancel changes progress without changing the parent revision.
+    private final Map<Long, Long> algoByChild = new HashMap<>();
+    private List<CoreAlgoOrderView> algoChanges = List.of();
 
     public CommittedTradeReplay(ProductLine product, byte[] snapshot) {
         state =
@@ -26,9 +30,11 @@ public final class CommittedTradeReplay implements AutoCloseable {
         capture = state.attachRealtime(outbox);
         capture.orderProjectionOnly(true);
         state.funding.observeReplayPayments(result -> fundingResult = result);
+        forEachRetainedAlgo(ignored -> {});
     }
 
     public List<RealtimeFrame> apply(byte[] bytes, long timestamp, long logPosition) {
+        algoChanges = List.of();
         fundingPage = null;
         deliveryPage = null;
         commandResult = null;
@@ -151,10 +157,79 @@ public final class CommittedTradeReplay implements AutoCloseable {
                         || frame.kind() == RealtimeFrame.Kind.EXECUTION || frame.kind() == RealtimeFrame.Kind.TRIGGER)
                     changes.add(frame);
             }
+            collectAlgoChanges(command, changes);
             return List.copyOf(changes);
         } finally {
             capture.abort();
         }
+    }
+
+    public List<CoreAlgoOrderView> algoChanges() { return algoChanges; }
+
+    /** Only the committed replay copy is queried; this never calls a running Core. */
+    public void forEachRetainedAlgo(java.util.function.Consumer<CoreAlgoOrderView> consumer) {
+        state.algoOrderIndex.forEachRoute(route -> {
+            var value = readAlgo(route.userId(), route.algoOrderId());
+            if (value == null) throw new IllegalStateException("retained algo route has no state");
+            routeAlgoChildren(value);
+            consumer.accept(value);
+        });
+    }
+
+    private CoreAlgoOrderView readAlgo(long userId, long algoId) {
+        var response = replayQuery(CoreMessageType.ALGO_ORDER_QUERY, userId,
+                CoreAlgoOrderCodec.encodeQuery(userId, algoId, "", 0, 1), state.currentClusterTimestamp(), 1);
+        if (response.status() != ResponseStatus.OK) throw new IllegalStateException("committed algo query failed");
+        return CoreAlgoOrderCodec.decodeList(response.data()).stream().findFirst().orElse(null);
+    }
+
+    private void routeAlgoChildren(CoreAlgoOrderView value) {
+        // Codes 0..2 are PENDING/RUNNING/CANCEL_REQUESTED. Terminal children need no further progress updates.
+        for (long child : value.childOrderIds()) {
+            if (value.statusCode() <= 2) algoByChild.put(child, value.algoOrderId());
+            else algoByChild.remove(child);
+        }
+    }
+
+    private void collectAlgoChanges(CoreMessage command, List<RealtimeFrame> changes) {
+        var dirty = new LinkedHashMap<Long, Long>();
+        if (command.header().messageType() == CoreMessageType.UPSERT_ALGO_ORDER
+                && commandResult != null && commandResult.status() == ResponseStatus.APPLIED) {
+            var submitted = CoreAlgoOrderCodec.decode(command.payloadUnsafe());
+            dirty.put(submitted.algoOrderId(), submitted.userId());
+        }
+        // A first child can fill before its ID is linked to the parent. Reuse the
+        // decoded PLACE receipt identity instead of decoding every ordinary order frame again.
+        String client = commandResult == null ? null : commandResult.clientOrderId();
+        if (client != null && client.startsWith("algo-") && commandResult.status() == ResponseStatus.APPLIED
+                && changes.stream().anyMatch(frame -> {
+                    if (frame.kind() != RealtimeFrame.Kind.ORDER || frame.userId() != commandResult.userId()) return false;
+                    var child = CoreStateQueryCodec.decodeOrderState(frame.payload());
+                    return client.equals(child.clientOrderId()) && !"OPEN".equals(child.status());
+                })) {
+            int separator = client.lastIndexOf('-');
+            if (separator > 5) try {
+                long id = Long.parseLong(client.substring(5, separator));
+                var route = state.algoOrderIndex.value(id);
+                if (route != null && route.userId() == commandResult.userId()) dirty.put(id, route.userId());
+            } catch (NumberFormatException malformed) { /* An ordinary client ID supplies no parent identity. */ }
+        }
+        for (var frame : changes) {
+            if (frame.kind() != RealtimeFrame.Kind.ORDER) continue;
+            long orderId = Long.parseLong(frame.entityId());
+            Long parent = algoByChild.get(orderId);
+            if (parent != null) dirty.put(parent, frame.userId());
+        }
+        if (dirty.isEmpty()) return;
+        var values = new ArrayList<CoreAlgoOrderView>(dirty.size());
+        dirty.forEach((id, user) -> {
+            var value = readAlgo(user, id);
+            if (value != null) {
+                routeAlgoChildren(value);
+                values.add(value);
+            }
+        });
+        algoChanges = List.copyOf(values);
     }
 
     public CommittedFundingPage fundingPage() { return fundingPage; }

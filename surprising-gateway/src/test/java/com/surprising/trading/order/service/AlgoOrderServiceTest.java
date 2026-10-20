@@ -49,11 +49,26 @@ class AlgoOrderServiceTest {
                 .hasMessageContaining("clientAlgoOrderId is required");
     }
 
+    @Test void openReadsOnlyTheCommittedProjectionForEachProduct() {
+        for (var line : ProductLine.values()) {
+            var properties = new TradingOrderProperties();
+            properties.getKafka().setProductLine(line);
+            var store = mock(AeronAlgoOrderStore.class);
+            var projection = mock(com.surprising.trading.order.repository.AlgoOrderProjectionRepository.class);
+            org.mockito.Mockito.when(projection.openOrders(line, 1001, "1", 10)).thenReturn(java.util.List.of());
+            var service = new AlgoOrderService(properties, mock(OrderService.class), store, projection);
+            org.assertj.core.api.Assertions.assertThat(service.openOrders(1001, "1", 10).orders()).isEmpty();
+            org.mockito.Mockito.verify(projection).openOrders(line,1001,"1",10);
+            org.mockito.Mockito.verifyNoInteractions(store);
+        }
+    }
+
     private AlgoOrderService service(ProductLine line) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(line);
         properties.getAlgo().setMinDurationSeconds(1);
         properties.getAlgo().setMinIntervalSeconds(1);
-        return new AlgoOrderService(properties, mock(OrderService.class), mock(AeronAlgoOrderStore.class));
+        return new AlgoOrderService(properties, mock(OrderService.class), mock(AeronAlgoOrderStore.class),
+                mock(com.surprising.trading.order.repository.AlgoOrderProjectionRepository.class));
     }
 }

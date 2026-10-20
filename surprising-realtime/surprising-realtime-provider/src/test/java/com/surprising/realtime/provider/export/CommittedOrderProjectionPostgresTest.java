@@ -29,6 +29,8 @@ class CommittedOrderProjectionPostgresTest {
         jdbc.execute("CREATE TABLE core_projection_watermark (LIKE public.core_projection_watermark INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_command_result_projection (LIKE public.core_command_result_projection INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_trigger_order_projection (LIKE public.core_trigger_order_projection INCLUDING ALL)");
+        jdbc.execute("CREATE TABLE core_algo_order_projection (LIKE public.core_algo_order_projection INCLUDING ALL)");
+        jdbc.execute("CREATE TABLE core_algo_projection_initialization (LIKE public.core_algo_projection_initialization INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_trigger_projection_initialization (LIKE public.core_trigger_projection_initialization INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_execution_projection (LIKE public.core_execution_projection INCLUDING ALL)");
         jdbc.execute("CREATE TABLE core_execution_projection_initialization (LIKE public.core_execution_projection_initialization INCLUDING ALL)");

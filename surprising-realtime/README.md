@@ -568,3 +568,7 @@ LINEAR_DELIVERY <cluster-directory> <aeron-directory> <archive-control-channel> 
 ### 期权参考报价读视图（2026-10-20）
 
 仅 OPTION 进程注册 `OptionQuoteService` 与现有 price.events topic 消费者，保存每合约一份可重建价格发布，按当前精度版本及源数据新鲜度查询；不向在线 Core 发查询。经既有 candlestick 市场数据路由返回真实价格与明确零贴现的参考 Greeks，源数据不合格则503，模型无法求解时greeks为null。停牌的未到期合约仍可查询，交易权限不随查询开放。[模型、公开费用契约和发布步骤](../docs/option-market-reference.md)。
+
+### 算法委托提交投影（2026-10-20）
+
+`CommittedTradeReplay` 在独立回放副本读取父单及子单成交进度，`CommittedAlgoProjection` 写入最新算法单和初始化标记。算法单变化纳入原有 ExportBatch，与订单、回执、水位共用事务和恢复点；相同父单 revision 的成交变化仍按 exportSequence 更新。先执行 `20261020-algo-read-projection.sql`，再配套发布 Core、realtime、gateway。状态归属、启动分批恢复和已知历史快照缺口见 [算法委托查询](../docs/algo-read-projection.md)。

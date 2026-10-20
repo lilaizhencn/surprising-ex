@@ -70,6 +70,8 @@ public class CommittedOrderProjectionRepository {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
     private final CommittedTradingStatistics statistics;
+    private final CommittedAlgoProjection algos;
+    public CommittedAlgoProjection algos() { return algos; }
 
     /** Use a method so Spring repository proxies delegate to the initialized target instance. */
     public CommittedTradingStatistics statistics() { return statistics; }
@@ -78,6 +80,7 @@ public class CommittedOrderProjectionRepository {
         this.jdbc = jdbc;
         this.transaction = new TransactionTemplate(transactions);
         this.statistics = new CommittedTradingStatistics(jdbc,transaction);
+        this.algos = new CommittedAlgoProjection(jdbc,transaction);
     }
 
     /** The detached replay checkpoint owns initialization; HTTP never materializes Core state. */
@@ -332,8 +335,14 @@ public class CommittedOrderProjectionRepository {
     /** All orders and their visibility watermark commit together, before the export checkpoint. */
     void persist(ProductLine product, List<RealtimeFrame> orders,
                  List<CommittedCommandResult> commandResults, long exportSequence) {
+        persist(product, orders, commandResults, exportSequence, List.of());
+    }
+
+    void persist(ProductLine product, List<RealtimeFrame> orders,
+                 List<CommittedCommandResult> commandResults, long exportSequence,
+                 List<com.surprising.aeron.protocol.CoreAlgoOrderView> algoChanges) {
         if (product == null || exportSequence < 0) throw new IllegalArgumentException("invalid order projection batch");
-        if (orders.isEmpty() && commandResults.isEmpty()) {
+        if (orders.isEmpty() && commandResults.isEmpty() && algoChanges.isEmpty()) {
             // Commands without order changes must still advance the visibility watermark.
             transaction.executeWithoutResult(status -> advanceWatermark(product, exportSequence));
             return;
@@ -405,6 +414,7 @@ public class CommittedOrderProjectionRepository {
         var fills = committedExecutions(product, orders);
         transaction.executeWithoutResult(status -> {
             statistics.persist(product,commandResults);
+            algos.persist(product, algoChanges, exportSequence);
             persistCommandResults(product, receipts);
             persistExecutions(product, fills);
             persistTriggers(product, triggers.values(), exportSequence);

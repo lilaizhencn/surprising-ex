@@ -102,6 +102,7 @@ final class MatcherSettlementChanges {
             }
             // 原生拒单保留已有的 REJECTED 查询记录，但不再持有冻结或 reservation。
             if (order.status() == CoreOrderStatus.REJECTED) continue;
+            RuntimeAlgoOrderStateTransitions.retireChild(lane, identities, order, changes);
             OrderRuntime removed = lane.removeOrder(orderId);
             if (removed != null) {
                 changes.removeOrderRoute(orderId);

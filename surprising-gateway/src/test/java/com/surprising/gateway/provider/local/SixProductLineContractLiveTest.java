@@ -738,6 +738,77 @@ class SixProductLineContractLiveTest {
         return new Participant(id, accessToken);
     }
 
+    private void exerciseSpotAlgoReads(JdbcTemplate jdbc, SurprisingAeronClient core, Participant user,
+                                       Participant maker, int instrumentId, long bid) throws Exception {
+        assertThat(line).isEqualTo(ProductLine.SPOT);
+        var before = combinedFunds(core,user.id,maker.id);
+        long baseBefore = userState(core,user.id).balances().stream().filter(b -> b.asset().equals("BTC"))
+                .mapToLong(b -> b.availableUnits()+b.lockedUnits()).sum();
+        String client = "algo-read-"+run;
+        long passive = submitAlgo(user,instrumentId,client+"-ice","ICEBERG","BUY",bid*99/100);
+        awaitAlgo(jdbc,passive,1,0,1);
+        String path = "/api/v1/gateway/trading/algo/open?userId="+user.id+"&instrumentId="+instrumentId+"&limit=100";
+        var active=get(path,user.token);
+        assertThat(active.path("orders").findValues("algoOrderId").stream().map(JsonNode::asLong).toList()).contains(passive);
+        request("GET",path,"",null,null,401);
+        request("GET",path.replace("userId="+user.id,"userId="+maker.id),"",user.token,null,403);
+        // The only paused process must be this test's live owned Core; resume it on every path.
+        var root=java.nio.file.Path.of(System.getenv("SIX_LINE_LIVE_ALGO_QA_ROOT")).toAbsolutePath().normalize();
+        assertThat(root.toString()).startsWith("/tmp/surprising-spot-algo-read-");
+        assertThat(json.readTree(java.nio.file.Files.readString(root.resolve("owner.json"))).path("purpose").asString())
+                .isEqualTo("spot algo committed read projection QA");
+        long pid=Long.parseLong(System.getenv("SIX_LINE_LIVE_ALGO_CORE_PID"));
+        var process=ProcessHandle.of(pid).orElseThrow();assertThat(process.isAlive()).isTrue();
+        String command=process.info().commandLine().orElseThrow();
+        assertThat(command).contains("surprising-aeron-service.jar",root.toString());
+        try {
+            assertThat(new ProcessBuilder("/bin/kill","-STOP",Long.toString(pid)).start().waitFor()).isZero();
+            long started=System.nanoTime();var paused=get(path,user.token);
+            assertThat(Duration.ofNanos(System.nanoTime()-started).toMillis()).isLessThan(2500);
+            assertThat(paused.path("orders").findValues("algoOrderId").stream().map(JsonNode::asLong).toList()).contains(passive);
+        } finally {
+            assertThat(new ProcessBuilder("/bin/kill","-CONT",Long.toString(pid)).start().waitFor()).isZero();
+        }
+        request("POST","/api/v1/gateway/trading/algo/cancel",json.writeValueAsString(Map.of("userId",user.id,"algoOrderId",passive)),user.token,null,200);
+        awaitAlgo(jdbc,passive,3,0,0);
+        long bought=submitAlgo(user,instrumentId,client+"-buy","TWAP","BUY",bid*101/100);
+        var buy=awaitAlgo(jdbc,bought,4,2,0);assertThat(buy.childOrderIds()).hasSize(2);
+        long sold=submitAlgo(user,instrumentId,client+"-sell","TWAP","SELL",bid*99/100);
+        var sell=awaitAlgo(jdbc,sold,4,2,0);assertThat(sell.childOrderIds()).hasSize(2);
+        assertThat(get(path,user.token).path("orders").findValues("algoOrderId").stream().map(JsonNode::asLong).toList())
+                .doesNotContain(passive,bought,sold);
+        long baseAfter = userState(core,user.id).balances().stream().filter(b -> b.asset().equals("BTC"))
+                .mapToLong(b -> b.availableUnits()+b.lockedUnits()).sum();
+        assertThat(baseAfter).isEqualTo(baseBefore);
+        assertThat(userState(core,user.id).balances()).allMatch(b -> b.lockedUnits()==0);
+        assertThat(userState(core,user.id).reservations()).isEmpty();
+        assertThat(combinedFunds(core,user.id,maker.id)).containsExactlyEntriesOf(before);
+        System.out.println("SPOT_ALGO_READ_PASS icebergCanceled=1 twapCompleted=2 childFills=4 corePausedRead=true unauthorized=401 crossUser=403 userLocked=0 fundsDifference=0");
+    }
+
+    private long submitAlgo(Participant user,int instrument,String client,String type,String side,long price) throws Exception {
+        var body=new LinkedHashMap<String,Object>();body.put("userId",user.id);body.put("instrumentId",String.valueOf(instrument));
+        body.put("clientAlgoOrderId",client);body.put("algoType",type);body.put("side",side);body.put("priceTicks",price);
+        body.put("quantitySteps",2);body.put("childQuantitySteps",1);body.put("intervalSeconds",1);body.put("durationSeconds",30);
+        body.put("marginMode","CROSS");body.put("positionSide","NET");body.put("reduceOnly",false);body.put("postOnly",false);
+        body.put("timeInForce",type.equals("TWAP")?"IOC":"GTC");body.put("startAt",Instant.now().toString());
+        return request("POST","/api/v1/gateway/trading/algo",json.writeValueAsString(body),user.token,null,200).path("algoOrderId").asLong();
+    }
+
+    private CoreAlgoOrderView awaitAlgo(JdbcTemplate jdbc,long id,int status,long executed,long active) throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(40);
+        CoreAlgoOrderView last=null;
+        do {
+            var rows=jdbc.queryForList("SELECT raw_algo_state FROM core_algo_order_projection WHERE product_line='SPOT' AND algo_order_id=?",byte[].class,id);
+            if(!rows.isEmpty()) {
+                last=CoreAlgoOrderCodec.decode(rows.getFirst());
+                if(last.statusCode()==status && last.executedQuantitySteps()==executed && last.activeQuantitySteps()==active)return last;
+            }
+            Thread.sleep(100);
+        } while(System.nanoTime()<deadline);
+        throw new AssertionError("algo did not reach expected committed state id="+id+" status="+status+" last="+last);
+    }
+
     private void exerciseTrading(JdbcTemplate jdbc, int instrumentId, JsonNode instrument) throws Exception {
         Participant user = participantFixture(jdbc, "trader", false);
         Participant maker = participantFixture(jdbc, "maker", false);
@@ -912,6 +983,8 @@ class SixProductLineContractLiveTest {
             }
             System.out.printf("SIX_LINE_REALTIME_PASS productLine=%s depthEvents=%d wsTrades=%d restTrades=%d identitiesMatch=true%n",
                     line, user.depth.size(), user.trades.size(), restTradeIds.size());
+            if ("true".equals(System.getenv("SIX_LINE_LIVE_ALGO_READ_VIEW")))
+                exerciseSpotAlgoReads(jdbc, core, user, maker, instrumentId, bid);
             if ((line == ProductLine.SPOT || line == ProductLine.OPTION)&&statisticsFixture==null) awaitClientVerification(user, maker, instrumentId, bid);
             if (line == ProductLine.OPTION && "true".equals(System.getenv("SIX_LINE_LIVE_OPTION_PROTECTION"))) {
                 var directory = java.nio.file.Path.of(System.getenv("SIX_LINE_LIVE_UI_FIXTURE")).getParent();

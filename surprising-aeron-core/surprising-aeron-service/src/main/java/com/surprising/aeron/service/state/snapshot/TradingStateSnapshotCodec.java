@@ -20,7 +20,7 @@ import java.util.function.Function;
  */
 public final class TradingStateSnapshotCodec {
     private static final int VERSION = 37;
-    private static final int READER_REVISION = 3;
+    private static final int READER_REVISION = 4;
     private TradingStateSnapshotCodec() { }
 
     public static byte[] encode(TradingCoreState value) {
@@ -36,7 +36,8 @@ public final class TradingStateSnapshotCodec {
                 .bytes(9, writeMap(value.algoOrders(), key -> new SnapshotFields.Writer().number(1, key).encode(), TradingStateSnapshotCodec::writeCoreAlgoOrderState))
                 .list(10, value.cancelAllAfterTimers().values(), TradingStateSnapshotCodec::writeCoreCancelAllAfterState)
                 .list(11, value.triggerOrders().values(), item -> writeCoreTriggerOrderStateView(item.view()))
-                .number(12, determineInstrumentVersion(value.instruments().values())).encode();
+                .number(12, value.algoOrders().values().stream().anyMatch(v -> v.retiredExecutedQuantitySteps() != 0 || v.pendingClosedChildId() != 0)
+                        ? 4 : determineInstrumentVersion(value.instruments().values())).encode();
         return ByteBuffer.allocate(4 + fields.length).order(ByteOrder.LITTLE_ENDIAN).putInt(VERSION).put(fields).array();
     }
 
@@ -441,6 +442,8 @@ public final class TradingStateSnapshotCodec {
                 .number(25, value.updatedAtEpochMillis()) // 25: updatedAtEpochMillis
                 .number(26, value.revision()) // 26: revision
                 .list(27, value.childOrderIds(), item -> new SnapshotFields.Writer().number(1, item).encode()) // 27: childOrderIds
+                .number(28, value.retiredExecutedQuantitySteps())
+                .number(29, value.pendingClosedChildId())
                 .encode();
     }
     private static CoreAlgoOrderState readCoreAlgoOrderState(byte[] encoded) {
@@ -471,7 +474,9 @@ public final class TradingStateSnapshotCodec {
                 r.number(24), // 24: createdAtEpochMillis
                 r.number(25), // 25: updatedAtEpochMillis
                 r.number(26), // 26: revision
-                r.list(27, item -> new SnapshotFields.Reader(item).number(1))); // 27: childOrderIds
+                r.list(27, item -> new SnapshotFields.Reader(item).number(1)), // 27: childOrderIds
+                r.number(28), // retired execution quantity
+                r.number(29)); // closed child awaiting parent link
     }
 
     private static byte[] writeCoreCancelAllAfterState(CoreCancelAllAfterState value) {

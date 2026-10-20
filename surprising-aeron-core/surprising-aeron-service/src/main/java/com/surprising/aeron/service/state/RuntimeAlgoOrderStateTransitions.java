@@ -10,6 +10,33 @@ public final class RuntimeAlgoOrderStateTransitions {
     private RuntimeAlgoOrderStateTransitions() {
     }
 
+    /** Fold the execution into its parent on the same settlement Lane before recycling the child. */
+    static void retireChild(AccountLaneState lane, RuntimeIdentityRegistry identities,
+                            OrderRuntime child, LaneCommitDelta changes) {
+        lane.assertOwner();
+        String client = child.clientOrderId();
+        if (client == null || !client.startsWith("algo-")) return;
+        int separator = client.lastIndexOf('-');
+        if (separator <= 5) return;
+        final long parentId;
+        final int slice;
+        try {
+            parentId = Long.parseLong(client.substring(5, separator));
+            slice = Integer.parseInt(client.substring(separator + 1));
+        } catch (NumberFormatException malformed) { return; }
+        var parent = lane.cold.algoOrders.get(parentId);
+        if (parent == null || parent.userId() != child.userId() || slice < 0
+                || !parent.instrumentId().equals(identities.instrumentId(child.symbolId()))) return;
+        boolean linked = slice < parent.childOrderIds().size() && parent.childOrderIds().get(slice) == child.orderId();
+        boolean pending = slice == parent.childOrderIds().size()
+                && (parent.pendingClosedChildId() == 0 || parent.pendingClosedChildId() == child.orderId());
+        if ((!linked && !pending) || child.executedQuantitySteps() > parent.quantitySteps() - parent.retiredExecutedQuantitySteps()) return;
+        long executed = Math.addExact(parent.retiredExecutedQuantitySteps(), child.executedQuantitySteps());
+        var updated = parent.withRetiredProgress(executed, pending ? child.orderId() : parent.pendingClosedChildId());
+        lane.cold.algoOrders.put(updated.algoOrderId(), updated);
+        changes.putAlgo(updated.algoOrderId(), updated);
+    }
+
     public static void upsert(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                        long userId, CoreAlgoOrderView view) {
         if (runtime == null || identities == null || view == null || userId <= 0) {
@@ -42,6 +69,10 @@ public final class RuntimeAlgoOrderStateTransitions {
             }
         } else {
             requireSameIntent(current, next);
+            if (current.terminal() || current.statusCode() == 2 && next.statusCode() < 2) {
+                throw new CoreStateRejectedException("INVALID_ALGO_ORDER_REVISION",
+                        "terminal or cancel-requested algo cannot resume execution");
+            }
             if (next.revision() <= current.revision()) {
                 throw new CoreStateRejectedException("STALE_ALGO_ORDER_REVISION", "algo order revision is stale");
             }
@@ -54,11 +85,18 @@ public final class RuntimeAlgoOrderStateTransitions {
             }
             if (next.childOrderIds().size() > current.childOrderIds().size()) {
                 OrderRuntime child = runtime.order(next.childOrderIds().getLast());
-                if (child == null || child.userId() != userId || child.symbolId() != symbolId) {
+                if ((child == null && current.pendingClosedChildId() != next.childOrderIds().getLast())
+                        || (child != null && (child.userId() != userId || child.symbolId() != symbolId))) {
                     throw new CoreStateRejectedException("INVALID_ALGO_CHILD",
                             "algo child order is not authoritative");
                 }
             }
+        }
+        if (current != null) {
+            long pending = current.pendingClosedChildId();
+            if (next.childOrderIds().size() > current.childOrderIds().size()
+                    && next.childOrderIds().getLast() == pending) pending = 0;
+            next = next.withRetiredProgress(current.retiredExecutedQuantitySteps(), pending);
         }
         runtime.requireRevisionCapacity();
         runtime.putAlgoOrder(next);

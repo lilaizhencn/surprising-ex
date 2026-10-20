@@ -99,6 +99,103 @@ class CommittedTradeReplayTest {
         }
     }
 
+    @Test void spotAlgoProgressFollowsCommittedChildFillsAndSurvivesReplayRestart() {
+        byte[] snapshot;
+        try (var replay = new CommittedTradeReplay(ProductLine.SPOT, null)) {
+            send(replay, ProductLine.SPOT, CoreMessageType.REGISTER_INSTRUMENT, 0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("604", 0,
+                            "BTC", "USDT", "USDT", 1, 1, 1, 100000, 50000, 0, 0, 0, -1, 0)));
+            send(replay, ProductLine.SPOT, CoreMessageType.ADJUST_BALANCE, 7,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1000000)));
+            send(replay, ProductLine.SPOT, CoreMessageType.ADJUST_BALANCE, 8,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 1000000)));
+            send(replay, ProductLine.SPOT, CoreMessageType.UPSERT_ALGO_ORDER, 7, CoreAlgoOrderCodec.encode(algo(0,1,List.of())));
+            assertThat(replay.algoChanges()).singleElement().satisfies(v -> {
+                assertThat(v.algoOrderId()).isEqualTo(701); assertThat(v.activeQuantitySteps()).isZero();
+            });
+            send(replay, ProductLine.SPOT, CoreMessageType.PLACE_ORDER, 7, TradingCommandCodec.encodePlaceOrder(
+                    new PlaceOrderCommand(201,"604",CoreOrderSide.BUY,100,2,false,CoreMarginMode.CROSS,
+                            CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"algo-701-0")));
+            assertThat(replay.algoChanges()).isEmpty();
+            send(replay, ProductLine.SPOT, CoreMessageType.UPSERT_ALGO_ORDER, 7, CoreAlgoOrderCodec.encode(algo(1,2,List.of(201L))));
+            assertThat(replay.algoChanges()).singleElement().satisfies(v -> {
+                assertThat(v.activeQuantitySteps()).isEqualTo(2);assertThat(v.executedQuantitySteps()).isZero();
+            });
+            snapshot=replay.snapshot();
+        }
+        try (var replay = new CommittedTradeReplay(ProductLine.SPOT,snapshot)) {
+            long before=replay.businessHash();
+            var initial=new ArrayList<CoreAlgoOrderView>();replay.forEachRetainedAlgo(initial::add);
+            assertThat(initial).hasSize(1);assertThat(replay.businessHash()).isEqualTo(before);
+            place(replay,ProductLine.SPOT,8,202,CoreOrderSide.SELL);
+            assertThat(replay.algoChanges()).singleElement().satisfies(v -> {
+                assertThat(v.revision()).isEqualTo(2);assertThat(v.executedQuantitySteps()).isEqualTo(2);
+                assertThat(v.activeQuantitySteps()).isZero();assertThat(v.activeChildOrderCount()).isZero();
+            });
+            try (var afterFill = new CommittedTradeReplay(ProductLine.SPOT,replay.snapshot())) {
+                var retained = new ArrayList<CoreAlgoOrderView>(); afterFill.forEachRetainedAlgo(retained::add);
+                assertThat(retained).singleElement().satisfies(v -> assertThat(v.executedQuantitySteps()).isEqualTo(2));
+                assertThat(afterFill.businessHash()).isEqualTo(replay.businessHash());
+            }
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encode(algo(1,2,List.of(201L))));
+            assertThat(replay.commandResult().status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(replay.algoChanges()).isEmpty();
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encode(algo(3,3,List.of(201L))));
+            assertThat(replay.algoChanges()).singleElement().satisfies(v -> assertThat(v.statusCode()).isEqualTo(3));
+            place(replay,ProductLine.SPOT,8,203,CoreOrderSide.SELL);
+            assertThat(replay.algoChanges()).isEmpty();
+        }
+    }
+
+    @Test void immediatelyFilledFirstChildCanLinkAfterRetirementAndSnapshotRestore() {
+        byte[] snapshot;
+        try (var replay = new CommittedTradeReplay(ProductLine.SPOT,null)) {
+            send(replay,ProductLine.SPOT,CoreMessageType.REGISTER_INSTRUMENT,0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("604",0,"BTC","USDT","USDT",1,1,1,100000,50000,0,0,0,-1,0)));
+            send(replay,ProductLine.SPOT,CoreMessageType.ADJUST_BALANCE,7,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1000000)));
+            send(replay,ProductLine.SPOT,CoreMessageType.ADJUST_BALANCE,8,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC",1000000)));
+            place(replay,ProductLine.SPOT,8,202,CoreOrderSide.SELL);
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encode(algo(0,1,List.of())));
+            send(replay,ProductLine.SPOT,CoreMessageType.PLACE_ORDER,7,TradingCommandCodec.encodePlaceOrder(
+                    new PlaceOrderCommand(201,"604",CoreOrderSide.BUY,100,2,false,CoreMarginMode.CROSS,
+                            CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"algo-701-0")));
+            assertThat(replay.algoChanges()).singleElement().satisfies(v -> {
+                assertThat(v.executedQuantitySteps()).isEqualTo(2);assertThat(v.childOrderIds()).isEmpty();
+            });
+            snapshot=replay.snapshot();
+        }
+        try (var replay = new CommittedTradeReplay(ProductLine.SPOT,snapshot)) {
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encode(algo(1,2,List.of(201L))));
+            assertThat(replay.commandResult().status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(replay.algoChanges()).singleElement().satisfies(v -> {
+                assertThat(v.childOrderIds()).containsExactly(201L);assertThat(v.executedQuantitySteps()).isEqualTo(2);
+                assertThat(v.activeQuantitySteps()).isZero();
+            });
+        }
+    }
+
+    @Test void cancellationCannotBeUndoneByALateSchedulerUpdate() {
+        try (var replay = new CommittedTradeReplay(ProductLine.SPOT,null)) {
+            send(replay,ProductLine.SPOT,CoreMessageType.REGISTER_INSTRUMENT,0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("604",0,"BTC","USDT","USDT",1,1,1,100000,50000,0,0,0,-1,0)));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encode(algo(0,1,List.of())));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encode(algo(2,2,List.of())));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encode(algo(1,3,List.of())));
+            assertThat(replay.commandResult().code()).isEqualTo(CoreResultCode.INVALID_ALGO_ORDER_REVISION);
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encode(algo(3,3,List.of())));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encode(algo(1,4,List.of())));
+            assertThat(replay.commandResult().code()).isEqualTo(CoreResultCode.INVALID_ALGO_ORDER_REVISION);
+            var retained = new ArrayList<CoreAlgoOrderView>();replay.forEachRetainedAlgo(retained::add);
+            assertThat(retained).singleElement().satisfies(v -> {assertThat(v.statusCode()).isEqualTo(3);assertThat(v.revision()).isEqualTo(3);});
+        }
+    }
+
+    private CoreAlgoOrderView algo(int status,long revision,List<Long> children) {
+        return new CoreAlgoOrderView(701,7,"algo-client-701","604",0,CoreOrderSide.BUY,100,4,2,5,20,
+                CoreMarginMode.CROSS,CorePositionSide.NET,false,false,CoreTimeInForce.GTC,status,
+                children.isEmpty()?0:children.getLast(),"",TIME,TIME+5000,0,TIME,TIME+revision,revision,children,0,0,0);
+    }
+
     private static final long TIME = 1_700_000_000_000L;
     private long sequence;
 

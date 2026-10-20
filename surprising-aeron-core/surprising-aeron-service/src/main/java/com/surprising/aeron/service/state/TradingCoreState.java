@@ -286,6 +286,11 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, algo.algoOrderId()); hash = CoreStateHash.mix(hash, algo.userId());
             hash = CoreStateHash.mix(hash, algo.instrumentId()); hash = CoreStateHash.mix(hash, algo.statusCode());
             hash = CoreStateHash.mix(hash, algo.updatedAtEpochMillis()); hash = CoreStateHash.mix(hash, algo.revision());
+            if (algo.retiredExecutedQuantitySteps() != 0 || algo.pendingClosedChildId() != 0) {
+                hash = CoreStateHash.mix(hash, "algo-retired-progress");
+                hash = CoreStateHash.mix(hash, algo.retiredExecutedQuantitySteps());
+                hash = CoreStateHash.mix(hash, algo.pendingClosedChildId());
+            }
             for (long childOrderId : algo.childOrderIds()) hash = CoreStateHash.mix(hash, childOrderId);
         }
         for (CoreCancelAllAfterState timer : cancelAllAfterTimers.values()) {

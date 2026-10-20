@@ -42,6 +42,11 @@ public final class AlgoOrderIndex {
     /** 已有Owner索引的不可变路由事实；账户和子订单仍由实际Lane读取。 */
     public AlgoRoute value(long algoOrderId) { return valuesById.get(algoOrderId); }
 
+    /** Export-worker bootstrap only; visits routing identities without copying Lane business state. */
+    public void forEachRoute(java.util.function.Consumer<AlgoRoute> consumer) {
+        valuesById.values().forEach(consumer);
+    }
+
     public List<Long> query(long userId, String instrumentId, long dueAtEpochMillis, int limit) {
         int boundedLimit = Math.max(1, Math.min(limit, 10_000));
         int normalizedSymbol = instrumentId == null || instrumentId.isEmpty()

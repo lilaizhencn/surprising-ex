@@ -180,7 +180,10 @@ final class CommittedTradeExporter {
                     var recordingLog = new RecordingLog(config.clusterDirectory().toFile(), false);
                     var archiveReplay = new ArchiveReplay(aeron, archive, product)) {
                 long cursor = checkpoint.logPosition();
-                if (mode == ExportMode.LIVE) orders.initializeTriggers(product, replay, cursor);
+                if (mode == ExportMode.LIVE) {
+                    orders.initializeTriggers(product, replay, cursor);
+                    orders.algos().initialize(product, replay, cursor);
+                }
                 boolean[] initialStatisticsPublished={false};
                 long[] nextCheckpoint = {System.nanoTime() + checkpointInterval};
                 var batch = new ExportBatch(product, orders, sink, mode);
@@ -211,7 +214,7 @@ final class CommittedTradeExporter {
                             orders.persistDelivery(replay.deliveryPage());
                         }
                         batch.add(changes,
-                                replay.commandResult(), replay.exportSequence(), System.nanoTime());
+                                replay.commandResult(), replay.exportSequence(), System.nanoTime(), replay.algoChanges());
                     }
                     delivered[0] = header.position();
                     if (System.nanoTime() >= nextCheckpoint[0]) {
@@ -351,6 +354,7 @@ final class CommittedTradeExporter {
         private final ArrayList<RealtimeFrame> trades = new ArrayList<>();
         private final ArrayList<RealtimeFrame> orderChanges = new ArrayList<>();
         private final ArrayList<CommittedTradeReplay.CommittedCommandResult> commandResults = new ArrayList<>();
+        private final ArrayList<com.surprising.aeron.protocol.CoreAlgoOrderView> algoChanges = new ArrayList<>();
         private int messages;
         private long startedAt, flushedSequence = -1;
         private long maxDelayNanos = MAX_DELAY_NANOS;
@@ -373,14 +377,20 @@ final class CommittedTradeExporter {
 
         void add(List<RealtimeFrame> changes, CommittedTradeReplay.CommittedCommandResult commandResult,
                  long sequence, long now) {
+            add(changes, commandResult, sequence, now, List.of());
+        }
+
+        void add(List<RealtimeFrame> changes, CommittedTradeReplay.CommittedCommandResult commandResult,
+                 long sequence, long now, List<com.surprising.aeron.protocol.CoreAlgoOrderView> algos) {
             if (mode == ExportMode.FUNDING_REPAIR || mode == ExportMode.DELIVERY_REPAIR) return;
+            if (mode == ExportMode.LIVE) algoChanges.addAll(algos);
             if (messages++ == 0) startedAt = now;
             if (commandResult != null && mode != ExportMode.EXECUTION_REPAIR) commandResults.add(commandResult);
             for (var change : mode == ExportMode.LIVE || mode == ExportMode.EXECUTION_REPAIR ? changes : List.<RealtimeFrame>of()) {
                 if (change.kind() == RealtimeFrame.Kind.TRADE && mode == ExportMode.LIVE) trades.add(change);
                 orderChanges.add(change);
             }
-            if (messages >= 256 || trades.size() + orderChanges.size() >= 4096
+            if (messages >= 256 || trades.size() + orderChanges.size() + algoChanges.size() >= 4096
                     || now - startedAt >= maxDelayNanos) flush(sequence);
         }
 
@@ -395,17 +405,18 @@ final class CommittedTradeExporter {
 
         void flush(long sequence) {
             if (mode == ExportMode.FUNDING_REPAIR || mode == ExportMode.DELIVERY_REPAIR) return;
-            if (sequence != flushedSequence || !orderChanges.isEmpty() || !trades.isEmpty() || !commandResults.isEmpty()) {
+            if (sequence != flushedSequence || !orderChanges.isEmpty() || !trades.isEmpty() || !commandResults.isEmpty() || !algoChanges.isEmpty()) {
                 if (mode == ExportMode.COMMAND_RESULT_REPAIR) orders.repairCommandResults(product, commandResults);
                 else if (mode == ExportMode.EXECUTION_REPAIR) orders.repairExecutions(product, orderChanges);
                 else if (mode == ExportMode.STATISTICS_REPAIR) orders.statistics().repair(product,commandResults);
                 else {
-                    orders.persist(product, orderChanges, commandResults, sequence);
+                    orders.persist(product, orderChanges, commandResults, sequence, algoChanges);
                     sink.publish(trades);
                 }
                 // Neither the checkpoint nor this marker advances when either sink fails.
                 flushedSequence = sequence;
             }
+            algoChanges.clear();
             orderChanges.clear();
             commandResults.clear();
             trades.clear();

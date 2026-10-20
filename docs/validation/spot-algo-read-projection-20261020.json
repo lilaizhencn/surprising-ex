@@ -1,0 +1,1227 @@
+{
+  "date": "2026-10-20",
+  "module": "现货算法委托已提交读投影与子单成交累计",
+  "goalStatus": "progress",
+  "product": "SPOT",
+  "executionMode": "FUSED",
+  "otherProductRuntimeStarted": false,
+  "previousTurn": {
+    "classification": "progress",
+    "evidence": "docs/validation/spot-trading-panel-scope-20261020.json",
+    "sha256": "d3267f62fe7c75d0a2b0b120e5e81397ca0fde0bcfb6321b511a21f0190ab59d",
+    "outcome": "现货交易面板展示及账户隔离已推进，不代表完整产品验收。"
+  },
+  "baseline": {
+    "backend": "9badd88bb5d87d89f66d289b8481a9f0f8e4c35c",
+    "web": "b7d1877e9f82a2ebc4cfc4ad6ad6932fa8286b92",
+    "client": "12420964b2ee0d841b53d98d10b51e832539bc93",
+    "admin": "ac8fe282228c1a18082665e56a08adccab577cea"
+  },
+  "flow": [
+    "用户 GET algo/open 在既有认证和用户归属校验后，只查询 realtime SQL；非终态/产品/用户/合约在 limit 前过滤。",
+    "独立已提交 Archive 回放读取父单和子单进度，沿用 ExportBatch、订单/命令回执事务和 checkpoint。",
+    "真实匹配结算 Lane 在终态子单回收前折叠已成交量；父单保留累计和一个尚未关联的已终结子单 ID，后续意图不覆盖累计。",
+    "终态和取消请求拒绝迟到调度恢复运行；初始化、存储或内容异常明确 503，无 Core 兜底。"
+  ],
+  "stateOwnership": {
+    "authoritative": "Core 父单退休成交量/待关联子单 ID，由同一 Account Lane 写入，随 LaneCommitDelta 提交，进入快照和业务哈希；不保存完整终态子单。",
+    "queryRouting": "CommittedTradeReplay 独立回放线程持有子单到活动父单路由，终态父单删除路由；不在在线 Core 新增查询缓存。",
+    "sql": "CommittedAlgoProjection 负责两表初始化与幂等写入；AlgoOrderProjectionRepository 负责用户 SQL 查询和内容校验；复用已有导出线程、事务和检查点。",
+    "snapshot": {
+      "format": 37,
+      "readerRevision": 4,
+      "minimumReaderWhenProgressNonzero": 4,
+      "oldAlgoSnapshotsMissingRequiredFieldsSupported": false
+    }
+  },
+  "toolchain": {
+    "java": "HotSpot Amazon Corretto 27+33-FR",
+    "maven": "3.9.16",
+    "javaHome": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn",
+    "codegraph": "当前工具列表不提供 CodeGraph，使用本地文件检索。"
+  },
+  "tests": {
+    "targetedInitial": {
+      "tests": 95,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "packagingPassed": true
+    },
+    "finalUnitAndIntegration": {
+      "core": {
+        "classes": [
+          {
+            "name": "com.surprising.aeron.service.orchestration.CommittedTradeReplayTest",
+            "tests": "14",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "6.421"
+          },
+          {
+            "name": "com.surprising.aeron.service.orchestration.CoreAlgoLaneQueryTest",
+            "tests": "4",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "0.077"
+          },
+          {
+            "name": "com.surprising.aeron.service.state.TradingStateSnapshotCodecTest",
+            "tests": "6",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "0.016"
+          },
+          {
+            "name": "com.surprising.aeron.service.state.snapshot.SnapshotFieldEvolutionTest",
+            "tests": "5",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "0.193"
+          },
+          {
+            "name": "com.surprising.aeron.service.state.RuntimeStateBusinessRulesTest",
+            "tests": "36",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "1.132"
+          },
+          {
+            "name": "com.surprising.aeron.service.state.RuntimeFundsAccumulatorTest",
+            "tests": "3",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "0.021"
+          },
+          {
+            "name": "com.surprising.aeron.service.orchestration.CoreNativeSnapshotProductLineTest",
+            "tests": "6",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "0.101"
+          },
+          {
+            "name": "com.surprising.aeron.service.orchestration.SharedProductLineSnapshotContractTest",
+            "tests": "6",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "4.876"
+          },
+          {
+            "name": "com.surprising.aeron.service.orchestration.SectionedCoreSnapshotCodecTest",
+            "tests": "15",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "1.524"
+          },
+          {
+            "name": "com.surprising.aeron.service.orchestration.PublishedSnapshotRecoveryTest",
+            "tests": "13",
+            "errors": "0",
+            "failures": "6",
+            "skipped": "0",
+            "time": "2.846"
+          },
+          {
+            "name": "com.surprising.aeron.service.orchestration.CoreFundsIdempotencyTest",
+            "tests": "5",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "6.765"
+          },
+          {
+            "name": "com.surprising.aeron.service.orchestration.MatcherCommandPipelineTest",
+            "tests": "8",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "0.05"
+          },
+          {
+            "name": "com.surprising.aeron.service.state.MatcherTreasurySettlementTest",
+            "tests": "2",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "0.036"
+          },
+          {
+            "name": "com.surprising.aeron.service.state.RuntimeChangedIndexCommitTest",
+            "tests": "4",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "0.022"
+          }
+        ],
+        "totals": {
+          "tests": 127,
+          "errors": 0,
+          "failures": 6,
+          "skipped": 0
+        }
+      },
+      "realtime": {
+        "classes": [
+          {
+            "name": "com.surprising.realtime.provider.export.ExportBatchTest",
+            "tests": "17",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "1.242"
+          },
+          {
+            "name": "com.surprising.realtime.provider.export.CommittedAlgoProjectionPostgresTest",
+            "tests": "3",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "0.947"
+          },
+          {
+            "name": "com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest",
+            "tests": "20",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "15.357"
+          },
+          {
+            "name": "com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest",
+            "tests": "1",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "22.228"
+          },
+          {
+            "name": "com.surprising.realtime.provider.export.CommittedFundingRepairIntegrationTest",
+            "tests": "1",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "3.645"
+          },
+          {
+            "name": "com.surprising.realtime.provider.export.CommittedDeliveryRepairIntegrationTest",
+            "tests": "1",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "1.858"
+          }
+        ],
+        "totals": {
+          "tests": 43,
+          "errors": 0,
+          "failures": 0,
+          "skipped": 0
+        }
+      },
+      "gateway": {
+        "classes": [
+          {
+            "name": "com.surprising.trading.order.service.AlgoOrderServiceTest",
+            "tests": "4",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "0.976"
+          },
+          {
+            "name": "com.surprising.trading.order.repository.AlgoOrderProjectionPostgresTest",
+            "tests": "3",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "1.522"
+          },
+          {
+            "name": "com.surprising.trading.order.service.AlgoOrderCancellationTest",
+            "tests": "2",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "time": "0.175"
+          }
+        ],
+        "totals": {
+          "tests": 9,
+          "errors": 0,
+          "failures": 0,
+          "skipped": 0
+        }
+      }
+    },
+    "commands": [
+      "mvn -o -pl surprising-aeron-core/surprising-aeron-service -Dtest=CommittedTradeReplayTest,CoreAlgoLaneQueryTest,TradingStateSnapshotCodecTest,SnapshotFieldEvolutionTest,RuntimeStateBusinessRulesTest,RuntimeFundsAccumulatorTest,CoreNativeSnapshotProductLineTest,SharedProductLineSnapshotContractTest,SectionedCoreSnapshotCodecTest,PublishedSnapshotRecoveryTest,CoreFundsIdempotencyTest,MatcherCommandPipelineTest,MatcherTreasurySettlementTest,RuntimeChangedIndexCommitTest test",
+      "mvn -o -pl surprising-realtime/surprising-realtime-provider -Dtest=ExportBatchTest,CommittedAlgoProjectionPostgresTest,CommittedOrderProjectionPostgresTest,CommittedTradeExportIntegrationTest,CommittedFundingRepairIntegrationTest,CommittedDeliveryRepairIntegrationTest test",
+      "mvn -o -pl surprising-gateway -Dtest=AlgoOrderServiceTest,AlgoOrderProjectionPostgresTest test",
+      "mvn -o -pl surprising-aeron-core/surprising-aeron-tools,surprising-realtime/surprising-realtime-provider,surprising-gateway,surprising-price/surprising-price-provider,surprising-maker -am -DskipTests install",
+      "mvn -o -pl surprising-gateway -Dtest=AlgoOrderCancellationTest,AlgoOrderServiceTest,AlgoOrderProjectionPostgresTest package"
+    ],
+    "postgres": "真实隔离数据库 surprising_spot_20261020_100541，SQL 用例在各自 schema 执行，没有跳过。",
+    "archiveKafka": "CommittedTradeExportIntegrationTest 使用真实 Aeron Archive 和嵌入式 Kafka；修复模式验证不误写 live 算法投影。",
+    "build": {
+      "finalArtifactsExit": 0,
+      "testsSkippedForPackagingOnly": true
+    },
+    "cancellationRegression": "并发闩锁覆盖本地切片下单与取消交错；未知子单撤销保持 CANCEL_REQUESTED，并支持原目标再次确认。",
+    "cancellationRedGreen": {
+      "method": "Compile pre-fix cancelRecord in isolated temporary classes; keep projection constructor and all tracked source/target unchanged",
+      "preFixHelperSha256": "4f66494ea8df1808577ec2f82fb9e59a2d05abfc7bf28bc5bd861f64ff4a2816",
+      "red": [
+        "cancellationWaitsForTheSchedulerToLinkItsInFlightChild ASSERTION_FAILED",
+        "unknownChildCancellationCannotMarkTheParentCanceledAndCanBeRetried ASSERTION_FAILED"
+      ],
+      "green": [
+        "cancellationWaitsForTheSchedulerToLinkItsInFlightChild PASS",
+        "unknownChildCancellationCannotMarkTheParentCanceledAndCanBeRetried PASS"
+      ]
+    },
+    "latestUniqueTotals": {
+      "tests": 180,
+      "passed": 174,
+      "failures": 6,
+      "errors": 0,
+      "skipped": 0,
+      "failureScope": "仅 PublishedSnapshotRecoveryTest 的六个既有历史指纹冲突；失败基线/算法对照已附。"
+    }
+  },
+  "existingHistoricalRecoveryFailure": {
+    "baselineCommit": "9badd88bb5d87d89f66d289b8481a9f0f8e4c35c",
+    "baselineMainSourceSha256": {
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CommittedTradeReplay.java": "b1cdb14d11051109e62a52ac7ee0dac65e9b84448af28c861b0d6f5a8469a2c7",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/MatcherSettlementChanges.java": "54a59366375ab6d64e26b61516ecb967d27d1a14ae398171f488692072f88b54",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeAlgoOrderStateTransitions.java": "672ce2a24eb3ef003a8e80c588cd336f02fd46ccd51dff4e97d97e19eb8bc650",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreState.java": "02a40cb13c44af12b6986f8e8ce888d39d1129862674a7d82a6988d9354695dd",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/index/AlgoOrderIndex.java": "05774583a0b7360ae60b5a9d9364fcded4f8647d03faae07271381164f5e6c92",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/model/CoreAlgoOrderState.java": "8169d5024d160a426ec8d5a84602220a7f88d5004b30195cd64d48ad2a9874a2",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/query/RuntimeOperationalQueryService.java": "7e1c7220e33e22a2004af67a6fc1bf056d694e8982751784a9864fa86ac259a1",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/snapshot/TradingStateSnapshotCodec.java": "732b363b334834fad8de9609b58b3fbce206def23fa49eabc51f85aebb1536dd"
+    },
+    "method": "Identical frozen-fixture recovery against baseline changed classes vs current classes, without source or target mutation",
+    "baseline": [
+      "SPOT status=REJECTED result=IDEMPOTENCY_CONFLICT hashUnchanged=true",
+      "LINEAR_PERPETUAL status=REJECTED result=IDEMPOTENCY_CONFLICT hashUnchanged=true",
+      "INVERSE_PERPETUAL status=REJECTED result=IDEMPOTENCY_CONFLICT hashUnchanged=true",
+      "LINEAR_DELIVERY status=REJECTED result=IDEMPOTENCY_CONFLICT hashUnchanged=true",
+      "INVERSE_DELIVERY status=REJECTED result=IDEMPOTENCY_CONFLICT hashUnchanged=true",
+      "OPTION status=REJECTED result=IDEMPOTENCY_CONFLICT hashUnchanged=true"
+    ],
+    "current": [
+      "SPOT status=REJECTED result=IDEMPOTENCY_CONFLICT hashUnchanged=true",
+      "LINEAR_PERPETUAL status=REJECTED result=IDEMPOTENCY_CONFLICT hashUnchanged=true",
+      "INVERSE_PERPETUAL status=REJECTED result=IDEMPOTENCY_CONFLICT hashUnchanged=true",
+      "LINEAR_DELIVERY status=REJECTED result=IDEMPOTENCY_CONFLICT hashUnchanged=true",
+      "INVERSE_DELIVERY status=REJECTED result=IDEMPOTENCY_CONFLICT hashUnchanged=true",
+      "OPTION status=REJECTED result=IDEMPOTENCY_CONFLICT hashUnchanged=true"
+    ],
+    "identical": true,
+    "sha256CalculatorControl": {
+      "source": "a7771604e^:surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CommandFingerprint.java",
+      "sha256": "28eb6787d0c75a229f1fe335e9da62ee1c3267c7d481e07d57de56b54ca0b244",
+      "responses": [
+        "SPOT status=DUPLICATE result=NONE hashUnchanged=true",
+        "LINEAR_PERPETUAL status=DUPLICATE result=NONE hashUnchanged=true",
+        "INVERSE_PERPETUAL status=DUPLICATE result=NONE hashUnchanged=true",
+        "LINEAR_DELIVERY status=DUPLICATE result=NONE hashUnchanged=true",
+        "INVERSE_DELIVERY status=DUPLICATE result=NONE hashUnchanged=true",
+        "OPTION status=DUPLICATE result=NONE hashUnchanged=true"
+      ],
+      "conclusion": "Prior fingerprint algorithm replacement changes equality with frozen fixture fingerprints; not introduced by algo changes. No tracked source or generated target modified."
+    }
+  },
+  "live": {
+    "firstRun": {
+      "log": "spot-algo-live-first.log",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "markers": [
+        "SIX_LINE_SETTINGS_PASS productLine=SPOT price=true lifecycle=false",
+        "SIX_LINE_REALTIME_PASS productLine=SPOT depthEvents=19 wsTrades=6 restTrades=6 identitiesMatch=true",
+        "SPOT_ALGO_READ_PASS icebergCanceled=1 twapCompleted=2 childFills=4 corePausedRead=true unauthorized=401 crossUser=403 userLocked=0 fundsDifference=0",
+        "SIX_LINE_PUBLIC_QUERY_PASS productLine=SPOT terminalByOrderAndClient=true balancesMatch=true",
+        "SIX_LINE_TRADING_PASS productLine=SPOT instrumentId=867 trader=3 maker=4 executions=10 fundsDifference=0",
+        "SIX_LINE_CONTRACT_PASS productLine=SPOT instrumentId=867 version=8 transitions=DRAFT,PRE_TRADING,TRADING,EDIT,HALT processes=[4951, 5014, 5349, 5580, 5970]"
+      ]
+    },
+    "firstRunSql": {
+      "parents": [
+        {
+          "id": "1130256281255890840",
+          "userId": "3",
+          "revision": 7,
+          "statusCode": 4,
+          "instrumentId": "867",
+          "exportSequence": 60
+        },
+        {
+          "id": "4018619902168822878",
+          "userId": "3",
+          "revision": 7,
+          "statusCode": 4,
+          "instrumentId": "867",
+          "exportSequence": 73
+        },
+        {
+          "id": "4505868311872312290",
+          "userId": "3",
+          "revision": 7,
+          "statusCode": 3,
+          "instrumentId": "867",
+          "exportSequence": 44
+        }
+      ],
+      "children": [
+        {
+          "id": "8293158269487179659",
+          "status": "CANCELED",
+          "userId": "3",
+          "clientId": "algo-4505868311872312290-0"
+        },
+        {
+          "id": "3531628780430467220",
+          "status": "FILLED",
+          "userId": "3",
+          "clientId": "algo-1130256281255890840-0"
+        },
+        {
+          "id": "6296767124856804900",
+          "status": "FILLED",
+          "userId": "3",
+          "clientId": "algo-1130256281255890840-1"
+        },
+        {
+          "id": "1268460907675428043",
+          "status": "FILLED",
+          "userId": "3",
+          "clientId": "algo-4018619902168822878-0"
+        },
+        {
+          "id": "5407253691593876127",
+          "status": "FILLED",
+          "userId": "3",
+          "clientId": "algo-4018619902168822878-1"
+        }
+      ]
+    },
+    "firstRunArtifactIdentities": {
+      "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar": {
+        "bytes": 141974229,
+        "sha256": "36fdb2b8c90c525a3893eea22fab0eecad7bf9ed641ef5ba42259576ac1c885d"
+      },
+      "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar": {
+        "bytes": 188402835,
+        "sha256": "ffcb2e62423f63eba962c67b4251d6833c4279be0d171006739f949cc6ab8d0d"
+      },
+      "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar": {
+        "bytes": 81296582,
+        "sha256": "69d1e6278e5c73eaeff0ec125f5106efd0cee7e1e84adc0736d8a2dddb58c83b"
+      }
+    },
+    "firstRunMode": {
+      "corePid": 4951,
+      "executionProperty": [],
+      "verifiedConfiguredDefault": "FUSED",
+      "clusterNodes": 1
+    },
+    "finalRestartRun": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "exitCode": 0,
+      "markers": [
+        "SIX_LINE_SETTINGS_PASS productLine=SPOT price=true lifecycle=false",
+        "SIX_LINE_REALTIME_PASS productLine=SPOT depthEvents=11 wsTrades=6 restTrades=6 identitiesMatch=true",
+        "SPOT_ALGO_READ_PASS icebergCanceled=1 twapCompleted=2 childFills=4 corePausedRead=true unauthorized=401 crossUser=403 userLocked=0 fundsDifference=0",
+        "SIX_LINE_PUBLIC_QUERY_PASS productLine=SPOT terminalByOrderAndClient=true balancesMatch=true",
+        "SIX_LINE_TRADING_PASS productLine=SPOT instrumentId=869 trader=11 maker=12 executions=10 fundsDifference=0",
+        "SIX_LINE_CONTRACT_PASS productLine=SPOT instrumentId=869 version=16 transitions=DRAFT,PRE_TRADING,TRADING,EDIT,HALT processes=[40076, 40293, 40712, 41293, 41912]"
+      ],
+      "sameOwnedClusterDatabaseAndExportCheckpointRetained": true
+    },
+    "financialResponsesMocked": false,
+    "ticker": "既有 loopback QA ticker 模拟外部行情；下单、匹配、资金、SQL 和 WS 均由真实服务处理。",
+    "finalRestartMode": {
+      "corePid": 40076,
+      "clusterNodes": 1,
+      "roles": [
+        "11:06:52.258 INFO  com.surprising.aeron.service.orchestration.TradingCoreOwner - Aeron core role productLine=SPOT role=FOLLOWER mode=FUSED",
+        "11:06:56.106 INFO  com.surprising.aeron.service.orchestration.TradingCoreOwner - Aeron core role-change productLine=SPOT role=LEADER"
+      ],
+      "runtimePids": {
+        "gateway": 40293,
+        "core-node0": 40076,
+        "realtime": 41293,
+        "price": 40712,
+        "maker": 41912
+      }
+    },
+    "finalArtifactIdentities": {
+      "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar": {
+        "bytes": 141974338,
+        "sha256": "3d042ce807525e091bd55fbd64c580b5aeea08d3b2309889e606bbcb9dcf8053"
+      },
+      "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar": {
+        "bytes": 188402944,
+        "sha256": "faaa524686d5783f81ae854347603b90afed9e375d357f05e37fe521859d2f35"
+      },
+      "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar": {
+        "bytes": 81296668,
+        "sha256": "0275074b57393723ef0ff1e15de2016c5b74b34053092ada82fab5e84f0c1911"
+      }
+    },
+    "restartRegressionFound": {
+      "log": "spot-algo-live-restart-red.log",
+      "tests": 1,
+      "failures": 1,
+      "error": "冰山撤销与本地调度并发，STALE_ALGO_ORDER_REVISION，未到达资金验收。",
+      "fix": "撤销与既有同步调度共用监视器；锁内重读权威父单及子单身份，撤销未知时先确认活动子单，不提前标终态。"
+    },
+    "failedActorCleanup": [
+      {
+        "algoOrderId": "1097946682532451096",
+        "userId": "7",
+        "status": "CANCELED",
+        "activeQuantitySteps": 0,
+        "childOrderCount": 1,
+        "balances": [
+          {
+            "userId": 7,
+            "accountType": "SPOT",
+            "asset": "BTC",
+            "availableUnits": 1000000000,
+            "lockedUnits": 0,
+            "equityUnits": 1000000000,
+            "updatedAt": "2026-10-20T03:09:33.280863Z"
+          },
+          {
+            "userId": 7,
+            "accountType": "SPOT",
+            "asset": "USDT",
+            "availableUnits": 9999984300050,
+            "lockedUnits": 0,
+            "equityUnits": 9999984300050,
+            "updatedAt": "2026-10-20T03:09:33.280874Z"
+          }
+        ],
+        "allLockedZero": true
+      }
+    ],
+    "allParentStatesAfterFinal": [
+      {
+        "id": "692812694155293331",
+        "userId": "11",
+        "status": 4,
+        "instrumentId": "869",
+        "revision": "7",
+        "exportSequence": "2587"
+      },
+      {
+        "id": "1097946682532451096",
+        "userId": "7",
+        "status": 3,
+        "instrumentId": "868",
+        "revision": "1427",
+        "exportSequence": "2315"
+      },
+      {
+        "id": "1130256281255890840",
+        "userId": "3",
+        "status": 4,
+        "instrumentId": "867",
+        "revision": "7",
+        "exportSequence": "60"
+      },
+      {
+        "id": "3615200396947294799",
+        "userId": "11",
+        "status": 4,
+        "instrumentId": "869",
+        "revision": "7",
+        "exportSequence": "2570"
+      },
+      {
+        "id": "4018619902168822878",
+        "userId": "3",
+        "status": 4,
+        "instrumentId": "867",
+        "revision": "7",
+        "exportSequence": "73"
+      },
+      {
+        "id": "4505868311872312290",
+        "userId": "3",
+        "status": 3,
+        "instrumentId": "867",
+        "revision": "7",
+        "exportSequence": "44"
+      },
+      {
+        "id": "5888617010629436482",
+        "userId": "11",
+        "status": 3,
+        "instrumentId": "869",
+        "revision": "5",
+        "exportSequence": "2548"
+      }
+    ]
+  },
+  "resources": {
+    "oneProductOnly": "SPOT",
+    "oneCoreNode": true,
+    "walletStarted": false,
+    "heapsMiB": {
+      "core": 256,
+      "gateway": 384,
+      "providers": 256,
+      "kafka": 256,
+      "valkeyLimit": 128
+    },
+    "jfrEnabled": false,
+    "appLogLimitMiB": 32,
+    "kafkaLogSegmentMiB": 16,
+    "kafkaRetentionHours": 1,
+    "sharedPostgres": "本轮前已存在的 PID 1435，仅使用本轮独立数据库。"
+  },
+  "deployment": {
+    "migration": "deployment/migrations/20261020-algo-read-projection.sql",
+    "sequence": "SQL 后配套 Core、realtime、gateway；等待初始化标记。不重置 live checkpoint。",
+    "nonQaDatabaseChanged": false,
+    "deployed": false
+  },
+  "limits": [
+    "六产品固定历史快照资金命令幂等有 6 项已证实基线同样失败；指纹算法更换导致历史冲突，本轮未修复、未弱化校验。",
+    "移动端现货算法单入口/列表、精度、原请求恢复及取消中状态仍未补齐，不计为客户端功能完成。",
+    "本轮只验证单 gateway 的调度/撤销序列；多 gateway 在途子单关联及算法委托完整生命周期仍未验收。",
+    "未启动其他产品实栈、wallet、浏览器或原生设备；无 JMH/JFR、生产恢复升级或上线验收。",
+    "本轮仅 backend 有源码改动；Web/client/admin 沿用此前已提交内容。"
+  ],
+  "cleanup": {
+    "status": "verified",
+    "qaRoot": "/tmp/surprising-spot-algo-read-20261020_100541",
+    "qaRootRemoved": true,
+    "currentMetadataRemoved": true,
+    "applications": {
+      "finalPids": {
+        "gateway": 40293,
+        "core-node0": 40076,
+        "realtime": 41293,
+        "price": 40712,
+        "maker": 41912
+      },
+      "allStopped": true,
+      "downMarker": "PRODUCT_LINE_RUNTIME=STOPPED productLine=SPOT runId=spot-algo-100541"
+    },
+    "infrastructure": {
+      "ticker": {
+        "pid": 29135,
+        "labelRemoved": true,
+        "portsReleased": [
+          19194,
+          19195
+        ]
+      },
+      "redis": {
+        "pid": 28032,
+        "labelRemoved": true,
+        "portsReleased": [
+          16379
+        ]
+      },
+      "kafka": {
+        "pid": 27358,
+        "labelRemoved": true,
+        "portsReleased": [
+          19092,
+          19093
+        ]
+      }
+    },
+    "firstRunInfrastructure": {
+      "ticker": {
+        "pid": 4537,
+        "labelRemoved": true,
+        "portsReleased": [
+          19194,
+          19195
+        ]
+      },
+      "redis": {
+        "pid": 4529,
+        "labelRemoved": true,
+        "portsReleased": [
+          16379
+        ]
+      },
+      "kafka": {
+        "pid": 4046,
+        "labelRemoved": true,
+        "portsReleased": [
+          19092,
+          19093
+        ]
+      }
+    },
+    "database": {
+      "name": "surprising_spot_20261020_100541",
+      "connectionsBeforeDrop": 0,
+      "removed": true,
+      "sharedPostgresPidRetained": 1435
+    },
+    "verifiedReleasedPorts": [
+      9094,
+      9095,
+      9096,
+      9082,
+      19092,
+      19093,
+      16379,
+      19194,
+      19195
+    ],
+    "ownedTestReportsRemoved": 48,
+    "ownedArchiveCandlesLogsAndPythonVenv": "all contained under qaRoot",
+    "unrelatedResourcesTouched": false
+  },
+  "artifactManifest": [
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CommittedTradeReplayTest.xml",
+      "bytes": 24169,
+      "sha256": "aa93d36bb53fb3678c8044867fd6d572664eaf9ae71c86919ea4dfc3cd43c7d4"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreAlgoLaneQueryTest.xml",
+      "bytes": 22280,
+      "sha256": "ac7651b5f08de0b06ad0be4416c12c8a66d2c3a8b3ba4541d15ae396b74d0133"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreFundsIdempotencyTest.xml",
+      "bytes": 22451,
+      "sha256": "d2aca4c2ce0ae27d933c37c3cd57ab4f8257cb8b5374a68636bb2f116390835d"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.CoreNativeSnapshotProductLineTest.xml",
+      "bytes": 22703,
+      "sha256": "2f5193864e9249bb45262ffc5686474acb5a4dcb1c678dffb065b1aa383a8a8e"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.MatcherCommandPipelineTest.xml",
+      "bytes": 22968,
+      "sha256": "7b7c4618289af5d2151a322bcdabcec546c09304b3a632b65b81a06d5fe53ee1"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.PublishedSnapshotRecoveryTest.xml",
+      "bytes": 26702,
+      "sha256": "8bbe8619f43580270bf523b5ef908ef1e7503cdb7ce374a0a38faef359cbb0c5"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.SectionedCoreSnapshotCodecTest.xml",
+      "bytes": 24278,
+      "sha256": "9ba5a6aec76660eef19eff536312e86af176753032e976ad062726b903210c4e"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.orchestration.SharedProductLineSnapshotContractTest.xml",
+      "bytes": 22874,
+      "sha256": "a664076c11ec9061c1be5b63d16cc868213a397e35402d0530941420275ca696"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.MatcherTreasurySettlementTest.xml",
+      "bytes": 21934,
+      "sha256": "bedbfd78cf777febbbbe133c4185159b728268a0a0ca9aa76bf35ebc726dca52"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeChangedIndexCommitTest.xml",
+      "bytes": 22235,
+      "sha256": "98ff93132caa375e261b127d047d65ba133205f648f049cf31ec5ccfbae2aee9"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeFundsAccumulatorTest.xml",
+      "bytes": 22073,
+      "sha256": "1195fe96172f8cce642358fa5890d982b47070b255530e59d60b691aede70ee7"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.RuntimeStateBusinessRulesTest.xml",
+      "bytes": 27798,
+      "sha256": "bdc6952c336bd727ae549c932250f1ae0640001309c19830171fdc7664ab1d04"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.TradingStateSnapshotCodecTest.xml",
+      "bytes": 22507,
+      "sha256": "0da400ee48226b6324395fc778111f617a660d42cd3f4a775a6c4cd735edee98"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/TEST-com.surprising.aeron.service.state.snapshot.SnapshotFieldEvolutionTest.xml",
+      "bytes": 22362,
+      "sha256": "f436a0ca48ac6f26fc9bb3c3e2b391b22fbed99425625619ebe2685c97a52ff5"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CommittedTradeReplayTest.txt",
+      "bytes": 385,
+      "sha256": "7bfbe00150e15f8fd657d083768cc47a05136a1a743522bb983e7c1cb4dd46e7"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreAlgoLaneQueryTest.txt",
+      "bytes": 378,
+      "sha256": "3963900b24bca0cc43554094c1f117d91118108edd682c631fd033411d081677"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreFundsIdempotencyTest.txt",
+      "bytes": 384,
+      "sha256": "8c70a44c0a287b3def7ff0c908f47853a2ab7d04f4c6f80fe8e2134592bc937c"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.CoreNativeSnapshotProductLineTest.txt",
+      "bytes": 402,
+      "sha256": "99fe71d40e666e092cd99903e609b2cac456d89f07c8a4d6384821a4ca95881b"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.MatcherCommandPipelineTest.txt",
+      "bytes": 388,
+      "sha256": "cc4b71c40230b29fdef2118ea698030dd005c0ee78b54a40bed6e12668bd7203"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.PublishedSnapshotRecoveryTest.txt",
+      "bytes": 3084,
+      "sha256": "8292652080026a718519734b084814d9d78811480a0a791e0b7fa05af4b0aed7"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.SectionedCoreSnapshotCodecTest.txt",
+      "bytes": 397,
+      "sha256": "b6d3af930494cf375dee9e2a10b17568120921162b7b118ec09b51ea92745cd8"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.orchestration.SharedProductLineSnapshotContractTest.txt",
+      "bytes": 410,
+      "sha256": "23c789a51a5cb402224ffe738fce96710b88a3c87320a1f06f89acfff4777ad8"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.MatcherTreasurySettlementTest.txt",
+      "bytes": 378,
+      "sha256": "45d657a60387d4655bf79775648741ef3ec00f8063ece827474cc95d1cd43965"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeChangedIndexCommitTest.txt",
+      "bytes": 378,
+      "sha256": "8a2b86aa4e7945f964a18cd091dcfa5b34d5438705f4b680fdc6b0abf9e93536"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeFundsAccumulatorTest.txt",
+      "bytes": 374,
+      "sha256": "5ea2b4cc2407437a1340db6462cb25d3e9c20541788c3be813c9ee1ce8adbe02"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.RuntimeStateBusinessRulesTest.txt",
+      "bytes": 379,
+      "sha256": "37ceee17be76f3ad88c622110ea0927e0b86dce1bcf30a0b2f5b57875724a84b"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.TradingStateSnapshotCodecTest.txt",
+      "bytes": 378,
+      "sha256": "d477cdb08d9f880503dd2859f97806b15c710acba76c24182dd169cf48ee47a1"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surefire-reports/com.surprising.aeron.service.state.snapshot.SnapshotFieldEvolutionTest.txt",
+      "bytes": 390,
+      "sha256": "a7ade06a2516c5d766d34847d6d29ec3cc45623bb691daa1ff79c220e8688895"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.SixProductLineContractLiveTest.xml",
+      "bytes": 45780,
+      "sha256": "44652ddb95a94c466ef1876c2fddc0b57cb338cee62a4a0800321b2e04f271c1"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.repository.AlgoOrderProjectionPostgresTest.xml",
+      "bytes": 45469,
+      "sha256": "97bf7c9d79e989642f0a48f8138a4c4cdca27a14966720c504db71d5e07344de"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.AlgoOrderCancellationTest.xml",
+      "bytes": 45254,
+      "sha256": "b6f1dbf53e6ccce7750597fb61e832103f4ecaf505ff5d871c5b4ae5ede3a560"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.AlgoOrderServiceTest.xml",
+      "bytes": 46348,
+      "sha256": "3e8546215fe1671a4ef57a0a79f4e7a50d5ccf29c0902140d8f257d70aaa136f"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.SixProductLineContractLiveTest.txt",
+      "bytes": 386,
+      "sha256": "9f6adf0ac8f419c5b4a5425160340089660a2f73b4906961f4f2b4d89c5d3e64"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.order.repository.AlgoOrderProjectionPostgresTest.txt",
+      "bytes": 392,
+      "sha256": "2f72afe3300f07464c4222b71c10e1ee3e1f9c6d984b085b1e92bb639d0713e8"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.AlgoOrderCancellationTest.txt",
+      "bytes": 374,
+      "sha256": "f0c6983655608f744d70fe037df1fe64c81b2c0bcfe4777b08eb8a8c61f2ed55"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.AlgoOrderServiceTest.txt",
+      "bytes": 364,
+      "sha256": "5606915c3428209daadc1e19f9f1786a7264572c71a5446a60edced7191536df"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedAlgoProjectionPostgresTest.xml",
+      "bytes": 52415,
+      "sha256": "c1212a102a07c6a7b8dd0160a4bb913b21bdb8506c2d8d41c94c4e8ff538c4e2"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedDeliveryRepairIntegrationTest.xml",
+      "bytes": 52069,
+      "sha256": "efbbb6f0146485bf822dbc8772a7a2bfadd010c075dc1cf576738619cd747d50"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedFundingRepairIntegrationTest.xml",
+      "bytes": 52190,
+      "sha256": "206b06adda49c38700ca0dc9332f6820afbaeee7a2cd4b9181e55d972045f041"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest.xml",
+      "bytes": 55741,
+      "sha256": "7b341c5da057487a9cbbd62814e32fc1e612efe7162748c0e308a8e74ff64994"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest.xml",
+      "bytes": 751101,
+      "sha256": "1357f47936a8d5cd97e371f0f35716a00b57cac272e8fae5f7d979f8eb10c16c"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.ExportBatchTest.xml",
+      "bytes": 55477,
+      "sha256": "e98025f78ffcdb85cf48b5e0219ebe3fb21195aaaa109a189b0f982eabbc7ee0"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedAlgoProjectionPostgresTest.txt",
+      "bytes": 400,
+      "sha256": "903725f279b053bf5c78f9f077826a804e834cdfd8fa337e7db193aba158cc5c"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedDeliveryRepairIntegrationTest.txt",
+      "bytes": 406,
+      "sha256": "3d298f7dd87553bedb7207ea5f7332ed2e38f8cd87a8da4b957240384d4961b0"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedFundingRepairIntegrationTest.txt",
+      "bytes": 404,
+      "sha256": "bdf92ef2fe02afcc5c2405f206db19067ad57a6d90d5e802e2b41aab6479f578"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest.txt",
+      "bytes": 403,
+      "sha256": "dbdbc6f9f7e6127824b266b97c06466d3245b74597563ca5a20ea5ff86d01bfd"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest.txt",
+      "bytes": 400,
+      "sha256": "c6d37158b34ac0d2ab62163be6f8921718141f30e356978fb1bdf369720fa304"
+    },
+    {
+      "historicalPath": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.ExportBatchTest.txt",
+      "bytes": 361,
+      "sha256": "93dba750f8ff14c0666ca390c09711f659f21b5857fe8b137e5b3d05e7b89ce0"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/algo-cancel-unit.log",
+      "bytes": 5007,
+      "sha256": "6e037b5ba817ba1f32d4f368c701647dfc4c5c8002f75e65dfea9ce993722f2d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/baseline-proof-compile.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/cancel-green-probe.log",
+      "bytes": 1030,
+      "sha256": "55dee2dec026910440ab5eacfc3a81f135843090cf0a339f2d2ddbf6f1bf0a16"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/cancel-red-green-proof.json",
+      "bytes": 586,
+      "sha256": "4ebeca8df04438054e951cc746882386b32821c88d7ac9819a251025e83f10f4"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/cancel-red-probe.log",
+      "bytes": 1054,
+      "sha256": "d144fca9b1c9c3bd00339b49a25bc40818966e50ffa36a3e896ea34615798af0"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/core-broader.log",
+      "bytes": 13434,
+      "sha256": "2cc348427af9d241897e0c080733f4d1f1f90564f0c2decc77340f19cb33f719"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/create-db.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/failed-actor-cancellation.json",
+      "bytes": 698,
+      "sha256": "ecae6f94379005531e65719812fe9035e3884795e616c6133f1d4f10862eece2"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/final-artifacts.log",
+      "bytes": 71749,
+      "sha256": "011133b13eccaf612d7a312332088cd55851a6fbfe1c30014470ec0485533b28"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/final-live-artifact-identities.json",
+      "bytes": 614,
+      "sha256": "7c7e96788ed3e4f65707e3195e3efa0549ed5fbcc225601b2fe993dda0796bb7"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/final-unit-results.json",
+      "bytes": 5367,
+      "sha256": "ee88caa43c58560c3acdb534c8c33fadc3c14d02d98bcf29615ff4650b4d4179"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/gateway-cancel-final.log",
+      "bytes": 5205,
+      "sha256": "bd87a11275394ec7ed75840af914f529042dd045c639bd4f08d6fc1e01ec6aca"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/gateway-final.log",
+      "bytes": 4518,
+      "sha256": "ac4a108d46ff515069a3bc6890966275dfb4bb5d0fd367bca6c9557cbc41ac1d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/infra-down.json",
+      "bytes": 336,
+      "sha256": "02521c5dabb03f5be236b1a6a05f5354728e346c11c507cfaa1a2a54cdc46d21"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/infra-final-down.json",
+      "bytes": 339,
+      "sha256": "baf9c912065ae0cdde013237d88ac1d6487cf1201acd404e3c692de0c6e0094c"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/infra-up.log",
+      "bytes": 497,
+      "sha256": "2446ebe00d41caf1f6133a0516da92a866a02d04289fa37246758d98c680dffa"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/init-db.log",
+      "bytes": 11900,
+      "sha256": "c012726e59a819b44507203605ae44894a7d9fdc3acfae0110405c7b3030ac06"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/kafka-stdout.log",
+      "bytes": 2662,
+      "sha256": "26c3bb92386c7ae8428593598efd34713c7aa86b87e1d8235ffc133e1cdf6130"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/live-artifact-identities.json",
+      "bytes": 614,
+      "sha256": "c075225fb78ad0686044711ab587fb37af0d4ca16fb02f677726666550a1bf6b"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/live-sql-evidence.json",
+      "bytes": 1261,
+      "sha256": "f56496bed2f692b12655c80624192f6f0a51231c4091fd9f1ecd8cd6e28d9567"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/mode-evidence.json",
+      "bytes": 100,
+      "sha256": "fc4204e4500fa30dc3d647dcb5111fa0ef996a3a07a0f80c86ae42ee40e56a1c"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/price-venv-install.log",
+      "bytes": 553,
+      "sha256": "501d0f24b91cf2306690b9978d0a1eca8eb642ace2b632f73fc8477bbb9f114c"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/published-recovery-baseline-proof.json",
+      "bytes": 3829,
+      "sha256": "ae2767ca7df1a19d15307b216ba54baee248001ad64f2c08c3a652091eba5de7"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/published-recovery-baseline.log",
+      "bytes": 1301,
+      "sha256": "831f5170a24266a40d997087a2d1d5e417af29081a4d55eed7327c4d2c5d1b35"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/published-recovery-current.log",
+      "bytes": 1301,
+      "sha256": "022fdf68bdd7c41d57c591ef6e4ea82f5eb96af5287a358a7b51e617abbe5fae"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/published-recovery-sha256.log",
+      "bytes": 1211,
+      "sha256": "ee2bce3bba9b17548b8f7f2f010c0dde522c9f549b92f84322e357a60153495e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/realtime-broader.log",
+      "bytes": 704539,
+      "sha256": "5151b0720435a05032b74cf43185f948d76c6fec0aac9122e1a5947ad4f62f1c"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/redis-stdout.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/replay-diagnostic.log",
+      "bytes": 17801,
+      "sha256": "33131f35c987c3a550dc8811b3f862e75ca71f3988b0c9b3637f7aaadc73c4f8"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/replay-lane-diagnostic.log",
+      "bytes": 17986,
+      "sha256": "5c3afeb482640b2d4dd3e385f4379a077cf35aca5a2367f961de58736036e3e2"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/runtime-artifacts.log",
+      "bytes": 45083,
+      "sha256": "5cda4694a4b4596de3630c70f2b9c0c215d85fd052fa4818482e97d62d2b440e"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/runtime-cancel-fixed-up.log",
+      "bytes": 225,
+      "sha256": "84064c5274502edf9af147451faf9e073c05439b422ec98fadc64abd70644987"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/runtime-down.log",
+      "bytes": 69,
+      "sha256": "733582443c7ea30923b4af4e8adfaccd03134db233a78f424426d6d727e8f584"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/runtime-final-down.log",
+      "bytes": 69,
+      "sha256": "733582443c7ea30923b4af4e8adfaccd03134db233a78f424426d6d727e8f584"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/runtime-install.log",
+      "bytes": 71225,
+      "sha256": "44f6991983bebb641628db8bddc0ae233716759eb511a30496688cf0665ced53"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/runtime-restart.log",
+      "bytes": 225,
+      "sha256": "84064c5274502edf9af147451faf9e073c05439b422ec98fadc64abd70644987"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/runtime-retest-down.log",
+      "bytes": 69,
+      "sha256": "733582443c7ea30923b4af4e8adfaccd03134db233a78f424426d6d727e8f584"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/runtime-up.log",
+      "bytes": 225,
+      "sha256": "84064c5274502edf9af147451faf9e073c05439b422ec98fadc64abd70644987"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/spot-algo-live-final.log",
+      "bytes": 4076,
+      "sha256": "8cbf26412f5939ddc910c6333d4e972aa406e38e8e7c38dfdf3977ce4ca57325"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/spot-algo-live-first.log",
+      "bytes": 4068,
+      "sha256": "18c7616dc1cf3484b2fa23dae47083ad71dbdfaa595d70db83eb3247f17304c6"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/spot-algo-live-restart-red.log",
+      "bytes": 5797,
+      "sha256": "06a73b167977904aae2358aff03c0be3bc0c567549fbaa2f44a32e4cd8998573"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/targeted-algo-package.log",
+      "bytes": 51568,
+      "sha256": "28c9d4f84db4e12f742802cd5220be5f40ef8d9fd8be83216643ba60c19da703"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/targeted-core-algo-projection-second.log",
+      "bytes": 38971,
+      "sha256": "015d757b6e97ee4df30819b531f557b9a6106068aebcc592a2a2a2715e64d384"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/targeted-core-algo-projection.log",
+      "bytes": 20128,
+      "sha256": "8e2d5878a0ad2b7d995956bfacbf2e869f0e391b0088b7af19fa5ad45d670fd8"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/targeted-first.log",
+      "bytes": 19345,
+      "sha256": "6c5ea7717a254cead614261383dcae309ef250d9b9f1b0f81440ade25ee65d66"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/targeted-results-before-broad.json",
+      "bytes": 2074,
+      "sha256": "b82956bf0da436af9d6f742214778f5576c245a6c157b409879c3c4e797893d9"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/targeted-retirement-counter.log",
+      "bytes": 35387,
+      "sha256": "ef88d3ed22148366686fb5de648a8b180767c60f04f3d7419c64e6e529f5a238"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/targeted-second.log",
+      "bytes": 19345,
+      "sha256": "8df986882896d540b45c3044cb43d066a6ff5720ea67c7955d4394efcc63061d"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/targeted-with-retained-children.log",
+      "bytes": 35387,
+      "sha256": "0141136ff5e5d49550abf015c76bbf08b44a5d68f622c5e290513dab8d481ba2"
+    },
+    {
+      "historicalPath": "/tmp/surprising-spot-algo-read-20261020_100541/ticker-stdout.log",
+      "bytes": 1086,
+      "sha256": "caa68e53147bb9b5104769e86c4cd9f35443d7742c8e6bf4ae406a29fd823785"
+    }
+  ],
+  "sourceSha256": {
+    "README.md": "aeb0d088a80bc4a8af8f01d6e2e2598e88a437a5a364ca966b0182821050b851",
+    "deployment/migrations/20261020-algo-read-projection.sql": "e44a2203f5f4739e8a48817453c7a21b825c9c3e6bb994c7954d3c15f9d69d61",
+    "docs/algo-read-projection.md": "c7edfbf2318a84746cbf5c840a5ee3c3fb0e5f4893793f83a93eb12aa43a8ee6",
+    "init.sql": "d262473deb81ab1b0606cacb8ec530ce456decbcb7b3a8a7ae79fb612a8d9e9e",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/CommittedTradeReplay.java": "7ee4eca5dab0325dad4b0281348ea9f38d718723f3887861864d80409edb7008",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/MatcherSettlementChanges.java": "cd682dee057c4002782edf65861da4b7fd32448087224c2c5725a81f0a2e3f9b",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeAlgoOrderStateTransitions.java": "68e7a2704d15c5cdd491c128c241343275411879f48335e4bd58115eff461a20",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingCoreState.java": "8e7a13ec95b244c988939fba4c8887bc0552dc7e52c4142d2dcac2dcbb2d2e98",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/index/AlgoOrderIndex.java": "9a71f2f8ae34f42960590ebc9de5014708cd2f37034e11e931d12e878dce4512",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/model/CoreAlgoOrderState.java": "09d067d386eab69011c650e7dbd28f3b44c7937d5c50b1adf887331717c17da9",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/query/RuntimeOperationalQueryService.java": "ffa6c69cd5b50ac9d3b8c2d2e8104835dd98a0b4c53de527f95540991fe88c46",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/snapshot/TradingStateSnapshotCodec.java": "81d8e13f65a038584142a2b0d5210940e27a98d5711b86f820995f7ce890a97c",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CommittedTradeReplayTest.java": "d6c07f9e54a580de2df073a4b8def2e32490e42f5f8e29a223781de1ae740a37",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/snapshot/SnapshotFieldEvolutionTest.java": "01d3715dc823be02760701665faf181316a65dd758f3d886ad354915369304b8",
+    "surprising-gateway/README.md": "dd8cab328f783e4277d84563cb3d7cf6f6a5174fd6a6bfd022bfc22da4b25a03",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/repository/AlgoOrderProjectionRepository.java": "5bee4e06cf1f41d8f942ac36cdd69e36648acd31735622569419356643970ab0",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java": "7c1fe54d25e045abdd3873cbc2e03ca194b252cb7270b8b6ff17d9d2a75492d3",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/local/SixProductLineContractLiveTest.java": "9a530eebd13696545047cef7e7c06775a163c35efe9f1b3553d836e34644e5af",
+    "surprising-gateway/src/test/java/com/surprising/trading/order/repository/AlgoOrderProjectionPostgresTest.java": "d165a6830bd3287633d697d022068e02149e57898c5a0aefc3459418a5b56145",
+    "surprising-gateway/src/test/java/com/surprising/trading/order/service/AlgoOrderCancellationTest.java": "4e1e3ad1f579add1c434a136c5a57fff8a696b60b1384449f27abb6e25fca550",
+    "surprising-gateway/src/test/java/com/surprising/trading/order/service/AlgoOrderServiceTest.java": "b796a1bac9ac62cf2a1ed07887c146e6b9587238ab9ac4d07ca117e5759d1e37",
+    "surprising-realtime/README.md": "0d3f090470e5dd7acc844c97b23927066fe92d25180eb5a9b4a7b2962839ff2e",
+    "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/CommittedAlgoProjection.java": "cfe662f422ee79a57983a1dd7d37014e67e879db3f315fb132cc672aacba8833",
+    "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/CommittedOrderProjectionRepository.java": "625cc005051faca0b9e97ad2e9c6166de690ca16c135f5f8830013d7fb9f726b",
+    "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/CommittedTradeExporter.java": "d6ce4c20234d26d5736cbba59a96d0fd773f5079f4a968ad6e4b83e99c69da82",
+    "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedAlgoProjectionPostgresTest.java": "7d7fb36e24e5421f2b84d4f909add34bb5816a7c79185baba31c4c6e32848c91",
+    "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedDeliveryRepairIntegrationTest.java": "6a91ac2129f6b848e0367a65238000d854e19f299a6196e67322da96fd4a9d3d",
+    "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedFundingRepairIntegrationTest.java": "c4109e1ed9c886f803feb1b47267840061e2e41de298126f6052ebbdb8e7f6dd",
+    "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedOrderProjectionPostgresTest.java": "89218405a02b8c53247404d31672c22f07c8e23c017e5ec49e03dc9e9ba61065",
+    "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedTradeExportIntegrationTest.java": "bdb6b848d2a27baabd83785f96be8d390264bb46b9bce6e03da0b15925fd7a4c",
+    "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/ExportBatchTest.java": "8de4cc7aee1527387eeba489f9bba9c0b84f5f7a9c2712b1b5b60ac1b1012d0d"
+  }
+}

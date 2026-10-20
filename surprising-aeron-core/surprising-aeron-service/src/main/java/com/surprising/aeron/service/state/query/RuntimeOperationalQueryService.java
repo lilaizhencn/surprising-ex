@@ -110,12 +110,12 @@ public final class RuntimeOperationalQueryService {
             if (state == null) continue;
             scannedChildren = Math.addExact(scannedChildren, state.childOrderIds().size());
             if (scannedChildren > MAX_INDEX_SCAN) throw new QueryTooLargeException();
-            long executed = 0;
+            long executed = state.retiredExecutedQuantitySteps();
             long active = 0;
             int activeCount = 0;
             for (long childOrderId : state.childOrderIds()) {
                 OrderRuntime child = runtime.order(childOrderId);
-                if (child == null) throw new IllegalStateException("algo child order missing");
+                if (child == null) continue; // Its final execution was folded into the parent before retirement.
                 executed = Math.addExact(executed, child.executedQuantitySteps());
                 if (child.status() == CoreOrderStatus.OPEN) {
                     active = Math.addExact(active, child.remainingQuantitySteps());

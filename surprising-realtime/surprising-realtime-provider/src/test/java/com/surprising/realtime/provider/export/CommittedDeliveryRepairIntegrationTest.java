@@ -84,7 +84,7 @@ class CommittedDeliveryRepairIntegrationTest {
                 assertThat(pages.getValue().cashFlows().getFirst().amountUnits()).isEqualTo(100);
                 assertThat(pages.getValue().cashFlows().getFirst().userId()).isEqualTo(2);
                 assertThat(TradeExportCheckpoint.read(checkpoint,line).logPosition()).isEqualTo(last);
-                verify(repository,never()).persist(any(),anyList(),anyList(),anyLong());
+                verify(repository,never()).persist(any(),anyList(),anyList(),anyLong(),anyList());
                 verify(repository,never()).repairCommandResults(any(),anyList());
                 verify(repository,never()).persistFunding(any());
                 Path live = temp.resolve("live.bin"), copied = temp.resolve("copied.delivery-repair");

@@ -45,14 +45,17 @@ public class AlgoOrderService {
     private final TradingOrderProperties properties;
     private final OrderService orderService;
     private final AeronAlgoOrderStore store;
+    private final com.surprising.trading.order.repository.AlgoOrderProjectionRepository projection;
 
     @Autowired
     public AlgoOrderService(TradingOrderProperties properties,
                             OrderService orderService,
-                            AeronAlgoOrderStore store) {
+                            AeronAlgoOrderStore store,
+                            com.surprising.trading.order.repository.AlgoOrderProjectionRepository projection) {
         this.properties = properties;
         this.orderService = orderService;
         this.store = store;
+        this.projection = projection;
     }
 
     public AlgoOrderResponse place(PlaceAlgoOrderRequest request) {
@@ -139,8 +142,7 @@ public class AlgoOrderService {
         if (limit < 1 || limit > MAX_OPEN_CANCEL_LIMIT) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        List<AlgoOrderResponse> orders = store.query(userId, instrumentId, 0, limit).stream()
-                .filter(value -> !isTerminal(AlgoOrderStatus.values()[value.statusCode()]))
+        List<AlgoOrderResponse> orders = projection.openOrders(currentProductLine(), userId, instrumentId, limit).stream()
                 .map(store::response).toList();
         return new AlgoOrderQueryResponse(orders.size(), orders);
     }
@@ -214,21 +216,31 @@ public class AlgoOrderService {
         update(updated, children);
     }
 
-    private AlgoOrderResponse cancelRecord(AlgoOrderRecord record) {
+    // Share the existing scheduler monitor: finish linking any locally submitted child
+    // before recording cancellation, then refresh the revision and child identities.
+    private synchronized AlgoOrderResponse cancelRecord(AlgoOrderRecord record) {
+        var current = store.get(record.userId(), record.algoOrderId());
+        record = store.record(current);
+        requireCurrentProductLine(record);
         if (isTerminal(record.status())) {
-            return store.response(store.get(record.userId(), record.algoOrderId()));
+            return store.response(current);
         }
         Instant now = Instant.now();
         AlgoOrderRecord requested = withStatus(record, AlgoOrderStatus.CANCEL_REQUESTED, null,
                 null, null, now, record.currentOrderId());
-        var current = store.get(record.userId(), record.algoOrderId());
         update(requested, current.childOrderIds());
+        RuntimeException cancellationFailure = null;
         for (AlgoOrderChild child : store.children(current)) {
             try {
                 orderService.cancel(new CancelOrderRequest(record.userId(), child.orderId()));
-            } catch (RuntimeException ignored) {
-                // 子单已终态时继续收敛算法单终态，订单事实流负责最终幂等裁决。
+            } catch (RuntimeException failure) {
+                cancellationFailure = failure;
             }
+        }
+        current = store.get(record.userId(), record.algoOrderId());
+        if (current.activeChildOrderCount() > 0) {
+            if (cancellationFailure != null) throw cancellationFailure;
+            return store.response(current);
         }
         AlgoOrderRecord canceled = withStatus(requested, AlgoOrderStatus.CANCELED, null,
                 null, now, Instant.now(), record.currentOrderId());
