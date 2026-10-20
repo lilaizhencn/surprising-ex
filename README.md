@@ -306,3 +306,12 @@ realtime 同步修正币本位交割基础币成交量、结算/关闭后真实�
 Web `TradingAccountTables` 与 client `OrderRow` 的现货价格/均价显示复用整数十进制换算，保留大于 JS 安全整数的原 tick 与小数 tick 均价。现货委托价值按 priceTicks × quantitySteps × notionalMultiplierUnits，成交价值按原 executedValueTicks × notionalMultiplierUnits，以真实报价币 scale 展示。原累计手续费直接显示，不使用平均价或最新费率反算；市价单不猜限价价值，缺少乘数/执行累计值时保持缺失。现货明确显示“计价币种”和 Post-only，隐藏不适用的全仓/逐仓、持仓方向与 reduce-only 文案。Web 小屏现货操作列随表格滚动，避免固定按钮遮住长价格和金额。
 
 本轮为展示层修复，无 API、realtime、Core 交易或资金模型变化，无迁移/topic/新服务；未启动后端、wallet 或其他产品实栈。Web 只读展示验证脚本 scripts/spot-order-details-qa.mjs 使用显式 SPOT_DETAILS_QA_ROOT（/tmp/surprising-spot-details- 前缀、owner.json 标识本轮 QA）及可选 SPOT_DETAILS_QA_BASE、SPOT_DETAILS_PLAYWRIGHT_MODULE、SPOT_DETAILS_CHROMIUM。它挂载真正生产组件及显式整数测试数据，不拦截金融 API 响应；不代表本轮真实 FUSED 成交/资金对账。证据与清理见 docs/validation/spot-current-order-details-20261020.json。
+
+
+### 现货交易面板默认视图与账户隔离（2026-10-20）
+
+client 现货默认打开当前委托，隐藏持仓入口和保证金风险摘要，保留止盈止损/策略、历史委托与成交记录；同一面板切换账户或产品后重新选择适用的默认页签。两端现货登录提示改为账户与委托。
+
+Web 最近订单更新曾在直接切换已登录账户时保留前一账户缓存。现按账户、登录状态、产品及永久 instrumentId 重新挂载面板，清除页签、筛选、订单更新与风险局部状态；仅收录根事件 userId 属于当前账户、channel=orders 且产品匹配的更新，跳过无订单号的空事件。现货不再展示持仓页签，衍生品入口保留。
+
+本轮只调试现货界面与状态隔离，无 API、realtime 或 Core 逻辑改动，无迁移/topic/服务新增；查询继续使用既有 realtime 路径。未启动后端、wallet 或其他产品实栈，不能据此宣称新的 FUSED 成交/资金对账通过。scripts/spot-order-details-qa.mjs 新增账户、退出登录、交易对往返、错误产品事件与页签切换回归，沿用既有 SPOT_DETAILS_QA_ROOT / SPOT_DETAILS_QA_BASE / SPOT_DETAILS_PLAYWRIGHT_MODULE / SPOT_DETAILS_CHROMIUM 参数。受控真实组件验证、原生 widget 覆盖与资源清理见 [验证记录](docs/validation/spot-trading-panel-scope-20261020.json)。

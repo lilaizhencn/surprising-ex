@@ -1,0 +1,626 @@
+{
+  "date": "2026-10-20",
+  "scope": "现货交易面板默认视图、账户/产品切换和最近订单更新缓存隔离。完整多产品目标继续 active。",
+  "previousGoalTurnClassification": {
+    "classification": "progress",
+    "evidence": "上一轮现货当前委托精度、价值与小屏展示已提交推送；本轮以对应已推送 HEAD 为基线。"
+  },
+  "baselines": {
+    "surprising-ex": "b5c80c1472b9ab433e1b815a70cbc7aec2964107",
+    "surprising-ex-web": "a439f4dfb0a849bf9bf8656a6e40c8ce022fc6aa",
+    "surprising-client": "d2294f9c9fed38fabff0a297599224e52226e367",
+    "surprising-admin-web": "ac8fe282228c1a18082665e56a08adccab577cea"
+  },
+  "rootCauses": [
+    "client 的 PrivateTradingPanel 默认 tab=0，即现货空持仓页，且无条件提供持仓页签和账户保证金摘要。",
+    "Web 子组件缓存 history 的 effect 未包含 userId；hook 已清空旧账户 events 时，子组件仍保留旧行。裸对象 lastOrderEvent 引用也没有对应状态归属。",
+    "仅 effect 清缓存会先提交含旧状态的视图；需要在新账户或交易对首次渲染前重置组件。",
+    "两端现货登录文案仍包含持仓。"
+  ],
+  "changes": [
+    "Web 以产品、登录状态、归一化 userId、永久 instrumentId 为 key 重挂局部状态组件，同步清除既有 history、lastOrderEvent、风险与选择状态。",
+    "Web 缓存只接收当前登录账户的根 userId、当前产品 orders 事件，过滤空订单号；保留已有 100 条有界合并与最新事件引用优化。",
+    "client 用最后渲染的产品/账户归属重置页签；AppState 为可变对象，不能仅对比 oldWidget.state。现货默认委托，其他产品保留持仓默认。",
+    "现货隐藏持仓入口和 client 保证金风险摘要，保留订单、策略/条件单、历史委托与成交记录。两端更新现货登录文案，Web 包含中文翻译。"
+  ],
+  "ownership": {
+    "newDomainState": false,
+    "newFramework": false,
+    "webViewBoundary": "新内部组件只承担 React key 重挂所需的局部状态生命周期边界；复用原 history/ref/risk 状态，不新增第二份业务缓存或通用 owner 框架。",
+    "nativeSelectionOwner": "_selectionScope 仅标记页签偏好的账户/产品归属；不复制订单、行情或风险业务状态。",
+    "dataSource": "现有 useRealtime / AppState 及已提交 realtime 视图。没有新增 API、Core 查询、后端状态或资金计算。"
+  },
+  "regression": {
+    "webUnitRed": "新增初始两例中 1 failed / 1 passed：SPOT 仍有 Positions (0)，交割适用页签原保护例通过。",
+    "clientUnitRed": "初始新增 3 例全部失败：两种主题默认选择错误、直接切换账户不重置选择。",
+    "browserRed": "修复前挂载实际 TradingAccountTables，账户1收到10001后切账户2且 events=[]，仍显示10001；断言 previous account history must be discarded 失败。",
+    "browserHarnessCorrection": "补充退出登录时页面正确不渲染表格；将负向数据检查从 tbody 改为整个交易面板文本，保留正向订单显示断言。未为测试更改产品数据或登录条件。"
+  },
+  "web": {
+    "commands": [
+      "npm test",
+      "npm run lint",
+      "npm run build",
+      "node scripts/spot-order-details-qa.mjs（显式隔离 QA root 与已有 Playwright/Chromium）"
+    ],
+    "testFilesPassed": 40,
+    "testsPassed": 303,
+    "newUnitCases": 3,
+    "lint": {
+      "exit": 0,
+      "errors": 0,
+      "warnings": 0,
+      "infos": 536
+    },
+    "build": {
+      "exit": 0,
+      "existing594KBChunkAdvisory": true
+    },
+    "browserMode": "controlled production-component presentation/interaction QA",
+    "browserCases": [
+      {
+        "width": 1440,
+        "theme": "dark",
+        "scenario": "normal",
+        "exactValues": [
+          "61.7225",
+          "123.445 USDT",
+          "308.625 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 0
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 0
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-normal-1440-dark.png",
+        "productionComponent": true,
+        "controlledFixture": true,
+        "accountAndProductScope": true,
+        "scopeChecks": [
+          "account switch clears old history and resets filter/tab",
+          "foreign events ignored",
+          "returning account reseeds retained owned event",
+          "logout clears cache and rejects private buffer",
+          "login without new events stays empty",
+          "foreign product ignored",
+          "instrument switch and return discard cache",
+          "spot hides positions and defaults to orders"
+        ]
+      },
+      {
+        "width": 1440,
+        "theme": "dark",
+        "scenario": "large",
+        "exactValues": [
+          "45035996273704.965",
+          "45035996273704.9675",
+          "90071992547409.935 USDT",
+          "225179981368524.825 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 0
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 0
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-large-1440-dark.png",
+        "productionComponent": true,
+        "controlledFixture": true,
+        "accountAndProductScope": true,
+        "scopeChecks": [
+          "account switch clears old history and resets filter/tab",
+          "foreign events ignored",
+          "returning account reseeds retained owned event",
+          "logout clears cache and rejects private buffer",
+          "login without new events stays empty",
+          "foreign product ignored",
+          "instrument switch and return discard cache",
+          "spot hides positions and defaults to orders"
+        ]
+      },
+      {
+        "width": 1440,
+        "theme": "light",
+        "scenario": "normal",
+        "exactValues": [
+          "61.7225",
+          "123.445 USDT",
+          "308.625 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 0
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 0
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-normal-1440-light.png",
+        "productionComponent": true,
+        "controlledFixture": true,
+        "accountAndProductScope": true,
+        "scopeChecks": [
+          "account switch clears old history and resets filter/tab",
+          "foreign events ignored",
+          "returning account reseeds retained owned event",
+          "logout clears cache and rejects private buffer",
+          "login without new events stays empty",
+          "foreign product ignored",
+          "instrument switch and return discard cache",
+          "spot hides positions and defaults to orders"
+        ]
+      },
+      {
+        "width": 1440,
+        "theme": "light",
+        "scenario": "large",
+        "exactValues": [
+          "45035996273704.965",
+          "45035996273704.9675",
+          "90071992547409.935 USDT",
+          "225179981368524.825 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 0
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 0
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-large-1440-light.png",
+        "productionComponent": true,
+        "controlledFixture": true,
+        "accountAndProductScope": true,
+        "scopeChecks": [
+          "account switch clears old history and resets filter/tab",
+          "foreign events ignored",
+          "returning account reseeds retained owned event",
+          "logout clears cache and rejects private buffer",
+          "login without new events stays empty",
+          "foreign product ignored",
+          "instrument switch and return discard cache",
+          "spot hides positions and defaults to orders"
+        ]
+      },
+      {
+        "width": 320,
+        "theme": "dark",
+        "scenario": "normal",
+        "exactValues": [
+          "61.7225",
+          "123.445 USDT",
+          "308.625 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 74
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 583
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-normal-320-dark.png",
+        "productionComponent": true,
+        "controlledFixture": true,
+        "accountAndProductScope": true,
+        "scopeChecks": [
+          "account switch clears old history and resets filter/tab",
+          "foreign events ignored",
+          "returning account reseeds retained owned event",
+          "logout clears cache and rejects private buffer",
+          "login without new events stays empty",
+          "foreign product ignored",
+          "instrument switch and return discard cache",
+          "spot hides positions and defaults to orders"
+        ]
+      },
+      {
+        "width": 320,
+        "theme": "dark",
+        "scenario": "large",
+        "exactValues": [
+          "45035996273704.965",
+          "45035996273704.9675",
+          "90071992547409.935 USDT",
+          "225179981368524.825 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 97
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 595
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-large-320-dark.png",
+        "productionComponent": true,
+        "controlledFixture": true,
+        "accountAndProductScope": true,
+        "scopeChecks": [
+          "account switch clears old history and resets filter/tab",
+          "foreign events ignored",
+          "returning account reseeds retained owned event",
+          "logout clears cache and rejects private buffer",
+          "login without new events stays empty",
+          "foreign product ignored",
+          "instrument switch and return discard cache",
+          "spot hides positions and defaults to orders"
+        ]
+      },
+      {
+        "width": 320,
+        "theme": "light",
+        "scenario": "normal",
+        "exactValues": [
+          "61.7225",
+          "123.445 USDT",
+          "308.625 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 97
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 630
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-normal-320-light.png",
+        "productionComponent": true,
+        "controlledFixture": true,
+        "accountAndProductScope": true,
+        "scopeChecks": [
+          "account switch clears old history and resets filter/tab",
+          "foreign events ignored",
+          "returning account reseeds retained owned event",
+          "logout clears cache and rejects private buffer",
+          "login without new events stays empty",
+          "foreign product ignored",
+          "instrument switch and return discard cache",
+          "spot hides positions and defaults to orders"
+        ]
+      },
+      {
+        "width": 320,
+        "theme": "light",
+        "scenario": "large",
+        "exactValues": [
+          "45035996273704.965",
+          "45035996273704.9675",
+          "90071992547409.935 USDT",
+          "225179981368524.825 USDT"
+        ],
+        "visibleCells": [
+          {
+            "label": "price",
+            "visible": true,
+            "scrollLeft": 97
+          },
+          {
+            "label": "value",
+            "visible": true,
+            "scrollLeft": 639
+          }
+        ],
+        "overflow": false,
+        "errors": [],
+        "apiRequests": [],
+        "screenshot": "details-large-320-light.png",
+        "productionComponent": true,
+        "controlledFixture": true,
+        "accountAndProductScope": true,
+        "scopeChecks": [
+          "account switch clears old history and resets filter/tab",
+          "foreign events ignored",
+          "returning account reseeds retained owned event",
+          "logout clears cache and rejects private buffer",
+          "login without new events stays empty",
+          "foreign product ignored",
+          "instrument switch and return discard cache",
+          "spot hides positions and defaults to orders"
+        ]
+      }
+    ],
+    "browserCaseCount": 8,
+    "apiRequests": 0,
+    "visualInspection": [
+      "320px light 初始订单视图：仅当前委托/最近更新，无持仓入口和整页横向溢出。",
+      "1440px dark 大整数订单：价格、价值及操作完整；保留前轮价格/金额遮挡回归。"
+    ],
+    "noFinancialResponsesMocked": true,
+    "fixtureDisclosure": "显式整数样本与生产 unwrapEvent 生成的归属事件；真实生产组件、真实浏览器点击，不代表后端 FUSED 或原生设备实测。"
+  },
+  "client": {
+    "commands": [
+      "flutter analyze",
+      "flutter test --reporter expanded"
+    ],
+    "analyze": {
+      "exit": 0,
+      "issues": 0
+    },
+    "testsPassed": 305,
+    "testsSkipped": 10,
+    "newWidgetCases": 4,
+    "checks": [
+      "320px 深浅色现货默认委托、无持仓和保证金摘要；显式注入非空 accountRisk 证明现货不展示。",
+      "真实点击最近订单更新，复用同一 mutable AppState/同一 mounted panel 依次换账户、产品、再回现货，页签按归属重置。",
+      "未登录现货提示账户与委托。"
+    ],
+    "mode": "offline production-widget tests",
+    "nativeDeviceInstallTested": false
+  },
+  "backend": {
+    "runtimeCodeChanged": false,
+    "mavenRun": false,
+    "reason": "仅 README 和验证档案；按后端 AGENTS.md 文档范围验证 git diff --check，无必要启动 Java/服务。",
+    "coreQueriesAdded": false,
+    "fusedStartedThisTurn": false
+  },
+  "limits": [
+    "本轮无真实 FUSED 下单/撤单/成交或资金对账，未启动做市、wallet、Core 或 realtime。",
+    "LINEAR_DELIVERY 仅为共享组件在产品切换时的静态/离线反例，未启动第二条产品。",
+    "后台管理系统无业务改动；保留其未跟踪生成目录 .codegraph/。",
+    "不包含 iOS/Android 真机安装、生产发布、其他产品实栈或全部目标验收。"
+  ],
+  "artifactManifest": [
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-large-1440-dark.png",
+      "bytes": 35145,
+      "sha256": "f1a03a9fc67efeff6ae4f7353ee990942594bf36c51307d281220ae649e5aae8"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-large-1440-light.png",
+      "bytes": 36076,
+      "sha256": "7e2fea31cc94512bcdf762a26dd5f1038154a0cef30f7b179f412aa75f38a32e"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-large-320-dark-price.png",
+      "bytes": 15772,
+      "sha256": "cf506d4ef86a0ffbc61f18f631a490164a725930f4d873050d28bb7089819594"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-large-320-dark-value.png",
+      "bytes": 16295,
+      "sha256": "c240ec9f0ed482c9c0b2d6a9ad457b7027d7fa2ae06e9056f6ea7e798325928d"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-large-320-dark.png",
+      "bytes": 15901,
+      "sha256": "020022e8e06e270365623922580503dab4d6acab235cb425e3471fb406b8781c"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-large-320-light-price.png",
+      "bytes": 15786,
+      "sha256": "eb14436eec6f7dd3dec215ca7836719058fa37f395c7d53d84b93707f54c248a"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-large-320-light-value.png",
+      "bytes": 16721,
+      "sha256": "80d329013aedf2fb31c07924516f9b7aaa67ee1653a05437552af572b06eb640"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-large-320-light.png",
+      "bytes": 15799,
+      "sha256": "c6e193af952fb3b375a4aec029c35b8e70e3a958a1f853b76c1cdbded0c2ddc2"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-normal-1440-dark.png",
+      "bytes": 34072,
+      "sha256": "9d0d5dcdfffe7e56e21c2e1fbd201cf99c99ff77d3a539c1d3a501686a5433f1"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-normal-1440-light.png",
+      "bytes": 32146,
+      "sha256": "fa9b240d667f4745d0929aaa0f4b34729a1720ab6a4c1a70f14193dcbc52d616"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-normal-320-dark-price.png",
+      "bytes": 12988,
+      "sha256": "322e26e23927721e32230469cf5c6de06bbbc40f644db43cbf5766ed2e2e2309"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-normal-320-dark-value.png",
+      "bytes": 14798,
+      "sha256": "07dc92c3b2055d78f23ba6b6bcc67e1523a746b94a5483e96a1e8a0d684ed876"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-normal-320-dark.png",
+      "bytes": 14398,
+      "sha256": "d11cb0983cd21d41324b3d4f6965db90ac9d7487e0d3c4380ec4fbf32a1f571b"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-normal-320-light-price.png",
+      "bytes": 13258,
+      "sha256": "732e10f74530e27d1abee7c457deb6e27b5584bba563c4abeea994aebe58c860"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-normal-320-light-value.png",
+      "bytes": 14653,
+      "sha256": "899b9e00595ba75c4b99da7d1c38652c40aa1e15ea4c8b12e973709dca942ebf"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/details-normal-320-light.png",
+      "bytes": 14935,
+      "sha256": "06fb63b93cfac0e6ebb95507afef6a81b960fba79e155cd6f3ebcf46c6c855e7"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/harness-owner.json",
+      "bytes": 114,
+      "sha256": "835b387441b164111869b91e986b2cfd608f54fab1e06905e3c0eb343bb09547"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/owner.json",
+      "bytes": 199,
+      "sha256": "a652278a74818b35c70909eac391bd4da3ae601feaa62c162885564bbc2ac3f3"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/web-details-evidence.json",
+      "bytes": 8323,
+      "sha256": "bf94662c1c475abdea69aa2f6285974be80ecd5b9ab1be5e5958fb46ba9b9a9a"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/web-panel-green-final.log",
+      "bytes": 519,
+      "sha256": "e1bcec3a75b2f58a7467ff71ea933d1eebf4796c00c011d35fa06ad7ff17fedc"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/web-panel-green-logout.log",
+      "bytes": 85,
+      "sha256": "5763487697b5e42bd76c17562beb8f398622a894151ad8035704185c905ca3f1"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/web-panel-green.log",
+      "bytes": 85,
+      "sha256": "5763487697b5e42bd76c17562beb8f398622a894151ad8035704185c905ca3f1"
+    },
+    {
+      "path": "/tmp/surprising-spot-details-20261020_094855/web-panel-red.log",
+      "bytes": 395,
+      "sha256": "d25c50b674adcfe9a61a5ab51d46125f0befd354349c9cc49f4c9e04a2480512"
+    },
+    {
+      "path": "/tmp/surprising-spot-panel-client-analyze-20261020.log",
+      "bytes": 96,
+      "sha256": "23f564db7f1f9e6d94205ca04592d39ff83b9f5cc43ad5b691c0dcdefa5c7753"
+    },
+    {
+      "path": "/tmp/surprising-spot-panel-client-format-20261020.log",
+      "bytes": 90,
+      "sha256": "ede892b0e965b8b870983692afdb21d43f61f9fe21ef673b047242d8032fb867"
+    },
+    {
+      "path": "/tmp/surprising-spot-panel-client-full-20261020.log",
+      "bytes": 53844,
+      "sha256": "18f694ba9159e1d04f0e4a1b36dd13e37812afbd5aaaf01f60d49419105e749d"
+    },
+    {
+      "path": "/tmp/surprising-spot-panel-client-green-20261020.log",
+      "bytes": 390,
+      "sha256": "d547b4d8fb6e94f55ed2848f8cbe31e7f88761a32eb91dd3e3ccb40fc16c8679"
+    },
+    {
+      "path": "/tmp/surprising-spot-panel-client-red-20261020.log",
+      "bytes": 6347,
+      "sha256": "a950aac0188a034f986bc15e65029ee226527b8f18710ada73cdd5dfb089cbeb"
+    },
+    {
+      "path": "/tmp/surprising-spot-panel-web-build-20261020.log",
+      "bytes": 3511,
+      "sha256": "a9a08a8cd351d12f9de03a5980fd28c079f03915f225c6d05f5c361436b85ee8"
+    },
+    {
+      "path": "/tmp/surprising-spot-panel-web-build-final-20261020.log",
+      "bytes": 3511,
+      "sha256": "a5237494e387b38a06e1d8692f864c632bc193f719b18dfe2a61529f36430663"
+    },
+    {
+      "path": "/tmp/surprising-spot-panel-web-format-20261020.log",
+      "bytes": 303,
+      "sha256": "becde7669aecedc03c3d0867ec83a888dc74b7c7111d68df3591fc8034277347"
+    },
+    {
+      "path": "/tmp/surprising-spot-panel-web-full-20261020.log",
+      "bytes": 289,
+      "sha256": "e5b62767d184af19e7e8e24a717d15ca57e0a4b97bbba7892ceadd2bb05f03e4"
+    },
+    {
+      "path": "/tmp/surprising-spot-panel-web-full-final-20261020.log",
+      "bytes": 290,
+      "sha256": "abcea39569bedbc563ac33b1ae0d482b876955817c420a5995cd01792657541e"
+    },
+    {
+      "path": "/tmp/surprising-spot-panel-web-green-20261020.log",
+      "bytes": 334,
+      "sha256": "c3f9e7807adcbfba01ec9125a55a49491ea82bfb10ebf7607c3e8d016e5c0a15"
+    },
+    {
+      "path": "/tmp/surprising-spot-panel-web-lint-20261020.log",
+      "bytes": 19292,
+      "sha256": "d1de9fd2b4997a3fa38b71442a7bdbcb021e1fbee676b82beba3561ff8aec034"
+    },
+    {
+      "path": "/tmp/surprising-spot-panel-web-lint-final-20261020.log",
+      "bytes": 19253,
+      "sha256": "79e90a09cfaf5c4ea0e44c441989eea322aacb38bd2bc9e48bbf2cf3053b9edd"
+    },
+    {
+      "path": "/tmp/surprising-spot-panel-web-red-20261020.log",
+      "bytes": 1978,
+      "sha256": "937c270f28ea0b93a7aa58438c6553c5df868d48f0dbb26ab7a643075b3a363a"
+    }
+  ],
+  "cleanup": {
+    "status": "verified",
+    "qaRoot": "/tmp/surprising-spot-details-20261020_094855",
+    "qaRootRemoved": true,
+    "currentMetadataRemoved": true,
+    "ownedLogFilesRemoved": 14,
+    "vite": {
+      "pid": 74452,
+      "port": 5178,
+      "commandMatchedBeforeStop": "node /Users/atomex/Desktop/surprising/surprising-ex-web/node_modules/.bin/vite --host 0.0.0.0 --host 127.0.0.1 --port 5178 --strictPort",
+      "cwdMatched": "/Users/atomex/Desktop/surprising/surprising-ex-web",
+      "portReleased": true,
+      "npmParentAlsoStopped": false
+    },
+    "browser": "最终脚本 exit 0；finally 中 await browser.close() 并删除本轮唯一 harness。",
+    "harnessRemoved": true,
+    "databaseArchiveOrBackendCreated": false,
+    "unrelatedResourcesTouched": false
+  }
+}
