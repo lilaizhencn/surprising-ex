@@ -57,6 +57,17 @@ public class AdminPermissionFilter extends OncePerRequestFilter {
         }
         boolean read = HttpMethod.GET.equals(method) || HttpMethod.HEAD.equals(method);
         String path = uri.substring("/api/v1/admin".length()).toLowerCase(Locale.ROOT);
+        if (path.equals("/c2c") || path.startsWith("/c2c/")) {
+            if (read && (path.matches("/c2c/payment-accounts/[^/]+")
+                    || path.matches("/c2c/orders/[^/]+/payment"))) {
+                return "admin.c2c.sensitive.read";
+            }
+            if (!read && (path.matches("/c2c/appeals/[^/]+/decision")
+                    || path.matches("/c2c/ads/[^/]+/close"))) {
+                return "admin.c2c.resolve";
+            }
+            return "admin.c2c." + (read ? "read" : "write");
+        }
         if (path.startsWith("/product-lines")) {
             return "admin.gateway.instrument-admin." + (read ? "read" : "write");
         }

@@ -17,6 +17,39 @@ import org.junit.jupiter.api.Test;
 
 class CoreRuntimeBalanceSurfaceTest {
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
+    void initializesAnEmptyAccountWithoutMintingMoneyAndKeepsItThroughSnapshot(ProductLine product) {
+        byte[] snapshot;
+        try (TradingCoreRuntime state = new TradingCoreRuntime(product)) {
+            CoreMessage initialize = new CoreMessage(CoreMessageHeader.command(
+                    CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), product,
+                    CommandSource.OPERATIONS, 9, 1, 1001, 1_000, 1),
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 0)));
+            assertThat(apply(state, initialize).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.tradingState().user(1001)).isNotNull();
+            assertThat(state.tradingState().user(1001).totalUnits("USDT")).isZero();
+            assertThat(apply(state, initialize).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.tradingState().user(1001).totalUnits("USDT")).isZero();
+            snapshot = state.snapshot(101);
+        }
+        try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, snapshot)) {
+            assertThat(restored.tradingState().user(1001)).isNotNull();
+            assertThat(restored.tradingState().user(1001).totalUnits("USDT")).isZero();
+            CoreMessage fund = new CoreMessage(CoreMessageHeader.command(
+                    CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), product,
+                    CommandSource.OPERATIONS, 9, 2, 1001, 2_000, 2),
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
+            assertThat(apply(restored, fund).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            CoreMessage repeatZero = new CoreMessage(CoreMessageHeader.command(
+                    CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), product,
+                    CommandSource.OPERATIONS, 9, 3, 1001, 3_000, 3),
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 0)));
+            assertThat(apply(restored, repeatZero).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(restored.tradingState().user(1001).totalUnits("USDT")).isEqualTo(10_000);
+        }
+    }
+
     @Test
     void appliesBalanceCommandThroughAuthoritativeRuntimeAndMaterializesQueryState() {
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {

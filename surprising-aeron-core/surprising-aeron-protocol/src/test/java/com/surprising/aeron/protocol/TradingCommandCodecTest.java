@@ -11,6 +11,13 @@ import org.junit.jupiter.api.Test;
 class TradingCommandCodecTest {
 
     @Test
+    void zeroBalanceInitializationKeepsTheExistingWireFormat() {
+        var command = new BalanceAdjustmentCommand("USDT", 0);
+        assertThat(TradingCommandCodec.decodeBalanceAdjustment(
+                TradingCommandCodec.encodeBalanceAdjustment(command))).isEqualTo(command);
+    }
+
+    @Test
     void collidingInstrumentTextRemainsDistinctAndDoesNotRetainInputBytes() {
         // Both decimal IDs select the same slot of the bounded text cache.
         byte[] first = "10000".getBytes(java.nio.charset.StandardCharsets.US_ASCII);

@@ -9,13 +9,13 @@ import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication(scanBasePackages = {
-        "com.surprising.gateway.provider",
+        "com.surprising.gateway.provider", "com.surprising.gateway.c2c",
         "com.surprising.websocket.provider",
         "com.surprising.instrument.provider",
         "com.surprising.asset"
 })
 @org.springframework.context.annotation.ComponentScan(basePackages = {
-        "com.surprising.gateway.provider", "com.surprising.websocket.provider",
+        "com.surprising.gateway.provider", "com.surprising.gateway.c2c", "com.surprising.websocket.provider",
         "com.surprising.instrument.provider", "com.surprising.asset"
 }, excludeFilters = @org.springframework.context.annotation.ComponentScan.Filter(
         type = org.springframework.context.annotation.FilterType.ASSIGNABLE_TYPE,

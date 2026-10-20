@@ -134,6 +134,43 @@ class AdminPermissionFilterTest {
         assertThat(response.getStatus()).isEqualTo(200);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "GET,/api/v1/admin/c2c/configuration,admin.c2c.read",
+            "GET,/api/v1/admin/c2c/payment-accounts,admin.c2c.read",
+            "GET,/api/v1/admin/c2c/orders/test-order,admin.c2c.read",
+            "GET,/api/v1/admin/c2c/payment-accounts/test-account,admin.c2c.sensitive.read",
+            "HEAD,/api/v1/admin/c2c/orders/test-order/payment,admin.c2c.sensitive.read",
+            "PUT,/api/v1/admin/c2c/configuration,admin.c2c.write",
+            "POST,/api/v1/admin/c2c/payment-accounts/test-account/review,admin.c2c.write",
+            "POST,/api/v1/admin/c2c/ads/test-ad/close,admin.c2c.resolve",
+            "POST,/api/v1/admin/c2c/appeals/test-appeal/decision,admin.c2c.resolve",
+            "GET,/api/v1/admin/c2c-unrelated,admin.unmapped.read"
+    })
+    void appliesC2cPermissionsAtTheActualServletBoundary(String method, String path, String permission)
+            throws ServletException, IOException {
+        AuthService auth = mock(AuthService.class);
+        var request = new MockHttpServletRequest(method, path);
+        request.addHeader("Authorization", "Bearer scoped-admin");
+        var response = new MockHttpServletResponse();
+        var filter = new AdminPermissionFilter(auth);
+        filter.doFilter(request, response, new MockFilterChain());
+        assertThat(response.getStatus()).isEqualTo(200);
+        verify(auth).requireAdminPermission("Bearer scoped-admin", permission);
+    }
+
+    @Test
+    void ordinaryC2cWritePermissionCannotPassTheMoneyDecisionFilter() throws ServletException, IOException {
+        AuthService auth = mock(AuthService.class);
+        doThrow(new IllegalStateException("Missing C2C resolution permission"))
+                .when(auth).requireAdminPermission("Bearer ordinary-admin", "admin.c2c.resolve");
+        var request = new MockHttpServletRequest("POST", "/api/v1/admin/c2c/appeals/test-appeal/decision");
+        request.addHeader("Authorization", "Bearer ordinary-admin");
+        var response = new MockHttpServletResponse();
+        new AdminPermissionFilter(auth).doFilter(request, response, new MockFilterChain());
+        assertThat(response.getStatus()).isEqualTo(403);
+    }
+
     private AuthService authService() {
         AuthService authService = mock(AuthService.class);
         org.mockito.Mockito.when(authService.requireAdminPermission("Bearer admin", "admin.users.read"))
