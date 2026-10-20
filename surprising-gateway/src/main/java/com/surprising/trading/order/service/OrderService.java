@@ -62,6 +62,14 @@ public class OrderService {
     @org.springframework.beans.factory.annotation.Autowired
     private com.surprising.trading.order.repository.TradeProjectionRepository tradeProjection;
 
+    public com.surprising.trading.api.model.TradeFillQueryResponse ownFills(long userId, String instrumentId,
+            Long orderId, Long startTime, Long endTime, int limit, String cursor) {
+        if (tradeProjection == null) throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "TRADE_READ_VIEW_UNAVAILABLE");
+        String instrument = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
+        return tradeProjection.ownFills(currentProductLine(), userId, instrument, orderId, startTime, endTime, limit, cursor);
+    }
+
     public com.surprising.trading.api.model.AdminTradeQueryResponse adminTrades(Long userId, String instrumentId,
             Long orderId, int limit, String cursor, String sort, ProductLine requestedProduct) {
         ProductLine product = currentProductLine();

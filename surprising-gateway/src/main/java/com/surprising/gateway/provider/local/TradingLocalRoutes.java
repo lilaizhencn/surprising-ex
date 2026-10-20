@@ -43,6 +43,7 @@ import org.springframework.web.util.pattern.PathPatternParser;
 
 /** 网关协议到订单入口的本地调用；不建立内部 HTTP 连接。 */
 public final class TradingLocalRoutes {
+    private static final PathPattern OWN_FILLS = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/trades");
     private static final PathPattern ADMIN_METRICS = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/metrics");
     private static final PathPattern ADMIN_TRADES = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/trades");
     private static final PathPattern TRIGGER_OCO_SUBMISSION = PathPatternParser.defaultInstance.parse("/api/v1/trading/trigger-orders/oco-submission");
@@ -137,6 +138,11 @@ public final class TradingLocalRoutes {
     }
 
     public Object invoke(LocalApiRequest r) {
+        if (r.matches(HttpMethod.GET, OWN_FILLS)) return orderRequests.ownFills(
+                r.query("userId", long.class, null, true), r.query("instrumentId", String.class, null, false),
+                r.query("orderId", Long.class, null, false), r.query("startTime", Long.class, null, false),
+                r.query("endTime", Long.class, null, false), r.query("limit", int.class, "100", false),
+                r.query("cursor", String.class, null, false));
         if(r.matches(HttpMethod.GET,ADMIN_METRICS))return adminOrderRequests.metrics(r.header("X-Admin-User-Id",String.class,null,true),
                 r.header("X-Product-Line",String.class,null,false),r.query("productLine",String.class,null,false),
                 r.query("windowMinutes",int.class,"1440",false),r.query("limit",int.class,"20",false));

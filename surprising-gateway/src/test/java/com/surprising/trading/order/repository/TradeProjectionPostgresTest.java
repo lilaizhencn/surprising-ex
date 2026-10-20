@@ -12,6 +12,60 @@ import org.springframework.web.server.ResponseStatusException;
 
 @EnabledIfEnvironmentVariable(named="INSTRUMENT_TEST_JDBC_URL", matches=".+")
 class TradeProjectionPostgresTest {
+    @Test void privateFillsPreserveBothSelfTradeSidesAcrossOneRowPagesAndRedactCounterparties() {
+        ready(ProductLine.SPOT);
+        add(ProductLine.SPOT, 10, 0, 1000, 7, 8);
+        add(ProductLine.SPOT, Long.MAX_VALUE, 1, 2000, 7, 7);
+        var fills = new ArrayList<com.surprising.trading.api.model.TradeFillResponse>();
+        String cursor = null;
+        do {
+            var page = repository.ownFills(ProductLine.SPOT, 7, null, null, null, null, 1, cursor);
+            assertThat(page.userId()).isEqualTo(7);
+            assertThat(page.count()).isEqualTo(1);
+            fills.addAll(page.trades()); cursor = page.nextCursor();
+        } while (cursor != null);
+        assertThat(fills).extracting(v -> v.liquidityRole()).containsExactly("TAKER", "MAKER", "TAKER");
+        assertThat(fills).extracting(v -> v.side().name()).containsExactly("BUY", "SELL", "BUY");
+        assertThat(fills.get(1).orderId()).isEqualTo(9007199254740993L);
+        assertThat(fills.get(1).feeRatePpm()).isEqualTo(-100);
+        assertThat(fills.get(0).orderId()).isEqualTo(Long.MAX_VALUE);
+        String json = new tools.jackson.databind.json.JsonMapper().writeValueAsString(fills);
+        assertThat(json).doesNotContain("takerUserId", "makerUserId", "takerOrderId", "makerOrderId", "clusterPosition", "executionIndex");
+    }
+
+    @Test void privateFiltersApplyToTheUsersOwnOrderAndInclusiveEventTimes() {
+        ready(ProductLine.SPOT); add(ProductLine.SPOT, 10, 0, 1000, 7, 8);
+        assertThat(repository.ownFills(ProductLine.SPOT, 8, "604", 9007199254740993L, 1000L, 1000L, 10, null).count()).isEqualTo(1);
+        assertThat(repository.ownFills(ProductLine.SPOT, 8, "604", Long.MAX_VALUE, null, null, 10, null).trades()).isEmpty();
+        assertThat(repository.ownFills(ProductLine.SPOT, 8, "604", null, null, 999L, 10, null).trades()).isEmpty();
+        assertThat(repository.ownFills(ProductLine.SPOT, 8, "605", null, null, null, 10, null).trades()).isEmpty();
+        assertThatThrownBy(() -> repository.ownFills(ProductLine.SPOT, 8, null, null, 1001L, 1000L, 10, null)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test void privateCursorCannotBeReusedForAnotherUserProductOrFilter() {
+        for (var line : ProductLine.values()) { ready(line); add(line, 10, 0, 1000, 7, 8); add(line, 20, 0, 2000, 7, 8); }
+        var first = repository.ownFills(ProductLine.SPOT, 7, null, null, null, null, 1, null);
+        for (var line : ProductLine.values()) {
+            assertThat(repository.ownFills(line, 7, null, null, null, null, 10, null).trades()).allMatch(v -> v.productLine() == line);
+            if (line != ProductLine.SPOT) assertThatThrownBy(() -> repository.ownFills(line, 7, null, null, null, null, 1, first.nextCursor())).isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThatThrownBy(() -> repository.ownFills(ProductLine.SPOT, 8, null, null, null, null, 1, first.nextCursor())).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> repository.ownFills(ProductLine.SPOT, 7, "604", null, null, null, 1, first.nextCursor())).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> repository.ownFills(ProductLine.SPOT, 7, null, Long.MAX_VALUE, null, null, 1, first.nextCursor())).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> repository.ownFills(ProductLine.SPOT, 7, null, null, 1L, 3000L, 1, first.nextCursor())).isInstanceOf(IllegalArgumentException.class);
+        String adminCursor = repository.search(ProductLine.SPOT, null, null, null, 1, null, null).nextCursor();
+        assertThatThrownBy(() -> repository.ownFills(ProductLine.SPOT, 7, null, null, null, null, 1, adminCursor)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test void privateInitializingInvalidAndUnavailableViewsAre503() {
+        assertThatThrownBy(() -> repository.ownFills(ProductLine.SPOT, 7, null, null, null, null, 10, null))
+                .isInstanceOfSatisfying(ResponseStatusException.class, e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+        ready(ProductLine.SPOT); add(ProductLine.SPOT, 10, 0, 1000, 7, 8);
+        jdbc.update("UPDATE core_execution_projection SET taker_side='INVALID'");
+        assertThatThrownBy(() -> repository.ownFills(ProductLine.SPOT, 7, null, null, null, null, 10, null)).isInstanceOf(ResponseStatusException.class);
+        jdbc.execute("DROP TABLE core_execution_projection");
+        assertThatThrownBy(() -> repository.ownFills(ProductLine.SPOT, 7, null, null, null, null, 10, null)).isInstanceOf(ResponseStatusException.class);
+    }
     private JdbcTemplate jdbc;
     private TradeProjectionRepository repository;
     @BeforeEach void prepare() {

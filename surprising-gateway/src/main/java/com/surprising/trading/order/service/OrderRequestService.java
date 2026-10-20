@@ -57,6 +57,16 @@ public class OrderRequestService {
         return orderService.priceProtection();
     }
 
+    public ResponseEntity<com.surprising.trading.api.model.TradeFillQueryResponse> ownFills(long userId, String instrumentId,
+            Long orderId, Long startTime, Long endTime, int limit, String cursor) {
+        try {
+            return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore())
+                    .body(orderService.ownFills(userId, instrumentId, orderId, startTime, endTime, limit, cursor));
+        } catch (IllegalArgumentException invalid) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
+        }
+    }
+
     public CompletionStage<ResponseEntity<OrderCommandReceipt>> place(PlaceOrderRequest request) {
         try {
             return mapAsyncFailure(orderService.placeCommandAsync(request).thenApply(this::commandResponse), HttpStatus.CONFLICT);

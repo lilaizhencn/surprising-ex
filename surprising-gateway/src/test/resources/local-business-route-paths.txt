@@ -93,3 +93,4 @@
 /api/v1/trading/trigger-orders/oco-submission
 /api/v1/trading/trigger-orders/submission
 /api/v1/trading/trigger-orders/cancellations/{triggerOrderId}
+/api/v1/trading/orders/trades

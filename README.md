@@ -289,3 +289,6 @@ U 本位交割的独立条件单/OCO 恢复与 SETTLING 直接减仓边界，参
 
 币本位交割的条件单/OCO 持久恢复复用既有 realtime 回执入口；BTC 资金、报价币触发价和 SETTLING 直接减仓分别验证。
 realtime 同步修正币本位交割基础币成交量、结算/关闭后真实成交接收，以及冷启动时当前大周期查询；Core 撮合与资金模型不变。见 [条件单原请求恢复](docs/trigger-command-recovery.md)、[行情口径与投影重建](docs/inverse-delivery-market-data.md) 及 [验证记录](docs/validation/inverse-delivery-protection-20261020.json)。
+
+
+现货用户成交记录现通过 authenticated trading 路由读取 realtime 已提交成交投影，返回本人 Maker/Taker 执行，不暴露对手身份；两端成交记录、精度和分页随之对齐。查询契约及发布顺序见 [用户成交记录](docs/private-trade-fills.md)。

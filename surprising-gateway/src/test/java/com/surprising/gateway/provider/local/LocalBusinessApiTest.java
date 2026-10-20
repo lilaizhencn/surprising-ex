@@ -16,6 +16,19 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
 class LocalBusinessApiTest {
+    @Test void ownTradeHistoryRouteRequiresTheAuthenticatedAccount() {
+        var page = new com.surprising.trading.api.model.TradeFillQueryResponse(42, ProductLine.SPOT, 0,
+                java.util.List.of(), null, false, "eventTime.desc", 100);
+        when(orders.ownFills(42, null, null, null, null, 100, null))
+                .thenReturn(ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(page));
+        assertThat(invoke("trading", "/api/v1/trading/orders/trades", HttpMethod.GET, userHeaders(), null).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        verify(orders).ownFills(42, null, null, null, null, 100, null);
+        assertThat(invoke("trading", "/api/v1/trading/orders/trades?userId=43", HttpMethod.GET, userHeaders(), null).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        verifyNoMoreInteractions(orders);
+        verifyNoInteractions(adminOrders);
+    }
     private final com.surprising.trading.trigger.service.TriggerOrderRequestService triggers = mock(com.surprising.trading.trigger.service.TriggerOrderRequestService.class);
 
     @Test void triggerReceiptRoutesBindUserAndPreserveOriginalIdentities() {

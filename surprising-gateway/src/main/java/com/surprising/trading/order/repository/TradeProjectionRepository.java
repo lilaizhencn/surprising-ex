@@ -12,11 +12,94 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Admin history reads the realtime-owned committed execution table only. */
+/** User fills and admin history read the realtime-owned committed execution table only. */
 @Repository
 public final class TradeProjectionRepository {
     private final JdbcTemplate jdbc;
     public TradeProjectionRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+    public TradeFillQueryResponse ownFills(ProductLine product, long userId, String instrumentId,
+            Long orderId, Long startTime, Long endTime, int limit, String cursor) {
+        if (product == null || userId <= 0 || orderId != null && orderId <= 0 || limit < 1 || limit > 1000
+                || startTime != null && startTime <= 0 || endTime != null && endTime <= 0
+                || startTime != null && endTime != null && startTime > endTime)
+            throw new IllegalArgumentException("invalid private fill query");
+        if (instrumentId != null && !com.surprising.product.api.InstrumentIds.valid(instrumentId))
+            throw new IllegalArgumentException("invalid instrumentId");
+        String scope = digest(product.name() + '|' + userId + '|' + instrumentId + '|' + orderId + '|' + startTime + '|' + endTime);
+        String[] after = cursor == null || cursor.isBlank() ? null : decodeFillCursor(cursor, scope);
+        // Each branch selects only this account's side. Self-trades intentionally
+        // produce two fills, with independent order, side and historical fee rate.
+        var sql = new StringBuilder("""
+                SELECT * FROM (
+                  SELECT trade_id,instrument_id,price_ticks,quantity_steps,occurred_at_epoch_ms,export_sequence,execution_index,
+                         taker_order_id AS order_id,taker_side AS side,taker_position_side AS position_side,
+                         taker_fee_rate_ppm AS fee_rate_ppm,'TAKER' AS liquidity_role
+                    FROM core_execution_projection WHERE product_line=? AND taker_user_id=?
+                  UNION ALL
+                  SELECT trade_id,instrument_id,price_ticks,quantity_steps,occurred_at_epoch_ms,export_sequence,execution_index,
+                         maker_order_id AS order_id,CASE taker_side WHEN 'BUY' THEN 'SELL' WHEN 'SELL' THEN 'BUY' END AS side,
+                         maker_position_side AS position_side,maker_fee_rate_ppm AS fee_rate_ppm,'MAKER' AS liquidity_role
+                    FROM core_execution_projection WHERE product_line=? AND maker_user_id=?
+                ) own_fills WHERE true
+                """);
+        var args = new ArrayList<Object>(List.of(product.name(), userId, product.name(), userId));
+        if (instrumentId != null) { sql.append(" AND instrument_id=?"); args.add(instrumentId); }
+        if (orderId != null) { sql.append(" AND order_id=?"); args.add(orderId); }
+        if (startTime != null) { sql.append(" AND occurred_at_epoch_ms>=?"); args.add(startTime); }
+        if (endTime != null) { sql.append(" AND occurred_at_epoch_ms<=?"); args.add(endTime); }
+        if (after != null) {
+            sql.append(" AND (occurred_at_epoch_ms,export_sequence,execution_index,liquidity_role)<(?,?,?,?)");
+            args.add(Long.parseLong(after[0])); args.add(Long.parseLong(after[1]));
+            args.add(Integer.parseInt(after[2])); args.add(after[3]);
+        }
+        sql.append(" ORDER BY occurred_at_epoch_ms DESC,export_sequence DESC,execution_index DESC,liquidity_role DESC LIMIT ?");
+        args.add(limit + 1);
+        try {
+            if (!Integer.valueOf(1).equals(jdbc.queryForObject("SELECT count(*) FROM core_execution_projection_initialization WHERE product_line=?", Integer.class, product.name())))
+                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "TRADE_READ_VIEW_INITIALIZING");
+            var values = jdbc.query(sql.toString(), (rs, row) -> {
+                try {
+                    var fill = new TradeFillResponse(rs.getString("trade_id"), product, rs.getString("instrument_id"),
+                            rs.getLong("order_id"), OrderSide.valueOf(rs.getString("side")), PositionSide.valueOf(rs.getString("position_side")),
+                            rs.getString("liquidity_role"), rs.getLong("price_ticks"), rs.getLong("quantity_steps"),
+                            rs.getLong("fee_rate_ppm"), Instant.ofEpochMilli(rs.getLong("occurred_at_epoch_ms")));
+                    long sequence = rs.getLong("export_sequence"); int index = rs.getInt("execution_index");
+                    if (fill.tradeId() == null || !fill.tradeId().startsWith(product.name() + ":")
+                            || !com.surprising.product.api.InstrumentIds.valid(fill.instrumentId()) || fill.orderId() <= 0
+                            || fill.priceTicks() <= 0 || fill.quantitySteps() <= 0 || fill.feeRatePpm() < -1_000_000
+                            || fill.feeRatePpm() > 1_000_000 || fill.eventTime().toEpochMilli() <= 0 || sequence <= 0 || index < 0)
+                        throw new IllegalStateException("invalid committed private fill");
+                    return new ProjectedFill(fill, sequence, index);
+                } catch (RuntimeException invalid) {
+                    throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "TRADE_READ_VIEW_INVALID", invalid);
+                }
+            }, args.toArray());
+            boolean more = values.size() > limit;
+            var page = more ? values.subList(0, limit) : values;
+            var last = page.isEmpty() ? null : page.getLast();
+            String next = !more ? null : Base64.getUrlEncoder().withoutPadding().encodeToString(
+                    ("user-fill-v1:" + scope + ':' + last.fill().eventTime().toEpochMilli() + ':' + last.sequence()
+                            + ':' + last.index() + ':' + last.fill().liquidityRole()).getBytes(StandardCharsets.UTF_8));
+            return new TradeFillQueryResponse(userId, product, page.size(), page.stream().map(ProjectedFill::fill).toList(), next, more, "eventTime.desc", limit);
+        } catch (DataAccessException unavailable) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "TRADE_READ_VIEW_UNAVAILABLE", unavailable);
+        }
+    }
+
+    /** SQL cursor coordinates stay at this query boundary, outside the public fill. */
+    private record ProjectedFill(TradeFillResponse fill, long sequence, int index) {}
+
+    private static String[] decodeFillCursor(String cursor, String scope) {
+        try {
+            var parts = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8).split(":", -1);
+            if (parts.length != 6 || !parts[0].equals("user-fill-v1") || !parts[1].equals(scope)) throw new IllegalArgumentException();
+            long time = Long.parseLong(parts[2]), sequence = Long.parseLong(parts[3]), index = Long.parseLong(parts[4]);
+            if (time <= 0 || sequence <= 0 || index < 0 || index > Integer.MAX_VALUE || !Set.of("MAKER", "TAKER").contains(parts[5]))
+                throw new IllegalArgumentException();
+            return new String[]{parts[2], parts[3], parts[4], parts[5]};
+        } catch (IllegalArgumentException invalid) { throw new IllegalArgumentException("fill cursor does not match query", invalid); }
+    }
 
     public AdminTradeQueryResponse search(ProductLine product, Long userId, String instrumentId,
             Long orderId, int limit, String cursor, String sort) {

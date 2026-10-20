@@ -57,6 +57,16 @@ import org.mockito.quality.Strictness;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class OrderServiceTest {
     @ParameterizedTest @EnumSource(ProductLine.class)
+    void ownFillsReadOnlyTheCommittedProductProjection(ProductLine line) {
+        var service = service(line, aeronOrders);
+        var trades = org.mockito.Mockito.mock(com.surprising.trading.order.repository.TradeProjectionRepository.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "tradeProjection", trades);
+        var page = new com.surprising.trading.api.model.TradeFillQueryResponse(1001, line, 0, List.of(), null, false, "eventTime.desc", 10);
+        when(trades.ownFills(line, 1001, "1", 91L, 1000L, 2000L, 10, "cursor")).thenReturn(page);
+        assertThat(service.ownFills(1001, " 1 ", 91L, 1000L, 2000L, 10, "cursor")).isSameAs(page);
+        verifyNoInteractions(aeronOrders, projection, realtimeQueries);
+    }
+    @ParameterizedTest @EnumSource(ProductLine.class)
     void amendmentLookupUsesTheReplacementCommandNamespaceAndNoCoreQuery(ProductLine line) {
         var service = service(line, aeronOrders);
         var id = StableOrderIdentity.replacementCommandId(line, 1001, "amend-91");

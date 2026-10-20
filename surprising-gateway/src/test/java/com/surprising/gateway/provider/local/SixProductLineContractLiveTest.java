@@ -39,6 +39,7 @@ class SixProductLineContractLiveTest {
     private int optionCompanion;
     private Map<String, Object> triggerQueryFixture;
     private Map<String, Object> tradeQueryFixture;
+    private Map<String, Object> userFillFixture;
     private Map<String, Object> statisticsFixture;
     private String deliveryProtectionPhase;
 
@@ -252,6 +253,7 @@ class SixProductLineContractLiveTest {
                 content.put("tradeQuery", tradeQueryFixture);
                 content.put("adminAccessToken", admin);
             }
+            if (userFillFixture != null) content.put("userFills", userFillFixture);
             if(statisticsFixture!=null) {
                 content.put("statistics",statisticsFixture);content.put("adminAccessToken",admin);
             }
@@ -832,6 +834,17 @@ class SixProductLineContractLiveTest {
             var restTradeIds = new HashSet<String>();
             for (var trade : recent.path("trades")) restTradeIds.add(trade.path("tradeId").asString());
             assertThat(restTradeIds).containsAll(user.trades.keySet());
+            if ("true".equals(System.getenv("SIX_LINE_LIVE_USER_FILLS"))) {
+                assertThat(line).isEqualTo(ProductLine.SPOT);
+                var own = privateFills(user, instrumentId, restTradeIds);
+                var makerFills = privateFills(maker, instrumentId, restTradeIds);
+                assertThat(own).allMatch(fill -> fill.path("liquidityRole").asString().equals("TAKER"));
+                assertThat(makerFills).allMatch(fill -> fill.path("liquidityRole").asString().equals("MAKER"));
+                request("GET", "/api/v1/gateway/trading/trades?userId=" + maker.id, "", user.token, null, 403);
+                request("GET", "/api/v1/gateway/trading/trades", "", null, null, 401);
+                userFillFixture = Map.of("tradeIds", restTradeIds, "count", own.size());
+                System.out.printf("SPOT_PRIVATE_FILLS_PASS user=%d maker=%d fills=%d ownOrderSideOnly=true%n", user.id, maker.id, own.size());
+            }
             if ("true".equals(System.getenv("SIX_LINE_LIVE_TRADE_READ_VIEW"))) {
                 String historyPath = "/api/v1/admin/gateway/trading-orders/trades?productLine=" + line + "&userId=" + user.id + "&instrumentId=" + instrumentId;
                 JsonNode history = null;
@@ -914,6 +927,34 @@ class SixProductLineContractLiveTest {
                 write("market-maker", "/strategies/" + strategy + "/pause?productLine=" + line, null, 200);
             if (user.socket != null) user.socket.sendClose(WebSocket.NORMAL_CLOSURE, "QA complete").join();
         }
+    }
+
+    private List<JsonNode> privateFills(Participant actor, int instrumentId, Set<String> expected) throws Exception {
+        String path = "/api/v1/gateway/trading/trades?instrumentId=" + instrumentId;
+        JsonNode ready = null;
+        for (int attempt = 0; attempt < 100; attempt++) {
+            ready = request("GET", path, "", actor.token, null, 200, 503);
+            if (ready.path("trades").size() == expected.size()) break;
+            Thread.sleep(100);
+        }
+        assertThat(ready.path("trades").size()).as("committed private fill view").isEqualTo(expected.size());
+        var rows = new ArrayList<JsonNode>();
+        String cursor = null;
+        do {
+            var page = get(path + "&limit=1" + (cursor == null ? "" : "&cursor=" + java.net.URLEncoder.encode(cursor, StandardCharsets.UTF_8)), actor.token);
+            assertThat(page.path("userId").asLong()).isEqualTo(actor.id);
+            assertThat(page.path("productLine").asString()).isEqualTo(line.name());
+            assertThat(page.path("count").asInt()).isEqualTo(1);
+            var row = page.path("trades").get(0);
+            assertThat(row.path("orderId").asLong()).isPositive();
+            assertThat(row.has("takerUserId") || row.has("makerUserId") || row.has("takerOrderId") || row.has("makerOrderId")).isFalse();
+            rows.add(row);
+            cursor = page.path("hasMore").asBoolean() ? page.path("nextCursor").asString() : null;
+            if (cursor != null) assertThat(cursor).isNotBlank();
+            assertThat(rows.size()).isLessThanOrEqualTo(expected.size());
+        } while (cursor != null);
+        assertThat(rows.stream().map(row -> row.path("tradeId").asString()).toList()).containsExactlyInAnyOrderElementsOf(expected);
+        return rows;
     }
 
     private void verifyCurrentRisk(SurprisingAeronClient core, Participant actor, int instrumentId, String settlement, JsonNode instrument) throws Exception {
