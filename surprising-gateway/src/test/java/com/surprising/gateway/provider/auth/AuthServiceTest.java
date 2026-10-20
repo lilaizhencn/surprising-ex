@@ -36,6 +36,28 @@ class AuthServiceTest {
             passwordHasher, jwtTokenService, emailVerificationService, loginVerification, accessBlocks);
 
     @Test
+    void telegramLoginKeepsMfaRequiredForPasswordlessAccount() {
+        var user = new AuthenticatedUser(42, null, null, "NORMAL", List.of("USER"), Instant.now(), "小李");
+        when(repository.user(42)).thenReturn(Optional.of(user));
+        when(repository.credential(42)).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(
+                42, null, null, null, "NORMAL", Instant.now())));
+        var challenge = new LoginVerificationService.ChallengeResponse(true, "challenge", Instant.now().plusSeconds(300),
+                List.of(new LoginVerificationService.Method("TOTP", null)), false);
+        when(loginVerification.begin(eq(42L), org.mockito.ArgumentMatchers.isNull(), any())).thenReturn(challenge);
+        assertThat(service.loginTelegram(42, new MockHttpServletRequest())).isSameAs(challenge);
+        verifyNoInteractions(passwordHasher, jwtTokenService);
+    }
+
+    @Test
+    void frozenTelegramAccountCannotLogin() {
+        when(repository.user(42)).thenReturn(Optional.of(new AuthenticatedUser(
+                42, null, null, "FROZEN", List.of("USER"), Instant.now(), "小李")));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.loginTelegram(42, new MockHttpServletRequest()))
+                .isInstanceOf(IllegalStateException.class);
+        verifyNoInteractions(loginVerification, jwtTokenService);
+    }
+
+    @Test
     void blockedIpCannotUseApiKeyAccess() {
         when(accessBlocks.blocked(42L, "IP", "203.0.113.7")).thenReturn(true);
 

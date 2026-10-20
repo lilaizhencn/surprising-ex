@@ -326,7 +326,7 @@ public class AuthPersistenceService {
                 user.email(),
                 user.status(),
                 roles,
-                user.createdAt());
+                user.createdAt(), user.displayName());
     }
 
     private List<String> normalizeRoleCodes(List<String> roleCodes) {

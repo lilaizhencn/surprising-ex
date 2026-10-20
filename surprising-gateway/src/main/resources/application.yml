@@ -637,3 +637,10 @@ surprising:
       candle-partial-coalesce-window: 250ms
       mark-price-max-age: 3s
       mark-price-allowed-future-skew: 1s
+
+# BotFather > Login Widget: register this exact HTTPS callback URL.
+telegram:
+  login:
+    client-id: ${TELEGRAM_CLIENT_ID:}
+    client-secret: ${TELEGRAM_CLIENT_SECRET:}
+    redirect-uri: ${TELEGRAM_REDIRECT_URI:}

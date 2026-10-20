@@ -49,7 +49,7 @@ public class LoginVerificationService {
         challenges.lockUser(userId);
         var currentCredential = users.credential(userId).orElseThrow();
         if ("FROZEN".equals(currentCredential.status())
-                || !currentCredential.passwordHash().equals(checkedPasswordHash))
+                || !java.util.Objects.equals(currentCredential.passwordHash(), checkedPasswordHash))
             throw new VerificationFailure("LOGIN_CHALLENGE_EXPIRED");
         List<Method> methods = methods(userId);
         if (methods.isEmpty()) return null;

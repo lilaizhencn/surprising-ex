@@ -121,6 +121,20 @@ public class AuthService {
         return authResponse(user, httpRequest, now);
     }
 
+    /** Called only after a server-validated Telegram identity has been consumed. */
+    @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
+    public AuthModels.LoginResult loginTelegram(long userId, HttpServletRequest request) {
+        Instant now = Instant.now();
+        var user = repository.user(userId).orElseThrow();
+        if ("FROZEN".equals(user.status())) throw new IllegalStateException("user is not active");
+        requireAccessAllowed(userId, deviceId(request), ipAddress(request));
+        var credential = repository.credential(userId).orElseThrow();
+        var challenge = loginVerification.begin(userId, credential.passwordHash(), now);
+        if (challenge != null) return challenge;
+        repository.loginLog(userId, "SUCCESS", "TELEGRAM_LOGIN", userAgent(request), ipAddress(request), now);
+        return authResponse(user, request, now);
+    }
+
     @Transactional
     public AuthResponse refresh(RefreshRequest request, HttpServletRequest httpRequest) {
         Instant now = Instant.now();
