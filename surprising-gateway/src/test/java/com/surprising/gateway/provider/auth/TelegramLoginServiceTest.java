@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.controller.AuthClientMetadataBinding;
+import com.surprising.gateway.provider.config.GatewayProperties;
+
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
 import com.surprising.gateway.provider.auth.client.TelegramOidcClient;
@@ -30,7 +33,7 @@ class TelegramLoginServiceTest {
     AuthService auth = mock(AuthService.class);
     TelegramLoginService service = new TelegramLoginService(repository, identities, userRows, oidc, users, auth);
     String state = "s".repeat(43), verifier = "v".repeat(43);
-    MockHttpServletRequest http = new MockHttpServletRequest();
+    com.surprising.gateway.provider.auth.model.AuthClientMetadata http = new AuthClientMetadataBinding(new GatewayProperties()).bind(new MockHttpServletRequest());
 
     @Test
     void startUsesIndependentRandomSecretsAndHashesBearerVerifier() {

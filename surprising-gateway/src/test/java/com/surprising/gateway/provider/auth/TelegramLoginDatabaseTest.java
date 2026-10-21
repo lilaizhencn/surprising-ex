@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.controller.AuthClientMetadataBinding;
+import com.surprising.gateway.provider.config.GatewayProperties;
+
 import com.surprising.gateway.provider.auth.client.TelegramOidcClient;
 import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
@@ -38,7 +41,7 @@ class TelegramLoginDatabaseTest {
     AuthService auth;
     GatewayUserRepository userRepository;
     DataSourceTransactionManager manager;
-    String device = "telegram-test-device";
+    String device = "a1111111-1111-4111-8111-111111111111";
 
     @BeforeEach
     void setup() throws Exception {
@@ -107,7 +110,7 @@ class TelegramLoginDatabaseTest {
     AuthModels.AuthResponse complete(TelegramLoginService.Started flow, String device) {
         var http = new MockHttpServletRequest();
         http.addHeader("X-Device-Id", device);
-        return (AuthModels.AuthResponse) login.complete(flow.flowId(), flow.verifier(), device, http);
+        return (AuthModels.AuthResponse) login.complete(flow.flowId(), flow.verifier(), device, new AuthClientMetadataBinding(new GatewayProperties()).bind(http));
     }
 
     @Test
@@ -126,7 +129,7 @@ class TelegramLoginDatabaseTest {
     void cannotRedeemOnDifferentDeviceWithWrongVerifierOrAfterConsumption() {
         var flow = authorize();
         assertThatThrownBy(() -> complete(flow, "other-device")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> login.complete(flow.flowId(), "x".repeat(43), device, new MockHttpServletRequest()))
+        assertThatThrownBy(() -> login.complete(flow.flowId(), "x".repeat(43), device, new AuthClientMetadataBinding(new GatewayProperties()).bind(new MockHttpServletRequest())))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(complete(flow, device).accessToken()).isEqualTo("access");
         assertThatThrownBy(() -> complete(flow, device)).isInstanceOf(IllegalArgumentException.class);

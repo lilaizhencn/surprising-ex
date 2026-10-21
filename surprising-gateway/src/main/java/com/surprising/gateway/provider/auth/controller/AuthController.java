@@ -30,11 +30,14 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/v1/auth")
 public class AuthController {
+    private final AuthClientMetadataBinding clients;
+
 
     private final AuthService authService;
     private final PasswordResetService passwordResetService;
 
-    public AuthController(AuthService authService, PasswordResetService passwordResetService) {
+    public AuthController(AuthService authService, PasswordResetService passwordResetService, AuthClientMetadataBinding clients) {
+        this.clients = clients;
         this.authService = authService;
         this.passwordResetService = passwordResetService;
     }
@@ -42,7 +45,7 @@ public class AuthController {
     @PostMapping("/register")
     public AuthResponse register(@Valid @RequestBody RegisterRequest request, HttpServletRequest httpRequest) {
         try {
-            return authService.register(request, httpRequest);
+            return authService.register(request, clients.bind(httpRequest));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -105,7 +108,7 @@ public class AuthController {
     @PostMapping("/login")
     public AuthModels.LoginResult login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
         try {
-            return authService.login(request, httpRequest);
+            return authService.login(request, clients.bind(httpRequest));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -116,7 +119,7 @@ public class AuthController {
     @PostMapping("/login/verify")
     public AuthResponse verifyLogin(@Valid @RequestBody LoginVerificationModels.VerifyRequest request,
                                     HttpServletRequest httpRequest) {
-        return authService.verifyLogin(request, httpRequest);
+        return authService.verifyLogin(request, clients.bind(httpRequest));
     }
 
     @org.springframework.web.bind.annotation.ExceptionHandler(LoginVerificationService.VerificationFailure.class)
@@ -130,7 +133,7 @@ public class AuthController {
     @PostMapping("/refresh")
     public AuthResponse refresh(@Valid @RequestBody RefreshRequest request, HttpServletRequest httpRequest) {
         try {
-            return authService.refresh(request, httpRequest);
+            return authService.refresh(request, clients.bind(httpRequest));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

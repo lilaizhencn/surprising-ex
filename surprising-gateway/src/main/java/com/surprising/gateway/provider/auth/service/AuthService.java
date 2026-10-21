@@ -6,7 +6,8 @@ import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
-import com.surprising.gateway.provider.auth.utils.ClientIpResolver;
+import com.surprising.gateway.provider.auth.model.AuthClientMetadata;
+import com.surprising.gateway.provider.auth.port.CurrentAuthClient;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.AuthResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
@@ -25,7 +26,6 @@ import com.surprising.gateway.provider.auth.model.AuthModels.EmailVerificationRe
 import com.surprising.gateway.provider.auth.model.AuthModels.RefreshRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.RegisterRequest;
 import com.surprising.gateway.provider.config.GatewayProperties;
-import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -33,11 +33,8 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
-import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 
 @Service
 public class AuthService {
@@ -51,7 +48,7 @@ public class AuthService {
     private final EmailVerificationService emailVerificationService;
     private final LoginVerificationService loginVerification;
     private final GatewayUserAccessBlockRepository accessBlocks;
-    private final ClientIpResolver clientIpResolver;
+    private final CurrentAuthClient currentClient;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthService(GatewayProperties properties,
@@ -60,7 +57,7 @@ public class AuthService {
                        JwtTokenService jwtTokenService,
                        EmailVerificationService emailVerificationService,
                        LoginVerificationService loginVerification,
-                       GatewayUserAccessBlockRepository accessBlocks) {
+                       GatewayUserAccessBlockRepository accessBlocks, CurrentAuthClient currentClient) {
         this.properties = properties;
         this.repository = repository;
         this.passwordHasher = passwordHasher;
@@ -68,11 +65,11 @@ public class AuthService {
         this.emailVerificationService = emailVerificationService;
         this.loginVerification = loginVerification;
         this.accessBlocks = accessBlocks;
-        this.clientIpResolver = new ClientIpResolver(properties);
+        this.currentClient = currentClient;
     }
 
     @Transactional
-    public AuthResponse register(RegisterRequest request, HttpServletRequest httpRequest) {
+    public AuthResponse register(RegisterRequest request, AuthClientMetadata httpRequest) {
         validatePassword(request.password());
         String username = request.username() == null || request.username().isBlank()
                 ? null : normalizeUsername(request.username());
@@ -106,7 +103,7 @@ public class AuthService {
     }
 
     @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
-    public AuthModels.LoginResult login(LoginRequest request, HttpServletRequest httpRequest) {
+    public AuthModels.LoginResult login(LoginRequest request, AuthClientMetadata httpRequest) {
         String identifier = normalizeLoginIdentifier(request.identifier());
         Instant now = Instant.now();
         GatewayUserRepository.UserCredential credential = credential(identifier).orElse(null);
@@ -131,7 +128,7 @@ public class AuthService {
 
     /** Called only after a server-validated Telegram identity has been consumed. */
     @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
-    public AuthModels.LoginResult loginTelegram(long userId, HttpServletRequest request) {
+    public AuthModels.LoginResult loginTelegram(long userId, AuthClientMetadata request) {
         Instant now = Instant.now();
         var user = repository.user(userId).orElseThrow();
         if ("FROZEN".equals(user.status())) throw new IllegalStateException("user is not active");
@@ -144,7 +141,7 @@ public class AuthService {
     }
 
     @Transactional
-    public AuthResponse refresh(RefreshRequest request, HttpServletRequest httpRequest) {
+    public AuthResponse refresh(RefreshRequest request, AuthClientMetadata httpRequest) {
         Instant now = Instant.now();
         String tokenHash = hashRefreshToken(request.refreshToken());
         GatewayRefreshSessionRepository.RefreshSession session = repository.refreshSession(tokenHash)
@@ -211,10 +208,8 @@ public class AuthService {
         if ("FROZEN".equals(user.status())) {
             throw new IllegalStateException("user is not active");
         }
-        var attributes = RequestContextHolder.getRequestAttributes();
-        if (attributes instanceof ServletRequestAttributes servlet) {
-            requireAccessAllowed(user.userId(), null, ipAddress(servlet.getRequest()));
-        }
+        AuthClientMetadata client = currentClient.current();
+        if (client != null) requireAccessAllowed(user.userId(), null, client.ipAddress());
         return new JwtPrincipal(user.userId(), user.username(), user.status(), user.roles(), principal.expiresAt(),
                 principal.sessionId());
     }
@@ -410,7 +405,7 @@ public class AuthService {
     }
 
     @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
-    public AuthResponse verifyLogin(LoginVerificationModels.VerifyRequest request, HttpServletRequest httpRequest) {
+    public AuthResponse verifyLogin(LoginVerificationModels.VerifyRequest request, AuthClientMetadata httpRequest) {
         Instant now = Instant.now();
         long userId = loginVerification.verify(request, now);
         AuthenticatedUser user = repository.user(userId).orElseThrow();
@@ -476,18 +471,18 @@ public class AuthService {
         return normalized;
     }
 
-    private AuthResponse authResponse(AuthenticatedUser user, HttpServletRequest request, Instant now) {
+    private AuthResponse authResponse(AuthenticatedUser user, AuthClientMetadata request, Instant now) {
         return authResponse(user, request, now, false);
     }
 
     private AuthResponse authResponse(AuthenticatedUser user,
-                                      HttpServletRequest request,
+                                      AuthClientMetadata request,
                                       Instant now,
                                       boolean requiresEmailVerification) {
         return authResponse(user, request, now, requiresEmailVerification, now);
     }
 
-    private AuthResponse authResponse(AuthenticatedUser user, HttpServletRequest request, Instant now,
+    private AuthResponse authResponse(AuthenticatedUser user, AuthClientMetadata request, Instant now,
                                       boolean requiresEmailVerification, Instant authenticatedAt) {
         String refreshToken = newRefreshToken();
         Instant refreshExpiresAt = now.plus(properties.getSecurity().getRefreshTokenTtl());
@@ -586,24 +581,16 @@ public class AuthService {
         return authorizationHeader.substring(7).trim();
     }
 
-    private String userAgent(HttpServletRequest request) {
-        return request == null ? null : truncate(request.getHeader("User-Agent"), 300);
+    private String userAgent(AuthClientMetadata metadata) {
+        return metadata == null ? null : metadata.userAgent();
     }
 
-    private String ipAddress(HttpServletRequest request) {
-        return truncate(clientIpResolver.resolve(request), 80);
+    private String ipAddress(AuthClientMetadata metadata) {
+        return metadata == null ? null : metadata.ipAddress();
     }
 
-    private String deviceId(HttpServletRequest request) {
-        if (request == null || request.getHeader("X-Device-Id") == null) return null;
-        String value = request.getHeader("X-Device-Id").trim();
-        try {
-            String canonical = UUID.fromString(value).toString();
-            if (!canonical.equalsIgnoreCase(value)) throw new IllegalArgumentException("invalid device ID");
-            return canonical;
-        } catch (IllegalArgumentException ex) {
-            throw new IllegalArgumentException("invalid device ID", ex);
-        }
+    private String deviceId(AuthClientMetadata metadata) {
+        return metadata == null ? null : metadata.deviceId();
     }
 
     private void requireAccessAllowed(long userId, String deviceId, String ipAddress) {
@@ -624,12 +611,7 @@ public class AuthService {
         return repository.withdrawalRestrictedUntil(userId).orElse(null);
     }
 
-    private String truncate(String value, int max) {
-        if (value == null) {
-            return null;
-        }
-        return value.length() <= max ? value : value.substring(0, max);
-    }
+
     /** 根据可信账户状态决定能否发起业务写操作；路径/HTTP绑定由Controller提供动作类别。 */
     public void requireUserGatewayWrite(String status, boolean tradingWrite, boolean withdrawalWrite) {
         String normalized = status == null ? "" : status.trim().toUpperCase(java.util.Locale.ROOT);

@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.controller.AuthClientMetadataBinding;
+import com.surprising.gateway.provider.config.GatewayProperties;
+
 import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;
@@ -15,7 +18,6 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Timestamp;
@@ -87,7 +89,7 @@ class PrimaryAuthenticationDatabaseTest {
         var jwt = mock(JwtTokenService.class);
         var verification = mock(LoginVerificationService.class);
         var auth = new AuthService(properties, persistence, mock(PasswordHasher.class), jwt,
-                mock(EmailVerificationService.class), verification, mock(GatewayUserAccessBlockRepository.class));
+                mock(EmailVerificationService.class), verification, mock(GatewayUserAccessBlockRepository.class), new AuthClientMetadataBinding(properties));
         when(persistence.user(1)).thenReturn(Optional.of(new AuthModels.AuthenticatedUser(
                 1, null, null, "NORMAL", List.of("USER"), Instant.now())));
         when(persistence.credential(1)).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(
@@ -98,13 +100,13 @@ class PrimaryAuthenticationDatabaseTest {
                 .thenAnswer(i -> sessions.save(i.getArgument(0), i.getArgument(1), i.getArgument(2),
                         i.getArgument(3), i.getArgument(4), i.getArgument(5), i.getArgument(6), i.getArgument(7)));
         var http = new MockHttpServletRequest();
-        var loggedIn = (AuthModels.AuthResponse) auth.loginTelegram(1, http);
+        var loggedIn = (AuthModels.AuthResponse) auth.loginTelegram(1, new AuthClientMetadataBinding(properties).bind(http));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_refresh_sessions WHERE authenticated_at IS NOT NULL", Long.class))
                 .isEqualTo(1);
         Instant original = Instant.parse("2026-10-20T00:00:00Z");
         jdbc.update("UPDATE gateway_refresh_sessions SET authenticated_at=? WHERE authenticated_at IS NOT NULL", Timestamp.from(original));
-        var refreshed = auth.refresh(new AuthModels.RefreshRequest(loggedIn.refreshToken()), http);
-        auth.refresh(new AuthModels.RefreshRequest(refreshed.refreshToken()), http);
+        var refreshed = auth.refresh(new AuthModels.RefreshRequest(loggedIn.refreshToken()), new AuthClientMetadataBinding(properties).bind(http));
+        auth.refresh(new AuthModels.RefreshRequest(refreshed.refreshToken()), new AuthClientMetadataBinding(properties).bind(http));
         var times = jdbc.query("SELECT authenticated_at FROM gateway_refresh_sessions WHERE authenticated_at IS NOT NULL",
                 (rs, n) -> rs.getTimestamp(1).toInstant());
         assertThat(times).hasSize(3).containsOnly(original);

@@ -532,3 +532,5 @@ WebSocket具体接入处理器位于 `websocket.provider.handler.ClientWebSocket
 后台系统Service只做授权、路由去重与健康汇总；`provider.client.SystemHealthClient`负责本地Actuator及远端HTTP健康探测，响应模型归 `provider.model`。
 
 KYC文档上传在 `auth.controller.UserComplianceController` 完成鉴权、Multipart绑定和文件格式校验，传入原生 `model.KycDocumentUpload`；`KycDocumentService`协调摘要、文件写入、元数据落库及失败清理。实际存储分别位于 `provider.storage.KycDocumentStorageService` 和 `c2c.storage.C2cR2Storage`；对象路径和签名验证仍在存储边界。
+
+鉴权入口通过 `auth.controller.AuthClientMetadataBinding` 将Servlet字段绑定为 `auth.model.AuthClientMetadata`。登录/注册/刷新/Telegram Service只接收原生数据；Bearer的当前IP经 `auth.port.CurrentAuthClient` 从既有Spring请求上下文读取，不新增ThreadLocal，也不扩大Bearer设备校验。账号、IP/设备封禁、MFA、会话轮换仍由Service负责。

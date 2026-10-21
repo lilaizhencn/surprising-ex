@@ -14,9 +14,11 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/v1/auth/telegram")
 public class TelegramLoginController {
+    private final AuthClientMetadataBinding clients;
+
     private final TelegramLoginService login;
 
-    public TelegramLoginController(TelegramLoginService login) { this.login = login; }
+    public TelegramLoginController(TelegramLoginService login, AuthClientMetadataBinding clients) { this.login = login; this.clients = clients; }
 
     @GetMapping("/config")
     public ResponseEntity<Config> config() { return noStore().body(new Config(login.enabled())); }
@@ -64,7 +66,7 @@ public class TelegramLoginController {
     @PostMapping("/complete")
     public ResponseEntity<?> complete(@Valid @RequestBody Complete request,
             @RequestHeader("X-Device-Id") String deviceId, HttpServletRequest http) {
-        var result = login.complete(request.flowId(), request.verifier(), deviceId, http);
+        var result = login.complete(request.flowId(), request.verifier(), deviceId, clients.bind(http));
         return result == null ? noStore().body(new Pending(true)) : noStore().body(result);
     }
 

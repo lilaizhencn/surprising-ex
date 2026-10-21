@@ -6,7 +6,7 @@ import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 
 import com.surprising.gateway.provider.auth.repository.TelegramIdentityRepository;
 import com.surprising.gateway.provider.auth.repository.TelegramLoginFlowRepository;
-import jakarta.servlet.http.HttpServletRequest;
+import com.surprising.gateway.provider.auth.model.AuthClientMetadata;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -75,7 +75,7 @@ public class TelegramLoginService {
 
     @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
     public AuthModels.LoginResult complete(String state, String verifier, String deviceId,
-                                           HttpServletRequest request) {
+                                           AuthClientMetadata request) {
         requireToken(state);
         requireToken(verifier);
         requireDevice(deviceId);

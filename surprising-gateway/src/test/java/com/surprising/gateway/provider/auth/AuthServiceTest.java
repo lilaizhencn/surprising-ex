@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.controller.AuthClientMetadataBinding;
+import com.surprising.gateway.provider.config.GatewayProperties;
+
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
 import com.surprising.gateway.provider.auth.model.AuthModels;
@@ -34,8 +37,6 @@ import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.model.AuthModels.LoginRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.RegisterRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.RefreshRequest;
-import com.surprising.gateway.provider.config.GatewayProperties;
-import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -52,7 +53,7 @@ class AuthServiceTest {
     private final LoginVerificationService loginVerification = mock(LoginVerificationService.class);
     private final GatewayUserAccessBlockRepository accessBlocks = mock(GatewayUserAccessBlockRepository.class);
     private final AuthService service = new AuthService(new GatewayProperties(), repository,
-            passwordHasher, jwtTokenService, emailVerificationService, loginVerification, accessBlocks);
+            passwordHasher, jwtTokenService, emailVerificationService, loginVerification, accessBlocks, new AuthClientMetadataBinding(new GatewayProperties()));
 
     @Test
     void telegramLoginKeepsMfaRequiredForPasswordlessAccount() {
@@ -63,7 +64,7 @@ class AuthServiceTest {
         var challenge = new LoginVerificationModels.ChallengeResponse(true, "challenge", Instant.now().plusSeconds(300),
                 List.of(new LoginVerificationModels.Method("TOTP", null)), false);
         when(loginVerification.begin(eq(42L), org.mockito.ArgumentMatchers.isNull(), any())).thenReturn(challenge);
-        assertThat(service.loginTelegram(42, new MockHttpServletRequest())).isSameAs(challenge);
+        assertThat(service.loginTelegram(42, new AuthClientMetadataBinding(new GatewayProperties()).bind(new MockHttpServletRequest()))).isSameAs(challenge);
         verifyNoInteractions(passwordHasher, jwtTokenService);
     }
 
@@ -71,7 +72,7 @@ class AuthServiceTest {
     void frozenTelegramAccountCannotLogin() {
         when(repository.user(42)).thenReturn(Optional.of(new AuthenticatedUser(
                 42, null, null, "FROZEN", List.of("USER"), Instant.now(), "小李")));
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.loginTelegram(42, new MockHttpServletRequest()))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.loginTelegram(42, new AuthClientMetadataBinding(new GatewayProperties()).bind(new MockHttpServletRequest())))
                 .isInstanceOf(IllegalStateException.class);
         verifyNoInteractions(loginVerification, jwtTokenService);
     }
@@ -244,7 +245,7 @@ class AuthServiceTest {
         var challenge = new LoginVerificationModels.ChallengeResponse(true,"challenge",now.plusSeconds(300),
                 List.of(new LoginVerificationModels.Method("TOTP",null)), false);
         when(loginVerification.begin(eq(7L),eq("hash"),any())).thenReturn(challenge);
-        assertThat(service.login(new LoginRequest("admin","password"),new MockHttpServletRequest())).isSameAs(challenge);
+        assertThat(service.login(new LoginRequest("admin","password"),new AuthClientMetadataBinding(new GatewayProperties()).bind(new MockHttpServletRequest()))).isSameAs(challenge);
         verifyNoInteractions(jwtTokenService);
         verify(repository,org.mockito.Mockito.never()).saveRefreshSession(any(Long.class),any(),any(),any(),any(),any(),any());
     }
@@ -260,7 +261,7 @@ class AuthServiceTest {
         when(jwtTokenService.createAccessToken(eq(42L), eq("user"), eq(List.of("USER")), any()))
                 .thenReturn("access");
 
-        var response = (AuthModels.AuthResponse) service.login(new LoginRequest("user", "password"), new MockHttpServletRequest());
+        var response = (AuthModels.AuthResponse) service.login(new LoginRequest("user", "password"), new AuthClientMetadataBinding(new GatewayProperties()).bind(new MockHttpServletRequest()));
 
         assertThat(response.accessToken()).isEqualTo("access");
         verifyNoInteractions(totpService);
@@ -277,7 +278,7 @@ class AuthServiceTest {
         when(jwtTokenService.createAccessToken(eq(42L), eq(null), eq(List.of("USER")), any()))
                 .thenReturn("access");
 
-        var response = service.refresh(new RefreshRequest("refresh-token"), new MockHttpServletRequest());
+        var response = service.refresh(new RefreshRequest("refresh-token"), new AuthClientMetadataBinding(new GatewayProperties()).bind(new MockHttpServletRequest()));
 
         assertThat(response.accessToken()).isEqualTo("access");
         verify(repository).consumeRefreshSession(eq(88L), any());
@@ -294,7 +295,7 @@ class AuthServiceTest {
         when(repository.consumeRefreshSession(eq(88L), any())).thenReturn(1);
         when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
                 42L, null, null, "NORMAL", List.of("USER"), now)));
-        service.refresh(new RefreshRequest("refresh-token"), new MockHttpServletRequest());
+        service.refresh(new RefreshRequest("refresh-token"), new AuthClientMetadataBinding(new GatewayProperties()).bind(new MockHttpServletRequest()));
         verify(repository).saveRefreshSession(eq(42L), anyString(), any(), any(), any(), any(), any(), eq(original));
     }
 
@@ -306,7 +307,7 @@ class AuthServiceTest {
         when(repository.consumeRefreshSession(eq(88L), any())).thenReturn(0);
 
         assertThatThrownBy(() -> service.refresh(
-                new RefreshRequest("refresh-token"), new MockHttpServletRequest()))
+                new RefreshRequest("refresh-token"), new AuthClientMetadataBinding(new GatewayProperties()).bind(new MockHttpServletRequest())))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("invalid refresh token");
         verify(repository, org.mockito.Mockito.never()).user(any(Long.class));
@@ -337,7 +338,7 @@ class AuthServiceTest {
                 .thenReturn("access");
 
         var response = (AuthModels.AuthResponse) service.login(new LoginRequest("USER@EXAMPLE.COM", "password"),
-                new MockHttpServletRequest());
+                new AuthClientMetadataBinding(new GatewayProperties()).bind(new MockHttpServletRequest()));
 
         assertThat(response.user().email()).isEqualTo("user@example.com");
         verify(repository).credentialByEmail("user@example.com");
@@ -358,7 +359,7 @@ class AuthServiceTest {
 
         var response = service.register(
                 new RegisterRequest(null, "StrongPassword1!", "user@example.com"),
-                new MockHttpServletRequest());
+                new AuthClientMetadataBinding(new GatewayProperties()).bind(new MockHttpServletRequest()));
 
         assertThat(response.user().email()).isEqualTo("user@example.com");
         assertThat(response.user().username()).isNull();
@@ -368,10 +369,28 @@ class AuthServiceTest {
     void phoneRegistrationRemainsDisabledByDefault() {
         assertThatThrownBy(() -> service.register(
                 new RegisterRequest(null, "StrongPassword1!", null, "+8613800138000"),
-                new MockHttpServletRequest()))
+                new AuthClientMetadataBinding(new GatewayProperties()).bind(new MockHttpServletRequest())))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("phone registration is not enabled");
         verifyNoInteractions(passwordHasher, repository);
+    }
+
+    @Test
+    void bearerStillChecksIpFromActualRequestContext() {
+        Instant now=Instant.now();
+        when(jwtTokenService.verifyAccessToken("token")).thenReturn(
+                new JwtPrincipal(42L,"user","NORMAL",List.of("USER"),now.plusSeconds(60)));
+        when(repository.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(42L,"user",null,"NORMAL",List.of("USER"),now)));
+        when(accessBlocks.blocked(42L,"IP","203.0.113.7")).thenReturn(true);
+        var http=new MockHttpServletRequest();http.setRemoteAddr("203.0.113.7");
+        http.addHeader("X-Device-Id","malformed-device-is-irrelevant-to-bearer");
+        org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(
+                new org.springframework.web.context.request.ServletRequestAttributes(http));
+        try {
+            assertThatThrownBy(()->service.authenticateBearer("Bearer token"))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("blocked");
+            verify(accessBlocks).blocked(42L,"IP","203.0.113.7");
+        } finally {org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();}
     }
 
     private AuthenticatedUser admin(Instant now) {
