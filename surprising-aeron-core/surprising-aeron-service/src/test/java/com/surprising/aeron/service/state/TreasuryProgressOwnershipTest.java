@@ -16,22 +16,34 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+/**
+ * 财库进度的跨线程可读视图、真实账本写入、回滚前值及订单批量修改限制测试；进度槽与实际资金所有权分开核对。
+ */
 class TreasuryProgressOwnershipTest {
+    /** 所有进度槽共同引用的固定U本位永续标的1配置。 */
     private static final CoreInstrument INSTRUMENT = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
             new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
                     "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+    /** 各进度记录共同引用的固定命令UUID，便于核对发布后对象身份。 */
     private static final UUID COMMAND_ID = UUID.fromString("00000000-0000-0000-0000-000000000701");
 
+    /**
+     * 交给真实账本后外部可读原进度及完成号，资金读取和修改进度仍拒绝；账本设置完成号后进度清空，原不可变记录内容保持。
+     */
     @Test
     void admissionReadsOriginalProgressAfterLedgerHandoffButCannotAccessMoneyOrWriteProgress() throws Exception {
+        // 本例唯一财库，冷阶段初始化后可交给真实账本线程
         TreasuryRuntime ledger = new TreasuryRuntime();
+        // 修改前资金费进度记录，用于核对只读发布或回滚身份
         var funding = funding(1);
+        // 修改前生命周期进度记录，用于检查域间隔离和回滚
         var lifecycle = lifecycle(2);
         ledger.setFundingProgress(0, funding);
         ledger.setLifecycleProgress(0, lifecycle);
         ledger.clearChangedKeys();
+        // 实际账本线程发布的故障引用
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        try (var lane = new SystemLedgerLane(ledger, 256, failure::set)) {
+        try (/* 本例真实账本工作对象，资源退出时关闭 */ var lane = new SystemLedgerLane(ledger, 256, failure::set)) {
             assertThat(ledger.fundingProgress(0)).isSameAs(funding);
             assertThat(ledger.lifecycleProgress(0)).isSameAs(lifecycle);
             assertThat(ledger.incompleteFundingCount()).isEqualTo(1);
@@ -43,8 +55,9 @@ class TreasuryProgressOwnershipTest {
             assertThatThrownBy(() -> ledger.setLifecycleProgress(0, lifecycle(4))).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(ledger::fundingProgresses).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(ledger::rollbackChangedValues).isInstanceOf(IllegalStateException.class);
+            // 确认账本全部更新已经执行完的门闩
             CountDownLatch completed = new CountDownLatch(1);
-            assertThat(lane.offer(actual -> {
+            assertThat(lane.offer(/* 回调在账本线程实际获得的财库拥有者引用 */ actual -> {
                 actual.setFundingSettlement(0, 3);
                 actual.setLifecycleSettlement(0, 4);
                 actual.clearChangedKeys();
@@ -63,26 +76,41 @@ class TreasuryProgressOwnershipTest {
         assertThat(lifecycle.settlementId()).isEqualTo(2);
     }
 
+    /**
+     * 独立读取线程与账本写入并发，扩展64个进度槽并替换0号进度，核对发布记录引用及完成号单调。各槽共用固定标的配置，本例不是64个真实标的业务测试。
+     */
     @Test
     void concurrentAdmissionReadsRemainSafeAsLedgerAddsSymbolsAndReplacesProgress() throws Exception {
+        // 本例唯一财库，冷阶段初始化后可交给真实账本线程
         TreasuryRuntime ledger = new TreasuryRuntime();
+        // 实际账本线程发布的故障引用
         AtomicReference<Throwable> failure = new AtomicReference<>();
+        // 独立读取线程遇到的原故障引用
         AtomicReference<Throwable> readerFailure = new AtomicReference<>();
+        // finally通知读取线程退出的原子标记
         AtomicBoolean finished = new AtomicBoolean();
+        // 确认读取线程已开始运行的门闩
+        // 账本已发布第一条进度的门闩，异常清理时也释放以便退出
         CountDownLatch readerStarted = new CountDownLatch(1), firstPublished = new CountDownLatch(1);
+        // 确认读取线程已见第一条进度的门闩，故障时同样释放
+        // 确认账本全部更新已经执行完的门闩
         CountDownLatch firstRead = new CountDownLatch(1), completed = new CountDownLatch(1);
+        // 并发读取发布进度及完成号的独立线程
         Thread reader = new Thread(() -> {
             readerStarted.countDown();
             try {
                 if (!firstPublished.await(3, TimeUnit.SECONDS)) throw new AssertionError("progress publication timeout");
                 assertThat(ledger.fundingProgress(0)).isNotNull();
                 firstRead.countDown();
+                // 读取线程上次见到的0号完成结算号，下一次不得变小
                 long lastSettlement = 0;
                 do {
+                    // 本次读到的0号已完成结算号
                     long current = ledger.fundingSettlement(0);
                     assertThat(current).isGreaterThanOrEqualTo(lastSettlement);
                     lastSettlement = current;
-                    for (int symbol = 0; symbol < 64; symbol++) {
+                    for (/* 正在读取或写入的进度表槽号，并非不同真实配置对象 */ int symbol = 0; symbol < 64; symbol++) {
+                        // 当前发布的可空资金费进度，存在时核对固定对象及正结算号
                         var value = ledger.fundingProgress(symbol);
                         if (value != null) {
                             assertThat(value.instrument()).isSameAs(INSTRUMENT);
@@ -93,24 +121,24 @@ class TreasuryProgressOwnershipTest {
                         ledger.lifecycleSettlement(symbol);
                     }
                 } while (!finished.get());
-            } catch (Throwable problem) {
+            } catch (/* 读取线程捕获的Throwable，保存并释放首次读取门闩 */ Throwable problem) {
                 readerFailure.set(problem);
                 firstRead.countDown();
             }
         }, "admission-progress-reader");
-        try (var lane = new SystemLedgerLane(ledger, 256, failure::set)) {
+        try (/* 本例真实账本工作对象，资源退出时关闭 */ var lane = new SystemLedgerLane(ledger, 256, failure::set)) {
             reader.start();
             assertThat(readerStarted.await(3, TimeUnit.SECONDS)).isTrue();
-            assertThat(lane.offer(actual -> {
+            assertThat(lane.offer(/* 回调在账本线程实际获得的财库拥有者引用 */ actual -> {
                 actual.setFundingProgress(0, funding(1));
                 firstPublished.countDown();
                 try {
                     if (!firstRead.await(3, TimeUnit.SECONDS)) throw new AssertionError("admission reader timeout");
-                } catch (InterruptedException interrupted) {
+                } catch (/* 账本等待首次读取被中断，恢复中断标记后转断言失败 */ InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                     throw new AssertionError(interrupted);
                 }
-                for (int symbol = 1; symbol < 64; symbol++) {
+                for (/* 正在读取或写入的进度表槽号，并非不同真实配置对象 */ int symbol = 1; symbol < 64; symbol++) {
                     actual.setFundingProgress(symbol, funding(symbol + 1));
                     actual.setLifecycleProgress(symbol, lifecycle(symbol + 1));
                     actual.setFundingSettlement(0, symbol);
@@ -136,10 +164,16 @@ class TreasuryProgressOwnershipTest {
         assertThat(failure.get()).isNull();
     }
 
+    /**
+     * 资金费和生命周期交错修改后回滚，要求恢复首次前值、完成号及原对象身份，删除新32号槽，并清变化标记。
+     */
     @Test
     void rollbackRestoresFirstProgressAndCompletedIdsForBothDomainsAndRemovesNewSymbols() {
+        // 本例唯一财库，冷阶段初始化后可交给真实账本线程
         TreasuryRuntime ledger = new TreasuryRuntime();
+        // 修改前资金费进度记录，用于核对只读发布或回滚身份
         var funding = funding(3);
+        // 修改前生命周期进度记录，用于检查域间隔离和回滚
         var lifecycle = lifecycle(4);
         ledger.setFundingSettlement(0, 1);
         ledger.setLifecycleSettlement(0, 2);
@@ -170,8 +204,12 @@ class TreasuryProgressOwnershipTest {
         assertThat(ledger.hasChangedValues()).isFalse();
     }
 
+    /**
+     * 订单批量范围内四类进度写入均拒绝且不留变化，退出后整体clear清进度及未完成计数。
+     */
     @Test
     void orderBatchCannotChangeProgressAndClearResetsAdmissionStatus() {
+        // 本例唯一财库，冷阶段初始化后可交给真实账本线程
         TreasuryRuntime ledger = new TreasuryRuntime();
         ledger.setFundingProgress(0, funding(1));
         ledger.setLifecycleProgress(0, lifecycle(2));
@@ -192,11 +230,19 @@ class TreasuryProgressOwnershipTest {
         assertThat(ledger.lifecycleProgresses().isEmpty()).isTrue();
     }
 
+    /**
+     * 使用固定标的、用户及命令身份构造指定结算号的资金费进度记录。
+     * @param settlementId 该测试进度记录对应的结算号
+     */
     private static TreasuryRuntime.FundingProgressRuntime funding(long settlementId) {
         return new TreasuryRuntime.FundingProgressRuntime(settlementId, INSTRUMENT, 100,
                 0, 7, COMMAND_ID, 100, 1);
     }
 
+    /**
+     * 使用同一固定标的及命令身份构造指定结算号的生命周期进度记录。
+     * @param settlementId 该测试进度记录对应的结算号
+     */
     private static TreasuryRuntime.LifecycleProgressRuntime lifecycle(long settlementId) {
         return new TreasuryRuntime.LifecycleProgressRuntime(settlementId, INSTRUMENT, 100,
                 0, true, 0, 0, 7, COMMAND_ID);
