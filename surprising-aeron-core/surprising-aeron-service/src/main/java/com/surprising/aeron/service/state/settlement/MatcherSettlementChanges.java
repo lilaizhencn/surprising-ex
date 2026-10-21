@@ -17,6 +17,16 @@ import com.surprising.aeron.service.state.position.PositionRuntime;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
+/**
+ * 下单步骤 4.4 与 4.6 共用的结算变化缓冲：各 Lane 写自己的结果，完成交接后供账本核对和 Owner 收集。
+ *
+ * <p>laneDeltas 保存实体及终态身份，balancePatches 保存余额前后值，laneFundsDeltas
+ * 保存由余额变化准备的资金增量，userRevisionDeltas 合并本代用户修订次数。
+ * 这些是当前结算的变化与交接数据，权威账户仍在 AccountLaneState。</p>
+ *
+ * <p>Matcher 确认实际参与账户后准备所需容量；各 Lane 通过 prepareLaneTerminal
+ * 整理发布结果并配合事件发布完成位。Owner 收集前不能清空，回收时保留容量供下一代复用。</p>
+ */
 public final class MatcherSettlementChanges {
     private static final LaneCommitDelta EMPTY_LANE_DELTA = new LaneCommitDelta();
     private static final LaneBalancePatches EMPTY_BALANCE_PATCHES = new LaneBalancePatches();
@@ -25,13 +35,13 @@ public final class MatcherSettlementChanges {
     boolean directPositionIdentities;
     boolean inUse;
     final int ringIndex;
-    /** Owner派发前固定的参与Lane；事件完成后仅回收这些Lane的缓冲。 */
+    /** 本代已准备的参与 Lane；实际撮合路由可扩展此集合，回收时据此清理缓冲。 */
     long activeLaneMask;
     /** 各 Lane 输出给 owner 的变化缓冲，在完成交接后消费。 */
     final LaneCommitDelta[] laneDeltas;
     /** 按 Lane 保存的余额前后值，用于资金增量核对。 */
     final LaneBalancePatches[] balancePatches;
-    /** 各 Lane 收集的资金增量，完成后由 owner 合并。 */
+    /** 各 Lane 准备的资金增量，交接后供财务核对；未启用账本的路径可由 Owner 收集。 */
     final RuntimeFundsAccumulator[] laneFundsDeltas;
     /** 每个 settlement 内按用户合并的 revision 增量，避免每个 fill 创建 UserRuntime。 */
     final LongLongHashMap[] userRevisionDeltas;

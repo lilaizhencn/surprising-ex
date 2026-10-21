@@ -196,6 +196,11 @@ sequenceDiagram
 
 准入/匹配规则拒绝转换成业务结果；需要回滚时只回滚该命令拥有的状态。无法核对的撮合/账户故障进入失败与恢复路径，不能伪装成普通拒单。响应背压由 egress 保留内容；仍被 Matcher、Lane 或响应使用的对象不能提前回收。
 
+步骤 4 的类较多，继续按“准备事件 → 整理事实 → 分发账户 → 账户收尾 → 财务核对 → Owner 收集”阅读，
+见 [service README 的结算步骤与交接图](surprising-aeron-service/README.md#下单步骤-4撮合事实账户与账本)。
+事件可由 Lane 消费、发布方已交出事件、账户及财务完成，是不同条件；文档分别对应
+`readyForLane()`、`ready()` 和 `complete()`，避免把 Matcher 结果可见误认为可以回包或复用事件。
+
 ## 其他业务流程
 
 各流程共用下单的输入、幂等、有序提交和回包边界，下面展开特有步骤。
@@ -460,3 +465,14 @@ mvn -B -pl surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/su
 
 清理状态：测试 JVM 已退出，未启动独立常驻集群或 wallet；本轮临时构建日志和已归档摘要的
 Surefire 报告已清理。保留 classes/JAR 及活动注释审计所需的紧凑校验数据，没有生成 JFR 或堆转储。
+
+### 结算步骤导航细化验证（2026-10-21）
+
+在上述业务包结构上，将下单步骤 4 细分为事件准备、事实整理、账户投递、账户收尾、财务完成与
+Owner 收集，在 service README、结算包说明和 7 个类的中文注释中对应到方法。
+同时区分账户可消费结果、Matcher 发布结束和事件完成，说明无成交及 FUSED 内联账本分支。
+
+本次仅文档和注释：8 个 Java 文件与提交前经 AST 比较，非注释 token 完全一致；
+全模块 444 个 Java 文件解析正常。两份 README 的 16 张 Mermaid 图通过解析，
+134 个本地链接及锚点有效，精确改动范围的 `git diff --check` 通过。
+按文档改动的验证要求，本次未重跑 Maven、集群、API 联调或性能测试；此前包迁移的运行验证见上节。

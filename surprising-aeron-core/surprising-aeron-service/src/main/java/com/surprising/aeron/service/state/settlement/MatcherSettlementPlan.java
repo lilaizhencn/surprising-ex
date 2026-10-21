@@ -18,6 +18,16 @@ import java.util.RandomAccess;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
+/**
+ * 下单步骤 4.2：把一项撮合结果整理为账户可消费的成交、撤单身份和 Lane 路由。
+ *
+ * <p>Matcher 通过 buildDirect 或 buildDirectNative 系列方法构建直达事实；
+ * MatcherSettlementEvent 发布后，各 Lane 通过本计划找到自己要处理的事件，
+ * 再交给产品结算处理器。本类整理已有撮合事实，不自行撮合，也不写用户余额。</p>
+ *
+ * <p>数组、索引和只读列表视图随所属事件或在途槽复用，只在该代租约内有效。
+ * 拒单及已接受的前置撤单分别保留，避免把新单拒绝误当成此前撤单也未发生。</p>
+ */
 public final class MatcherSettlementPlan {
     /** 撮合明确拒绝时，由账户 Lane 释放准入冻结并产生拒单终态。 */
     private boolean rejectedTaker;
@@ -73,7 +83,7 @@ public final class MatcherSettlementPlan {
     /** Read-only view owned by this plan; it remains valid until the enclosing context is recycled. */
     private final List<Long> orderIdView = new OrderIdView(this);
 
-    /** 事件池或在途序号槽独占并复用；Owner准备后只读，所有Lane完成后才能清理。 */
+    /** 所属事件或在途槽独占并复用；构建方完成发布后供 Lane 只读，消费者结束后才能清理。 */
     public MatcherSettlementPlan() { orderIds = new long[8]; preCancellationOrderIds = NO_ORDERS; matcherEvents = List.of(); }
 
     public void clearReferences() {

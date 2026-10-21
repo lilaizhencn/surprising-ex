@@ -13,9 +13,19 @@ import java.util.List;
 
 import static com.surprising.aeron.service.state.TradingRuntimeState.*;
 
-/** 交易步骤 4：派发撮合事实给所属账户，收集结算完成；使用各产品结算处理器并保持 Lane 序号。 */
+/**
+ * 下单步骤 4.1、4.3 与 4.6：准备结算事件、投递账户事实，并衔接批量项的完成收集。
+ *
+ * <p>阅读顺序：Owner 调用 prepareDirect 系列方法借用事件并填写命令输入；Matcher 在
+ * MatcherSettlementEvent 中整理事实后，调用 publishMatcherOwned 直接投递所属账户。
+ * 账户及财务回执到齐后，Owner 收集变化并通过 releaseMatcherSettlement 归还事件。
+ * 产品资金计算在各结算处理器中，本类不重复结算。</p>
+ *
+ * <p>事件池只由 Owner 操作；publishMatcherOwned 是 Matcher 发布边界，不能因为本类持有
+ * 运行时引用，就把所有方法都当成 Owner 线程方法。编号对应 service README，不构成新执行阶段。</p>
+ */
 public final class MatcherSettlementDispatcher {
-    /** 唯一 owner；仅在其线程访问共享交易状态和提交边界。 */
+    /** 所属运行时；准备与回收遵守 Owner 线程约束，事实投递遵守单 Matcher 发布约束。 */
     final TradingRuntimeState owner;
 
     public MatcherSettlementDispatcher(TradingRuntimeState owner) { this.owner = owner; }
@@ -144,7 +154,11 @@ public final class MatcherSettlementDispatcher {
         return event;
     }
 
-    /** Publish a completed Matcher fact directly into each routed Lane's shard SPSC mailbox. */
+    /**
+     * 下单步骤 4.3：由单个 Matcher 发布方把同一事实送入实际路由 Lane 的分片 SPSC 队列。
+     * FUSED 不创建账户工作线程，直接在当前执行线程应用各 Lane；入队成功不表示结算完成。
+     * @param event 已准备结果且仍由发布租约保护的本代结算事件
+     */
     void publishMatcherOwned(MatcherSettlementEvent event) {
         if (event == null || event.runtime() != owner || !event.direct()
                 || !event.dispatched() || !event.resultPrepared())

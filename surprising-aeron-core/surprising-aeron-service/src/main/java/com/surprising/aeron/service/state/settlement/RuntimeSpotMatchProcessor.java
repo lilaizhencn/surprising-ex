@@ -21,6 +21,13 @@ import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
+/**
+ * 下单步骤 4.4 的现货结算：按撮合事实更新买卖资产、订单成交量、手续费及剩余预留。
+ *
+ * <p>在线 Lane 入口为 applyLane，由 MatcherSettlementEvent.applyPlan 选择；
+ * 每个 Lane 只处理自己的 taker 或 maker。深度成交复用 Lane 内的累加器，
+ * 系统费用先写财务差额，随后由事件的账本边界统一应用。</p>
+ */
 public final class RuntimeSpotMatchProcessor {
 
     private RuntimeSpotMatchProcessor() {

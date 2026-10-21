@@ -8,6 +8,18 @@ HTTP 接入、价格生产、生命周期调度和外部查询投影由其他服
 各业务时序和快照恢复见 [Aeron 总 README](../README.md)。下面的编号表示阅读顺序，
 不表示增加线程、队列或提交阶段；同一公共类可能被多条业务复用。
 
+| 要看什么 | 图与源码导航 |
+| --- | --- |
+| 模块之间怎样连接 | [系统架构](../README.md#模块与系统架构) |
+| 配置从哪里来、线程怎样启动 | [本文启动流程](#启动配置加载恢复与线程启动)、[完整配置表与启动命令](../README.md#配置入口) |
+| 下单经过哪些类 | [下单六步](#下单按六步顺着源码读)、[步骤 4 的账户与账本交接](#下单步骤-4撮合事实账户与账本) |
+| 撤单、改单、批量订单 | [独立流程图](../README.md#撤单改单与批量订单) |
+| 触发单、止盈止损、OCO | [独立流程图](../README.md#触发单止盈止损与-oco) |
+| 标记价与风控 | [独立流程图](../README.md#标记价与风控扫描) |
+| 强平、保险基金、ADL | [独立流程图](../README.md#强平保险基金与-adl) |
+| 资金费、交割、期权到期 | [独立流程图](../README.md#资金费交割与期权到期) |
+| 快照与日志如何恢复 | [恢复时序](../README.md#快照与恢复) |
+
 ## 启动：配置加载、恢复与线程启动
 
 ```mermaid
@@ -71,6 +83,50 @@ flowchart LR
 
 内部 `MATCHING_PENDING`、队列入队成功和 Matcher 执行完成均不能单独作为客户端交易终态。
 业务拒单保留拒绝结果；需要回滚时只回滚该命令拥有的变化；无法核对的执行故障由故障与恢复边界处理。
+
+### 下单步骤 4：撮合事实、账户与账本
+
+`state.settlement` 中的类按下面顺序阅读。这里细分的是原有结算职责，
+普通下单、改单、撤单和触发子订单继续共用同一套事件与完成条件。
+
+| 阅读步骤 | 类与方法 | 本步做什么、由谁做 |
+| --- | --- | --- |
+| 4.1 准备交接 | [`MatcherSettlementDispatcher.prepareDirectAdmission / prepareDirect / prepareDirectReplacement / prepareDirectCancellation`](src/main/java/com/surprising/aeron/service/state/settlement/MatcherSettlementDispatcher.java) | Owner 借用事件槽，保存命令身份、币对与资产编号、初始路由和准入输入 |
+| 4.2 整理事实 | [`MatcherSettlementEvent.publishDirectNativeResult / publishDirectNativeBatchItem / publishDirectNativeReplacement`](src/main/java/com/surprising/aeron/service/state/settlement/MatcherSettlementEvent.java) → [`MatcherSettlementPlan`](src/main/java/com/surprising/aeron/service/state/settlement/MatcherSettlementPlan.java) | Matcher 校验序号与命令证据，整理成交、已接受的前置撤单和实际参与 Lane；不读取其他线程的账户表 |
+| 4.3 发布给账户 | `MatcherSettlementEvent.notifyDirectPublication` → `MatcherSettlementDispatcher.publishMatcherOwned` | PIPELINED 由 Matcher 直接写各 Lane 的分片 SPSC 队列；FUSED 在当前线程内联执行 |
+| 4.4 应用账户变化 | `MatcherSettlementEvent.execute / applyPlan` → [`RuntimeSpotMatchProcessor.applyLane`](src/main/java/com/surprising/aeron/service/state/settlement/RuntimeSpotMatchProcessor.java) 或 [`RuntimeDerivativeMatchProcessor.applyLane`](src/main/java/com/surprising/aeron/service/state/settlement/RuntimeDerivativeMatchProcessor.java) | 各账户所有者只写自己的订单、预留、余额与持仓；衍生品成交计算由 [`RuntimeDerivativeFillCalculator`](src/main/java/com/surprising/aeron/service/state/settlement/RuntimeDerivativeFillCalculator.java) 承担 |
+| 4.4 收尾与回执 | [`MatcherSettlementChanges.prepareLaneTerminal`](src/main/java/com/surprising/aeron/service/state/settlement/MatcherSettlementChanges.java) → `MatcherSettlementEvent.publishCompletion` | 所属 Lane 整理用户修订、终态身份、持仓及余额资金增量，然后发布自己的完成位 |
+| 4.5 财务完成 | `MatcherSettlementEvent.submitTreasurySettlement` → `TreasurySettlement` / [`SystemLedgerLane`](src/main/java/com/surprising/aeron/service/state/ledger/SystemLedgerLane.java) | Owner 尝试投递财务槽；账本等账户回执到齐后应用 Treasury 差额、校验资金守恒并更新持仓索引 |
+| 4.6 交回提交 | [`TradingRuntimeState.collectMatcherSettlement`](src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java) → `OrderedCommitCoordinator` | Owner 等发布、账户和已登记的财务工作完成后，收集变更与终态身份，再按命令顺序提交；事件归还对象池前还须交出变更缓冲 |
+
+```mermaid
+flowchart TD
+    O[4.1 Owner: Dispatcher 准备事件] --> M[4.2 Matcher: Event / Plan 整理事实]
+    M --> P[4.3 发布结果并保持事件租约]
+    P --> D[Dispatcher: 各 Lane 的分片 SPSC 队列]
+    D --> A[4.4 所属账户: 产品结算 / Changes 收尾]
+    A --> C[各 Lane 发布完成位]
+    D --> R[全部投递结束: 解除发布租约]
+    R --> Q[4.5 Owner 尝试投递财务槽]
+    Q --> W[Ledger 等待账户回执]
+    C --> W
+    W --> L[Treasury 差额 / 资金守恒 / 持仓索引]
+    L --> F[财务完成位]
+    C --> K[4.6 Owner 收集 → 有序提交]
+    F --> K
+    R --> K
+```
+
+图展开 PIPELINED 中需要账本处理的成交。财务槽可以在账户尚未完成时先入队；
+队列满则 Owner 保留原槽重试。无成交时可在账户完成后就地核对资金增量；
+FUSED 还可在账本队列为空且事实就绪时，通过 `SystemLedgerLane.tryApplyInline`
+交接账本所有权并内联应用，不要求每个命令都发生一次账本线程切换。
+
+三个条件分别看：`readyForLane()` 只要求结果已经发布；`ready()` 还要求 Matcher 已结束发布过程；
+`complete()` 再检查所有实际路由 Lane，以及已登记的财务槽是否完成。
+因此，Lane 可以在其他 Lane 尚未入队时开始工作，Owner 此时仍不能回收事件。
+准入拒绝的普通下单沿已登记路由交出无成交回执，不执行正常成交资金计算；
+前置撤单已经成功、随后新单被拒绝时，成功的撤单仍须结算，不能视为整条命令没有变化。
 
 ## 撤单、触发单、风控与强平
 

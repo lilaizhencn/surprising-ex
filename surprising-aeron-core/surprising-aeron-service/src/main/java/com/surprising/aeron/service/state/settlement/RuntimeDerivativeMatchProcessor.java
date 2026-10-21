@@ -14,6 +14,14 @@ import java.util.List;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
+/**
+ * 下单步骤 4.4 的衍生品结算入口：按成交事实推进本 Lane 的订单、持仓和剩余预留。
+ *
+ * <p>在线入口为 applyLane，由 MatcherSettlementEvent 按产品选择；
+ * 成交金额、保证金、盈亏和费用由 RuntimeDerivativeFillCalculator 及对应产品规则计算。
+ * taker 与 maker 分别由所属账户所有者应用，财务差额留给事件的账本边界，
+ * 不把不同本位、交割和期权的资金公式合成一套。</p>
+ */
 public final class RuntimeDerivativeMatchProcessor {
 
     private RuntimeDerivativeMatchProcessor() {

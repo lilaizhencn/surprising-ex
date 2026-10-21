@@ -20,8 +20,16 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 
 /**
- * Immutable matcher fact routed once to every Account Lane it touches.
- * Mutable completion state is isolated from the fact payload and is only used by the owner coordinator.
+ * 下单步骤 4.2–4.6：承载一代撮合事实，以及账户和系统账本交回的完成回执。
+ *
+ * <p>阅读顺序：publishDirectNative 系列方法在 Matcher 整理事实；notifyDirectPublication
+ * 发布结果并投递账户；execute 在所属 Account Lane 应用订单、余额和持仓变化；
+ * submitTreasurySettlement 登记财务工作；Owner 通过 complete 判断能否收集并推进提交。</p>
+ *
+ * <p>这是复用事件，不是永久不可变快照。Owner 准备输入，Matcher 构建并发布事实，
+ * 各 Lane 写自己的变化与完成位，财务槽交回账本完成位；消费方遵守各自发布边界。
+ * readyForLane 只表示账户可读结果，ready 还要求 Matcher 交出发布租约，complete
+ * 再等待实际路由账户及已登记财务工作。清理前还必须交出 changes 缓冲，避免在途引用被覆盖。</p>
  */
 public final class MatcherSettlementEvent implements
         SettlementLaneWorker.Command,
@@ -45,7 +53,7 @@ public final class MatcherSettlementEvent implements
     private boolean treasuryTrades;
     private long[] completedLanes;
     private boolean collected;
-    /** One retained financial slot for this pooled fact; never a second ledger. */
+    /** 本代事件保留的可复用财务任务槽；实际系统资金仍在原 Treasury 中。 */
     private volatile TreasurySettlement treasurySettlement;
     /** Owner 已以 acquire 观察到的完成位；本代事件不会倒退，复用时清零。 */
     private long observedCompletedLaneMask;
@@ -79,7 +87,7 @@ public final class MatcherSettlementEvent implements
     private long directCommandIdLsb;
     private int directShard;
     private java.util.List<Long> authorizedCancellations = java.util.List.of();
-    /** Native immutable result used by the allocation-free ordinary Matcher handoff. */
+    /** 本代原生成交结果；可能借用事件自己的命令槽，只在事件租约内消费。 */
     private exchange.core2.core.common.MatcherResult directNativeResult;
     private long directMatcherSequence;
     private long directLastMatcherSequence;
@@ -283,9 +291,10 @@ public final class MatcherSettlementEvent implements
     }
     long queuedLaneMask() { return queuedLaneMask; }
     long routedLaneMask() { return routedLaneMask; }
+    /** 结果已发布且 Matcher 已结束发布过程；供 Owner 推进，尚不表示账户或财务工作完成。 */
     public boolean ready() { return directPublished && !matcherPublicationDeferred; }
 
-    /** Lane readiness is gated only by the Matcher fact publication. */
+    /** 账户只等待结果发布即可消费；其他 Lane 的投递可能仍在继续，事件仍受发布租约保护。 */
     public boolean readyForLane() {
         return directPublished;
     }
@@ -594,6 +603,10 @@ public final class MatcherSettlementEvent implements
         if (!matcherPublicationDeferred) notifyDirectPublication();
     }
 
+    /**
+     * 下单步骤 4.3：先允许 Lane 读取事实，再完成各 Lane 投递，最后解除发布租约。
+     * 发布期间即使某个 Lane 已经完成，Owner 也不能回收事件；交出租约后的通知只使用提前保存的运行时。
+     */
     private void notifyDirectPublication() {
         TradingRuntimeState completionRuntime = runtime;
         // Lane may consume a prepared fact as soon as its queue publication is visible.
@@ -758,6 +771,11 @@ public final class MatcherSettlementEvent implements
         collected = false;
     }
 
+    /**
+     * 下单步骤 4.4：在所属账户执行本代事实、整理终态变化，再发布本 Lane 完成位。
+     * 准入拒绝只整理回执；正常事实按现货或衍生品规则应用，不能跨 Lane 修改其他用户账户。
+     * @param lane 当前线程持有的账户 Lane
+     */
     public void execute(AccountLaneState lane) {
         requireDirectResult();
         int laneId = lane.laneId();
@@ -984,6 +1002,11 @@ public final class MatcherSettlementEvent implements
         }
     }
 
+    /**
+     * 下单步骤 4.6：供 Owner 检查发布租约、实际路由账户和已登记财务工作是否全部完成。
+     * 无独立账户线程时可推进尚未执行的 Lane；返回 true 仍不代替变更收集和按序提交。
+     * @return 本代事件已达到可收集边界时返回 true
+     */
     public boolean complete() {
         if (ownerObservedComplete) return true;
         if (!ready()) return false;
@@ -1050,6 +1073,12 @@ public final class MatcherSettlementEvent implements
         return aggregate;
     }
 
+    /**
+     * 下单步骤 4.5：由 Owner 保留并投递本代财务槽，队列满时保留输入供后续重试。
+     * 无成交时可在账户完成后就地核对资金；FUSED 可在账本允许交接所有权时内联应用。
+     * @param ledger 当前运行时的系统账本执行边界
+     * @return 财务工作已登记成功时返回 true，队列满而需要重试时返回 false
+     */
     public boolean submitTreasurySettlement(SystemLedgerLane ledger) {
         if (ledger == null || runtime == null || changes == null || collected)
             throw new IllegalStateException("Ledger settlement requires retained isolated account facts");

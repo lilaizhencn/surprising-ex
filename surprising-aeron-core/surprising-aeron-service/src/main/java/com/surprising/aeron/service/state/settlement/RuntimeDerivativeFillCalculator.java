@@ -20,7 +20,13 @@ import com.surprising.aeron.service.state.order.OrderRuntime;
 import com.surprising.aeron.service.state.order.ReservationRuntime;
 import com.surprising.aeron.service.state.position.PositionRuntime;
 
-/** Calculates derivative fills against the owning Account Lane. */
+/**
+ * 下单步骤 4.4 的衍生品成交计算：使用所属账户的预留、余额、持仓及产品规则计算一次或连续成交。
+ *
+ * <p>RuntimeDerivativeMatchProcessor 组织成交顺序，本类及 Lane 内复用的 FillCursor
+ * 计算订单累计成交、持仓、保证金、盈亏和费用，再把结果写回同一账户，系统资金差额写入
+ * RuntimeTreasuryDelta。期货和期权继续选择各自产品计算器，不跨账户读取权威状态。</p>
+ */
 public final class RuntimeDerivativeFillCalculator {
 
     private RuntimeDerivativeFillCalculator() {
