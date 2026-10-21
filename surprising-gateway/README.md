@@ -538,3 +538,5 @@ KYC文档上传在 `auth.controller.UserComplianceController` 完成鉴权、Mul
 Binance APIKey请求由 `auth.controller.ApiKeyRequestBinding` 绑定原生 `ApiKeyAuthenticationRequest`，原始Query和Form Body签名组合保持原字节顺序；纯编码位于 `auth.utils.ApiSignatureFormats`。`GatewayApiKeyService`只处理密钥、IP/权限、有效时间及验签业务，封禁IP原生失败由HTTP入口映射403。
 
 `GatewayProductServices.requireEnabled`仅抛原生 `provider.exception.ProductUnavailableException`，阻止未就绪产品开始资金/交易操作；HTTP资产/本机维护、代理/签名和内部Mapping分别在其协议边界返回404。C2C明确返回404/PRODUCT_NOT_ENABLED，避免泛型异常处理掩盖产品未就绪。数据库明确禁用的资产空列表规则保持，连接失败/启动中仍不能按零展示。
+
+账户原生拒绝、命令超时和未初始化快照异常归 `account.provider.exception`；错误码与结果载荷、超时UNKNOWN及HTTP映射保持原处理流程。

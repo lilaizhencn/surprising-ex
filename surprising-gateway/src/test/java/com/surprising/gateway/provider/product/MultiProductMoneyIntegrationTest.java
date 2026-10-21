@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.product;
 
+import com.surprising.account.provider.exception.AccountCommandRejectedException;
 import com.surprising.gateway.provider.model.ProductTransferCommand;
 import com.surprising.gateway.provider.model.ProductTransferStatus;
 

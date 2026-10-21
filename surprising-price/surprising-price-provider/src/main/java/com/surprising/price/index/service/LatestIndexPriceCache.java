@@ -1,5 +1,6 @@
 package com.surprising.price.index.service;
 
+import com.surprising.price.index.exception.StaleIndexPriceException;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.IndexPriceResponse;
 import com.surprising.price.api.model.PriceStatus;

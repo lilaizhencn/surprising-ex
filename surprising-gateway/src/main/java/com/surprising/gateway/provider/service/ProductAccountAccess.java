@@ -5,7 +5,7 @@ import com.surprising.gateway.provider.model.ProductAccountAdjustment;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.account.provider.service.AccountCommandGateway;
-import com.surprising.account.provider.service.AccountCommandRejectedException;
+import com.surprising.account.provider.exception.AccountCommandRejectedException;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
 import java.util.List;

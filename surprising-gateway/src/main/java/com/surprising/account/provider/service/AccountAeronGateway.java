@@ -1,5 +1,7 @@
 package com.surprising.account.provider.service;
 
+import com.surprising.account.provider.exception.AccountCommandRejectedException;
+import com.surprising.account.provider.exception.AccountStateUnavailableException;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.aeron.client.AeronClientPool;
 import io.aeron.driver.MediaDriver;

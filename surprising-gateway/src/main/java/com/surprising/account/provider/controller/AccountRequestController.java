@@ -22,7 +22,7 @@ import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.provider.service.AccountService;
 import com.surprising.account.provider.service.AccountCommandGateway;
-import com.surprising.account.provider.service.AccountCommandTimeoutException;
+import com.surprising.account.provider.exception.AccountCommandTimeoutException;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.product.api.ProductLine;
 import org.springframework.http.HttpStatus;

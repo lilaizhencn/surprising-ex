@@ -368,3 +368,5 @@ Kafka职责归包：独立快照、审计、结算/排空及推送消费入口�
 标记价格接入由 `price.mark.consumer.MarkPriceConsumer` 负责三种Kafka流的产品topic、成交key和JSON解码；`MarkPriceService` 只接收原生事件，继续唯一持有输入/基差状态及计算、租约和发布顺序。当前输入查询结果位于mark.model.MarketInputs，topic不匹配异常位于mark.exception；原监听配置、字段和消息处理顺序保持。
 
 法币拉取由 `index.client.FiatRateClient`处理HTTP和提供方响应，返回原生 `index.model.FiatRateSnapshot`；`ExchangeRateService`继续拥有精确金额换算、倒数、精度、缓存写入与数据库落账。
+
+陈旧指数价格的原生失败位于 `index.exception.StaleIndexPriceException`，缓存新鲜度及Controller映射保持。

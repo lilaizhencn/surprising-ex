@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.service;
 
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.provider.service.AccountCommandGateway;
-import com.surprising.account.provider.service.AccountCommandRejectedException;
+import com.surprising.account.provider.exception.AccountCommandRejectedException;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
 import java.util.Locale;

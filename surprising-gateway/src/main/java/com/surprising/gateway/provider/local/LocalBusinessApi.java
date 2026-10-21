@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.local;
 
-import com.surprising.account.provider.service.AccountCommandRejectedException;
+import com.surprising.account.provider.exception.AccountCommandRejectedException;
 import jakarta.validation.Validator;
 import java.net.URI;
 import java.time.Duration;

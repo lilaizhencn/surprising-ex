@@ -1,5 +1,6 @@
 package com.surprising.price.index.service;
 
+import com.surprising.price.index.exception.StaleIndexPriceException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

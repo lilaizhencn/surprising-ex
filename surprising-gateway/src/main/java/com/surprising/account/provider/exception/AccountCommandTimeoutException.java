@@ -1,4 +1,4 @@
-package com.surprising.account.provider.service;
+package com.surprising.account.provider.exception;
 
 public class AccountCommandTimeoutException extends RuntimeException {
 

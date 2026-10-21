@@ -8,7 +8,7 @@ import static org.mockito.Mockito.*;
 import com.surprising.account.api.model.*;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.service.AccountCommandGateway;
-import com.surprising.account.provider.service.AccountCommandRejectedException;
+import com.surprising.account.provider.exception.AccountCommandRejectedException;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.*;
 import com.surprising.product.api.ProductLine;

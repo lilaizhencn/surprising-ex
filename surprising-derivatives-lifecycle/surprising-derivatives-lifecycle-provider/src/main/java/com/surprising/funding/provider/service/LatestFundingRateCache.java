@@ -1,5 +1,6 @@
 package com.surprising.funding.provider.service;
 
+import com.surprising.funding.provider.exception.StaleFundingRateException;
 import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.price.api.model.PerpFundingRateEvent;

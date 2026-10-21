@@ -1,5 +1,6 @@
 package com.surprising.account.provider.service;
 
+import com.surprising.account.provider.exception.AccountStateUnavailableException;
 import com.surprising.account.api.model.AccountLedgerQueryResponse;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AdminBalanceAdjustmentQueryResponse;

@@ -190,3 +190,5 @@
 - 深扫继续发现19个Repository的原始分页/游标解析及11处其他入口格式/原生业务HTTP依赖；新增ADD-063..092待整改，不能由原248/追加62项已验证推断全项目完成。全源码快照2128Java/1495main及方法级Repository SQL清单、只读可复现工具已入档，见 [深度复扫报告](java-mvc-deep-audit-20261022.md)。公开嵌套类型仅列候选，需要实际跨层调用复核。
 
 - 产品就绪失败改为原生ProductUnavailableException，原生资金聚合不再获得ResponseStatusException；普通HTTP入口由Advice、代理/签名及Handler选中之前由实际入口映射404。C2C过去泛型Runtime处理会把此类失败变500，现明确返回404/PRODUCT_NOT_ENABLED且失败审计状态一致；实际PG质押测试确认无新增质押/资金意图和Core调用。六产品线真实Controller/内部Mapping覆盖就绪消失、原生资金失败与不错误展示零余额。定向85、边界修正后51、Mapping18、扩大干净构建374项均无跳过通过；HTTP状态反证12项全部预期失败，恢复后扩大通过。初次边界测试中两处夹具预期（原异常类型、已有种子质押行）已修正；产品行为不据夹具伪造通过。关闭ADD-083，见 [产品就绪边界验证](validation/java-mvc-product-unavailable-20261022.json)。其余29项深扫问题、公开嵌套模型与最终实栈继续。
+
+- 五个顶层原生异常（账户拒绝、超时、快照未就绪、陈旧资金费、陈旧指数价）归各模块exception，保持继承关系、错误码/载荷、超时UNKNOWN语义及事实完整性。19个原文件完整体归一相同。Price144、Lifecycle111项干净构建无跳过，Gateway扩大360项、2项环境条件跳过，无失败；25项PG提现对账已实跑。清除旧class，未启动wallet；关闭ADD-093..097，见 [异常归包验证](validation/java-mvc-exception-packages-20261022.json)。其余29项深扫输入/分页问题及公开嵌套类型仍继续。

@@ -6,7 +6,7 @@ import com.surprising.account.api.model.PendingProductTransfersResponse;
 import com.surprising.account.api.model.ProductBalanceResponse;
 import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.account.provider.config.AccountProperties;
-import com.surprising.account.provider.service.AccountCommandRejectedException;
+import com.surprising.account.provider.exception.AccountCommandRejectedException;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;

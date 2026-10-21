@@ -155,3 +155,5 @@ DerivativesInstrumentSnapshotInitializer归derivatives.lifecycle.service；初�
 资金费历史与支付分页由 `funding.provider.controller.FundingController` 校验请求并解析原生 `FundingPageQuery`；Service保持结果聚合，Repository选择固定SQL列和产品隔离条件。历史费率仍以已提交APPLIED结算为权威，冻结费率仅在完整身份与费率匹配时补充组成，关联用途在Repository方法注释说明。
 
 Kafka职责归包：独立快照、审计、结算/排空及推送消费入口统一放在各自provider.consumer（价格为index.consumer/mark.consumer），业务和缓存继续由原Service/状态所有者负责。监听topic、group、启动条件与处理顺序保持；做市事件唤醒组件为consumer.MakerQuoteWakeups，原唯一信号状态不变。详见 docs/validation/java-mvc-consumer-packages-20261022.json。
+
+陈旧资金费的原生失败位于 `funding.provider.exception.StaleFundingRateException`，缓存新鲜度和资金费业务判断保持。
