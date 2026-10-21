@@ -1,5 +1,10 @@
 # 实时查询视图 API
 
+K 线跨进程契约 `CandleUpdatedEvent` 和 `CandleStatus` 统一位于本工程的
+`src/main/java/com/surprising/candlestick/api/model`，供行情应用和 Gateway WebSocket 共用。
+原 `surprising-market-data-api` 及其聚合 POM 已移除；Java 包名、字段、枚举值和事件 JSON 均保持不变。
+本工程继续承担既有 realtime 编码、路由目录和 Valkey 查询视图接入，不承接交易裁决或价格计算。
+
 ## Lua 批量传输（2026-10-08）
 
 `ValkeyReadViewStore.applyCommits` 保留逐用户、逐提交的原子 DELTA 脚本与版本/快照屏障。只有一条用户更新时仍使用 EVAL；多条更新在同一个 pipeline、同一连接上先 SCRIPT LOAD 一次，再逐条 EVALSHA。完整脚本从每次用户更新发送一次，减少为每批一次，没有新增连接、线程、跨批业务缓存或共享资金状态。

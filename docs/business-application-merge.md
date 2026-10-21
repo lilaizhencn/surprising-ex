@@ -1,5 +1,10 @@
 # 身份、订单、账户、合约合并
 
+当前 Maven 结构（2026-10-21）：账户、订单、合约 API 的中间聚合 POM 已移除，
+由根 POM 直接聚合现有 `surprising-*/surprising-*-api` 路径，并统一继承 `surprising-parent`。
+三个 API 的 artifactId 和 Java 包名不变。K 线共享事件归入 `surprising-realtime-api`，
+market-data API 与聚合 POM 已移除；本页旧版本验证数字仅描述当时的合并结果。
+
 ## 运行边界
 
 `surprising-gateway` 是统一业务应用，保留现有启动类
@@ -128,7 +133,7 @@ MERGED_BUSINESS_IT_KAFKA=127.0.0.1:59092 \
 mvn -pl surprising-gateway test
 
 mvn -pl surprising-instrument/surprising-instrument-api,surprising-account/surprising-account-api,surprising-trading/surprising-trading-api test
-mvn -pl surprising-price/surprising-price-provider,surprising-funding/surprising-funding-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-market-data/surprising-market-data-provider,surprising-realtime/surprising-realtime-provider,surprising-maker clean test
+mvn -pl surprising-price/surprising-price-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-realtime/surprising-realtime-provider,surprising-maker -am clean test
 
 PRODUCT_LINE=LINEAR_PERPETUAL RUN_ID=business-merge-review ACTION=dry-run \
 AERON_CLUSTER_HOSTNAMES=127.0.0.1 bash scripts/start-product-line-providers.sh

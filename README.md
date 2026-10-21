@@ -1,5 +1,16 @@
 # Surprising EX
 
+## Maven 工程收拢（2026-10-21）
+
+- K 线共享事件 `CandleUpdatedEvent`、`CandleStatus` 原样归入 `surprising-realtime-api`；
+  Gateway 和行情应用复用现有 realtime-api 依赖，原 market-data API 与聚合 POM 已移除。
+- 账户、订单、合约三个 API 由根 POM 直接聚合，直接继承 `surprising-parent`；
+  三个中间聚合 POM 已移除。API 的 artifactId、目录、Java 包名与跨进程契约保持不变。
+- 仓库 Maven 工程由 29 个减少至 24 个（18 个 JAR、6 个 POM）。六个运行进程及产品线隔离保持不变。
+  行情和账户对外读入口继续使用 realtime 视图，Core 保留交易裁决、资金结算及原有控制/恢复边界。
+
+源码入口和验证范围见 [Maven 工程收拢记录](docs/validation/maven-module-consolidation-20261021.json)。
+
 大额划转验证由 `ProductTransferSecurityService` 按 `assets.scale_units` 把最小单位换算为币种数量后估值，不假定所有币种为 8 位精度。`ProductTransferSecurityServiceTest` 覆盖 6/8/18 位精度、阈值边界及未知币种拒绝；与代理、划转协调器联合 58 项测试通过（HotSpot JDK 27）。
 
 C2C 首轮服务端功能位于 [Gateway c2c 包](surprising-gateway/src/main/java/com/surprising/gateway/c2c/README.md)，部署及业务默认关闭。复用现货 Core 资金、realtime 查询、既有身份认证、审批和审计；新增 SQL 只持有广告、订单、库存分配和不可变资金意图。已验证真实托管/放币/退款、超时及双人申诉裁决、原请求恢复与 Gateway 崩溃续办，18 个资金核对阶段差额 0。Web、Flutter、管理端 C2C 页面和消息/私有凭证仍在开发，未发布服务器；测试范围、协议旧向量已知失败及清理状态见 [验证记录](docs/validation/c2c-foundation-20261020.json)。

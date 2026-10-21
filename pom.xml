@@ -16,11 +16,10 @@
         <module>surprising-parent</module>
         <module>surprising-product-api</module>
         <module>surprising-aeron-core</module>
-        <module>surprising-instrument</module>
-        <module>surprising-market-data</module>
+        <module>surprising-instrument/surprising-instrument-api</module>
         <module>surprising-price</module>
-        <module>surprising-trading</module>
-        <module>surprising-account</module>
+        <module>surprising-trading/surprising-trading-api</module>
+        <module>surprising-account/surprising-account-api</module>
         <module>surprising-derivatives-lifecycle</module>
         <module>surprising-realtime</module>
         <module>surprising-gateway</module>

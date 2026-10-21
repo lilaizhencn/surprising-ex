@@ -33,11 +33,6 @@
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-market-data-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
             <artifactId>surprising-price-api</artifactId>
             <version>${project.version}</version>
         </dependency>

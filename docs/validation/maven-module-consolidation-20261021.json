@@ -1,0 +1,425 @@
+{
+  "date": "2026-10-21",
+  "status": "verified-with-initial-transport-timeout-rechecked",
+  "baseCommit": "7ef7e6ca4edb252fde16db866deea78c02bf4ab2",
+  "scope": [
+    "Move CandleUpdatedEvent and CandleStatus unchanged into surprising-realtime-api",
+    "Remove surprising-market-data API JAR and aggregator POM",
+    "Aggregate account/trading/instrument API modules directly from the root and inherit surprising-parent"
+  ],
+  "reactor": {
+    "before": {
+      "projects": 29,
+      "jars": 19,
+      "poms": 10
+    },
+    "after": {
+      "projects": 24,
+      "jars": 18,
+      "poms": 6
+    },
+    "runtimeProcesses": 6
+  },
+  "movedContracts": [
+    {
+      "from": "surprising-market-data/surprising-market-data-api/src/main/java/com/surprising/candlestick/api/model/CandleUpdatedEvent.java",
+      "to": "surprising-realtime/surprising-realtime-api/src/main/java/com/surprising/candlestick/api/model/CandleUpdatedEvent.java",
+      "sha256": "641463c49e1f786bccbf42ef6986565315ae1b1f0ec1848f3a47944f1d7003ae",
+      "byteIdentical": true
+    },
+    {
+      "from": "surprising-market-data/surprising-market-data-api/src/main/java/com/surprising/candlestick/api/model/CandleStatus.java",
+      "to": "surprising-realtime/surprising-realtime-api/src/main/java/com/surprising/candlestick/api/model/CandleStatus.java",
+      "sha256": "7f7fbc7b8ba1b38dae69da587a22009fcd97dff402efecc1ba01ee30c60cdd19",
+      "byteIdentical": true
+    }
+  ],
+  "sourceIsolation": {
+    "input": "git archive of baseCommit plus only task paths",
+    "preExistingChangedFiles": 21,
+    "preExistingChangesIncluded": false,
+    "preExistingFilesByteIdentical": true
+  },
+  "verification": {
+    "jdk": "HotSpot Amazon Corretto 27.0.0.33.1",
+    "firstFullRun": {
+      "command": "mvn -B -ntp -fae clean verify",
+      "exitCode": 1,
+      "source": "HEAD plus module-consolidation files only",
+      "javaHome": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn",
+      "tests": {
+        "tests": 3994,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 247
+      },
+      "modules": {
+        "surprising-product-api": {
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-maker": {
+          "tests": 131,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-gateway": {
+          "tests": 1204,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 197
+        },
+        "surprising-instrument/surprising-instrument-api": {
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-realtime/surprising-realtime-provider": {
+          "tests": 178,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 44
+        },
+        "surprising-realtime/surprising-realtime-api": {
+          "tests": 40,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-trading/surprising-trading-api": {
+          "tests": 23,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-aeron-core/surprising-aeron-benchmarks": {
+          "tests": 315,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-aeron-core/surprising-aeron-tools": {
+          "tests": 22,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-aeron-core/surprising-aeron-service": {
+          "tests": 1555,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 2
+        },
+        "surprising-aeron-core/surprising-aeron-client": {
+          "tests": 66,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-aeron-core/surprising-aeron-protocol": {
+          "tests": 250,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-account/surprising-account-api": {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider": {
+          "tests": 63,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 3
+        },
+        "surprising-price/surprising-price-provider": {
+          "tests": 105,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1
+        },
+        "surprising-price/surprising-price-consumer": {
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "failedTests": [
+        {
+          "class": "com.surprising.realtime.provider.RealtimeRouterIntegrationTest",
+          "test": "targetsOnlySubscribersAndHealsACommitGapWithAnAuthoritativeSnapshot",
+          "message": "condition timed out",
+          "trace": "java.lang.AssertionError: condition timed out\n\tat com.surprising.realtime.provider.RealtimeRouterIntegrationTest.await(RealtimeRouterIntegrationTest.java:426)\n\tat com.surprising.realtime.provider.RealtimeRouterIntegrationTest.targetsOnlySubscribersAndHealsACommitGapWithAnAuthoritativeSnapshot(RealtimeRouterIntegrationTest.java:102)\n"
+        }
+      ],
+      "note": "One Aeron receiver readiness wait timed out before sending application frames; this full command exited 1, not a clean all-green run."
+    },
+    "targetedRechecks": [
+      {
+        "source": "baseline-source",
+        "command": "mvn -B -ntp -pl surprising-realtime/surprising-realtime-provider -am -Dtest=RealtimeRouterIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false verify",
+        "exitCode": 0,
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "testSourceSha256": "fc476d04c9698014def87f44e54e921b817017a11048fad848ad35e3ad75fbed",
+        "originalFailedTestIncluded": true
+      },
+      {
+        "source": "source",
+        "command": "mvn -B -ntp -pl surprising-realtime/surprising-realtime-provider -am -Dtest=RealtimeRouterIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false verify",
+        "exitCode": 0,
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "testSourceSha256": "fc476d04c9698014def87f44e54e921b817017a11048fad848ad35e3ad75fbed",
+        "originalFailedTestIncluded": true
+      }
+    ],
+    "workspaceCompile": {
+      "command": "mvn -B -ntp -DskipTests compile",
+      "exitCode": 0,
+      "includesOriginalUncommittedChanges": true
+    },
+    "artifacts": {
+      "surprising-account-api": {
+        "sha256": "e099597a558e0bc7c4b6d161d92531cb8b6df54ee10c11dcafa939c0a41248e8",
+        "parent": "surprising-parent"
+      },
+      "surprising-trading-api": {
+        "sha256": "1d83d72fbffca15cdfd0a912f88b86ff640b641e8b1a98be13c56f0e35b6c9d7",
+        "parent": "surprising-parent"
+      },
+      "surprising-instrument-api": {
+        "sha256": "cf96a6c924b4432a43ab72db195bda91229a69f7addd2a5ed8a2207d74b9ae45",
+        "parent": "surprising-parent"
+      },
+      "surprising-realtime-api": {
+        "sha256": "bff5739828613c70955c10b8c582d6bdc4ce36d636f4dc41f6abbd50ce250c20",
+        "classes": [
+          "com/surprising/candlestick/api/model/CandleUpdatedEvent.class",
+          "com/surprising/candlestick/api/model/CandleStatus.class"
+        ]
+      },
+      "surprising-gateway": {
+        "sha256": "bb7e99de7e6104760625e8896b796e3d61b6a27ed00826b45def772cffa1784a",
+        "marketDataJarAbsent": true,
+        "candleClassesOnlyIn": "surprising-realtime-api",
+        "classOccurrences": {
+          "com/surprising/candlestick/api/model/CandleUpdatedEvent.class": 1,
+          "com/surprising/candlestick/api/model/CandleStatus.class": 1
+        }
+      },
+      "surprising-realtime-provider": {
+        "sha256": "8a3c7ab28a0eb78569e9504841f154b52a20ab005bb84869d70cdd6680870f61",
+        "marketDataJarAbsent": true,
+        "candleClassesOnlyIn": "surprising-realtime-api",
+        "classOccurrences": {
+          "com/surprising/candlestick/api/model/CandleUpdatedEvent.class": 1,
+          "com/surprising/candlestick/api/model/CandleStatus.class": 1
+        }
+      }
+    },
+    "staticChecks": {
+      "reactorProjects": 24,
+      "deletedArtifactReferencedByActivePom": false,
+      "directApiParentsResolveToSharedParent": true,
+      "stagedDiffCheck": "passed"
+    },
+    "recheckConclusion": "Baseline and merged code both passed the unchanged transport integration test; the first readiness timeout was not reproduced. No business code, test assertion or timeout was changed.",
+    "logSha256": {
+      "clean-verify.log": "e2584a5e56ec665b3faf8ffca7d43ddf89e0f5f8b99d94638dd6e4ef4418b8d3",
+      "workspace-compile.log": "6f6aca1edc74ec4291c4234ca677bfae9e070f93923a6be3d95cb33aeff0e6f9",
+      "consolidated-targeted.log": "3b2fbc3e3f7c72b99bbd45ba0406c8de032df886db7d73d40bc352ef8ecf7b61",
+      "baseline-targeted.log": "ec2e6d647f854d87adfd7f3955c1337ad7d0eed4dc9d9436bdafedf33c68a201"
+    },
+    "skippedByReason": {
+      "Environment variable [INSTRUMENT_TEST_JDBC_URL] does not exist": {
+        "count": 181,
+        "classes": {
+          "com.surprising.instrument.provider.repository.MarketSummaryPostgresTest": 1,
+          "com.surprising.trading.trigger.service.TriggerOrderProjectionPostgresTest": 5,
+          "com.surprising.gateway.c2c.C2cOrdersPostgresTest": 6,
+          "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest": 7,
+          "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest": 7,
+          "com.surprising.gateway.c2c.C2cFundsPostgresTest": 6,
+          "com.surprising.gateway.c2c.C2cSubmissionsPostgresTest": 4,
+          "com.surprising.gateway.provider.service.PortfolioIncomeServicePostgresTest": 11,
+          "com.surprising.gateway.c2c.C2cAdsPostgresTest": 4,
+          "com.surprising.trading.order.repository.CommittedCommandResultQueryPostgresTest": 5,
+          "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest": 7,
+          "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest": 15,
+          "com.surprising.trading.order.repository.AlgoOrderProjectionPostgresTest": 3,
+          "com.surprising.gateway.c2c.C2cChatPostgresTest": 15,
+          "com.surprising.gateway.c2c.C2cAccessPostgresTest": 4,
+          "com.surprising.trading.order.repository.TradingMetricsPostgresTest": 2,
+          "com.surprising.gateway.c2c.C2cHttpPostgresTest": 9,
+          "com.surprising.instrument.provider.repository.InstrumentLifecycleDrainPostgresTest": 1,
+          "com.surprising.instrument.provider.service.InstrumentCurrentConfigurationIntegrationTest": 1,
+          "com.surprising.trading.order.repository.TradeProjectionPostgresTest": 8,
+          "com.surprising.asset.AssetConfigurationIntegrationTest": 2,
+          "com.surprising.gateway.c2c.C2cMeHttpPostgresTest": 10,
+          "com.surprising.trading.order.repository.OrderHistoryPostgresTest": 2,
+          "com.surprising.realtime.provider.export.CommittedFundingProjectionPostgresTest": 4,
+          "com.surprising.realtime.provider.export.CommittedTradingStatisticsPostgresTest": 3,
+          "com.surprising.realtime.provider.export.CommittedAlgoProjectionPostgresTest": 3,
+          "com.surprising.realtime.provider.export.CommittedPortfolioRepairIntegrationTest": 1,
+          "com.surprising.candlestick.provider.repository.CandleQueryPostgresTest": 4,
+          "com.surprising.realtime.provider.export.CommittedPortfolioHistoryPostgresTest": 6,
+          "com.surprising.realtime.provider.export.CommittedDeliveryProjectionPostgresTest": 3,
+          "com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest": 20,
+          "com.surprising.funding.provider.repository.FundingHistoryPostgresTest": 2
+        }
+      },
+      "Environment variable [C2C_R2_LIVE_QA] does not exist": {
+        "count": 2,
+        "classes": {
+          "com.surprising.gateway.c2c.C2cR2GatewayLiveTest": 1,
+          "com.surprising.gateway.c2c.C2cR2StorageLiveTest": 1
+        }
+      },
+      "Environment variable [PRODUCT_ACCESS_IT_BASE_URL] does not exist": {
+        "count": 2,
+        "classes": {
+          "com.surprising.gateway.provider.product.AdminProductLinesLiveTest": 2
+        }
+      },
+      "Environment variable [SURPRISING_WITHDRAWAL_IT_DATABASE_URL] does not exist": {
+        "count": 22,
+        "classes": {
+          "com.surprising.gateway.provider.service.CustodyWithdrawalReconciliationPostgresTest": 22
+        }
+      },
+      "Environment variable [SIX_LINE_LIVE_PRODUCT] does not exist": {
+        "count": 1,
+        "classes": {
+          "com.surprising.gateway.provider.local.SixProductLineContractLiveTest": 1
+        }
+      },
+      "Environment variable [GATEWAY_PRODUCTS_TEST_JDBC_URL] does not exist": {
+        "count": 2,
+        "classes": {
+          "com.surprising.gateway.provider.product.GatewayProductSettingsIntegrationTest": 2
+        }
+      },
+      "Environment variable [MAINTENANCE_TEST_JDBC_URL] does not exist": {
+        "count": 10,
+        "classes": {
+          "com.surprising.aeron.service.orchestration.MaintenanceIntegrationTest": 10
+        }
+      },
+      "System property [gateway.shared-driver.it] does not exist": {
+        "count": 1,
+        "classes": {
+          "com.surprising.gateway.provider.product.SharedCommandTransportIntegrationTest": 1
+        }
+      },
+      "Environment variable [ORDER_SETTINGS_TEST_JDBC_URL] does not exist": {
+        "count": 1,
+        "classes": {
+          "com.surprising.trading.order.config.OrderBusinessSettingsIntegrationTest": 1
+        }
+      },
+      "Environment variable [LOGIN_TEST_JDBC_URL] does not exist": {
+        "count": 7,
+        "classes": {
+          "com.surprising.gateway.provider.auth.KycProviderDatabaseTest": 1,
+          "com.surprising.gateway.provider.auth.MfaRecoveryDatabaseTest": 2,
+          "com.surprising.gateway.provider.auth.LoginVerificationDatabaseTest": 4
+        }
+      },
+      "Environment variable [MERGED_BUSINESS_IT_BASE_URL] does not exist": {
+        "count": 1,
+        "classes": {
+          "com.surprising.gateway.provider.local.MergedBusinessHttpIntegrationTest": 1
+        }
+      },
+      "Environment variable [TELEGRAM_TEST_JDBC_URL] does not exist": {
+        "count": 7,
+        "classes": {
+          "com.surprising.gateway.provider.auth.TelegramLoginDatabaseTest": 5,
+          "com.surprising.gateway.provider.auth.PrimaryAuthenticationDatabaseTest": 2
+        }
+      },
+      "Environment variable [SURPRISING_LIVE_QA] does not exist": {
+        "count": 2,
+        "classes": {
+          "com.surprising.gateway.provider.local.LocalTradingLifecycleLiveTest": 2
+        }
+      },
+      "Environment variable [MULTI_PRODUCT_GATEWAY_IT_BASE_URL] does not exist": {
+        "count": 3,
+        "classes": {
+          "com.surprising.gateway.provider.product.MultiProductGatewayHttpIntegrationTest": 3
+        }
+      },
+      "Environment variable [C2C_BROWSER_QA_DIR] does not exist": {
+        "count": 1,
+        "classes": {
+          "com.surprising.gateway.c2c.C2cBrowserQaTest": 1
+        }
+      },
+      "System property [surprising.aeron.matching-phase-log-interval] does not exist": {
+        "count": 1,
+        "classes": {
+          "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest": 1
+        }
+      },
+      "Disabled on operating system: Mac OS X": {
+        "count": 1,
+        "classes": {
+          "com.surprising.aeron.service.config.TradingCpuAffinityTest": 1
+        }
+      },
+      "Environment variable [LIFECYCLE_TEST_JDBC_URL] does not exist": {
+        "count": 1,
+        "classes": {
+          "com.surprising.derivatives.lifecycle.LifecycleBusinessSettingsIntegrationTest": 1
+        }
+      },
+      "Environment variable [PRICE_TEST_JDBC_URL] does not exist": {
+        "count": 1,
+        "classes": {
+          "com.surprising.price.settings.PriceBusinessSettingsIntegrationTest": 1
+        }
+      }
+    }
+  },
+  "unverified": [
+    "No deployed services, live user/maker trading API stack or wallet was started or migrated.",
+    "Database, external HTTP/R2 and other opt-in scenarios without configured environments remain skipped; see skippedTests.",
+    "The full Maven run includes existing benchmark support/functional cases. No separate capacity acceptance or JMH/JFR comparison was performed, and no throughput improvement is claimed.",
+    "Existing uncommitted order changes were compiled together with the merged POMs, but were excluded from the isolated full functional test source and this commit."
+  ],
+  "cleanup": {
+    "state": "complete",
+    "temporaryDirectory": "/tmp/surprising-ex-module-merge-20261021-fxu8bw3w",
+    "temporarySourceTreesLogsAndReportsRemoved": true,
+    "taskProcessIds": [],
+    "checkedPorts": [
+      9094,
+      9082,
+      9095,
+      9087,
+      9096,
+      19094,
+      19847,
+      15432,
+      16379,
+      19092,
+      19093,
+      56349
+    ],
+    "openCheckedPorts": [],
+    "note": "Temporary paths in the first failure trace and log evidence are historical references; the compact verification summary and artifact hashes remain in this file. Shared pre-existing PostgreSQL was not altered."
+  }
+}

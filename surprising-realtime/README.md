@@ -1,5 +1,17 @@
 # 统一行情应用：成交导出、K 线与实时路由
 
+## 共享契约与查询入口（2026-10-21）
+
+`CandleUpdatedEvent`、`CandleStatus` 归入 `surprising-realtime-api`，Java 包仍为
+`com.surprising.candlestick.api.model`。Gateway 和行情应用直接使用现有 realtime-api 依赖，
+不再构建 market-data API 或聚合 POM。事件字段、枚举值和 JSON 保持不变。
+
+盘口入口仍是 Gateway 的 `/api/v1/gateway/trading-market/orderbook`，由
+`com.surprising.trading.matching` 读取 realtime 写入 Valkey 的按产品线、币对隔离视图。
+视图未初始化、缺失或超过 5 秒未刷新返回 503，不回查 Core。请求深度接受 1–100，
+实际窗口最多每侧 50 档；响应 depth 反映实际窗口。内部 `/api/v1/trading/market/orderbook`
+仍由 Gateway 9094 承接。K 线聚合、历史查询与路由仍运行在本行情进程。
+
 ## 未收盘 K 线实时更新（2026-10-09）
 
 `CandlestickStreamConfiguration` 将所有 1m 完整快照（PARTIAL/CLOSED）交给
@@ -284,7 +296,7 @@ Kafka Streams TopologyTestDriver 覆盖原聚合、去重、水位线、迟到�
 
 ```bash
 mvn -pl surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests install
-mvn -pl surprising-trading/surprising-trading-api,surprising-market-data/surprising-market-data-api install
+mvn -pl surprising-realtime/surprising-realtime-provider -am install -DskipTests
 mvn -pl surprising-gateway,surprising-realtime/surprising-realtime-api,surprising-realtime/surprising-realtime-provider,surprising-maker test
 mvn -pl surprising-gateway,surprising-realtime/surprising-realtime-provider,surprising-maker -DskipTests package
 PRODUCT_LINE=LINEAR_PERPETUAL REALTIME_ENABLED=true RUN_ID=market-merge-review ACTION=dry-run AERON_CLUSTER_HOSTNAMES=127.0.0.1 bash scripts/start-product-line-providers.sh
@@ -331,7 +343,7 @@ Driver 仍使用 SHARED 模式，线程、共享内存与 term buffer 开销保�
 迁移前停止旧独立 Driver；同一个目录只允许一个活跃 Driver，不能让多个 gateway 同时占用。
 这是同机共享目录的部署方式；跨主机不能用目录字符串代替各主机本地的 Driver。
 
-K 线查询、周期和聚合输入类型已迁入本模块 `src/main/java/com/surprising/candlestick/api`；`surprising-market-data-api` 仅保留与 gateway WebSocket 共用的 K 线事件和状态。
+K 线查询、周期和聚合输入类型位于 provider 的 `src/main/java/com/surprising/candlestick/api`；与 Gateway WebSocket 共用的 `CandleUpdatedEvent`、`CandleStatus` 统一位于 `surprising-realtime-api` 的同名 Java 包。原 market-data API 和聚合 POM 已移除。
 
 ## 提交内订阅查询复用（2026-09-26）
 
