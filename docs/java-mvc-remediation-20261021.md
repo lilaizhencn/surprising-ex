@@ -156,3 +156,5 @@
 - 参数职责4将私人成交和后台成交的limit、合约/订单/时间筛选、排序与游标解码归Controller；Service/Repository接收精确原生坐标。纯游标工具保持旧令牌与作用域格式，Repository仅以最后事实行编码输出游标，保留SQL必要就绪关联。定向192项、扩大干净构建335项全部通过无跳过；撤去两种游标作用域匹配的2项负例均捕获预期失败，逐字节恢复后绿色。真实Controller→Service→PostgreSQL验证自成交双侧/隐私、六产品隔离、两种排序和long坐标。关闭ADD-010；见 [成交参数绑定验证](validation/java-mvc-trade-binding-20261022.json)。所属资源已清理，其余补充发现、全源码复扫/门禁及最终实栈继续。
 
 - 参数职责5将条件单历史请求的用户/合约/状态/ID、limit、排序与作用域游标绑定归AdminTriggerOrderRequestController；Service只接收原生状态/坐标并检查产品归属，Repository保留事实解码及必要单SQL就绪关联。纯格式工具保持原令牌。定向77项、扩大干净构建337项全部通过无跳过；撤去作用域匹配的1项负例捕获预期失败，逐字节恢复后绿色。实际Controller→Service→PostgreSQL验证双方向分页、精确long ID和产品/用户/排序隔离。关闭ADD-011；见 [条件单查询绑定验证](validation/java-mvc-trigger-binding-20261022.json)。所属资源已清理，其余补充发现、全源码复扫/门禁及最终实栈继续。
+
+- 参数职责6将合约标识/资产ID、精度表示、订单选项及指数源URL/路径/解析器/JSON格式校验移至Controller入口，复用无状态InstrumentConfigurationFormats工具。InstrumentValidator只负责金融、产品、档位连续性、指数源数量/兼容性等业务规则。内部配置安装及数据库重建后的状态更新显式验证配置表示，避免绕过HTTP后丢失完整性保护；行锁、版本、事务和Outbox不变。定向168项、扩大干净构建459项通过无跳过；撤去入口格式检查的12项负例均捕获预期失败，恢复后绿色。关闭ADD-007；见 [合约配置格式职责验证](validation/java-mvc-instrument-format-20261022.json)。前两轮测试夹具缺少Jackson必填primitive字段及Mockito可空Integer默认0已修正；所属资源已清理，其余补充发现、复扫/门禁及最终实栈继续。

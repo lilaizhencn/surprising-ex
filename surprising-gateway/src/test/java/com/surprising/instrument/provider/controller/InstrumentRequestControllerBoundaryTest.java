@@ -25,6 +25,17 @@ class InstrumentRequestControllerBoundaryTest {
 
     @Test void nativeVersionConflictRemains409AndInternalStateFailuresAreNotMisreportedAs404() {
         var request = mock(InstrumentUpsertRequest.class);
+        when(request.instrumentId()).thenReturn(null);
+        when(request.symbol()).thenReturn("BTC-USDT");
+        when(request.baseAssetId()).thenReturn(3);
+        when(request.quoteAssetId()).thenReturn(1);
+        when(request.settleAssetId()).thenReturn(1);
+        when(request.contractValueAssetId()).thenReturn(1);
+        when(request.status()).thenReturn(com.surprising.instrument.api.model.InstrumentStatus.TRADING);
+        when(request.instrumentType()).thenReturn(com.surprising.instrument.api.model.InstrumentType.SPOT);
+        when(request.contractType()).thenReturn(com.surprising.instrument.api.model.ContractType.SPOT);
+        when(request.supportedOrderTypes()).thenReturn(java.util.List.of("LIMIT"));
+        when(request.supportedTimeInForce()).thenReturn(java.util.List.of("GTC"));
         when(service.edit(request, "1", "edit", 2)).thenThrow(new InstrumentOperationException(
                 InstrumentOperationException.Reason.CONFLICT, "合约配置已更新，请重新加载后检查修改；本次修改未保存"));
         assertThatThrownBy(() -> controller.edit(request, "1", "edit", 2)).isInstanceOfSatisfying(ResponseStatusException.class,

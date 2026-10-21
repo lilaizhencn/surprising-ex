@@ -35,6 +35,20 @@ class InstrumentServiceTest {
 
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().findAndAddModules().build();
 
+    @Test void internalConfigurationInstallationAndPersistedStatusChangesRejectDamagedRepresentation() {
+        var storage=mock(InstrumentStorageService.class);
+        var outbox=mock(InstrumentOutboxService.class);
+        var business=new InstrumentService(storage,new InstrumentValidator(),new InstrumentProperties(),outbox,mock(MarketSummaryService.class));
+        var damaged=linearPerpetual("BTC-USDT-SWAP",4,100);
+        assertThatThrownBy(()->business.upsert(request(damaged,100))).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("invalid symbol");
+        org.mockito.Mockito.verifyNoInteractions(storage,outbox);
+        when(storage.latest(1,ProductLine.LINEAR_PERPETUAL)).thenReturn(Optional.of(damaged));
+        assertThatThrownBy(()->business.updateStatus(1,ProductLine.LINEAR_PERPETUAL,InstrumentStatus.TRADING))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("invalid symbol");
+        verify(storage,org.mockito.Mockito.never()).save(any(),any(),any(),any(),any());
+        org.mockito.Mockito.verifyNoInteractions(outbox);
+    }
+
     @Test
     void publishesDeliverySettlementToProductTopic() {
         InstrumentOutboxService outboxService = mock(InstrumentOutboxService.class);

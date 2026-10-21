@@ -119,6 +119,7 @@ public class InstrumentRequestController {
     public InstrumentResponse edit(InstrumentUpsertRequest request, String operator, String reason, long expectedChangeId) {
         try {
             requireAudit(operator, reason);
+            com.surprising.instrument.provider.utils.InstrumentConfigurationFormats.validate(request);
             return instrumentService.edit(request, operator, reason, expectedChangeId);
         } catch (InstrumentOperationException conflict) {
             throw httpError(conflict);
@@ -143,6 +144,7 @@ public class InstrumentRequestController {
     public InstrumentResponse upsert(InstrumentUpsertRequest request, String operator, String reason) {
         try {
             requireAudit(operator, reason);
+            com.surprising.instrument.provider.utils.InstrumentConfigurationFormats.validate(request);
             return instrumentService.upsert(request, operator, reason);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);

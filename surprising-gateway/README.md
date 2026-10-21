@@ -508,3 +508,5 @@ C2C后台的原始请求头、method/path/query、User-Agent和IP由 `c2c.contro
 成交查询由 `OrderRequestController` / `AdminOrderRequestController` 绑定范围、排序及作用域游标，Service 和 `TradeProjectionRepository` 只接收 `TradeReadCursor` 的精确 long/int 坐标；`TradeReadCursors` 保持原有令牌格式。SQL保留同表 maker/taker 双侧事实与必要就绪关联，输出游标依据最后事实行编码。
 
 条件单历史查询由 `AdminTriggerOrderRequestController` 校验原始筛选、状态和分页协议，经 `TriggerReadCursors` 绑定为 `CoreTriggerOrderStatus`、`TriggerReadCursor` 和排序方向；Service保留产品归属检查，Repository只处理原生SQL条件和持久化事实。
+
+合约配置由 `InstrumentRequestController` 在调用业务前通过 `InstrumentConfigurationFormats` 检查标识、表示和连接协议格式；`InstrumentValidator` 聚合产品、保证金、资金费、档位及指数源业务规则。内部配置安装入口和基于持久化配置的状态更新仍显式检查表示完整性，均不依赖HTTP Controller。

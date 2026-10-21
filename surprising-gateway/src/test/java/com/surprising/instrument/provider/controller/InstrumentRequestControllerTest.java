@@ -24,6 +24,65 @@ class InstrumentRequestControllerTest {
             JsonMapper.builder().findAndAddModules().build());
 
     @ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("malformedConfigurations")
+    void malformedConfigurationIsRejectedBeforeBusinessEdit(String path, String jsonValue) {
+        var business=mock(InstrumentService.class);
+        var json=JsonMapper.builder().findAndAddModules().build();
+        var fields=validFormat(json);
+        var target=path.startsWith("source.")?(tools.jackson.databind.node.ObjectNode)fields.get("indexSources").get(0):fields;
+        target.set(path.substring(path.lastIndexOf('.')+1),json.readTree(jsonValue));
+        var request=json.treeToValue(fields,InstrumentUpsertRequest.class);
+        var controller=new InstrumentRequestController(business,json);
+        for (boolean edit:List.of(false,true)) {
+            assertThatThrownBy(()->{if(edit)controller.edit(request,"1","edit config",0);else controller.upsert(request,"1","edit config");})
+                    .isInstanceOfSatisfying(ResponseStatusException.class,failure->assertThat(failure.getStatusCode().value()).isEqualTo(400));
+        }
+        verifyNoInteractions(business);
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> malformedConfigurations() {
+        return java.util.stream.Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of("symbol","\"BTC-USDT-SWAP\""),
+                org.junit.jupiter.params.provider.Arguments.of("instrumentId","0"),
+                org.junit.jupiter.params.provider.Arguments.of("baseAssetId","0"),
+                org.junit.jupiter.params.provider.Arguments.of("status","null"),
+                org.junit.jupiter.params.provider.Arguments.of("pricePrecision","19"),
+                org.junit.jupiter.params.provider.Arguments.of("supportedOrderTypes","[\"LIMIT\",\"LIMIT\"]"),
+                org.junit.jupiter.params.provider.Arguments.of("source.baseUrl","\"https://user:pass@example.com\""),
+                org.junit.jupiter.params.provider.Arguments.of("source.path","\"//ticker\""),
+                org.junit.jupiter.params.provider.Arguments.of("source.parser","\"UNKNOWN\""),
+                org.junit.jupiter.params.provider.Arguments.of("source.websocketUrl","\"https://example.com\""),
+                org.junit.jupiter.params.provider.Arguments.of("source.websocketSubscribeMessage","\"invalid-json\""),
+                org.junit.jupiter.params.provider.Arguments.of("source.conversionMode","\"UNKNOWN\""));
+    }
+
+    @Test void validRepresentationKeepsTheSameConfigurationAtBusinessEntry() {
+        var business=mock(InstrumentService.class);
+        var json=JsonMapper.builder().findAndAddModules().build();
+        var request=json.treeToValue(validFormat(json),InstrumentUpsertRequest.class);
+        new InstrumentRequestController(business,json).edit(request,"1","edit config",0);
+        verify(business).edit(request,"1","edit config",0);
+    }
+
+    private static tools.jackson.databind.node.ObjectNode validFormat(JsonMapper json) {
+        return (tools.jackson.databind.node.ObjectNode)json.readTree("""
+                {"symbol":"BTC-USDT","instrumentType":"SPOT","contractType":"SPOT","baseAssetId":3,"quoteAssetId":1,
+                 "contractMultiplierPpm":1000000,"priceTickUnits":1,"quantityStepUnits":1,"minQuantitySteps":1,"maxQuantitySteps":100,
+                 "minNotionalUnits":1,"maxNotionalUnits":100,"notionalMultiplierUnits":1,"postOnlyEnabled":false,"reduceOnlyEnabled":false,
+                 "marketOrderEnabled":false,"maxLeveragePpm":1000000,"initialMarginRatePpm":1000000,"maintenanceMarginRatePpm":1000000,
+                 "makerFeeRatePpm":0,"takerFeeRatePpm":0,"maxPositionNotionalUnits":100,"userOpenInterestLimitRatePpm":0,
+                 "userOpenInterestLimitFloorUnits":1,"fundingIntervalHours":0,"interestRatePpm":0,"fundingRateCapPpm":0,"fundingRateFloorPpm":0,
+                 "impactNotionalUnits":1,"minValidIndexSources":1,"settleAssetId":1,"contractValueAssetId":1,"status":"TRADING","pricePrecision":1,"quantityPrecision":3,
+                 "supportedOrderTypes":["LIMIT"],"supportedTimeInForce":["GTC"],"indexSources":[
+                   {"source":"A","enabled":true,"baseUrl":"https://example.com","path":"/ticker","sourceSymbol":"BTCUSDT",
+                    "parser":"BINANCE_BOOK_TICKER","quoteCurrency":"USDT","targetQuoteCurrency":"USDT",
+                    "conversionMode":"DISCOUNT","conversionOperation":"MULTIPLY","weightPpm":500000,
+                    "websocketEnabled":true,"websocketUrl":"wss://example.com","websocketSubscribeMessage":"{}",
+                    "websocketParser":"BINANCE_BOOK_TICKER","fallbackWeightMultiplierPpm":1000000}]}
+                """);
+    }
+
+    @ParameterizedTest
     @EnumSource(value=ContractType.class, names={"LINEAR_DELIVERY","INVERSE_DELIVERY","VANILLA_OPTION"})
     void settlingDeliveryRemainsAvailableByIdAndInCatalog(ContractType type) {
         var settling = instrument(type, InstrumentStatus.SETTLING);

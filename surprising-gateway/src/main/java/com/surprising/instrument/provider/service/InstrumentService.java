@@ -141,6 +141,8 @@ public class InstrumentService {
 
     @Transactional
     public InstrumentResponse upsert(InstrumentUpsertRequest request) {
+        // 内部配置安装入口不经过HTTP；先验证配置表示，再由业务规则校验金融/产品约束。
+        com.surprising.instrument.provider.utils.InstrumentConfigurationFormats.validate(request);
         return upsert(request, InstrumentEventType.UPSERTED);
     }
 
@@ -212,6 +214,8 @@ public class InstrumentService {
                 current.deliveryTime(), current.underlyingInstrumentId(), current.underlyingProductLine(), current.strikePriceUnits(),
                 current.optionType(), current.optionExerciseStyle(), current.settlementMethod(), status, Instant.now(),
                 current.riskLimitBrackets(), current.indexSources());
+        // 这里校验的是数据库重建出的完整配置，防止状态变更传播损坏的持久化配置。
+        com.surprising.instrument.provider.utils.InstrumentConfigurationFormats.validate(request);
         return upsert(request, InstrumentEventType.STATUS_CHANGED,operator,reason);
     }
 
@@ -357,10 +361,7 @@ public class InstrumentService {
     }
 
     private String normalizeSymbol(String symbol) {
-        if (symbol == null || !symbol.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
-            throw new IllegalArgumentException("invalid symbol: " + symbol);
-        }
-        return symbol.trim().toUpperCase();
+        return symbol.trim().toUpperCase(java.util.Locale.ROOT);
     }
 
     private String snapshotChecksum(ProductLine productLine,

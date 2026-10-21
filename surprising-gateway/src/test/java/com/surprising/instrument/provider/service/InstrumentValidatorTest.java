@@ -56,10 +56,7 @@ class InstrumentValidatorTest {
         fields.put("minValidIndexSources", 2);
         assertThatThrownBy(() -> validator.validate(json.treeToValue(fields, InstrumentUpsertRequest.class)))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("enabled index sources");
-        fields.put("minValidIndexSources", 1);
-        ((tools.jackson.databind.node.ObjectNode) fields.get("indexSources").get(0)).put("baseUrl", "invalid");
-        assertThatThrownBy(() -> validator.validate(json.treeToValue(fields, InstrumentUpsertRequest.class)))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("baseUrl");
+
     }
 
     @Test
