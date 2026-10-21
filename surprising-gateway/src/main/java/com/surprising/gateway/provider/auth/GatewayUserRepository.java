@@ -94,6 +94,12 @@ public class GatewayUserRepository {
                 """, (rs, rowNum) -> toUserRecord(rs), userId).stream().findFirst();
     }
 
+    /** 与C2C设置/商家审核串行；只锁用户行，锁随调用方业务事务释放。 */
+    public boolean lockForNoKeyUpdate(long userId) {
+        return !jdbcTemplate.query("SELECT user_id FROM gateway_users WHERE user_id=? FOR NO KEY UPDATE",
+                (row, n) -> row.getLong(1), userId).isEmpty();
+    }
+
     public List<UserRecord> find(String query, String status, int limit) {
         String normalizedQuery = normalizeLikeQuery(query);
         String normalizedStatus = normalizeStatusFilter(status);

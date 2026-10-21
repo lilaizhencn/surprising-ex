@@ -1,7 +1,9 @@
 package com.surprising.gateway.c2c.repository;
 
 import com.surprising.gateway.c2c.model.C2cAdminRows.Merchant;
+import com.surprising.gateway.c2c.model.C2cMerchant;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -11,6 +13,21 @@ public class C2cMerchantRepository {
     private final JdbcTemplate jdbc;
 
     public C2cMerchantRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+    public Optional<C2cMerchant> find(long userId, boolean lock) {
+        return jdbc.query("SELECT * FROM c2c_merchants WHERE user_id=?" + (lock ? " FOR UPDATE" : ""),
+                (r, n) -> new C2cMerchant(r.getLong("user_id"), r.getString("status"), r.getString("tier"),
+                        r.getString("application_text"), r.getString("review_reason"), r.getLong("revision"),
+                        r.getTimestamp("created_at").toInstant(), r.getTimestamp("updated_at").toInstant()),
+                userId).stream().findFirst();
+    }
+
+    public void review(long userId, String status, String tier, String reason, long reviewer) {
+        jdbc.update("""
+                UPDATE c2c_merchants SET status=?,tier=?,review_reason=?,reviewed_by=?,reviewed_at=now(),revision=revision+1,updated_at=now()
+                WHERE user_id=?
+                """, status, tier, reason, reviewer, userId);
+    }
 
     /**
      * 以商家为分页根，一次读取昵称、KYC状态、最新质押及其资产精度用于审核列表。

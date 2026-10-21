@@ -17,7 +17,7 @@
 | 2 | KYC/MFA 通知持久意图、提交后发送、失败重试与 task 入口 | 已验证 | 业务回滚、新投递实例续办、并发领取、过期租约及失败重试 |
 | 3 | 用户安全 Controller 业务和事务下沉；设备/IP 批量读取与分页 | 已验证 | 定向24项、扩大认证201项；失败尝试计数、SQL故障回滚与HTTP分页 |
 | 4 | C2C Controller 参数和业务边界、类型化结果、Repository 与 Service 职责 | 进行中 | 后台列表与市场准入已拆分；其余 C2C 聚合和类型化待继续 |
-| 5 | C2C 多表 Repository 和 Service SQL；统一广告资格与批量查询 | 待处理 | 待并发、审批、质押、库存及资金守恒 |
+| 5 | C2C 多表 Repository 和 Service SQL；统一广告资格与批量查询 | 进行中 | 安全凭据/审核/收款SQL已拆分；其余多表写、查询资格与资金实栈继续处理 |
 | 6 | 其余多表写 Repository：公告、认证、托管、维护与提交投影 | 待处理 | 待单表职责检查及原子提交/重放回归 |
 | 7 | 跨表读取例外逐项核对、注释与单表事实访问收拢 | 待处理 | 待 83 个 Repository 表职责复查 |
 | 8 | RequestService HTTP 职责、底层 HTTP 异常和业务异常类型 | 待处理 | 待 HTTP 契约及共享客户端回归 |
@@ -51,3 +51,5 @@
 
 - 批次 4.1 删除 `C2cAdminQueries` 和 `C2cMarkets`：后台查询聚合、市场准入分别归 `c2c.service`，单表访问与必要关联读取归 `c2c.repository`，模型归 `c2c.model`。后台分页与状态校验移至 Controller，广告/订单列表市场信息改为当前页批量读取。关联用途和边界见 [C2C 分层记录](c2c-java-layering.md)。
 - 批次 4.1 基线97项、定向24项、干净构建扩大104项均通过且无跳过；逐行查询负例2项中1项按预期失败。关闭 MVC-022、026、075、078、169、173、175、191，其余 C2C 问题继续保留。对应验证见 `validation/java-mvc-c2c-admin-20261021.json`。所属 PostgreSQL、临时日志与已汇总报告已清理。
+
+- 批次 4.2 将 `C2cAccess`、`C2cAdminReview`、`C2cPaymentAccounts` 的 SQL 移至对应单表 Repository，摘要计算归 `c2c.utils`；用户行锁回到原用户 Repository。保留独立安全验证提交、广告先于账号的锁顺序及原审核事务。定向45项、干净构建扩大107项全部通过，均无跳过；移除四个实际入口事务后4项负例全部按预期失败。关闭 MVC-212、214、221，包/格式/类型契约问题仍待继续。见 [C2C Service 验证](validation/java-mvc-c2c-services-20261021.json)。所属数据库、日志及已汇总报告已清理。

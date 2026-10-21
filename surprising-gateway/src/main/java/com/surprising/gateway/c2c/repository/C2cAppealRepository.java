@@ -2,6 +2,7 @@ package com.surprising.gateway.c2c.repository;
 
 import com.surprising.gateway.c2c.model.C2cAdminRows.Appeal;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -12,6 +13,11 @@ public class C2cAppealRepository {
     private final JdbcTemplate jdbc;
 
     public C2cAppealRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+    public Optional<UUID> orderId(UUID id) {
+        return jdbc.query("SELECT order_id FROM c2c_appeals WHERE appeal_id=?",
+                (r, n) -> r.getObject(1, UUID.class), id).stream().findFirst();
+    }
 
     public List<Appeal> adminPage(String status, UUID orderId, int count, int offset) {
         return jdbc.query("""

@@ -1,7 +1,9 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.model.C2cMarket;
+import com.surprising.gateway.c2c.model.C2cPaymentAccount;
 import com.surprising.gateway.c2c.service.C2cMarketService;
+import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -48,7 +50,7 @@ public class C2cOrders {
     C2cOrdersRepository.Order create(JwtPrincipal user,String authorization,String key,UUID quoteId,String email,String totp) {
         C2cAds.requireKey(key);
         if(quoteId==null) throw new IllegalArgumentException("请选择有效报价");
-        String hash=C2cAccess.digest(quoteId.toString());
+        String hash=C2cDigests.sha256(quoteId.toString());
         var receipt=submissions.begin(user.userId(),key,"ORDER_CREATE",hash);
         if(receipt.status().equals("SUCCEEDED")) {
             var accepted = orders.get(receipt.resultId(),false);
@@ -218,7 +220,7 @@ public class C2cOrders {
     }
     private boolean applied(UUID order,String purpose) {var intent=funds.find("ORDER",order,purpose);return intent!=null && intent.status().equals("APPLIED");}
     private static boolean canRestore(C2cAdsRepository.Ad ad) {return List.of("ACTIVE","PAUSED").contains(ad.status());}
-    private C2cPaymentAccounts.Account paymentAccount(long userId,C2cAdsRepository.Ad ad,C2cMarket market,UUID id) {
+    private C2cPaymentAccount paymentAccount(long userId,C2cAdsRepository.Ad ad,C2cMarket market,UUID id) {
         long seller=ad.side().equals("SELL")?ad.makerUserId():userId;
         var account=payments.get(seller,id,true);
         if(!account.fiat().equals(market.fiat()) || !ad.methods().contains(account.method())

@@ -1,7 +1,11 @@
 package com.surprising.gateway.c2c.repository;
 
 import com.surprising.gateway.c2c.model.C2cAdminRows.PaymentAccount;
+import com.surprising.gateway.c2c.model.C2cPaymentAccount;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -12,6 +16,59 @@ public class C2cPaymentAccountRepository {
     private final JdbcTemplate jdbc;
 
     public C2cPaymentAccountRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+    public List<C2cPaymentAccount> byUser(long userId) {
+        return jdbc.query("SELECT * FROM c2c_payment_accounts WHERE user_id=? ORDER BY created_at DESC,account_id", this::read, userId);
+    }
+
+    public Optional<C2cPaymentAccount> find(long userId, UUID id) {
+        return jdbc.query("SELECT * FROM c2c_payment_accounts WHERE user_id=? AND account_id=?", this::read, userId, id)
+                .stream().findFirst();
+    }
+
+    public Optional<C2cPaymentAccount> lock(UUID id) {
+        return jdbc.query("SELECT * FROM c2c_payment_accounts WHERE account_id=? FOR UPDATE", this::read, id).stream().findFirst();
+    }
+
+    public void insert(UUID id, long userId, String fiat, String method, String encrypted, String masked) {
+        jdbc.update("""
+                INSERT INTO c2c_payment_accounts(account_id,user_id,fiat,method_code,details_ciphertext,masked_label)
+                VALUES (?,?,?,?,?,?)
+                """, id, userId, fiat, method, encrypted, masked);
+    }
+
+    public int replaceDetails(UUID id, long userId, long revision, String fiat, String method, String encrypted, String masked) {
+        return jdbc.update("""
+                UPDATE c2c_payment_accounts SET fiat=?,method_code=?,details_ciphertext=?,masked_label=?,
+                    status='PENDING',reviewed_by=NULL,reviewed_at=NULL,review_reason=NULL,revision=revision+1,updated_at=now()
+                WHERE account_id=? AND user_id=? AND revision=?
+                """, fiat, method, encrypted, masked, id, userId, revision);
+    }
+
+    public int disable(UUID id, long userId, long revision) {
+        return jdbc.update("""
+                UPDATE c2c_payment_accounts SET status='DISABLED',revision=revision+1,updated_at=now()
+                WHERE account_id=? AND user_id=? AND revision=?
+                """, id, userId, revision);
+    }
+
+    public void review(UUID id, String status, String reason, long reviewer) {
+        jdbc.update("""
+                UPDATE c2c_payment_accounts SET status=?,review_reason=?,reviewed_by=?,reviewed_at=now(),
+                    revision=revision+1,updated_at=now() WHERE account_id=?
+                """, status, reason, reviewer, id);
+    }
+
+    private C2cPaymentAccount read(ResultSet r, int n) throws SQLException {
+        return new C2cPaymentAccount(r.getObject("account_id", UUID.class), r.getLong("user_id"), r.getString("fiat"),
+                r.getString("method_code"), r.getString("details_ciphertext"), r.getString("masked_label"),
+                r.getString("status"), r.getLong("revision"));
+    }
+
+    public Optional<Long> owner(UUID id) {
+        return jdbc.query("SELECT user_id FROM c2c_payment_accounts WHERE account_id=?",
+                (r, n) -> r.getLong(1), id).stream().findFirst();
+    }
 
     /** 一对一关联用户档案，仅为审核列表显示昵称；根记录仍按收款账号稳定分页。 */
     public List<PaymentAccount> adminPage(String status, Long userId, int count, int offset) {

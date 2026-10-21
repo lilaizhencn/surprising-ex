@@ -1,15 +1,15 @@
 package com.surprising.gateway.c2c;
 
-import com.surprising.gateway.c2c.service.C2cAdminQueryService;
-import com.surprising.gateway.c2c.repository.*;
-import com.surprising.gateway.c2c.service.C2cMarketService;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import com.surprising.gateway.provider.auth.*;
 import com.surprising.account.api.model.BalanceQueryResponse;
-import com.surprising.account.provider.service.AccountRequestService;
 import com.surprising.account.provider.service.AccountCommandGateway;
+import com.surprising.account.provider.service.AccountRequestService;
+import com.surprising.gateway.c2c.repository.*;
+import com.surprising.gateway.c2c.service.C2cAdminQueryService;
+import com.surprising.gateway.c2c.service.C2cMarketService;
+import com.surprising.gateway.provider.auth.*;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.product.GatewayProductServices;
@@ -116,8 +116,8 @@ final class C2cHttpFixture implements AutoCloseable {
             context.registerBean(C2cOrdersRepository.class,()->new C2cOrdersRepository(jdbc,json));
             context.registerBean(C2cSubmissions.class,()->new C2cSubmissions(jdbc));
             context.registerBean(C2cFundsRepository.class,()->new C2cFundsRepository(jdbc));
-            context.registerBean(C2cPaymentAccounts.class,()->new C2cPaymentAccounts(jdbc,new TotpService(properties),json,compliance));
-            context.registerBean(C2cAccess.class,()->new C2cAccess(auth,compliance,security,jdbc,new GatewayUserRepository(jdbc),db.transactions.getTransactionManager()));
+            context.registerBean(C2cPaymentAccounts.class,()->C2cDatabaseFixture.payments(jdbc,new TotpService(properties),json,compliance));
+            context.registerBean(C2cAccess.class,()->new C2cAccess(auth,compliance,security,new C2cProfileRepository(jdbc),new C2cSecurityGrantRepository(jdbc),new GatewayUserRepository(jdbc),db.transactions.getTransactionManager()));
             context.registerBean(C2cAds.class,()->new C2cAds(bean(C2cAdsRepository.class),bean(C2cMarketService.class),bean(C2cPaymentAccounts.class),
                     bean(C2cAccess.class),bean(C2cFundsRepository.class),jdbc,json,bean(C2cSubmissions.class)));
             context.registerBean(C2cOrders.class,()->new C2cOrders(bean(C2cOrdersRepository.class),bean(C2cAdsRepository.class),bean(C2cMarketService.class),
@@ -142,7 +142,8 @@ final class C2cHttpFixture implements AutoCloseable {
             context.registerBean(C2cAdminQueryService.class,()->new C2cAdminQueryService(bean(C2cMerchantRepository.class),
                     bean(C2cPaymentAccountRepository.class),bean(C2cAdsRepository.class),bean(C2cOrdersRepository.class),
                     bean(C2cFundsRepository.class),bean(C2cAppealRepository.class),bean(C2cReportRepository.class),bean(C2cMarketRepository.class)));
-            context.registerBean(C2cAdminReview.class,()->new C2cAdminReview(bean(C2cAdminAccess.class),jdbc,bean(C2cMarketService.class),bean(C2cAdsRepository.class),bean(C2cAds.class),
+            context.registerBean(C2cAdminReview.class,()->new C2cAdminReview(bean(C2cAdminAccess.class),bean(C2cMerchantRepository.class),bean(C2cAppealRepository.class),
+                    bean(C2cPaymentAccountRepository.class),bean(C2cReportRepository.class),bean(C2cMarketService.class),bean(C2cAdsRepository.class),bean(C2cAds.class),
                     bean(C2cOrdersRepository.class),bean(C2cOrders.class),bean(C2cPaymentAccounts.class),bean(C2cQueries.class),compliance,new GatewayUserRepository(jdbc)));
             context.registerBean(C2cConversations.class,()->new C2cConversations(jdbc,bean(C2cOrdersRepository.class)));
             context.registerBean(C2cAttachments.class,()->new C2cAttachments(jdbc,bean(C2cConversations.class),bean(C2cOrdersRepository.class),

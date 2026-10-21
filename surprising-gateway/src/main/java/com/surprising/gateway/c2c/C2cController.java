@@ -1,6 +1,7 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.service.C2cMarketService;
+import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
@@ -83,7 +84,7 @@ public class C2cController {
                                      @RequestBody PublishRequest request) {
         var user=access.user(authorization);
         if(request.payload()==null) throw new IllegalArgumentException("广告资料不完整");
-        String hash=C2cAccess.digest(json.writeValueAsString(request.payload()));
+        String hash=C2cDigests.sha256(json.writeValueAsString(request.payload()));
         var receipt=submissions.admit(user.userId(),request.requestKey(),"AD_PUBLISH",hash);
         if(receipt.status().equals("PROCESSING")) {
             try {
@@ -158,7 +159,7 @@ public class C2cController {
                                     @RequestBody OrderRequest request) {
         var user=access.user(authorization);
         if(request.quoteId()==null) throw new IllegalArgumentException("请选择有效报价");
-        String hash=C2cAccess.digest(request.quoteId().toString());
+        String hash=C2cDigests.sha256(request.quoteId().toString());
         var receipt=submissions.admit(user.userId(),request.requestKey(),"ORDER_CREATE",hash);
         if(receipt.status().equals("PROCESSING")) {
             try {

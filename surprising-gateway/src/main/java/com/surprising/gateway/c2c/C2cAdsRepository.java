@@ -14,6 +14,17 @@ public class C2cAdsRepository {
     private final JdbcTemplate jdbc;
     public C2cAdsRepository(JdbcTemplate jdbc) {this.jdbc=jdbc;}
 
+    public void pauseByMerchant(long userId) {
+        jdbc.update("UPDATE c2c_ads SET status='PAUSED',revision=revision+1,updated_at=now() WHERE maker_user_id=? AND status='ACTIVE'", userId);
+    }
+
+    public void pauseUsingPaymentAccount(long userId, UUID accountId) {
+        jdbc.update("""
+                UPDATE c2c_ads SET status='PAUSED',revision=revision+1,updated_at=now()
+                WHERE maker_user_id=? AND status='ACTIVE' AND ?=ANY(payment_account_ids)
+                """, userId, accountId);
+    }
+
     public List<Ad> adminPage(String status, Long userId, UUID market, int count, int offset) {
         return jdbc.query("""
                 SELECT * FROM c2c_ads WHERE (CAST(? AS text) IS NULL OR status=?) AND (CAST(? AS bigint) IS NULL OR maker_user_id=?)

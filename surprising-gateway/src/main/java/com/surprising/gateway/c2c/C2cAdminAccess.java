@@ -1,11 +1,11 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.*;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.AuthModels.AdminApprovalResponse;
+import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
-import java.util.HexFormat;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -83,8 +83,7 @@ public class C2cAdminAccess {
     }
     static String hash(byte[] body) {
         if(body==null || body.length==0) return null;
-        try {return HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(body));}
-        catch(java.security.NoSuchAlgorithmException impossible) {throw new IllegalStateException(impossible);}
+        return C2cDigests.sha256(body);
     }
     private static C2cProblem approvalRequired() {
         return new C2cProblem(HttpStatus.FORBIDDEN,"C2C_APPROVAL_REQUIRED","需要另一位有权限的管理员审批当前完整请求");

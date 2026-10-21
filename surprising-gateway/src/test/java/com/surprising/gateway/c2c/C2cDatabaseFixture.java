@@ -47,6 +47,14 @@ final class C2cDatabaseFixture implements AutoCloseable {
         jdbc.execute("CREATE SEQUENCE "+table+"_qa_sequence");
         jdbc.execute("ALTER TABLE "+table+" ALTER COLUMN "+column+" SET DEFAULT nextval('"+table+"_qa_sequence')");
     }
+    static C2cPaymentAccounts payments(JdbcTemplate jdbc, com.surprising.gateway.provider.auth.TotpService secrets,
+                                       tools.jackson.databind.ObjectMapper json,
+                                       com.surprising.gateway.provider.auth.ComplianceService compliance) {
+        return new C2cPaymentAccounts(new com.surprising.gateway.c2c.repository.C2cPaymentAccountRepository(jdbc),
+                new com.surprising.gateway.c2c.repository.C2cPaymentMethodRepository(jdbc),new C2cAdsRepository(jdbc),
+                new com.surprising.gateway.c2c.repository.C2cAttachmentRepository(jdbc),secrets,json,compliance);
+    }
+
     static com.surprising.gateway.c2c.service.C2cMarketService markets(JdbcTemplate jdbc) {
         return new com.surprising.gateway.c2c.service.C2cMarketService(
                 new com.surprising.gateway.c2c.repository.C2cConfigurationRepository(jdbc),

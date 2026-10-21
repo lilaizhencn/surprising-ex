@@ -1,8 +1,10 @@
 package com.surprising.gateway.c2c;
 
-import com.surprising.gateway.c2c.service.C2cMarketService;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
+
+import com.surprising.gateway.c2c.service.C2cMarketService;
+import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.*;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.config.GatewayProperties;
@@ -45,7 +47,7 @@ class C2cOrdersPostgresTest {
         jdbc.update("INSERT INTO c2c_merchants(user_id,status,application_text) VALUES(11,'APPROVED','QA')");
         db.seedMerchantBond(11);
         var properties=new GatewayProperties();properties.getSecurity().setMfaSecretEncryptionKey("c2c-fixture-encryption-key-not-for-deployment");
-        payments=new C2cPaymentAccounts(jdbc,new TotpService(properties),json,null);
+        payments=C2cDatabaseFixture.payments(jdbc,new TotpService(properties),json,null);
         makerAccount=payments.save(11,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Seller","qa-seller-account","",null)).id();
         sellerAccount=payments.save(12,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Taker","qa-taker-account","",null)).id();
         jdbc.update("UPDATE c2c_payment_accounts SET status='APPROVED'");
@@ -60,7 +62,7 @@ class C2cOrdersPostgresTest {
     @AfterEach void cleanup(){if(db!=null)db.close();}
     private C2cAdsRepository.Ad ad(String side) {
         var body=new C2cAds.Publish(marketId,side,"6.65","10","1","10000",List.of("ALIPAY"),side.equals("SELL")?List.of(makerAccount):List.of(),900,"Original terms",0);
-        String key="qa-ad-"+UUID.randomUUID();requests.admit(11,key,"AD_PUBLISH",C2cAccess.digest(json.writeValueAsString(body)));
+        String key="qa-ad-"+UUID.randomUUID();requests.admit(11,key,"AD_PUBLISH",C2cDigests.sha256(json.writeValueAsString(body)));
         var value=db.transaction(()->ads.publish(user(11),"Bearer fixture",key,body,"123456",""));
         settle();return adRows.get(value.id(),false);
     }
@@ -68,7 +70,7 @@ class C2cOrdersPostgresTest {
         return db.transaction(()->orders.quote(user(actor),ad.id(),"CRYPTO",quantity,ad.side().equals("SELL")?makerAccount:sellerAccount));
     }
     private C2cOrdersRepository.Order create(C2cOrdersRepository.Quote quote,long actor,String key) {
-        requests.admit(actor,key,"ORDER_CREATE",C2cAccess.digest(quote.id().toString()));
+        requests.admit(actor,key,"ORDER_CREATE",C2cDigests.sha256(quote.id().toString()));
         return db.transaction(()->orders.create(user(actor),"Bearer fixture",key,quote.id(),"123456",""));
     }
     private C2cOrdersRepository.Order create(C2cAdsRepository.Ad ad) {return create(quote(ad,12,"2"),12,"qa-order-"+UUID.randomUUID());}

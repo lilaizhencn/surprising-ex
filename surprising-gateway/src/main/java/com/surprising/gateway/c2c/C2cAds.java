@@ -2,6 +2,7 @@ package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.model.C2cMarket;
 import com.surprising.gateway.c2c.service.C2cMarketService;
+import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import java.math.BigDecimal;
 import java.util.*;
@@ -37,7 +38,7 @@ public class C2cAds {
         if((request.methodCodes()!=null && request.methodCodes().stream().anyMatch(Objects::isNull))
                 || (request.paymentAccountIds()!=null && request.paymentAccountIds().stream().anyMatch(Objects::isNull)))
             throw new IllegalArgumentException("收付款方式不完整");
-        String hash=C2cAccess.digest(json.writeValueAsString(request));
+        String hash=C2cDigests.sha256(json.writeValueAsString(request));
         var receipt=submissions.begin(user.userId(),key,"AD_PUBLISH",hash);
         if(receipt.status().equals("SUCCEEDED")) {
             var accepted = ads.get(receipt.resultId(),false);

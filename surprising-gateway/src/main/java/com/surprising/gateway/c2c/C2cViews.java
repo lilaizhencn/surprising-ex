@@ -1,7 +1,7 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.model.C2cMarket;
-
+import com.surprising.gateway.c2c.model.C2cPaymentAccount;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -109,7 +109,7 @@ public final class C2cViews {
         return view;
     }
 
-    static Map<String,Object> paymentAccount(C2cPaymentAccounts.Account account) {
+    static Map<String,Object> paymentAccount(C2cPaymentAccount account) {
         return Map.of("accountId", account.id().toString(), "ownerUserId", Long.toString(account.userId()),
                 "fiat", account.fiat(), "methodCode", account.method(), "maskedLabel", account.maskedLabel(),
                 "status", account.status(), "revision", Long.toString(account.revision()));

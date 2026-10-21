@@ -1,11 +1,15 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cPaymentAccount;
+import com.surprising.gateway.c2c.repository.C2cAppealRepository;
+import com.surprising.gateway.c2c.repository.C2cMerchantRepository;
+import com.surprising.gateway.c2c.repository.C2cPaymentAccountRepository;
+import com.surprising.gateway.c2c.repository.C2cReportRepository;
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.auth.ComplianceService;
 import com.surprising.gateway.provider.auth.GatewayUserRepository;
 import java.time.Instant;
 import java.util.*;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,7 +22,10 @@ public class C2cAdminReview {
     public record AppealDecision(String decision,String reason) { }
     public record ReportDecision(String decision,String reason) { }
     private final C2cAdminAccess access;
-    private final JdbcTemplate jdbc;
+    private final C2cMerchantRepository merchants;
+    private final C2cAppealRepository appeals;
+    private final C2cPaymentAccountRepository paymentRows;
+    private final C2cReportRepository reports;
     private final C2cMarketService markets;
     private final C2cAdsRepository adRows;
     private final C2cAds ads;
@@ -29,10 +36,11 @@ public class C2cAdminReview {
     private final ComplianceService compliance;
     private final GatewayUserRepository users;
 
-    public C2cAdminReview(C2cAdminAccess access,JdbcTemplate jdbc,C2cMarketService markets,C2cAdsRepository adRows,C2cAds ads,
+    public C2cAdminReview(C2cAdminAccess access,C2cMerchantRepository merchants,C2cAppealRepository appeals,
+                          C2cPaymentAccountRepository paymentRows,C2cReportRepository reports,C2cMarketService markets,C2cAdsRepository adRows,C2cAds ads,
                           C2cOrdersRepository orderRows,C2cOrders orders,C2cPaymentAccounts payments,C2cQueries queries,
                           ComplianceService compliance,GatewayUserRepository users) {
-        this.access=access;this.jdbc=jdbc;this.markets=markets;this.adRows=adRows;this.ads=ads;
+        this.access=access;this.merchants=merchants;this.appeals=appeals;this.paymentRows=paymentRows;this.reports=reports;this.markets=markets;this.adRows=adRows;this.ads=ads;
         this.orderRows=orderRows;this.orders=orders;this.payments=payments;this.queries=queries;this.compliance=compliance;this.users=users;
     }
 
@@ -40,14 +48,11 @@ public class C2cAdminReview {
     Map<String,Object> merchant(String authorization,C2cAdminAccess.Request request,byte[] body,long userId,MerchantDecision input) {
         var administrator=access.write(authorization,request,body);C2cAdminMarkets.reason(input.reason());
         if(administrator.userId()==userId) throw C2cProblem.forbidden("不能审核本人的商家资格");
-        if(jdbc.query("SELECT user_id FROM gateway_users WHERE user_id=? FOR NO KEY UPDATE",(r,n)->r.getLong(1),userId).isEmpty())
-            throw new IllegalArgumentException("用户不存在");
-        var rows=jdbc.queryForList("SELECT * FROM c2c_merchants WHERE user_id=? FOR UPDATE",userId);
-        if(rows.isEmpty()) throw new IllegalArgumentException("商家申请不存在");
-        var current=rows.getFirst();
-        if(((Number)current.get("revision")).longValue()!=C2cAdminMarkets.version(input.revision(),false)) throw new IllegalStateException("商家状态已变更，请刷新");
+        if(!users.lockForNoKeyUpdate(userId)) throw new IllegalArgumentException("用户不存在");
+        var current=merchants.find(userId,true).orElseThrow(()->new IllegalArgumentException("商家申请不存在"));
+        if(current.revision()!=C2cAdminMarkets.version(input.revision(),false)) throw new IllegalStateException("商家状态已变更，请刷新");
         String state;
-        String tier=(String)current.get("tier");
+        String tier=current.tier();
         if("APPROVE".equals(input.decision())) {
             markets.requireMerchantBond(userId);
             var user=users.find(userId).orElseThrow();var kyc=compliance.kyc(userId);
@@ -55,17 +60,14 @@ public class C2cAdminReview {
                     || (kyc.expiresAt()!=null && !kyc.expiresAt().isAfter(Instant.now()))) throw new IllegalStateException("用户当前没有有效身份认证或账户受限");
             if(input.tier()==null || !List.of("VERIFIED","VIP").contains(input.tier())) throw new IllegalArgumentException("商家等级无效");
             state="APPROVED";tier=input.tier();
-        } else if("REJECT".equals(input.decision()) && "PENDING".equals(current.get("status"))) state="REJECTED";
+        } else if("REJECT".equals(input.decision()) && "PENDING".equals(current.status())) state="REJECTED";
         else if("SUSPEND".equals(input.decision())) {
-            jdbc.update("UPDATE c2c_ads SET status='PAUSED',revision=revision+1,updated_at=now() WHERE maker_user_id=? AND status='ACTIVE'",userId);
+            adRows.pauseByMerchant(userId);
             state="SUSPENDED";
         } else throw new IllegalArgumentException("商家审核操作无效");
-        jdbc.update("""
-                UPDATE c2c_merchants SET status=?,tier=?,review_reason=?,reviewed_by=?,reviewed_at=now(),revision=revision+1,updated_at=now()
-                WHERE user_id=?
-                """,state,tier,input.reason().trim(),administrator.userId(),userId);
+        merchants.review(userId,state,tier,input.reason().trim(),administrator.userId());
         access.audit(administrator,request,body);
-        return Map.of("userId",Long.toString(userId),"status",state,"tier",tier,"revision",Long.toString(((Number)current.get("revision")).longValue()+1));
+        return Map.of("userId",Long.toString(userId),"status",state,"tier",tier,"revision",Long.toString(current.revision()+1));
     }
 
     @Transactional
@@ -118,9 +120,8 @@ public class C2cAdminReview {
     @Transactional
     Map<String,Object> appeal(String authorization,C2cAdminAccess.Request request,byte[] body,UUID id,AppealDecision input) {
         C2cAdminMarkets.reason(input.reason());var approved=access.resolve(authorization,request,body);
-        var rows=jdbc.query("SELECT order_id FROM c2c_appeals WHERE appeal_id=?",(r,n)->r.getObject(1,UUID.class),id);
-        if(rows.isEmpty()) throw new IllegalArgumentException("申诉不存在");
-        var order=orderRows.get(rows.getFirst(),false);
+        UUID orderId=appeals.orderId(id).orElseThrow(()->new IllegalArgumentException("申诉不存在"));
+        var order=orderRows.get(orderId,false);
         requireIndependent(approved,order.buyerUserId(),order.sellerUserId());
         orders.resolveAppeal(id,input.decision(),input.reason(),approved.administrator().userId(),approved.approval().approvalId());
         access.audit(approved.administrator(),request,body);return queries.adminOrder(order.id(),false);
@@ -130,18 +131,16 @@ public class C2cAdminReview {
     Map<String,Object> report(String authorization,C2cAdminAccess.Request request,byte[] body,UUID id,ReportDecision input) {
         var administrator=access.write(authorization,request,body);C2cAdminMarkets.reason(input.reason());
         if(input.decision()==null || !List.of("REVIEWED","DISMISSED").contains(input.decision())) throw new IllegalArgumentException("举报结论无效");
-        var rows=jdbc.queryForList("SELECT * FROM c2c_reports WHERE report_id=? FOR UPDATE",id);
-        if(rows.isEmpty()) throw new IllegalArgumentException("举报不存在");var current=rows.getFirst();
-        if(((Number)current.get("user_id")).longValue()==administrator.userId() || ((Number)current.get("target_user_id")).longValue()==administrator.userId())
+        var current=reports.find(id,true).orElseThrow(()->new IllegalArgumentException("举报不存在"));
+        if(current.userId()==administrator.userId() || current.targetUserId()==administrator.userId())
             throw C2cProblem.forbidden("不能处理涉及本人的举报");
-        if(!"OPEN".equals(current.get("status"))) throw new IllegalStateException("举报已处理，请刷新");
-        jdbc.update("UPDATE c2c_reports SET status=?,review_reason=?,reviewed_by=?,reviewed_at=now() WHERE report_id=?",
-                input.decision(),input.reason().trim(),administrator.userId(),id);
+        if(!"OPEN".equals(current.status())) throw new IllegalStateException("举报已处理，请刷新");
+        reports.decide(id,input.decision(),input.reason().trim(),administrator.userId());
         access.audit(administrator,request,body);return Map.of("reportId",id.toString(),"status",input.decision());
     }
-    private C2cPaymentAccounts.Account payment(UUID id) {
-        var owner=jdbc.query("SELECT user_id FROM c2c_payment_accounts WHERE account_id=?",(r,n)->r.getLong(1),id);
-        if(owner.isEmpty()) throw new IllegalArgumentException("收款资料不存在");return payments.get(owner.getFirst(),id,false);
+    private C2cPaymentAccount payment(UUID id) {
+        long owner=paymentRows.owner(id).orElseThrow(()->new IllegalArgumentException("收款资料不存在"));
+        return payments.get(owner,id,false);
     }
     private static void requireIndependent(C2cAdminAccess.Approved approved,long buyer,long seller) {
         long operator=approved.administrator().userId(),reviewer=approved.approval().approverUserId();

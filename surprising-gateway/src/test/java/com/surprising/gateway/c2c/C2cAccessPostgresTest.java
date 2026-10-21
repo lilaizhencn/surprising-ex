@@ -1,11 +1,10 @@
 package com.surprising.gateway.c2c;
 
-import com.surprising.gateway.c2c.model.C2cMarket;
-
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import com.surprising.gateway.c2c.model.C2cMarket;
 import com.surprising.gateway.provider.auth.*;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import java.math.BigDecimal;
@@ -31,7 +30,8 @@ class C2cAccessPostgresTest {
         db.jdbc.update("INSERT INTO c2c_otp_attempts VALUES(0)");
         compliance = mock(ComplianceService.class);
         security = mock(SensitiveActionVerificationService.class);
-        access = new C2cAccess(mock(AuthService.class), compliance, security, db.jdbc,
+        access = new C2cAccess(mock(AuthService.class), compliance, security, new com.surprising.gateway.c2c.repository.C2cProfileRepository(db.jdbc),
+                new com.surprising.gateway.c2c.repository.C2cSecurityGrantRepository(db.jdbc),
                 mock(GatewayUserRepository.class), db.transactions.getTransactionManager());
     }
     @AfterEach void cleanup() { if (db != null) db.close(); }

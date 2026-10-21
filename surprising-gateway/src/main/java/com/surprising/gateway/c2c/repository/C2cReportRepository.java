@@ -2,6 +2,7 @@ package com.surprising.gateway.c2c.repository;
 
 import com.surprising.gateway.c2c.model.C2cAdminRows.Report;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -12,6 +13,19 @@ public class C2cReportRepository {
     private final JdbcTemplate jdbc;
 
     public C2cReportRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+    public Optional<Report> find(UUID id, boolean lock) {
+        return jdbc.query("SELECT * FROM c2c_reports WHERE report_id=?" + (lock ? " FOR UPDATE" : ""),
+                (r, n) -> new Report(r.getObject("report_id", UUID.class), r.getLong("user_id"),
+                        r.getLong("target_user_id"), r.getObject("order_id", UUID.class), r.getString("reason"),
+                        r.getString("status"), r.getString("review_reason"), r.getTimestamp("created_at").toInstant()),
+                id).stream().findFirst();
+    }
+
+    public void decide(UUID id, String status, String reason, long reviewer) {
+        jdbc.update("UPDATE c2c_reports SET status=?,review_reason=?,reviewed_by=?,reviewed_at=now() WHERE report_id=?",
+                status, reason, reviewer, id);
+    }
 
     public List<Report> adminPage(String status, Long userId, int count, int offset) {
         return jdbc.query("""

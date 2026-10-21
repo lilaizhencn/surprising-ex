@@ -1,7 +1,7 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.model.C2cMarket;
-
+import com.surprising.gateway.c2c.model.C2cPaymentAccount;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -38,7 +38,7 @@ public class C2cOrdersRepository {
         if(rows.isEmpty()) throw new IllegalArgumentException("报价不存在或已过期");
         return rows.getFirst();
     }
-    Quote createQuote(long userId,C2cAdsRepository.Ad ad,C2cMarket market,long units,long fee,BigDecimal fiat,C2cPaymentAccounts.Account account) {
+    Quote createQuote(long userId,C2cAdsRepository.Ad ad,C2cMarket market,long units,long fee,BigDecimal fiat,C2cPaymentAccount account) {
         UUID id=UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO c2c_quotes(quote_id,user_id,ad_id,ad_revision,market_revision,quantity_units,buyer_fee_units,
@@ -57,7 +57,7 @@ public class C2cOrdersRepository {
         return jdbc.query("SELECT * FROM c2c_orders WHERE quote_id=?",this::readOrder,id).stream().findFirst().orElse(null);
     }
 
-    Order create(long userId,Quote quote,C2cAdsRepository.Ad ad,C2cPaymentAccounts.Account account) {
+    Order create(long userId,Quote quote,C2cAdsRepository.Ad ad,C2cPaymentAccount account) {
         UUID id=UUID.randomUUID();boolean reserves=ad.side().equals("BUY");
         long buyer=ad.side().equals("SELL")?userId:ad.makerUserId();
         long seller=ad.side().equals("SELL")?ad.makerUserId():userId;
