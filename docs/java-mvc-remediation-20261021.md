@@ -176,3 +176,5 @@
 - HTTP职责复扫将OrderCommandRejectedException改为exception包内原生终态拒绝，仅保留CoreResultCode与原业务提示；Service不再携带HTTP/ProblemDetail。LeverageRequestController、LocalBusinessApi和实际HTTP Advice分别维持409及code，不与未知结果/未接纳混合。业务提示switch原文不变。定向95项、扩大干净构建390项通过无跳过；三处HTTP映射改400的3项负例均捕获预期失败，逐字节恢复后绿色。真实本机杠杆HTTP路由与现有公开本地网关/杠杆请求路径覆盖。关闭ADD-045；见 [原生命令拒绝验证](validation/java-mvc-order-rejections-20261022.json)。所属资源已清理，其余HTTP职责、复扫/门禁与最终实栈继续。
 
 - 复扫归包3将实际WebSocket处理器与连接实例分别归handler和session；订阅/缓存/路由聚合仍归原Service，连接队列与两条虚拟线程仍由同一ClientConnection实例拥有。对应Handler测试归同包以保持原protected与可选装配方法，无扩大可见性。11个原文件完整体在包/导入/类型限定归一后相等。定向75项、扩大干净构建143项通过无跳过，旧class清理。关闭ADD-046、047；见 [WebSocket职责归包验证](validation/java-mvc-websocket-packages-20261022.json)。所属数据库/日志/报告清理，其余HTTP接入、全范围复扫/门禁和最终实栈继续。
+
+- 外部适配归包将CustodyWalletClient、WithdrawalValuationClient和RestReferenceMarketProvider移到client；提现/对账/划转业务仍由原Service聚合，签名、精度、连接与缓存保持。18个原文件完整体在包/导入/构件注解归一后相等。JDK27干净构建：Maker153、Gateway109项无跳过，包含25项独立PostgreSQL提现对账；未启动wallet。关闭ADD-048..050，见 [外部适配验证](validation/java-mvc-client-packages-20261022.json)。所属数据库、日志与汇总报告清理；其余HTTP耦合、完整复扫/门禁及最终实栈验收仍继续。

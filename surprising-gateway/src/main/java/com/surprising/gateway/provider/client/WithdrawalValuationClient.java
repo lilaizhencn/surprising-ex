@@ -1,4 +1,4 @@
-package com.surprising.gateway.provider.service;
+package com.surprising.gateway.provider.client;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.math.BigDecimal;
@@ -7,11 +7,11 @@ import java.time.Instant;
 import java.util.Map;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpMethod;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
-@Service
+@Component
 public class WithdrawalValuationClient {
 
     private final GatewayProperties properties;

@@ -8,7 +8,7 @@ import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.controller.GatewayProxyController;
-import com.surprising.gateway.provider.service.CustodyWalletClient;
+import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.math.BigDecimal;

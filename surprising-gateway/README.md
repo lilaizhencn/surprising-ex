@@ -526,3 +526,5 @@ Kafka职责归包：独立快照、审计、结算/排空及推送消费入口�
 Core订单/杠杆终态拒绝通过 `trading.order.exception.OrderCommandRejectedException` 传递原生CoreResultCode和业务提示。HTTP入口由LeverageRequestController/OrderRejectionHttpAdvice映射409及code，本地网关仍返回原status/message/code JSON；未知结果与未接纳继续走原独立语义。业务异常不引用Spring HTTP类型。
 
 WebSocket具体接入处理器位于 `websocket.provider.handler.ClientWebSocketHandler`，连接/有界发送队列/超时监视位于 `websocket.provider.session.ClientConnection`；SubscriptionRegistry等Service继续拥有订阅与业务路由状态。权限、协议字段、慢连接背压、关闭码和线程生命周期保持。
+
+托管钱包请求与提现法币估值适配位于 `provider.client.CustodyWalletClient` 和 `provider.client.WithdrawalValuationClient`；提现、对账及划转安全判断仍由原Service聚合。

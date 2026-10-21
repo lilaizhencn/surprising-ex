@@ -1,0 +1,328 @@
+{
+  "verified_at_utc": "2026-10-21T19:32:09.109688+00:00",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16",
+  "scope": "外部托管、估值与行情适配归client",
+  "stages": {
+    "maker": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-maker",
+        "-Dtest=*",
+        "clean",
+        "install"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.marketmaker.provider.service.MarketMakerBusinessSettingsServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.client.RestReferenceMarketProviderTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.MarketMakerQuoteSlotTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.MarketMakerQuoteArithmeticTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.config.MarketMakerApplicationYamlTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.task.MarketMakerTaskTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.QuotePlannerTest",
+          "tests": 31,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.config.MarketMakerFeignConfigurationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.repository.MarketMakerMemorySettingsTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.MarketMakerServiceTest",
+          "tests": 56,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepositoryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.SurprisingMarketMakerApplicationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.controller.MarketMakerSettingsConflictTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.controller.AdminMarketMakerControllerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.config.MarketMakerFeignConnectionTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.controller.MarketMakerSettingsValidationTest",
+          "tests": 22,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "a17aace96f269de4ca4131b33ab54e17427ad7918165c02b65517d9e142ab789",
+      "tests": 153,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "gateway": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=CustodyWalletClientTest,CustodyWalletControllerTest,CustodyWithdrawal*Test,Withdrawal*Test,WalletFunding*Test,ProductTransfer*Test,BinanceApiControllerTest",
+        "clean",
+        "install"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.service.CustodyWithdrawalServiceTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.client.CustodyWalletClientTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.WalletFundingServiceTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.CustodyWithdrawalReconciliationPostgresTest",
+          "tests": 25,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.CustodyWalletControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.account.provider.controller.ProductTransferInternalControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.ProductTransferGatewaySurfaceTest",
+          "tests": 21,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.BinanceApiControllerTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.ProductTransferCoordinatorTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.ProductTransferSecurityServiceTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "5d1c8030f0fd93beb0554a603933293210fae738fed519d1475ceb200e774b6f",
+      "tests": 109,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "source_proof": [
+    {
+      "original": "surprising-gateway/src/main/java/com/surprising/gateway/provider/controller/WalletFundingController.java",
+      "current": "surprising-gateway/src/main/java/com/surprising/gateway/provider/controller/WalletFundingController.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/main/java/com/surprising/gateway/provider/controller/CustodyWalletController.java",
+      "current": "surprising-gateway/src/main/java/com/surprising/gateway/provider/controller/CustodyWalletController.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/main/java/com/surprising/gateway/provider/controller/BinanceApiController.java",
+      "current": "surprising-gateway/src/main/java/com/surprising/gateway/provider/controller/BinanceApiController.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalReconciliationService.java",
+      "current": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalReconciliationService.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/WalletFundingService.java",
+      "current": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/WalletFundingService.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/WithdrawalValuationClient.java",
+      "current": "surprising-gateway/src/main/java/com/surprising/gateway/provider/client/WithdrawalValuationClient.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWalletClient.java",
+      "current": "surprising-gateway/src/main/java/com/surprising/gateway/provider/client/CustodyWalletClient.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalService.java",
+      "current": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalService.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/ProductTransferSecurityService.java",
+      "current": "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/ProductTransferSecurityService.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/test/java/com/surprising/gateway/provider/controller/BinanceApiControllerTest.java",
+      "current": "surprising-gateway/src/test/java/com/surprising/gateway/provider/controller/BinanceApiControllerTest.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/test/java/com/surprising/gateway/provider/controller/CustodyWalletControllerTest.java",
+      "current": "surprising-gateway/src/test/java/com/surprising/gateway/provider/controller/CustodyWalletControllerTest.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/CustodyWalletClientTest.java",
+      "current": "surprising-gateway/src/test/java/com/surprising/gateway/provider/client/CustodyWalletClientTest.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/ProductTransferSecurityServiceTest.java",
+      "current": "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/ProductTransferSecurityServiceTest.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/WalletFundingServiceTest.java",
+      "current": "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/WalletFundingServiceTest.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/CustodyWithdrawalReconciliationPostgresTest.java",
+      "current": "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/CustodyWithdrawalReconciliationPostgresTest.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/CustodyWithdrawalServiceTest.java",
+      "current": "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/CustodyWithdrawalServiceTest.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-maker/src/main/java/com/surprising/marketmaker/provider/service/RestReferenceMarketProvider.java",
+      "current": "surprising-maker/src/main/java/com/surprising/marketmaker/provider/client/RestReferenceMarketProvider.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    },
+    {
+      "original": "surprising-maker/src/test/java/com/surprising/marketmaker/provider/service/RestReferenceMarketProviderTest.java",
+      "current": "surprising-maker/src/test/java/com/surprising/marketmaker/provider/client/RestReferenceMarketProviderTest.java",
+      "complete_body_equal_after_declared_namespace_stereotype_normalization": true
+    }
+  ],
+  "new_abstractions": [],
+  "preserved": [
+    "18个原文件完整体归一相同；实际Bean名称不变；原包内测试归新包，未扩大生产API。",
+    "HTTP请求、签名、精度、缓存和状态所有者不变。",
+    "25项PostgreSQL提现对账独立运行；未启动wallet服务。"
+  ],
+  "unverified": "其余HTTP耦合、完整复扫/门禁及最终真实网关/六集群/做市/资金验收仍继续。",
+  "cleanup": {
+    "owned_postgres": "已停止并删除",
+    "owned_logs_reports": "本批日志及已汇总Maker/Gateway报告清理，保留构建产物"
+  }
+}

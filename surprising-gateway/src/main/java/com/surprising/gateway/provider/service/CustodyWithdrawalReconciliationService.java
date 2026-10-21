@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.client.CustodyWalletClient;
+
 import com.surprising.gateway.provider.model.CustodyWithdrawalModels;
 import com.surprising.gateway.provider.repository.CustodyWithdrawalRepository;
 import java.math.BigDecimal;

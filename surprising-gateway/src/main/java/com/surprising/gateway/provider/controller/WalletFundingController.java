@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.controller;
 
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.service.WalletFundingService;
-import com.surprising.gateway.provider.service.CustodyWalletClient;
+import com.surprising.gateway.provider.client.CustodyWalletClient;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;

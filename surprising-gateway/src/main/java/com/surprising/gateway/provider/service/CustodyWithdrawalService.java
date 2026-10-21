@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.client.CustodyWalletClient;
+import com.surprising.gateway.provider.client.WithdrawalValuationClient;
+
 import com.surprising.gateway.provider.model.CustodyWithdrawalModels;
 import lombok.extern.slf4j.Slf4j;
 

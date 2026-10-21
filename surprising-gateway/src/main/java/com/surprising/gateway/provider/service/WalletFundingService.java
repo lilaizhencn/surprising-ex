@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.client.CustodyWalletClient;
+
 import com.surprising.asset.model.AssetConfiguration.*;
 import com.surprising.asset.repository.AssetRepository;
 import com.surprising.asset.repository.AssetNetworkRepository;

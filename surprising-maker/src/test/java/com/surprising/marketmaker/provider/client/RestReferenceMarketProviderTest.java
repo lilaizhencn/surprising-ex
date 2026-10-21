@@ -1,4 +1,4 @@
-package com.surprising.marketmaker.provider.service;
+package com.surprising.marketmaker.provider.client;
 
 import com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups;
 

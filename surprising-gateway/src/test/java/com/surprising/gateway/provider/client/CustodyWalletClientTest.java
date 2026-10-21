@@ -1,4 +1,4 @@
-package com.surprising.gateway.provider.service;
+package com.surprising.gateway.provider.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

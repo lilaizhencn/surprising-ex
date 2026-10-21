@@ -5,7 +5,7 @@ import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
-import com.surprising.gateway.provider.service.CustodyWalletClient;
+import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;

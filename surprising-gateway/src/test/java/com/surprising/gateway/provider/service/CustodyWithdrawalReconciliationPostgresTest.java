@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.client.CustodyWalletClient;
+import com.surprising.gateway.provider.client.WithdrawalValuationClient;
+
 import com.surprising.gateway.provider.model.CustodyWithdrawalModels;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
