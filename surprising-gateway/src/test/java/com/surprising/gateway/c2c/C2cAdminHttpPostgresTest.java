@@ -23,6 +23,8 @@ import com.surprising.gateway.c2c.service.C2cMarketService;
 import java.time.Instant;
 import java.util.*;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.http.HttpMethod;
 
@@ -84,6 +86,26 @@ class C2cAdminHttpPostgresTest {
         approved(path,9,body,approval,403);
         assertThat(approvalStatus(approval)).isEqualTo("APPROVED");
         assertThat(fixture.bean(C2cOrdersRepository.class).get(dispute.order(),false).status()).isEqualTo(C2cOrderStatus.APPEALED);
+    }
+
+    @ParameterizedTest @ValueSource(strings={"spaces", "plus", "leadingZero", "overflow", "negative", "empty"})
+    void c2cResolutionRejectsNoncanonicalApprovalHeaders(String format) throws Exception {
+        var dispute = dispute();
+        String path = decisionPath(dispute.appeal());
+        var body = new C2cAdminReview.AppealDecision("REFUND", "Synthetic payment verification");
+        long approval = approve(path, body, 9, 10);
+        String header = switch (format) {
+            case "spaces" -> " " + approval + " ";
+            case "plus" -> "+" + approval;
+            case "leadingZero" -> "0" + approval;
+            case "overflow" -> "9223372036854775808";
+            case "negative" -> "-" + approval;
+            default -> "";
+        };
+        var result = fixture.perform(HttpMethod.POST, path, 9, body, Map.of("X-Admin-Approval-Id", header));
+        assertThat(result.getResponse().getStatus()).isEqualTo(403);
+        assertThat(approvalStatus(approval)).isEqualTo("APPROVED");
+        assertThat(fixture.bean(C2cOrdersRepository.class).get(dispute.order(), false).status()).isEqualTo(C2cOrderStatus.APPEALED);
     }
 
     @Test void selfApprovalAndRevokedApproverPermissionAreRejected() throws Exception {

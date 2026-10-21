@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c.service;
 
+import com.surprising.gateway.provider.exception.AdminApprovalRequiredException;
+import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
@@ -35,8 +37,8 @@ public class C2cAdminAccess {
         catch(IllegalStateException failure) {throw C2cProblem.forbidden("当前后台账号没有此 C2C 权限");}
     }
     public JwtPrincipal write(String authorization,C2cAdminRequest request,byte[] body) {
-        try {return approvals.requireWrite(authorization,"admin.c2c.write","c2c",new AdminApprovalService.AdminRequestMetadata(request.approvalId(), request.method(), request.path(), request.query()),body);}
-        catch(AdminApprovalService.AdminApprovalRequiredException failure) {throw approvalRequired();}
+        try {return approvals.requireWrite(authorization,"admin.c2c.write","c2c",new AdminRequestMetadata(request.approval(), request.method(), request.path(), request.query()),body);}
+        catch(AdminApprovalRequiredException failure) {throw approvalRequired();}
         catch(IllegalArgumentException failure) {throw new C2cProblem(C2cProblem.Reason.AUTHENTICATION_REQUIRED,"C2C_AUTH_REQUIRED","请使用有效后台登录");}
         catch(IllegalStateException failure) {throw C2cProblem.forbidden("当前后台账号没有 C2C 管理权限");}
     }
@@ -46,10 +48,10 @@ public class C2cAdminAccess {
         catch(IllegalArgumentException failure) {throw new C2cProblem(C2cProblem.Reason.AUTHENTICATION_REQUIRED,"C2C_AUTH_REQUIRED","请使用有效后台登录");}
         catch(IllegalStateException failure) {throw C2cProblem.forbidden("当前后台账号没有申诉裁决权限");}
         // 资金裁决始终双人审批；不受普通后台高风险开关关闭的影响。
-        String value=request.approvalId();
-        if(value==null || !value.matches("[1-9][0-9]{0,18}")) throw approvalRequired();
+        var reference = request.approval();
+        if (reference == null || !reference.canonicalPositive() || reference.value() == null) throw approvalRequired();
         try {
-            long id=Long.parseLong(value);
+            long id = reference.value();
             var approved=approvals.consumeApproved(id,administrator.userId(),"c2c",request.method(),request.path(),
                     request.query(),hash(body),Instant.now());
             if(approved.approverUserId()==null || approved.approverUserId()==administrator.userId()) throw approvalRequired();

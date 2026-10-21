@@ -1,5 +1,6 @@
 package com.surprising.asset;
 
+import com.surprising.gateway.provider.exception.AdminApprovalRequiredException;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -21,7 +22,7 @@ class AssetConfigurationControllerTest {
         when(auth.requireAdminPermission("invalid","admin.wallet.read")).thenThrow(new IllegalArgumentException("unauthorized"));
         when(approval.approvalHeaderName()).thenReturn("X-Admin-Approval-Id");
         when(approval.requireWrite(eq("invalid"),eq("admin.wallet.write"),eq("gateway-admin"),any(),any()))
-                .thenThrow(new AdminApprovalService.AdminApprovalRequiredException("admin approval required"));
+                .thenThrow(new AdminApprovalRequiredException("admin approval required"));
         assertThatThrownBy(() -> controller.list("invalid",false)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> controller.save("invalid",new byte[0],new MockHttpServletRequest()))
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class).hasMessageContaining("428");

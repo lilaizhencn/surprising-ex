@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth.service;
 
+import com.surprising.gateway.provider.exception.AdminApprovalRequiredException;
+import com.surprising.gateway.provider.auth.model.AdminApprovalReference;
+import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
 import com.surprising.gateway.provider.auth.repository.AdminApprovalRepository;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 
@@ -220,15 +223,14 @@ public class AdminApprovalService {
         if (!properties.getSecurity().isRequireApprovalForHighRiskAdminWrites()) {
             return;
         }
-        if (request == null || request.approvalId() == null || request.approvalId().isBlank()) {
+        AdminApprovalReference approval = request == null ? null : request.approval();
+        if (approval == null || !approval.supplied()) {
             throw new AdminApprovalRequiredException("admin approval required");
         }
-        long approvalId;
-        try {
-            approvalId = Long.parseLong(request.approvalId().trim());
-        } catch (NumberFormatException ex) {
-            throw new AdminApprovalRequiredException("invalid admin approval id", ex);
+        if (approval.value() == null) {
+            throw new AdminApprovalRequiredException("invalid admin approval id");
         }
+        long approvalId = approval.value();
         try {
             consumeApproved(
                     approvalId,
@@ -260,24 +262,4 @@ public class AdminApprovalService {
         }
     }
 
-    /**
-     * Controller 从 HTTP 请求中提取的审批匹配数据，不包含任何持久化对象。
-     */
-    public record AdminRequestMetadata(
-            String approvalId,
-            String method,
-            String requestUri,
-            String queryString) {
-    }
-
-    public static class AdminApprovalRequiredException extends RuntimeException {
-
-        public AdminApprovalRequiredException(String message) {
-            super(message);
-        }
-
-        public AdminApprovalRequiredException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
 }

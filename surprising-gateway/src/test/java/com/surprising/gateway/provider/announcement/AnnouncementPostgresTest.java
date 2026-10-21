@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.announcement;
 
+import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -42,7 +43,7 @@ class AnnouncementPostgresTest {
     private AnnouncementService service;
     private final JwtPrincipal actor=new JwtPrincipal(9,"operator","NORMAL",List.of("ADMIN"),Instant.now().plusSeconds(600));
     private final byte[] raw={1,2,3};
-    private final AdminApprovalService.AdminRequestMetadata metadata=new AdminApprovalService.AdminRequestMetadata("approval-1","POST","/api/v1/admin/announcements/publish",null);
+    private final AdminRequestMetadata metadata=new AdminRequestMetadata(com.surprising.gateway.provider.auth.controller.AdminApprovalRequestBinding.reference("approval-1"),"POST","/api/v1/admin/announcements/publish",null);
     @BeforeEach void setup() {
         var rawSource=new DriverManagerDataSource(System.getenv("INSTRUMENT_TEST_JDBC_URL"),System.getenv("INSTRUMENT_TEST_DB_USER"),System.getenv("INSTRUMENT_TEST_DB_PASSWORD"));
         source=new CountingSource(rawSource);jdbc=new JdbcTemplate(source);manager=new DataSourceTransactionManager(source);

@@ -1,5 +1,8 @@
 package com.surprising.asset.controller;
 
+import com.surprising.gateway.provider.auth.controller.AdminApprovalRequestBinding;
+import com.surprising.gateway.provider.exception.AdminApprovalRequiredException;
+import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
 import com.surprising.asset.model.AssetConfiguration.*;
 import com.surprising.asset.service.AssetConfigurationService;
 import com.surprising.gateway.provider.auth.service.AuthService;
@@ -62,9 +65,9 @@ public class AssetConfigurationController {
     private long requireWrite(String authorization, HttpServletRequest request, byte[] body) {
         try {
             return approvals.requireWrite(authorization, "admin.wallet.write", "gateway-admin",
-                    new AdminApprovalService.AdminRequestMetadata(request.getHeader(approvals.approvalHeaderName()),
+                    new AdminRequestMetadata(AdminApprovalRequestBinding.reference(request.getHeader(approvals.approvalHeaderName())),
                             request.getMethod(), request.getRequestURI(), request.getQueryString()), body).userId();
-        } catch (AdminApprovalService.AdminApprovalRequiredException ex) {
+        } catch (AdminApprovalRequiredException ex) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
         }
     }

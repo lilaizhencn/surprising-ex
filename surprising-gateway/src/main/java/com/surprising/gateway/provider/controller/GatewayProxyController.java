@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.controller;
 
+import com.surprising.gateway.provider.exception.AdminApprovalRequiredException;
 import com.surprising.gateway.provider.model.ProductTransferCommand;
 import com.surprising.gateway.provider.model.ProductTransferWireRequest;
 
@@ -526,7 +527,7 @@ public class GatewayProxyController {
                     request.getQueryString(),
                     bodyHash,
                     Instant.now());
-        } catch (AdminApprovalService.AdminApprovalRequiredException ex) {
+        } catch (AdminApprovalRequiredException ex) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
         }
     }

@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth.controller;
 
+import com.surprising.gateway.provider.exception.AdminApprovalRequiredException;
+import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 
@@ -254,14 +256,14 @@ public class AdminComplianceController {
     private <T> T withApproval(Supplier<T> action) {
         try {
             return action.get();
-        } catch (AdminApprovalService.AdminApprovalRequiredException ex) {
+        } catch (AdminApprovalRequiredException ex) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
         }
     }
 
-    private AdminApprovalService.AdminRequestMetadata requestMetadata(HttpServletRequest request) {
-        return new AdminApprovalService.AdminRequestMetadata(
-                request.getHeader(complianceService.approvalHeaderName()),
+    private AdminRequestMetadata requestMetadata(HttpServletRequest request) {
+        return new AdminRequestMetadata(
+                AdminApprovalRequestBinding.reference(request.getHeader(complianceService.approvalHeaderName())),
                 request.getMethod(),
                 request.getRequestURI(),
                 request.getQueryString());

@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.announcement;
 
+import com.surprising.gateway.provider.exception.AdminApprovalRequiredException;
+import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -65,10 +67,10 @@ class AnnouncementControllerTest {
         byte[] body=" { \"reason\": \"批准\", \"version\": 3 }\n".getBytes(StandardCharsets.UTF_8);
         mvc.perform(post("/api/v1/admin/announcements/7/publish?locale=zh-CN").header("Authorization","admin").header("X-Admin-Approval-Id","approval-7")
                 .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
-        var bytes=ArgumentCaptor.forClass(byte[].class);var metadata=ArgumentCaptor.forClass(AdminApprovalService.AdminRequestMetadata.class);
+        var bytes=ArgumentCaptor.forClass(byte[].class);var metadata=ArgumentCaptor.forClass(AdminRequestMetadata.class);
         verify(service).publish(eq("admin"),eq(7L),eq(3L),eq("批准"),metadata.capture(),bytes.capture());
         assertThat(bytes.getValue()).containsExactly(body);
-        assertThat(metadata.getValue()).isEqualTo(new AdminApprovalService.AdminRequestMetadata("approval-7","POST","/api/v1/admin/announcements/7/publish","locale=zh-CN"));
+        assertThat(metadata.getValue()).isEqualTo(new AdminRequestMetadata(com.surprising.gateway.provider.auth.controller.AdminApprovalRequestBinding.reference("approval-7"),"POST","/api/v1/admin/announcements/7/publish","locale=zh-CN"));
     }
     @Test void mapsNativeBusinessFailuresAndPreservesRequiredApprovalStatus() throws Exception {
         int[] statuses={400,404,409,401,403};int i=0;
@@ -77,7 +79,7 @@ class AnnouncementControllerTest {
             mvc.perform(get("/api/v1/admin/announcements/7").header("Authorization","admin")).andExpect(status().is(statuses[i++])).andExpect(jsonPath("$.message").value("domain failure"));
         }
         when(approvals.approvalHeaderName()).thenReturn("X-Admin-Approval-Id");
-        when(service.publish(eq("admin"),eq(7L),eq(3L),anyString(),any(),any())).thenThrow(new AdminApprovalService.AdminApprovalRequiredException("approval required"));
+        when(service.publish(eq("admin"),eq(7L),eq(3L),anyString(),any(),any())).thenThrow(new AdminApprovalRequiredException("approval required"));
         mvc.perform(post("/api/v1/admin/announcements/7/publish").header("Authorization","admin").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"reason\":\"publish\",\"version\":3}")).andExpect(status().isPreconditionRequired());
     }

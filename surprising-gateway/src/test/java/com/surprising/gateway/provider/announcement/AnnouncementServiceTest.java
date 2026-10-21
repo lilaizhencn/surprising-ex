@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.announcement;
 
+import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -23,7 +24,7 @@ class AnnouncementServiceTest {
     private final AdminApprovalService approvals=mock(AdminApprovalService.class);
     private final AnnouncementService service=new AnnouncementService(repository,translations,targets,mock(AnnouncementReadRepository.class),audit,mock(AuthService.class),approvals);
     private final JwtPrincipal actor=new JwtPrincipal(9,"operator","ACTIVE",List.of("ADMIN"),Instant.now().plusSeconds(60));
-    private final AdminApprovalService.AdminRequestMetadata metadata=new AdminApprovalService.AdminRequestMetadata("approval-1","POST","/api/v1/admin/announcements/7/publish",null);
+    private final AdminRequestMetadata metadata=new AdminRequestMetadata(com.surprising.gateway.provider.auth.controller.AdminApprovalRequestBinding.reference("approval-1"),"POST","/api/v1/admin/announcements/7/publish",null);
     private final byte[] raw={1,2,3};
     private BaseRow row(String status,long version,Instant start) { return new BaseRow(7,"GENERAL",status,10,start,null,version,9,9,start,start); }
     private Translation translation(String locale) { return new Translation(locale,"Title","Summary","Body"); }

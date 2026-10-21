@@ -66,7 +66,7 @@ class C2cHttpBoundaryTest {
         http.setQueryString("market=a%2Bb&reason=%E8%AF%B4%E6%98%8E");http.setRemoteAddr("127.0.0.9");
         http.addHeader("X-QA-Approval", "9007199254740993");http.addHeader("User-Agent", "original-agent");
         var bound = new C2cAdminRequestBinding(approvals).bind(http);
-        assertThat(bound.approvalId()).isEqualTo("9007199254740993");assertThat(bound.method()).isEqualTo("POST");
+        assertThat(bound.approval().value()).isEqualTo(9007199254740993L);assertThat(bound.approval().canonicalPositive()).isTrue();assertThat(bound.method()).isEqualTo("POST");
         assertThat(bound.path()).isEqualTo(http.getRequestURI());assertThat(bound.query()).isEqualTo(http.getQueryString());
         assertThat(bound.userAgent()).isEqualTo("original-agent");assertThat(bound.ip()).isEqualTo("127.0.0.9");
         byte[] body = " { \"reason\": \"原始正文\" }\r\n".getBytes(StandardCharsets.UTF_8);

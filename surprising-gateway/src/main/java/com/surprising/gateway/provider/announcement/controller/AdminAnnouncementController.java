@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.announcement.controller;
 
+import com.surprising.gateway.provider.auth.controller.AdminApprovalRequestBinding;
+import com.surprising.gateway.provider.exception.AdminApprovalRequiredException;
+import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
 import com.surprising.gateway.provider.announcement.service.AnnouncementService;
 import com.surprising.gateway.provider.announcement.model.AnnouncementModels;
 
@@ -80,7 +83,7 @@ public class AdminAnnouncementController {
             if(request==null)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"request body is required");
             AnnouncementParameters.version(request.version());
             return service.publish(authorization,announcementId,request.version(),AnnouncementParameters.reason(request.reason(),false),requestMetadata(httpRequest),body);
-        } catch (AdminApprovalService.AdminApprovalRequiredException ex) {
+        } catch (AdminApprovalRequiredException ex) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
         }
     }
@@ -96,7 +99,7 @@ public class AdminAnnouncementController {
             if(request==null)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"request body is required");
             AnnouncementParameters.version(request.version());
             return service.withdraw(authorization,announcementId,request.version(),AnnouncementParameters.reason(request.reason(),true),requestMetadata(httpRequest),body);
-        } catch (AdminApprovalService.AdminApprovalRequiredException ex) {
+        } catch (AdminApprovalRequiredException ex) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
         }
     }
@@ -108,10 +111,10 @@ public class AdminAnnouncementController {
         return service.audit(authorization, announcementId);
     }
 
-    private AdminApprovalService.AdminRequestMetadata requestMetadata(HttpServletRequest request) {
+    private AdminRequestMetadata requestMetadata(HttpServletRequest request) {
 
-        return new AdminApprovalService.AdminRequestMetadata(
-                request.getHeader(approvals.approvalHeaderName()), request.getMethod(),
+        return new AdminRequestMetadata(
+                AdminApprovalRequestBinding.reference(request.getHeader(approvals.approvalHeaderName())), request.getMethod(),
                 request.getRequestURI(), request.getQueryString());
     }
 

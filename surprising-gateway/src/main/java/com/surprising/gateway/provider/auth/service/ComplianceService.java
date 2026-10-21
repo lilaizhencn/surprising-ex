@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.auth.service;
 
+import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
 import com.surprising.gateway.provider.auth.client.KycProvider;
 import com.surprising.gateway.provider.auth.client.KycProviderRegistry;
 import com.surprising.gateway.provider.auth.model.AuthModels;
@@ -132,7 +133,7 @@ public class ComplianceService {
     public KycProfile adminUpsertKyc(String authorization,
                                      long userId,
                                      KycUpdateRequest request,
-                                     AdminApprovalService.AdminRequestMetadata metadata,
+                                     AdminRequestMetadata metadata,
                                      byte[] body) {
         AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
         authService.adminUser(authorization, userId);
@@ -301,7 +302,7 @@ public class ComplianceService {
     public RiskTag adminCreateRiskTag(String authorization,
                                       long userId,
                                       RiskTagCreateRequest request,
-                                      AdminApprovalService.AdminRequestMetadata metadata,
+                                      AdminRequestMetadata metadata,
                                       byte[] body) {
         AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
         authService.adminUser(authorization, userId);
@@ -310,7 +311,7 @@ public class ComplianceService {
 
     public RiskTag adminResolveRiskTag(String authorization,
                                        long tagId,
-                                       AdminApprovalService.AdminRequestMetadata metadata,
+                                       AdminRequestMetadata metadata,
                                        byte[] body) {
         AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
         return resolveRiskTag(tagId, principal.userId(), Instant.now());
@@ -319,7 +320,7 @@ public class ComplianceService {
     public AmlCase adminCreateAmlCase(String authorization,
                                       long userId,
                                       AmlCaseCreateRequest request,
-                                      AdminApprovalService.AdminRequestMetadata metadata,
+                                      AdminRequestMetadata metadata,
                                       byte[] body) {
         AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
         authService.adminUser(authorization, userId);
@@ -329,7 +330,7 @@ public class ComplianceService {
     public AmlCase adminUpdateAmlCaseStatus(String authorization,
                                             long caseId,
                                             AmlCaseStatusUpdateRequest request,
-                                            AdminApprovalService.AdminRequestMetadata metadata,
+                                            AdminRequestMetadata metadata,
                                             byte[] body) {
         AuthModels.JwtPrincipal principal = requireAdminWrite(authorization, metadata, body);
         return updateAmlCaseStatus(caseId, principal.userId(), request, Instant.now());
@@ -337,7 +338,7 @@ public class ComplianceService {
 
     private AuthModels.JwtPrincipal requireAdminWrite(
             String authorization,
-            AdminApprovalService.AdminRequestMetadata metadata,
+            AdminRequestMetadata metadata,
             byte[] body) {
         return approvalService.requireWrite(
                 authorization,

@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.announcement.service;
 
+import com.surprising.gateway.provider.auth.model.AdminRequestMetadata;
 import com.surprising.gateway.provider.announcement.model.AnnouncementModels.*;
 import com.surprising.gateway.provider.announcement.repository.*;
 import com.surprising.gateway.provider.announcement.exception.AnnouncementProblem;
@@ -67,7 +68,7 @@ public class AnnouncementService {
     }
     @Transactional
     public Announcement publish(String authorization,long id,long version,String reason,
-                               AdminApprovalService.AdminRequestMetadata metadata,byte[] rawBody) {
+                               AdminRequestMetadata metadata,byte[] rawBody) {
         var actor=approvedActor(authorization,metadata,rawBody);var current=findAdmin(id);
         if(current.version()!=version)throw conflict("announcement was changed by another operator");
         if(current.status().equals("WITHDRAWN"))throw invalid("withdrawn announcements must be saved as a draft before publishing");
@@ -83,7 +84,7 @@ public class AnnouncementService {
     }
     @Transactional
     public Announcement withdraw(String authorization,long id,long version,String reason,
-                                AdminApprovalService.AdminRequestMetadata metadata,byte[] rawBody) {
+                                AdminRequestMetadata metadata,byte[] rawBody) {
         var actor=approvedActor(authorization,metadata,rawBody);requireRow(id);var now=Instant.now();
         if(!repository.withdraw(id,version,actor.userId(),now))throw conflict("announcement was changed or already withdrawn");
         return auditResult(id,"WITHDRAW",actor,reason,now);
@@ -160,7 +161,7 @@ public class AnnouncementService {
         catch(IllegalArgumentException ex) { throw new AnnouncementProblem(Kind.AUTH_REQUIRED,ex.getMessage()); }
         catch(IllegalStateException ex) { throw new AnnouncementProblem(Kind.ACCESS_DENIED,ex.getMessage()); }
     }
-    private JwtPrincipal approvedActor(String authorization,AdminApprovalService.AdminRequestMetadata metadata,byte[] body) {
+    private JwtPrincipal approvedActor(String authorization,AdminRequestMetadata metadata,byte[] body) {
         return approvals.requireWrite(authorization,"admin.announcements.publish","gateway-admin",metadata,body);
     }
     private JwtPrincipal user(String authorization) {

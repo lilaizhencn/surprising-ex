@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.auth.controller;
 
+import com.surprising.gateway.provider.auth.model.AdminApprovalReference;
 import com.surprising.gateway.provider.auth.model.AdminApprovalCommand;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalCreateRequest;
 import java.util.Locale;
@@ -17,6 +18,19 @@ public final class AdminApprovalRequestBinding {
 
     public static String decisionReason(String reason) {
         return blankToNull(reason);
+    }
+
+    public static AdminApprovalReference reference(String value) {
+        if (value == null || value.isBlank()) {
+            return new AdminApprovalReference(null, false, false);
+        }
+        try {
+            long id = Long.parseLong(value.trim());
+            // C2C 资金裁决沿用更严格的原始 Header 格式：不允许空格、符号或前导零。
+            return new AdminApprovalReference(id, true, value.matches("[1-9][0-9]{0,18}"));
+        } catch (NumberFormatException invalid) {
+            return new AdminApprovalReference(null, true, false);
+        }
     }
 
     private static String normalizeService(String service) {
