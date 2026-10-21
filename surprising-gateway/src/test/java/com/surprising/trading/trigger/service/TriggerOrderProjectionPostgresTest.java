@@ -37,7 +37,7 @@ class TriggerOrderProjectionPostgresTest {
     }
     @Test void absentInitializationIs503RatherThanAnEmptyHistory() {
         assertThatThrownBy(()->repository.get(ProductLine.OPTION,7L,99)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
-        assertThatThrownBy(()->repository.search(ProductLine.OPTION,null,null,null,null,10,null,null)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
+        assertThatThrownBy(()->search(ProductLine.OPTION,null,null,null,null,10,null,null)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
     }
     @Test void terminalPointReadsKeepProductUserAndExactInt64Identity() {
         ready();add(Long.MAX_VALUE,7,1000,CoreTriggerOrderStatus.CANCELED);
@@ -52,19 +52,19 @@ class TriggerOrderProjectionPostgresTest {
         add(Long.MAX_VALUE,7,2000,CoreTriggerOrderStatus.CANCELED);add(9007199254740993L,7,2000,CoreTriggerOrderStatus.CANCELED);
         for(String sort:List.of("createdAt.desc","createdAt.asc")) {
             var ids=new ArrayList<Long>();String cursor=null;
-            do {var page=repository.search(ProductLine.OPTION,null,null,null,null,1,cursor,sort);
+            do {var page=search(ProductLine.OPTION,null,null,null,null,1,cursor,sort);
                 page.orders().forEach(v->ids.add(v.triggerOrderId()));cursor=page.nextCursor();}while(cursor!=null);
             assertThat(ids).containsExactlyElementsOf(sort.endsWith("desc")?List.of(9L,Long.MAX_VALUE,9007199254740993L,5L):List.of(5L,9007199254740993L,Long.MAX_VALUE,9L));
         }
-        var filtered=repository.search(ProductLine.OPTION,7L,"74",CoreTriggerOrderStatus.CANCELED,null,10,null,null);
-        assertThat(filtered.orders()).extracting(CoreTriggerOrderStateView::triggerOrderId).containsExactly(Long.MAX_VALUE,9007199254740993L);
+        var filtered=search(ProductLine.OPTION,7L,"74",CoreTriggerOrderStatus.CANCELED,null,10,null,null);
+        assertThat(filtered.orders()).extracting(com.surprising.trading.api.model.TriggerOrderResponse::triggerOrderId).containsExactly(Long.MAX_VALUE,9007199254740993L);
     }
     @Test void cursorCannotBeReusedForAnotherProductFilterOrSort() {
         ready();add(1,7,1000,CoreTriggerOrderStatus.CANCELED);add(2,7,2000,CoreTriggerOrderStatus.CANCELED);
-        String cursor=repository.search(ProductLine.OPTION,null,null,null,null,1,null,null).nextCursor();
-        assertThatThrownBy(()->repository.search(ProductLine.SPOT,null,null,null,null,1,cursor,null)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(()->repository.search(ProductLine.OPTION,8L,null,null,null,1,cursor,null)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(()->repository.search(ProductLine.OPTION,null,null,null,null,1,cursor,"createdAt.asc")).isInstanceOf(IllegalArgumentException.class);
+        String cursor=search(ProductLine.OPTION,null,null,null,null,1,null,null).nextCursor();
+        assertThatThrownBy(()->search(ProductLine.SPOT,null,null,null,null,1,cursor,null)).isInstanceOfSatisfying(ResponseStatusException.class,failure -> assertThat(failure.getStatusCode().value()).isEqualTo(400));
+        assertThatThrownBy(()->search(ProductLine.OPTION,8L,null,null,null,1,cursor,null)).isInstanceOfSatisfying(ResponseStatusException.class,failure -> assertThat(failure.getStatusCode().value()).isEqualTo(400));
+        assertThatThrownBy(()->search(ProductLine.OPTION,null,null,null,null,1,cursor,"createdAt.asc")).isInstanceOfSatisfying(ResponseStatusException.class,failure -> assertThat(failure.getStatusCode().value()).isEqualTo(400));
     }
     @Test void corruptRowsAndUnavailableStorageAre503() {
         ready();add(1,7,1000,CoreTriggerOrderStatus.CANCELED);
@@ -73,4 +73,13 @@ class TriggerOrderProjectionPostgresTest {
         jdbc.execute("DROP TABLE core_trigger_order_projection");
         assertThatThrownBy(()->repository.get(ProductLine.OPTION,null,1)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
     }
+    private com.surprising.trading.api.model.TriggerOrderQueryResponse search(ProductLine product,Long user,String instrument,
+            CoreTriggerOrderStatus status,Long trigger,int limit,String cursor,String sort) {
+        var properties=new com.surprising.trading.trigger.config.TriggerProperties();
+        properties.setProductLine(product);
+        var service=new TriggerOrderService(properties,null,null,repository);
+        return new com.surprising.trading.trigger.controller.AdminTriggerOrderRequestController(service)
+                .orders("1",null,product.name(),user,instrument,status==null?null:status.name(),trigger,limit,cursor,sort);
+    }
+
 }

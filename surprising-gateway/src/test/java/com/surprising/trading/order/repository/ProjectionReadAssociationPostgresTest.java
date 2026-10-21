@@ -40,7 +40,7 @@ class ProjectionReadAssociationPostgresTest {
                 ()->assertThat(trades.ownFills(line,7,null,null,null,null,10,null).trades()).isEmpty(),
                 ()->assertThat(trades.search(line,null,null,null,10,null,false).trades()).isEmpty(),
                 ()->assertThat(triggers.get(line,7L,99)).isEmpty(),
-                ()->assertThat(triggers.search(line,null,null,null,null,10,null,null).orders()).isEmpty());
+                ()->assertThat(triggers.search(line,null,null,null,null,10,null,false).orders()).isEmpty());
         for(var read:reads) {
             jdbc.reads=0;
             assertThatThrownBy(read::run).isInstanceOf(ReadViewUnavailableException.class).hasMessageContaining("INITIALIZING");

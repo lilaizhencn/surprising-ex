@@ -154,3 +154,5 @@
 - 参数职责3将算法单查询的请求身份/分页/合约ID/客户端ID检查归OrderRequestController；Repository只收原生条件，保留持久化事实严格解码及单SQL就绪关联。原Repository格式测试移至实际入口并验证调用业务前拒绝。定向67项、扩大干净构建334项全部通过无跳过；撤去入口检查的1项负例捕获预期失败，逐字节恢复后绿色。关闭ADD-009；见 [算法单参数绑定验证](validation/java-mvc-algo-binding-20261022.json)。所属资源已清理，其余补充发现、全源码复扫/门禁及最终实栈继续。
 
 - 参数职责4将私人成交和后台成交的limit、合约/订单/时间筛选、排序与游标解码归Controller；Service/Repository接收精确原生坐标。纯游标工具保持旧令牌与作用域格式，Repository仅以最后事实行编码输出游标，保留SQL必要就绪关联。定向192项、扩大干净构建335项全部通过无跳过；撤去两种游标作用域匹配的2项负例均捕获预期失败，逐字节恢复后绿色。真实Controller→Service→PostgreSQL验证自成交双侧/隐私、六产品隔离、两种排序和long坐标。关闭ADD-010；见 [成交参数绑定验证](validation/java-mvc-trade-binding-20261022.json)。所属资源已清理，其余补充发现、全源码复扫/门禁及最终实栈继续。
+
+- 参数职责5将条件单历史请求的用户/合约/状态/ID、limit、排序与作用域游标绑定归AdminTriggerOrderRequestController；Service只接收原生状态/坐标并检查产品归属，Repository保留事实解码及必要单SQL就绪关联。纯格式工具保持原令牌。定向77项、扩大干净构建337项全部通过无跳过；撤去作用域匹配的1项负例捕获预期失败，逐字节恢复后绿色。实际Controller→Service→PostgreSQL验证双方向分页、精确long ID和产品/用户/排序隔离。关闭ADD-011；见 [条件单查询绑定验证](validation/java-mvc-trigger-binding-20261022.json)。所属资源已清理，其余补充发现、全源码复扫/门禁及最终实栈继续。

@@ -340,36 +340,18 @@ public class TriggerOrderService {
                 "createdAt.desc", limit);
     }
 
-    public TriggerOrderQueryResponse adminOrders(Long userId, String instrumentId, String status,
-                                                 Long triggerOrderId, int limit) {
-        return adminOrders(userId, instrumentId, status, triggerOrderId, limit, null, null, null);
-    }
-
     private com.surprising.realtime.api.ValkeyUserQueries requireRealtimeQueries() {
         if (realtimeQueries == null) throw new ReadViewUnavailableException("READ_VIEW_UNAVAILABLE");
         return realtimeQueries;
     }
 
-    public TriggerOrderQueryResponse adminOrders(Long userId, String instrumentId, String status,
-                                                 Long triggerOrderId, int limit, String cursor, String sort) {
-        return adminOrders(userId, instrumentId, status, triggerOrderId, limit, cursor, sort, null);
-    }
-
-    public TriggerOrderQueryResponse adminOrders(Long userId, String instrumentId, String status,
-                                                 Long triggerOrderId, int limit, String cursor, String sort,
-                                                 ProductLine productLine) {
-        if (userId != null && userId <= 0) throw new IllegalArgumentException("userId must be positive");
-        if (triggerOrderId != null && triggerOrderId <= 0) {
-            throw new IllegalArgumentException("triggerOrderId must be positive");
-        }
-        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1, 1000]");
+    public TriggerOrderQueryResponse adminOrders(Long userId, String instrumentId, CoreTriggerOrderStatus status,
+            Long triggerOrderId, int limit, com.surprising.trading.trigger.model.TriggerReadCursor cursor,
+            boolean ascending, ProductLine productLine) {
         ProductLine effective = productLine == null ? currentProductLine() : productLine;
         if (effective != currentProductLine()) throw new IllegalArgumentException("product line does not match provider");
-        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
-        CoreTriggerOrderStatus normalizedStatus = status == null || status.isBlank() ? null
-                : CoreTriggerOrderStatus.valueOf(status.trim().toUpperCase());
-        var page = requireTriggerProjection().search(effective, userId, normalizedSymbol, normalizedStatus,
-                triggerOrderId, limit, cursor, sort);
+        var page = requireTriggerProjection().search(effective, userId, instrumentId, status,
+                triggerOrderId, limit, cursor, ascending);
         var values = page.orders().stream().map(TriggerOrderAeronGateway::response).toList();
         return new TriggerOrderQueryResponse(values.size(), values, page.nextCursor(), page.hasMore(), page.sort(), limit);
     }
@@ -555,7 +537,7 @@ public class TriggerOrderService {
         return normalized;
     }
 
-    private ProductLine currentProductLine() {
+    public ProductLine currentProductLine() {
         if (properties.getProductLine() == null) throw new IllegalStateException("trigger product line is required");
         return properties.getProductLine();
     }

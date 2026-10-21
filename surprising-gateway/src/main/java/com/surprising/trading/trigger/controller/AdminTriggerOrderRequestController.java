@@ -25,7 +25,19 @@ public class AdminTriggerOrderRequestController {
         requireAdmin(adminUserId);
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
-            return triggerOrderService.adminOrders(userId, instrumentId, status, triggerOrderId, limit, cursor, sort, productLine);
+            if (userId != null && userId <= 0) throw new IllegalArgumentException("userId must be positive");
+            if (triggerOrderId != null && triggerOrderId <= 0) throw new IllegalArgumentException("triggerOrderId must be positive");
+            if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1, 1000]");
+            String instrument = instrumentId == null || instrumentId.isBlank() ? null : instrumentId.trim().toUpperCase(java.util.Locale.ROOT);
+            if (instrument != null) com.surprising.product.api.utils.InstrumentIds.parse(instrument);
+            var state = status == null || status.isBlank() ? null : com.surprising.aeron.protocol.CoreTriggerOrderStatus.valueOf(status.trim().toUpperCase(java.util.Locale.ROOT));
+            String ordering = sort == null || sort.isBlank() ? "createdAt.desc" : sort.trim();
+            if (!java.util.Set.of("createdAt.desc", "createdAt.asc").contains(ordering)) throw new IllegalArgumentException("invalid trigger sort");
+            boolean ascending = ordering.endsWith("asc");
+            ProductLine effective = productLine == null ? triggerOrderService.currentProductLine() : productLine;
+            var after = cursor == null || cursor.isBlank() ? null : com.surprising.trading.trigger.utils.TriggerReadCursors.decode(cursor,
+                    com.surprising.trading.trigger.utils.TriggerReadCursors.scope(effective,userId,instrument,state,triggerOrderId,ascending));
+            return triggerOrderService.adminOrders(userId,instrument,state,triggerOrderId,limit,after,ascending,productLine);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

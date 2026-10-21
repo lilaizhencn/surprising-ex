@@ -506,3 +506,5 @@ C2C后台的原始请求头、method/path/query、User-Agent和IP由 `c2c.contro
 算法单查询的请求身份、分页、永久合约ID和客户端请求号由 `OrderRequestController` 校验/规范化；`AlgoOrderProjectionRepository` 接收原生查询条件，继续负责持久化父单事实的身份、进度一致性和必要初始化关联。
 
 成交查询由 `OrderRequestController` / `AdminOrderRequestController` 绑定范围、排序及作用域游标，Service 和 `TradeProjectionRepository` 只接收 `TradeReadCursor` 的精确 long/int 坐标；`TradeReadCursors` 保持原有令牌格式。SQL保留同表 maker/taker 双侧事实与必要就绪关联，输出游标依据最后事实行编码。
+
+条件单历史查询由 `AdminTriggerOrderRequestController` 校验原始筛选、状态和分页协议，经 `TriggerReadCursors` 绑定为 `CoreTriggerOrderStatus`、`TriggerReadCursor` 和排序方向；Service保留产品归属检查，Repository只处理原生SQL条件和持久化事实。

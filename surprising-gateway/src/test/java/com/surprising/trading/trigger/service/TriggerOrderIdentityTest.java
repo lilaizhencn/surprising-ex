@@ -53,7 +53,7 @@ class TriggerOrderIdentityTest {
         var service = new TriggerOrderService(properties(), gateway, null, null);
         assertThatThrownBy(() -> service.get(1001L, 99L)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         assertThatThrownBy(() -> service.get(99L, ProductLine.LINEAR_PERPETUAL)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
-        assertThatThrownBy(() -> service.adminOrders(null, null, null, null, 10)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
+        assertThatThrownBy(() -> service.adminOrders(null, null, null, null, 10, null, false, null)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         assertThatThrownBy(() -> service.adminTimeline(99L)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         org.mockito.Mockito.verifyNoInteractions(gateway);
     }
