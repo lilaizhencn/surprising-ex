@@ -1,5 +1,8 @@
 package com.surprising.price.mark.service;
 
+import com.surprising.price.mark.consumer.MarkPriceConsumer;
+import com.surprising.price.mark.exception.ProductTopicMismatchException;
+
 import com.surprising.realtime.api.RealtimeJsonPublisher;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,8 +50,7 @@ class MarkPriceServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         Instant now = Instant.now();
 
-        service.onBookTicker(objectMapper.writeValueAsString(
-                new PerpBookTickerEvent("1", new BigDecimal("100.00"), new BigDecimal("100.10"), 1, now)));
+        service.acceptBookTicker(new PerpBookTickerEvent("1", new BigDecimal("100.00"), new BigDecimal("100.10"), 1, now));
         service.acceptTrade(new PerpTradeEvent("1", "t1", 1, now,
                 new BigDecimal("100.05"), BigDecimal.ONE, "BUY"));
         supplyMarket(service, now);
@@ -67,8 +69,7 @@ class MarkPriceServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         Instant now = Instant.now();
 
-        service.onBookTicker(objectMapper.writeValueAsString(
-                new PerpBookTickerEvent("1", new BigDecimal("100.00"), new BigDecimal("100.10"), 1, now)));
+        service.acceptBookTicker(new PerpBookTickerEvent("1", new BigDecimal("100.00"), new BigDecimal("100.10"), 1, now));
         service.acceptTrade(new PerpTradeEvent("1", "t1", 1, now,
                 new BigDecimal("100.05"), BigDecimal.ONE, "BUY"));
         supplyMarket(service, now);
@@ -88,8 +89,7 @@ class MarkPriceServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         Instant now = Instant.now();
 
-        service.onBookTicker(objectMapper.writeValueAsString(
-                new PerpBookTickerEvent("1", new BigDecimal("100.00"), new BigDecimal("100.10"), 1, now)));
+        service.acceptBookTicker(new PerpBookTickerEvent("1", new BigDecimal("100.00"), new BigDecimal("100.10"), 1, now));
         service.acceptTrade(new PerpTradeEvent("1", "t1", 1, now,
                 new BigDecimal("100.05"), BigDecimal.ONE, "BUY"));
         supplyMarket(service, now);
@@ -121,9 +121,9 @@ class MarkPriceServiceTest {
                 "realtime", realtime, "core", corePublisher));
         MarkPriceProperties properties = properties();
         LatestMarkPriceCache cache = mock(LatestMarkPriceCache.class);
-        MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
+        MarkPriceService service = new MarkPriceService(properties,
                 new MarkPriceCalculator(properties), coordinationService, kafkaTemplate, cache,
-                mock(PublicTradeEventMapper.class), publishers.getBeanProvider(RealtimeJsonPublisher.class), publishers.getBeanProvider(MarkPriceCorePublisher.class));
+                 publishers.getBeanProvider(RealtimeJsonPublisher.class), publishers.getBeanProvider(MarkPriceCorePublisher.class));
         ObjectMapper objectMapper = new ObjectMapper();
         Instant now = Instant.now();
 
@@ -182,9 +182,9 @@ class MarkPriceServiceTest {
         when(coordinationService.currentEncoding("1")).thenReturn(encoding());
         MarkPriceProperties properties = properties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
+        MarkPriceService service = new MarkPriceService(properties,
                 new MarkPriceCalculator(properties), coordinationService, kafkaTemplate,
-                mock(LatestMarkPriceCache.class), mock(PublicTradeEventMapper.class),
+                mock(LatestMarkPriceCache.class),
                 new StaticListableBeanFactory().getBeanProvider(RealtimeJsonPublisher.class),
                 new StaticListableBeanFactory().getBeanProvider(MarkPriceCorePublisher.class));
         Instant now = Instant.now();
@@ -208,15 +208,15 @@ class MarkPriceServiceTest {
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
         MarkPriceProperties properties = properties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
-        MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
+        MarkPriceService service = new MarkPriceService(properties,
                 new MarkPriceCalculator(properties), coordinationService, kafkaTemplate,
-                mock(LatestMarkPriceCache.class), mock(PublicTradeEventMapper.class),
+                mock(LatestMarkPriceCache.class),
                 new StaticListableBeanFactory().getBeanProvider(RealtimeJsonPublisher.class),
                 new StaticListableBeanFactory().getBeanProvider(MarkPriceCorePublisher.class));
         String payload = new ObjectMapper().writeValueAsString(new PerpBookTickerEvent("45",
                 new BigDecimal("100.00"), new BigDecimal("100.10"), 1, Instant.now()));
 
-        service.onBookTicker(new ConsumerRecord<>("surprising.option.book.ticker.v1", 0, 1L,
+        consumer(service,properties,mock(PublicTradeEventMapper.class)).onBookTicker(new ConsumerRecord<>("surprising.option.book.ticker.v1", 0, 1L,
                 "45", payload));
 
         verify(kafkaTemplate, never()).send(any(), any(), any());
@@ -228,9 +228,9 @@ class MarkPriceServiceTest {
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
         PublicTradeEventMapper mapper = mock(PublicTradeEventMapper.class);
         MarkPriceProperties properties = properties();
-        MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
+        MarkPriceService service = new MarkPriceService(properties,
                 new MarkPriceCalculator(properties), coordinationService, kafkaTemplate,
-                mock(LatestMarkPriceCache.class), mapper,
+                mock(LatestMarkPriceCache.class),
                 new StaticListableBeanFactory().getBeanProvider(RealtimeJsonPublisher.class),
                 new StaticListableBeanFactory().getBeanProvider(MarkPriceCorePublisher.class));
         Instant now = Instant.parse("2026-08-25T00:00:00Z");
@@ -241,9 +241,9 @@ class MarkPriceServiceTest {
         when(mapper.toPerpTradeEvent(event)).thenReturn(mapped);
         ObjectMapper objectMapper = new ObjectMapper();
 
-        service.onTrade(new ConsumerRecord<>(properties.matchTradesTopic(), 0, 1L, "1",
+        consumer(service,properties,mapper).onTrade(new ConsumerRecord<>(properties.matchTradesTopic(), 0, 1L, "1",
                 objectMapper.writeValueAsString(event)));
-        service.onTrade(new ConsumerRecord<>(properties.matchTradesTopic(), 0, 2L, "2",
+        consumer(service,properties,mapper).onTrade(new ConsumerRecord<>(properties.matchTradesTopic(), 0, 2L, "2",
                 objectMapper.writeValueAsString(event)));
 
         verify(mapper).toPerpTradeEvent(event);
@@ -258,9 +258,9 @@ class MarkPriceServiceTest {
                 .thenThrow(new IllegalStateException("mark price encoding not found for BTC-USDT"));
         MarkPriceProperties properties = properties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
-        MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
+        MarkPriceService service = new MarkPriceService(properties,
                 new MarkPriceCalculator(properties), coordinationService, kafkaTemplate,
-                mock(LatestMarkPriceCache.class), mock(PublicTradeEventMapper.class),
+                mock(LatestMarkPriceCache.class),
                 new StaticListableBeanFactory().getBeanProvider(RealtimeJsonPublisher.class),
                 new StaticListableBeanFactory().getBeanProvider(MarkPriceCorePublisher.class));
         Instant now = Instant.now();
@@ -279,17 +279,17 @@ class MarkPriceServiceTest {
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
         MarkPriceProperties properties = properties();
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
-        MarkPriceService service = new MarkPriceService(new ObjectMapper(), properties,
+        MarkPriceService service = new MarkPriceService(properties,
                 new MarkPriceCalculator(properties), coordinationService, kafkaTemplate,
-                mock(LatestMarkPriceCache.class), mock(PublicTradeEventMapper.class),
+                mock(LatestMarkPriceCache.class),
                 new StaticListableBeanFactory().getBeanProvider(RealtimeJsonPublisher.class),
                 new StaticListableBeanFactory().getBeanProvider(MarkPriceCorePublisher.class));
         String payload = new ObjectMapper().writeValueAsString(new PerpFundingRateEvent("5",
                 BigDecimal.ZERO, Instant.now(), 8, 1, Instant.now()));
 
-        assertThatThrownBy(() -> service.onFundingRate(new ConsumerRecord<>(
+        assertThatThrownBy(() -> consumer(service,properties,mock(PublicTradeEventMapper.class)).onFundingRate(new ConsumerRecord<>(
                 "surprising.linear-perp.funding.rate.v1", 0, 1L, "5", payload)))
-                .isInstanceOf(MarkPriceService.ProductTopicMismatchException.class)
+                .isInstanceOf(ProductTopicMismatchException.class)
                 .hasMessageContaining("funding rate topic must match current product line")
                 .hasMessageContaining("surprising.inverse-perp.funding.rate.v1");
 
@@ -386,12 +386,16 @@ class MarkPriceServiceTest {
                 new BigDecimal("100"), BigDecimal.ONE, "BUY"));
     }
 
+    private MarkPriceConsumer consumer(MarkPriceService service,MarkPriceProperties properties,PublicTradeEventMapper mapper) {
+        return new MarkPriceConsumer(new ObjectMapper(),properties,mapper,service);
+    }
+
     private MarkPriceService service(MarkPriceCoordinationService coordinationService,
                                      KafkaTemplate<String, Object> kafkaTemplate) {
         MarkPriceProperties properties = properties();
         when(coordinationService.currentEncoding("1")).thenReturn(encoding());
-        return new MarkPriceService(new ObjectMapper(), properties, new MarkPriceCalculator(properties),
-                coordinationService, kafkaTemplate, mock(LatestMarkPriceCache.class), mock(PublicTradeEventMapper.class),
+        return new MarkPriceService(properties, new MarkPriceCalculator(properties),
+                coordinationService, kafkaTemplate, mock(LatestMarkPriceCache.class),
                 new StaticListableBeanFactory().getBeanProvider(RealtimeJsonPublisher.class),
                 new StaticListableBeanFactory().getBeanProvider(MarkPriceCorePublisher.class));
     }

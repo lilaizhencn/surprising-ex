@@ -364,3 +364,5 @@ HotSpot JDK 27，基线 `292e4e04` 与当前代码使用相同 ThreadPoolTaskSch
 行情探针的HTTP入口与采样聚合分别归probe.controller和probe.service，保留现有探针接口与计算。验证见 [其余归包记录](../docs/validation/java-mvc-remaining-packages-20261021.json)。
 
 Kafka职责归包：独立快照、审计、结算/排空及推送消费入口统一放在各自provider.consumer（价格为index.consumer/mark.consumer），业务和缓存继续由原Service/状态所有者负责。监听topic、group、启动条件与处理顺序保持；做市事件唤醒组件为consumer.MakerQuoteWakeups，原唯一信号状态不变。详见 docs/validation/java-mvc-consumer-packages-20261022.json。
+
+标记价格接入由 `price.mark.consumer.MarkPriceConsumer` 负责三种Kafka流的产品topic、成交key和JSON解码；`MarkPriceService` 只接收原生事件，继续唯一持有输入/基差状态及计算、租约和发布顺序。当前输入查询结果位于mark.model.MarketInputs，topic不匹配异常位于mark.exception；原监听配置、字段和消息处理顺序保持。

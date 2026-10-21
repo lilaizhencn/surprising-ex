@@ -1,0 +1,403 @@
+{
+  "verified_at_utc": "2026-10-21T19:16:31.351629+00:00",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16",
+  "scope": "标记价格Kafka协议接入与实际业务状态/计算分离",
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-price/surprising-price-provider",
+        "-Dtest=MarkPrice*Test,PublicTradeEventMapperTest,MarketProbe*Test",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceServiceTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceCorePublisherTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceCalculatorTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.consumer.MarkPriceConsumerTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceMarketSubscriptionTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceAuditConsumerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.probe.MarketProbeControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.PublicTradeEventMapperTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.repository.MarkPriceTickRepositoryTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceEncodingServiceTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.probe.MarketProbeServiceTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.config.MarkPriceApplicationYamlTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "b39525492d3d0110dbe790798c0fcda9cd81dfe8dad5ed3772fcf932a1452aff",
+      "tests": 63,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-price/surprising-price-provider",
+        "-Dtest=MarkPriceConsumerTest#acceptsOwnBookAndRejectsEveryOtherProductBeforeBusiness",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.price.mark.consumer.MarkPriceConsumerTest",
+          "tests": 6,
+          "failures": 6,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "77bc30ae8cfce56b98e2837dce5517da9ad5d13543977de2a34b8c8a94c478a2",
+      "tests": 6,
+      "failures": 6,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-price/surprising-price-provider",
+        "-Dtest=*",
+        "clean",
+        "install"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceServiceTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceCorePublisherTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.settings.PriceMaintenanceSchedulingTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexInstrumentConfigServiceTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.settings.PriceSettingsSchedulingEventTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.service.LatestIndexPriceCacheTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.client.ExternalSpotPriceClientTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceCalculatorTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.SurprisingPriceApplicationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.settings.PriceBusinessSettingsControllerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.config.IndexKafkaProducerConfigurationTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.client.ExternalSpotWebSocketManagerTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.consumer.MarkPriceConsumerTest",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceMarketSubscriptionTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexInstrumentConfigLoaderTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceAuditConsumerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexPriceAuditConsumerTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.probe.MarketProbeControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.PublicTradeEventMapperTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.settings.PriceBusinessSettingsIntegrationTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.repository.MarkPriceTickRepositoryTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexPriceCalculatorTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.config.MarkKafkaConfigurationTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceEncodingServiceTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.OptionPricePipelineTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.settings.PriceSettingsBoundaryPostgresTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.probe.MarketProbeServiceTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexPriceServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.config.IndexPriceApplicationYamlTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.repository.IndexPriceRepositoryBoundaryTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.config.MarkPriceApplicationYamlTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "4d13e1de66d45ce9543f75b3210febb1028daec6dd4b5ffe951a4facecbb29e5",
+      "tests": 140,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "source_proof": {
+    "listener_configuration_equal": true,
+    "unchanged_business_blocks": [
+      "publishMarkPrices/publishSymbol/marketInputs",
+      "symbols/ownsSymbol",
+      "freshness/newer/trade checks/node identity"
+    ],
+    "state_maps_retained_by_same_service": 5
+  },
+  "negative_control": "仅撤去Consumer当前产品topic检查，六产品参数用例6项全部因其他产品事件可进入业务而失败；finally逐字节恢复后完整clean install通过。",
+  "new_abstractions": [
+    {
+      "type": "MarkPriceConsumer",
+      "purpose": "真实Kafka协议边界，负责三种监听/产品topic/key和JSON解码；不维护价格或基差业务状态。"
+    },
+    {
+      "type": "MarketInputs",
+      "purpose": "原Service嵌套的公开只读查询结果归model；字段不变。"
+    },
+    {
+      "type": "ProductTopicMismatchException",
+      "purpose": "原私有Service嵌套的协议错误归exception，维持异常消息及拒绝语义。"
+    }
+  ],
+  "preserved": [
+    "监听topic/group/autoStartup三处配置逐段相等；错误topic在解析/状态前拒绝，坏key/畸形JSON按原日志拒绝。",
+    "同一Service唯一拥有五个业务Map；计算/发布、租约和新鲜度/节点身份块原文一致，没有状态复制。",
+    "原始成交映射仍由原PublicTradeEventMapper完成；精度与金融计算不改。",
+    "资金费原生回调继续先更新原Map、再Realtime发布；精确BigDecimal/long序号/事件时间验证。",
+    "旧嵌套class经clean移除，Service无Kafka/JSON接入类型。"
+  ],
+  "unverified": "其余HTTP接入职责及完整复扫/门禁、最终真实网关/六集群/做市/资金验收仍未完成。",
+  "cleanup": {
+    "owned_postgres": "已停止并删除",
+    "owned_logs_reports": "本批日志和已汇总价格模块报告已清理，构建产物保留"
+  }
+}
