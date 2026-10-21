@@ -1,6 +1,5 @@
 package com.surprising.gateway.c2c.service;
 
-import com.surprising.gateway.provider.auth.repository.AdminApprovalRepository;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
@@ -22,13 +21,12 @@ public class C2cAdminAccess {
     public record Approved(JwtPrincipal administrator,AdminApprovalResponse approval) { }
     private final AuthService auth;
     private final AdminApprovalService approvals;
-    private final AdminApprovalRepository approvalRows;
     private final AdminAuditRepository audit;
     private final GatewayUserRepository users;
 
-    public C2cAdminAccess(AuthService auth,AdminApprovalService approvals,AdminApprovalRepository approvalRows,
+    public C2cAdminAccess(AuthService auth,AdminApprovalService approvals,
                           AdminAuditRepository audit,GatewayUserRepository users) {
-        this.auth=auth;this.approvals=approvals;this.approvalRows=approvalRows;this.audit=audit;this.users=users;
+        this.auth=auth;this.approvals=approvals;this.audit=audit;this.users=users;
     }
 
     public JwtPrincipal read(String authorization,boolean sensitive) {
@@ -52,7 +50,7 @@ public class C2cAdminAccess {
         if(value==null || !value.matches("[1-9][0-9]{0,18}")) throw approvalRequired();
         try {
             long id=Long.parseLong(value);
-            var approved=approvalRows.consumeApproved(id,administrator.userId(),"c2c",request.method(),request.path(),
+            var approved=approvals.consumeApproved(id,administrator.userId(),"c2c",request.method(),request.path(),
                     request.query(),hash(body),Instant.now());
             if(approved.approverUserId()==null || approved.approverUserId()==administrator.userId()) throw approvalRequired();
             var reviewer=users.find(approved.approverUserId());

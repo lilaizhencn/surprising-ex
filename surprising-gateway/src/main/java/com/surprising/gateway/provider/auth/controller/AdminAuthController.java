@@ -273,7 +273,7 @@ public class AdminAuthController {
     public AdminApprovalResponse createApproval(@RequestHeader("Authorization") String authorization,
                                                 @Valid @RequestBody AdminApprovalCreateRequest request) {
         try {
-            return adminApprovalService.create(authorization, request);
+            return adminApprovalService.create(authorization, AdminApprovalRequestBinding.create(request));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -309,7 +309,7 @@ public class AdminAuthController {
                                          @Valid @RequestBody(required = false) AdminApprovalDecisionRequest request) {
         try {
             return adminApprovalService.approve(
-                    authorization, approvalId, request == null ? null : request.reason());
+                    authorization, approvalId, AdminApprovalRequestBinding.decisionReason(request == null ? null : request.reason()));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -323,7 +323,7 @@ public class AdminAuthController {
                                         @Valid @RequestBody(required = false) AdminApprovalDecisionRequest request) {
         try {
             return adminApprovalService.reject(
-                    authorization, approvalId, request == null ? null : request.reason());
+                    authorization, approvalId, AdminApprovalRequestBinding.decisionReason(request == null ? null : request.reason()));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

@@ -89,7 +89,7 @@ class C2cAdminHttpPostgresTest {
     @Test void selfApprovalAndRevokedApproverPermissionAreRejected() throws Exception {
         var dispute=dispute();String path=decisionPath(dispute.appeal());var body=new C2cAdminReview.AppealDecision("REFUND","Synthetic payment verification");
         var service=fixture.bean(AdminApprovalService.class);
-        var request=new AuthModels.AdminApprovalCreateRequest("c2c","POST",path,null,C2cAdminAccess.hash(fixture.json.writeValueAsBytes(body)),"Synthetic independent approval reason");
+        var request=new com.surprising.gateway.provider.auth.model.AdminApprovalCommand("c2c","POST",path,null,C2cAdminAccess.hash(fixture.json.writeValueAsBytes(body)),"Synthetic independent approval reason");
         var pending=service.create("Bearer qa-9",request);
         assertThatThrownBy(()->service.approve("Bearer qa-9",pending.approvalId(),"Not independent")).isInstanceOf(IllegalStateException.class);
         long approval=approve(path,body,9,10);
@@ -256,7 +256,7 @@ class C2cAdminHttpPostgresTest {
     private String decisionPath(UUID id) {return "/api/v1/admin/c2c/appeals/"+id+"/decision";}
     private long approve(String path,Object body,long requester,long reviewer) {
         var service=fixture.bean(AdminApprovalService.class);
-        var request=new AuthModels.AdminApprovalCreateRequest("c2c","POST",path,null,C2cAdminAccess.hash(fixture.json.writeValueAsBytes(body)),"Synthetic independent approval");
+        var request=new com.surprising.gateway.provider.auth.model.AdminApprovalCommand("c2c","POST",path,null,C2cAdminAccess.hash(fixture.json.writeValueAsBytes(body)),"Synthetic independent approval");
         var approval=service.create("Bearer qa-"+requester,request);
         service.approve("Bearer qa-"+reviewer,approval.approvalId(),"Synthetic evidence checked");return approval.approvalId();
     }

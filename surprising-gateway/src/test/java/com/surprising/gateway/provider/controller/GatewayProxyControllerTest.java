@@ -165,7 +165,7 @@ class GatewayProxyControllerTest {
         properties.getAdminRoutes().put(service, new GatewayProperties.BackendRoute(
                 "http://configuration:9080", "/api/v1/configuration", true));
         var auth = adminAuthService();
-        var proxy = gateway(properties, new CapturingRestTemplate(), auth, null, new FakeApprovalRepository());
+        var proxy = gateway(properties, new CapturingRestTemplate(), auth, null, new CapturedApproval());
         var request = new MockHttpServletRequest("POST", "/api/v1/admin/gateway/" + service + suffix);
         request.addHeader("Authorization", "Bearer admin");
         request.addHeader("X-Product-Line", "LINEAR_PERPETUAL");
@@ -183,7 +183,7 @@ class GatewayProxyControllerTest {
     void highRiskAdminWriteRequiresApproval() {
         AuthService authService = adminAuthService();
         GatewayProxyController controller = gateway(
-                properties(), new RestTemplate(), authService, null, new FakeApprovalRepository());
+                properties(), new RestTemplate(), authService, null, new CapturedApproval());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", "/api/v1/admin/gateway/account/balance-adjustments");
         request.addHeader("Authorization", "Bearer admin");
@@ -201,7 +201,7 @@ class GatewayProxyControllerTest {
             properties.getAdminRoutes().put("trading-orders",new GatewayProperties.BackendRoute(
                     "http://trading-provider:9084","/api/v1/admin/trading/orders",true));
             AuthService auth=adminAuthService();
-            var proxy=gateway(properties,new RestTemplate(),auth,null,new FakeApprovalRepository());
+            var proxy=gateway(properties,new RestTemplate(),auth,null,new CapturedApproval());
             var request=new MockHttpServletRequest("POST","/api/v1/admin/gateway/trading-orders"+suffix);
             request.addHeader("Authorization","Bearer admin");
             request.addHeader("X-Product-Line","LINEAR_PERPETUAL");
@@ -216,7 +216,7 @@ class GatewayProxyControllerTest {
     void riskAdminWriteRequiresApproval() {
         AuthService authService = adminAuthService();
         GatewayProxyController controller = gateway(
-                properties(), new RestTemplate(), authService, null, new FakeApprovalRepository());
+                properties(), new RestTemplate(), authService, null, new CapturedApproval());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", "/api/v1/admin/gateway/risk-admin/rules/GLOBAL_MARGIN_POLICY");
         request.addHeader("Authorization", "Bearer admin");
@@ -233,7 +233,7 @@ class GatewayProxyControllerTest {
         doThrow(new IllegalStateException("admin permission required: admin.gateway.account.write"))
                 .when(authService).requireAdminPermission(7L, List.of("ADMIN"), "admin.gateway.account.write");
         GatewayProxyController controller = gateway(
-                properties(), new RestTemplate(), authService, null, new FakeApprovalRepository());
+                properties(), new RestTemplate(), authService, null, new CapturedApproval());
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", "/api/v1/admin/gateway/account/balance-adjustments");
         request.addHeader("Authorization", "Bearer admin");
@@ -249,7 +249,7 @@ class GatewayProxyControllerTest {
     void approvedHighRiskAdminWriteConsumesApprovalAndProxies() {
         GatewayProperties properties = properties();
         AuthService authService = adminAuthService();
-        FakeApprovalRepository approvalRepository = new FakeApprovalRepository();
+        CapturedApproval approvalRepository = new CapturedApproval();
         var audit=mock(com.surprising.gateway.provider.auth.repository.AdminAuditRepository.class);
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
         GatewayProxyController controller = gateway(
@@ -521,7 +521,7 @@ class GatewayProxyControllerTest {
         AuthService auth = dependencies.length > 0 ? (AuthService) dependencies[0] : null;
         var audit = dependencies.length > 1
                 ? (com.surprising.gateway.provider.auth.repository.AdminAuditRepository) dependencies[1] : null;
-        var approval = dependencies.length > 2 ? (AdminApprovalRepository) dependencies[2] : null;
+        var approval = dependencies.length > 2 ? (CapturedApproval) dependencies[2] : null;
         var mapper = dependencies.length > 3 ? (tools.jackson.databind.ObjectMapper) dependencies[3]
                 : new tools.jackson.databind.ObjectMapper();
         var transfers = dependencies.length > 4 ? (ProductTransferCoordinator) dependencies[4] : null;
@@ -545,7 +545,13 @@ class GatewayProxyControllerTest {
         var selectorProducts = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         when(selectorProducts.enabled()).thenReturn(properties.getRoutes().values().stream().anyMatch(GatewayProperties.BackendRoute::hasProductRoutes)
                 ? java.util.List.of(ProductLine.values()) : java.util.List.of(ProductLine.LINEAR_PERPETUAL));
-        return new GatewayProxyController(properties, rest, auth, new com.surprising.gateway.provider.auth.service.AdminApprovalService(auth,audit,approval,properties), mapper, transfers, security,
+        return new GatewayProxyController(properties, rest, auth, new com.surprising.gateway.provider.auth.service.AdminApprovalService(auth, audit, null, properties) {
+                    @Override public void consumeGatewayApproval(long id, long requester, String service, String method,
+                            String path, String query, String hash, Instant now) {
+                        if (approval == null) throw new AssertionError("approval capture is missing");
+                        approval.capture(id, requester, service, method, path, query, hash, now);
+                    }
+                }, mapper, transfers, security,
                 products, local, new com.surprising.gateway.provider.product.GatewayProductSelection(selectorProducts, mapper));
     }
 
@@ -598,7 +604,7 @@ class GatewayProxyControllerTest {
         return authService;
     }
 
-    private static final class FakeApprovalRepository extends AdminApprovalRepository {
+    private static final class CapturedApproval {
         private long approvalId;
         private long requesterUserId;
         private String service;
@@ -607,12 +613,7 @@ class GatewayProxyControllerTest {
         private String requestPath;
         private String queryString;
 
-        private FakeApprovalRepository() {
-            super(null);
-        }
-
-        @Override
-        public com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalResponse consumeApproved(
+        private void capture(
                 long approvalId,
                 long requesterUserId,
                 String service,
@@ -628,7 +629,6 @@ class GatewayProxyControllerTest {
             this.bodyHash = bodyHash;
             this.requestPath = requestPath;
             this.queryString = queryString;
-            return null;
         }
     }
 

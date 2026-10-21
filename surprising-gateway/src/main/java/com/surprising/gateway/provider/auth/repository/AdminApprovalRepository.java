@@ -3,22 +3,16 @@ package com.surprising.gateway.provider.auth.repository;
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalCreateRequest;
+import com.surprising.gateway.provider.auth.model.AdminApprovalCommand;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalResponse;
-import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-import java.util.Objects;
-import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 只负责 {@code gateway_admin_approval_requests} 表。
@@ -32,20 +26,8 @@ public class AdminApprovalRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public AdminApprovalResponse create(JwtPrincipal requester,
-                                        AdminApprovalCreateRequest request,
-                                        Duration ttl,
-                                        Instant now) {
-        String service = normalizeService(request.service());
-        String method = normalizeMethod(request.httpMethod());
-        String requestPath = normalizeRequestPath(request.requestPath());
-        String queryString = blankToNull(request.queryString());
-        String bodyHash = normalizeBodyHash(request.requestBodySha256());
-        String reason = normalizeReason(request.reason());
-        Instant expiresAt = now.plus(ttl == null || ttl.isNegative() || ttl.isZero()
-                ? Duration.ofMinutes(30)
-                : ttl);
-
+    public AdminApprovalResponse insert(long requesterUserId, String requesterUsername,
+                                         AdminApprovalCommand command, Instant now, Instant expiresAt) {
         return jdbcTemplate.queryForObject("""
                 INSERT INTO gateway_admin_approval_requests (
                     requester_user_id, requester_username, service, http_method, request_path,
@@ -56,62 +38,11 @@ public class AdminApprovalRepository {
                           request_body_sha256, reason, decision_reason, status, requested_at,
                           expires_at, decided_at, consumed_at
                 """, this::toResponse,
-                requester.userId(), requester.username(), service, method, requestPath, queryString,
-                bodyHash, reason, Timestamp.from(now), Timestamp.from(expiresAt));
+                requesterUserId, requesterUsername, command.service(), command.httpMethod(), command.requestPath(), command.queryString(),
+                command.requestBodySha256(), command.reason(), Timestamp.from(now), Timestamp.from(expiresAt));
     }
 
-    @Transactional
-    public AdminApprovalResponse approve(long approvalId,
-                                         JwtPrincipal approver,
-                                         String reason,
-                                         Instant now) {
-        AdminApprovalResponse current = requireForUpdate(approvalId);
-        requirePending(current, now);
-        if (current.requesterUserId() == approver.userId()) {
-            throw new IllegalStateException("approval requires a different administrator");
-        }
-        return updateDecision(approvalId, approver, "APPROVED", reason, now);
-    }
-
-    @Transactional
-    public AdminApprovalResponse reject(long approvalId,
-                                        JwtPrincipal approver,
-                                        String reason,
-                                        Instant now) {
-        AdminApprovalResponse current = requireForUpdate(approvalId);
-        requirePending(current, now);
-        if (current.requesterUserId() == approver.userId()) {
-            throw new IllegalStateException("approval requires a different administrator");
-        }
-        return updateDecision(approvalId, approver, "REJECTED", reason, now);
-    }
-
-    @Transactional
-    public AdminApprovalResponse consumeApproved(long approvalId,
-                                                 long requesterUserId,
-                                                 String service,
-                                                 String method,
-                                                 String requestPath,
-                                                 String queryString,
-                                                 String bodyHash,
-                                                 Instant now) {
-        AdminApprovalResponse current = requireForUpdate(approvalId);
-        if (!"APPROVED".equals(current.status())) {
-            throw new IllegalStateException("approval is not approved");
-        }
-        if (current.expiresAt().isBefore(now)) {
-            throw new IllegalStateException("approval has expired");
-        }
-        if (current.requesterUserId() != requesterUserId) {
-            throw new IllegalStateException("approval requester does not match current administrator");
-        }
-        if (!Objects.equals(current.service(), normalizeService(service))
-                || !Objects.equals(current.httpMethod(), normalizeMethod(method))
-                || !Objects.equals(current.requestPath(), normalizeRequestPath(requestPath))
-                || !Objects.equals(blankToNull(current.queryString()), blankToNull(queryString))
-                || !Objects.equals(blankToNull(current.requestBodySha256()), normalizeBodyHash(bodyHash))) {
-            throw new IllegalStateException("approval does not match this request");
-        }
+    public AdminApprovalResponse markConsumed(long approvalId, Instant now) {
         return jdbcTemplate.queryForObject("""
                 UPDATE gateway_admin_approval_requests
                    SET status = 'CONSUMED',
@@ -178,8 +109,8 @@ public class AdminApprovalRepository {
                 AdminApprovalResponse::approvalId);
     }
 
-    private AdminApprovalResponse updateDecision(long approvalId,
-                                                 JwtPrincipal approver,
+    public AdminApprovalResponse updateDecision(long approvalId,
+                                                 long approverUserId, String approverUsername,
                                                  String status,
                                                  String reason,
                                                  Instant now) {
@@ -196,11 +127,11 @@ public class AdminApprovalRepository {
                           request_body_sha256, reason, decision_reason, status, requested_at,
                           expires_at, decided_at, consumed_at
                 """, this::toResponse,
-                status, approver.userId(), approver.username(), blankToNull(reason),
+                status, approverUserId, approverUsername, reason,
                 Timestamp.from(now), approvalId);
     }
 
-    private AdminApprovalResponse requireForUpdate(long approvalId) {
+    public java.util.Optional<AdminApprovalResponse> findForUpdate(long approvalId) {
         List<AdminApprovalResponse> rows = jdbcTemplate.query("""
                 SELECT approval_id, requester_user_id, requester_username, approver_user_id,
                        approver_username, service, http_method, request_path, query_string,
@@ -210,19 +141,7 @@ public class AdminApprovalRepository {
                  WHERE approval_id = ?
                  FOR UPDATE
                 """, this::toResponse, approvalId);
-        if (rows.isEmpty()) {
-            throw new IllegalArgumentException("approval not found");
-        }
-        return rows.get(0);
-    }
-
-    private void requirePending(AdminApprovalResponse current, Instant now) {
-        if (!"PENDING".equals(current.status())) {
-            throw new IllegalStateException("approval is not pending");
-        }
-        if (current.expiresAt().isBefore(now)) {
-            throw new IllegalStateException("approval has expired");
-        }
+        return rows.stream().findFirst();
     }
 
     private AdminApprovalResponse toResponse(ResultSet rs, int rowNum) throws SQLException {
@@ -256,52 +175,4 @@ public class AdminApprovalRepository {
         return value == null ? null : value.toInstant();
     }
 
-    private String normalizeService(String service) {
-        String normalized = service == null ? "" : service.trim().toLowerCase(Locale.ROOT);
-        if (!normalized.matches("[a-z0-9][a-z0-9_-]{0,63}")) {
-            throw new IllegalArgumentException("invalid approval service");
-        }
-        return normalized;
-    }
-
-    private String normalizeMethod(String method) {
-        String normalized = method == null ? "" : method.trim().toUpperCase(Locale.ROOT);
-        if (!normalized.matches("[A-Z]{3,16}")) {
-            throw new IllegalArgumentException("invalid approval method");
-        }
-        return normalized;
-    }
-
-    private String normalizeRequestPath(String requestPath) {
-        String normalized = requestPath == null ? "" : requestPath.trim();
-        if (!(normalized.startsWith("/api/v1/admin/gateway/") || normalized.startsWith("/api/v1/admin/"))
-                || normalized.length() > 2048) {
-            throw new IllegalArgumentException("invalid approval request path");
-        }
-        return normalized;
-    }
-
-    private String normalizeBodyHash(String bodyHash) {
-        String normalized = blankToNull(bodyHash);
-        if (normalized == null) {
-            return null;
-        }
-        normalized = normalized.toLowerCase(Locale.ROOT);
-        if (!normalized.matches("[a-f0-9]{64}")) {
-            throw new IllegalArgumentException("invalid request body hash");
-        }
-        return normalized;
-    }
-
-    private String normalizeReason(String reason) {
-        String normalized = reason == null ? "" : reason.trim();
-        if (normalized.isBlank() || normalized.length() > 1000) {
-            throw new IllegalArgumentException("approval reason is required");
-        }
-        return normalized;
-    }
-
-    private String blankToNull(String value) {
-        return value == null || value.isBlank() ? null : value.trim();
-    }
 }

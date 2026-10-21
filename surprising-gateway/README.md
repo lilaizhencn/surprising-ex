@@ -546,3 +546,5 @@ Binance APIKey请求由 `auth.controller.ApiKeyRequestBinding` 绑定原生 `Api
 账户历史账本/产品账本/划转/后台调整由 `account.provider.controller.AccountHistoryRequestBinding` 绑定原生 `AccountHistoryPageQuery`；`AccountQueryService`负责历史响应与产品归属，四个单表Repository只执行原生查询。实时 `AccountService`不再依赖历史查询Service/Repository，继续只读realtime并通过Core命令裁决。历史limit仍要求1..1000。账户历史游标已使用完整ISO Instant及long坐标，修复数据库微秒被截为毫秒引起的重复/遗漏；客户端继续将nextCursor当不透明字符串回传，旧格式游标不兼容。
 
 认证用户、刷新会话、审批和合规三类列表由 `auth.controller.AuthPageRequestBinding` 绑定排序白名单、精确游标与筛选，统一传递 `auth.model.AuthPageQuery`；limit沿用1..500夹取。Service保留权限与角色批量聚合，六个Repository仅将原生字段/方向映射到固定SQL。用户搜索保留数字文本（含前导零）的原语义，SQL LIKE转义仍属持久化绑定；合规用户必要多表快照关联的用途注释保留。
+
+后台审批创建由 `AdminApprovalRequestBinding` 校验并形成 `AdminApprovalCommand`。`AdminApprovalService` 决定有效期，并在事务内锁定审批行、校验双人身份/状态/完整请求再决策或单次消费；C2C资金裁决共用此入口。`AdminApprovalRepository`仅执行审批表SQL，不再裁决审批人、期限或请求匹配。

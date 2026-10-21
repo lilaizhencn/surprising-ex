@@ -181,7 +181,7 @@ class C2cChatPostgresTest {
         fixture.call(HttpMethod.POST,path,9,body,403);
         assertThat(fixture.db.jdbc.queryForObject("SELECT count(*) FROM c2c_conversations",Integer.class)).isZero();
         var approvals=fixture.bean(com.surprising.gateway.provider.auth.service.AdminApprovalService.class);
-        var request=new com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalCreateRequest("c2c","POST",path,null,
+        var request=new com.surprising.gateway.provider.auth.model.AdminApprovalCommand("c2c","POST",path,null,
                 C2cAdminAccess.hash(fixture.json.writeValueAsBytes(body)),"Synthetic support reply approval");
         long approval=approvals.create("Bearer qa-9",request).approvalId();approvals.approve("Bearer qa-10",approval,"Synthetic independent review");
         var headers=Map.of("X-Admin-Approval-Id",Long.toString(approval));

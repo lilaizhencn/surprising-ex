@@ -1,7 +1,11 @@
 package com.surprising.gateway.provider.auth;
 
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
-import com.surprising.gateway.provider.auth.model.UserQueryFilter;
+import com.surprising.gateway.provider.auth.model.AdminApprovalCommand;
+import com.surprising.gateway.provider.auth.service.AdminApprovalService;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.config.GatewayProperties;
+import static org.mockito.Mockito.*;
 
 import com.surprising.gateway.provider.auth.repository.AdminApprovalRepository;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
@@ -50,27 +54,29 @@ class AdminAuditApprovalPostgresTest {
             }
             var approvals = new AdminApprovalRepository(jdbc);
             var audits = new AdminAuditRepository(jdbc);
-            Instant now = Instant.parse("2026-10-21T06:00:00Z");
+            Instant now = Instant.now();
             var requester = new JwtPrincipal(101, "requester", "NORMAL", List.of("ADMIN"), now.plusSeconds(3600));
             var approver = new JwtPrincipal(102, "approver", "NORMAL", List.of("ADMIN"), now.plusSeconds(3600));
             String hash = "a".repeat(64);
             String path = "/api/v1/admin/accounts/adjustments";
-            var created = approvals.create(requester,
-                    new AdminApprovalCreateRequest("account", "POST", path, null, hash, "余额调整"),
-                    Duration.ofMinutes(30), now);
-            assertThatThrownBy(() -> transactions.execute(tx -> approvals.approve(created.approvalId(), requester, "self", now)))
+            var auth = mock(AuthService.class);
+            when(auth.authenticateAdminBearer("requester")).thenReturn(requester);
+            when(auth.authenticateAdminBearer("approver")).thenReturn(approver);
+            var service = new AdminApprovalService(auth, audits, approvals, new GatewayProperties());
+            var created = service.create("requester", new AdminApprovalCommand("account", "POST", path, null, hash, "余额调整"));
+            assertThatThrownBy(() -> transactions.execute(tx -> service.approve("requester", created.approvalId(), "self")))
                     .hasMessageContaining("different administrator");
-            transactions.executeWithoutResult(tx -> approvals.approve(created.approvalId(), approver, "同意", now));
-            assertThatThrownBy(() -> transactions.execute(tx -> approvals.consumeApproved(created.approvalId(), 102,
+            transactions.executeWithoutResult(tx -> service.approve("approver", created.approvalId(), "同意"));
+            assertThatThrownBy(() -> transactions.execute(tx -> service.consumeApproved(created.approvalId(), 102,
                     "account", "POST", path, null, hash, now))).hasMessageContaining("requester does not match");
-            assertThatThrownBy(() -> transactions.execute(tx -> approvals.consumeApproved(created.approvalId(), 101,
+            assertThatThrownBy(() -> transactions.execute(tx -> service.consumeApproved(created.approvalId(), 101,
                     "account", "POST", path, null, "b".repeat(64), now))).hasMessageContaining("does not match this request");
-            var consumed = transactions.execute(tx -> approvals.consumeApproved(created.approvalId(), 101,
+            var consumed = transactions.execute(tx -> service.consumeApproved(created.approvalId(), 101,
                     "account", "POST", path, null, hash, now));
             assertThat(consumed.status()).isEqualTo("CONSUMED");
             assertThat(consumed.approverUserId()).isEqualTo(102);
             assertThat(consumed.consumedAt()).isEqualTo(now);
-            assertThatThrownBy(() -> transactions.execute(tx -> approvals.consumeApproved(created.approvalId(), 101,
+            assertThatThrownBy(() -> transactions.execute(tx -> service.consumeApproved(created.approvalId(), 101,
                     "account", "POST", path, null, hash, now))).hasMessageContaining("not approved");
             assertThat(approvals.approvalPage("CONSUMED",101L,102L,"account",new AuthPageQuery(10,null,AuthPageQuery.Order.REQUESTED_DESC)).items()).containsExactly(consumed);
 

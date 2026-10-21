@@ -7,7 +7,7 @@ import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
 
-import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalCreateRequest;
+import com.surprising.gateway.provider.auth.model.AdminApprovalCommand;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminOperationLogResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
@@ -15,6 +15,10 @@ import com.surprising.gateway.provider.config.GatewayProperties;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.Duration;
+import java.util.Locale;
+import java.util.Objects;
+import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
@@ -50,13 +54,13 @@ public class AdminApprovalService {
         return auditRepository.operationLogPage(adminUserId, service, method, success, query);
     }
 
-    public AdminApprovalResponse create(String authorization, AdminApprovalCreateRequest request) {
+    public AdminApprovalResponse create(String authorization, AdminApprovalCommand command) {
         JwtPrincipal principal = authService.authenticateAdminBearer(authorization);
-        return approvalRepository.create(
-                principal,
-                request,
-                properties.getSecurity().getAdminApprovalTtl(),
-                Instant.now());
+        Instant now = Instant.now();
+        Duration ttl = properties.getSecurity().getAdminApprovalTtl();
+        Instant expiresAt = now.plus(ttl == null || ttl.isNegative() || ttl.isZero()
+                ? Duration.ofMinutes(30) : ttl);
+        return approvalRepository.insert(principal.userId(), principal.username(), command, now, expiresAt);
     }
 
     public AdminCursorPage.CursorPage<AdminApprovalResponse> approvals(
@@ -71,14 +75,70 @@ public class AdminApprovalService {
                 status, requesterUserId, approverUserId, service, pageQuery);
     }
 
+    @Transactional
     public AdminApprovalResponse approve(String authorization, long approvalId, String reason) {
         JwtPrincipal principal = authService.authenticateAdminBearer(authorization);
-        return approvalRepository.approve(approvalId, principal, reason, Instant.now());
+        return decide(approvalId, principal, "APPROVED", reason, Instant.now());
     }
 
+    @Transactional
     public AdminApprovalResponse reject(String authorization, long approvalId, String reason) {
         JwtPrincipal principal = authService.authenticateAdminBearer(authorization);
-        return approvalRepository.reject(approvalId, principal, reason, Instant.now());
+        return decide(approvalId, principal, "REJECTED", reason, Instant.now());
+    }
+
+    private AdminApprovalResponse decide(long approvalId, JwtPrincipal approver,
+                                          String status, String reason, Instant now) {
+        AdminApprovalResponse current = requireForUpdate(approvalId);
+        requirePending(current, now);
+        if (current.requesterUserId() == approver.userId()) {
+            throw new IllegalStateException("approval requires a different administrator");
+        }
+        return approvalRepository.updateDecision(approvalId, approver.userId(), approver.username(), status, reason, now);
+    }
+
+    /** 单次消费在同一事务内锁定、校验完整请求并推进状态；C2C 裁决也复用此业务入口。 */
+    @Transactional
+    public AdminApprovalResponse consumeApproved(long approvalId, long requesterUserId,
+                                                 String service, String method, String requestPath,
+                                                 String queryString, String bodyHash, Instant now) {
+        AdminApprovalResponse current = requireForUpdate(approvalId);
+        if (!"APPROVED".equals(current.status())) {
+            throw new IllegalStateException("approval is not approved");
+        }
+        if (current.expiresAt().isBefore(now)) {
+            throw new IllegalStateException("approval has expired");
+        }
+        if (current.requesterUserId() != requesterUserId) {
+            throw new IllegalStateException("approval requester does not match current administrator");
+        }
+        // 比较同一请求的规范身份；HTTP 创建格式由 Controller 绑定，正文仍按原始字节摘要匹配。
+        if (!Objects.equals(current.service(), service == null ? "" : service.trim().toLowerCase(Locale.ROOT))
+                || !Objects.equals(current.httpMethod(), method == null ? "" : method.trim().toUpperCase(Locale.ROOT))
+                || !Objects.equals(current.requestPath(), requestPath == null ? "" : requestPath.trim())
+                || !Objects.equals(blankToNull(current.queryString()), blankToNull(queryString))
+                || !Objects.equals(blankToNull(current.requestBodySha256()), bodyHash == null ? null : blankToNull(bodyHash.toLowerCase(Locale.ROOT)))) {
+            throw new IllegalStateException("approval does not match this request");
+        }
+        return approvalRepository.markConsumed(approvalId, now);
+    }
+
+    private AdminApprovalResponse requireForUpdate(long approvalId) {
+        return approvalRepository.findForUpdate(approvalId)
+                .orElseThrow(() -> new IllegalArgumentException("approval not found"));
+    }
+
+    private void requirePending(AdminApprovalResponse current, Instant now) {
+        if (!"PENDING".equals(current.status())) {
+            throw new IllegalStateException("approval is not pending");
+        }
+        if (current.expiresAt().isBefore(now)) {
+            throw new IllegalStateException("approval has expired");
+        }
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     public boolean requiresGatewayApproval(String service, String method, String requestPath, boolean adminRequest) {
@@ -114,11 +174,12 @@ public class AdminApprovalService {
         };
     }
 
+    @Transactional
     public void consumeGatewayApproval(long approvalId, long adminUserId, String service, String method,
             String requestPath, String query, String bodyHash, Instant now) {
         if (approvalRepository == null) throw new AdminApprovalRequiredException("admin approval repository is not available");
         try {
-            approvalRepository.consumeApproved(approvalId,adminUserId,service,method,requestPath,query,bodyHash,now);
+            consumeApproved(approvalId,adminUserId,service,method,requestPath,query,bodyHash,now);
         } catch (IllegalArgumentException | IllegalStateException invalid) {
             throw new AdminApprovalRequiredException(invalid.getMessage(),invalid);
         }
@@ -132,6 +193,7 @@ public class AdminApprovalService {
         return properties.getSecurity().getAdminApprovalHeader();
     }
 
+    @Transactional
     public JwtPrincipal requireWrite(String authorization,
                                      String permission,
                                      String approvalService,
@@ -142,6 +204,7 @@ public class AdminApprovalService {
         return principal;
     }
 
+    @Transactional
     public void consumeLocalApproval(String authorization,
                                      String approvalService,
                                      AdminRequestMetadata request,
@@ -167,7 +230,7 @@ public class AdminApprovalService {
             throw new AdminApprovalRequiredException("invalid admin approval id", ex);
         }
         try {
-            approvalRepository.consumeApproved(
+            consumeApproved(
                     approvalId,
                     principal.userId(),
                     approvalService,
