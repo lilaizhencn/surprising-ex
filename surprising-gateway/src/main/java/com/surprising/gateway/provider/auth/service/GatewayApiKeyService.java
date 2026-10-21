@@ -4,12 +4,12 @@ import com.surprising.gateway.provider.auth.repository.GatewayApiKeyRepository;
 import com.surprising.gateway.provider.auth.utils.ClientIpResolver;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
-import jakarta.servlet.http.HttpServletRequest;
+import com.surprising.gateway.provider.auth.model.ApiKeyAuthenticationRequest;
+import com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -25,7 +25,6 @@ import org.springframework.stereotype.Service;
 public class GatewayApiKeyService {
 
     private static final Set<String> PERMISSIONS = Set.of("READ", "TRADE", "WITHDRAW");
-    private static final long MAX_TIMESTAMP_SKEW_MILLIS = 5_000L;
     private final GatewayApiKeyRepository repository;
     private final AuthService authService;
     private final TotpService totpService;
@@ -97,108 +96,26 @@ public class GatewayApiKeyService {
         }
     }
 
-    public long authenticate(HttpServletRequest request, String requiredPermission) {
-        return authenticate(request, requiredPermission, null);
-    }
-
-    public long authenticate(HttpServletRequest request, String requiredPermission, byte[] body) {
-        String apiKey = requireApiKey(request.getHeader("X-MBX-APIKEY"));
-        GatewayApiKeyRepository.ApiKeyRecord record = repository.active(apiKey)
+    public long authenticate(ApiKeyAuthenticationRequest request, String requiredPermission) {
+        GatewayApiKeyRepository.ApiKeyRecord record = repository.active(request.apiKey())
                 .orElseThrow(() -> new IllegalArgumentException("invalid api key"));
         try {
-            authService.requireIpAccessAllowed(record.userId(), clientIpResolver.resolve(request));
+            authService.requireIpAccessAllowed(record.userId(), request.ipAddress());
         } catch (IllegalStateException ex) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.FORBIDDEN, ex.getMessage(), ex);
+            throw new ApiKeyAccessBlockedException(ex.getMessage(), ex);
         }
-        requireIpAllowlist(record.ipAllowlist(), clientIpResolver.resolve(request));
+        requireIpAllowlist(record.ipAllowlist(), request.ipAddress());
         requirePermission(record.permissions(), requiredPermission);
-        String timestamp = request.getParameter("timestamp");
-        long timestampValue = parseLong(timestamp, "timestamp");
-        long recvWindow = request.getParameter("recvWindow") == null
-                ? 5_000L : parseLong(request.getParameter("recvWindow"), "recvWindow");
-        if (recvWindow < 1L || recvWindow > 60_000L
-                || Math.abs(System.currentTimeMillis() - timestampValue) > Math.min(recvWindow, 60_000L)) {
+        if (Math.abs(System.currentTimeMillis() - request.timestamp()) > Math.min(request.recvWindow(), 60_000L)) {
             throw new IllegalArgumentException("request timestamp is outside recvWindow");
         }
-        String signature = request.getParameter("signature");
-        if (signature == null || signature.isBlank()) {
-            throw new IllegalArgumentException("signature is required");
-        }
-        String canonical = binanceCanonicalQuery(request, body);
-        String expected = sign(totpService.decryptSecret(record.secretCiphertext()), canonical);
+        String expected = sign(totpService.decryptSecret(record.secretCiphertext()), request.canonical());
         if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
-                signature.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8))) {
+                request.signature().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8))) {
             throw new IllegalArgumentException("invalid api signature");
         }
         repository.markUsed(record.apiKeyId(), Instant.now());
         return record.userId();
-    }
-
-    public String canonicalQuery(String queryString) {
-        if (queryString == null || queryString.isBlank()) {
-            return "";
-        }
-        return java.util.Arrays.stream(queryString.split("&"))
-                .filter(item -> {
-                    int separator = item.indexOf('=');
-                    String key = separator < 0 ? item : item.substring(0, separator);
-                    return !"signature".equals(key);
-                })
-                .reduce((left, right) -> left + "&" + right)
-                .orElse("");
-    }
-
-    public String binanceCanonicalQuery(HttpServletRequest request) {
-        return binanceCanonicalQuery(request, null);
-    }
-
-    public String binanceCanonicalQuery(HttpServletRequest request, byte[] body) {
-        String queryString = request.getQueryString();
-        String query = queryString == null || queryString.isBlank() ? "" : canonicalQuery(queryString);
-        String requestBody = body == null || body.length == 0
-                ? "" : canonicalQuery(new String(body, StandardCharsets.UTF_8));
-        if (!query.isBlank() && !requestBody.isBlank()) {
-            return query + requestBody;
-        }
-        if (!query.isBlank()) {
-            return query;
-        }
-        if (!requestBody.isBlank()) {
-            return requestBody;
-        }
-        return canonicalParameters(request.getParameterMap());
-    }
-
-    public String canonicalRequest(HttpServletRequest request) {
-        return canonicalRequest(request.getMethod(), request.getRequestURI(), request.getParameterMap());
-    }
-
-    public String canonicalRequest(String method, String path, java.util.Map<String, String[]> parameterMap) {
-        return method.toUpperCase(Locale.ROOT) + "\n" + path + "\n" + canonicalParameters(parameterMap);
-    }
-
-    private String canonicalParameters(java.util.Map<String, String[]> parameterMap) {
-        List<String> parameters = new ArrayList<>();
-        parameterMap.entrySet().stream()
-                .filter(entry -> !"signature".equals(entry.getKey()))
-                .sorted(java.util.Map.Entry.comparingByKey())
-                .forEach(entry -> {
-                    String[] values = entry.getValue();
-                    if (values == null || values.length == 0) {
-                        parameters.add(encodeParameter(entry.getKey(), ""));
-                    } else {
-                        for (String value : values) {
-                            parameters.add(encodeParameter(entry.getKey(), value == null ? "" : value));
-                        }
-                    }
-                });
-        return String.join("&", parameters);
-    }
-
-    private String encodeParameter(String key, String value) {
-        return java.net.URLEncoder.encode(key, StandardCharsets.UTF_8)
-                + "=" + java.net.URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     public String sign(String secret, String canonicalQuery) {
@@ -283,14 +200,6 @@ public class GatewayApiKeyService {
             throw new IllegalArgumentException("api key is invalid");
         }
         return value;
-    }
-
-    private long parseLong(String value, String field) {
-        try {
-            return Long.parseLong(value);
-        } catch (NumberFormatException ex) {
-            throw new IllegalArgumentException(field + " is invalid", ex);
-        }
     }
 
     private String randomToken(int bytes) {

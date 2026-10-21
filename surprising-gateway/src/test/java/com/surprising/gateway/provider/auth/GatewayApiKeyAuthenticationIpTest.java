@@ -3,6 +3,7 @@ package com.surprising.gateway.provider.auth;
 import com.surprising.gateway.provider.auth.repository.GatewayApiKeyRepository;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
+import com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding;
 import com.surprising.gateway.provider.auth.service.TotpService;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,7 +35,7 @@ class GatewayApiKeyAuthenticationIpTest {
         when(repository.active(apiKey)).thenReturn(Optional.of(record));
         MockHttpServletRequest request = signedRequest(service, apiKey, "192.0.2.10", "10.8.2.3", true);
 
-        service.authenticate(request, "READ");
+        service.authenticate(new ApiKeyRequestBinding(properties).bind(request, null), "READ");
     }
 
     @Test
@@ -49,7 +50,7 @@ class GatewayApiKeyAuthenticationIpTest {
         when(repository.active(apiKey)).thenReturn(Optional.of(record));
         MockHttpServletRequest request = signedRequest(service, apiKey, "203.0.113.10", "10.8.2.3");
 
-        assertThatThrownBy(() -> service.authenticate(request, "READ"))
+        assertThatThrownBy(() -> service.authenticate(new ApiKeyRequestBinding(properties).bind(request, null), "READ"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("api key IP address is not allowed");
     }
@@ -73,10 +74,10 @@ class GatewayApiKeyAuthenticationIpTest {
         request.addParameter("timestamp", query.substring("timestamp=".length()));
         request.addParameter("signature", signature);
 
-        service.authenticate(request, "READ", signedBody.getBytes(StandardCharsets.UTF_8));
+        service.authenticate(new ApiKeyRequestBinding(properties).bind(request, signedBody.getBytes(StandardCharsets.UTF_8)), "READ");
 
-        assertThatThrownBy(() -> service.authenticate(request, "READ",
-                        "symbol=ETHUSDT&side=BUY".getBytes(StandardCharsets.UTF_8)))
+        assertThatThrownBy(() -> service.authenticate(new ApiKeyRequestBinding(properties).bind(request,
+                        "symbol=ETHUSDT&side=BUY".getBytes(StandardCharsets.UTF_8)), "READ"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("invalid api signature");
     }

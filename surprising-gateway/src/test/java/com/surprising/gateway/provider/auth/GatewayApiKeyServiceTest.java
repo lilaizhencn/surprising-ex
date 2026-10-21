@@ -1,6 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
 import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
+import com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding;
+import com.surprising.gateway.provider.auth.utils.ApiSignatureFormats;
 import com.surprising.gateway.provider.auth.service.TotpService;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,7 +21,7 @@ class GatewayApiKeyServiceTest {
 
     @Test
     void removesOnlySignatureFromBinanceCanonicalQuery() {
-        assertThat(service.canonicalQuery("symbol=BTCUSDT&timestamp=123&signature=abc&recvWindow=5000"))
+        assertThat(ApiSignatureFormats.canonicalQuery("symbol=BTCUSDT&timestamp=123&signature=abc&recvWindow=5000"))
                 .isEqualTo("symbol=BTCUSDT&timestamp=123&recvWindow=5000");
     }
 
@@ -28,7 +30,7 @@ class GatewayApiKeyServiceTest {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v3/order");
         request.setQueryString("timestamp=123&symbol=BTC%2FUSDT&signature=abc");
 
-        assertThat(service.binanceCanonicalQuery(request))
+        assertThat(new ApiKeyRequestBinding(new GatewayProperties()).canonicalQuery(request))
                 .isEqualTo("timestamp=123&symbol=BTC%2FUSDT");
     }
 
@@ -37,7 +39,7 @@ class GatewayApiKeyServiceTest {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v3/order");
         request.setQueryString("timestamp=123&signature=abc");
 
-        assertThat(service.binanceCanonicalQuery(request,
+        assertThat(new ApiKeyRequestBinding(new GatewayProperties()).canonicalQuery(request,
                 "symbol=BTCUSDT&side=BUY".getBytes(StandardCharsets.UTF_8)))
                 .isEqualTo("timestamp=123symbol=BTCUSDT&side=BUY");
     }
@@ -49,7 +51,7 @@ class GatewayApiKeyServiceTest {
         request.addParameter("symbol", "BTCUSDT");
         request.addParameter("signature", "abc");
 
-        assertThat(service.binanceCanonicalQuery(request))
+        assertThat(new ApiKeyRequestBinding(new GatewayProperties()).canonicalQuery(request))
                 .isEqualTo("symbol=BTCUSDT&timestamp=123");
     }
 
@@ -61,7 +63,7 @@ class GatewayApiKeyServiceTest {
 
     @Test
     void bindsApiSignatureToMethodPathAndAllParameters() {
-        assertThat(service.canonicalRequest("POST", "/sapi/v1/capital/withdraw/apply", Map.of(
+        assertThat(ApiSignatureFormats.canonicalRequest("POST", "/sapi/v1/capital/withdraw/apply", Map.of(
                 "coin", new String[]{"USDT"},
                 "amount", new String[]{"1.25"},
                 "signature", new String[]{"ignored"},

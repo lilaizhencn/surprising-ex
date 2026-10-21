@@ -534,3 +534,5 @@ WebSocket具体接入处理器位于 `websocket.provider.handler.ClientWebSocket
 KYC文档上传在 `auth.controller.UserComplianceController` 完成鉴权、Multipart绑定和文件格式校验，传入原生 `model.KycDocumentUpload`；`KycDocumentService`协调摘要、文件写入、元数据落库及失败清理。实际存储分别位于 `provider.storage.KycDocumentStorageService` 和 `c2c.storage.C2cR2Storage`；对象路径和签名验证仍在存储边界。
 
 鉴权入口通过 `auth.controller.AuthClientMetadataBinding` 将Servlet字段绑定为 `auth.model.AuthClientMetadata`。登录/注册/刷新/Telegram Service只接收原生数据；Bearer的当前IP经 `auth.port.CurrentAuthClient` 从既有Spring请求上下文读取，不新增ThreadLocal，也不扩大Bearer设备校验。账号、IP/设备封禁、MFA、会话轮换仍由Service负责。
+
+Binance APIKey请求由 `auth.controller.ApiKeyRequestBinding` 绑定原生 `ApiKeyAuthenticationRequest`，原始Query和Form Body签名组合保持原字节顺序；纯编码位于 `auth.utils.ApiSignatureFormats`。`GatewayApiKeyService`只处理密钥、IP/权限、有效时间及验签业务，封禁IP原生失败由HTTP入口映射403。

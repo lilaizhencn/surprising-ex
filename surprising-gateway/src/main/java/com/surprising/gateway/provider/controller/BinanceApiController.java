@@ -5,6 +5,8 @@ import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
+import com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding;
+import com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.controller.GatewayProxyController;
@@ -36,6 +38,7 @@ import tools.jackson.databind.ObjectMapper;
 @RestController
 public class BinanceApiController {
 
+    private final ApiKeyRequestBinding apiKeyRequests;
     private final GatewayProperties properties;
     private final GatewayProxyController gatewayProxyService;
     private final GatewayApiKeyService apiKeyService;
@@ -56,6 +59,7 @@ public class BinanceApiController {
                                 CustodyWithdrawalService withdrawalService,
                                 ObjectMapper objectMapper) {
         this.properties = properties;
+        this.apiKeyRequests = new ApiKeyRequestBinding(properties);
         this.gatewayProxyService = gatewayProxyService;
         this.apiKeyService = apiKeyService;
         this.verificationService = verificationService;
@@ -475,7 +479,12 @@ public class BinanceApiController {
 
     private long authenticate(HttpServletRequest request, String permission, byte[] body) {
         String apiKey = request.getHeader("X-MBX-APIKEY");
-        if (apiKey != null && !apiKey.isBlank()) return apiKeyService.authenticate(request, permission, body);
+        if (apiKey != null && !apiKey.isBlank()) {
+            try { return apiKeyService.authenticate(apiKeyRequests.bind(request, body), permission); }
+            catch (ApiKeyAccessBlockedException ex) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
+            }
+        }
         try {
             JwtPrincipal principal = authService.authenticateBearer(request.getHeader(HttpHeaders.AUTHORIZATION));
             return principal.userId();
