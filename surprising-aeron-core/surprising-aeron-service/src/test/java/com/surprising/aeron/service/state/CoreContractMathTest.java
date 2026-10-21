@@ -18,10 +18,13 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+/** 验证合约计算中的风险分档、期权买卖方差异、取整及大整数中间值，避免金额公式在边界处少算保证金。 */
 class CoreContractMathTest {
 
+    /** 期权买方保证金为 0，应在计算巨大权利金之前返回，不能被无关乘法溢出阻断。 */
     @Test
     void optionBuyerZeroMarginDoesNotEvaluateOverflowingPremium() {
+        // 使用乘数为 2 的看涨期权，让后面的极大价格一旦参与权利金乘法就会溢出。
         CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
                 new RegisterInstrumentCommand("6", ContractType.VANILLA_OPTION.ordinal(),
                         "BTC", "USDT", "USDT", 2, 1, 1,
@@ -34,8 +37,10 @@ class CoreContractMathTest {
                 instrument, CoreOrderSide.BUY, Long.MAX_VALUE, 2, 0, 0)).isZero();
     }
 
+    /** 当前规模决定保证金档位；已有持仓超出最高档上限仍可估值，新开仓严格选档则必须拒绝超限。 */
     @Test
     void maintenanceMarginUsesTheInstrumentRiskBracketForCurrentNotional() {
+        // 两个保证金率不同的风险档位，用来区分小规模、大规模及超出最高金额上限的情况。
         CoreInstrument instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
                 new RegisterInstrumentCommand("1",
                         com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(),
@@ -57,8 +62,10 @@ class CoreContractMathTest {
                 .hasMessageContaining("exceeds instrument risk brackets");
     }
 
+    /** 看涨期权卖方保证金应结合指数价、远期虚值程度、当前权利金及档位系数，并保留空头市值的负号。 */
     @Test
     void optionShortMarginUsesIndexForwardOtmAndCurrentPremium() {
+        // 行权价 100、保证金调整系数 1.2 的看涨期权，供手工核对保证金与市值结果。
         CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
                 new RegisterInstrumentCommand("6", ContractType.VANILLA_OPTION.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1,
@@ -76,8 +83,10 @@ class CoreContractMathTest {
         assertThat(OptionContractMath.optionMarketValueUnits(instrument, -2, 10)).isEqualTo(-20);
     }
 
+    /** 看跌期权的虚值方向与看涨相反，且标记权利金很高时应使用标记价口径的维持风险下限。 */
     @Test
     void putShortMarginUsesPutOtmDirectionAndMarkBasedMaintenanceFloor() {
+        // 使用与看涨用例相同的档位参数，仅改变期权类型来验证看跌专属公式。
         CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
                 new RegisterInstrumentCommand("7", ContractType.VANILLA_OPTION.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1,
@@ -93,6 +102,7 @@ class CoreContractMathTest {
                 .isEqualTo(424);
     }
 
+    /** 杠杆倒数采用整数向上取整，不能被 3 倍杠杆的小数截断，也不能把极大杠杆算成 0 保证金率。 */
     @Test
     void initialMarginRateUsesExactAllocationFreeCeilingDivision() {
         assertThat(CoreContractMath.initialMarginRateFromLeverage(20_000_000)).isEqualTo(50_000);
@@ -100,6 +110,7 @@ class CoreContractMathTest {
         assertThat(CoreContractMath.initialMarginRateFromLeverage(Long.MAX_VALUE)).isEqualTo(1);
     }
 
+    /** 缩放要保留下限和上限顺序；中间乘积溢出后仍能得到封顶结果，下限高于上限时最终仍以封顶为准。 */
     @Test
     void openInterestScalingUsesLongFastPathAndPreservesOverflowSemantics() {
         assertThat(CoreArithmetic.scaledFloorCapped(
