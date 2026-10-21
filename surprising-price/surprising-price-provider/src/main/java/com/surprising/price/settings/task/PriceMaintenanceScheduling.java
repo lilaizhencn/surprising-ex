@@ -1,4 +1,6 @@
-package com.surprising.price.settings;
+package com.surprising.price.settings.task;
+
+import com.surprising.price.settings.model.PriceSettingsSnapshot;
 
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.task.IndexPriceMaintenanceTask;
@@ -30,7 +32,7 @@ public final class PriceMaintenanceScheduling implements SmartLifecycle {
         jobs.add(new Job(scheduler, indexTasks::calculateAndPublish, () -> index.getCalculation().getPollDelayMs()));
         jobs.add(new Job(scheduler, markTasks::publishMarkPrices, () -> mark.getCalculation().getPublishIntervalMs()));
     }
-    @EventListener public void settingsInstalled(PriceBusinessSettingsService.Snapshot snapshot) {
+    @EventListener public void settingsInstalled(PriceSettingsSnapshot snapshot) {
         jobs.forEach(Job::refresh);
     }
 

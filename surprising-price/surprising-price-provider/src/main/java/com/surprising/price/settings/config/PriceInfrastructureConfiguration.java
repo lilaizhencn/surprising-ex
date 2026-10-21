@@ -1,4 +1,4 @@
-package com.surprising.price.settings;
+package com.surprising.price.settings.config;
 
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.mark.config.MarkPriceProperties;

@@ -46,6 +46,6 @@ class IndexPriceApplicationYamlTest {
                 .load("application", new ClassPathResource("application.yml"));
         sources.forEach(environment.getPropertySources()::addLast);
 
-        return new com.surprising.price.settings.PriceInfrastructureConfiguration().indexPriceProperties(environment);
+        return new com.surprising.price.settings.config.PriceInfrastructureConfiguration().indexPriceProperties(environment);
     }
 }

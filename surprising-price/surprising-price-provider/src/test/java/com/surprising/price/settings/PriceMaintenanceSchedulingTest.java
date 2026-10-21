@@ -1,5 +1,7 @@
 package com.surprising.price.settings;
 
+import com.surprising.price.settings.task.PriceMaintenanceScheduling;
+
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.task.IndexPriceMaintenanceTask;
 import com.surprising.price.mark.config.MarkPriceProperties;

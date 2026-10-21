@@ -55,6 +55,6 @@ class MarkPriceApplicationYamlTest {
     }
 
     private MarkPriceProperties bind(StandardEnvironment environment) {
-        return new com.surprising.price.settings.PriceInfrastructureConfiguration().markPriceProperties(environment);
+        return new com.surprising.price.settings.config.PriceInfrastructureConfiguration().markPriceProperties(environment);
     }
 }
