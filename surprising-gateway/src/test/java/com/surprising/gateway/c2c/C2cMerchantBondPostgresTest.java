@@ -39,6 +39,21 @@ class C2cMerchantBondPostgresTest {
         f.bean(C2cMerchantBonds.class).confirm();
     }
 
+    @Test void unavailableSpotReturnsNativeProductFailureBeforeCreatingAnyFundsIntent() throws Exception {
+        int bondsBefore=f.db.jdbc.queryForObject("SELECT count(*) FROM c2c_merchant_bonds",Integer.class);
+        int intentsBefore=f.db.jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents WHERE owner_type='MERCHANT'",Integer.class);
+        doThrow(new com.surprising.gateway.provider.exception.ProductUnavailableException(com.surprising.product.api.ProductLine.SPOT))
+                .when(f.products).requireEnabled(com.surprising.product.api.ProductLine.SPOT);
+        var result=f.call(HttpMethod.POST,"/api/v1/c2c/me/merchant-bond",12,
+                new C2cMerchantController.Deposit(UUID.randomUUID(),"1",new C2cVerification("123456","")),404);
+        assertThat(result.get("code")).isEqualTo("PRODUCT_NOT_ENABLED");
+        assertThat(f.db.jdbc.queryForObject("SELECT count(*) FROM c2c_merchant_bonds",Integer.class)).isEqualTo(bondsBefore);
+        assertThat(f.db.jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents WHERE owner_type='MERCHANT'",Integer.class)).isEqualTo(intentsBefore);
+        verifyNoInteractions(f.core);
+        assertThat(com.surprising.gateway.c2c.controller.advice.C2cHttpErrors.status(
+                new com.surprising.gateway.provider.exception.ProductUnavailableException(com.surprising.product.api.ProductLine.SPOT)).value()).isEqualTo(404);
+    }
+
     @Test void approvalRequiresCommittedBondAndDuplicateDepositUsesOnlyOneOriginalIntent() throws Exception {
         apply();
         f.call(HttpMethod.POST,"/api/v1/admin/c2c/merchants/12/review",9,

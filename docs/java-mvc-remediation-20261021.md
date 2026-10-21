@@ -188,3 +188,5 @@
 - APIKey鉴权Servlet请求绑定、时间戳/窗口格式和原始签名载荷组装移ApiKeyRequestBinding，纯编码归ApiSignatureFormats；Service保留账号密钥/IP/权限/有效时间/验签及使用记录。封禁IP原生失败在Controller仍映射403/-1000。定向20、边界29项无跳过；移除Query+Body拼接反证2项全部预期失败。恢复后Gateway全模块干净构建1476项，20项环境条件跳过，无失败错误，25项独立PostgreSQL提现对账实际运行；外部R2与多产品网关实栈3个测试类未运行。关闭ADD-061、062，见 [API Key边界验证](validation/java-mvc-api-key-boundary-20261022.json)。复扫2128Java/1495main/0语法错误，Service HTTP、Controller直持Repository、Scheduled错误归包及Kafka错误归包四项为0；格式/分页深扫和嵌套共享模型仍需继续，不能据此宣称全量关闭。
 
 - 深扫继续发现19个Repository的原始分页/游标解析及11处其他入口格式/原生业务HTTP依赖；新增ADD-063..092待整改，不能由原248/追加62项已验证推断全项目完成。全源码快照2128Java/1495main及方法级Repository SQL清单、只读可复现工具已入档，见 [深度复扫报告](java-mvc-deep-audit-20261022.md)。公开嵌套类型仅列候选，需要实际跨层调用复核。
+
+- 产品就绪失败改为原生ProductUnavailableException，原生资金聚合不再获得ResponseStatusException；普通HTTP入口由Advice、代理/签名及Handler选中之前由实际入口映射404。C2C过去泛型Runtime处理会把此类失败变500，现明确返回404/PRODUCT_NOT_ENABLED且失败审计状态一致；实际PG质押测试确认无新增质押/资金意图和Core调用。六产品线真实Controller/内部Mapping覆盖就绪消失、原生资金失败与不错误展示零余额。定向85、边界修正后51、Mapping18、扩大干净构建374项均无跳过通过；HTTP状态反证12项全部预期失败，恢复后扩大通过。初次边界测试中两处夹具预期（原异常类型、已有种子质押行）已修正；产品行为不据夹具伪造通过。关闭ADD-083，见 [产品就绪边界验证](validation/java-mvc-product-unavailable-20261022.json)。其余29项深扫问题、公开嵌套模型与最终实栈继续。

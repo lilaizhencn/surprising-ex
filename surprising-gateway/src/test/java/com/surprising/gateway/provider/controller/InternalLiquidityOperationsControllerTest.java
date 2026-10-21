@@ -28,7 +28,7 @@ class InternalLiquidityOperationsControllerTest {
     private InternalLiquidityOperationsController controller(String configured) {
         when(local.service(ProductLine.LINEAR_PERPETUAL, AccountCommandGateway.class)).thenReturn(accounts);
         when(local.service(ProductLine.LINEAR_PERPETUAL, LeverageService.class)).thenReturn(leverage);
-        doThrow(new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND)).when(local).requireEnabled(ProductLine.INVERSE_PERPETUAL);
+        doThrow(new com.surprising.gateway.provider.exception.ProductUnavailableException(ProductLine.INVERSE_PERPETUAL)).when(local).requireEnabled(ProductLine.INVERSE_PERPETUAL);
         return new InternalLiquidityOperationsController(configured, new com.surprising.gateway.provider.service.LiquidityOperationsService(local,instruments,audit), new ObjectMapper());
     }
     private MockHttpServletRequest request() {
@@ -133,7 +133,7 @@ class InternalLiquidityOperationsControllerTest {
     }
 
     @Test void productIsolationAndRequiredReasonPrecedeFundsCommand() {
-        assertThatThrownBy(() -> controller(token).adjust(funds(AccountType.COIN_PERPETUAL), request())).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> controller(token).adjust(funds(AccountType.COIN_PERPETUAL), request())).isInstanceOf(com.surprising.gateway.provider.exception.ProductUnavailableException.class);
         var noReason = new ProductBalanceAdjustmentRequest(2, AccountType.USDT_PERPETUAL, "USDT", 100, "ref", "");
         assertThatThrownBy(() -> controller(token).adjust(noReason, request())).isInstanceOf(ResponseStatusException.class);
         verifyNoInteractions(accounts, audit);
@@ -158,7 +158,7 @@ class InternalLiquidityOperationsControllerTest {
 
     @Test void leverageRequiresExplicitMatchingProduct() {
         var wrong = new LeverageSettingRequest(2, ProductLine.INVERSE_PERPETUAL, "604", MarginMode.CROSS, 5_000_000, "maker capacity");
-        assertThatThrownBy(() -> controller(token).leverage(wrong, request())).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> controller(token).leverage(wrong, request())).isInstanceOf(com.surprising.gateway.provider.exception.ProductUnavailableException.class);
         var correct = new LeverageSettingRequest(2, ProductLine.LINEAR_PERPETUAL, "604", MarginMode.CROSS, 5_000_000, "maker capacity");
         controller(token).leverage(correct, request());
         verify(leverage).set(correct);
@@ -170,7 +170,7 @@ class InternalLiquidityOperationsControllerTest {
         assertThatThrownBy(() -> c.leverage(2, "604", ProductLine.LINEAR_PERPETUAL, MarginMode.CROSS, missing))
                 .isInstanceOf(ResponseStatusException.class);
         assertThatThrownBy(() -> c.leverage(2, "604", ProductLine.INVERSE_PERPETUAL, MarginMode.CROSS, request()))
-                .isInstanceOf(ResponseStatusException.class);
+                .isInstanceOf(com.surprising.gateway.provider.exception.ProductUnavailableException.class);
         verifyNoInteractions(leverage);
         c.leverage(2, "604", ProductLine.LINEAR_PERPETUAL, MarginMode.CROSS, request());
         verify(leverage).get(2, "604", MarginMode.CROSS, ProductLine.LINEAR_PERPETUAL);

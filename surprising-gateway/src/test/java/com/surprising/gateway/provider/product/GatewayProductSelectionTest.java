@@ -20,7 +20,7 @@ class GatewayProductSelectionTest {
     GatewayProductSelectionTest() {
         org.mockito.Mockito.when(products.enabled()).thenAnswer(i -> enabled);
         org.mockito.Mockito.doAnswer(i -> {
-            if (!enabled.contains(i.getArgument(0))) throw new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND,"not enabled");
+            if (!enabled.contains(i.getArgument(0))) throw new com.surprising.gateway.provider.exception.ProductUnavailableException(i.getArgument(0));
             return null;
         }).when(products).requireEnabled(org.mockito.ArgumentMatchers.any());
     }

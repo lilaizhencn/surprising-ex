@@ -7,6 +7,7 @@ import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.auth.controller.ApiKeyRequestBinding;
 import com.surprising.gateway.provider.auth.exception.ApiKeyAccessBlockedException;
+import com.surprising.gateway.provider.exception.ProductUnavailableException;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.controller.GatewayProxyController;
@@ -132,6 +133,8 @@ public class BinanceApiController {
                 return bookTicker(request);
             }
             return error(HttpStatus.NOT_FOUND, -1003, "unsupported Binance-compatible endpoint");
+        } catch (ProductUnavailableException unavailable) {
+            return error(HttpStatus.NOT_FOUND, -1000, unavailable.getMessage());
         } catch (ResponseStatusException ex) {
             return error(HttpStatus.valueOf(ex.getStatusCode().value()), -1000,
                     ex.getReason() == null ? "request failed" : ex.getReason());

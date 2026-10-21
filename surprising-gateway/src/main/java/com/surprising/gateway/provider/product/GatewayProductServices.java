@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.product;
 
 import com.surprising.gateway.provider.config.GatewayProductsProperties;
+import com.surprising.gateway.provider.exception.ProductUnavailableException;
 
 import com.surprising.gateway.provider.model.GatewayProductSetting;
 import com.surprising.gateway.provider.service.GatewayProductSettings;
@@ -107,8 +108,7 @@ public final class GatewayProductServices implements AutoCloseable {
 
     public void requireEnabled(ProductLine product) {
         if (product == null || !products.containsKey(product))
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.NOT_FOUND, "product is not enabled: " + product);
+            throw new ProductUnavailableException(product);
     }
     public <T> T service(ProductLine product, Class<T> type) {
         requireEnabled(product);

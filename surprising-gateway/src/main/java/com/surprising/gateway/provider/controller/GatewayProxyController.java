@@ -15,6 +15,7 @@ import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.auth.model.AdminOperationRecord;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.exception.ProductUnavailableException;
 import com.surprising.product.api.ProductLine;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
@@ -196,6 +197,8 @@ public class GatewayProxyController {
                     : result.status().terminal() ? HttpStatus.CONFLICT : HttpStatus.SERVICE_UNAVAILABLE;
             return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON)
                     .body(objectMapper.writeValueAsBytes(result));
+        } catch (ProductUnavailableException unavailable) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, unavailable.getMessage(), unavailable);
         } catch (com.surprising.gateway.provider.exception.ProductTransferSecurityException rejected) {
             throw new ResponseStatusException(switch (rejected.reason()) {
                 case VALUATION_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
@@ -266,6 +269,8 @@ public class GatewayProxyController {
         try {
             return restTemplate.exchange(target, method, new HttpEntity<>(body, headers(request, identity, route)),
                     byte[].class);
+        } catch (ProductUnavailableException unavailable) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, unavailable.getMessage(), unavailable);
         } catch (ResourceAccessException ex) {
             throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT, "backend request timed out", ex);
         } catch (RestClientException ex) {

@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.product;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.gateway.provider.exception.ProductUnavailableException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.*;
 import org.springframework.http.HttpStatus;
@@ -45,7 +46,12 @@ public final class GatewayProductSelection {
             if (products.enabled().size() != 1) throw badRequest("productLine is required for a multi-product Gateway");
             product = products.enabled().getFirst();
         }
-        if (product != null && productRequired) products.requireEnabled(product);
+        if (product != null && productRequired) {
+            try { products.requireEnabled(product); }
+            catch (ProductUnavailableException unavailable) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, unavailable.getMessage(), unavailable);
+            }
+        }
         return product;
     }
     private void collect(Set<ProductLine> selected, JsonNode node) {

@@ -2,6 +2,7 @@ package com.surprising.gateway.c2c.controller.advice;
 
 import com.surprising.gateway.provider.exception.KycDocumentStorageException;
 import com.surprising.gateway.c2c.exception.C2cProblem;
+import com.surprising.gateway.provider.exception.ProductUnavailableException;
 
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.Map;
@@ -19,6 +20,11 @@ public class C2cHttpErrors {
     public void noStore(HttpServletResponse response) {
         response.setHeader("Cache-Control", "no-store");
         response.setHeader("Pragma", "no-cache");
+    }
+
+    @ExceptionHandler(ProductUnavailableException.class)
+    public ResponseEntity<?> productUnavailable(ProductUnavailableException failure) {
+        return error(HttpStatus.NOT_FOUND, "PRODUCT_NOT_ENABLED", failure.getMessage());
     }
 
     @ExceptionHandler(C2cProblem.class)
@@ -58,6 +64,7 @@ public class C2cHttpErrors {
     }
     /** HTTP响应和Controller失败审计使用相同分类；未知内部异常不暴露细节。 */
     public static HttpStatus status(RuntimeException failure) {
+        if (failure instanceof ProductUnavailableException) return HttpStatus.NOT_FOUND;
         if (failure instanceof C2cProblem problem) return switch (problem.reason()) {
             case AUTHENTICATION_REQUIRED -> HttpStatus.UNAUTHORIZED;
             case ACCESS_DENIED -> HttpStatus.FORBIDDEN;

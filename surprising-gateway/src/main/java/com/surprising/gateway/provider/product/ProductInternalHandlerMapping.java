@@ -24,6 +24,11 @@ public final class ProductInternalHandlerMapping extends AbstractHandlerMapping 
     @Override protected Object getHandlerInternal(HttpServletRequest request) throws Exception {
         if (!isProductEndpoint(request.getRequestURI())) return null;
         var product = selection.resolve(request, (byte[]) request.getAttribute(ProductRequestBodyFilter.BODY), true);
-        return products.internalMapping(product).getHandler(request);
+        try { return products.internalMapping(product).getHandler(request); }
+        catch (com.surprising.gateway.provider.exception.ProductUnavailableException unavailable) {
+            // Handler尚未选中，ControllerAdvice不能承担此处的HTTP异常转换。
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.NOT_FOUND, unavailable.getMessage(), unavailable);
+        }
     }
 }
