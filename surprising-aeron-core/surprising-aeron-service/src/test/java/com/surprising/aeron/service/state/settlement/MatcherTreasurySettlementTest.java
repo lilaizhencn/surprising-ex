@@ -41,34 +41,49 @@ import org.junit.jupiter.api.Test;
 import static com.surprising.aeron.service.matching.MatcherEventFixtures.trade;
 import static org.assertj.core.api.Assertions.*;
 
+/**
+ * 结算事件财务槽的回归用例。一项通过反射核对容量保留和活跃槽范围，另一项用真实独立账户 Lane 及原 Treasury 的账本线程验证手续费、满队列、完成与回收交接，不是完整 Cluster 压测。
+ */
 class MatcherTreasurySettlementTest {
+    /**
+     * 反射交替准备一 Lane、多 Lane 和无成交路由，检查原财务槽对象保留、每代金额清空且合并只读当前参与范围，包含最高位 Lane。
+     */
     @Test
     void shrinkingLaneRoutesRetainTreasurySlotsAndExcludeInactiveContributions() throws Exception {
+        // 本次待准备、投递和收集的可复用撮合结算事件。
         var event = new MatcherSettlementEvent();
+        // 反射取得的财务槽容量准备方法。
         var prepare = MatcherSettlementEvent.class.getDeclaredMethod("prepareTreasuryDeltas", long.class, boolean.class);
         prepare.setAccessible(true);
+        // 反射取得的参与 Lane 财务槽数组字段。
         var storage = MatcherSettlementEvent.class.getDeclaredField("touchedLaneTreasuryDeltas");
         storage.setAccessible(true);
+        // 反射取得的实际参与 Lane 位图字段。
         var mask = MatcherSettlementEvent.class.getDeclaredField("requiredLaneMask");
         mask.setAccessible(true);
+        // 反射取得的本代是否存在成交标记。
         var trades = MatcherSettlementEvent.class.getDeclaredField("treasuryTrades");
         trades.setAccessible(true);
+        // 反射取得的财务差额合并方法。
         var merge = MatcherSettlementEvent.class.getDeclaredMethod("mergeTreasuryDeltas");
         merge.setAccessible(true);
 
         prepare.invoke(event, 1L, false);
         assertThat(storage.get(event)).isNull();
         prepare.invoke(event, 1L, true);
+        // 紧凑参与槽中的第一个财务差额对象，用于检查保留及金额清空。
         RuntimeTreasuryDelta first = ((RuntimeTreasuryDelta[]) storage.get(event))[0];
         first.addFee(2, 17);
         prepare.invoke(event, 5L, true);
+        // 已扩为两个槽的财务差额数组，之后缩小路由不应替换它。
         RuntimeTreasuryDelta[] slots = (RuntimeTreasuryDelta[]) storage.get(event);
         assertThat(slots).hasSize(2);
         assertThat(slots[0]).isSameAs(first);
         assertThat(first.size()).isZero();
+        // 第二个保留财务槽，当前不参与时故意填入金额以验证不被合并。
         RuntimeTreasuryDelta second = slots[1];
 
-        for (int iteration = 0; iteration < 64; iteration++) {
+        for (/* 重复扩缩路由及无成交清空的当前轮次。 */ int iteration = 0; iteration < 64; iteration++) {
             prepare.invoke(event, 1L << 63, true);
             assertThat(storage.get(event)).isSameAs(slots);
             assertThat(slots[0]).isSameAs(first);
@@ -78,7 +93,7 @@ class MatcherTreasurySettlementTest {
             mask.setLong(event, 1L << 63);
             trades.setBoolean(event, true);
             first.addFee(2, 3);
-            // Capacity is not the current business range, even if an inactive cell has data.
+            // 保留容量不等于本代业务范围，非参与槽即使有数据也不能参与合并。
             second.addFee(2, 100);
             assertThat(((RuntimeTreasuryDelta) merge.invoke(event)).feeUnits(0)).isEqualTo(3);
 
@@ -94,38 +109,63 @@ class MatcherTreasurySettlementTest {
         }
     }
 
+    /**
+     * 实际阻塞 maker 与账本队首，让 taker 独立完成；检查满队列保留、提前回收及重复收集拒绝、原财库手续费为二，以及旧账本唤醒回调未返回时财务槽也可安全复用。
+     */
     @Test
     void independentAccountWritersThenOriginalLedgerSettleFeesBeforeOwnerCollects() throws Exception {
+        // 生产默认账户 Lane 拓扑，用于挑选跨 Lane 用户。
         var topology = LaneTopology.productionDefault();
+        // 固定 maker 用户编号。
+        // 调整为与 maker 不同 Lane 的主动用户编号。
         long makerUser = 8, takerUser = 7;
         while (topology.accountLaneId(makerUser) == topology.accountLaneId(takerUser)) takerUser++;
+        // 本次真实 Lane 成交使用的规范 U 本位永续币对。
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
                 new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000,
                         0, 0, 0, -1, 0, 10_000_000, 10_000, 0, 1,
                         List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000, 100_000, 50_000))));
+        // 冷状态中的一单位主动买单。
         var taker = order(11, takerUser, CoreOrderSide.BUY);
+        // 冷状态中的一单位卖方 maker。
         var maker = order(12, makerUser, CoreOrderSide.SELL);
+        // 包含两账户、两订单、币对和空系统账本的起始冷状态。
         var before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(takerUser, user(takerUser, taker), makerUser, user(makerUser, maker)),
                 Map.of(11L, taker, 12L, maker), Map.of("1", instrument),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
+        // 把业务币对、资产及持仓转为运行时编号的字典。
         var identities = new RuntimeIdentityRegistry();
-        try (var runtime = RuntimeStateProjector.project(before, identities)) {
+        try (/* 由冷状态投影得到并在用例退出时关闭的交易运行时。 */ var runtime = RuntimeStateProjector.project(before, identities)) {
+            // 投影后权威主动订单引用，后续事件复用仍以其身份准备撤单。
             OrderRuntime originalTaker = runtime.order(11);
+            // 首代成交事实对应的命令 UUID。
             UUID commandId = new UUID(1, 2);
+            // maker 与 taker 两账户 Lane 的联合位图。
             long laneMask = topology.accountLaneMask(takerUser) | topology.accountLaneMask(makerUser);
+            // 本次待准备、投递和收集的可复用撮合结算事件。
             var event = runtime.prepareDirectMatcherSettlement(1, laneMask, originalTaker, null, 1,
                     commandId, 0, identities, 10, 20, List.of(), null);
+            // 始终由本用例复用的原 Treasury 对象，所有权由系统账本线程交接。
             TreasuryRuntime original = runtime.treasury();
+            // 账本工作线程意外故障的原子接收槽。
             var failure = new AtomicReference<Throwable>();
             runtime.startAccountLanes();
+            // maker 账户所属 Lane 编号。
+            // 主动账户所属 Lane 编号。
             int makerLane = topology.accountLaneId(makerUser), takerLane = topology.accountLaneId(takerUser);
+            // maker Lane 已进入阻塞任务的通知门闩。
             var makerParked = new CountDownLatch(1);
+            // 放行 maker Lane 继续账户结算的门闩。
             var releaseMaker = new CountDownLatch(1);
+            // 由主动账户线程完成通知触发的门闩，用于证明 taker 不必等待 maker。
             var takerFinished = new CountDownLatch(1);
+            // 系统账本进入完成后的唤醒回调时通知主线程的门闩。
             var financialSignalling = new CountDownLatch(1);
+            // 延迟旧代账本完成通知返回，供主线程先复用事件的门闩。
             var releaseFinancialSignal = new CountDownLatch(1);
+            // 只允许首个账本通知被阻塞的原子开关。
             var holdFirstFinancialSignal = new java.util.concurrent.atomic.AtomicBoolean(true);
             runtime.ownerCompletionSignal(() -> {
                 if (Thread.currentThread() == runtime.laneWorkers[takerLane].thread()) takerFinished.countDown();
@@ -135,15 +175,23 @@ class MatcherTreasurySettlementTest {
                     await(releaseFinancialSignal);
                 }
             });
-            runtime.laneWorkers[makerLane].submit(lane -> {
+            runtime.laneWorkers[makerLane].submit(/* 阻塞任务收到的 maker 账户 Lane，本任务只等门闩而不读账户。 */ lane -> {
                 makerParked.countDown();
                 await(releaseMaker);
             });
             assertThat(makerParked.await(3, TimeUnit.SECONDS)).isTrue();
+            // 控制账本队首空任务是否就绪的原子开关。
             var releaseLedgerHead = new java.util.concurrent.atomic.AtomicBoolean();
-            try (var ledger = new SystemLedgerLane(original, 1, failure::set)) {
-                assertThat(ledger.offer(new SystemLedgerLane.Entry() {
+            try (/* 实际运行且退出时自动关闭的系统账本线程，邮箱容量为一。 */ var ledger = new SystemLedgerLane(original, 1, failure::set)) {
+                assertThat(ledger.offer(/* 确定性占住账本队首的测试任务，原子门闩控制就绪，应用时不修改资金。 */ new SystemLedgerLane.Entry() {
+                    /**
+                     * 通过用例门闩控制空账本任务是否就绪，以确定性占住容量为一的队列。
+                     */
                     @Override public boolean ready() { return releaseLedgerHead.get(); }
+                    /**
+                     * 队首门闩放开后执行空任务，仅用于释放被占住的账本槽，不修改系统资金。
+                     * @param treasury 账本任务收到的原系统财库，本空任务不读取或修改它
+                     */
                     @Override public void apply(TreasuryRuntime treasury) { }
                 })).isTrue();
                 event.reserveMatcherPublication();
@@ -166,6 +214,7 @@ class MatcherTreasurySettlementTest {
                     assertThatThrownBy(() -> original.fee(identities.assetId("USDT")))
                             .isInstanceOf(IllegalStateException.class);
                 } finally { releaseMaker.countDown(); }
+                // 等待两个账户 Lane 都完成的有界单调时间截止点。
                 long accountDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                 while (!event.accountLanesCompleteForLedger()) {
                     ledger.assertHealthy(); runtime.assertAccountLanesHealthy();
@@ -175,6 +224,7 @@ class MatcherTreasurySettlementTest {
                 assertThat(event.complete()).isFalse();
                 assertThat(runtime.collectMatcherSettlement(event, null, null)).isNull();
                 releaseLedgerHead.set(true);
+                // 账本队列满后重试投递的有界截止点。
                 long admissionDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                 while (!event.submitTreasurySettlement(ledger)) {
                     if (System.nanoTime() >= admissionDeadline) throw new AssertionError("Ledger queue remained full");
@@ -182,6 +232,7 @@ class MatcherTreasurySettlementTest {
                 }
                 assertThatThrownBy(() -> event.submitTreasurySettlement(ledger))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("already queued");
+                // 等待财务槽完成或复用槽完成的有界截止点。
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                 while (!event.complete()) {
                     ledger.assertHealthy(); runtime.assertAccountLanesHealthy();
@@ -195,9 +246,11 @@ class MatcherTreasurySettlementTest {
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("already collected");
                 runtime.releaseMatcherSettlement(event);
                 assertThat(financialSignalling.await(3, TimeUnit.SECONDS)).isTrue();
-                // The previous Ledger callback still runs after its completion release. Its
-                // financial slot can be reused, provided it never reads the pooled fact again.
+                // 旧账本回调在发布完成位后仍未返回；此时可复用财务槽，
+                // 前提是旧回调不再读取池化事件字段。
+                // 复用事件新一代撤单命令的 UUID。
                 UUID secondId = new UUID(3, 4);
+                // 从池中借到的同一结算事件，用于检查旧账本回调不污染新代。
                 var reused = runtime.prepareDirectCancellation(2, originalTaker.userId(), originalTaker.orderId(),
                         secondId, 0, identities, 30, 40);
                 assertThat(reused).isSameAs(event);
@@ -230,6 +283,11 @@ class MatcherTreasurySettlementTest {
         }
     }
 
+    /**
+     * 为测试订单构造含 USDT 余额及衍生品保证金预留的冷用户状态。
+     * @param userId 测试用户编号
+     * @param order 需要在冷用户状态中建立保证金预留的订单
+     */
     private static CoreUserState user(long userId, CoreOrderState order) {
         return new CoreUserState(ProductLine.LINEAR_PERPETUAL, userId, 1,
                 Map.of("USDT", new AssetBalance("USDT", 800, 100)),
@@ -237,6 +295,12 @@ class MatcherTreasurySettlementTest {
                         ReservationKind.DERIVATIVE_MARGIN, "USDT", 100, 1)), Map.of());
     }
 
+    /**
+     * 构造一单位数量的开放全仓净持仓限价单，按买卖方向充当 taker 或 maker。
+     * @param orderId 测试订单编号
+     * @param userId 测试用户编号
+     * @param side 订单买卖方向
+     */
     private static CoreOrderState order(long orderId, long userId, CoreOrderSide side) {
         return new CoreOrderState(orderId, ProductLine.LINEAR_PERPETUAL, userId, "1", side,
                 100, 1, 0, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
@@ -244,10 +308,14 @@ class MatcherTreasurySettlementTest {
                 10_000, 10_000, CoreOrderStatus.OPEN, 1);
     }
 
+    /**
+     * 有界等待账户或账本通知门闩，中断时恢复标记并抛出测试断言失败。
+     * @param latch 控制工作线程继续执行的门闩
+     */
     private static void await(CountDownLatch latch) {
         try {
             if (!latch.await(3, TimeUnit.SECONDS)) throw new AssertionError("account gate timed out");
-        } catch (InterruptedException interrupted) {
+        } catch (/* 门闩等待收到的中断异常，恢复中断标记后交给断言失败。 */ InterruptedException interrupted) {
             Thread.currentThread().interrupt(); throw new AssertionError(interrupted);
         }
     }

@@ -26,15 +26,25 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.*;
 
+/**
+ * 撮合结算计划和事件租约的回归用例。覆盖发布预约、就绪与回收、Lane 票据、跨项成交数量、计划数组及视图复用；有的用例使用实际线程，有的直接构造结果，不代表完整 Cluster 或性能采样。
+ */
 class MatcherSettlementPlanTest {
+    /**
+     * 检查未预约 Matcher 发布的事件不能开始或保存结果，重复预约也拒绝；合法预约及发布结束后可收集并回收。
+     */
     @Test
     void directFactsCannotStartOrPublishWithoutAReservedMatcherSlot() {
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+            // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
+            // 固定测试币对一对应的稠密编号。
             int symbol = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            // 拒绝撤单前的权威订单引用，用于核对事件不替换或修改订单归属。
             var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
             runtime.putOrder(original);
+            // 当前需要预约、发布、收集并回收的撮合结算事件。
             var event = runtime.prepareDirectCancellation(1, 21, 11, new java.util.UUID(1, 2),
                     0, identities, 10, 20);
             assertThatThrownBy(event::beginMatcherPublication).isInstanceOf(IllegalStateException.class);
@@ -54,20 +64,28 @@ class MatcherSettlementPlanTest {
         }
     }
 
+    /** 测试共用的规范 BTC/USDT U 本位永续币对及单档风险限额。 */
     private static final CoreInstrument INSTRUMENT = new CoreInstrument(
             "1", ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT",
             1, 1, 1_000_000, 100_000, 50_000, -10, 25, 0, null, 0,
             10_000_000, Long.MAX_VALUE, 0, 1,
             List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000)));
 
+    /**
+     * 在发布完成前检查事件未就绪、没有完成位且无法收集，完成发布后拒绝撤单可收集且原订单引用未变。
+     */
     @Test
     void matcherPublicationWaitsForReadinessBeforeApplyingAccounts() {
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+            // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
+            // 固定测试币对一对应的稠密编号。
             int symbol = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            // 拒绝撤单前的权威订单引用，用于核对事件不替换或修改订单归属。
             var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
             runtime.putOrder(original);
+            // 当前需要预约、发布、收集并回收的撮合结算事件。
             var event = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
             event.reserveMatcherPublication();
@@ -85,18 +103,26 @@ class MatcherSettlementPlanTest {
         }
     }
 
+    /**
+     * 先发布同账户后缀事件并检查尚无完成位，再发布前缀并按前缀、后缀顺序收集，最后核对拒绝撤单不改原订单；这里没有提前调用后缀收集来单独验证拒绝越序收集。
+     */
     @Test
     void matcherPublishedFactsRetireInAccountOrder() {
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+            // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
+            // 固定测试币对一对应的稠密编号。
             int symbol = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            // 拒绝撤单前的权威订单引用，用于核对事件不替换或修改订单归属。
             var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
             runtime.putOrder(original);
+            // 同账户先行 Core 序号对应的前缀结算事件。
             var first = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
             first.reserveMatcherPublication();
             first.beginMatcherPublication();
+            // 同账户后行 Core 序号对应的后缀事件，不能越过未完成前缀。
             var suffix = runtime.prepareDirectCancellation(2, original.userId(), original.orderId(), new java.util.UUID(3, 4),
                     0, identities, 30, 40);
             suffix.reserveMatcherPublication();
@@ -116,25 +142,36 @@ class MatcherSettlementPlanTest {
         }
     }
 
+    /**
+     * 用真实 Matcher 测试线程卡住发布后的唤醒回调；Owner 可在就绪后收集并复用事件，旧回调继续返回不能污染新代字段。
+     */
     @Test
     @org.junit.jupiter.api.Timeout(15)
     void ownerMayRecycleAfterReadinessWhileMatcherIsStillSignalling() throws Exception {
+        // 工作线程进入发布后唤醒回调时通知主线程的门闩。
         var signalling = new java.util.concurrent.CountDownLatch(1);
+        // 阻塞旧发布唤醒回调直到主线程完成事件复用的门闩。
         var finishSignal = new java.util.concurrent.CountDownLatch(1);
+        // 跨线程记录意外异常的原子引用。
         var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        // 执行事件发布和完成通知的实际测试线程，退出时有界等待结束。
         Thread matcher = null;
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+            // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
+            // 固定测试币对一对应的稠密编号。
             int symbol = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            // 拒绝撤单前的权威订单引用，用于核对事件不替换或修改订单归属。
             var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
             runtime.putOrder(original);
+            // 当前需要预约、发布、收集并回收的撮合结算事件。
             var event = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), new java.util.UUID(1, 2),
                     0, identities, 10, 20);
             event.reserveMatcherPublication();
-            // The transport release must observe all event metadata already prepared, while
-            // readiness still prevents the Owner from consuming or recycling it.
-            event.matcherCompletionRoute(shard -> {
+            // 传输释放回调应能看到已准备的事件元数据，
+            // 此时发布租约仍阻止 Owner 收集或回收事件。
+            event.matcherCompletionRoute(/* 释放回调传入的 Matcher 分片编号；这些测试回调不读取编号。 */ shard -> {
                 assertThat(event.dispatched()).isTrue();
                 assertThat(event.ready()).isFalse();
             }, 0);
@@ -149,13 +186,14 @@ class MatcherSettlementPlanTest {
                     event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                             symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
                     event.completeMatcherPublication();
-                } catch (Throwable error) { failure.set(error); signalling.countDown(); }
+                } catch (/* Matcher 测试线程捕获并交给主线程检查的异常。 */ Throwable error) { failure.set(error); signalling.countDown(); }
             });
             assertThat(signalling.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
             assertThat(failure.get()).isNull();
             assertThat(event.ready()).isTrue();
             assertThat(runtime.collectMatcherSettlement(event)).isNotNull();
             runtime.releaseMatcherSettlement(event);
+            // 从事件池再次借到的同一对象，用于检查新代字段未被旧回调覆盖。
             var reused = runtime.prepareDirectCancellation(2, original.userId(), original.orderId(), new java.util.UUID(3, 4),
                     0, identities, 30, 40);
             assertThat(reused).isSameAs(event);
@@ -179,16 +217,20 @@ class MatcherSettlementPlanTest {
         }
     }
 
+    /**
+     * 让事件释放路由回调抛异常，检查实际 Matcher 管线把发布故障交给 Owner 查询和后续提交，而不是留下无结果等待。
+     */
     @Test
     void settlementPublicationFailureReachesOwnerInsteadOfLeavingDeadMatcher() {
-        try (var runtime = new TradingRuntimeState();
-             var pipeline = new com.surprising.aeron.service.matcher.MatcherCommandPipeline(256)) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState();
+             /* 用例实际启动并自动关闭的 Matcher 管线，用于检查故障传播。 */ var pipeline = new com.surprising.aeron.service.matcher.MatcherCommandPipeline(256)) {
+            // 当前需要预约、发布、收集并回收的撮合结算事件。
             var event = new MatcherSettlementEvent();
             event.batchStorage(1);
             event.prepareDirect(1, 1, 0, 0, new java.util.UUID(1, 2), 0,
                     runtime, new RuntimeIdentityRegistry(), 1, List.of(), null);
             event.reserveMatcherPublication();
-            event.matcherCompletionRoute(shard -> {
+            event.matcherCompletionRoute(/* 释放回调传入的 Matcher 分片编号；这些测试回调不读取编号。 */ shard -> {
                 throw new IllegalStateException("settlement publication failed");
             }, 0);
             pipeline.submit(1, () -> {
@@ -196,6 +238,7 @@ class MatcherSettlementPlanTest {
                 return new CoreMatchingResult(false, "REJECTED");
             }, event);
             assertThatThrownBy(() -> {
+                // 单调时钟计算的有界等待截止点，超时让测试失败。
                 long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
                 while (System.nanoTime() < deadline) {
                     pipeline.completedMatchingSequence();
@@ -208,25 +251,37 @@ class MatcherSettlementPlanTest {
         }
     }
 
+    /**
+     * 有界等待测试门闩，超时失败；被中断时恢复中断标记并把异常交给测试。
+     * @param latch 由测试主线程或工作线程释放的发布门闩
+     */
     private static void awaitPublicationLatch(java.util.concurrent.CountDownLatch latch) {
         try {
             if (!latch.await(5, java.util.concurrent.TimeUnit.SECONDS))
                 throw new IllegalStateException("test publication signal timed out");
-        } catch (InterruptedException failure) {
+        } catch (/* 有界等待收到的中断异常，恢复中断标记后转换为测试失败。 */ InterruptedException failure) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("test publication interrupted", failure);
         }
     }
 
+    /**
+     * 不注册币对元数据直接构造拒绝撤单，检查完成后没有变化订单身份，原订单仍是同一引用。
+     */
     @Test
     void rejectedDirectCancelLeavesOrderUnchangedWithoutInstrumentMetadata() {
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+            // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
+            // 当前用例固定测试币对的稠密编号。
             int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            // 拒绝撤单前的权威订单引用，用于核对事件不替换或修改订单归属。
             var original = order(11, 21, instrumentId, CoreOrderSide.BUY, 3);
             runtime.putOrder(original);
+            // 本事件命令 UUID，供原生结果证据匹配。
             var id = new java.util.UUID(1, 2);
+            // 当前需要预约、发布、收集并回收的撮合结算事件。
             var event = runtime.prepareDirectCancellation(1, original.userId(), original.orderId(), id, 0, identities, 10, 20);
             event.reserveMatcherPublication();
             event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
@@ -240,36 +295,49 @@ class MatcherSettlementPlanTest {
         }
     }
 
+    /**
+     * 实际启动四个账户 Lane 并阻塞非成交 Lane，检查成交 Lane 已完成也不能提前回收；全部路由票据消费后才允许事件入池。
+     */
     @Test
     @org.junit.jupiter.api.Timeout(15)
     void directEventCannotRecycleBeforeReservedNonTradingLanesConsumeTheirTickets() throws Exception {
+        // 用例显式使用的四账户 Lane 路由拓扑。
         var topology = new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0, 4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
-        try (var runtime = new TradingRuntimeState(topology)) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState(topology)) {
+            // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
+            // 当前用例固定测试币对的稠密编号。
             int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument());
+            // 当前构建或事件输入的主动买单。
             var taker = order(11, 21, instrumentId, CoreOrderSide.BUY, 3);
             runtime.putOrder(taker);
+            // 本事件命令 UUID，供原生结果证据匹配。
             var id = new java.util.UUID(1, 2);
+            // 当前需要预约、发布、收集并回收的撮合结算事件。
             var event = runtime.prepareDirectMatcherSettlement(1, 15, taker, null, 1, id, 0,
                     identities, 1, 1, List.of(), null);
+            // 本次无成交订单实际涉及的账户 Lane 编号。
             int actual = topology.accountLaneId(21);
+            // 等待另外三个 Lane 已进入阻塞回调的计数门闩。
             var waiting = new java.util.concurrent.CountDownLatch(3);
+            // 释放非成交 Lane 阻塞回调的门闩，finally 保证放行。
             var release = new java.util.concurrent.CountDownLatch(1);
             runtime.startAccountLanes();
             runtime.releaseOwnerLaneAccess();
             try {
-                for (int lane = 0; lane < 4; lane++) if (lane != actual)
-                    runtime.laneWorkers[lane].submit(ignored -> {
+                for (/* 当前需阻塞的账户 Lane 下标，实际参与 Lane 被排除。 */ int lane = 0; lane < 4; lane++) if (lane != actual)
+                    runtime.laneWorkers[lane].submit(/* 阻塞回调收到的账户 Lane，本回调只等待门闩，不读写账户。 */ ignored -> {
                         waiting.countDown();
                         awaitPublicationLatch(release);
                     });
                 assertThat(waiting.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                // 回调记录是否已释放 Matcher 传输路由的单元素标记。
                 boolean[] routeReleased = {false};
                 event.reserveMatcherPublication();
-                event.matcherCompletionRoute(shard -> routeReleased[0] = true, 0);
+                event.matcherCompletionRoute(/* 释放回调传入的 Matcher 分片编号；这些测试回调不读取编号。 */ shard -> routeReleased[0] = true, 0);
                 event.beginMatcherPublication();
                 event.publishDirectNativeResult(nativeResult(CommandResultCode.SUCCESS, instrumentId, 1,
                         List.of()), 1, 1, 2, 11, 1, 0);
@@ -277,6 +345,7 @@ class MatcherSettlementPlanTest {
                 assertThat(event.ready()).isFalse();
                 event.completeMatcherPublication();
                 assertThat(routeReleased[0]).isTrue();
+                // 单调时钟计算的有界等待截止点，超时让测试失败。
                 long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
                 while ((event.completedLaneMask() & (1L << actual)) == 0) {
                     runtime.assertAccountLanesHealthy();
@@ -287,6 +356,7 @@ class MatcherSettlementPlanTest {
                 assertThat(event.complete()).isFalse();
                 assertThatThrownBy(event::clear).isInstanceOf(IllegalStateException.class);
             } finally { release.countDown(); }
+            // 单调时钟计算的有界等待截止点，超时让测试失败。
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
             while (!event.complete()) {
                 runtime.assertAccountLanesHealthy();
@@ -295,6 +365,7 @@ class MatcherSettlementPlanTest {
             }
             assertThat(runtime.collectMatcherSettlement(event)).isNotNull();
             runtime.releaseMatcherSettlement(event);
+            // 从事件池再次借到的同一对象，用于检查新代字段未被旧回调覆盖。
             var reused = runtime.prepareDirectMatcherSettlement(2, 15, taker, null, 1, id, 0,
                     identities, 2, 2, List.of(), null);
             assertThat(reused).isSameAs(event);
@@ -303,18 +374,28 @@ class MatcherSettlementPlanTest {
         }
     }
 
+    /**
+     * 两项共享 maker 时用批次暂存累计剩余量，拒绝合计超量和终态后继续成交；构建失败不扣减权威 maker 数量。
+     */
     @Test
     void sharedMakerQuantityIsValidatedAcrossItemsBeforeAnyLaneApplies() {
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+            // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
+            // 当前用例固定测试币对的稠密编号。
             int instrumentId = identities.symbolId("1");
+            // 用例共用的规范永续币对引用。
             var instrument = instrument();
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument);
+            // 批次多次成交共用的卖方 maker，用于检查累计剩余量。
             var maker = order(10, 20, instrumentId, CoreOrderSide.SELL, 5);
+            // 当前批次第一笔主动买单，计划消耗 maker 三个单位。
             var first = order(11, 21, instrumentId, CoreOrderSide.BUY, 3);
+            // 当前批次第二笔主动买单，用于累计 maker 数量检查。
             var second = order(12, 22, instrumentId, CoreOrderSide.BUY, 3);
             runtime.putOrder(maker); runtime.putOrder(first); runtime.putOrder(second);
+            // 当前批次共享的剩余数量、终态及最近 maker 校验暂存。
             var scratch = new MatcherSettlementPlan.BatchValidationScratch();
             assertThat(MatcherSettlementPlan.buildBatchItem(1, first, instrument, fill(3), runtime, identities, scratch, new MatcherSettlementPlan()).tradeCount()).isEqualTo(1);
             assertThatThrownBy(() -> MatcherSettlementPlan.buildBatchItem(1, second, instrument, fill(3), runtime, identities, scratch, new MatcherSettlementPlan()))
@@ -327,14 +408,20 @@ class MatcherSettlementPlanTest {
                     .isInstanceOf(IllegalStateException.class);
         }
     }
+    /**
+     * 清理计划及批次暂存后替换 maker 为更小数量，检查重建会读新数量并拒绝超量；本用例没有附加触发终态，不据名称声称验证触发状态清理。
+     */
     @Test
     void reusedPlanAndScratchDoNotRetainPriorMakerOrTriggerState() {
-        try (var runtime = new TradingRuntimeState()) {
-            var identities = new RuntimeIdentityRegistry(); int instrumentId = identities.symbolId("1");
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+            // 当前用例解析币对编号及持仓身份的运行时字典。
+            var identities = new RuntimeIdentityRegistry(); /* 当前用例固定测试币对的稠密编号。 */ int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0); runtime.registerInstrument(instrument());
             runtime.putOrder(order(10,20,instrumentId,CoreOrderSide.SELL,5));
+            // 当前构建或事件输入的主动买单。
             var taker = order(11,21,instrumentId,CoreOrderSide.BUY,3); runtime.putOrder(taker);
-            var scratch = new MatcherSettlementPlan.BatchValidationScratch(); var slot = new MatcherSettlementPlan();
+            // 当前批次共享的剩余数量、终态及最近 maker 校验暂存。
+            var scratch = new MatcherSettlementPlan.BatchValidationScratch(); /* 需要在各代间复用的结算计划对象。 */ var slot = new MatcherSettlementPlan();
             assertThat(MatcherSettlementPlan.buildBatchItem(1,taker,instrument(),fill(3),runtime,identities,scratch,slot)).isSameAs(slot);
             slot.clearReferences(); scratch.clear();
             runtime.putOrder(order(10,20,instrumentId,CoreOrderSide.SELL,1));
@@ -342,26 +429,38 @@ class MatcherSettlementPlanTest {
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds");
         }
     }
+    /**
+     * 先为九次成交建立 maker Lane 链，再复用为一次成交，核对新代首项、结束下标及成交数不读取旧链尾。
+     */
     @Test
     void pooledPlanSwitchesFromDeepMakerLaneIndexBackToOneFillWithoutStaleLinks() {
+        // 用例显式使用的四账户 Lane 路由拓扑。
         var topology = new LaneTopology(LaneTopology.ROUTE_VERSION,1,0,0,4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,16,16,16);
-        try (var runtime = new TradingRuntimeState(topology)) {
-            var identities = new RuntimeIdentityRegistry(); int instrumentId = identities.symbolId("1");
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState(topology)) {
+            // 当前用例解析币对编号及持仓身份的运行时字典。
+            var identities = new RuntimeIdentityRegistry(); /* 当前用例固定测试币对的稠密编号。 */ int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL,0); runtime.registerInstrument(instrument());
+            // 调整到与固定 maker 不同账户 Lane 的主动用户编号。
             long takerUser = 21;
             while (topology.accountLaneId(takerUser) == topology.accountLaneId(20)) takerUser++;
             runtime.putOrder(order(10,20,instrumentId,CoreOrderSide.SELL,20));
+            // 当前构建或事件输入的主动买单。
             var taker = order(11,takerUser,instrumentId,CoreOrderSide.BUY,20); runtime.putOrder(taker);
+            // 构造深度成交所用的九项原始事件列表。
             var events = new java.util.ArrayList<exchange.core2.core.common.MatcherResult.MatcherEvent>();
-            for (int i = 0; i < 9; i++) events.add(MatcherEventFixtures.trade(10,20,100,1,false,false));
+            for (/* 添加重复 maker 成交事件的当前次数。 */ int i = 0; i < 9; i++) events.add(MatcherEventFixtures.trade(10,20,100,1,false,false));
+            // 包含九次小额成交的接受结果，用来触发多 Lane 深度事件链。
             var deep = new CoreMatchingResult(true,"SUCCESS",List.of(),0,true,
                     0, 0, 0, 0, 0, 0, 0, -1, null,
                     events,new MatcherResult.MarketData(List.of(),List.of(),0,0)).withCoreSequenceInPlace(1);
-            var scratch = new MatcherSettlementPlan.BatchValidationScratch(); var slot = new MatcherSettlementPlan();
+            // 当前批次共享的剩余数量、终态及最近 maker 校验暂存。
+            var scratch = new MatcherSettlementPlan.BatchValidationScratch(); /* 需要在各代间复用的结算计划对象。 */ var slot = new MatcherSettlementPlan();
             MatcherSettlementPlan.buildBatchItem(1,taker,instrument(),deep,runtime,identities,scratch,slot);
+            // 固定 maker 所属账户 Lane，用于检查其事件链。
+            // 沿 maker Lane 链实际遍历到的事件数。
             int makerLane = topology.accountLaneId(20), count = 0;
-            for (int event = slot.firstMatcherEvent(makerLane); event >= 0; event = slot.nextMatcherEvent(event,makerLane)) count++;
+            for (/* 沿 maker Lane 链当前访问的原始事件下标，负一表示遍历结束。 */ int event = slot.firstMatcherEvent(makerLane); event >= 0; event = slot.nextMatcherEvent(event,makerLane)) count++;
             assertThat(count).isEqualTo(9);
             slot.clearReferences(); scratch.clear();
             MatcherSettlementPlan.buildBatchItem(1,taker,instrument(),fill(1),runtime,identities,scratch,slot);
@@ -370,17 +469,27 @@ class MatcherSettlementPlanTest {
             assertThat(slot.tradeCount()).isOne();
         }
     }
+    /**
+     * 借用大批量存储后改为一项，在尾部留异代计划，检查当前有效项只有一项且不能通过 plan 读取尾部。
+     */
     @Test
     void smallerBatchReusesCapacityAndIgnoresStaleTailPlans() {
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+            // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
+            // 当前用例固定测试币对的稠密编号。
             int instrumentId = identities.symbolId("1");
+            // 用例共用的规范永续币对引用。
             var instrument = instrument();
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument);
+            // 当前需要预约、发布、收集并回收的撮合结算事件。
             var event = new MatcherSettlementEvent();
+            // 大批次借出的事件存储，缩小有效项数后仍保留原容量。
             var storage = event.batchStorage(20);
+            // 小批次测试的主动用户编号。
             long userId = 21;
+            // 该主动用户所属账户 Lane 位图。
             long laneMask = runtime.topology().accountLaneMask(userId);
             storage.plans[0] = MatcherSettlementPlan.empty(1, userId, new long[]{11}, runtime);
             // 尾部属于上代且序号不同；不能参与本代校验、执行或收集。
@@ -388,6 +497,7 @@ class MatcherSettlementPlanTest {
             storage.instruments[0] = instrument;
             assertThat(event.batchStorage(1)).isSameAs(storage);
             storage.admittedOrders[0] = order(11, userId, instrumentId, CoreOrderSide.BUY, 1);
+            // 当前构造事实使用的命令 UUID。
             var commandId = new java.util.UUID(1, 2);
             event.prepareDirect(1, laneMask, 1, 1, commandId, 0, runtime, identities, 1, List.of(), null);
             event.reserveMatcherPublication();
@@ -399,18 +509,25 @@ class MatcherSettlementPlanTest {
         }
     }
 
+    /**
+     * 交替构建成交和空计划，检查调用方撤单数组被复制、清空后旧事件与撤单不保留，新代编号及成交数正确。
+     */
     @Test
     void singleCommandSlotReusesPlanWithoutLeakingPriorOrdersOrCancellations() {
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+            // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
+            // 当前用例固定测试币对的稠密编号。
             int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument());
             runtime.putOrder(order(10, 20, instrumentId, CoreOrderSide.SELL, 5));
             runtime.putOrder(order(11, 21, instrumentId, CoreOrderSide.BUY, 3));
+            // 需要在各代间复用的结算计划对象。
             var slot = new MatcherSettlementPlan();
             assertThat(MatcherSettlementPlan.buildInto(slot, 1, 11, 21, 11, 0,
                     fill(3), runtime, identities)).isSameAs(slot);
+            // 调用方撤单数组或混合接受与拒绝的撤单结果列表，具体用例分别核对复制及顺序。
             long[] cancellations = {12};
             assertThat(slot.preCancellations(cancellations)).isSameAs(slot);
             cancellations[0] = 999;
@@ -433,16 +550,23 @@ class MatcherSettlementPlanTest {
         }
     }
 
+    /**
+     * 检查单项构建返回原计划槽，并保存预期 taker、maker 和成交数；仅验证槽复用，不代表分配采样。
+     */
     @Test
     void singleItemBatchBuilderUsesThePooledTargetForInitialIdentity() {
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+            // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
+            // 当前用例固定测试币对的稠密编号。
             int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument());
             runtime.putOrder(order(10, 20, instrumentId, CoreOrderSide.SELL, 5));
             runtime.putOrder(order(11, 21, instrumentId, CoreOrderSide.BUY, 3));
+            // 需要在各代间复用的结算计划对象。
             var slot = new MatcherSettlementPlan();
+            // 本次单项构建使用的接受成交结果。
             var result = fill(3);
             assertThat(MatcherSettlementPlan.buildSingleInto(slot, 1, 11, 21,
                     result, runtime, identities)).isSameAs(slot);
@@ -453,10 +577,15 @@ class MatcherSettlementPlanTest {
         }
     }
 
+    /**
+     * 检查重复读取返回同一编号视图，计划清空后旧视图也变空，明确它不是独立快照。
+     */
     @Test
     void orderIdViewFollowsPlanLifetimeWithoutCopyingStorage() {
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+            // 需要在各代间复用的结算计划对象。
             var slot = MatcherSettlementPlan.emptyInto(new MatcherSettlementPlan(), 1, 21, 11, 10, runtime);
+            // 绑定计划生命周期的只读订单编号视图。
             var view = slot.orderIdList();
 
             assertThat(view).containsExactly(11L, 10L);
@@ -466,19 +595,26 @@ class MatcherSettlementPlanTest {
         }
     }
 
+    /**
+     * 让实际结果顺序不同于准入顺序且包含拒绝项，检查只保存成功撤单并按准入期望顺序排列。
+     */
     @Test
     void expectedCancellationsAreWrittenInAdmissionOrderIntoReusablePlanStorage() {
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+            // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
+            // 当前用例固定测试币对的稠密编号。
             int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument());
             runtime.putOrder(order(11, 21, instrumentId, CoreOrderSide.BUY, 3));
+            // 需要在各代间复用的结算计划对象。
             var slot = MatcherSettlementPlan.buildInto(new MatcherSettlementPlan(), 1, 11, 21, 11, 0,
                     new CoreMatchingResult(true, "SUCCESS", List.of(), 0, true,
                             1, 1, 2, 11, 1, 1, 1, 0,
                             null, List.of(),
                             new MatcherResult.MarketData(List.of(), List.of(), 0, 0)), runtime, identities);
+            // 调用方撤单数组或混合接受与拒绝的撤单结果列表，具体用例分别核对复制及顺序。
             var cancellations = List.of(new com.surprising.aeron.service.matching.CoreCancellationResult(13, true, "CANCELLED"),
                     new com.surprising.aeron.service.matching.CoreCancellationResult(12, false, "NOT_FOUND"),
                     new com.surprising.aeron.service.matching.CoreCancellationResult(11, true, "CANCELLED"));
@@ -489,19 +625,28 @@ class MatcherSettlementPlanTest {
         }
     }
 
+    /**
+     * 分别构造单次超量及重复 maker 累计超量，检查失败后合法数量仍可重建，原 taker 和 maker 引用保持不变。
+     */
     @Test
     void singleEventAndRepeatedMakerBothRejectExcessBeforeStateMutation() {
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+            // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
+            // 当前用例固定测试币对的稠密编号。
             int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.registerInstrument(instrument());
+            // 批次多次成交共用的卖方 maker，用于检查累计剩余量。
             var maker = order(10, 20, instrumentId, CoreOrderSide.SELL, 3);
+            // 当前构建或事件输入的主动买单。
             var taker = order(11, 21, instrumentId, CoreOrderSide.BUY, 5);
             runtime.putOrder(maker); runtime.putOrder(taker);
+            // 需要在各代间复用的结算计划对象。
             var slot = new MatcherSettlementPlan();
             assertThatThrownBy(() -> MatcherSettlementPlan.buildInto(slot, 1, 11, 21, 11, 0,
                     fill(4), runtime, identities)).isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds");
+            // 两次引用同一 maker 且累计超量的原始成交结果。
             var repeated = new CoreMatchingResult(true, "SUCCESS", List.of(), 0, true,
                     1, 0, 0, 0, 0, 0, 0, -1, null,
                     List.of(MatcherEventFixtures.trade(10, 20, 100, 2, false, false),
@@ -515,23 +660,50 @@ class MatcherSettlementPlanTest {
         }
     }
 
+    /**
+     * 构造固定规范币对、价格一百的开放全仓净持仓限价单，用于结算计划输入。
+     * @param id 测试订单编号
+     * @param user 测试订单所属用户编号
+     * @param instrumentId 测试币对的运行时稠密编号
+     * @param side 测试订单买卖方向
+     * @param qty 测试订单总量及初始剩余量
+     */
     private static OrderRuntime order(long id,long user,int instrumentId,CoreOrderSide side,long qty) {
         return new OrderRuntime(id,user,instrumentId,instrument(),side,100,false,CoreMarginMode.CROSS,CorePositionSide.NET,
                 CoreOrderType.LIMIT,CoreTimeInForce.GTC,0,0,qty,0,qty,false);
     }
+    /**
+     * 以 Core 序号一构造固定 maker 的单笔接受成交。
+     * @param quantity 固定 maker 本次成交的数量
+     */
     private static CoreMatchingResult fill(long quantity) { return fill(quantity, 1); }
+    /**
+     * 以指定 Core 序号构造固定 maker 的单笔接受成交，数量按参数设置。
+     * @param quantity 固定 maker 本次成交的数量
+     * @param sequence 关联结果的 Core 序号
+     */
     private static CoreMatchingResult fill(long quantity, long sequence) {
         return new CoreMatchingResult(true,"SUCCESS",List.of(),0,true,
                 0, 0, 0, 0, 0, 0, 0, -1, null,
                 List.of(MatcherEventFixtures.trade(10,20,100,quantity,false,false)),
                 new MatcherResult.MarketData(List.of(),List.of(),0,0)).withCoreSequenceInPlace(sequence);
     }
+    /**
+     * 构造测试用原生结果，命令类型固定为 PLACE_ORDER；结果码和事件由用例指定，不实际运行撮合。
+     * @param code 测试期望的原生接受或拒绝结果码
+     * @param instrumentId 测试币对的运行时稠密编号
+     * @param sequence 关联结果的 Core 序号
+     * @param events 测试输入的原生撮合事件列表
+     */
     private static MatcherResult nativeResult(CommandResultCode code, int instrumentId, long sequence,
                                                List<MatcherResult.MatcherEvent> events) {
         return new MatcherResult(sequence, OrderCommandType.PLACE_ORDER, sequence, instrumentId,
                 100, 1, 100, OrderAction.BID, OrderType.GTC, 21, 1_000, 0,
                 code, events, new MatcherResult.MarketData(List.of(), List.of(), 0, 0));
     }
+    /**
+     * 返回所有本文件订单共用的规范 U 本位永续币对对象，便于校验对象身份。
+     */
     private static CoreInstrument instrument() {
         return INSTRUMENT;
     }

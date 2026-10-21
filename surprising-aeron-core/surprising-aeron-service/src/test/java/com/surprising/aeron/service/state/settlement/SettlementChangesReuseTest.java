@@ -13,18 +13,33 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.*;
 
+/**
+ * 结算变化缓冲复用的回归用例。直接构造 Lane 值或变化列，检查成交累计值、终态清理、原语身份有效前缀、池化清空及持仓发布；不运行 Cluster 或测量整链路对象分配。
+ */
 class SettlementChangesReuseTest {
+    /**
+     * 同次包含部分成交和全部成交，核对终态清理及累计费用；清空变化后再次撤单，检查只发布新代订单并保留原累计费用。
+     */
     @Test void mixedSettlementKeepsFinalCountersAndTerminalCleanupAcrossReuse() {
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingRuntimeState()) {
+            // 用户七所属账户 Lane 编号。
             int laneId = runtime.topology().accountLaneId(7);
+            // 本用例持有的账户 Lane，或池轮转用例当前 Lane 数组下标。
             var lane = runtime.accountLane(laneId);
+            // 本次创建或借出的结算变化缓冲。
             var changes = new MatcherSettlementChanges(runtime.topology().accountLaneCount());
             changes.ensureOrderCapacity(2, 1L << laneId);
+            // 当前待准备、发布或清理的 Lane 实体及终态变化缓冲。
             var delta = changes.laneDeltas[laneId];
+            // 结算收尾需要的运行时身份字典。
             var identities = new RuntimeIdentityRegistry();
+            // 先部分成交、下一代再撤销的权威订单。
             var open = CoreStateTestFixtures.order(11, 7, 0, 10);
+            // 本代全部成交并从账户表退休的权威订单。
             var filled = CoreStateTestFixtures.order(12, 7, 0, 10);
+            // 部分成交订单的预留，先消耗四十再释放剩余六十。
             var openReservation = CoreStateTestFixtures.reservation(11, 7, 0, 100);
+            // 全部成交订单的预留，本代消耗全部一百后移除。
             var filledReservation = CoreStateTestFixtures.reservation(12, 7, 0, 100);
             lane.putOrder(open);
             lane.putOrder(filled);
@@ -70,26 +85,34 @@ class SettlementChangesReuseTest {
         }
     }
 
+    /**
+     * 在大、小及空终态前缀间反复复用变化缓冲，检查编号和用户有效数、clear 后订单为空，并反射核对客户身份引用列全部释放。
+     */
     @Test void terminalReceiptReuseReadsOnlyTheNewCountAndReleasesReferences() throws Exception {
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingRuntimeState()) {
+            // 当前待准备、发布或清理的 Lane 实体及终态变化缓冲。
             var delta = new LaneCommitDelta();
+            // 跨复用轮次单调增加的测试订单编号。
             long nextId = 1;
-            for (int count : new int[]{65, 1, 0, 7, 0}) {
+            for (int /* 当前轮需要构造的终态身份数量，包含零项轮次。 */ count : new int[]{65, 1, 0, 7, 0}) {
+                // 本轮首个终态订单编号，用于核对有效前缀顺序。
                 long firstId = nextId;
-                for (int i = 0; i < count; i++) {
+                for (/* 当前填充、核对终态项或检查 Lane 列的数组下标。 */ int i = 0; i < count; i++) {
+                    // 本轮当前构造的终态订单编号。
                     long id = nextId++;
                     delta.orders().put(id, CoreStateTestFixtures.order(id, id + 100, 0, 1, true).snapshot());
                 }
                 delta.preparePublication();
                 assertThat(delta.terminalOrderCount()).isEqualTo(count);
-                for (int i = 0; i < delta.terminalOrderCount(); i++) {
+                for (/* 当前填充、核对终态项或检查 Lane 列的数组下标。 */ int i = 0; i < delta.terminalOrderCount(); i++) {
                     assertThat(delta.terminalOrderId(i)).isEqualTo(firstId + i);
                     assertThat(delta.terminalOrderUser(i)).isEqualTo(firstId + i + 100);
                 }
-                // Recycle an unpublished receipt too: failure cleanup must not leak into reuse.
+                // 尚未提交的回执也要能清理，故障清理留下的引用和计数不能泄漏到下一代。
                 delta.clear();
                 assertThat(delta.terminalOrderCount()).isZero();
                 assertThat(delta.orders().isEmpty()).isTrue();
+                // 反射取得的终态客户身份引用数组字段。
                 var field = LaneCommitDelta.class.getDeclaredField("terminalOrderClients");
                 field.setAccessible(true);
                 assertThat((Object[]) field.get(delta)).containsOnlyNulls();
@@ -97,14 +120,20 @@ class SettlementChangesReuseTest {
         }
     }
 
+    /**
+     * 以四个 Lane 轮转一百次借还池化变化，检查每次所有 Lane 的旧订单和 pending 完成计数均已清空；仅验证复用结果，不当成分配基准。
+     */
     @Test void pooledChangesMoveBetweenLanesWithoutRetainingPreviousOrdersOrPendingCounts() {
+        // 池化缓冲跨 Lane 轮转用例使用的四账户 Lane 拓扑。
         var topology = new LaneTopology(LaneTopology.ROUTE_VERSION,1,0,0,4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,16,16,16);
-        try (var runtime = new TradingRuntimeState(topology)) {
-            for (int turn = 0; turn < 100; turn++) {
+        try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingRuntimeState(topology)) {
+            for (/* 当前借还变化缓冲的轮次。 */ int turn = 0; turn < 100; turn++) {
+                // 本用例持有的账户 Lane，或池轮转用例当前 Lane 数组下标。
                 int lane = turn % 4;
+                // 本次创建或借出的结算变化缓冲。
                 var changes = runtime.acquireMatcherSettlementChanges(1L << lane);
-                for (int i = 0; i < 4; i++) {
+                for (/* 当前填充、核对终态项或检查 Lane 列的数组下标。 */ int i = 0; i < 4; i++) {
                     assertThat(changes.laneDeltas[i].orders().isEmpty()).isTrue();
                     assertThat(changes.laneDeltas[i].completedPending()).isZero();
                 }
@@ -114,10 +143,16 @@ class SettlementChangesReuseTest {
             }
         }
     }
+    /**
+     * 直接把持仓初值、原位更新后值及删除标记写入变化缓冲并提交，检查 Owner 发布变化跟随新代；不代表真实成交持仓计算。
+     */
     @Test void positionPublicationTracksChangedPositions() {
-        try (var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingRuntimeState()) {
+            // 当前待准备、发布或清理的 Lane 实体及终态变化缓冲。
             var delta = new LaneCommitDelta();
+            // 直接构造测试持仓使用的规范币对对象。
             var instrument = CoreStateTestFixtures.runtimeInstrument();
+            // 用于检查初值、原位更新和删除发布的持仓运行时值。
             var source = new PositionRuntime(7, 0, 0,
                     com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                     com.surprising.aeron.protocol.CorePositionSide.NET,
