@@ -1,4 +1,6 @@
-package com.surprising.realtime.provider.option;
+package com.surprising.realtime.provider.option.controller;
+
+import com.surprising.realtime.provider.option.service.OptionQuoteService;
 
 import com.surprising.candlestick.api.CandlestickApiPaths;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

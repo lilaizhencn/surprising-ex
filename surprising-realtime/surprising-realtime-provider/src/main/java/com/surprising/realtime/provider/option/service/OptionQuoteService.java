@@ -1,4 +1,6 @@
-package com.surprising.realtime.provider.option;
+package com.surprising.realtime.provider.option.service;
+
+import com.surprising.realtime.provider.option.utils.Black76Reference;
 
 import com.surprising.product.api.utils.InstrumentIds;
 import com.surprising.product.api.utils.ProductTopicNames;
@@ -40,7 +42,7 @@ public final class OptionQuoteService {
             throw new IllegalArgumentException("option market view requires OPTION product");
     }
 
-    OptionQuoteService(InstrumentSnapshotCache instruments, ObjectMapper mapper, Clock clock) {
+    public OptionQuoteService(InstrumentSnapshotCache instruments, ObjectMapper mapper, Clock clock) {
         this.instruments = instruments;
         this.mapper = mapper;
         this.clock = clock;

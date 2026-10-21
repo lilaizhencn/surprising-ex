@@ -1,4 +1,4 @@
-package com.surprising.realtime.provider.option;
+package com.surprising.realtime.provider.option.utils;
 
 import org.apache.commons.math3.special.Erf;
 
@@ -9,7 +9,7 @@ public final class Black76Reference {
     public record Greeks(double impliedVolatility, double forwardDelta, double forwardGamma,
                   double vegaPerVolPoint, double thetaPerDay) {}
 
-    static Greeks infer(boolean call, double forward, double strike, double premium, double years) {
+    public static Greeks infer(boolean call, double forward, double strike, double premium, double years) {
         if (!positive(forward) || !positive(strike) || !positive(premium) || !positive(years)) return null;
         double intrinsic = Math.max(call ? forward - strike : strike - forward, 0);
         double upper = call ? forward : strike;

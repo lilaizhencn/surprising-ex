@@ -1,5 +1,7 @@
 package com.surprising.trading.trigger.service;
 
+import com.surprising.trading.trigger.repository.TriggerOrderProjectionRepository;
+
 import static org.assertj.core.api.Assertions.*;
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;

@@ -1,6 +1,6 @@
 package com.surprising.realtime.provider.option.task;
 
-import com.surprising.realtime.provider.option.OptionQuoteService;
+import com.surprising.realtime.provider.option.service.OptionQuoteService;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

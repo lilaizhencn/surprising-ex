@@ -77,12 +77,12 @@ class MarketApplicationContextTest {
                     .doesNotHaveBean(com.surprising.realtime.provider.export.service.CommittedOrderProjectionService.class)
                     .doesNotHaveBean(com.surprising.aeron.service.bootstrap.AeronCoreLifecycle.class);
             if (line == ProductLine.OPTION) {
-                assertThat(ctx).hasSingleBean(com.surprising.realtime.provider.option.OptionQuoteService.class)
-                        .hasSingleBean(com.surprising.realtime.provider.option.OptionQuoteController.class)
+                assertThat(ctx).hasSingleBean(com.surprising.realtime.provider.option.service.OptionQuoteService.class)
+                        .hasSingleBean(com.surprising.realtime.provider.option.controller.OptionQuoteController.class)
                         .hasSingleBean(com.surprising.realtime.provider.option.task.OptionQuotePruneTask.class);
             } else {
-                assertThat(ctx).doesNotHaveBean(com.surprising.realtime.provider.option.OptionQuoteService.class)
-                        .doesNotHaveBean(com.surprising.realtime.provider.option.OptionQuoteController.class)
+                assertThat(ctx).doesNotHaveBean(com.surprising.realtime.provider.option.service.OptionQuoteService.class)
+                        .doesNotHaveBean(com.surprising.realtime.provider.option.controller.OptionQuoteController.class)
                         .doesNotHaveBean(com.surprising.realtime.provider.option.task.OptionQuotePruneTask.class);
             }
             MockMvcBuilders.webAppContextSetup(ctx).build()

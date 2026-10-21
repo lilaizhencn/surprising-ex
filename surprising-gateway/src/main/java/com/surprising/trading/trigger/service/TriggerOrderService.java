@@ -1,5 +1,7 @@
 package com.surprising.trading.trigger.service;
 
+import com.surprising.trading.trigger.repository.TriggerOrderProjectionRepository;
+
 import lombok.extern.slf4j.Slf4j;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;

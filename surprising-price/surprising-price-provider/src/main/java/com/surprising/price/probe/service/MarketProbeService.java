@@ -1,4 +1,4 @@
-package com.surprising.price.probe;
+package com.surprising.price.probe.service;
 
 import com.surprising.price.api.model.IndexComponentSnapshot;
 import com.surprising.price.api.model.IndexPriceResponse;

@@ -24,7 +24,7 @@ import com.surprising.trading.order.service.OrderValidator;
 import com.surprising.trading.matching.service.MatchingMarketDataService;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import com.surprising.trading.trigger.service.TriggerOrderAeronGateway;
-import com.surprising.trading.trigger.service.TriggerOrderProjectionRepository;
+import com.surprising.trading.trigger.repository.TriggerOrderProjectionRepository;
 import com.surprising.trading.trigger.service.TriggerOrderService;
 import java.util.List;
 import java.util.Map;

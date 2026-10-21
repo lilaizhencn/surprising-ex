@@ -1,5 +1,8 @@
 package com.surprising.price.probe;
 
+import com.surprising.price.probe.controller.MarketProbeController;
+import com.surprising.price.probe.service.MarketProbeService;
+
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;

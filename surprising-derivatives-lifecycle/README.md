@@ -149,3 +149,5 @@ FundingSettlementProjectionRepository只读确定性提交的结算投影。Fund
 生命周期基础设施、调度器、合约快照与资金费配置统一归derivatives.lifecycle.config；保留两个永续产品才装配资金费的条件和原调度器名称。验证见 [配置拦截归包记录](../docs/validation/java-mvc-infra-packages-20261021.json)。
 
 ADL、保险、强平、风险和资金费的AdminCursorPage工具归对应api.utils；API源文件位置与package统一，分页游标和排序行为保持。验证见 [工具归包记录](../docs/validation/java-mvc-utils-packages-20261021.json)。
+
+DerivativesInstrumentSnapshotInitializer归derivatives.lifecycle.service；初始化仍只安装当前生命周期产品，快照Bean名称与产品限定保持。验证见 [其余归包记录](../docs/validation/java-mvc-remaining-packages-20261021.json)。

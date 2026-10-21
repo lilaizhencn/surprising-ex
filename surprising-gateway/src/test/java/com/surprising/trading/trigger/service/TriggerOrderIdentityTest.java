@@ -1,5 +1,7 @@
 package com.surprising.trading.trigger.service;
 
+import com.surprising.trading.trigger.repository.TriggerOrderProjectionRepository;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;

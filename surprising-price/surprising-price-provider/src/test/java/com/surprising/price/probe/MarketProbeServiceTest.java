@@ -1,5 +1,7 @@
 package com.surprising.price.probe;
 
+import com.surprising.price.probe.service.MarketProbeService;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 

@@ -1,4 +1,4 @@
-package com.surprising.derivatives.lifecycle;
+package com.surprising.derivatives.lifecycle.service;
 
 import com.surprising.instrument.api.cache.AbstractInstrumentSnapshotInitializer;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;

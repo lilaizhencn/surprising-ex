@@ -610,3 +610,5 @@ LINEAR_DELIVERY <cluster-directory> <aeron-directory> <archive-control-channel> 
 RealtimeRouterProperties统一归provider.config；路由器配置键、默认参数和产品控制通道绑定保持。验证见 [配置拦截归包记录](../docs/validation/java-mvc-infra-packages-20261021.json)。
 
 期权价格视图的状态与清理规则仍归OptionQuoteService；5秒调度入口归option.task.OptionQuotePruneTask，仅OPTION市场装配。验证见 [定时职责记录](../docs/validation/java-mvc-task-boundaries-20261021.json)。
+
+期权入口、聚合和Black-76参考计算分别归option.controller、option.service与option.utils；清理时钟仍归option.task，保持OPTION专属装配。验证见 [其余归包记录](../docs/validation/java-mvc-remaining-packages-20261021.json)。

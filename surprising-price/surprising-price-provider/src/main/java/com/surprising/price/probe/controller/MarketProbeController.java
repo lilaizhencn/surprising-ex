@@ -1,4 +1,6 @@
-package com.surprising.price.probe;
+package com.surprising.price.probe.controller;
+
+import com.surprising.price.probe.service.MarketProbeService;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;

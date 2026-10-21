@@ -1,4 +1,4 @@
-package com.surprising.trading.trigger.service;
+package com.surprising.trading.trigger.repository;
 
 import com.surprising.aeron.protocol.CoreTriggerOrderCodec;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
