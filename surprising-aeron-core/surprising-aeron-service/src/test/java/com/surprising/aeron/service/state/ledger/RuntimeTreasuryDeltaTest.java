@@ -22,10 +22,17 @@ import org.junit.jupiter.params.provider.EnumSource;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+/**
+ * 财库首值捕获、七类分录、回滚及冷运行时投影测试。溢出用例覆盖差额实际支持的六类金额；其他用例直接构造内存值，不代表 Cluster 恢复或独立线程链路。
+ */
 class RuntimeTreasuryDeltaTest {
 
+    /**
+     * 同资产重复修改保留首个前值，逐项核对七类有符号分录及亏空反号，检查守恒后回滚恢复金额并清除变化捕获。
+     */
     @Test
     void recordsFirstTreasuryValuesAndIncludesAllSevenSubledgersInFundsAndRollback() {
+        // 本用例独占的权威 TreasuryRuntime，用于设置前值及检查变化和回滚。
         TreasuryRuntime treasury = new TreasuryRuntime();
         treasury.setFee(7, 90);
         treasury.setInsurance(7, 500, 20);
@@ -45,6 +52,7 @@ class RuntimeTreasuryDeltaTest {
 
         assertThat(treasury.patchAssetBefore(7)).isEqualTo(
                 new TreasuryRuntime.AssetState(90, 500, 20, 1, 4, 5, -100));
+        // 从当前财库前后值生成的资金累加器，用于守恒及逐分录核对。
         RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
         treasury.appendFundsDelta(funds);
         funds.requireConserved(false);
@@ -70,28 +78,34 @@ class RuntimeTreasuryDeltaTest {
         assertThat(treasury.patchAssetBefore(7)).isNull();
     }
 
+    /**
+     * 二十五资产倒序重复写三轮，核对前值列扩容及每轮费用和保险差额，再回滚确认各资产旧值不串槽。
+     */
     @Test
     void keepsSeparateAssetBeforeValuesAcrossRepeatedTransactions() {
+        // 本用例独占的权威 TreasuryRuntime，用于设置前值及检查变化和回滚。
         TreasuryRuntime treasury = new TreasuryRuntime();
-        for (int asset = 0; asset < 25; asset++) treasury.setFee(asset, asset);
+        for (/* 当前设置或核对前值的资产编号。 */ int asset = 0; asset < 25; asset++) treasury.setFee(asset, asset);
         treasury.clearChangedKeys();
-        for (int transaction = 0; transaction < 3; transaction++) {
-            for (int asset = 24; asset >= 0; asset--) {
+        for (/* 二十五资产重复捕获和回滚的当前轮次。 */ int transaction = 0; transaction < 3; transaction++) {
+            for (/* 当前设置或核对前值的资产编号。 */ int asset = 24; asset >= 0; asset--) {
                 treasury.setFee(asset, 100 + asset);
                 treasury.setFee(asset, 200 + asset);
                 treasury.setInsurance(asset, 300 + asset, asset);
             }
+            // 从当前财库前后值生成的资金累加器，用于守恒及逐分录核对。
             RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator(75);
             treasury.appendFundsDelta(funds);
+            // 当前原语流水物化的分录列表，供逐资产核对。
             var postings = funds.toDelta().postings();
-            for (int asset = 0; asset < 25; asset++) {
+            for (/* 当前设置或核对前值的资产编号。 */ int asset = 0; asset < 25; asset++) {
                 assertThat(postings).contains(new RuntimeFundsDelta.Posting(asset,
                         FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 200));
                 assertThat(postings).contains(new RuntimeFundsDelta.Posting(asset,
                         FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.INSURANCE, 300 + asset));
             }
             treasury.rollbackChangedValues();
-            for (int asset = 0; asset < 25; asset++) {
+            for (/* 当前设置或核对前值的资产编号。 */ int asset = 0; asset < 25; asset++) {
                 assertThat(treasury.fee(asset)).isEqualTo(asset);
                 assertThat(treasury.insurance(asset)).isZero();
                 assertThat(treasury.insuranceDeficit(asset)).isZero();
@@ -100,13 +114,19 @@ class RuntimeTreasuryDeltaTest {
         }
     }
 
+    /**
+     * 对六个支持差额列分别构造单资产或后续资产溢出，检查首资产未先写、目标列原极值仍在且无新变化键。
+     * @param subledger 本轮参数化溢出测试选择的系统子账
+     */
     @ParameterizedTest
     @EnumSource(value = FundsPosting.Subledger.class, names = {
             "FEE", "INSURANCE", "DEFICIT", "FUNDING_RESIDUAL", "ROUNDING_RESIDUAL", "CLEARING_PNL"})
     void rejectsOverflowInSingleOrLaterAssetBeforeWritingAnyFunds(FundsPosting.Subledger subledger) {
-        for (boolean anotherAsset : new boolean[] { false, true }) {
+        for (boolean /* 本轮是否在溢出资产前加入另一个正常资产，以检查跨资产预检。 */ anotherAsset : new boolean[] { false, true }) {
+            // 本用例独占的权威 TreasuryRuntime，用于设置前值及检查变化和回滚。
             TreasuryRuntime treasury = new TreasuryRuntime();
             treasury.setFee(1, 4);
+            // 当前构造的系统差额，故意含会使目标余额溢出的金额。
             RuntimeTreasuryDelta delta = new RuntimeTreasuryDelta();
             if (anotherAsset) delta.addFee(1, 3);
             switch (subledger) {
@@ -124,6 +144,7 @@ class RuntimeTreasuryDeltaTest {
 
             assertThat(treasury.fee(1)).isEqualTo(4);
             assertThat(treasury.hasChangedValues()).isFalse();
+            // 抛出溢出后重新读取的目标子账余额，应仍等于原长整数极值。
             long unchanged = switch (subledger) {
                 case FEE -> treasury.fee(2);
                 case INSURANCE -> treasury.insurance(2);
@@ -138,8 +159,12 @@ class RuntimeTreasuryDeltaTest {
         }
     }
 
+    /**
+     * 重复清变化键保留权威余额及完成编号，下一轮写入能重新捕获前值和资产变化。
+     */
     @Test
     void clearingTwicePreservesFundsAndCapturesTheNextBeforeValue() {
+        // 本用例独占的权威 TreasuryRuntime，用于设置前值及检查变化和回滚。
         var treasury = new TreasuryRuntime();
         treasury.setFee(7, 100);
         treasury.setFundingSettlement(8, 11);
@@ -155,9 +180,14 @@ class RuntimeTreasuryDeltaTest {
         assertThat(treasury.changedAssets().contains(7)).isTrue();
     }
 
+    /**
+     * 对空账本及七个子账各单独变化一单位的八个指定状态检查哈希互异，不是统计碰撞率测试。
+     */
     @Test
     void everyTreasurySubledgerContributesToTheBusinessStateHash() {
+        // 计算业务哈希参照使用的空冷账本。
         CoreTreasuryState empty = CoreTreasuryState.empty();
+        // 空账本加七种单列变化状态的业务哈希集合，重复值会使构造失败。
         Set<Long> hashes = Set.of(
                 state(empty, 1).businessStateHash(),
                 state(empty.adjustFee("USDT", 1), 1).businessStateHash(),
@@ -171,25 +201,38 @@ class RuntimeTreasuryDeltaTest {
         assertThat(hashes).hasSize(8);
     }
 
+    /**
+     * 七子账含正负金额的冷状态投影为运行时后再物化，核对完整值和两种业务哈希结果，不执行快照编码或重启。
+     */
     @Test
     void projectsEveryTreasurySubledgerWithoutDroppingFunds() {
+        // 含七个独立正负金额子账的冷账本输入。
         CoreTreasuryState treasury = CoreTreasuryState.ofSubledgers(
                 Map.of("USDT", 1L), Map.of("USDT", 2L), Map.of("USDT", 3L),
                 Map.of("USDT", -4L), Map.of("USDT", 5L), Map.of("USDT", -6L),
                 Map.of("USDT", 7L));
+        // 七子账投影用例中预期完整冷核心状态。
         TradingCoreState expected = state(treasury, 1);
+        // 当前冷运行时投影共用的资产和币对身份字典。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
 
+        // 从冷状态投影的内存运行时，不启动真实账本线程。
         TradingRuntimeState runtime = RuntimeStateProjector.project(expected, identities);
 
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
         assertThat(expected.businessStateHash()).isEqualTo(expected.fullBusinessStateHash());
     }
 
+    /**
+     * 手工更新 USDT 费用、保险及两类完成编号，核对 BTC 未改、进度清除及最终冷状态一致；没有统计未变化资产的访问次数。
+     */
     @Test
     void appliesOnlyChangedTreasuryEntriesAndPreservesRuntimeParity() {
+        // 测试资金费分页进度的固定命令 UUID。
         UUID fundingCommandId = UUID.fromString("00000000-0000-0000-0000-000000000101");
+        // 测试生命周期分页进度的固定命令 UUID。
         UUID lifecycleCommandId = UUID.fromString("00000000-0000-0000-0000-000000000102");
+        // 含两资产及两类进行中进度的起始冷账本。
         CoreTreasuryState beforeTreasury = new CoreTreasuryState(
                 Map.of("USDT", 100L, "BTC", 200L),
                 Map.of("USDT", 50L),
@@ -199,19 +242,26 @@ class RuntimeTreasuryDeltaTest {
                 Map.of("1", new CoreTreasuryState.FundingProgress(7, 10_000, 0, 11, fundingCommandId, 60_000, 1)),
                 Map.of("2", new CoreTreasuryState.LifecycleProgress(3, 60_000,
                         0, true, 0, 12, lifecycleCommandId)));
+        // 本次手工运行时变化之前的核心冷状态。
         TradingCoreState before = state(beforeTreasury, 1);
 
+        // 按同样预期变化生成的冷账本结果，允许保险有符号余额。
         CoreTreasuryState afterTreasury = beforeTreasury
                 .adjustFee("USDT", -100)
                 .adjustInsurance("USDT", -100)
                 .recordFunding("1", 8)
                 .recordLifecycle("2", 4);
+        // 手工运行时最终结果应物化得到的完整冷核心状态。
         TradingCoreState after = state(afterTreasury, 2);
 
+        // 当前冷运行时投影共用的资产和币对身份字典。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        // 从冷状态投影的内存运行时，不启动真实账本线程。
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
+        // 本用例独占的权威 TreasuryRuntime，用于设置前值及检查变化和回滚。
         TreasuryRuntime treasury = runtime.treasury();
+        // 当前用例要修改的 USDT 稠密资产编号。
         int usdt = identities.assetId("USDT");
         treasury.setFee(usdt, 0);
         treasury.setInsurance(usdt, -50, 0);
@@ -230,11 +280,16 @@ class RuntimeTreasuryDeltaTest {
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(after);
     }
 
+    /**
+     * 合并两份交叉资产费用和清算差额，核对各资产各列独立归集，不跨资产抵消。
+     */
     @Test
     void aggregatesContributionsWithoutNettingDifferentAssets() {
+        // 包含资产一费用及资产二清算金额的第一份系统差额。
         RuntimeTreasuryDelta first = new RuntimeTreasuryDelta();
         first.addFee(1, 7);
         first.addClearing(2, -11);
+        // 与第一份资产交叉的第二份系统差额。
         RuntimeTreasuryDelta second = new RuntimeTreasuryDelta();
         second.addFee(2, 13);
         second.addClearing(1, -17);
@@ -250,8 +305,12 @@ class RuntimeTreasuryDeltaTest {
         assertThat(first.clearingUnits(1)).isEqualTo(-11);
     }
 
+    /**
+     * 从包含系统和用户分录的资金值提取 Treasury 差额，核对强平费归保险、亏空反号及普通用户分录被忽略。
+     */
     @Test
     void derivesLaneTreasuryAcknowledgementFromPrimitiveFundsPostings() {
+        // 含 Treasury 及普通用户分录的资金值，尚未提取系统差额。
         RuntimeFundsDelta funds = new RuntimeFundsDelta(List.of(
                 new RuntimeFundsDelta.Posting(1, FundsPosting.OwnerKind.TREASURY, 0,
                         FundsPosting.Subledger.FEE, 7),
@@ -264,6 +323,7 @@ class RuntimeTreasuryDeltaTest {
                 new RuntimeFundsDelta.Posting(2, FundsPosting.OwnerKind.USER, 9,
                         FundsPosting.Subledger.AVAILABLE, -19)));
 
+        // 从原语资金分录提取的系统差额，用于核对子账映射。
         RuntimeTreasuryDelta treasury = funds.treasuryDelta();
 
         assertThat(treasury.size()).isOne();
@@ -274,10 +334,14 @@ class RuntimeTreasuryDeltaTest {
         assertThat(treasury.fundingResidualUnits(0)).isEqualTo(-17);
     }
 
+    /**
+     * 将预留及持仓保证金子账配给 Treasury，检查差额提取明确拒绝；这里只枚举这两个非法子账。
+     */
     @Test
     void rejectsUserOnlySubledgersForTreasuryOwner() {
-        for (FundsPosting.Subledger subledger : List.of(
+        for (FundsPosting.Subledger /* 当前故意给 Treasury 配入的用户专用子账类别。 */ subledger : List.of(
                 FundsPosting.Subledger.RESERVATION, FundsPosting.Subledger.POSITION_MARGIN)) {
+            // 故意把用户专用子账配给 Treasury 的非法提取输入。
             RuntimeFundsDelta funds = new RuntimeFundsDelta(List.of(
                     new RuntimeFundsDelta.Posting(1, FundsPosting.OwnerKind.TREASURY, 0, subledger, 1)));
 
@@ -287,14 +351,26 @@ class RuntimeTreasuryDeltaTest {
         }
     }
 
+    /**
+     * 用两个固定永续币对和传入冷账本构造无用户订单的测试核心状态。
+     * @param treasury 需要装入测试核心状态的冷账本值
+     * @param revision 测试核心状态修订号
+     */
     private static TradingCoreState state(CoreTreasuryState treasury, long revision) {
+        // 构造核心状态时固定的 BTC/USDT 永续币对。
         CoreInstrument btc = instrument("1", "BTC");
+        // 构造核心状态时固定的 ETH/USDT 永续币对。
         CoreInstrument eth = instrument("2", "ETH");
         return new TradingCoreState(ProductLine.LINEAR_PERPETUAL, revision,
                 Map.of(), Map.of(), Map.of(btc.instrumentId(), btc, eth.instrumentId(), eth),
                 CoreRiskState.empty(), treasury);
     }
 
+    /**
+     * 按指定编号及基础资产构造 USDT 结算的基础永续币对。
+     * @param instrumentId 测试币对业务名称
+     * @param baseAsset 测试币对基础资产名称
+     */
     private static CoreInstrument instrument(String instrumentId, String baseAsset) {
         return CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
                 new RegisterInstrumentCommand(instrumentId, ContractType.LINEAR_PERPETUAL.ordinal(),
