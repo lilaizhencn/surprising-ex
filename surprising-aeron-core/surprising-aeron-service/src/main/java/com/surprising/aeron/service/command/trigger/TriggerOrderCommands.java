@@ -17,32 +17,60 @@ import com.surprising.aeron.service.state.risk.RuntimeRiskStateTransitions;
 import java.util.UUID;
 
 /**
- * 触发流程入口：登记条件 → 价格/预算扫描 → 子订单准入与冻结 → 接回交易撮合、结算与提交。
- * OCO、追踪、重试和失效留在原生命周期边界；各产品使用所属运行时与订单规则，详见模块 README。
+ * 触发业务命令及续步入口：条件登记后由价格预算扫描选候选，OCO、追踪、过期和重试沿用原状态转换，再把子单交现有准入、撮合和结算。Owner 管页与交接，账户 Lane 改触发和资金，必要的市场未平仓量由唯一账本读取；bool 完成值只针对当前页或当前交接。
  */
 public final class TriggerOrderCommands {
-    public enum Mutation { CANCEL, CLAIM, COMPLETE, TRAILING, EXPIRE, RETRY }
+    /**
+     * 直接控制槽使用的触发单变更种类，各项对应原触发状态转换。
+     */
+    public enum Mutation {
+        /** 撤销触发单。 */
+        CANCEL,
+        /** 按触发行情认领执行。 */
+        CLAIM,
+        /** 登记子单执行成功或失败结果。 */
+        COMPLETE,
+        /** 更新追踪最高价、最低价及激活时间。 */
+        TRAILING,
+        /** 按业务时间检查并写入过期。 */
+        EXPIRE,
+        /** 按陈旧界限恢复允许重试的触发状态。 */
+        RETRY
+    }
 
+    /**
+     * 一页 OCO 同组撤销的遍历结果，记录是否还有下一页、最后游标及工作量，不代表子单成交结果。
+     * @param complete 本 OCO 段后是否没有更多需要遍历的兄弟 ID
+     * @param nextCursor 本页最后遍历到的兄弟 ID，下一页排除大于等于它的 ID
+     * @param workUnits 本页选中遍历的兄弟 ID 个数，不仅统计成功取消的单
+     */
     public record OcoCancellationPage(boolean complete, long nextCursor, int workUnits) { }
 
-    /** 唯一 owner；仅在其线程访问共享交易状态和提交边界。 */
+    /** 本产品线交易 Owner，串行推进本类命令并管理提交边界。 */
     private final TradingCoreRuntime owner;
 
-    /** Owner selection scratch, copied into the existing commit event before the next command. */
+    /** Owner 复用的已平仓关联触发 ID 缓冲，后续复制入既有提交事件，下一命令前可重用。 */
     private final PrimitiveLongChangeSet closingTriggerIds = new PrimitiveLongChangeSet();
-    /** Reused owner scratch for one OCO cancellation page; never escapes this command. */
+    /** 同步 OCO 撤销使用的一页 primitive ID 缓冲，页处理前清空，不把可变缓冲交出命令边界。 */
     private final PrimitiveLongChangeSet ocoSiblingPage = new PrimitiveLongChangeSet(64);
+    /** 无扫描或不再待执行时共享的立即完成回调，不承载真实扫描进度。 */
     private static final java.util.function.BooleanSupplier COMPLETE = () -> true;
-    /** Risk-trigger scanning is serialized by the owner command loop, so one work object is enough. */
+    /** Owner 串行触发扫描复用的一页续步，不为每次价格更新新建整个捕获图。 */
     private final PendingTriggerScan reusableTriggerScan = new PendingTriggerScan();
-    /** Trigger child execution is also serialized and can reuse its Lane operation and continuation. */
+    /** 触发子单串行执行复用的账户操作与 Owner 续步。 */
     private final TriggerExecutionContinuation reusableTriggerExecution = new TriggerExecutionContinuation();
 
+    /**
+     * 借出 Owner 当前复用的清仓触发单 ID 缓冲，调用方在下次清空或重新选择前消费。
+     */
     public PrimitiveLongChangeSet closingTriggerIds() { return closingTriggerIds; }
 
+    /**
+     * 清缓冲后选出本命令已平仓对应的待触发单，核对各单取消修订可增加，再检查全局修订加总不溢出；返回的是待取消 ID，不在这里直接撤销。
+     */
     public PrimitiveLongChangeSet collectClosingTriggerIds() {
         closingTriggerIds.clear();
-        selectClosingTriggers(id -> {
+        selectClosingTriggers(/* 本次遍历或回调选中的触发单 ID */ id -> {
             if (!owner.triggerOrderIndex().route(id).cancelRevisionAvailable())
                 throw new ArithmeticException("trigger cancellation revision overflow");
             closingTriggerIds.add(id);
@@ -51,14 +79,25 @@ public final class TriggerOrderCommands {
         return closingTriggerIds;
     }
 
+    /**
+     * 保存非空交易 Owner，复用扫描与子单续步；本构造不启动任何工作线程。
+     * @param owner 本产品线唯一交易 Owner，提供账户运行时、索引和提交入口
+     */
     public TriggerOrderCommands(TradingCoreRuntime owner) {
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 
+    /**
+     * 仅在现有风险扫描与本价格序列一致时，固定当前最大待触发 ID、标记价及报价时间，重置触发阶段和 OCO 续步；无候选时标记触发扫描完成。
+     * @param command 本次已解码的标记价、价格序列及生成时间
+     */
     public void initializeTriggerScan(com.surprising.aeron.protocol.ApplyMarkPriceCommand command) {
+        // 本标的解析得到的内部整数身份，find 入口没找到时可为空
         Integer symbolId = owner.identities().findSymbolId(command.instrumentId());
+        // 该标的已有风险与触发扫描进度，存在且价格序列对应时才继续
         RiskScanRuntime scan = symbolId == null ? null : owner.runtimeState().riskScan(symbolId);
         if (scan == null || scan.priceSequence() != command.priceSequence()) return;
+        // 本价格序列开始时固定的最大待触发 ID，后续新建更大 ID 不纳入这次页范围
         long upperId = owner.triggerOrderIndex().maxPendingId(command.instrumentId());
         RuntimeRiskStateTransitions.replaceScan(owner.runtimeState(),
                 scan.withTriggerProgress(upperId == 0, TriggerOrderIndex.PHASE_GREATER_OR_EQUAL,
@@ -66,46 +105,89 @@ public final class TriggerOrderCommands {
                 command.generatedAtEpochMillis()).withTriggerOcoProgress(0, 0));
     }
 
-    /** One bounded page cursor; account mutations use the same permanent Lane tasks as explicit triggers. */
+    /**
+     * 没有扫描或触发部分已完成时返回共享完成回调；否则准备一页可续步工作，页预算取请求与配置的较小者。返回真只表示本次工作结束，不代表三种价格来源均扫完。
+     * @param instrumentId 本次扫描的规范数字标的 ID 文本，准备时解析为整数
+     * @param maxWork 本次允许使用的候选页及 OCO 处理预算，另受配置批量上限约束
+     */
     public java.util.function.BooleanSupplier pendingTriggerScan(String instrumentId, int maxWork) {
+        // 本标的解析得到的内部整数身份，find 入口没找到时可为空
         Integer symbolId = owner.identities().findSymbolId(instrumentId);
+        // 该标的已有风险与触发扫描进度，存在且价格序列对应时才继续
         RiskScanRuntime scan = symbolId == null ? null : owner.runtimeState().riskScan(symbolId);
         if (scan == null || scan.triggerComplete()) return COMPLETE;
         return reusableTriggerScan.prepare(instrumentId, scan,
                 Math.min(maxWork, owner.defaultTriggerScanBatchSize()));
     }
 
+    /**
+     * 同步尝试执行一页触发扫描；若账户或子单仍异步等待，明确报错要求调用方使用续步，而不在此阻塞线程。
+     * @param instrumentId 本次扫描的规范数字标的 ID 文本，准备时解析为整数
+     * @param maxWork 本次允许使用的候选页及 OCO 处理预算，另受配置批量上限约束
+     */
     public void evaluatePendingTriggerScan(String instrumentId, int maxWork) {
+        // 本次准备的一页可轮询触发扫描工作，当前只同步调用一次
         var work = pendingTriggerScan(instrumentId, maxWork);
         if (!work.getAsBoolean()) throw new IllegalStateException("asynchronous trigger scan requires continuation");
     }
 
+    /**
+     * 优先把本命令收集到的非空触发新值转成路由；返回空新值时仍回退 Owner 已发布索引，本方法不单独区分删除与没有新值。
+     * @param id 需要查询的触发单业务 ID
+     */
     private TriggerOrderIndex.TriggerRoute currentTriggerRoute(long id) {
+        // 本命令收集到的触发状态新值，非空时优先于已发布 Owner 路由
         var receipt = owner.runtimeState().changedTriggerOrder(id);
         return receipt == null ? owner.triggerOrderIndex().route(id) : TriggerOrderIndex.TriggerRoute.from(receipt);
     }
 
+    /**
+     * Owner 串行复用的一页触发扫描续步，保留价格与 OCO 游标并等待账户变更或子单准入。
+     */
     private final class PendingTriggerScan implements java.util.function.BooleanSupplier {
+        /** 当前扫描标的的规范整数身份。 */
         private int instrumentId;
+        /** 本扫描合成或原执行请求传入的命令 UUID，供子单身份和撮合上下文使用。 */
         private UUID commandId;
+        /** 本页固定并随 OCO 续步调整的风险与触发扫描进度值。 */
         private RiskScanRuntime scan;
+        /** 当前页预算，同时约束候选页大小和 OCO 段工作；逐候选本身不递减，兄弟段完成时扣量。 */
         private int remaining;
+        /** 当前价格来源已取出的候选页，处理完后保存续步并结束本次扫描工作。 */
         private TriggerOrderIndex.TriggerCandidatePage page;
+        /** 当前候选在 page 中的下标，追踪状态变更后可留在同一候选重新检查。 */
         private int candidate;
+        /**
+         * ocoComplete：当前候选的 OCO 兄弟撤销已扫完，允许继续认领与下子单。
+         * finished：本次页或 OCO 段已结束，区别于运行时 scan.triggerComplete 的整体扫描完成。
+         */
         private boolean ocoComplete, finished;
+        /** 已经派发且尚待轮询完成的账户变更或子单执行回调。 */
         private java.util.function.BooleanSupplier pending;
+        /** 当前页在同一用户账户 Lane 复用的过期、追踪或同组撤销任务。 */
         private final ScanMutation reusableMutation = new ScanMutation();
 
+        /**
+         * 创建供 Owner 串行复用的页续步，具体输入由 prepare 填入。
+         */
         PendingTriggerScan() {
         }
 
+        /**
+         * 固定标的整数身份、扫描值和页预算，用产品线、标的文本及价格序列合成可重建命令 UUID，清上次页和等待状态后返回自身。
+         * @param instrumentId 本次扫描的规范数字标的 ID 文本，准备时解析为整数
+         * @param scan 当前需要保存或接续的风险及触发扫描进度
+         * @param remaining 本次扫描页及 OCO 撤销可用的预算
+         */
         PendingTriggerScan prepare(String instrumentId, RiskScanRuntime scan, int remaining) {
             this.instrumentId = com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
             this.scan = scan;
             this.remaining = remaining;
+            // 自动触发 UUID 高半部，由产品线、标的文本哈希及固定标记组合
             long msb = ((long) owner.productLine().ordinal() << 48)
                     ^ (instrumentId == null ? 0L : ((long) instrumentId.hashCode() << 16))
-                    ^ 0x4d41524b50524943L; // "MARKPRIC"
+                    ^ 0x4d41524b50524943L; // 固定文本标记 MARKPRIC 的整数编码
+            // 自动触发 UUID 低半部，固定采用本轮价格序列
             long lsb = scan.priceSequence();
             commandId = new UUID(msb, lsb);
             candidate = 0;
@@ -116,6 +198,9 @@ public final class TriggerOrderCommands {
             return this;
         }
 
+        /**
+         * 先续完已派发工作，优先恢复 OCO 撤单，再取当前价格来源的一页候选；逐个处理过期、追踪更新、条件与同组撤销后发起子单。候选页处理完就保存下一阶段或游标并结束本次工作，账户未完成则返回假让 Owner 稍后再轮询。remaining 用于页大小和同组撤单预算，不逐候选递减。
+         */
         @Override public boolean getAsBoolean() {
             for (;;) {
                 if (pending != null) {
@@ -125,6 +210,7 @@ public final class TriggerOrderCommands {
                 if (finished) return true;
                 if (page == null) {
                     if (scan.triggerOcoOrderId() != 0) {
+                        // 本次候选对应的触发状态或路由，先确认状态再处理
                         var trigger = currentTriggerRoute(scan.triggerOcoOrderId());
                         if (trigger != null && trigger.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {
                             cancelSiblings(trigger, scan.triggerOcoCursor() == 0 ? Long.MAX_VALUE : scan.triggerOcoCursor(), true);
@@ -134,9 +220,13 @@ public final class TriggerOrderCommands {
                         replaceRiskScan(scan);
                     }
                     if (remaining <= 0) return true;
+                    // 整个触发阶段除以单来源阶段数得到的行情来源枚举下标
                     int sourceIndex = scan.triggerPhase() / TriggerOrderIndex.PHASE_COMPLETE;
+                    // 当前扫描采用的 MARK、LAST 或 INDEX 行情来源
                     var source = com.surprising.aeron.protocol.CoreTriggerPriceSource.values()[sourceIndex];
+                    // 本标的当前行情状态，LAST 与 INDEX 还依赖该价格序列
                     var mark = owner.runtimeState().markPrice(scan.symbolId());
+                    // 取候选页所用价格；MARK 固定在扫描值中，其他来源要求当前行情仍匹配该序列
                     long sourcePrice = source == com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK
                             ? scan.triggerMarkPriceTicks()
                             : mark == null || mark.priceSequence() != scan.priceSequence() ? 0
@@ -147,6 +237,7 @@ public final class TriggerOrderCommands {
                             scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(), remaining);
                 }
                 if (candidate == page.ids().size()) {
+                    // 本页结束后保存的全来源扫描阶段，来源编号和来源内阶段一起编码
                     int nextPhase = page.complete()
                             ? ((scan.triggerPhase() / TriggerOrderIndex.PHASE_COMPLETE) + 1)
                                     * TriggerOrderIndex.PHASE_COMPLETE
@@ -160,19 +251,25 @@ public final class TriggerOrderCommands {
                     finished = true;
                     return true;
                 }
+                // 本次遍历或回调选中的触发单 ID
                 long id = page.idAt(candidate);
+                // 本次候选对应的触发状态或路由，先确认状态再处理
                 var trigger = currentTriggerRoute(id);
                 if (trigger == null || trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {
                     candidate++;
                     continue;
                 }
+                // 当前扫描采用的 MARK、LAST 或 INDEX 行情来源
                 var source = com.surprising.aeron.protocol.CoreTriggerPriceSource.values()[
                         scan.triggerPhase() / TriggerOrderIndex.PHASE_COMPLETE];
+                // 本标的当前行情状态，LAST 与 INDEX 还依赖该价格序列
                 var mark = owner.runtimeState().markPrice(scan.symbolId());
+                // 当前候选实际采用的所选来源价格 tick
                 long price = source == com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK
                         ? scan.triggerMarkPriceTicks()
                         : source == com.surprising.aeron.protocol.CoreTriggerPriceSource.LAST
                                 ? mark.lastPriceTicks() : mark.indexPriceTicks();
+                // 本次扫描固定的报价生成时间，用于过期、激活与触发时间
                 long at = scan.triggerGeneratedAtEpochMillis();
                 if (trigger.expiresAtEpochMillis() > 0 && at > 0 && trigger.expiresAtEpochMillis() <= at) {
                     candidate++;
@@ -180,15 +277,19 @@ public final class TriggerOrderCommands {
                     continue;
                 }
                 if (trigger.triggerType() == com.surprising.aeron.protocol.CoreTriggerOrderType.TRAILING_STOP) {
+                    // 追踪单是否卖出方向，卖单跟最高价、买单跟最低价
                     boolean sell = trigger.side() == CoreOrderSide.SELL;
                     if (trigger.activationPriceTicks() > 0 && ((sell && price < trigger.activationPriceTicks())
                             || (!sell && price > trigger.activationPriceTicks()))) {
                         candidate++;
                         continue;
                     }
+                    // 按当前行情更新后的追踪最高价，只有卖出追踪单更新它
                     long highest = sell ? Math.max(trigger.highestPriceTicks(), price) : trigger.highestPriceTicks();
+                    // 按当前行情更新后的追踪最低价，只有买入追踪单更新它
                     long lowest = sell ? trigger.lowestPriceTicks()
                             : trigger.lowestPriceTicks() == 0 ? price : Math.min(trigger.lowestPriceTicks(), price);
+                    // 已有激活时间保留，未激活则使用本次报价时间
                     long activated = trigger.activatedAtEpochMillis() == 0 ? at : trigger.activatedAtEpochMillis();
                     if (highest != trigger.highestPriceTicks() || lowest != trigger.lowestPriceTicks()
                             || activated != trigger.activatedAtEpochMillis()) {
@@ -219,23 +320,36 @@ public final class TriggerOrderCommands {
             }
         }
 
+        /**
+         * 从稳定 Owner 索引借用同组倒序 ID，只选排除当前单且小于游标的一段，按剩余预算定位下一界；有工作则派给账户 Lane，无工作直接推进 OCO 续步状态。
+         * @param trigger 当前 OCO 主触发单路由，同组撤销范围排除它自身
+         * @param cursor 本段 OCO 撤销的排他起始触发 ID
+         * @param resumed 是否接续此前保存在扫描状态中的 OCO 撤销
+         */
         private void cancelSiblings(TriggerOrderIndex.TriggerRoute trigger,
                                     long cursor, boolean resumed) {
-            // The control fence keeps the Owner index stable until Lane publication is collected.
-            // Pass the bounded ID range, not a copied list of sibling identities.
+            // 控制边界内 Owner 索引保持稳定直到收集 Lane 发布结果，账户任务借用有界 ID 范围，无须复制兄弟清单。
+            // 从 Owner 索引借入的同组倒序 ID 集，控制边界内保持稳定
             var siblings = owner.triggerOrderIndex().ocoSiblingsDescending(trigger);
+            // 本 OCO 页已选的兄弟 ID 数量，不是成功取消数量
             int count = 0;
+            // 本页最近选中的最后一个兄弟 ID，供保存下一排他游标
             long last = cursor;
+            // 是否在页预算之外还看到了其他符合范围的兄弟 ID
             boolean more = false;
-            for (var siblingIds = siblings.iterator(); siblingIds.hasNext();) {
+            for (/* 当前借入同组倒序集合的 primitive ID 迭代器 */ var siblingIds = siblings.iterator(); siblingIds.hasNext();) {
+                // 本次遍历或回调选中的触发单 ID
                 long id = siblingIds.nextLong();
                 if (id == trigger.triggerOrderId() || id >= cursor) continue;
                 if (count == remaining) { more = true; break; }
                 count++;
                 last = id;
             }
+            // 本段选择已到同组末尾，不再需要下一 OCO 页
             boolean complete = !more;
+            // 本 OCO 页选中的兄弟 ID 个数，由账户结果收集后扣预算
             int work = count;
+            // 本页选中的最后 ID，账户任务把它作为包含的下界
             long next = last;
             if (work == 0) {
                 reusableMutation.completeSiblings(trigger, next, work, complete, resumed);
@@ -245,16 +359,34 @@ public final class TriggerOrderCommands {
             submitMutation(trigger.userId());
         }
 
+        /**
+         * 准备当前触发单过期操作，再按所属用户派发同一个永久账户任务。
+         * @param userId 触发单所属用户，决定账户访问与派发 Lane
+         * @param triggerId 本次扫描变更或执行的触发单 ID
+         * @param at 本次过期检查采用的业务毫秒时间
+         */
         private void mutateExpire(long userId, long triggerId, long at) {
             reusableMutation.prepareExpire(triggerId, at);
             submitMutation(userId);
         }
 
+        /**
+         * 准备追踪单高低价及激活时间更新，再按所属用户派发账户任务；同一候选稍后会用新路由重新判断。
+         * @param userId 触发单所属用户，决定账户访问与派发 Lane
+         * @param triggerId 本次扫描变更或执行的触发单 ID
+         * @param highest 追踪止损目前记录的最高价格 tick
+         * @param lowest 追踪止损目前记录的最低价格 tick
+         * @param activated 追踪止损激活的毫秒时间戳
+         */
         private void mutateTrailing(long userId, long triggerId, long highest, long lowest, long activated) {
             reusableMutation.prepareTrailing(triggerId, highest, lowest, activated);
             submitMutation(userId);
         }
 
+        /**
+         * 异步时记住同一个待完成任务并派发用户 Lane；冷路径同步执行，真实变化才请求发布，再更新本页 OCO 状态。
+         * @param userId 触发单所属用户，决定账户访问与派发 Lane
+         */
         private void submitMutation(long userId) {
             reusableMutation.userId = userId;
             if (owner.runtimeState().asynchronousCommands()) {
@@ -262,31 +394,79 @@ public final class TriggerOrderCommands {
                 owner.runtimeState().dispatchControlLanes(
                         1L << owner.runtimeState().topology().accountLaneId(userId), reusableMutation);
             } else {
+                // 冷账户过期、追踪或 OCO 变更是否真实改变状态的返回值
                 Object result = owner.runtimeState().executeUserSettlement(userId, reusableMutation);
                 if (Boolean.TRUE.equals(result)) owner.requestCommitPublication();
                 reusableMutation.completeMutation();
             }
         }
 
+        /**
+         * 扫描页复用的账户任务：同一对象分别承担 Lane 操作、冷同步回调和 Owner 完成轮询，使用前明确准备一种任务。
+         */
         private final class ScanMutation implements java.util.function.BooleanSupplier,
                 java.util.function.IntFunction<Object>, java.util.function.Supplier<Object> {
+            /**
+             * EXPIRE：扫描任务内部类型一：检查并写入过期状态。
+             * TRAILING：扫描任务内部类型二：更新追踪高低价和激活时间。
+             * SIBLINGS：扫描任务内部类型三：处理已选 OCO 兄弟范围。
+             */
             private static final byte EXPIRE = 1, TRAILING = 2, SIBLINGS = 3;
+            /** 本次复用扫描任务要执行的内部类型，准备前重置为零。 */
             private byte kind;
+            /**
+             * userId：本次账户扫描任务所属用户，用于派发和收集对应 Lane 结果。
+             * triggerId：本次要变更或执行的触发单业务 ID。
+             * arg1：过期任务存检查时间；追踪任务存最高价。
+             * arg2：追踪任务存最低价，其他类型不使用。
+             * arg3：追踪任务存激活时间，其他类型不使用。
+             * cursor：本 OCO 页的排他起始 ID，跳过大于等于它的兄弟。
+             * next：本 OCO 页已选的最后 ID，账户处理范围包含该 ID。
+             */
             private long userId, triggerId, arg1, arg2, arg3, cursor, next;
+            /** 本 OCO 页选中遍历的兄弟 ID 数，不等同实际取消成功数。 */
             private int work;
+            /**
+             * complete：本 OCO 页后是否已没有更多兄弟 ID 待遍历。
+             * resumed：本次 OCO 页是否从保存的扫描续步恢复，而非当前候选首次检查。
+             */
             private boolean complete, resumed;
+            /** OCO 当前主触发单路由，借它确定同用户和要排除的主 ID。 */
             private TriggerOrderIndex.TriggerRoute trigger;
+            /** 借用 Owner 索引的稳定同组倒序集合，下次 prepare 前清理，不在任务准备时复制。 */
             private it.unimi.dsi.fastutil.longs.LongSortedSet siblings;
 
+            /**
+             * 清上次任务数据，保存过期类型、触发单 ID 及过期检查时间。
+             * @param triggerId 本次扫描变更或执行的触发单 ID
+             * @param at 本次过期检查采用的业务毫秒时间
+             */
             void prepareExpire(long triggerId, long at) {
                 clear(); kind = EXPIRE; this.triggerId = triggerId; arg1 = at;
             }
 
+            /**
+             * 清上次任务数据，保存追踪类型、触发单 ID 和高价、低价、激活时间。
+             * @param triggerId 本次扫描变更或执行的触发单 ID
+             * @param highest 追踪止损目前记录的最高价格 tick
+             * @param lowest 追踪止损目前记录的最低价格 tick
+             * @param activated 追踪止损激活的毫秒时间戳
+             */
             void prepareTrailing(long triggerId, long highest, long lowest, long activated) {
                 clear(); kind = TRAILING; this.triggerId = triggerId;
                 arg1 = highest; arg2 = lowest; arg3 = activated;
             }
 
+            /**
+             * 清上次任务数据，借入稳定同组 ID 集和当前页范围、工作量及是否恢复标志；集合不复制，外层控制边界保证使用期间索引稳定。
+             * @param trigger 当前 OCO 主触发单路由，保存它的身份及所属用户
+             * @param cursor 本段 OCO 撤销的排他起始触发 ID
+             * @param next 本 OCO 段最后要处理的 ID，范围包含该 ID
+             * @param work 本段选中遍历的兄弟 ID 数量，用于扣减页预算
+             * @param complete 本 OCO 段后是否没有更多需要遍历的兄弟 ID
+             * @param resumed 是否接续此前保存在扫描状态中的 OCO 撤销
+             * @param siblings Owner 索引中稳定借入的同组倒序 ID 集，账户任务只处理选中范围
+             */
             void prepareSiblings(TriggerOrderIndex.TriggerRoute trigger,
                                  long cursor, long next, int work, boolean complete, boolean resumed,
                                  it.unimi.dsi.fastutil.longs.LongSortedSet siblings) {
@@ -294,23 +474,37 @@ public final class TriggerOrderCommands {
                 this.work = work; this.complete = complete; this.resumed = resumed; this.siblings = siblings;
             }
 
+            /**
+             * 没有实际账户工作时直接保存本页结果并推进扫描续步，不派发空 Lane 操作。
+             * @param trigger 当前 OCO 主触发单路由，供记录恢复游标
+             * @param next 本 OCO 段最后要处理的 ID，范围包含该 ID
+             * @param work 本段选中遍历的兄弟 ID 数量，用于扣减页预算
+             * @param complete 本 OCO 段后是否没有更多需要遍历的兄弟 ID
+             * @param resumed 是否接续此前保存在扫描状态中的 OCO 撤销
+             */
             void completeSiblings(TriggerOrderIndex.TriggerRoute trigger,
                                   long next, int work, boolean complete, boolean resumed) {
                 this.trigger = trigger; this.next = next; this.work = work;
                 this.complete = complete; this.resumed = resumed; finishSiblings();
             }
 
+            /**
+             * 在用户账户访问范围内按类型修改过期或追踪状态；同组撤单只遍历已选倒序范围并取消仍待触发的单，返回是否有变化，未知类型明确报错。
+             */
             private Object applyMutation() {
                 return switch (kind) {
                     case EXPIRE -> RuntimeTriggerOrderStateTransitions.expire(owner.runtimeState(), triggerId, arg1);
                     case TRAILING -> RuntimeTriggerOrderStateTransitions.updateTrailing(owner.runtimeState(), triggerId,
                             arg1, arg2, arg3);
                     case SIBLINGS -> {
+                        // 本段 OCO 兄弟中至少一个待触发单实际被取消的累计标记
                         boolean changed = false;
-                        for (var siblingIds = siblings.iterator(); siblingIds.hasNext();) {
+                        for (/* 当前借入同组倒序集合的 primitive ID 迭代器 */ var siblingIds = siblings.iterator(); siblingIds.hasNext();) {
+                            // 本次遍历或回调选中的触发单 ID
                             long id = siblingIds.nextLong();
                             if (id == trigger.triggerOrderId() || id >= cursor) continue;
                             if (id < next) break;
+                            // 当前兄弟在账户 Lane 的真实状态，只取消仍为 PENDING 的单
                             var sibling = owner.runtimeState().triggerOrder(id);
                             if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
                                 changed |= RuntimeTriggerOrderStateTransitions.cancel(owner.runtimeState(),
@@ -322,10 +516,16 @@ public final class TriggerOrderCommands {
                 };
             }
 
+            /**
+             * 账户结果收集后只对同组撤销推进页状态；过期和追踪更新没有额外页尾动作。
+             */
             void completeMutation() {
                 if (kind == SIBLINGS) finishSiblings();
             }
 
+            /**
+             * 扣除本段遍历工作量；未撤完保存目标单和下一游标并结束本页，恢复段撤完则清 OCO 游标，普通段撤完则允许当前候选执行。
+             */
             private void finishSiblings() {
                 remaining -= work;
                 if (!complete) {
@@ -338,16 +538,30 @@ public final class TriggerOrderCommands {
                 } else ocoComplete = true;
             }
 
+            /**
+             * 下次准备前清数值、标志和借用的触发路由与同组集合；它不是所有完成分支都会自动调用的尾部清理。
+             */
             void clear() {
                 kind = 0; userId = triggerId = arg1 = arg2 = arg3 = cursor = next = 0;
                 work = 0; complete = resumed = false; trigger = null; siblings = null;
             }
 
+            /**
+             * 账户 Lane 回调统一执行本次变更；Lane 编号由外层派发决定，此参数当前不读取。
+             * @param ignoredLaneId 外层派发提供的账户 Lane 编号，本回调当前不读取
+             */
             @Override public Object apply(int ignoredLaneId) { return applyMutation(); }
+            /**
+             * 冷同步用户结算回调，执行与账户 Lane 相同的本次变更。
+             */
             @Override public Object get() { return applyMutation(); }
 
+            /**
+             * Owner 等待控制 Lane 结果，未齐返回假；真实变化请求发布，再推进 OCO 页状态并返回本次任务完成。
+             */
             @Override public boolean getAsBoolean() {
                 if (!owner.runtimeState().pollControlLanes()) return false;
+                // 控制 Lane 收集的变更返回值，为 Boolean.TRUE 才请求发布
                 Object result = owner.runtimeState().controlLaneResult(
                         owner.runtimeState().topology().accountLaneId(userId));
                 if (Boolean.TRUE.equals(result)) owner.requestCommitPublication();
@@ -357,23 +571,41 @@ public final class TriggerOrderCommands {
         }
     }
 
+    /**
+     * 把触发扫描游标与 OCO 进度接回原风险状态转换，然后请求命令提交发布。
+     * @param scan 当前需要保存或接续的风险及触发扫描进度
+     */
     void replaceRiskScan(RiskScanRuntime scan) {
         RuntimeRiskStateTransitions.replaceScan(owner.runtimeState(), scan);
         owner.requestCommitPublication();
     }
 
+    /**
+     * 基价或回调率非正返回零；否则精确相乘后按百万分之一向下取整得到追踪回撤价差，中间乘法溢出明确失败。
+     * @param base 追踪卖单最高价或买单最低价，作为回撤价差计算基数
+     * @param callbackRatePpm 追踪回调比例，单位为百万分之一
+     */
     static long trailingDelta(long base, long callbackRatePpm) {
         if (base <= 0 || callbackRatePpm <= 0) return 0;
         return Math.floorDiv(Math.multiplyExact(base, callbackRatePpm), 1_000_000L);
     }
 
+    /**
+     * 从完整触发单判断条件：普通单比较固定阈值，追踪卖单按最高价回落、买单按最低价反弹；追踪基价或激活时间未准备好时不满足。此方法不检查行情序列、过期或任务状态。
+     * @param trigger 本次判断、构造子单或 OCO 撤销所用的触发状态、路由或视图
+     * @param priceTicks 本次所选行情来源的价格 tick
+     */
     static boolean isTriggerConditionSatisfied(
             com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger, long priceTicks) {
         if (trigger.triggerType() == com.surprising.aeron.protocol.CoreTriggerOrderType.TRAILING_STOP) {
+            // 追踪单是否卖出方向，卖单跟最高价、买单跟最低价
             boolean sell = trigger.side() == com.surprising.aeron.protocol.CoreOrderSide.SELL;
+            // 追踪卖单记录的最高价或买单记录的最低价，作为回调阈值基数
             long base = sell ? trigger.highestPriceTicks() : trigger.lowestPriceTicks();
             if (base <= 0 || trigger.activatedAtEpochMillis() <= 0) return false;
+            // 基价按百万分之一回调比例向下取整得到的价差
             long delta = trailingDelta(base, trigger.callbackRatePpm());
+            // 卖单基价减回调价差、买单基价加回调价差得到的触发阈值
             long threshold = sell ? Math.subtractExact(base, delta) : Math.addExact(base, delta);
             return sell ? priceTicks <= threshold : priceTicks >= threshold;
         }
@@ -381,13 +613,22 @@ public final class TriggerOrderCommands {
                 ? priceTicks >= trigger.triggerPriceTicks() : priceTicks <= trigger.triggerPriceTicks();
     }
 
+    /**
+     * 只用 Owner 路由判断同一套普通或追踪价格条件，供扫描筛选；是否还能执行仍由后续完整业务检查决定。
+     * @param trigger 本次判断、构造子单或 OCO 撤销所用的触发状态、路由或视图
+     * @param priceTicks 本次所选行情来源的价格 tick
+     */
     static boolean isTriggerConditionSatisfied(
             TriggerOrderIndex.TriggerRoute trigger, long priceTicks) {
         if (trigger.triggerType() == com.surprising.aeron.protocol.CoreTriggerOrderType.TRAILING_STOP) {
+            // 追踪单是否卖出方向，卖单跟最高价、买单跟最低价
             boolean sell = trigger.side() == com.surprising.aeron.protocol.CoreOrderSide.SELL;
+            // 追踪卖单记录的最高价或买单记录的最低价，作为回调阈值基数
             long base = sell ? trigger.highestPriceTicks() : trigger.lowestPriceTicks();
             if (base <= 0 || trigger.activatedAtEpochMillis() <= 0) return false;
+            // 基价按百万分之一回调比例向下取整得到的价差
             long delta = trailingDelta(base, trigger.callbackRatePpm());
+            // 卖单基价减回调价差、买单基价加回调价差得到的触发阈值
             long threshold = sell ? Math.subtractExact(base, delta) : Math.addExact(base, delta);
             return sell ? priceTicks <= threshold : priceTicks >= threshold;
         }
@@ -395,12 +636,20 @@ public final class TriggerOrderCommands {
                 ? priceTicks >= trigger.triggerPriceTicks() : priceTicks <= trigger.triggerPriceTicks();
     }
 
+    /**
+     * 同步选择并处理一页同组倒序 ID，工作量统计遍历到的兄弟 ID 而非实际取消成功数；请求上限非正时原游标返回且未完成，后续是否继续由调用方决定。
+     * @param trigger 当前完整 OCO 主触发单，按同用户和持仓腿查兄弟
+     * @param cursor 本段 OCO 撤销的排他起始触发 ID
+     * @param limit 本页最多遍历的 OCO 兄弟 ID 个数
+     */
     public OcoCancellationPage cancelOcoSiblings(
             com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger, long cursor, int limit) {
         if (limit <= 0) return new OcoCancellationPage(false, cursor, 0);
         ocoSiblingPage.clear();
+        // 是否在页预算之外还看到了其他符合范围的兄弟 ID
         boolean more = false;
-        for (var siblingIds = owner.triggerOrderIndex().ocoSiblingsDescending(trigger).iterator(); siblingIds.hasNext();) {
+        for (/* 当前借入同组倒序集合的 primitive ID 迭代器 */ var siblingIds = owner.triggerOrderIndex().ocoSiblingsDescending(trigger).iterator(); siblingIds.hasNext();) {
+            // 本页当前选择或处理的 OCO 兄弟触发 ID
             long siblingId = siblingIds.nextLong();
             if (siblingId == trigger.triggerOrderId() || siblingId >= cursor) continue;
             if (ocoSiblingPage.size() >= limit) {
@@ -409,12 +658,16 @@ public final class TriggerOrderCommands {
             }
             ocoSiblingPage.add(siblingId);
         }
+        // 本页最后已遍历的兄弟 ID，下一页跳过该 ID 及更大值
         long nextCursor = cursor;
+        // 本同步页实际遍历处理的兄弟 ID 数，包含已不待触发但被检查的单
         int work = 0;
-        for (int index = 0; index < ocoSiblingPage.size(); index++) {
+        for (/* 同步 OCO 页 ID 缓冲当前下标 */ int index = 0; index < ocoSiblingPage.size(); index++) {
+            // 本页当前选择或处理的 OCO 兄弟触发 ID
             long siblingId = ocoSiblingPage.valueAt(index);
             nextCursor = siblingId;
             work++;
+            // 当前兄弟在账户 Lane 的真实状态，只取消仍为 PENDING 的单
             var sibling = owner.runtimeState().triggerOrder(siblingId);
             if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {
                 cancelTriggerOrderRuntime(sibling.userId(), siblingId);
@@ -423,18 +676,41 @@ public final class TriggerOrderCommands {
         return new OcoCancellationPage(!more, nextCursor, work);
     }
 
+    /**
+     * 从请求解码触发 ID、价格序列、触发价和时间，携带原命令 UUID 进入默认需要 OCO 撤销的同步执行入口。
+     * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
+     */
     public void executeTriggerOrder(CoreMessage message) {
+        // 协议解出的执行数组，依次为触发 ID、行情序列、价格和触发时间
         long[] execute = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeExecute(message.payloadUnsafe());
         executeTriggerOrder(execute[0], execute[1], execute[2], execute[3], message.header().commandId(), true);
     }
 
+    /**
+     * 显式参数的同步入口，默认在认领当前触发单前处理同组撤销。
+     * @param triggerOrderId 当前触发单业务 ID
+     * @param triggerSequence 本次执行或认领要求匹配的行情价格序列
+     * @param triggeredPriceTicks 本次认领时所选来源的实际价格 tick
+     * @param triggeredAtEpochMillis 本次触发的业务毫秒时间戳
+     * @param commandId 原请求或自动扫描合成的命令 UUID，沿用到子单准入和撮合
+     */
     public void executeTriggerOrder(long triggerOrderId, long triggerSequence, long triggeredPriceTicks,
                                      long triggeredAtEpochMillis, UUID commandId) {
         executeTriggerOrder(triggerOrderId, triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis, commandId, true);
     }
 
+    /**
+     * 同步执行先核对可执行条件、可选撤 OCO 并认领，再构造子单及核对身份，冻结准入成功后排入原撮合链。只有 reserve 调用中的业务拒绝在这里转成触发失败；前面的身份检查及技术异常继续交外层处理。排入撮合不代表子单已成交。
+     * @param triggerOrderId 当前触发单业务 ID
+     * @param triggerSequence 本次执行或认领要求匹配的行情价格序列
+     * @param triggeredPriceTicks 本次认领时所选来源的实际价格 tick
+     * @param triggeredAtEpochMillis 本次触发的业务毫秒时间戳
+     * @param commandId 原请求或自动扫描合成的命令 UUID，沿用到子单准入和撮合
+     * @param cancelOco 本次是否还需要先撤同组兄弟，自动扫描已撤完时为假
+     */
     public void executeTriggerOrder(long triggerOrderId, long triggerSequence, long triggeredPriceTicks,
                                      long triggeredAtEpochMillis, UUID commandId, boolean cancelOco) {
+        // 本次候选对应的触发状态或路由，先确认状态再处理
         var trigger = executableTrigger(triggerOrderId, triggerSequence, triggeredPriceTicks);
         if (trigger == null) return;
         if (cancelOco) owner.cancelAllOcoSiblings(trigger);
@@ -442,14 +718,18 @@ public final class TriggerOrderCommands {
                 triggeredPriceTicks, triggeredAtEpochMillis)) {
             owner.requestCommitPublication();
         }
+        // 本触发单已有标的配置，供交易开关或子单产品规则检查
         var instrument = trigger.instrument();
+        // 按触发规则构造的子订单意图，尚未完成资金冻结或撮合
         var place = childOrder(trigger, triggeredPriceTicks, instrument);
+        // 已经选定并用于本次子单的未占用正奇数订单 ID
         long childOrderId = place.orderId();
         owner.requireOrderIdentityAvailable(trigger.userId(), place);
         try {
+            // 原已应用命令数加二再加已排撮合数得到的子单业务顺序，精确加法检查溢出
             long childCoreSequence = Math.addExact(Math.addExact(owner.appliedCommandCount(), 2), owner.queuedMatchingCount());
             owner.reservePlaceOrderRuntime(trigger.userId(), place, commandId, childCoreSequence);
-        } catch (CoreStateRejectedException exception) {
+        } catch (/* reserve 子单过程中抛出的业务拒绝，保存其代码并把本触发完成为失败 */ CoreStateRejectedException exception) {
             completeTriggerOrderRuntime(triggerOrderId, false, 0, exception.code(), triggeredAtEpochMillis);
             return;
         }
@@ -459,16 +739,32 @@ public final class TriggerOrderCommands {
                 owner.runtimeState().changedOrderValue(childOrderId));
     }
 
+    /**
+     * 从账户状态读完整触发单并找到其标的索引，交给统一可执行性校验。
+     * @param id 需要查询的触发单业务 ID
+     * @param sequence 可执行性校验必须匹配的行情价格序列
+     * @param price 选定来源价格或子单默认限价，单位为价格 tick
+     */
     private com.surprising.aeron.service.state.model.CoreTriggerOrderState executableTrigger(long id, long sequence, long price) {
+        // 本次候选对应的触发状态或路由，先确认状态再处理
         var trigger = owner.runtimeState().triggerOrder(id);
         return executableTrigger(trigger, sequence, price, trigger == null ? null : owner.identities().findSymbolId(trigger.instrumentId()));
     }
 
+    /**
+     * 不存在时报业务拒绝，非待触发状态直接返回空；从该单选择的 MARK、LAST 或 INDEX 取当前价格，核对正数、行情序列、指定价和触发条件，满足才返回原单。
+     * @param trigger 本次判断、构造子单或 OCO 撤销所用的触发状态、路由或视图
+     * @param sequence 可执行性校验必须匹配的行情价格序列
+     * @param price 选定来源价格或子单默认限价，单位为价格 tick
+     * @param symbolId 触发标的内部整数索引，可以为空以表示尚未解析到标的
+     */
     private com.surprising.aeron.service.state.model.CoreTriggerOrderState executableTrigger(
             com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger, long sequence, long price, Integer symbolId) {
         if (trigger == null) throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
         if (trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) return null;
+        // 本标的当前行情状态，LAST 与 INDEX 还依赖该价格序列
         var mark = symbolId == null ? null : owner.runtimeState().markPrice(symbolId);
+        // 从当前行情按触发单价格来源取出的实际校验价，没有行情时为零
         long selectedPrice = mark == null ? 0 : switch (trigger.priceSource()) {
             case MARK -> mark.markPriceTicks();
             case LAST -> mark.lastPriceTicks();
@@ -480,13 +776,27 @@ public final class TriggerOrderCommands {
         return trigger;
     }
 
+    /**
+     * 先分配未占用的正奇数子订单 ID，再按触发单参数构造下单意图。
+     * @param trigger 本次判断、构造子单或 OCO 撤销所用的触发状态、路由或视图
+     * @param price 选定来源价格或子单默认限价，单位为价格 tick
+     * @param instrument 触发单已有标的配置，用来判断现货还是衍生品
+     */
     private PlaceOrderCommand childOrder(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
             long price, com.surprising.aeron.service.state.instrument.CoreInstrument instrument) {
         return childOrder(trigger, price, instrument, triggerChildOrderId(trigger.triggerOrderId()));
     }
 
+    /**
+     * 限价单优先用配置价，没有配置价时用触发价；市价单限价零。衍生品子单强制只减仓、现货不只减仓，客户端 ID 固定由触发 ID 派生。
+     * @param trigger 本次判断、构造子单或 OCO 撤销所用的触发状态、路由或视图
+     * @param price 选定来源价格或子单默认限价，单位为价格 tick
+     * @param instrument 触发单已有标的配置，用来判断现货还是衍生品
+     * @param orderId 已确定未占用的正奇数子订单 ID
+     */
     private PlaceOrderCommand childOrder(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
             long price, com.surprising.aeron.service.state.instrument.CoreInstrument instrument, long orderId) {
+        // 子单限价：限价意图优先配置价否则触发价，市价意图固定零
         long limit = trigger.orderType() == com.surprising.aeron.protocol.CoreOrderType.LIMIT
                 ? (trigger.priceTicks() > 0 ? trigger.priceTicks() : price) : 0;
         return new PlaceOrderCommand(orderId,
@@ -496,6 +806,11 @@ public final class TriggerOrderCommands {
                 "TRIGGER:" + trigger.triggerOrderId());
     }
 
+    /**
+     * 在该用户结算访问范围内取消触发单，实际有变更时请求发布。
+     * @param userId 触发单所属用户，决定账户访问与派发 Lane
+     * @param triggerOrderId 当前触发单业务 ID
+     */
     void cancelTriggerOrderRuntime(long userId, long triggerOrderId) {
         if (owner.runtimeState().executeUserSettlement(userId,
                 () -> RuntimeTriggerOrderStateTransitions.cancel(
@@ -504,8 +819,16 @@ public final class TriggerOrderCommands {
         }
     }
 
+    /**
+     * 先查触发单所属用户，再在其账户范围内按行情序列、触发价和时间认领，真实变化才请求发布。
+     * @param triggerOrderId 当前触发单业务 ID
+     * @param triggerSequence 本次执行或认领要求匹配的行情价格序列
+     * @param triggeredPriceTicks 本次认领时所选来源的实际价格 tick
+     * @param triggeredAtEpochMillis 本次触发的业务毫秒时间戳
+     */
     void claimTriggerOrderRuntime(long triggerOrderId, long triggerSequence,
                                           long triggeredPriceTicks, long triggeredAtEpochMillis) {
+        // 从触发路由查得的真实所属用户，用于原账户结算范围
         long userId = requireTriggerOwner(triggerOrderId);
         if (owner.runtimeState().executeUserSettlement(userId,
                 () -> RuntimeTriggerOrderStateTransitions.claim(owner.runtimeState(), triggerOrderId,
@@ -514,8 +837,17 @@ public final class TriggerOrderCommands {
         }
     }
 
+    /**
+     * 按触发单所属用户写入执行成功或失败、关联子订单及原因和完成时间，真实变化才请求发布。
+     * @param triggerOrderId 当前触发单业务 ID
+     * @param success 本次触发子单执行是否成功
+     * @param placedOrderId 成功时要关联的子订单 ID，失败时可为零
+     * @param rejectReason 失败时保存的业务拒绝原因
+     * @param completedAtEpochMillis 本次触发执行完成的业务毫秒时间
+     */
     void completeTriggerOrderRuntime(long triggerOrderId, boolean success, long placedOrderId,
                                              String rejectReason, long completedAtEpochMillis) {
+        // 从触发路由查得的真实所属用户，用于原账户结算范围
         long userId = requireTriggerOwner(triggerOrderId);
         if (owner.runtimeState().executeUserSettlement(userId,
                 () -> RuntimeTriggerOrderStateTransitions.complete(owner.runtimeState(), triggerOrderId, success,
@@ -524,7 +856,13 @@ public final class TriggerOrderCommands {
         }
     }
 
+    /**
+     * 定位触发单用户后在其账户范围执行过期转换，真实变化才请求发布。
+     * @param triggerOrderId 当前触发单业务 ID
+     * @param expiredAtEpochMillis 本次检查过期采用的业务毫秒时间
+     */
     void expireTriggerOrderRuntime(long triggerOrderId, long expiredAtEpochMillis) {
+        // 从触发路由查得的真实所属用户，用于原账户结算范围
         long userId = requireTriggerOwner(triggerOrderId);
         if (owner.runtimeState().executeUserSettlement(userId,
                 () -> RuntimeTriggerOrderStateTransitions.expire(
@@ -533,8 +871,16 @@ public final class TriggerOrderCommands {
         }
     }
 
+    /**
+     * 定位用户后更新追踪高低价及激活时间，真实变化才请求发布。
+     * @param triggerOrderId 当前触发单业务 ID
+     * @param highestPriceTicks 需要写入追踪状态的最高价格 tick
+     * @param lowestPriceTicks 需要写入追踪状态的最低价格 tick
+     * @param activatedAtEpochMillis 需要写入追踪状态的激活毫秒时间
+     */
     void updateTriggerTrailingRuntime(long triggerOrderId, long highestPriceTicks,
                                               long lowestPriceTicks, long activatedAtEpochMillis) {
+        // 从触发路由查得的真实所属用户，用于原账户结算范围
         long userId = requireTriggerOwner(triggerOrderId);
         if (owner.runtimeState().executeUserSettlement(userId,
                 () -> RuntimeTriggerOrderStateTransitions.updateTrailing(owner.runtimeState(), triggerOrderId,
@@ -543,8 +889,15 @@ public final class TriggerOrderCommands {
         }
     }
 
+    /**
+     * 定位用户后按陈旧时间界限和本次重试时间恢复可重试状态，具体资格由原转换方法检查。
+     * @param triggerOrderId 当前触发单业务 ID
+     * @param staleBeforeEpochMillis 允许重试的旧执行状态必须早于的时间界限
+     * @param retryAtEpochMillis 本次重试的业务毫秒时间
+     */
     void retryTriggerOrderRuntime(long triggerOrderId, long staleBeforeEpochMillis,
                                           long retryAtEpochMillis) {
+        // 从触发路由查得的真实所属用户，用于原账户结算范围
         long userId = requireTriggerOwner(triggerOrderId);
         if (owner.runtimeState().executeUserSettlement(userId,
                 () -> RuntimeTriggerOrderStateTransitions.retry(owner.runtimeState(), triggerOrderId,
@@ -553,16 +906,26 @@ public final class TriggerOrderCommands {
         }
     }
 
+    /**
+     * 按当前产品线、用户和触发视图，通过原身份表准备对应持仓键；不在这里修改真实持仓。
+     * @param userId 触发单所属用户，决定账户访问与派发 Lane
+     * @param trigger 本次判断、构造子单或 OCO 撤销所用的触发状态、路由或视图
+     */
     long preparedTriggerPositionKey(
             long userId, com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger) {
         return RuntimeTriggerOrderStateTransitions.positionKey(
                 owner.identities(), owner.productLine(), userId, trigger);
     }
 
+    /**
+     * 从触发 ID 映射到正奇数候选，碰到占用就按二递增并在最大值后回到一；转一整圈仍无可用值才拒绝，不把移位当成普通有符号乘法。
+     * @param triggerOrderId 当前触发单业务 ID
+     */
     private long triggerChildOrderId(long triggerOrderId) {
-        // Trigger IDs span the full positive long range (gateway IDs are UUID-derived).
-        // Keep child orders in the positive odd namespace without signed multiplication overflow.
+        // 网关触发 ID 来自 UUID，可覆盖正 long 范围；用移位和掩码选正奇数子单空间，避免普通有符号乘法溢出。
+        // 由触发 ID 映射并逐个检查占用的正奇数子订单候选
         long candidate = ((triggerOrderId << 1) | 1L) & Long.MAX_VALUE;
+        // 首次子单候选值，用于判断奇数空间是否已回绕一整圈
         long first = candidate;
         while (owner.orderIdInUse(candidate)) {
             candidate = candidate == Long.MAX_VALUE ? 1 : candidate + 2;
@@ -571,7 +934,13 @@ public final class TriggerOrderCommands {
         return candidate;
     }
 
+    /**
+     * 解码并用业务时间物化算法视图，先拒绝已保留终态身份；异步路径另核用户并准备标的索引，交原控制槽，冷路径直接更新并请求发布。
+     * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
+     * @param clusterTimestamp 本次复制命令的业务毫秒时间，用于物化创建视图的时间字段
+     */
     public void executeUpsertAlgoOrder(CoreMessage message, long clusterTimestamp) {
+        // 按当前命令业务时间物化的算法单创建或更新视图
         var algo = com.surprising.aeron.protocol.CoreAlgoOrderCodec.decode(message.payloadUnsafe())
                 .materializeCreation(clusterTimestamp);
         if (owner.runtimeState().algoRoute(algo.algoOrderId()) == null
@@ -581,9 +950,11 @@ public final class TriggerOrderCommands {
                     "terminal algo order identity is retained");
         }
         if (owner.runtimeState().asynchronousCommands()) {
+            // 已有算法单路由，异步路径用它确认请求用户没有越权
             var current = owner.runtimeState().algoRoute(algo.algoOrderId());
             if (current != null && current.userId() != message.header().userId())
                 throw new CoreStateRejectedException("ALGO_ORDER_OWNER_MISMATCH", "algo order belongs to another user");
+            // 本标的解析得到的内部整数身份，find 入口没找到时可为空
             int symbolId = owner.identities().symbolId(algo.instrumentId());
             owner.directCommand.deferAlgoUpsertControl(owner, message.header().userId(), algo, symbolId);
             return;
@@ -593,29 +964,46 @@ public final class TriggerOrderCommands {
         owner.requestCommitPublication();
     }
 
+    /**
+     * 解码延时全撤控制并应用原用户状态转换，正常返回后请求发布；此入口不读取额外传入的 clusterTimestamp。
+     * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
+     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
+     */
     public void executeUpdateCancelAllAfter(CoreMessage message, long clusterTimestamp) {
         RuntimeCancelAllAfterStateTransitions.update(owner.runtimeState(), message.header().userId(),
                 com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeCommand(message.payloadUnsafe()));
         owner.requestCommitPublication();
     }
 
+    /**
+     * 要求恰好两条并按业务时间建立视图，核对配对、交易开关及终态身份，再准备标的、持仓键和已结算标记；异步交控制槽，冷路径在一次用户结算内写入两腿并返回视图。
+     * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
+     * @param clusterTimestamp 本次复制命令的业务毫秒时间，用于物化创建视图的时间字段
+     */
     public void executePlaceTriggerOcoPair(CoreMessage message, long clusterTimestamp) {
+        // OCO 请求解出的两腿创建视图列表，数量必须恰好二
         var views = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeList(message.payloadUnsafe());
         if (views.size() != 2) throw new CoreStateRejectedException("INVALID_COMMAND", "OCO requires two legs");
+        // 按本次业务时间物化的 OCO 第一腿
         var first = views.get(0).materializeCreation(clusterTimestamp);
+        // 按当前业务时间物化的 OCO 第二腿
         var second = views.get(1).materializeCreation(clusterTimestamp);
         RuntimeTriggerOrderStateTransitions.validateOcoPair(first, second);
+        // 本触发单已有标的配置，供交易开关或子单产品规则检查
         var instrument = owner.runtimeState().instrument(first.instrumentId());
         if (instrument != null) {
             instrument.requireOrderEnabled(first.orderType(), first.timeInForce(), false, false);
             instrument.requireOrderEnabled(second.orderType(), second.timeInForce(), false, false);
         }
-        for (var leg : java.util.List.of(first, second)) {
+        for (var /* 当前检查终态保留身份的 OCO 一条腿 */ leg : java.util.List.of(first, second)) {
             if (owner.terminalTriggerRetained(leg.triggerOrderId(), message.header().userId(), leg.clientTriggerOrderId()))
                 throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID", "terminal trigger identity is retained");
         }
+        // 本标的解析得到的内部整数身份，find 入口没找到时可为空
         int symbolId = owner.identities().symbolId(first.instrumentId());
+        // 本触发视图或本次持仓变化所对应的内部持仓键
         long positionKey = preparedTriggerPositionKey(message.header().userId(), first);
+        // 该标的财库是否已经登记生命周期结算，传给账户准入作为拒绝依据
         boolean settled = owner.runtimeState().treasury().lifecycleSettlement(symbolId) != 0;
         if (owner.runtimeState().asynchronousCommands()) {
             owner.directCommand.deferTriggerOcoPairControl(owner, message.header().userId(), first, second, symbolId, positionKey, settled);
@@ -632,9 +1020,16 @@ public final class TriggerOrderCommands {
                 owner.runtimeState().triggerOrder(second.triggerOrderId()).view());
     }
 
+    /**
+     * 解码并建立带业务时间的视图，检查标的开关和终态保留身份，再准备标的与持仓输入；异步交控制槽，冷路径在用户账户范围更新、请求发布并放入响应视图。
+     * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
+     * @param clusterTimestamp 本次复制命令的业务毫秒时间，用于物化创建视图的时间字段
+     */
     public void executePlaceTriggerOrder(CoreMessage message, long clusterTimestamp) {
+        // 按本次业务时间物化的触发单创建或更新视图
         var trigger = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(message.payloadUnsafe())
                 .materializeCreation(clusterTimestamp);
+        // 触发单所属的已注册标的，存在时先检查当前交易状态及订单开关
         var maintenanceInstrument = owner.runtimeState().instrument(trigger.instrumentId());
         if (maintenanceInstrument != null) {
             maintenanceInstrument.requireOrderEnabled(trigger.orderType(), trigger.timeInForce(), false, false);
@@ -645,8 +1040,11 @@ public final class TriggerOrderCommands {
             throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID",
                     "terminal trigger order identity is retained");
         }
+        // 本标的解析得到的内部整数身份，find 入口没找到时可为空
         int symbolId = owner.identities().symbolId(trigger.instrumentId());
+        // 本触发视图或本次持仓变化所对应的内部持仓键
         long positionKey = preparedTriggerPositionKey(message.header().userId(), trigger);
+        // 当前标的是否已结算，交给账户转换防止过期合约新建触发单
         boolean instrumentSettled = owner.runtimeState().treasury().lifecycleSettlement(symbolId) != 0;
         if (owner.runtimeState().asynchronousCommands()) {
             owner.directCommand.deferTriggerUpsertControl(owner, message.header().userId(), trigger, symbolId, positionKey,
@@ -662,7 +1060,13 @@ public final class TriggerOrderCommands {
         owner.resultBuilder.commandTriggerOrderViews = java.util.List.of(owner.runtimeState().triggerOrder(trigger.triggerOrderId()).view());
     }
 
+    /**
+     * 解码触发 ID，异步交取消类型控制任务，冷路径在请求用户账户范围取消。
+     * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
+     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
+     */
     public void executeCancelTriggerOrder(CoreMessage message, long clusterTimestamp) {
+        // 本次协议解出或平仓关联遍历到的触发单 ID
         long triggerOrderId = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeId(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
             owner.directCommand.deferTriggerMutationControl(owner, message.header().userId(), Mutation.CANCEL,
@@ -672,7 +1076,13 @@ public final class TriggerOrderCommands {
         cancelTriggerOrderRuntime(message.header().userId(), triggerOrderId);
     }
 
+    /**
+     * 解码认领参数，按触发单真实所属用户选择异步控制或冷账户转换，不用请求头用户替代路由用户。
+     * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
+     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
+     */
     public void executeClaimTriggerOrder(CoreMessage message, long clusterTimestamp) {
+        // 协议解出的认领数组，依次为 ID、行情序列、触发价格和时间
         long[] claim = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeClaim(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
             owner.directCommand.deferTriggerMutationControl(owner, requireTriggerOwner(claim[0]), Mutation.CLAIM,
@@ -682,7 +1092,13 @@ public final class TriggerOrderCommands {
         claimTriggerOrderRuntime(claim[0], claim[1], claim[2], claim[3]);
     }
 
+    /**
+     * 解码成功标记、子单 ID 和完成时间，按真实所属用户完成触发单；该协议入口拒绝原因固定空文本。
+     * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
+     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
+     */
     public void executeCompleteTriggerOrder(CoreMessage message, long clusterTimestamp) {
+        // 协议解出的完成数组，依次为 ID、成功标记、关联子单 ID 和完成时间
         long[] complete = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeComplete(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
             owner.directCommand.deferTriggerMutationControl(owner, requireTriggerOwner(complete[0]), Mutation.COMPLETE,
@@ -692,7 +1108,13 @@ public final class TriggerOrderCommands {
         completeTriggerOrderRuntime(complete[0], complete[1] == 1, complete[2], "", complete[3]);
     }
 
+    /**
+     * 解码追踪高低价与激活时间，按真实用户选择原异步或冷转换。
+     * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
+     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
+     */
     public void executeUpdateTriggerTrailing(CoreMessage message, long clusterTimestamp) {
+        // 协议解出的追踪数组，依次为 ID、最高价、最低价及激活时间
         long[] trailing = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeTrailing(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
             owner.directCommand.deferTriggerMutationControl(owner, requireTriggerOwner(trailing[0]), Mutation.TRAILING,
@@ -702,7 +1124,13 @@ public final class TriggerOrderCommands {
         updateTriggerTrailingRuntime(trailing[0], trailing[1], trailing[2], trailing[3]);
     }
 
+    /**
+     * 解码触发 ID 与过期检查时间，按真实用户选择过期控制或冷转换。
+     * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
+     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
+     */
     public void executeExpireTriggerOrder(CoreMessage message, long clusterTimestamp) {
+        // 协议解出的触发单 ID 与过期检查时间或重试陈旧界限
         long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
             owner.directCommand.deferTriggerMutationControl(owner, requireTriggerOwner(lifecycle[0]), Mutation.EXPIRE,
@@ -712,7 +1140,13 @@ public final class TriggerOrderCommands {
         expireTriggerOrderRuntime(lifecycle[0], lifecycle[1]);
     }
 
+    /**
+     * 解码触发 ID 和陈旧界限，以请求头提交时间作为重试时间，按真实用户选择控制或冷转换。
+     * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
+     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
+     */
     public void executeRetryTriggerOrder(CoreMessage message, long clusterTimestamp) {
+        // 协议解出的触发单 ID 与过期检查时间或重试陈旧界限
         long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
             owner.directCommand.deferTriggerMutationControl(owner, requireTriggerOwner(lifecycle[0]), Mutation.RETRY,
@@ -722,46 +1156,111 @@ public final class TriggerOrderCommands {
         retryTriggerOrderRuntime(lifecycle[0], lifecycle[1], message.header().submittedAtEpochMillis());
     }
 
+    /**
+     * 显式执行请求的分流入口：冷路径进入同步执行，活动账户路径解码并把子单续步交直接控制槽等待。
+     * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
+     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
+     */
     public void executeExecuteTriggerOrder(CoreMessage message, long clusterTimestamp) {
         if (!owner.runtimeState().asynchronousCommands()) {
             executeTriggerOrder(message);
             return;
         }
+        // 协议解出的执行数组，依次为触发 ID、行情序列、价格和触发时间
         long[] execute = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeExecute(message.payloadUnsafe());
+        // 当前候选实际采用的所选来源价格 tick
+        // 本次显式执行协议中的触发 ID
+        // 本次显式执行协议中的触发时间
+        // 本次显式执行协议要求匹配的行情价格序列
         long triggerId = execute[0], triggerSequence = execute[1], price = execute[2], triggeredAt = execute[3];
         owner.directCommand.deferControl(beginTriggerExecution(triggerId, triggerSequence, price, triggeredAt,
                 message.header().commandId(), true));
     }
 
+    /**
+     * 在 Owner 索引中找原路由，不存在则拒绝，非待触发直接返回完成；其余先选子单 ID，再准备复用执行续步，真正账户校验稍后执行。
+     * @param triggerId 本次扫描变更或执行的触发单 ID
+     * @param triggerSequence 本次执行或认领要求匹配的行情价格序列
+     * @param price 选定来源价格或子单默认限价，单位为价格 tick
+     * @param triggeredAt 本次触发的业务毫秒时间
+     * @param commandId 原请求或自动扫描合成的命令 UUID，沿用到子单准入和撮合
+     * @param cancelOco 本次是否还需要先撤同组兄弟，自动扫描已撤完时为假
+     */
     private java.util.function.BooleanSupplier beginTriggerExecution(long triggerId, long triggerSequence,
             long price, long triggeredAt, UUID commandId, boolean cancelOco) {
+        // Owner 索引中原触发单路由，用于开始异步子单准备
         var route = owner.triggerOrderIndex().route(triggerId);
         if (route == null) throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
         if (route.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) return COMPLETE;
+        // 已经选定并用于本次子单的未占用正奇数订单 ID
         long childOrderId = triggerChildOrderId(triggerId);
         return reusableTriggerExecution.prepare(route, triggerId, triggerSequence, price, triggeredAt,
                 commandId, cancelOco, childOrderId);
     }
 
-    /** Reusable Lane operation for a trigger child; keeps the large capture graph off each command. */
+    /**
+     * 触发子单准入的复用续步：必要时先查询唯一账本，再派发所属账户 Lane 完成触发认领和冻结，Owner 收集回执后交撮合；不承担后续成交终态。
+     */
     private final class TriggerExecutionContinuation
             implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object>,
             com.surprising.aeron.service.state.ledger.SystemLedgerLane.Entry {
+        /** 账户 Lane 复核并认领后的完整触发单，Owner 收集回执后清引用。 */
         private com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger;
+        /**
+         * triggerId：本次要变更或执行的触发单业务 ID。
+         * triggerSequence：本次执行要求匹配的行情价格序列。
+         * price：本次执行要求匹配的所选来源价格 tick。
+         * triggeredAt：本次触发时间，传给认领和完成状态转换。
+         * childSequence：子单准入及后续撮合使用的预先算定 Core 顺序。
+         * childOrderId：Owner 在派发账户前选定的未占用正奇数子订单 ID。
+         */
         private long triggerId, triggerSequence, price, triggeredAt, childSequence, childOrderId;
+        /** 本扫描合成或原执行请求传入的命令 UUID，供子单身份和撮合上下文使用。 */
         private UUID commandId;
+        /** 本次账户执行是否同时遍历同组兄弟撤销；自动扫描已处理同组时为假。 */
         private boolean cancelOco;
+        /** 账户解析后的子单准入输入，包含原交易规则确定的预留和费率。 */
         private com.surprising.aeron.service.state.admission.ResolvedPlaceOrder order;
+        /** 解析子单遇到的业务拒绝代码，非空则认领后完成为失败。 */
         private String failureReason;
+        /** 账户成功准入留下的客户端身份准备令牌，Owner 用它登记新分配数量。 */
         private long preparedClientKey;
+        /**
+         * assetId：子单实际预留资产的内部 ID，解析未成功时为零。
+         * laneId：触发单所属用户账户 Lane，由 Owner 预先定位。
+         */
         private int assetId, laneId;
+        /**
+         * baseAssetId：标的基础资产的内部整数身份。
+         * quoteAssetId：标的报价资产的内部整数身份。
+         * settleAssetId：标的结算资产的内部整数身份。
+         */
         private int baseAssetId, quoteAssetId, settleAssetId;
+        /** Owner 固定的订单决策上下文，账户 Lane 据此解析子单，交接完成后清引用。 */
         private com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.Context decision;
+        /** 唯一账本提供的市场未平仓量，只有标的额度需要它时才查询。 */
         private long openInterest;
+        /** 跨线程输入已齐标志；账本写好未平仓量后以 volatile 发布。 */
         private volatile boolean inputReady;
+        /**
+         * inputQueued：需要的账本查询是否已成功入队，未成功时允许下轮重试。
+         * accountDispatched：子单账户工作是否已派发，防止 Owner 轮询时重复派同一任务。
+         */
         private boolean inputQueued, accountDispatched;
+        /** 本次可选借入的同组倒序集合，准备时固定来源、Owner 收集后清引用。 */
         private it.unimi.dsi.fastutil.longs.LongSortedSet siblings;
 
+        /**
+         * 固定子单 ID 和本次触发输入，准备订单决策、资产整数身份及原命令序号；需要市场未平仓量时稍后问唯一账本，借入可选 OCO 集合并确定账户 Lane，不在这里冻结资金。
+         * @param route Owner 索引中的原触发路由，只用于定位账户与准备决策输入
+         * @param triggerId 本次扫描变更或执行的触发单 ID
+         * @param triggerSequence 本次执行或认领要求匹配的行情价格序列
+         * @param price 选定来源价格或子单默认限价，单位为价格 tick
+         * @param triggeredAt 本次触发的业务毫秒时间
+         * @param commandId 原请求或自动扫描合成的命令 UUID，沿用到子单准入和撮合
+         * @param cancelOco 本次是否还需要先撤同组兄弟，自动扫描已撤完时为假
+         * @param childOrderId Owner 已选定、需要由账户准入的子订单 ID
+         */
         java.util.function.BooleanSupplier prepare(TriggerOrderIndex.TriggerRoute route,
                 long triggerId, long triggerSequence, long price, long triggeredAt, UUID commandId,
                 boolean cancelOco, long childOrderId) {
@@ -786,13 +1285,22 @@ public final class TriggerOrderCommands {
             return this;
         }
 
+        /**
+         * System Ledger 回调读取准入所需未平仓量，再发布 inputReady 并通知 Owner；账本形参当前不直接读取，数据通过原运行时入口取得。
+         * @param ignored 唯一账本回调提供的财库形参，本实现通过原运行时入口查询而不直接读取该形参
+         */
         @Override public void apply(com.surprising.aeron.service.state.ledger.TreasuryRuntime ignored) {
             openInterest = owner.runtimeState().ledgerAdmissionOpenInterest(decision.instrument().instrumentId());
+            // 账本查询完成后用于通知 Owner 的同一运行时引用
             var runtime = owner.runtimeState();
             inputReady = true;
             runtime.signalOwnerCompletion();
         }
 
+        /**
+         * 账户 Lane 先用完整触发单复核行情及条件，解析子单准入；业务拒绝先记原因，随后处理同组撤销并认领，再记触发失败或冻结子单。客户端身份失败时只在这里撤回新准备的身份；技术异常继续传播，不扩大为本方法回滚所有业务状态。
+         * @param ignoredLaneId 外层派发提供的账户 Lane 编号，本回调当前不读取
+         */
         @Override public Object apply(int ignoredLaneId) {
             if (!inputReady) throw new IllegalStateException("Ledger trigger admission input is incomplete");
             trigger = executableTrigger(owner.runtimeState().triggerOrder(triggerId), triggerSequence, price, decision.symbolId());
@@ -800,12 +1308,14 @@ public final class TriggerOrderCommands {
             try {
                 order = com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver.resolve(
                         decision, trigger.userId(), childOrder(trigger, price, trigger.instrument(), childOrderId));
-            } catch (CoreStateRejectedException rejected) { failureReason = rejected.code(); }
+            } catch (/* 子单决策或冻结中遇到的业务拒绝，记成触发失败而非技术故障 */ CoreStateRejectedException rejected) { failureReason = rejected.code(); }
             assetId = order == null ? 0 : order.reservationAsset().equals(decision.instrument().baseAsset()) ? baseAssetId
                     : order.reservationAsset().equals(decision.instrument().quoteAsset()) ? quoteAssetId : settleAssetId;
-            for (var siblingIds = siblings.iterator(); siblingIds.hasNext();) {
+            for (/* 当前借入同组倒序集合的 primitive ID 迭代器 */ var siblingIds = siblings.iterator(); siblingIds.hasNext();) {
+                // 本页当前选择或处理的 OCO 兄弟触发 ID
                 long siblingId = siblingIds.nextLong();
                 if (siblingId == triggerId) continue;
+                // 当前兄弟在账户 Lane 的真实状态，只取消仍为 PENDING 的单
                 var sibling = owner.runtimeState().triggerOrder(siblingId);
                 if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
                     RuntimeTriggerOrderStateTransitions.cancel(owner.runtimeState(), trigger.userId(), siblingId);
@@ -817,27 +1327,32 @@ public final class TriggerOrderCommands {
                         failureReason, triggeredAt);
                 return null;
             }
+            // 当前用户 Lane 预备的客户端身份令牌，成功后交 Owner 统计，失败时按需撤回
             var key = owner.identities().prepareClientKeyInCurrentLane(trigger.userId(), order.clientOrderId());
             try {
+                // 子单资金准入成功后的运行时订单回执，交给 Owner 收集预留并排入撮合
                 var receipt = RuntimeOrderStateTransitions.placeTriggerChildInLane(owner.runtimeState(), trigger.userId(), order,
                         commandId, childSequence, openInterest, owner.identities(),
                         com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry.clientKeyValue(key), assetId,
                         decision.lifecycleSettled(), decision.fundingInProgress());
                 preparedClientKey = key;
                 return receipt;
-            } catch (CoreStateRejectedException rejected) {
+            } catch (/* 子单决策或冻结中遇到的业务拒绝，记成触发失败而非技术故障 */ CoreStateRejectedException rejected) {
                 if (key != 0) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(),
                         order.clientOrderId(), key);
                 RuntimeTriggerOrderStateTransitions.complete(owner.runtimeState(), triggerId, false, 0,
                         rejected.code(), triggeredAt);
                 return null;
-            } catch (RuntimeException | Error failure) {
+            } catch (/* 子单冻结过程中遇到的技术异常或错误，只撤回新预备客户端身份后继续传播 */ RuntimeException | Error failure) {
                 if (key != 0) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(),
                         order.clientOrderId(), key);
                 throw failure;
             }
         }
 
+        /**
+         * Owner 必要时入队账本查询，输入齐备后只派发一次账户工作；收集结果登记新客户端身份及变化，有子单回执才把预留接回并排入撮合，最后清大对象引用。本次返回真是准入交接完成，撮合与成交终态仍由后续链路处理。
+         */
         @Override public boolean getAsBoolean() {
             if (!inputReady) {
                 if (!inputQueued) inputQueued = owner.runtimeState().dispatchLedgerQuery(this);
@@ -848,12 +1363,15 @@ public final class TriggerOrderCommands {
                 accountDispatched = true;
             }
             if (!owner.runtimeState().pollControlLanes()) return false;
+            // 账户子单准入的回执，空表示本次没有成功接纳子单
             var result = owner.runtimeState().controlLaneResult(laneId);
+            // 账户成功准入留下的原客户端身份令牌，用于登记新分配数量
             long clientKey = preparedClientKey;
             if (com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry.newClientIdentity(clientKey))
                 owner.identities().recordLaneClientAllocations(1);
             owner.requestCommitPublication();
             if (result != null) {
+                // 账户返回的子单订单回执，先收集冻结预留再排入撮合
                 var receipt = (com.surprising.aeron.service.state.order.OrderRuntime) result;
                 owner.runtimeState().collectControlReservation(receipt, childSequence);
                 owner.resultBuilder.markUserChanged(trigger.userId());
@@ -869,25 +1387,40 @@ public final class TriggerOrderCommands {
         }
     }
 
+    /**
+     * 选择本命令从有仓变为零仓或删除的持仓，对其对应待触发单逐个调用原取消方法。
+     */
     public void cancelTriggersForClosedPositions() {
-        selectClosingTriggers(id -> cancelTriggerOrderRuntime(requireTriggerOwner(id), id));
+        selectClosingTriggers(/* 本次遍历或回调选中的触发单 ID */ id -> cancelTriggerOrderRuntime(requireTriggerOwner(id), id));
     }
 
+    /**
+     * 先合入本命令变化，只检查原非零且本次已经归零或删除的持仓；从该用户 Owner 索引筛选相同标的、持仓方向及保证金模式的待触发单，交调用方消费。
+     * @param selected 消费选定触发 ID 的回调，调用期间在 Owner 流程内立即执行
+     */
     private void selectClosingTriggers(java.util.function.LongConsumer selected) {
         owner.seedChangeAccumulators();
         if (!owner.runtimeState().hasChangedPositions()) return;
+        // 本命令已登记变化的 primitive 持仓键迭代器
         org.eclipse.collections.api.iterator.LongIterator changedPositions =
                 owner.runtimeState().changedPositionIterator();
         while (changedPositions.hasNext()) {
+            // 本触发视图或本次持仓变化所对应的内部持仓键
             long positionKey = changedPositions.next();
+            // 本命令变更前的持仓，只有原数量非零才检查关联触发
             var previous = owner.runtimeState().currentPatchPositionBefore(positionKey);
             if (previous == null || previous.signedQuantitySteps() == 0) continue;
+            // 本命令变更后的持仓值，为空或数量零才需要清理原持仓关联触发
             var current = owner.runtimeState().changedPositionValue(positionKey);
             if (current != null && current.signedQuantitySteps() != 0) continue;
+            // 已平仓原持仓的标的规范整数身份
             int instrumentId = previous.instrument().instrumentIdValue();
+            // 原持仓全仓或逐仓模式，选关联触发时必须一致
             var previousMarginMode = previous.marginMode();
-            for (var triggerIds = owner.triggerOrderIndex().ids(previous.userId()).iterator(); triggerIds.hasNext();) {
+            for (/* 该用户 Owner 触发索引的 ID 迭代器，逐项再核对本命令新路由 */ var triggerIds = owner.triggerOrderIndex().ids(previous.userId()).iterator(); triggerIds.hasNext();) {
+                // 本次协议解出或平仓关联遍历到的触发单 ID
                 long triggerOrderId = triggerIds.nextLong();
+                // 本次候选对应的触发状态或路由，先确认状态再处理
                 var trigger = currentTriggerRoute(triggerOrderId);
                 if (trigger == null || trigger.status()
                         != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) continue;
@@ -898,7 +1431,12 @@ public final class TriggerOrderCommands {
         }
     }
 
+    /**
+     * 按本命令新路由优先、已发布索引次之查所属用户，找不到触发单则明确拒绝。
+     * @param triggerOrderId 当前触发单业务 ID
+     */
     long requireTriggerOwner(long triggerOrderId) {
+        // 本次候选对应的触发状态或路由，先确认状态再处理
         var trigger = currentTriggerRoute(triggerOrderId);
         if (trigger == null) {
             throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order does not exist");
