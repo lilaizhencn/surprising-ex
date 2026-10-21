@@ -1,5 +1,6 @@
 package com.surprising.realtime.provider.export;
 
+import com.surprising.realtime.provider.export.service.CommittedAlgoProjectionService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay;
 import com.surprising.product.api.ProductLine;
@@ -16,7 +17,7 @@ import static org.assertj.core.api.Assertions.*;
 class CommittedAlgoProjectionPostgresTest {
     private JdbcTemplate jdbc;
     private TransactionTemplate transaction;
-    private CommittedAlgoProjection projection;
+    private CommittedAlgoProjectionService projection;
     @BeforeEach void prepare() {
         String url=System.getenv("INSTRUMENT_TEST_JDBC_URL");
         var admin=new JdbcTemplate(new DriverManagerDataSource(url,System.getenv("INSTRUMENT_TEST_DB_USER"),System.getenv("INSTRUMENT_TEST_DB_PASSWORD")));
@@ -24,7 +25,7 @@ class CommittedAlgoProjectionPostgresTest {
         var source=new DriverManagerDataSource(url+(url.contains("?")?"&":"?")+"currentSchema=algo_export_it",System.getenv("INSTRUMENT_TEST_DB_USER"),System.getenv("INSTRUMENT_TEST_DB_PASSWORD"));
         jdbc=new JdbcTemplate(source);transaction=new TransactionTemplate(new DataSourceTransactionManager(source));
         for(String table:List.of("core_algo_order_projection","core_algo_projection_initialization"))jdbc.execute("CREATE TABLE "+table+" (LIKE public."+table+" INCLUDING ALL)");
-        projection=new CommittedAlgoProjection(jdbc,transaction);
+        projection=ProjectionTestFixtures.algos(jdbc,transaction);
     }
     @AfterEach void clean() {if(jdbc!=null)jdbc.execute("DROP SCHEMA algo_export_it CASCADE");}
     private CoreAlgoOrderView view(long id,long user,long revision,long executed,long active) {

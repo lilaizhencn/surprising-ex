@@ -1,5 +1,7 @@
 package com.surprising.realtime.provider.export;
 
+import com.surprising.realtime.provider.export.config.TradeExportProperties;
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import lombok.extern.slf4j.Slf4j;
 
 import com.surprising.candlestick.provider.config.CandlestickProperties;
@@ -26,7 +28,7 @@ public class TradeExportService implements SmartLifecycle, HealthIndicator {
 
     @org.springframework.beans.factory.annotation.Autowired
     public TradeExportService(TradeExportProperties config, CandlestickProperties candles,
-            CommittedOrderProjectionRepository orders) {
+            CommittedOrderProjectionService orders) {
         this(config, new CommittedTradeExporter(config, candles.getKafka().getProductLine(),
                 candles.getKafka().getBootstrapServers(), orders));
     }

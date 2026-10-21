@@ -1,4 +1,4 @@
-package com.surprising.realtime.provider.export;
+package com.surprising.realtime.provider.export.config;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

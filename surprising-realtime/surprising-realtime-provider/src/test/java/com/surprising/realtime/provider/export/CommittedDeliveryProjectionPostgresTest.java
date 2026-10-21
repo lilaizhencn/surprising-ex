@@ -1,5 +1,6 @@
 package com.surprising.realtime.provider.export;
 
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedDeliveryPage;
 import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.DeliveryCashFlow;
@@ -21,7 +22,7 @@ class CommittedDeliveryProjectionPostgresTest {
     private JdbcTemplate jdbc;
     private DriverManagerDataSource source;
     private String schema;
-    private CommittedOrderProjectionRepository repository;
+    private CommittedOrderProjectionService repository;
 
     @BeforeEach void prepare() {
         String url = System.getenv("INSTRUMENT_TEST_JDBC_URL");
@@ -34,7 +35,7 @@ class CommittedDeliveryProjectionPostgresTest {
         jdbc = new JdbcTemplate(source);
         jdbc.execute("CREATE TABLE account_product_ledger_entries (LIKE public.account_product_ledger_entries INCLUDING ALL)");
         jdbc.execute("CREATE SEQUENCE account_product_ledger_entry_seq AS BIGINT");
-        repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
+        repository = ProjectionTestFixtures.orders(jdbc, new DataSourceTransactionManager(source));
     }
     @AfterEach void cleanup() { if (jdbc != null) jdbc.execute("DROP SCHEMA " + schema + " CASCADE"); }
 
@@ -45,7 +46,7 @@ class CommittedDeliveryProjectionPostgresTest {
         var first = page(line, List.of(new DeliveryCashFlow(1, asset, -10, 990)));
         repository.persistDelivery(first);
         long entry = jdbc.queryForObject("SELECT entry_id FROM account_product_ledger_entries", Long.class);
-        repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
+        repository = ProjectionTestFixtures.orders(jdbc, new DataSourceTransactionManager(source));
         repository.persistDelivery(first);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM account_product_ledger_entries", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT entry_id FROM account_product_ledger_entries", Long.class)).isEqualTo(entry);

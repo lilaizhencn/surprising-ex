@@ -1,5 +1,6 @@
 package com.surprising.realtime.provider.export;
 
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedFundingPage;
 import com.surprising.product.api.ProductLine;
@@ -19,7 +20,7 @@ import static org.assertj.core.api.Assertions.*;
 class CommittedFundingProjectionPostgresTest {
     private JdbcTemplate jdbc;
     private DriverManagerDataSource source;
-    private CommittedOrderProjectionRepository repository;
+    private CommittedOrderProjectionService repository;
     private String schema;
     @BeforeEach void prepare() {
         String url = System.getenv("INSTRUMENT_TEST_JDBC_URL");
@@ -32,7 +33,7 @@ class CommittedFundingProjectionPostgresTest {
         jdbc = new JdbcTemplate(source);
         for (String table : List.of("core_funding_page_projection", "core_funding_payment_projection", "core_funding_settlement_projection"))
             jdbc.execute("CREATE TABLE " + table + " (LIKE public." + table + " INCLUDING ALL)");
-        repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
+        repository = ProjectionTestFixtures.orders(jdbc, new DataSourceTransactionManager(source));
     }
     @AfterEach void clean() { if (jdbc != null) jdbc.execute("DROP SCHEMA " + schema + " CASCADE"); }
 
@@ -45,7 +46,7 @@ class CommittedFundingProjectionPostgresTest {
         repository.persistFunding(first);
         assertThat(count("core_funding_payment_projection")).isEqualTo(1);
         assertThat(count("core_funding_settlement_projection")).isZero();
-        var restarted = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
+        var restarted = ProjectionTestFixtures.orders(jdbc, new DataSourceTransactionManager(source));
         restarted.persistFunding(last);
         restarted.persistFunding(first);
         restarted.persistFunding(last);

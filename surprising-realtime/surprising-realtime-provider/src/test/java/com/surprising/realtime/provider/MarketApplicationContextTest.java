@@ -1,5 +1,7 @@
 package com.surprising.realtime.provider;
 
+import com.surprising.realtime.provider.export.config.TradeExportProperties;
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import com.surprising.candlestick.provider.service.SymbolRegistryService;
 import com.surprising.candlestick.provider.service.CandleQueryService;
 import com.surprising.product.api.ProductLine;
@@ -58,7 +60,7 @@ class MarketApplicationContextTest {
             }).run(ctx -> {
                 assertThat(ctx).hasNotFailed()
                     .hasSingleBean(com.surprising.realtime.provider.export.TradeExportService.class)
-                    .hasSingleBean(com.surprising.realtime.provider.export.TradeExportProperties.class)
+                    .hasSingleBean(com.surprising.realtime.provider.export.config.TradeExportProperties.class)
                     .doesNotHaveBean(com.surprising.aeron.service.bootstrap.AeronCoreLifecycle.class)
                     .doesNotHaveBean(RealtimeRouter.class);
                 assertThat(ctx.getBean(com.surprising.candlestick.provider.config.CandlestickProperties.class)
@@ -72,7 +74,7 @@ class MarketApplicationContextTest {
             assertThat(ctx).hasNotFailed().hasSingleBean(CandleQueryService.class)
                     .doesNotHaveBean(RealtimeRouter.class).doesNotHaveBean(RealtimeJsonPublisher.class)
                     .doesNotHaveBean(com.surprising.realtime.provider.export.TradeExportService.class)
-                    .doesNotHaveBean(com.surprising.realtime.provider.export.CommittedOrderProjectionRepository.class)
+                    .doesNotHaveBean(com.surprising.realtime.provider.export.service.CommittedOrderProjectionService.class)
                     .doesNotHaveBean(com.surprising.aeron.service.bootstrap.AeronCoreLifecycle.class);
             if (line == ProductLine.OPTION) {
                 assertThat(ctx).hasSingleBean(com.surprising.realtime.provider.option.OptionQuoteService.class)

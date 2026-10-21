@@ -27,7 +27,7 @@
 借用现有 Account Lane 所有权后直接聚合本地 orders、positions、triggers，再归还。
 不进入在线 matcher/settlement 热路径，不物化或缓存完整用户/订单视图，不新增 Core 协议。
 
-`CommittedTradingStatistics` 归现有 `CommittedOrderProjectionRepository` 和导出线程所有。
+`CommittedTradingStatisticsService` 归现有 `CommittedOrderProjectionService` 和导出线程所有。
 分钟桶与订单、成交、回执和投影水位同事务更新，用独立命令日志游标保证幂等，不受做市回执过滤影响。
 仓库通过方法提供该对象，确保 Spring 代理委派到实际初始化的目标，而非读取代理对象的未初始化字段。
 

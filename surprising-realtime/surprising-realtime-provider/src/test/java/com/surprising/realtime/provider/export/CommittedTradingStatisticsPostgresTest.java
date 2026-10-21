@@ -1,5 +1,6 @@
 package com.surprising.realtime.provider.export;
 
+import com.surprising.realtime.provider.export.service.CommittedTradingStatisticsService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult;
 import com.surprising.aeron.service.state.query.CommittedTradingActivity;
@@ -18,14 +19,14 @@ import static org.assertj.core.api.Assertions.*;
 @EnabledIfEnvironmentVariable(named="INSTRUMENT_TEST_JDBC_URL",matches=".+")
 class CommittedTradingStatisticsPostgresTest {
     private JdbcTemplate jdbc;
-    private CommittedTradingStatistics statistics;
+    private CommittedTradingStatisticsService statistics;
     @BeforeEach void prepare() {
         String url=System.getenv("INSTRUMENT_TEST_JDBC_URL"),user=System.getenv("INSTRUMENT_TEST_DB_USER"),password=System.getenv("INSTRUMENT_TEST_DB_PASSWORD");
         var admin=new JdbcTemplate(new DriverManagerDataSource(url,user,password));admin.execute("CREATE SCHEMA statistics_it");
         var source=new DriverManagerDataSource(url+"?currentSchema=statistics_it",user,password);jdbc=new JdbcTemplate(source);
         for(var name:List.of("core_trading_command_statistics","core_trading_statistics_cursor","core_trading_statistics_initialization","core_trading_statistics_snapshot","core_execution_projection"))
             jdbc.execute("CREATE TABLE "+name+" (LIKE public."+name+" INCLUDING ALL)");
-        statistics=new CommittedTradingStatistics(jdbc,new TransactionTemplate(new DataSourceTransactionManager(source)));
+        statistics=ProjectionTestFixtures.statistics(jdbc,new TransactionTemplate(new DataSourceTransactionManager(source)));
     }
     @AfterEach void clean() { if(jdbc!=null)jdbc.execute("DROP SCHEMA statistics_it CASCADE"); }
     private CommittedCommandResult attempt(ProductLine product,long position,long commandId,CoreMessageType type,CoreResultCode code) {

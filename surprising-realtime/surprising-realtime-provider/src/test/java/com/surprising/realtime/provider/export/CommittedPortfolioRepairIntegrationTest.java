@@ -1,5 +1,8 @@
 package com.surprising.realtime.provider.export;
 
+import com.surprising.realtime.provider.export.config.TradeExportProperties;
+import com.surprising.realtime.provider.export.service.CommittedTradingStatisticsService;
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.surprising.aeron.protocol.*;
@@ -33,7 +36,7 @@ class CommittedPortfolioRepairIntegrationTest {
     private static final ProductLine PRODUCT = ProductLine.SPOT;
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-20T04:05:30Z"), ZoneOffset.UTC);
     private JdbcTemplate jdbc;
-    private CommittedOrderProjectionRepository repository;
+    private CommittedOrderProjectionService repository;
     private String schema;
     private long sequence;
 
@@ -50,7 +53,7 @@ class CommittedPortfolioRepairIntegrationTest {
         assertNotNull(root);
         jdbc.execute(Files.readString(root.resolve("deployment/migrations/20261020-portfolio-income.sql")));
         // No order, statistics or Kafka tables exist in this schema. Repair must write only financial history.
-        repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
+        repository = ProjectionTestFixtures.orders(jdbc, new DataSourceTransactionManager(source));
     }
 
     @AfterEach void clean() { if (jdbc != null) jdbc.execute("DROP SCHEMA " + schema + " CASCADE"); }
@@ -127,7 +130,7 @@ class CommittedPortfolioRepairIntegrationTest {
                 // configuration, proving readiness does not depend on market/order SQL tables.
                 var liveRepository = org.mockito.Mockito.spy(repository);
                 org.mockito.Mockito.doReturn(true).when(liveRepository).executionsInitialized(org.mockito.ArgumentMatchers.any());
-                var statistics = org.mockito.Mockito.mock(CommittedTradingStatistics.class);
+                var statistics = org.mockito.Mockito.mock(CommittedTradingStatisticsService.class);
                 org.mockito.Mockito.when(statistics.initialized(org.mockito.ArgumentMatchers.any())).thenReturn(true);
                 org.mockito.Mockito.doReturn(statistics).when(liveRepository).statistics();
                 var liveConfig = new TradeExportProperties(cluster, directory, control, live, 0, null, null, null);

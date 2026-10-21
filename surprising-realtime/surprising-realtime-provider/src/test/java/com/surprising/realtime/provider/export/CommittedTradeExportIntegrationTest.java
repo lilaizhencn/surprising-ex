@@ -1,5 +1,10 @@
 package com.surprising.realtime.provider.export;
 
+import com.surprising.realtime.provider.export.config.TradeExportProperties;
+import com.surprising.realtime.provider.export.service.CommittedAlgoProjectionService;
+import com.surprising.realtime.provider.export.service.CommittedPortfolioHistoryService;
+import com.surprising.realtime.provider.export.service.CommittedTradingStatisticsService;
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.*;
@@ -30,16 +35,16 @@ import static org.assertj.core.api.Assertions.*;
 
 class CommittedTradeExportIntegrationTest {
     @TempDir Path temp;
-    private final CommittedOrderProjectionRepository orders = org.mockito.Mockito.mock(CommittedOrderProjectionRepository.class);
+    private final CommittedOrderProjectionService orders = org.mockito.Mockito.mock(CommittedOrderProjectionService.class);
     {
-        org.mockito.Mockito.when(orders.algos()).thenReturn(org.mockito.Mockito.mock(CommittedAlgoProjection.class));
-        var statistics=org.mockito.Mockito.mock(CommittedTradingStatistics.class);
+        org.mockito.Mockito.when(orders.algos()).thenReturn(org.mockito.Mockito.mock(CommittedAlgoProjectionService.class));
+        var statistics=org.mockito.Mockito.mock(CommittedTradingStatisticsService.class);
         org.mockito.Mockito.when(statistics.initialized(org.mockito.ArgumentMatchers.any())).thenReturn(true);
         org.mockito.Mockito.when(orders.statistics()).thenReturn(statistics);
-        var portfolio = org.mockito.Mockito.mock(CommittedPortfolioHistory.class);
+        var portfolio = org.mockito.Mockito.mock(CommittedPortfolioHistoryService.class);
         org.mockito.Mockito.when(portfolio.initialized(org.mockito.ArgumentMatchers.any())).thenReturn(true);
         org.mockito.Mockito.when(portfolio.start(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong()))
-                .thenReturn(new CommittedPortfolioHistory.Start(0, 0));
+                .thenReturn(new com.surprising.realtime.provider.export.model.PortfolioProjectionStart(0, 0));
         org.mockito.Mockito.when(orders.portfolio()).thenReturn(portfolio);
     }
 

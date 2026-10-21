@@ -1,5 +1,7 @@
 package com.surprising.realtime.provider.export;
 
+import com.surprising.realtime.provider.export.config.TradeExportProperties;
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -30,7 +32,7 @@ class CommittedFundingRepairIntegrationTest {
     private static final long TIME=1_700_000_000_000L;
 
     @Test void archiveFundingPagesStopAtCommitAndSqlFailureCannotAdvanceCheckpoint() throws Exception {
-        var repository=mock(CommittedOrderProjectionRepository.class);
+        var repository=mock(CommittedOrderProjectionService.class);
         String directory=temp.resolve("driver").toString();
         int port;try(var socket=new DatagramSocket(0)){port=socket.getLocalPort();}
         String control="aeron:udp?endpoint=127.0.0.1:"+port;

@@ -32,7 +32,7 @@ Core 协议版本为 8。项目尚未上线，不实现旧名称状态的兼容�
 
 ## 历史订单与恢复
 
-`CommittedTradeReplay` 在 Realtime 的独立导出线程读取已提交 Archive 命令，同时产出成交和完整订单状态。`CommittedOrderProjectionRepository` 按 `(productLine, orderId)` 写入 `core_order_projection`，只接受更高订单版本；累计成交数量、累计成交金额、均价和手续费使用与 WebSocket 相同的 `CoreOrderStateView` 编码。订单与查询水位同一数据库事务提交，随后发送成交 Kafka 事务，最后写本地检查点。数据库失败不推进检查点，重试不能用旧状态覆盖终态。该读模型不参与撮合或资金结算。同一 SQL 批次内按订单 ID 合并到最高版本，再使用 PostgreSQL 批量写入，避免单个 `ON CONFLICT` 语句多次修改同一订单；合并容器只在本次持久化调用内存在，提交或失败后释放，不在 Core 热路径维护副本。
+`CommittedTradeReplay` 在 Realtime 的独立导出线程读取已提交 Archive 命令，同时产出成交和完整订单状态。`CommittedOrderProjectionService` 按 `(productLine, orderId)` 写入 `core_order_projection`，只接受更高订单版本；累计成交数量、累计成交金额、均价和手续费使用与 WebSocket 相同的 `CoreOrderStateView` 编码。订单与查询水位同一数据库事务提交，随后发送成交 Kafka 事务，最后写本地检查点。数据库失败不推进检查点，重试不能用旧状态覆盖终态。该读模型不参与撮合或资金结算。同一 SQL 批次内按订单 ID 合并到最高版本，再使用 PostgreSQL 批量写入，避免单个 `ON CONFLICT` 语句多次修改同一订单；合并容器只在本次持久化调用内存在，提交或失败后释放，不在 Core 热路径维护副本。
 
 币种与网络管理目前负责目录、配置校验和审计；本轮只启动交易相关六个服务，不启动 Wallet，也不代表已完成外部链上充提、手续费及确认数的联调。
 

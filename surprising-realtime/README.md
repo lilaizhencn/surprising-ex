@@ -377,7 +377,7 @@ Router 的控制及转发 Aeron 客户端也沿用默认 10 秒驱动超时（�
 
 ### 历史订单保留规则
 
-`CommittedOrderProjectionRepository` 只为查询写入 `core_order_projection`，不改变 Core 撮合、资金结算、恢复日志或实时 WebSocket。
+`export.service.CommittedOrderProjectionService` 聚合提交投影事务；`export.repository.CommittedOrderRepository` 仅写查询表 `core_order_projection`，不改变 Core 撮合、资金结算、恢复日志或实时 WebSocket。
 普通用户订单全部保留。产品线内配置的 `surprising.trade-export.market-maker-account-ids` 为专用做市账户（包括模拟成交账户）：
 纯做市互成交、同账户自成交、未成交撤单都不入历史订单表；只要订单涉及一次普通用户成交，就保存完整累计状态，后续内部成交和撤单也持续更新。
 账户分类以服务端配置 ID 为准，不能用客户端订单号前缀判断。每条产品线单独配置，专用账户不得改作普通用户使用。
@@ -444,7 +444,7 @@ Streams changelog 和内部 Topic 来节省分区，否则会破坏消费进度�
 
 2026-10-08 对测试服务器做了 2 秒 `/proc` 只读采样：realtime 的 `committed-trade-export` 约使用 49.3% 单核 CPU。这个短窗口只用于确定排查优先级，不能归因到某一条 SQL 或证明宿主机超分。本轮没有部署或重启服务。
 
-1. `CommittedOrderProjectionRepository.persist` 每批先查询做市账户目录，即使该批没有 ORDER/EXECUTION，也进入查询水位事务；导出器每次提交位置推进后可能形成很小的批次，`ReliableTradeKafkaSink.publish` 则为非空成交批次提交 Kafka 事务。下一步先统计批次大小、SQL 次数、事务耗时和提交频率，再减少无订单批的目录查询或采用有明确时延上限的合批。空批也可能需要推进可见性水位，不能直接跳过 persist、提前保存 checkpoint 或跨产品合并。
+1. `CommittedOrderProjectionService.persist` 每批先查询做市账户目录，即使该批没有 ORDER/EXECUTION，也进入查询水位事务；导出器每次提交位置推进后可能形成很小的批次，`ReliableTradeKafkaSink.publish` 则为非空成交批次提交 Kafka 事务。下一步先统计批次大小、SQL 次数、事务耗时和提交频率，再减少无订单批的目录查询或采用有明确时延上限的合批。空批也可能需要推进可见性水位，不能直接跳过 persist、提前保存 checkpoint 或跨产品合并。
 2. `ValkeyReadViewStore.applyCommits` 已做流水线，但每个用户提交仍通过 EVAL 发送完整 DELTA Lua。可评估 SCRIPT LOAD / EVALSHA 减少网络负载；必须处理 NOSCRIPT、保证逐用户原子性与版本屏障，不能简单重放整条 pipeline。
 3. `AeronRealtimeReceiver` 复制完整消息后，`RealtimeFrameCodec.decode` 再复制 payload，`RealtimeFrame` 构造和访问仍有保护性复制。可评估直接缓冲区解码或协议边界转移所有权，先测分配量；不能直接移除公共 payload 的防御性复制，或保留 FragmentAssembler 下轮会覆盖的缓冲区。
 4. 网关 `SubscriptionRegistry.publishDepth` 在同步方法内为每条连接计算盘口差量并序列化；订阅者基线相同时存在重复工作。可按本次推送的相同基线复用编码，保留首次快照、每连接版本、发送成功才更新基线和慢连接移除规则。其他普通公共 fanout 已复用编码，不应重复优化。
@@ -464,7 +464,7 @@ JFR 限制单文件最大 32MiB，已将采样条件和结果记录在各模块 
 
 ### 订单投影与可靠成交合批
 
-`CommittedOrderProjectionRepository.persist` 收到空订单批时只在事务中推进查询水位，不查询做市账户目录、不创建订单/成交临时索引或调用空 batchUpdate。非空批仍读取当前服务端目录，保留普通用户历史、做市涉及用户成交的持久化凭据、最高 revision 和六产品隔离，不做长期账户分类缓存。
+`CommittedOrderProjectionService.persist` 收到空订单批时只在事务中推进查询水位，不查询做市账户目录、不创建订单/成交临时索引或调用空 batchUpdate。非空批仍读取当前服务端目录，保留普通用户历史、做市涉及用户成交的持久化凭据、最高 revision 和六产品隔离，不做长期账户分类缓存。
 
 `CommittedTradeExporter.ExportBatch` 接管原来分散在回调和循环中的两个列表及命令计数，由单一导出线程持有，不新增线程或通用执行框架。累计完整命令，达到原来的 256 命令或 4096 帧阈值就刷新；小批可跨 commit position 的推进合并，目标等待最多 5ms，空闲 park 和 commit counter 暂时不可用时的等待都受该期限约束。单个完整命令仍可超过帧阈值后立即刷新，不能为了容量把一个命令拆开。外部 I/O、回放或线程调度可能超过目标期限，5ms 不是端到端延迟保证。
 
@@ -498,7 +498,7 @@ HotSpot JDK 27 定向测试 61 个测试类，按最后一次类结果去重共 
 
 ## 当前Core协议消费端对齐（2026-10-18，验收中）
 
-`CommittedOrderProjectionRepository` 及资金页测试直接消费 `CommittedTradeReplay.CommittedFundingPage`。资金费支付记录来自确定性回放的实际已提交页；不增设旧类型转接类。
+`CommittedOrderProjectionService` 及资金页测试直接消费 `CommittedTradeReplay.CommittedFundingPage`。资金费支付记录来自确定性回放的实际已提交页；不增设旧类型转接类。
 
 `CandlestickStreamConfiguration` 按现有十字段 `RealtimeFrame` 构造 K 线帧。`RealtimeRouter` 使用产品线、实体 ID 和日志序号记录发送结果；`ReliableTradeKafkaSink` 使用产品线、成交 ID 和日志位置记录事务提交或失败。Kafka 消息和 WebSocket 推送只携带业务数据。
 
@@ -550,7 +550,7 @@ Web lint/build 和 147 项测试通过；Flutter analyze 无问题、126 项测�
 
 ## 已提交回执查询（2026-10-19）
 
-`CommittedTradeReplay` 在独立回放完成全部提交后交出命令结果；`CommittedOrderProjectionRepository` 将普通用户处理回执、订单和水位同事务提交，重放冲突会回滚。新表 `core_command_result_projection` 不保存账户或订单当前状态，做市策略内部报价被过滤。拒单没有订单事件时仍导出回执，网关用户查询改读该投影而不访问 Core 结果缓存。
+`CommittedTradeReplay` 在独立回放完成全部提交后交出命令结果；`CommittedOrderProjectionService` 将普通用户处理回执、订单和水位同事务提交，重放冲突会回滚。新表 `core_command_result_projection` 不保存账户或订单当前状态，做市策略内部报价被过滤。拒单没有订单事件时仍导出回执，网关用户查询改读该投影而不访问 Core 结果缓存。
 
 已有 live checkpoint 不回溯旧回执。先应用 `deployment/migrations/20261019-committed-command-results.sql`，再通过 `CommittedCommandResultRepair` 从日志前缀有限回补；必须新建独立 `*.command-repair` checkpoint，不能复制 live checkpoint。该回补只写回执，不写 Kafka、订单、资金费或水位。完整发布顺序、六个参数、范围与限制见 [说明](../docs/realtime-command-results.md)。
 
@@ -562,7 +562,7 @@ Web lint/build 和 147 项测试通过；Flutter analyze 无问题、126 项测�
 
 `CommittedTradeReplay` 在独立的已提交日志回放进程处理 SETTLE_INSTRUMENT 时，通过本地所有者查询读取同一全局用户游标页的结算资产余额，比较结算前后的可用加冻结总额。真实现金差额包括实际保险补偿；释放保证金不是收入，平价结算没有现金变动则不生成流水。不复制在线 Core 状态，不新增撮合或账户热路径阶段，不向在线 Core 发查询。
 
-`CommittedTradeExporter` 在写检查点前调用 `CommittedOrderProjectionRepository.persistDelivery`，原子写入现有 `account_product_ledger_entries` 与 `account_product_ledger_entry_seq`。类型为 DELIVERY_SETTLEMENT，参考号为产品线:合约ID:结算ID；自然键重复时逐字段核对，内容冲突回滚整页并阻止检查点推进。Gateway 的产品账本 repository 只读，JSON 资金整数和流水 ID 用字符串返回，并提供 instrumentId；Web/client 依币种精度格式化，不经浮点转换。这里提供现金流水，不代表包含零盈亏记录的完整交割报告。
+`CommittedTradeExporter` 在写检查点前调用 `CommittedOrderProjectionService.persistDelivery`，原子写入现有 `account_product_ledger_entries` 与 `account_product_ledger_entry_seq`。类型为 DELIVERY_SETTLEMENT，参考号为产品线:合约ID:结算ID；自然键重复时逐字段核对，内容冲突回滚整页并阻止检查点推进。Gateway 的产品账本 repository 只读，JSON 资金整数和流水 ID 用字符串返回，并提供 instrumentId；Web/client 依币种精度格式化，不经浮点转换。这里提供现金流水，不代表包含零盈亏记录的完整交割报告。
 
 旧 live checkpoint 不自动回溯。历史补齐入口为 `com.surprising.realtime.provider.export.CommittedDeliveryLedgerRepair`，使用 HotSpot JDK 27、部署运行依赖 classpath 和 SPRING_DATASOURCE_URL/USERNAME/PASSWORD。六个位置参数为：
 
@@ -589,3 +589,20 @@ LINEAR_DELIVERY <cluster-directory> <aeron-directory> <archive-control-channel> 
 ### 算法委托提交投影（2026-10-20）
 
 `CommittedTradeReplay` 在独立回放副本读取父单及子单成交进度，`CommittedAlgoProjection` 写入最新算法单和初始化标记。算法单变化纳入原有 ExportBatch，与订单、回执、水位共用事务和恢复点；相同父单 revision 的成交变化仍按 exportSequence 更新。先执行 `20261020-algo-read-projection.sql`，再配套发布 Core、realtime、gateway。状态归属、启动分批恢复和已知历史快照缺口见 [算法委托查询](../docs/algo-read-projection.md)。
+
+### 提交投影的表职责与事务（2026-10-21）
+
+`export.service` 聚合订单/成交/回执/条件单与可见水位、资金费页、交割账本，以及统计、
+组合权益历史、算法委托初始化；SQL收拢至 `export.repository` 的单表Repository。
+业务Service不再依赖JdbcTemplate。四个Service共享配置中的REQUIRED事务模板，
+一批事实和可见性水位原子提交；SQL失败阻止Kafka发送及检查点推进。
+
+21个Repository各访问一张表。`MarketMakerProjectionAccountsRepository` 是明确注释的只读例外：
+合并策略和业务设置中的做市账号，包含停用策略，以保持历史分类；不写这两张表。
+资金费汇总从支付Repository读取精确NUMERIC总数，再由结算Repository写汇总，仍在原结算身份锁和事务内。
+
+`export.config.CommittedProjectionConfiguration` 负责相同的事务及Repository装配。
+离线修复入口通过 `openPersistence` 使用这一配置并关闭所属容器，不另建写入路径；
+关闭导出时不创建这些持久化组件。原生投影行归model，回执事实比较归utils，
+`TradeExportProperties` 归config。验证见
+[提交投影分层验证](../docs/validation/java-mvc-projection-20261021.json)。

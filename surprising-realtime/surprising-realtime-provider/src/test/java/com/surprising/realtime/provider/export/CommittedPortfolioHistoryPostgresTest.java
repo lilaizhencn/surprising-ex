@@ -1,5 +1,6 @@
 package com.surprising.realtime.provider.export;
 
+import com.surprising.realtime.provider.export.service.CommittedPortfolioHistoryService;
 import com.surprising.aeron.service.orchestration.replay.CommittedPortfolioSnapshot.UserEquity;
 import com.surprising.aeron.service.orchestration.replay.CommittedPortfolioSnapshot;
 import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedBalanceFlow;
@@ -24,7 +25,7 @@ class CommittedPortfolioHistoryPostgresTest {
     private static final long NOW = 1_792_454_400_000L;
     private JdbcTemplate jdbc;
     private TransactionTemplate transaction;
-    private CommittedPortfolioHistory history;
+    private CommittedPortfolioHistoryService history;
     private String schema;
 
     @BeforeEach void prepare() throws Exception {
@@ -42,7 +43,7 @@ class CommittedPortfolioHistoryPostgresTest {
         jdbc.execute(migration);
         jdbc.execute(migration);
         transaction = new TransactionTemplate(new DataSourceTransactionManager(source));
-        history = new CommittedPortfolioHistory(jdbc, transaction);
+        history = ProjectionTestFixtures.portfolio(jdbc, transaction);
     }
 
     @AfterEach void clean() { if (jdbc != null) jdbc.execute("DROP SCHEMA " + schema + " CASCADE"); }
@@ -79,8 +80,8 @@ class CommittedPortfolioHistoryPostgresTest {
     }
 
     @Test void restartRetainsCoverageAndPruningKeepsDailyOpeningAndRecentCutsOnly() {
-        assertEquals(new CommittedPortfolioHistory.Start(100, NOW), history.start(ProductLine.SPOT, 100, NOW));
-        assertEquals(new CommittedPortfolioHistory.Start(100, NOW), history.start(ProductLine.SPOT, 200, NOW + 1));
+        assertEquals(new com.surprising.realtime.provider.export.model.PortfolioProjectionStart(100, NOW), history.start(ProductLine.SPOT, 100, NOW));
+        assertEquals(new com.surprising.realtime.provider.export.model.PortfolioProjectionStart(100, NOW), history.start(ProductLine.SPOT, 200, NOW + 1));
         long minute = NOW + 5 * 60_000;
         for (long cut : new long[]{NOW - 2 * 86_400_000, NOW, NOW + 60_000, minute - 60_000, minute})
             history.publish(snapshot(cut, Map.of(7L, new UserEquity(true, Map.of("USDT", "10")))), 1, 1, 0, cut <= NOW);

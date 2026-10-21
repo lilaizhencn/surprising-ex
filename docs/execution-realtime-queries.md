@@ -7,7 +7,7 @@
 游标绑定全部筛选与排序，按成交时间、已提交日志位置和该命令内成交序号分页。
 
 `CommittedTradeExporter.ExportBatch` 将同一已提交命令的 TRADE、EXECUTION 和 ORDER 帧交给
-`CommittedOrderProjectionRepository`。临时配对只限当前有界 SQL 批次，并按命令分组，
+`CommittedOrderProjectionService`。临时配对只限当前有界 SQL 批次，并按命令分组，
 从两侧订单的实际状态取得用户、订单、持仓方向与费率，避免后续改单的字段覆盖先前成交。
 普通订单、条件单、成交、回执和现有订单可见水位在同一事务提交；随后才提交公开 Kafka 成交和导出检查点。
 重复重放按真实 tradeId 及命令位置幂等校验，身份或内容冲突会回滚，不覆盖既有成交。

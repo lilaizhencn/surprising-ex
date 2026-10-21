@@ -8,7 +8,7 @@
 
 `CommittedTradeReplay` 仅在独立 Archive 回放副本中读取父单视图；它保存子单到父单的查询路由，收到父单意图更新或子单成交/撤销时导出最新状态。父单终态后删除子单路由。成交可以改变累计数量而不增加父单 revision，因此数据库同时使用提交导出序号判新旧，不能只比较 revision。
 
-`CommittedTradeExporter.ExportBatch` 将算法单变化纳入已有有界批次。`CommittedOrderProjectionRepository.persist` 在同一事务中写入普通订单、命令回执、算法单和可见性水位；SQL 或 Kafka 失败不清空待提交批次、不推进检查点。`CommittedAlgoProjection` 承担算法单 SQL 持久化和初始化边界，没有另起导出线程或检查点。
+`CommittedTradeExporter.ExportBatch` 将算法单变化纳入已有有界批次。`CommittedOrderProjectionService.persist` 在同一事务中写入普通订单、命令回执、算法单和可见性水位；SQL 或 Kafka 失败不清空待提交批次、不推进检查点。`CommittedAlgoProjectionService` 聚合算法单批次和初始化，单表 SQL 由 `CommittedAlgoRepository` 与 `AlgoInitializationRepository` 承担，没有另起导出线程或检查点。
 
 第一次启动时，从已有恢复点的回放状态分批写入保留的父单，全部成功后才写初始化标记；失败可重新执行。标记未就绪返回 503 `ALGO_READ_VIEW_INITIALIZING`，存储不可用或状态损坏同样明确返回 503，不回查 Core。已有标记后继续使用正常已提交日志增量。
 

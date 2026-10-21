@@ -1,5 +1,6 @@
 package com.surprising.realtime.provider.export;
 
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -15,7 +16,7 @@ import static org.assertj.core.api.Assertions.*;
 class CommittedOrderProjectionPostgresTest {
     private JdbcTemplate jdbc;
     private DriverManagerDataSource source;
-    private CommittedOrderProjectionRepository repository;
+    private CommittedOrderProjectionService repository;
 
     @BeforeEach void prepare() {
         String url = System.getenv("INSTRUMENT_TEST_JDBC_URL");
@@ -39,15 +40,42 @@ class CommittedOrderProjectionPostgresTest {
             jdbc.execute("CREATE TABLE "+name+" (LIKE public."+name+" INCLUDING ALL)");
         jdbc.execute("CREATE TABLE market_maker_strategies (product_line text, account_ids bigint[])");
         jdbc.execute("CREATE TABLE market_maker_business_settings (product_line text, settings jsonb)");
-        repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
+        repository = ProjectionTestFixtures.orders(jdbc, new DataSourceTransactionManager(source));
     }
 
     @AfterEach void clean() { if (jdbc != null) jdbc.execute("DROP SCHEMA order_projection_it CASCADE"); }
 
+    @Test
+    void springPersistenceContextRollsBackReceiptsStatisticsAndWatermarkTogether() {
+        try (var context = com.surprising.realtime.provider.export.config.CommittedProjectionConfiguration.openPersistence(source)) {
+            var stores = context.getBeansWithAnnotation(org.springframework.stereotype.Repository.class);
+            assertThat(stores).hasSize(22);
+            assertThat(stores.values()).allSatisfy(store ->
+                    assertThat(org.springframework.aop.support.AopUtils.isAopProxy(store)).isTrue());
+            var service = context.getBean(CommittedOrderProjectionService.class);
+            var product = ProductLine.OPTION;
+            long now = System.currentTimeMillis();
+            var first = new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult(
+                    product, 7, new java.util.UUID(0, 1), CoreMessageType.PLACE_ORDER, "first", "604",
+                    ResponseStatus.APPLIED, CoreResultCode.NONE, 10, 10, now, List.of());
+            service.persist(product, List.of(), List.of(first), 10);
+            jdbc.execute("ALTER TABLE core_projection_watermark ADD CONSTRAINT mvc_watermark_fault CHECK(last_export_sequence < 20)");
+            var second = new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult(
+                    product, 7, new java.util.UUID(0, 2), CoreMessageType.PLACE_ORDER, "second", "604",
+                    ResponseStatus.APPLIED, CoreResultCode.NONE, 20, 20, now, List.of());
+            assertThatThrownBy(() -> service.persist(product, List.of(), List.of(second), 20))
+                    .isInstanceOf(org.springframework.dao.DataAccessException.class);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM core_command_result_projection", Integer.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT sum(commands) FROM core_trading_command_statistics", Long.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT last_command_position FROM core_trading_statistics_cursor", Long.class)).isEqualTo(10);
+            assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark", Long.class)).isEqualTo(10);
+        }
+    }
+
     @Test void springRepositoryProxyDelegatesStatisticsToTheSameTransactionalTarget() {
         var factory=new org.springframework.aop.framework.ProxyFactory(repository);factory.setProxyTargetClass(true);
         factory.addAdvice((org.aopalliance.intercept.MethodInterceptor)invocation->invocation.proceed());
-        var proxy=(CommittedOrderProjectionRepository)factory.getProxy();
+        var proxy=(CommittedOrderProjectionService)factory.getProxy();
         assertThat(org.springframework.aop.support.AopUtils.isCglibProxy(proxy)).isTrue();
         var result=new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult(ProductLine.OPTION,7,new java.util.UUID(0,1),
                 CoreMessageType.PLACE_ORDER,"client","604",ResponseStatus.APPLIED,CoreResultCode.NONE,10,10,System.currentTimeMillis(),List.of());
@@ -246,7 +274,7 @@ class CommittedOrderProjectionPostgresTest {
     @Test void rejectedCommandsWithoutOrdersRemainQueryableAfterRestartAndMoreThan128OtherResults() {
         var result = result(1, 7, CoreResultCode.ORDER_NOT_FOUND);
         repository.persist(ProductLine.SPOT, List.of(), List.of(result), 0);
-        repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
+        repository = ProjectionTestFixtures.orders(jdbc, new DataSourceTransactionManager(source));
         repository.persist(ProductLine.SPOT, List.of(), List.of(result), 0);
         var later = new java.util.ArrayList<com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult>();
         for (int i=2;i<150;i++) later.add(result(i, 7, CoreResultCode.NONE));
@@ -309,7 +337,7 @@ class CommittedOrderProjectionPostgresTest {
         for (var line : ProductLine.values()) {
             repository.persist(line, List.of(frame(line, 91, "OPEN", 1)), List.of(), 10);
             repository.persist(line, List.of(frame(line, 91, "FILLED", 2)), List.of(), 11);
-            var restarted = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
+            var restarted = ProjectionTestFixtures.orders(jdbc, new DataSourceTransactionManager(source));
             restarted.persist(line, List.of(frame(line, 91, "FILLED", 2)), List.of(), 11);
             restarted.persist(line, List.of(frame(line, 91, "OPEN", 1)), List.of(), 10);
             var raw = jdbc.queryForObject("SELECT raw_order_state FROM core_order_projection WHERE product_line=? AND order_id=91", byte[].class, line.name());
@@ -370,7 +398,7 @@ class CommittedOrderProjectionPostgresTest {
             repository.persist(line, List.of(order(line, 40, 901, "FILLED", 2, 2),
                     execution(line, "maker-taker", 40, 901, false), execution(line, "maker-taker", 41, 7, true)), List.of(), 5);
             // Restart, then another internal fill and cancellation must still update the stored order.
-            repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
+            repository = ProjectionTestFixtures.orders(jdbc, new DataSourceTransactionManager(source));
             repository.persist(line, List.of(order(line, 30, 900, "CANCELED", 3, 4),
                     execution(line, "last", 30, 900, true), execution(line, "last", 33, 901, false)), List.of(), 6);
             repository.persist(line, List.of(order(line, 30, 900, "OPEN", 2, 3)), List.of(), 5);
@@ -385,7 +413,7 @@ class CommittedOrderProjectionPostgresTest {
 
     @Test void incompleteCounterpartyEvidenceFailsBeforeWritingOrAdvancingWatermark() {
         jdbc.update("INSERT INTO market_maker_strategies VALUES (?, ARRAY[900]::bigint[])", ProductLine.LINEAR_PERPETUAL.name());
-        repository = new CommittedOrderProjectionRepository(jdbc, new DataSourceTransactionManager(source));
+        repository = ProjectionTestFixtures.orders(jdbc, new DataSourceTransactionManager(source));
         var line = ProductLine.LINEAR_PERPETUAL;
         assertThatThrownBy(() -> repository.persist(line, List.of(order(line, 30, 900, "FILLED", 2, 1),
                 execution(line, "missing", 30, 900, true)), List.of(), 1)).isInstanceOf(IllegalArgumentException.class);

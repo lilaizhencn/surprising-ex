@@ -1,5 +1,7 @@
 package com.surprising.realtime.provider.export;
 
+import com.surprising.realtime.provider.export.config.TradeExportProperties;
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import static org.assertj.core.api.Assertions.*;
 
 import com.surprising.product.api.ProductLine;
@@ -37,7 +39,7 @@ class TradeExportCheckpointTest {
                 .isInstanceOf(java.io.IOException.class).hasMessageContaining("purpose");
         var config = new TradeExportProperties(directory, "unused", "unused", repair, 0, null, null, null);
         assertThatThrownBy(() -> new CommittedTradeExporter(config, ProductLine.SPOT, null,
-                org.mockito.Mockito.mock(CommittedOrderProjectionRepository.class))
+                org.mockito.Mockito.mock(CommittedOrderProjectionService.class))
                 .run(new java.util.concurrent.atomic.AtomicBoolean(false), ready -> {}, 100))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("live exporter");
     }

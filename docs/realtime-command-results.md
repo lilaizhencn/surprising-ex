@@ -5,7 +5,7 @@
 现货 POST 响应丢失后，订单可能已成交，也可能在资金准入阶段被拒绝，后者没有订单实体。只查订单或 Core 的短期结果缓存无法覆盖这个区别。
 
 1. `surprising-aeron-service/.../orchestration/CommittedTradeReplay` 在 realtime 的独立 Archive 回放中，等原有撮合、账户与账本提交全部完成，再取该命令的最终结果。每个回放步骤只交出一个不可变回执，不向在线 Core 增加查询、状态或回调。
-2. `surprising-realtime-provider/.../export/CommittedTradeExporter.ExportBatch` 在原有有限合批中暂存回执；`CommittedOrderProjectionRepository` 将普通用户回执、订单投影和可见性水位放入同一数据库事务，成功后才发送既有 Kafka 成交并推进 checkpoint。拒单没有订单事件、exportSequence 不变时，也必须落库。
+2. `surprising-realtime-provider/.../export/CommittedTradeExporter.ExportBatch` 在原有有限合批中暂存回执；`CommittedOrderProjectionService` 将普通用户回执、订单投影和可见性水位放入同一数据库事务，成功后才发送既有 Kafka 成交并推进 checkpoint。拒单没有订单事件、exportSequence 不变时，也必须落库。
 3. `core_command_result_projection` 按产品和 commandId 保留第一次已提交结果；重复回放校验用户、命令类型、客户订单号、交易对、状态、结果码及 appliedCommandCount 一致。矛盾会回滚整批，不能推进 checkpoint。重放位置和时间允许因同一命令的重复提交不同，不覆盖首次记录。冲突请求的 IDEMPOTENCY_CONFLICT 不替换原请求结果。
 4. 网关 `AeronOrderProjectionRepository` 按认证用户、产品和 commandId 查询该表；`OrderService.submission` 使用已有 StableOrderIdentity 从 clientOrderId 推导原命令号。查询没有 Core 回退，也不依赖其 128 条内存结果保留窗口。
 
@@ -85,7 +85,7 @@ Web 188 项、lint/build，client 166 项及 analyze 通过。浏览器对交易
 - `POST /api/v1/gateway/trading/batch-cancel`：必须显式携带 `batchKey`，以及同一账户的 `orders`，每批 1–50 笔。原生顶层 `NONE` 仍可能包含逐项失败；批次包含其他账户订单时整批 `ORDER_OWNER_MISMATCH`，不能按单项跳过归属校验。
 - `GET /api/v1/gateway/trading/cancellation-batches?batchKey=...`：只读 realtime 提交投影，以认证用户、产品和原生 `batch:cancel:` 命名空间定位请求，返回原目标与逐项业务结果，`Cache-Control: no-store`。结果未知返回 202；已提交的业务拒绝按现有 `commandResponse` 状态契约返回，客户端必须检查 outcome/code/逐项结果。
 
-`CommittedTradeReplay` 在原有撮合、账户 Lane 与账本提交边界之后，提取最多 50 个 index/orderId/success/code；不复制订单或账户快照。`CommittedOrderProjectionRepository` 将这些事实与原命令回执、订单和水位写入同一事务。已有回执只能由确定性提交回放补充 NULL 字段；非空内容冲突会回滚，不能覆盖原结果。`CancellationPlanResponse` 是只读 HTTP 契约，不增加交易业务状态；两端保存的是尚未确认的用户操作目标和发送断点，不作为账户或订单权威视图。
+`CommittedTradeReplay` 在原有撮合、账户 Lane 与账本提交边界之后，提取最多 50 个 index/orderId/success/code；不复制订单或账户快照。`CommittedOrderProjectionService` 将这些事实与原命令回执、订单和水位写入同一事务。已有回执只能由确定性提交回放补充 NULL 字段；非空内容冲突会回滚，不能覆盖原结果。`CancellationPlanResponse` 是只读 HTTP 契约，不增加交易业务状态；两端保存的是尚未确认的用户操作目标和发送断点，不作为账户或订单权威视图。
 
 发布顺序：
 

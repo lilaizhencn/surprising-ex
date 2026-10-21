@@ -1,5 +1,7 @@
 package com.surprising.realtime.provider.export;
 
+import com.surprising.realtime.provider.export.config.TradeExportProperties;
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay;
 import com.surprising.product.api.ProductLine;
@@ -25,16 +27,16 @@ final class CommittedTradeExporter {
     private final TradeExportProperties config;
     private final ProductLine product;
     private final String bootstrapServers;
-    private final CommittedOrderProjectionRepository orders;
+    private final CommittedOrderProjectionService orders;
     private final Clock clock;
 
     CommittedTradeExporter(TradeExportProperties config, ProductLine product, String bootstrapServers,
-            CommittedOrderProjectionRepository orders) {
+            CommittedOrderProjectionService orders) {
         this(config, product, bootstrapServers, orders, Clock.systemUTC());
     }
 
     CommittedTradeExporter(TradeExportProperties config, ProductLine product, String bootstrapServers,
-            CommittedOrderProjectionRepository orders, Clock clock) {
+            CommittedOrderProjectionService orders, Clock clock) {
         this.config = config;
         this.product = product;
         this.bootstrapServers = bootstrapServers;
@@ -404,7 +406,7 @@ final class CommittedTradeExporter {
         private static final long MAX_DELAY_NANOS = TimeUnit.MILLISECONDS.toNanos(5);
         private static final long CATCH_UP_DELAY_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
         private final ProductLine product;
-        private final CommittedOrderProjectionRepository orders;
+        private final CommittedOrderProjectionService orders;
         private final ReliableTradeKafkaSink sink;
         private final ExportMode mode;
         private final ArrayList<RealtimeFrame> trades = new ArrayList<>();
@@ -416,11 +418,11 @@ final class CommittedTradeExporter {
         private long startedAt, flushedSequence = -1;
         private long maxDelayNanos = MAX_DELAY_NANOS;
 
-        ExportBatch(ProductLine product, CommittedOrderProjectionRepository orders, ReliableTradeKafkaSink sink) {
+        ExportBatch(ProductLine product, CommittedOrderProjectionService orders, ReliableTradeKafkaSink sink) {
             this(product, orders, sink, ExportMode.LIVE);
         }
 
-        ExportBatch(ProductLine product, CommittedOrderProjectionRepository orders, ReliableTradeKafkaSink sink,
+        ExportBatch(ProductLine product, CommittedOrderProjectionService orders, ReliableTradeKafkaSink sink,
                     ExportMode mode) {
             this.product = product;
             this.orders = orders;

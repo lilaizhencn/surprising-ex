@@ -1,5 +1,6 @@
 package com.surprising.realtime.provider.export;
 
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
@@ -14,7 +15,7 @@ import static org.mockito.Mockito.*;
 
 class ExportBatchTest {
     @Test void executionRepairNeverPublishesKafkaOrWritesOrdersAndReceipts() {
-        var repository = mock(CommittedOrderProjectionRepository.class);
+        var repository = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
         var batch = new CommittedTradeExporter.ExportBatch(ProductLine.OPTION,repository,sink,CommittedTradeExporter.ExportMode.EXECUTION_REPAIR);
         batch.add(List.of(frame(ProductLine.OPTION,RealtimeFrame.Kind.TRADE,1)),null,1,0);
@@ -23,7 +24,7 @@ class ExportBatchTest {
         verifyNoMoreInteractions(repository); verifyNoInteractions(sink);
     }
     @Test void receiptRepairNeverPublishesTradesOrAdvancesTheOrderProjection() {
-        var repository = mock(CommittedOrderProjectionRepository.class);
+        var repository = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
         var batch = new CommittedTradeExporter.ExportBatch(ProductLine.SPOT, repository, sink,
                 CommittedTradeExporter.ExportMode.COMMAND_RESULT_REPAIR);
@@ -42,7 +43,7 @@ class ExportBatchTest {
         verifyNoInteractions(sink);
     }
     @Test void receiptsFlushEvenWhenThereAreNoOrderChangesAndTheExportSequenceHasNotChanged() {
-        var orders = mock(CommittedOrderProjectionRepository.class);
+        var orders = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
         var batch = new CommittedTradeExporter.ExportBatch(ProductLine.SPOT, orders, sink);
         batch.flush(0);
@@ -68,7 +69,7 @@ class ExportBatchTest {
     }
     @ParameterizedTest @EnumSource(ProductLine.class)
     void coalescesSmallCommittedBatchesUntilDeadlineAndFlushesInBusinessOrder(ProductLine product) {
-        var orders = mock(CommittedOrderProjectionRepository.class);
+        var orders = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
         var batch = new CommittedTradeExporter.ExportBatch(product, orders, sink);
         var projected = new ArrayList<RealtimeFrame>();
@@ -98,7 +99,7 @@ class ExportBatchTest {
     }
 
     @Test void enforcesCommandAndFrameBoundsBeforeDeadlineAndFlushesWatermarkWithoutOrders() {
-        var orders = mock(CommittedOrderProjectionRepository.class);
+        var orders = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
         var batch = new CommittedTradeExporter.ExportBatch(ProductLine.SPOT, orders, sink);
         for (int i=0;i<256;i++) batch.add(List.of(), null, i, i);
@@ -110,7 +111,7 @@ class ExportBatchTest {
     }
 
     @Test void failuresRetainBatchAndDoNotMarkItFlushed() {
-        var orders = mock(CommittedOrderProjectionRepository.class);
+        var orders = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
         var batch = new CommittedTradeExporter.ExportBatch(ProductLine.SPOT, orders, sink);
         batch.add(List.of(frame(ProductLine.SPOT, RealtimeFrame.Kind.ORDER, 1)), null,1,0);
@@ -128,7 +129,7 @@ class ExportBatchTest {
 
     @ParameterizedTest @EnumSource(ProductLine.class)
     void catchesUpInBoundedBatchesThenRestoresLiveDeadline(ProductLine product) {
-        var orders = mock(CommittedOrderProjectionRepository.class);
+        var orders = mock(CommittedOrderProjectionService.class);
         var sink = mock(ReliableTradeKafkaSink.class);
         var projected = new ArrayList<RealtimeFrame>();
         doAnswer(call -> { projected.addAll(call.getArgument(1)); return null; })

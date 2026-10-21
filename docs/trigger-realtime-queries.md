@@ -13,7 +13,7 @@
 触发事件名使用实际 MARK / LAST / INDEX 来源。
 
 `CommittedTradeReplay` 在 realtime 的独立已提交重放状态中捕获 TRIGGER 绝对状态。
-`CommittedOrderProjectionRepository.persist` 将条件单、订单、命令回执与订单投影水位放在同一事务，
+`CommittedOrderProjectionService.persist` 将条件单、订单、命令回执与订单投影水位放在同一事务，
 只接受更高 revision，相同 revision 的不同内容或不可变身份冲突会回滚。该投影是可重建查询副本，
 不参与撮合、冻结、持仓或结算。Core 保留条件单提交、撤销、触发、到期、维护和交易准入所需的控制查询。
 
