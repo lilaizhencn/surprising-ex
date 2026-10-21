@@ -33,37 +33,61 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public final class AeronTradingClusterService implements ClusteredService {
+    /** 一次快照读取或发布允许等待的最长时间，转换成单调时钟使用的纳秒。 */
     private static final long SNAPSHOT_TIMEOUT_NS = TimeUnit.SECONDS.toNanos(
             Long.getLong("surprising.aeron.snapshot-timeout-seconds", 300L));
+    /** 当前服务的会话和响应发送出口，只在 Cluster 线程真正操作 Aeron 会话。 */
     private final ClusterServiceEgress egress;
+    /** 交易状态所属的专用 Owner 循环，通过输入环接收已复制命令。 */
     private final TradingOwnerLoop owner;
+    /** 默认可复用解码槽数量；槽位仍被在途命令使用时不能提前覆盖。 */
     private static final int DEFAULT_DECODER_CACHE_SLOTS = 4096;
+    /** 在 Cluster 回调线程解码协议帧，并把解码槽的使用权交给 Owner。 */
     private final CoreMessageFlyweightDecoder messageDecoder = new CoreMessageFlyweightDecoder(
             Integer.getInteger("surprising.aeron.decoder-cache-slots", DEFAULT_DECODER_CACHE_SLOTS));
+    /** 复用的命令指纹计算器，用来区分正常重试与同一命令编号携带不同内容的冲突。 */
     private final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
+    /** 连续收到这么多输入后主动发送一轮响应，减少逐条输入都排水的开销。 */
     private static final int INBOUND_DRAIN_THRESHOLD = 16;
+    /** 上一次响应排水之后已接收的输入数，到达阈值或后台轮询时归零。 */
     private int unflushedInboundMessages;
+    /** Aeron 提供的当前集群句柄，供快照发布和空闲等待使用，终止时释放引用。 */
     private Cluster cluster;
 
-    /** Spring 使用的构造方法；注入已配置好的 Owner 与响应出口。 */
+    /**
+     * Spring 使用的构造方法，让回调适配器与 Owner 共用已装配的响应出口。
+     * @param owner 接收复制命令并处理交易状态的专用循环
+     * @param egress 与该 Owner 配套的会话和响应出口
+     */
     @Autowired
     public AeronTradingClusterService(TradingOwnerLoop owner, ClusterServiceEgress egress) {
         this.egress = java.util.Objects.requireNonNull(egress);
         this.owner = java.util.Objects.requireNonNull(owner);
     }
 
-    /** 创建独立运行的 Cluster Service，并使用默认 Aeron 响应出口。 */
+    /**
+     * 为测试、工具等独立入口创建服务，同时创建默认响应出口。
+     * @param productLine 本服务唯一处理的产品线
+     */
     public AeronTradingClusterService(ProductLine productLine) {
         this(productLine, new ClusterServiceEgress());
     }
 
-    /** 创建独立运行的 Cluster Service，并让 Owner 与指定响应出口共用会话状态。 */
+    /**
+     * 创建独立服务，并让新建 Owner 与指定出口共用会话状态。
+     * @param productLine 本服务唯一处理的产品线
+     * @param egress 调用方提供的响应出口
+     */
     public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress egress) {
         this.egress = java.util.Objects.requireNonNull(egress);
         this.owner = new TradingOwnerLoop(productLine, egress);
     }
 
-    /** 创建独立运行的 Cluster Service，并通过工厂定制各客户端 Session 的响应 Publication。 */
+    /**
+     * 创建独立服务，并允许测试或工具替换每个会话的响应发送端。
+     * @param productLine 本服务唯一处理的产品线
+     * @param egressFactory 根据客户端会话创建响应发送端的工厂
+     */
     public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress.EgressFactory egressFactory) {
         this(productLine, new ClusterServiceEgress(egressFactory));
     }
@@ -99,11 +123,12 @@ public final class AeronTradingClusterService implements ClusteredService {
         // 这里在 Cluster 回调线程中真正关闭 Aeron ClientSession，再处理新消息。
         egress.flushSessionClosures();
 
+        // 借用的解码消息；入队成功后由 Owner 持有，入队失败时必须在本线程归还槽位。
         CoreMessage command;
         try {
             // 将 Aeron 收到的协议帧解码为 Core 消息；解码失败时没有可信的命令内容可继续处理。
             command = messageDecoder.decodeBorrowed(buffer, offset, length);
-        } catch (IllegalArgumentException invalid) {
+        } catch (/* 解码发现协议帧非法；此时没有可信命令可供继续处理。 */ IllegalArgumentException invalid) {
             // 非法帧直接丢弃，不进入 Owner 命令队列。
             return;
         }
@@ -114,8 +139,8 @@ public final class AeronTradingClusterService implements ClusteredService {
             owner.enqueue(command, session == null ? ClusterServiceEgress.NO_SESSION_ID : egress.transportSession(session).id(), timestamp,
                     header.position(), command.header().kind() == WireMessageKind.COMMAND
                             ? fingerprints.ofBorrowed(command) : null);
-        } catch (RuntimeException | Error failure) {
-            // Publication did not transfer this decoder lease to the Owner.
+        } catch (/* 记录输入交接失败，归还未成功转移给 Owner 的解码槽后继续抛出。 */ RuntimeException | Error failure) {
+            // 输入没有成功交给 Owner，本线程仍负责归还这一解码槽。
             command.releaseDecoderSlot();
             throw failure;
         }
@@ -176,12 +201,15 @@ public final class AeronTradingClusterService implements ClusteredService {
         unflushedInboundMessages = 0;
         try {
             return owner.drainResponses();
-        } catch (RuntimeException fatal) {
+        } catch (/* 让 Cluster 看见后台响应处理失败，不能让故障 Owner 悄悄继续服务。 */ RuntimeException fatal) {
             throw new AgentTerminationException(fatal);
         }
     }
 
-    /** 处理 Cluster 角色变化，并同步更新 Owner 任期和响应出口的会话状态。 */
+    /**
+     * 处理角色变化，并同步 Owner 任期和响应出口，防止旧 Leader 继续发送响应。
+     * @param role 本成员切换后的 Leader、Follower 等集群角色
+     */
     @Override
     public void onRoleChange(Cluster.Role role) {
         owner.onRoleChange(role, egress.onRoleChange(role));
@@ -216,6 +244,7 @@ public final class AeronTradingClusterService implements ClusteredService {
     public void onTakeSnapshot(ExclusivePublication publication) {
         unflushedInboundMessages = 0;
         owner.drainResponses();
+        // 在同一个复制日志边界捕获的分段快照，不能把不同完成位置的状态拼在一起。
         var snapshot = owner.captureSnapshotSections(cluster.logPosition(), cluster.time());
         writeSnapshot(snapshot, publication, this::awaitProgress);
     }
@@ -254,12 +283,24 @@ public final class AeronTradingClusterService implements ClusteredService {
         cluster.idleStrategy().idle();
     }
 
+    /**
+     * 读取 Aeron 提供的快照片段并交给恢复缓冲区；这里只接收数据，还不启动交易线程。
+     * @param image 本次恢复的快照流，首次启动时可能为 null
+     * @param cluster 提供空闲等待策略的当前集群上下文
+     * @return 已收集的恢复缓冲区；没有快照时返回 null
+     */
     private SectionedCoreSnapshotCodec.RecoveryBuffer readSnapshot(Image image, Cluster cluster) {
         if (image == null) return null;
+        // 按段收集和校验输入，随后交给 Owner 在启动边界恢复状态。
         var recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
+        // 一次恢复共用的截止时间，不能每收到一段就无限延长等待。
         long deadline = System.nanoTime() + SNAPSHOT_TIMEOUT_NS;
         while (!image.isEndOfStream()) {
-            int work = image.poll((buffer, offset, length, header) ->
+            // 本次已处理的片段数，空闲策略据此决定是否需要等待。
+            int work = image.poll((/* 当前片段所在的 Aeron 缓冲区。 */ buffer,
+                    /* 片段在缓冲区中的起始字节位置。 */ offset,
+                    /* 当前片段占用的字节数。 */ length,
+                    /* 当前片段的传输头；恢复数据处理不需要读取它。 */ header) ->
                     recovery.accept(buffer, offset, length), 10);
             if (System.nanoTime() > deadline) {
                 throw new IllegalStateException("snapshot recovery deadline");
@@ -269,13 +310,23 @@ public final class AeronTradingClusterService implements ClusteredService {
         return recovery;
     }
 
+    /**
+     * 按 Publication 能接收的最大负载切分快照，背压时重试同一段，不能跳过未发送的字节。
+     * @param snapshot Owner 在固定提交边界生成的分段快照
+     * @param publication Aeron 提供的快照写入通道
+     * @param awaitProgress 背压时检查故障、让出线程并继续推进的等待动作
+     */
     private void writeSnapshot(SectionedCoreSnapshotCodec.SectionedSnapshot snapshot,
                               ExclusivePublication publication, LongConsumer awaitProgress) {
+        // 整次快照写入共用的截止时间，单个片段成功不会重置它。
         long deadline = System.nanoTime() + SNAPSHOT_TIMEOUT_NS;
-        for (byte[] chunk : snapshot.chunks()) {
+        for (/* 快照中的一个连续字节块，可能还要拆成多个传输负载。 */ byte[] chunk : snapshot.chunks()) {
+            // 用 Aeron 接口需要的缓冲区视图包装原字节块，不再复制整份快照。
             var buffer = new UnsafeBuffer(chunk);
-            for (int offset = 0; offset < chunk.length;) {
+            for (/* 本块中下一个尚未成功发送的字节位置。 */ int offset = 0; offset < chunk.length;) {
+                // 本次只发送通道允许的大小，最后一段按剩余字节数缩短。
                 int length = Math.min(publication.maxPayloadLength(), chunk.length - offset);
+                // 非负表示已写入；负数是背压、临时管理操作或不可继续的通道故障。
                 long result = publication.offer(buffer, offset, length);
                 if (result >= 0) {
                     offset += length;
