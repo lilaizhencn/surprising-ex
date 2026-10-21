@@ -139,8 +139,8 @@ final class C2cHttpFixture implements AutoCloseable {
             context.registerBean(AdminApprovalRepository.class,()->new AdminApprovalRepository(jdbc));
             context.registerBean(AdminApprovalService.class,()->new AdminApprovalService(auth,bean(AdminAuditRepository.class),bean(AdminApprovalRepository.class),properties));
             context.registerBean(C2cAdminAccess.class,()->new C2cAdminAccess(auth,bean(AdminApprovalService.class),bean(AdminApprovalRepository.class),bean(AdminAuditRepository.class),new GatewayUserRepository(jdbc)));
-            context.registerBean(C2cAdminMarkets.class,()->new C2cAdminMarkets(jdbc,bean(C2cMarketService.class),bean(C2cQueryService.class),bean(C2cAdminAccess.class),products));
-            context.registerBean(C2cMerchantBonds.class,()->new C2cMerchantBonds(jdbc,bean(C2cFundsRepository.class),bean(C2cMarketService.class),bean(C2cAccess.class),bean(C2cAdminAccess.class),products));
+            context.registerBean(C2cAdminMarkets.class,()->C2cDatabaseFixture.adminMarkets(jdbc,bean(C2cMarketService.class),bean(C2cQueryService.class),bean(C2cAdminAccess.class),products));
+            context.registerBean(C2cMerchantBonds.class,()->C2cDatabaseFixture.bonds(jdbc,bean(C2cFundsRepository.class),bean(C2cMarketService.class),bean(C2cAccess.class),bean(C2cAdminAccess.class),products));
             context.registerBean(C2cAdminInitialization.class,()->new C2cAdminInitialization(bean(C2cAdminAccess.class),bean(C2cMarketService.class),products,db.transactions.getTransactionManager()));
             context.registerBean(C2cMerchantRepository.class,()->new C2cMerchantRepository(jdbc));
             context.registerBean(C2cPaymentAccountRepository.class,()->new C2cPaymentAccountRepository(jdbc));

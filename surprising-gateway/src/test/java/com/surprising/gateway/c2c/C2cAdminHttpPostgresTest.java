@@ -121,7 +121,7 @@ class C2cAdminHttpPostgresTest {
         UUID ad=fixture.publish("SELL"),quote=fixture.quote(ad,12,"2");
         UUID order=UUID.fromString((String)fixture.create(quote,12,"qa-fee-"+UUID.randomUUID(),"",200).get("resultId"));
         UUID oldQuote=fixture.quote(ad,12,"1");
-        var update=new C2cAdminMarkets.MarketInput(fixture.marketId,"1","USDT","CNY",2,true,"1","100000","1","100",2000,900,3,true,100,"Synthetic fee policy update");
+        var update=new C2cAdminController.MarketInput(fixture.marketId,"1","USDT","CNY",2,true,"1","100000","1","100",2000,900,3,true,100,"Synthetic fee policy update");
         fixture.call(HttpMethod.POST,"/api/v1/admin/c2c/markets",9,update,200);
         assertThat(fixture.bean(C2cAdsRepository.class).get(ad,false).status()).isEqualTo("PAUSED");
         assertThat(fixture.call(HttpMethod.GET,"/api/v1/c2c/quotes/"+oldQuote,12,null,200).get("valid")).isEqualTo(false);
@@ -149,16 +149,16 @@ class C2cAdminHttpPostgresTest {
 
     @Test void configurationCannotReopenUntilIntentsAndRealtimeBalancesReconcile() throws Exception {
         fixture.call(HttpMethod.POST,"/api/v1/c2c/ads",11,new C2cController.PublishRequest("qa-pending-"+UUID.randomUUID(),fixture.payload("SELL"),new C2cVerification("123456","")),200);
-        fixture.call(HttpMethod.PUT,"/api/v1/admin/c2c/configuration",9,new C2cAdminMarkets.ConfigurationInput("1",false,20,"Synthetic market closure"),200);
+        fixture.call(HttpMethod.PUT,"/api/v1/admin/c2c/configuration",9,new C2cAdminController.ConfigurationInput("1",false,20,"Synthetic market closure"),200);
         assertThat(fixture.call(HttpMethod.GET,"/api/v1/admin/c2c/reconciliation",9,null,200).get("status")).isEqualTo("PENDING");
-        fixture.call(HttpMethod.PUT,"/api/v1/admin/c2c/configuration",9,new C2cAdminMarkets.ConfigurationInput("2",true,20,"Synthetic market reopening"),409);
+        fixture.call(HttpMethod.PUT,"/api/v1/admin/c2c/configuration",9,new C2cAdminController.ConfigurationInput("2",true,20,"Synthetic market reopening"),409);
         fixture.settle();
         assertThat(fixture.call(HttpMethod.GET,"/api/v1/admin/c2c/reconciliation",9,null,200).get("status")).isEqualTo("MISMATCH");
         var configuration=fixture.bean(C2cMarketService.class).configuration();
         when(fixture.accountQueries.balances(configuration.escrowUserId())).thenReturn(new BalanceQueryResponse(1,List.of(
                 new BalanceResponse(configuration.escrowUserId(),"USDT",1000000000,0,1000000000,Instant.now()))));
         assertThat(fixture.call(HttpMethod.GET,"/api/v1/admin/c2c/reconciliation",9,null,200).get("status")).isEqualTo("MATCHED");
-        fixture.call(HttpMethod.PUT,"/api/v1/admin/c2c/configuration",9,new C2cAdminMarkets.ConfigurationInput("2",true,20,"Synthetic market reopening"),200);
+        fixture.call(HttpMethod.PUT,"/api/v1/admin/c2c/configuration",9,new C2cAdminController.ConfigurationInput("2",true,20,"Synthetic market reopening"),200);
     }
 
     @Test void intentFactsAndSettlementProgressCannotBeMutatedBySqlUpdates() throws Exception {
@@ -177,11 +177,11 @@ class C2cAdminHttpPostgresTest {
     @Test void ordinaryAdminWritesRespectGlobalApprovalAndRollbackConsumptionOnBadVersion() throws Exception {
         fixture.properties.getSecurity().setRequireApprovalForHighRiskAdminWrites(true);
         String path="/api/v1/admin/c2c/payment-methods";
-        var input=new C2cAdminMarkets.MethodInput("ALIPAY","1","Synthetic label",true,List.of("CNY"),false,true,"Synthetic payment method update");
+        var input=new C2cAdminController.MethodInput("ALIPAY","1","Synthetic label",true,List.of("CNY"),false,true,"Synthetic payment method update");
         fixture.call(HttpMethod.POST,path,9,input,403);
         long valid=approve(path,input,9,10);approved(path,9,input,valid,200);
         assertThat(approvalStatus(valid)).isEqualTo("CONSUMED");
-        var stale=new C2cAdminMarkets.MethodInput("ALIPAY","1","Stale label",true,List.of("CNY"),false,true,"Synthetic stale revision update");
+        var stale=new C2cAdminController.MethodInput("ALIPAY","1","Stale label",true,List.of("CNY"),false,true,"Synthetic stale revision update");
         long invalid=approve(path,stale,9,10);approved(path,9,stale,invalid,409);
         assertThat(approvalStatus(invalid)).isEqualTo("APPROVED");
         assertThat(fixture.db.jdbc.queryForObject("SELECT label FROM c2c_payment_methods WHERE code='ALIPAY'",String.class)).isEqualTo("Synthetic label");

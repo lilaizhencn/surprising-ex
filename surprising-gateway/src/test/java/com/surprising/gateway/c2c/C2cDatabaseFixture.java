@@ -86,6 +86,21 @@ final class C2cDatabaseFixture implements AutoCloseable {
                 new C2cAppealRepository(jdbc),submissions);
     }
 
+    static C2cAdminMarkets adminMarkets(JdbcTemplate jdbc,C2cMarketService markets,C2cQueryService queries,C2cAdminAccess access,
+                                       com.surprising.gateway.provider.product.GatewayProductServices products) {
+        return new C2cAdminMarkets(markets,queries,access,products,new C2cConfigurationRepository(jdbc),new C2cMarketRepository(jdbc),
+                new com.surprising.asset.repository.AssetRepository(jdbc),new C2cAdsRepository(jdbc),new C2cPaymentMethodRepository(jdbc),
+                new C2cPaymentAccountRepository(jdbc),new C2cFundsRepository(jdbc));
+    }
+
+    static C2cMerchantBonds bonds(JdbcTemplate jdbc,C2cFundsRepository funds,C2cMarketService markets,C2cAccess access,
+                                 C2cAdminAccess admin,com.surprising.gateway.provider.product.GatewayProductServices products) {
+        return new C2cMerchantBonds(funds,markets,access,admin,products,new GatewayUserRepository(jdbc),
+                new com.surprising.asset.repository.AssetRepository(jdbc),new C2cConfigurationRepository(jdbc),
+                new com.surprising.gateway.c2c.repository.C2cMerchantBondPolicyRepository(jdbc),new C2cMerchantBondRepository(jdbc),
+                new C2cMerchantRepository(jdbc),new C2cAdsRepository(jdbc),new C2cOrdersRepository(jdbc));
+    }
+
     static C2cProfiles profiles(JdbcTemplate jdbc,C2cAccess access,ComplianceService compliance,GatewayUserRepository users,
                                 C2cOrdersRepository orders,C2cMarketService markets,ObjectMapper json) {
         return new C2cProfiles(access,compliance,users,orders,markets,new com.surprising.gateway.c2c.repository.C2cProfileRepository(jdbc),

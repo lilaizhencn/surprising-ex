@@ -35,4 +35,18 @@ public class C2cPaymentMethodRepository {
                 Arrays.asList((String[]) r.getArray("currencies").getArray()), r.getBoolean("requires_bank_name"),
                 r.getBoolean("supports_qr"), r.getLong("revision"));
     }
+    public Optional<C2cPaymentMethod> find(String code) {
+        return jdbc.query("SELECT * FROM c2c_payment_methods WHERE code=?",this::read,code).stream().findFirst();
+    }
+    public void insert(C2cPaymentMethod method) {
+        jdbc.update("""
+                INSERT INTO c2c_payment_methods(code,label,enabled,currencies,requires_bank_name,supports_qr) VALUES(?,?,?,?::text[],?,?)
+                """,method.code(),method.label(),method.enabled(),"{"+String.join(",",method.currencies())+"}",method.requiresBankName(),method.supportsQr());
+    }
+    public void update(C2cPaymentMethod method) {
+        jdbc.update("""
+                UPDATE c2c_payment_methods SET label=?,enabled=?,currencies=?::text[],requires_bank_name=?,supports_qr=?,revision=revision+1 WHERE code=?
+                """,method.label(),method.enabled(),"{"+String.join(",",method.currencies())+"}",method.requiresBankName(),method.supportsQr(),method.code());
+    }
+
 }

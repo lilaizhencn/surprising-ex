@@ -16,4 +16,12 @@ public class C2cConfigurationRepository {
                 (row, n) -> new C2cConfiguration(row.getBoolean("enabled"), row.getLong("escrow_user_id"),
                         row.getLong("fee_user_id"), row.getInt("max_active_ads"), row.getLong("revision")));
     }
+    public void lockExclusive() {
+        jdbc.queryForList("SELECT singleton FROM c2c_configuration WHERE singleton FOR UPDATE");
+    }
+    public void update(boolean enabled,int maxAds,long actor) {
+        jdbc.update("UPDATE c2c_configuration SET enabled=?,max_active_ads=?,revision=revision+1,updated_by=?,updated_at=now() WHERE singleton",
+                enabled,maxAds,actor);
+    }
+
 }

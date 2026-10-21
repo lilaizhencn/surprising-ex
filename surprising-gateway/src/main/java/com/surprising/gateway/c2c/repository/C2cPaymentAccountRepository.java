@@ -95,4 +95,11 @@ public class C2cPaymentAccountRepository {
                         r.getString("status"), r.getLong("revision"), r.getString("review_reason"),
                         r.getTimestamp("created_at").toInstant()), status, status, userId, userId, count, offset);
     }
+    public void requireReviewByMethod(String code) {
+        jdbc.update("""
+                UPDATE c2c_payment_accounts SET status='PENDING',revision=revision+1,reviewed_by=NULL,reviewed_at=NULL,
+                    review_reason=NULL,updated_at=now() WHERE method_code=? AND status='APPROVED'
+                """,code);
+    }
+
 }

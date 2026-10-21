@@ -86,4 +86,8 @@ public class C2cMerchantRepository {
                 """,application,userId);
     }
 
+    public void withdraw(long userId) {
+        jdbc.update("UPDATE c2c_merchants SET status='WITHDRAWN',revision=revision+1,updated_at=now() WHERE user_id=?",userId);
+    }
+
 }

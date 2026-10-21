@@ -147,4 +147,11 @@ public class C2cOrdersRepository {
                 """,(r,n)->new OrderStats(r.getLong("completed"),r.getLong("canceled"),r.getLong("ongoing"),r.getLong("appealed")),userId,userId);
     }
 
+    public boolean hasOpenOrders(long userId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM c2c_orders WHERE (buyer_user_id=? OR seller_user_id=?)
+                    AND status NOT IN ('COMPLETED','CANCELED','EXPIRED','FAILED'))
+                """,Boolean.class,userId,userId));
+    }
+
 }

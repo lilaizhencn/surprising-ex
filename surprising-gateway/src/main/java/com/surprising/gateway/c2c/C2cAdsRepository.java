@@ -162,4 +162,11 @@ public class C2cAdsRepository {
                 methods,ids,r.getInt("payment_window_seconds"),r.getString("terms"),r.getInt("min_counterparty_completed"),
                 r.getString("status"),r.getLong("revision"));
     }
+    public void pauseByMarket(UUID marketId) {
+        jdbc.update("UPDATE c2c_ads SET status='PAUSED',revision=revision+1,updated_at=now() WHERE market_id=? AND status='ACTIVE'",marketId);
+    }
+    public void pauseByMethod(String code) {
+        jdbc.update("UPDATE c2c_ads SET status='PAUSED',revision=revision+1,updated_at=now() WHERE status='ACTIVE' AND ?=ANY(method_codes)",code);
+    }
+
 }

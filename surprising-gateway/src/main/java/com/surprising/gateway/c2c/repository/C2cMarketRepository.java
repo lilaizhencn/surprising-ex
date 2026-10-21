@@ -51,4 +51,20 @@ public class C2cMarketRepository {
                 r.getInt("buyer_fee_ppm"), r.getInt("payment_window_seconds"), r.getInt("max_open_orders"),
                 r.getBoolean("require_kyc"), r.getInt("vip_min_completed"), r.getLong("revision"));
     }
+    public void insert(C2cMarket market) {
+        jdbc.update("""
+                INSERT INTO c2c_markets(market_id,asset,fiat,fiat_decimals,enabled,min_fiat,max_fiat,min_price,max_price,buyer_fee_ppm,
+                    payment_window_seconds,max_open_orders,require_kyc,vip_min_completed)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,market.id(),market.asset(),market.fiat(),market.fiatDecimals(),market.enabled(),market.minFiat(),market.maxFiat(),
+                market.minPrice(),market.maxPrice(),market.buyerFeePpm(),market.paymentWindowSeconds(),market.maxOpenOrders(),market.requireKyc(),market.vipMinCompleted());
+    }
+    public void update(C2cMarket market) {
+        jdbc.update("""
+                UPDATE c2c_markets SET enabled=?,min_fiat=?,max_fiat=?,min_price=?,max_price=?,buyer_fee_ppm=?,payment_window_seconds=?,
+                    max_open_orders=?,require_kyc=?,vip_min_completed=?,revision=revision+1,updated_at=now() WHERE market_id=?
+                """,market.enabled(),market.minFiat(),market.maxFiat(),market.minPrice(),market.maxPrice(),market.buyerFeePpm(),
+                market.paymentWindowSeconds(),market.maxOpenOrders(),market.requireKyc(),market.vipMinCompleted(),market.id());
+    }
+
 }

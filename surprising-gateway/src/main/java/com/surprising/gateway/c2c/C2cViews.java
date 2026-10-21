@@ -5,6 +5,8 @@ import com.surprising.gateway.c2c.model.C2cMarket;
 import com.surprising.gateway.c2c.model.C2cOrder;
 import com.surprising.gateway.c2c.model.C2cPaymentAccount;
 import com.surprising.gateway.c2c.model.C2cQuote;
+import com.surprising.gateway.c2c.model.C2cPaymentMethod;
+import com.surprising.gateway.c2c.model.C2cReconciliation;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -128,6 +130,23 @@ public final class C2cViews {
         view.put("resultId", receipt == null ? null : text(receipt.resultId()));
         view.put("errorCode", receipt == null ? null : receipt.errorCode());
         view.put("message", receipt == null ? "原请求尚未确认，请继续查询或明确停止；勿更换标识重新提交" : receipt.errorMessage());
+        return view;
+    }
+    public static Map<String,Object> paymentMethod(C2cPaymentMethod method) {
+        return Map.of("code",method.code(),"label",method.label(),"enabled",method.enabled(),"currencies",method.currencies(),
+                "requiresBankName",method.requiresBankName(),"supportsQr",method.supportsQr(),"revision",Long.toString(method.revision()));
+    }
+    public static Map<String,Object> reconciliation(C2cReconciliation result) {
+        var view=new LinkedHashMap<String,Object>();view.put("status",result.status().name());
+        view.put("assets",result.assets().stream().map(row -> Map.<String,Object>of("asset",row.asset(),
+                "expectedEscrowUnits",row.expectedEscrow().toBigIntegerExact().toString(),"actualEscrowUnits",Long.toString(row.actualEscrow()),
+                "escrowLockedUnits",Long.toString(row.escrowLocked()),"expectedFeeUnits",row.expectedFees().toBigIntegerExact().toString(),
+                "actualFeeUnits",Long.toString(row.actualFees()),"feeLockedUnits",Long.toString(row.feeLocked()),"matches",row.matches())).toList());
+        switch(result.status()) {
+            case REVIEW_REQUIRED -> view.put("failedSettlementCount",Long.toString(result.failed()));
+            case UNAVAILABLE -> view.put("reason",result.reason());
+            default -> view.put("pendingIntentCount",Long.toString(result.pending()));
+        }
         return view;
     }
     public static String quantity(long units, long scale) {

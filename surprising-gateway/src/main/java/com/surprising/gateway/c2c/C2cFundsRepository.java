@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cFundTotals;
 import com.surprising.gateway.c2c.model.C2cProfileRows.Escrow;
 import com.surprising.gateway.c2c.model.C2cAdminRows.FundIntent;
 import java.nio.ByteBuffer;
@@ -122,6 +123,25 @@ public class C2cFundsRepository {
                 LEFT JOIN c2c_merchant_bonds b ON f.owner_type='MERCHANT' AND f.owner_id=b.bond_id JOIN assets a ON a.asset=f.asset
                 WHERE COALESCE(ad.maker_user_id,o.seller_user_id,b.user_id)=? GROUP BY f.asset,a.scale_units
                 """,(r,n)->new Escrow(r.getString("asset"),r.getLong("scale_units"),r.getBigDecimal("held"),r.getLong("pending"),r.getLong("failed")),userId);
+    }
+
+    public boolean hasPendingForUser(long userId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM c2c_fund_intents WHERE (source_user_id=? OR target_user_id=?) AND status NOT IN ('APPLIED','REJECTED'))
+                """,Boolean.class,userId,userId));
+    }
+    public long pendingCount() {
+        return jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents WHERE status NOT IN ('APPLIED','REJECTED')",Long.class);
+    }
+    public long failedSettlementCount() {
+        return jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents WHERE status='REJECTED' AND purpose NOT IN ('AD_RESERVE','ORDER_RESERVE','MERCHANT_BOND')",Long.class);
+    }
+    public List<C2cFundTotals> confirmedTotals(long escrow,long fees) {
+        return jdbc.query("""
+                SELECT asset,COALESCE(sum(CASE WHEN target_user_id=? THEN amount_units::numeric WHEN source_user_id=? THEN -amount_units::numeric ELSE 0 END),0) AS escrow,
+                    COALESCE(sum(CASE WHEN target_user_id=? THEN amount_units::numeric WHEN source_user_id=? THEN -amount_units::numeric ELSE 0 END),0) AS fees
+                FROM c2c_fund_intents WHERE status='APPLIED' GROUP BY asset
+                """,(r,n)->new C2cFundTotals(r.getString("asset"),r.getBigDecimal("escrow"),r.getBigDecimal("fees")),escrow,escrow,fees,fees);
     }
 
 }

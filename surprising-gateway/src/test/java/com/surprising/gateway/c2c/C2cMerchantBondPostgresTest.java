@@ -20,7 +20,7 @@ class C2cMerchantBondPostgresTest {
     }
     private Map<String,Object> deposit(UUID request) throws Exception {
         return f.call(HttpMethod.POST,"/api/v1/c2c/me/merchant-bond",12,
-                new C2cMerchantBonds.Deposit(request,"1",new C2cVerification("123456","")),200);
+                new C2cMerchantController.Deposit(request,"1",new C2cVerification("123456","")),200);
     }
     private Map<?,?> bond(Map<String,Object> response) {return (Map<?,?>)response.get("bond");}
     private void settle() {
@@ -57,7 +57,7 @@ class C2cMerchantBondPostgresTest {
         settle();
         assertThat(bond(deposit(request)).get("status")).isEqualTo("RESERVING");
         f.call(HttpMethod.POST,"/api/v1/c2c/me/merchant-bond",12,
-                new C2cMerchantBonds.Deposit(UUID.randomUUID(),"1",new C2cVerification("123456","")),409);
+                new C2cMerchantController.Deposit(UUID.randomUUID(),"1",new C2cVerification("123456","")),409);
         f.call(HttpMethod.POST,"/api/v1/c2c/me/merchant-bonds/"+bond(first).get("bondId")+"/withdraw",12,null,409);
         f.db.jdbc.update("UPDATE c2c_fund_intents SET retry_after=now() WHERE owner_type='MERCHANT'");
         when(f.core.transferOut(any(),any())).thenReturn(new ProductAccountAdjustment(ProductAccountAdjustment.Status.APPLIED,null));
@@ -102,7 +102,7 @@ class C2cMerchantBondPostgresTest {
     }
 
     @Test void policyNeedsPermissionAuditAndCannotChangeWhileBondsExist() throws Exception {
-        var policy=new C2cMerchantBonds.Policy("1","USDT","2","Change policy while existing merchant bond is locked");
+        var policy=new C2cMerchantController.Policy("1","USDT","2","Change policy while existing merchant bond is locked");
         f.call(HttpMethod.PUT,"/api/v1/admin/c2c/merchant-bond-policy",12,policy,403);
         f.call(HttpMethod.PUT,"/api/v1/admin/c2c/merchant-bond-policy",9,policy,409);
         assertThat(f.bean(C2cMerchantBonds.class).policy().get("amountUnits")).isEqualTo("100000000");
@@ -113,7 +113,7 @@ class C2cMerchantBondPostgresTest {
     @Test void insufficientBalanceAndInvalidSecurityNeverBecomeLockedBonds() throws Exception {
         apply();
         f.call(HttpMethod.POST,"/api/v1/c2c/me/merchant-bond",12,
-                new C2cMerchantBonds.Deposit(UUID.randomUUID(),"1",new C2cVerification("000000","")),409);
+                new C2cMerchantController.Deposit(UUID.randomUUID(),"1",new C2cVerification("000000","")),409);
         assertThat(f.db.jdbc.queryForObject("SELECT count(*) FROM c2c_merchant_bonds WHERE user_id=12",Integer.class)).isZero();
         when(f.core.transferOut(any(),any())).thenReturn(new ProductAccountAdjustment(ProductAccountAdjustment.Status.REJECTED,"INSUFFICIENT_BALANCE"));
         UUID request=UUID.randomUUID();deposit(request);settle();
