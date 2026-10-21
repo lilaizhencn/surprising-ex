@@ -4,6 +4,8 @@ Web 与 Flutter 使用同一条服务端 OIDC 授权链路，注册不要求密�
 
 ## 部署配置
 
+先在 BotFather 的管理小程序中选择机器人并进入 Login Widget。如果页面只显示域名以及 **Switch to OpenID Connect Login**，当前仍是旧版模式；点击该按钮切换到 OIDC 后，登记 Allowed URLs，并读取该页的 Client ID 与 Client Secret。Allowed URLs 必须包含带 `/api/v1/auth/telegram/callback` 的完整 HTTPS 回调地址。Bot API Token 不能代替登录 Secret。
+
 先执行 `deployment/migrations/20261020-telegram-login.sql` 和 `deployment/migrations/20261020-primary-authentication.sql`，新数据库使用 `init.sql`。在服务端配置环境变量：
 
 - `TELEGRAM_CLIENT_ID`：BotFather > Login Widget 的 Client ID。
@@ -52,3 +54,14 @@ JDK 27 的联合验证包含 `PrimaryAuthenticationDatabaseTest`、`LoginVerific
 App 的公开名片二维码仅包含 `surprising://user/<UID>`，不含会话、邮箱、手机号或余额。`POST /api/v1/users/scan` 要求现有 Bearer 会话，正文 `{qrCode}`；服务端严格解析平台 URI 并返回 `{userId, displayName}`。客户端显示服务端解析的昵称，不信任二维码中附加的名称，也不执行转账、外部跳转或登录动作。冻结或不存在的账户返回不可用。
 
 `UserCardControllerTest` 4 项通过，覆盖公开资料范围、外部地址、非法/溢出 UID、冻结或不存在账户，以及无效会话。
+
+
+## 本地真实配置验收（2026-10-21）
+
+登录专用 Secret 已放入工作树之外、权限为 `0600` 的本地配置文件，并重载专用 QA 网关。该值不会写入前端、截图、文档或 Git。配置检查返回 `enabled: true` 且禁止缓存。
+
+实际 HTTP 验证覆盖发起流程的 state、nonce、S256 PKCE、待授权轮询、错误设备/错误领取凭据拒绝，以及经 Cloudflare 公网隧道到专用网关的取消授权回调和重复回调拒绝。真实 Chrome 已从 Web 的 Telegram 按钮进入 `oauth.telegram.org` 的 OIDC 授权页，取消后按钮恢复可用；随后用户已在真实 Telegram 完成授权；专用数据库确认创建了一个 Telegram 身份绑定、非空昵称、无密码账户与有效会话。没有记录身份 subject、昵称内容或令牌。
+
+本地 Web 使用 `http://127.0.0.1:5173`，代理至 `http://127.0.0.1:19094`。网关的 `GatewayCorsConfig` 已允许标准开发端口；此前临时端口 `15474` 的浏览器 POST 请求被 Origin 白名单拒绝，而没有 Origin 的接口请求可以成功，因此接口冒烟测试不能代替实际浏览器测试。当前改用空闲的标准开发端口，保留既有跨域校验。
+
+用户已确认实际登录成功，并明确要求合并主分支。iOS 真机扫码、相册与防截图验收仍单独保留为未验收项，合并不能表述为这些项目已通过。详见 `docs/validation/telegram-configuration-20261021.json`。
