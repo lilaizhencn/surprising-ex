@@ -86,6 +86,22 @@ final class C2cDatabaseFixture implements AutoCloseable {
                 new C2cAppealRepository(jdbc),submissions);
     }
 
+    static C2cConversations conversations(JdbcTemplate jdbc,C2cOrdersRepository orders) {
+        return new C2cConversations(new com.surprising.gateway.c2c.repository.C2cConversationRepository(jdbc),
+                new com.surprising.gateway.c2c.repository.C2cMessageReadRepository(jdbc),orders,
+                new com.surprising.gateway.c2c.repository.C2cProfileRepository(jdbc),new C2cRelationRepository(jdbc),new GatewayUserRepository(jdbc));
+    }
+    static C2cAttachments attachments(JdbcTemplate jdbc,C2cConversations conversations,C2cOrdersRepository orders,
+                                      C2cPaymentAccounts payments,C2cR2Storage storage,org.springframework.transaction.PlatformTransactionManager transactions) {
+        return new C2cAttachments(new C2cAttachmentRepository(jdbc),new com.surprising.gateway.c2c.repository.C2cMessageRepository(jdbc),
+                new GatewayUserRepository(jdbc),conversations,orders,payments,storage,transactions);
+    }
+    static C2cMessages messages(JdbcTemplate jdbc,C2cConversations conversations,C2cAttachments attachments,ObjectMapper json) {
+        return new C2cMessages(new com.surprising.gateway.c2c.repository.C2cMessageRepository(jdbc),
+                new com.surprising.gateway.c2c.repository.C2cMessageReadRepository(jdbc),new com.surprising.gateway.c2c.repository.C2cConversationRepository(jdbc),
+                new C2cOrderEventRepository(jdbc,json),new GatewayUserRepository(jdbc),conversations,attachments);
+    }
+
     static C2cAdminMarkets adminMarkets(JdbcTemplate jdbc,C2cMarketService markets,C2cQueryService queries,C2cAdminAccess access,
                                        com.surprising.gateway.provider.product.GatewayProductServices products) {
         return new C2cAdminMarkets(markets,queries,access,products,new C2cConfigurationRepository(jdbc),new C2cMarketRepository(jdbc),

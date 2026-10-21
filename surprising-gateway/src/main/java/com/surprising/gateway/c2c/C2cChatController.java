@@ -1,6 +1,9 @@
 package com.surprising.gateway.c2c;
 
 import java.io.IOException;
+import com.surprising.gateway.c2c.model.C2cChatViews;
+import com.surprising.gateway.c2c.model.C2cAttachmentContent;
+import com.surprising.gateway.c2c.utils.C2cChatCursors;
 import java.util.*;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.*;
@@ -24,28 +27,36 @@ public class C2cChatController {
     }
     @PostMapping("/conversations")
     public Map<String,Object> start(@RequestHeader(value="Authorization",required=false) String auth,@RequestBody Start request) {
-        var user=access.user(auth);return conversations.start(user.userId(),request.orderId(),request.targetUserId());
+        var user=access.user(auth);
+        if((request.orderId()==null)==(request.targetUserId()==null) || (request.targetUserId()!=null && request.targetUserId()<=0))
+            throw new IllegalArgumentException("请选择订单或咨询对象");
+        return conversations.start(user.userId(),request.orderId(),request.targetUserId());
     }
     @GetMapping("/conversations")
     public Map<String,Object> list(@RequestHeader(value="Authorization",required=false) String auth,
             @RequestParam(defaultValue="") String search,@RequestParam(defaultValue="30") int limit,@RequestParam(defaultValue="0") int offset) {
-        return conversations.list(access.user(auth).userId(),search,limit,offset);
+        var user=access.user(auth);
+        if(limit<1 || limit>50 || offset<0 || offset>10000 || search==null || search.length()>80) throw new IllegalArgumentException("会话查询条件无效");
+        return conversations.list(user.userId(),search,limit,offset);
     }
     @GetMapping("/conversations/{id}/messages")
-    public Map<String,Object> page(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID id,
+    public C2cChatViews.Page page(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID id,
             @RequestParam(defaultValue="0") String after,@RequestParam(required=false) String before,
             @RequestParam(defaultValue="0") String afterEvent,@RequestParam(defaultValue="50") int limit,
             @RequestParam(defaultValue="false") boolean latest) {
         var user=access.user(auth);
+        pageRange(0,null,0,limit);
         if(latest) {
             if(!"0".equals(after) || before!=null || !"0".equals(afterEvent)) throw new IllegalArgumentException("最近消息不能混用其他游标");
             return messages.latest(user.userId(),id,limit);
         }
-        return messages.page(user.userId(),id,C2cMessages.cursor(after),before==null?null:C2cMessages.cursor(before),C2cMessages.cursor(afterEvent),limit);
+        long a=C2cChatCursors.parse(after),e=C2cChatCursors.parse(afterEvent);Long older=before==null?null:C2cChatCursors.parse(before);
+        pageRange(a,older,e,limit);return messages.page(user.userId(),id,a,older,e,limit);
     }
     @PostMapping("/conversations/{id}/messages")
-    public Map<String,Object> send(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID id,@RequestBody Send request) {
-        return messages.send(access.user(auth).userId(),id,request.requestId(),request.text(),request.attachmentId());
+    public C2cChatViews.Message send(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID id,@RequestBody Send request) {
+        var user=access.user(auth);String text=messageText(request.text());
+        requireMessage(request.requestId(),text,request.attachmentId());return messages.send(user.userId(),id,request.requestId(),text,request.attachmentId());
     }
     @GetMapping("/conversations/{id}/requests/{request}")
     public Map<String,Object> receipt(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID id,@PathVariable UUID request) {
@@ -53,7 +64,7 @@ public class C2cChatController {
     }
     @PostMapping("/conversations/{id}/read")
     public Map<String,Object> read(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID id,@RequestBody Read request) {
-        return messages.markRead(access.user(auth).userId(),id,C2cMessages.cursor(request.messageId()),C2cMessages.cursor(request.eventId()));
+        return messages.markRead(access.user(auth).userId(),id,C2cChatCursors.parse(request.messageId()),C2cChatCursors.parse(request.eventId()));
     }
     @PostMapping(value="/attachments/{id}",consumes=MediaType.MULTIPART_FORM_DATA_VALUE)
     public Map<String,Object> upload(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID id,
@@ -61,7 +72,9 @@ public class C2cChatController {
             @RequestParam MultipartFile file) throws IOException {
         var user=access.user(auth);
         if(file.getSize()>10485760) throw new IllegalArgumentException("请选择 10MB 以内的文件");
-        return attachments.upload(user.userId(),id,purpose,orderId,conversationId,file.getOriginalFilename(),file.getContentType(),file.getBytes());
+        byte[] bytes=file.getBytes();String name=fileName(file.getOriginalFilename());
+        uploadMetadata(id,purpose,orderId,conversationId,file.getContentType(),bytes.length);
+        return attachments.upload(user.userId(),id,purpose,orderId,conversationId,name,file.getContentType(),bytes);
     }
     @GetMapping("/attachments/{id}")
     public Map<String,Object> attachment(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID id) {
@@ -69,8 +82,10 @@ public class C2cChatController {
     }
     @PostMapping("/attachments/{id}/presigned-put")
     public Map<String,Object> presign(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID id,@RequestBody Upload request) {
-        return attachments.presign(access.user(auth).userId(),id,request.purpose(),request.orderId(),request.conversationId(),
-                request.name(),request.contentType(),request.byteCount(),request.sha256());
+        var user=access.user(auth);String name=fileName(request.name());
+        uploadMetadata(id,request.purpose(),request.orderId(),request.conversationId(),request.contentType(),request.byteCount());
+        if(request.sha256()==null || !request.sha256().matches("[a-f0-9]{64}")) throw new IllegalArgumentException("文件内容摘要无效");
+        return attachments.presign(user.userId(),id,request.purpose(),request.orderId(),request.conversationId(),name,request.contentType(),request.byteCount(),request.sha256());
     }
     @PostMapping("/attachments/{id}/confirm")
     public Map<String,Object> confirm(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID id) {
@@ -81,7 +96,34 @@ public class C2cChatController {
             @RequestParam(required=false) UUID orderId) {
         return file(attachments.download(access.user(auth).userId(),id,orderId));
     }
-    static ResponseEntity<byte[]> file(C2cAttachments.Content content) {
+    static String messageText(String raw) {
+        String text=raw==null?"":raw.replace("\r\n","\n").strip();
+        if(text.length()>4000 || text.codePoints().anyMatch(c -> Character.isISOControl(c) && c!='\n' && c!='\t'))
+            throw new IllegalArgumentException("消息内容无效或超过 4000 字");
+        return text;
+    }
+    static void requireMessage(UUID request,String text,UUID attachment) {
+        if(request==null || (text.isBlank() && attachment==null)) throw new IllegalArgumentException("请输入消息或选择附件");
+    }
+    static void pageRange(long after,Long before,long event,int limit) {
+        if(after<0 || event<0 || (before!=null && (before<1 || after!=0)) || limit<1 || limit>50)
+            throw new IllegalArgumentException("消息查询条件无效");
+    }
+    private static String fileName(String name) {
+        if(name==null || name.isBlank() || name.length()>160 || name.indexOf('/')>=0 || name.indexOf('\\')>=0
+                || name.codePoints().anyMatch(Character::isISOControl)) throw new IllegalArgumentException("文件名无效");
+        return name.trim();
+    }
+    private static void uploadMetadata(UUID id,String purpose,UUID order,UUID conversation,String mime,int bytes) {
+        if(id==null || purpose==null || !Set.of("PAYMENT_QR","PROOF","MESSAGE").contains(purpose)
+                || mime==null || !Set.of("image/jpeg","image/png","application/pdf").contains(mime)
+                || ("PAYMENT_QR".equals(purpose) && "application/pdf".equals(mime)) || bytes<8 || bytes>10485760)
+            throw new IllegalArgumentException("文件格式、大小或用途无效");
+        if("PAYMENT_QR".equals(purpose) && (order!=null || conversation!=null)) throw new IllegalArgumentException("收款码不能绑定其他用途");
+        if("PROOF".equals(purpose) && (order==null || conversation!=null)) throw new IllegalArgumentException("付款凭证必须绑定订单");
+        if("MESSAGE".equals(purpose) && conversation==null) throw new IllegalArgumentException("消息附件必须绑定会话");
+    }
+    static ResponseEntity<byte[]> file(C2cAttachmentContent content) {
         boolean image=content.mime().startsWith("image/");
         return ResponseEntity.ok().header("Cache-Control","no-store").header("X-Content-Type-Options","nosniff")
                 .header("Content-Security-Policy","sandbox; default-src 'none'")

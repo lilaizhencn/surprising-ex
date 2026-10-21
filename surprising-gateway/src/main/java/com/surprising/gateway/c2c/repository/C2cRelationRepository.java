@@ -35,4 +35,8 @@ public class C2cRelationRepository {
         jdbc.update("DELETE FROM c2c_relations WHERE user_id=? AND target_user_id=? AND kind=?",userId,target,kind);
     }
 
+    public boolean follows(long user,long target) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM c2c_relations WHERE user_id=? AND target_user_id=? AND kind='FOLLOW')",Boolean.class,user,target));
+    }
+
 }

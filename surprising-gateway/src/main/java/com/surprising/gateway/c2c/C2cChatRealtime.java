@@ -1,6 +1,8 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.websocket.provider.service.ClientConnection;
+import com.surprising.gateway.c2c.model.C2cChatViews;
+import com.surprising.gateway.c2c.utils.C2cChatCursors;
 import jakarta.annotation.PreDestroy;
 import java.time.Instant;
 import java.util.*;
@@ -8,7 +10,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
@@ -56,8 +57,8 @@ public class C2cChatRealtime {
             switch(command.op()) {
                 case "c2c.watch" -> {
                     UUID id=UUID.fromString(command.conversationId());conversations.get(user,id,false);
-                    long after=C2cMessages.cursor(command.after()==null?"0":command.after());
-                    long event=C2cMessages.cursor(command.afterEvent()==null?"0":command.afterEvent());
+                    long after=C2cChatCursors.parse(command.after()==null?"0":command.after());
+                    long event=C2cChatCursors.parse(command.afterEvent()==null?"0":command.afterEvent());
                     var page=messages.page(user,id,after,null,event,20);
                     subscription.conversation=id;subscription.after=after;subscription.event=event;subscription.reads=null;
                     deliver(subscription,page,true);
@@ -70,7 +71,6 @@ public class C2cChatRealtime {
         } finally {subscription.lock.unlock();}
     }
 
-    @Scheduled(fixedDelay=1000,scheduler="c2cChatScheduler")
     public void poll() {
         for(var entry:subscriptions.entrySet()) {
             var subscription=entry.getValue();if(!subscription.lock.tryLock())continue;
@@ -103,13 +103,13 @@ public class C2cChatRealtime {
             throw C2cProblem.forbidden("登录状态已失效，请重新登录");
         }
     }
-    private void deliver(Subscription subscription,Map<String,Object> page,boolean initial) {
-        var items=(List<Map<String,Object>>)page.get("messages");var events=(List<Map<String,Object>>)page.get("orderEvents");
-        String reads=json.writeValueAsString(page.get("reads"));
+    private void deliver(Subscription subscription,C2cChatViews.Page page,boolean initial) {
+        var items=page.messages();var events=page.orderEvents();
+        String reads=json.writeValueAsString(page.reads());
         if(initial || !items.isEmpty() || !events.isEmpty() || !reads.equals(subscription.reads)) {
             if(send(subscription,Map.of("op","c2c.messages","channel","c2c.messages","data",page))) {
-                if(!items.isEmpty())subscription.after=C2cMessages.cursor((String)items.getLast().get("messageId"));
-                if(!events.isEmpty())subscription.event=C2cMessages.cursor((String)events.getLast().get("eventId"));
+                if(!items.isEmpty())subscription.after=items.getLast().messageId();
+                if(!events.isEmpty())subscription.event=events.getLast().eventId();
                 subscription.reads=reads;
             }
         }

@@ -1,6 +1,8 @@
 package com.surprising.gateway.c2c;
 
 import java.util.*;
+import com.surprising.gateway.c2c.model.C2cChatViews;
+import com.surprising.gateway.c2c.model.C2cAttachmentContent;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,12 +17,12 @@ public class C2cAdminChat {
         this.access=access;this.orders=orders;this.messages=messages;this.attachments=attachments;
     }
     @Transactional
-    Map<String,Object> history(String auth,C2cAdminAccess.Request request,UUID order,long after,Long before,long event,int limit) {
+    C2cChatViews.Page history(String auth,C2cAdminAccess.Request request,UUID order,long after,Long before,long event,int limit) {
         var administrator=access.read(auth,true);orders.get(order,false);access.audit(administrator,request,new byte[0]);
         return messages.adminPage(order,after,before,event,limit);
     }
     @Transactional
-    Map<String,Object> latest(String auth,C2cAdminAccess.Request request,UUID order,int limit) {
+    C2cChatViews.Page latest(String auth,C2cAdminAccess.Request request,UUID order,int limit) {
         var administrator=access.read(auth,true);orders.get(order,false);access.audit(administrator,request,new byte[0]);
         return messages.adminLatest(order,limit);
     }
@@ -30,15 +32,14 @@ public class C2cAdminChat {
         return messages.adminReceipt(administrator.userId(),order,messageRequest);
     }
     @Transactional
-    C2cAttachments.Content attachment(String auth,C2cAdminAccess.Request request,UUID order,UUID attachment) {
+    C2cAttachmentContent attachment(String auth,C2cAdminAccess.Request request,UUID order,UUID attachment) {
         var administrator=access.read(auth,true);access.audit(administrator,request,new byte[0]);
         return attachments.adminDownload(attachment,order);
     }
     @Transactional
-    Map<String,Object> reply(String auth,C2cAdminAccess.Request metadata,UUID order,C2cChatController.Send request,byte[] body) {
+    C2cChatViews.Message reply(String auth,C2cAdminAccess.Request metadata,UUID order,UUID request,String text,byte[] body) {
         access.read(auth,true);var administrator=access.write(auth,metadata,body);
-        if(request.attachmentId()!=null) throw new IllegalArgumentException("客服回复暂只支持文字");
-        var result=messages.support(administrator.userId(),order,request.requestId(),request.text());
+        var result=messages.support(administrator.userId(),order,request,text);
         access.audit(administrator,metadata,body);return result;
     }
 }

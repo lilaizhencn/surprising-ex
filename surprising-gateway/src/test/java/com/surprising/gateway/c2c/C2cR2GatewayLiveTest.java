@@ -29,7 +29,7 @@ class C2cR2GatewayLiveTest {
         var credentials=StaticCredentialsProvider.create(AwsBasicCredentials.create(properties.getAccessKeyId(),properties.getSecretAccessKey()));
         try(var client=S3Client.builder().endpointOverride(URI.create(properties.getEndpoint())).region(Region.of(properties.getRegion()))
                 .credentialsProvider(credentials).forcePathStyle(true).build();var storage=new C2cR2Storage(properties);var fixture=new C2cHttpFixture()) {
-            var attachments=new C2cAttachments(fixture.db.jdbc,fixture.bean(C2cConversations.class),fixture.bean(C2cOrdersRepository.class),
+            var attachments=C2cDatabaseFixture.attachments(fixture.db.jdbc,fixture.bean(C2cConversations.class),fixture.bean(C2cOrdersRepository.class),
                     fixture.bean(C2cPaymentAccounts.class),storage,fixture.db.transactions.getTransactionManager());
             var mvc=MockMvcBuilders.standaloneSetup(new C2cChatController(fixture.bean(C2cAccess.class),fixture.bean(C2cConversations.class),
                     fixture.bean(C2cMessages.class),attachments)).setControllerAdvice(new C2cHttpErrors()).build();

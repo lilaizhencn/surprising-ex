@@ -27,4 +27,13 @@ public class C2cOrderEventRepository {
         jdbc.update("INSERT INTO c2c_order_events(order_id,actor_user_id,event_type,details) VALUES(?,?,?,?::jsonb)",
                 orderId, actor, type, json.writeValueAsString(details));
     }
+    public List<C2cOrderEvent> after(UUID order,long after,int count) {
+        return jdbc.query("SELECT * FROM c2c_order_events WHERE order_id=? AND event_id>? ORDER BY event_id LIMIT ?",(r,n)->
+                new C2cOrderEvent(r.getLong("event_id"),r.getObject("actor_user_id",Long.class),r.getString("event_type"),
+                        json.readTree(r.getString("details")),r.getTimestamp("created_at").toInstant()),order,after,count);
+    }
+    public boolean exists(UUID order,long id) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM c2c_order_events WHERE order_id=? AND event_id=?)",Boolean.class,order,id));
+    }
+
 }

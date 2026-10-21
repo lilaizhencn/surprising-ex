@@ -153,10 +153,10 @@ final class C2cHttpFixture implements AutoCloseable {
             context.registerBean(C2cAdminReview.class,()->new C2cAdminReview(bean(C2cAdminAccess.class),bean(C2cMerchantRepository.class),bean(C2cAppealRepository.class),
                     bean(C2cPaymentAccountRepository.class),bean(C2cReportRepository.class),bean(C2cMarketService.class),bean(C2cAdsRepository.class),bean(C2cAds.class),
                     bean(C2cOrdersRepository.class),bean(C2cOrders.class),bean(C2cPaymentAccounts.class),bean(C2cQueryService.class),compliance,new GatewayUserRepository(jdbc)));
-            context.registerBean(C2cConversations.class,()->new C2cConversations(jdbc,bean(C2cOrdersRepository.class)));
-            context.registerBean(C2cAttachments.class,()->new C2cAttachments(jdbc,bean(C2cConversations.class),bean(C2cOrdersRepository.class),
+            context.registerBean(C2cConversations.class,()->C2cDatabaseFixture.conversations(jdbc,bean(C2cOrdersRepository.class)));
+            context.registerBean(C2cAttachments.class,()->C2cDatabaseFixture.attachments(jdbc,bean(C2cConversations.class),bean(C2cOrdersRepository.class),
                     bean(C2cPaymentAccounts.class),new C2cR2Storage(r2),db.transactions.getTransactionManager()));
-            context.registerBean(C2cMessages.class,()->new C2cMessages(jdbc,bean(C2cConversations.class),bean(C2cAttachments.class),json));
+            context.registerBean(C2cMessages.class,()->C2cDatabaseFixture.messages(jdbc,bean(C2cConversations.class),bean(C2cAttachments.class),json));
             context.registerBean(C2cAdminChat.class,()->new C2cAdminChat(bean(C2cAdminAccess.class),bean(C2cOrdersRepository.class),bean(C2cMessages.class),bean(C2cAttachments.class)));
             context.refresh();
             makerAccount=bean(C2cPaymentAccounts.class).save(11,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Maker","qa-maker-account","",null)).id();

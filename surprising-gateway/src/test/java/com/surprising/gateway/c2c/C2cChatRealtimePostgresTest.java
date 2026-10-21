@@ -54,9 +54,9 @@ class C2cChatRealtimePostgresTest {
         socket.closed(session.getId());wires.remove(session.getId()).close();frames.clear();
         var second=fixture.bean(C2cMessages.class).send(11,id,UUID.randomUUID(),"断线后的消息",null);
         var resumed=session("resumed");command(resumed,Map.of("op","authenticate","token","qa-12"));
-        command(resumed,Map.of("op","c2c.watch","conversationId",id.toString(),"after",original.get("messageId"),"afterEvent","0"));
+        command(resumed,Map.of("op","c2c.watch","conversationId",id.toString(),"after",Long.toString(original.messageId()),"afterEvent","0"));
         awaitFrame("断线后的消息");assertThat(frames.stream().noneMatch(frame->frame.contains("断线前的消息"))).isTrue();
-        assertThat(second.get("messageId")).isNotEqualTo(original.get("messageId"));
+        assertThat(Long.toString(second.messageId())).isNotEqualTo(Long.toString(original.messageId()));
     }
     @Test void committedMessagesFromAnotherNodeAndReadReceiptsAreObservedFromSharedStorage() throws Exception {
         UUID id=UUID.fromString((String)fixture.bean(C2cConversations.class).start(12,null,11L).get("conversationId"));
@@ -64,7 +64,7 @@ class C2cChatRealtimePostgresTest {
         command(session,Map.of("op","c2c.watch","conversationId",id.toString()));awaitFrame("messages");
         var sent=fixture.bean(C2cMessages.class).send(11,id,UUID.randomUUID(),"另一进程写入的消息",null);
         socket.poll();awaitFrame("另一进程写入的消息");
-        frames.clear();fixture.bean(C2cMessages.class).markRead(11,id,Long.parseLong((String)sent.get("messageId")),0);
+        frames.clear();fixture.bean(C2cMessages.class).markRead(11,id,sent.messageId(),0);
         socket.poll();awaitFrame("\"revision\":\"1\"");
     }
     @Test void logoutOrRevocationClosesTheConnectionBeforeAnyFurtherPrivateDelivery() throws Exception {
