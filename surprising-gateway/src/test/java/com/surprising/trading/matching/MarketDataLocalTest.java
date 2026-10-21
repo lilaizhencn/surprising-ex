@@ -65,7 +65,7 @@ class MarketDataLocalTest {
     void unavailableRealtimeIsNotAnEmptyBookOrCoreQuery(ProductLine product) {
         var realtime = mock(ValkeyMarketData.class);
         when(realtime.requireBook(product, "1")).thenThrow(
-                new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "MARKET_BOOK_UNAVAILABLE"));
+                new com.surprising.realtime.api.exception.ReadViewUnavailableException("MARKET_BOOK_UNAVAILABLE"));
         var controller = new MarketDataInternalController(new MatchingMarketDataService(realtime, product));
         assertThatThrownBy(() -> controller.orderBook("1", 30))
                 .isInstanceOf(ResponseStatusException.class).hasMessageContaining("503");

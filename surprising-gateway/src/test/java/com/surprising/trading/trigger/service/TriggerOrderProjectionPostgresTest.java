@@ -36,15 +36,15 @@ class TriggerOrderProjectionPostgresTest {
         jdbc.update("INSERT INTO core_trigger_order_projection VALUES (?,?,?,?,?,?,?,?,?,?,?)", "OPTION",id,user,v.clientTriggerOrderId(),"74",status.name(),time,time+1,2,20,CoreTriggerOrderCodec.encodeList(List.of(v)));
     }
     @Test void absentInitializationIs503RatherThanAnEmptyHistory() {
-        assertThatThrownBy(()->repository.get(ProductLine.OPTION,7L,99)).isInstanceOfSatisfying(ResponseStatusException.class,e->assertThat(e.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
-        assertThatThrownBy(()->repository.search(ProductLine.OPTION,null,null,null,null,10,null,null)).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(()->repository.get(ProductLine.OPTION,7L,99)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
+        assertThatThrownBy(()->repository.search(ProductLine.OPTION,null,null,null,null,10,null,null)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
     }
     @Test void terminalPointReadsKeepProductUserAndExactInt64Identity() {
         ready();add(Long.MAX_VALUE,7,1000,CoreTriggerOrderStatus.CANCELED);
         assertThat(repository.get(ProductLine.OPTION,7L,Long.MAX_VALUE)).hasValueSatisfying(v->{
             assertThat(v.status()).isEqualTo(CoreTriggerOrderStatus.CANCELED);assertThat(v.priceSource()).isEqualTo(CoreTriggerPriceSource.LAST);});
         assertThat(repository.get(ProductLine.OPTION,8L,Long.MAX_VALUE)).isEmpty();
-        assertThatThrownBy(()->repository.get(ProductLine.SPOT,7L,Long.MAX_VALUE)).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(()->repository.get(ProductLine.SPOT,7L,Long.MAX_VALUE)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         assertThat(repository.get(ProductLine.OPTION,null,Long.MAX_VALUE)).isPresent();
     }
     @Test void bothSortDirectionsUseCreationTimeAndInt64TieBreakerWithoutGaps() {
@@ -69,8 +69,8 @@ class TriggerOrderProjectionPostgresTest {
     @Test void corruptRowsAndUnavailableStorageAre503() {
         ready();add(1,7,1000,CoreTriggerOrderStatus.CANCELED);
         jdbc.update("UPDATE core_trigger_order_projection SET user_id=8");
-        assertThatThrownBy(()->repository.get(ProductLine.OPTION,null,1)).isInstanceOfSatisfying(ResponseStatusException.class,e->assertThat(e.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+        assertThatThrownBy(()->repository.get(ProductLine.OPTION,null,1)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         jdbc.execute("DROP TABLE core_trigger_order_projection");
-        assertThatThrownBy(()->repository.get(ProductLine.OPTION,null,1)).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(()->repository.get(ProductLine.OPTION,null,1)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
     }
 }

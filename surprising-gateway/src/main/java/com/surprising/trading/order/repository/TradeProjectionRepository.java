@@ -7,10 +7,9 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.*;
 import org.springframework.dao.DataAccessException;
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import org.springframework.web.server.ResponseStatusException;
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 
 /** User fills and admin history read the realtime-owned committed execution table only. */
 @Repository
@@ -57,7 +56,7 @@ public final class TradeProjectionRepository {
         args.add(limit + 1);
         try {
             if (!Integer.valueOf(1).equals(jdbc.queryForObject("SELECT count(*) FROM core_execution_projection_initialization WHERE product_line=?", Integer.class, product.name())))
-                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "TRADE_READ_VIEW_INITIALIZING");
+                throw new ReadViewUnavailableException("TRADE_READ_VIEW_INITIALIZING");
             var values = jdbc.query(sql.toString(), (rs, row) -> {
                 try {
                     var fill = new TradeFillResponse(rs.getString("trade_id"), product, rs.getString("instrument_id"),
@@ -72,7 +71,7 @@ public final class TradeProjectionRepository {
                         throw new IllegalStateException("invalid committed private fill");
                     return new ProjectedFill(fill, sequence, index);
                 } catch (RuntimeException invalid) {
-                    throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "TRADE_READ_VIEW_INVALID", invalid);
+                    throw new ReadViewUnavailableException("TRADE_READ_VIEW_INVALID", invalid);
                 }
             }, args.toArray());
             boolean more = values.size() > limit;
@@ -83,7 +82,7 @@ public final class TradeProjectionRepository {
                             + ':' + last.index() + ':' + last.fill().liquidityRole()).getBytes(StandardCharsets.UTF_8));
             return new TradeFillQueryResponse(userId, product, page.size(), page.stream().map(ProjectedFill::fill).toList(), next, more, "eventTime.desc", limit);
         } catch (DataAccessException unavailable) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "TRADE_READ_VIEW_UNAVAILABLE", unavailable);
+            throw new ReadViewUnavailableException("TRADE_READ_VIEW_UNAVAILABLE", unavailable);
         }
     }
 
@@ -133,7 +132,7 @@ public final class TradeProjectionRepository {
                 .append(",execution_index").append(direction).append(" LIMIT ?"); args.add(limit + 1);
         try {
             if (!Integer.valueOf(1).equals(jdbc.queryForObject("SELECT count(*) FROM core_execution_projection_initialization WHERE product_line=?", Integer.class, product.name())))
-                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "TRADE_READ_VIEW_INITIALIZING");
+                throw new ReadViewUnavailableException("TRADE_READ_VIEW_INITIALIZING");
             var values = jdbc.query(sql.toString(), (rs, row) -> {
                 try {
                     var value = new AdminTradeResponse(rs.getString("trade_id"), product, rs.getString("instrument_id"),
@@ -149,7 +148,7 @@ public final class TradeProjectionRepository {
                         throw new IllegalStateException("invalid committed execution");
                     return value;
                 } catch (RuntimeException invalid) {
-                    throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "TRADE_READ_VIEW_INVALID", invalid);
+                    throw new ReadViewUnavailableException("TRADE_READ_VIEW_INVALID", invalid);
                 }
             }, args.toArray());
             boolean more = values.size() > limit;
@@ -159,7 +158,7 @@ public final class TradeProjectionRepository {
                     ("trade-v1:" + scope + ':' + last.eventTime().toEpochMilli() + ':' + last.clusterPosition() + ':' + last.executionIndex()).getBytes(StandardCharsets.UTF_8));
             return new AdminTradeQueryResponse(product, page.size(), page, next, more, ordering, limit);
         } catch (DataAccessException unavailable) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "TRADE_READ_VIEW_UNAVAILABLE", unavailable);
+            throw new ReadViewUnavailableException("TRADE_READ_VIEW_UNAVAILABLE", unavailable);
         }
     }
 

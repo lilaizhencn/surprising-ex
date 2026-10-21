@@ -1,5 +1,7 @@
 package com.surprising.trading.trigger.service;
 
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
+
 import com.surprising.trading.trigger.repository.TriggerOrderProjectionRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -344,8 +346,7 @@ public class TriggerOrderService {
     }
 
     private com.surprising.realtime.api.ValkeyUserQueries requireRealtimeQueries() {
-        if (realtimeQueries == null) throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_UNAVAILABLE");
+        if (realtimeQueries == null) throw new ReadViewUnavailableException("READ_VIEW_UNAVAILABLE");
         return realtimeQueries;
     }
 
@@ -374,8 +375,7 @@ public class TriggerOrderService {
     }
 
     private TriggerOrderProjectionRepository requireTriggerProjection() {
-        if (triggerProjection == null) throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "TRIGGER_READ_VIEW_UNAVAILABLE");
+        if (triggerProjection == null) throw new ReadViewUnavailableException("TRIGGER_READ_VIEW_UNAVAILABLE");
         return triggerProjection;
     }
 

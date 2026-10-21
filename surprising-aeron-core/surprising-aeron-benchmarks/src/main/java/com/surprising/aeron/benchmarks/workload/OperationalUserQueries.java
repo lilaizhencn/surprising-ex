@@ -10,7 +10,7 @@ import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.web.server.ResponseStatusException;
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 
 /** Calls the production read/materialization implementation; never falls back to a Core query. */
 public @Slf4j
@@ -49,8 +49,7 @@ final class OperationalUserQueries implements AutoCloseable {
             lastSequence[index]=view.exportSequence();
             ready++;
             owner.record("VALKEY_QUERY_READY",start,System.nanoTime());
-        }catch(ResponseStatusException e) {
-            if(e.getStatusCode().value()!=503)throw e;
+        }catch(ReadViewUnavailableException e) {
             unavailable++;
             owner.record("VALKEY_QUERY_UNAVAILABLE",start,System.nanoTime());
         }

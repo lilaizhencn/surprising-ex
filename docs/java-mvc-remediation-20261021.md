@@ -140,3 +140,5 @@
 - HTTP/参数职责3将合约本地请求组件归controller，Service聚合目录可见性与真实行情，原生分页条件经Controller绑定，Repository只选固定SQL列。版本/可见性/结算冲突由原生异常经Controller映射；保留行锁、事务和Outbox。定向70项通过，扩大182项中179通过、3项六Core外部HTTP环境未启动跳过；18项负例捕获17项预期失败。关闭MVC-009、202和补充ADD-005；见 [合约入口验证](validation/java-mvc-instrument-boundary-20261022.json)。复核追加ADD-007格式/业务配置校验混合职责待整改；所属数据库/日志/报告已清理，最终实栈及其余问题继续。
 
 - HTTP职责4将C2cProblem改为原生原因，明确业务冲突，保留18处内部状态/密文/资金进度不变量；HTTP层对内部异常返回脱敏500。后台原始请求绑定归Controller，Service接收model请求事实，失败审计分类由HTTP入口提供。内部异常不把原PROCESSING回执写为校验拒绝。定向49项通过，干净构建C2C165项中164通过、1项浏览器QA未启用跳过；16项联合负例捕获3失败，另8项独立回执负例捕获1失败，恢复后绿色。关闭MVC-004、020和补充ADD-001；见 [C2C原生异常验证](validation/java-mvc-c2c-http-20261022.json)。追加ADD-008账户HTTP门面调用待与共享读视图一起处理；所属资源已清理，外部R2两项Live未运行，其余全范围/实栈继续。
+
+- HTTP职责5将共享Valkey、订单/杠杆/条件单及四类SQL查询的不可用失败改为原生ReadViewUnavailableException，由公共本地网关/内部HTTP/C2C Advice映射503；C2C对账直接调用AccountService，分别请求两个账户且冷视图不能按零放行。API40项、实时完整187项、Gateway扩大532项中531通过/1项浏览器QA环境跳过；两组负例分别捕获12和14失败，恢复后干净构建绿色，直接基准消费者及依赖源码编译通过。关闭MVC-012,MVC-013,MVC-014,MVC-185,MVC-186,MVC-187,MVC-188,MVC-226,MVC-227及补充ADD-008；见 [读视图HTTP职责验证](validation/java-mvc-readview-http-20261022.json)。复核追加ADD-009至011输入绑定待整改，三处初始化多表复核和指标无类型契约尚未关闭；所属资源清理，最终实栈和其余全范围继续。

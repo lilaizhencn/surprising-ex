@@ -59,12 +59,12 @@ class TradeProjectionPostgresTest {
 
     @Test void privateInitializingInvalidAndUnavailableViewsAre503() {
         assertThatThrownBy(() -> repository.ownFills(ProductLine.SPOT, 7, null, null, null, null, 10, null))
-                .isInstanceOfSatisfying(ResponseStatusException.class, e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+                .isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         ready(ProductLine.SPOT); add(ProductLine.SPOT, 10, 0, 1000, 7, 8);
         jdbc.update("UPDATE core_execution_projection SET taker_side='INVALID'");
-        assertThatThrownBy(() -> repository.ownFills(ProductLine.SPOT, 7, null, null, null, null, 10, null)).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> repository.ownFills(ProductLine.SPOT, 7, null, null, null, null, 10, null)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         jdbc.execute("DROP TABLE core_execution_projection");
-        assertThatThrownBy(() -> repository.ownFills(ProductLine.SPOT, 7, null, null, null, null, 10, null)).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> repository.ownFills(ProductLine.SPOT, 7, null, null, null, null, 10, null)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
     }
     private JdbcTemplate jdbc;
     private TradeProjectionRepository repository;
@@ -90,9 +90,9 @@ class TradeProjectionPostgresTest {
     }
     @Test void missingInitializationAndDatabaseFailureAre503RatherThanSuccessfulEmptyLists() {
         assertThatThrownBy(() -> repository.search(ProductLine.OPTION,null,null,null,10,null,null))
-                .isInstanceOfSatisfying(ResponseStatusException.class,e->assertThat(e.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+                .isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         ready(ProductLine.OPTION);jdbc.execute("DROP TABLE core_execution_projection");
-        assertThatThrownBy(() -> repository.search(ProductLine.OPTION,null,null,null,10,null,null)).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> repository.search(ProductLine.OPTION,null,null,null,10,null,null)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
     }
     @Test void bothSortDirectionsTraverseEqualTimesAndFullInt64PositionsWithoutDuplicates() {
         ready(ProductLine.OPTION);add(ProductLine.OPTION,10,0,1000,7,8);add(ProductLine.OPTION,20,0,2000,7,8);

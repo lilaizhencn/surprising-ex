@@ -35,14 +35,14 @@ class TradingMetricsPostgresTest {
         jdbc.update("INSERT INTO core_trading_statistics_snapshot VALUES (?,60,?,?,?::jsonb)",product.name(),Long.MAX_VALUE,now,json.writeValueAsString(data));
     }
     @Test void absentStaleCorruptAndFailedDatabaseReadsNeverBecomeSuccessfulZeroStatistics() {
-        assertThatThrownBy(()->repository.require(ProductLine.OPTION,60,20)).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(()->repository.require(ProductLine.OPTION,60,20)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         add(ProductLine.OPTION,System.currentTimeMillis()-181000);
-        assertThatThrownBy(()->repository.require(ProductLine.OPTION,60,20)).isInstanceOf(ResponseStatusException.class).hasMessageContaining("STALE");
+        assertThatThrownBy(()->repository.require(ProductLine.OPTION,60,20)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class).hasMessageContaining("STALE");
         jdbc.update("DELETE FROM core_trading_statistics_snapshot");add(ProductLine.OPTION,System.currentTimeMillis());
         jdbc.update("UPDATE core_trading_statistics_snapshot SET metrics=metrics-'positions'");
-        assertThatThrownBy(()->repository.require(ProductLine.OPTION,60,20)).isInstanceOf(ResponseStatusException.class).hasMessageContaining("INVALID");
+        assertThatThrownBy(()->repository.require(ProductLine.OPTION,60,20)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class).hasMessageContaining("INVALID");
         jdbc.execute("DROP TABLE core_trading_statistics_snapshot");
-        assertThatThrownBy(()->repository.require(ProductLine.OPTION,60,20)).isInstanceOf(ResponseStatusException.class).hasMessageContaining("UNAVAILABLE");
+        assertThatThrownBy(()->repository.require(ProductLine.OPTION,60,20)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class).hasMessageContaining("UNAVAILABLE");
     }
     @Test void sixProductsKeepTheirOwnSnapshotsAndLimitOnlyRankedRowsWithoutChangingTotals() {
         for(var line:ProductLine.values())add(line,System.currentTimeMillis());

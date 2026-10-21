@@ -618,3 +618,5 @@ option.consumer.OptionQuotePriceConsumer负责Kafka协议，沿用原Topic、监
 OptionQuoteService只持有源事件与业务聚合，OptionQuoteException为原生业务原因，报价归model.OptionQuote。
 保留OPTION范围、短有效期、精度/版本/来源一致性和只读参考定位。
 [期权HTTP职责验证](../docs/validation/java-mvc-option-http-20261021.json)包含完整实时模块及负例结果。
+
+共享读视图API的失败使用 `realtime.api.exception.ReadViewUnavailableException`，保留 `READ_VIEW_*` / `MARKET_BOOK_UNAVAILABLE` 原因，不选择HTTP状态。Gateway在Controller/本地协议边界映射503；Redis租约、版本门槛、过期/epoch检查和禁止Core回退的读取规则保持。

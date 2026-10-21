@@ -35,6 +35,10 @@ public class C2cHttpErrors {
     public ResponseEntity<?> conflict(DataIntegrityViolationException failure) {
         return error(HttpStatus.CONFLICT, "C2C_CONFLICT", "资料已变更或与现有记录冲突，请刷新后重试");
     }
+    @ExceptionHandler(com.surprising.realtime.api.exception.ReadViewUnavailableException.class)
+    public ResponseEntity<?> readView(com.surprising.realtime.api.exception.ReadViewUnavailableException failure) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, "C2C_UNAVAILABLE", "资金查询视图暂不可用，请查询原请求，勿重复提交");
+    }
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<?> internal(RuntimeException failure) {
         return error(HttpStatus.INTERNAL_SERVER_ERROR, "C2C_INTERNAL_ERROR", "C2C 状态暂不可确认，请查询原请求，勿重复提交");
@@ -61,6 +65,7 @@ public class C2cHttpErrors {
             case CONFLICT -> HttpStatus.CONFLICT;
             case UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
         };
+        if (failure instanceof com.surprising.realtime.api.exception.ReadViewUnavailableException) return HttpStatus.SERVICE_UNAVAILABLE;
         if (failure instanceof DataIntegrityViolationException) return HttpStatus.CONFLICT;
         if (failure instanceof DataAccessException || failure instanceof com.surprising.gateway.provider.service.KycDocumentStorageException)
             return HttpStatus.SERVICE_UNAVAILABLE;

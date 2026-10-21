@@ -492,3 +492,5 @@ KYC/OIDC/邮件的协议接入不与业务聚合混放。LoginVerificationModels
 合约目录本地分发仍由 `gateway.provider.local.InstrumentLocalRoutes` 调用 `instrument.provider.controller.InstrumentRequestController`，不新增内部HTTP路由。Controller解析产品选择、分页及HTTP异常；`InstrumentService.publicCatalog/publicLatest` 负责公开可见性和行情聚合。Repository接收原生 `InstrumentPageQuery`，SQL列只在Repository映射；合约编辑仍在原事务中持行锁检查版本并写配置/Outbox。
 
 C2C后台的原始请求头、method/path/query、User-Agent和IP由 `c2c.controller.C2cAdminRequestBinding` 绑定为 `model.C2cAdminRequest`；审批正文保持原始字节摘要。Service只产生原生 `C2cProblem` 原因，`controller.advice.C2cHttpErrors` 映射HTTP并对未知内部异常脱敏。内部资金/对账状态故障保留PROCESSING回执供核查和原身份续办，不伪造为用户校验拒绝。
+
+账户/订单/成交/条件单读视图未就绪、落后、过期或无效使用原生 `ReadViewUnavailableException`；公共本地分发由 `LocalBusinessApi` 映射原503响应，产品内部HTTP由 `ReadViewHttpErrors` / 行情Controller处理。C2C对账直接读取 `AccountService`，仍分别续租并读取托管/手续费账户，任一不可用都不能按零余额放行。

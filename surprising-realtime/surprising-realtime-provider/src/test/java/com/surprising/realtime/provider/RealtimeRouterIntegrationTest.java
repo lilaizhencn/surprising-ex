@@ -228,7 +228,7 @@ class RealtimeRouterIntegrationTest {
                 offer(publication, frame(RealtimeFrame.Kind.COMMIT_END, 0, 6000, 2, 0, "", "", new byte[0]));
                 await(() -> {
                     try { return market.requireBook(ProductLine.SPOT, "7").view().exportSequence() == 6000; }
-                    catch (org.springframework.web.server.ResponseStatusException pending) { return false; }
+                    catch (com.surprising.realtime.api.exception.ReadViewUnavailableException pending) { return false; }
                 });
                 assertThat(market.requireBook(ProductLine.SPOT, "7").view().levels().getFirst().quantitySteps())
                         .isEqualTo(12);

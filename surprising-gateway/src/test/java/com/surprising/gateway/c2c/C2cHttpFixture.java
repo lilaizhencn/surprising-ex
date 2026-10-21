@@ -53,7 +53,7 @@ import static org.mockito.Mockito.*;
 
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.provider.service.AccountCommandGateway;
-import com.surprising.account.provider.service.AccountRequestService;
+import com.surprising.account.provider.service.AccountService;
 import com.surprising.gateway.c2c.repository.*;
 import com.surprising.gateway.c2c.service.C2cAdminQueryService;
 import com.surprising.gateway.c2c.service.C2cNotificationService;
@@ -88,7 +88,7 @@ final class C2cHttpFixture implements AutoCloseable {
     final AuthService auth = mock(AuthService.class);
     final ComplianceService compliance = mock(ComplianceService.class);
     final SensitiveActionVerificationService security = mock(SensitiveActionVerificationService.class);
-    final AccountRequestService accountQueries = mock(AccountRequestService.class);
+    final AccountService accountQueries = mock(AccountService.class);
     final AccountCommandGateway accountCommands = mock(AccountCommandGateway.class);
     final ProductAccountClient core = mock(ProductAccountClient.class);
     final GatewayProductServices products = mock(GatewayProductServices.class);
@@ -150,7 +150,7 @@ final class C2cHttpFixture implements AutoCloseable {
             when(core.transferIn(any(),any())).thenReturn(applied);
             when(core.completeTransfer(any(),any())).thenReturn(applied);
             when(products.enabled()).thenReturn(List.of(ProductLine.SPOT));
-            when(products.service(ProductLine.SPOT,AccountRequestService.class)).thenReturn(accountQueries);
+            when(products.service(ProductLine.SPOT,AccountService.class)).thenReturn(accountQueries);
             when(products.service(ProductLine.SPOT,AccountCommandGateway.class)).thenReturn(accountCommands);
             when(accountQueries.balances(anyLong())).thenReturn(new BalanceQueryResponse(0,List.of()));
             properties.getSecurity().setRequireApprovalForHighRiskAdminWrites(false);

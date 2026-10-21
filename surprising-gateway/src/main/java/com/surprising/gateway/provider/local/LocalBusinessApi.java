@@ -183,6 +183,9 @@ public final class LocalBusinessApi {
         while (exception instanceof java.util.concurrent.CompletionException && exception.getCause() != null) {
             exception = exception.getCause();
         }
+        if (exception instanceof com.surprising.realtime.api.exception.ReadViewUnavailableException unavailable) {
+            return error(HttpStatus.SERVICE_UNAVAILABLE, unavailable.getMessage());
+        }
         if (exception instanceof ResponseStatusException status) {
             var properties = status.getBody().getProperties();
             if (properties != null && properties.get("code") instanceof String code) {

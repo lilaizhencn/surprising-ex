@@ -50,8 +50,8 @@ class LeverageServiceTest {
                     .thenReturn(view(line, 1001L, java.util.List.of(new CoreLeverageView("73", CoreMarginMode.CROSS, 5_000_000L))));
             assertThat(service.get(1001L, "73", MarginMode.CROSS, line).leveragePpm()).isEqualTo(5_000_000L);
             org.mockito.Mockito.when(queries.require(line, 1001L, null)).thenReturn(view(line, 1002L, java.util.List.of()));
-            assertThatThrownBy(() -> service.get(1001L, "73", MarginMode.CROSS, line)).hasMessageContaining("503");
-            org.mockito.Mockito.when(queries.require(line, 1001L, null)).thenThrow(new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_STALE"));
+            assertThatThrownBy(() -> service.get(1001L, "73", MarginMode.CROSS, line)).hasMessageContaining("READ_VIEW_");
+            org.mockito.Mockito.when(queries.require(line, 1001L, null)).thenThrow(new com.surprising.realtime.api.exception.ReadViewUnavailableException("READ_VIEW_STALE"));
             assertThatThrownBy(() -> service.get(1001L, "73", MarginMode.CROSS, line)).hasMessageContaining("READ_VIEW_STALE");
             org.mockito.Mockito.verifyNoInteractions(aeron);
             org.mockito.Mockito.reset(queries);

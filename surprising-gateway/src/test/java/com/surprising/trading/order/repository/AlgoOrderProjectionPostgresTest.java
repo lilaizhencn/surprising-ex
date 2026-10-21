@@ -58,12 +58,12 @@ class AlgoOrderProjectionPostgresTest {
         assertThat(projection.openOrders(ProductLine.OPTION,7,null,10)).hasSize(1);
     }
     @Test void initializingUnavailableAndCorruptDataAre503RatherThanEmptySuccess() {
-        assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,7,null,10)).isInstanceOf(ResponseStatusException.class).hasMessageContaining("ALGO_READ_VIEW_INITIALIZING");
+        assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,7,null,10)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class).hasMessageContaining("ALGO_READ_VIEW_INITIALIZING");
         ready(ProductLine.SPOT);add(ProductLine.SPOT,701,7,"604",0);
         jdbc.update("UPDATE core_algo_order_projection SET revision=99");
-        assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,7,null,10)).isInstanceOf(ResponseStatusException.class).hasMessageContaining("ALGO_READ_VIEW_INVALID");
+        assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,7,null,10)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class).hasMessageContaining("ALGO_READ_VIEW_INVALID");
         jdbc.execute("DROP TABLE core_algo_order_projection");
-        assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,7,null,10)).isInstanceOf(ResponseStatusException.class).hasMessageContaining("ALGO_READ_VIEW_UNAVAILABLE");
+        assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,7,null,10)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class).hasMessageContaining("ALGO_READ_VIEW_UNAVAILABLE");
     }
     @Test void invalidIdentityAndLimitsAreRejectedBeforeReadingStorage() {
         assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,0,null,10)).isInstanceOf(IllegalArgumentException.class);

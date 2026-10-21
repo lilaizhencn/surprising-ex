@@ -147,8 +147,7 @@ class C2cAdminHttpPostgresTest {
     @Test void coldReadViewsRequestBothInternalAccountsAndKeepTradingClosedUntilReady() throws Exception {
         var configuration=fixture.bean(C2cMarketService.class).configuration();
         fixture.db.jdbc.update("UPDATE c2c_configuration SET enabled=false");
-        when(fixture.accountQueries.balances(anyLong())).thenThrow(new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"READ_VIEW_STALE"));
+        when(fixture.accountQueries.balances(anyLong())).thenThrow(new com.surprising.realtime.api.exception.ReadViewUnavailableException("READ_VIEW_STALE"));
         assertThat(fixture.call(HttpMethod.GET,"/api/v1/admin/c2c/reconciliation",9,null,200).get("status")).isEqualTo("UNAVAILABLE");
         verify(fixture.accountQueries).balances(configuration.escrowUserId());
         verify(fixture.accountQueries).balances(configuration.feeUserId());

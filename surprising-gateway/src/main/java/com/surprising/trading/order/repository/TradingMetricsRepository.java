@@ -5,10 +5,9 @@ import java.time.Instant;
 import java.math.BigInteger;
 import java.util.*;
 import org.springframework.dao.DataAccessException;
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import org.springframework.web.server.ResponseStatusException;
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 import tools.jackson.databind.ObjectMapper;
 
 /** Reads the complete, product-scoped statistics snapshot published by realtime. */
@@ -44,10 +43,10 @@ public final class TradingMetricsRepository {
                 data.put("limit",limit);data.put("dataAgeMs",Math.max(0,now-row.generated()));
                 return data;
             } catch(RuntimeException invalid) {
-                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"TRADING_METRICS_INVALID",invalid);
+                throw new ReadViewUnavailableException("TRADING_METRICS_INVALID",invalid);
             }
         } catch(DataAccessException unavailable) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"TRADING_METRICS_UNAVAILABLE",unavailable);
+            throw new ReadViewUnavailableException("TRADING_METRICS_UNAVAILABLE",unavailable);
         }
     }
     private record Row(long position,long generated,String raw) {}
@@ -56,5 +55,5 @@ public final class TradingMetricsRepository {
         if(!(data.get(section) instanceof Map<?,?> values))throw new IllegalArgumentException("statistics section missing");
         for(String field:fields)if(new BigInteger(Objects.requireNonNull(values.get(field)).toString()).signum()<0)throw new IllegalArgumentException("invalid statistics count");
     }
-    private static ResponseStatusException unavailable(String reason) { return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,reason); }
+    private static ReadViewUnavailableException unavailable(String reason) { return new ReadViewUnavailableException(reason); }
 }

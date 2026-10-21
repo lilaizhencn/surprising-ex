@@ -49,10 +49,10 @@ class AccountServiceLocalSnapshotTest {
         assertThat(service.balance(1001L,"USDT").availableUnits()).isEqualTo(800);
         assertThat(service.positions(1001L).count()).isEqualTo(1);
         when(queries.require(ProductLine.LINEAR_PERPETUAL,1001L,null)).thenThrow(
-            new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
+            new com.surprising.realtime.api.exception.ReadViewUnavailableException("READ_VIEW_UNAVAILABLE"));
         when(queries.balance(ProductLine.LINEAR_PERPETUAL,1001L,"USDT",null)).thenThrow(
-            new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
-        assertThatThrownBy(()->service.balance(1001L,"USDT")).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+            new com.surprising.realtime.api.exception.ReadViewUnavailableException("READ_VIEW_UNAVAILABLE"));
+        assertThatThrownBy(()->service.balance(1001L,"USDT")).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         verifyNoInteractions(projection);
     }
 
@@ -102,10 +102,9 @@ class AccountServiceLocalSnapshotTest {
         AccountService service = service(queries, projection);
 
         when(queries.balance(ProductLine.LINEAR_PERPETUAL,1001L,"USDT",null)).thenThrow(
-                new org.springframework.web.server.ResponseStatusException(
-                        org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"READ_VIEW_UNAVAILABLE"));
+                new com.surprising.realtime.api.exception.ReadViewUnavailableException("READ_VIEW_UNAVAILABLE"));
         assertThatThrownBy(() -> service.balance(1001L, "USDT"))
-                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class)
                 .hasMessageContaining("READ_VIEW_UNAVAILABLE");
         verifyNoInteractions(projection);
     }

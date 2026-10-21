@@ -8,10 +8,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
 import org.springframework.dao.DataAccessException;
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import org.springframework.web.server.ResponseStatusException;
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 
 /** HTTP history reads only the realtime-owned committed trigger projection. */
 @Repository
@@ -71,7 +70,7 @@ public final class TriggerOrderProjectionRepository {
     private void requireInitialized(ProductLine product) {
         if (!Integer.valueOf(1).equals(jdbc.queryForObject(
                 "SELECT count(*) FROM core_trigger_projection_initialization WHERE product_line=?", Integer.class, product.name())))
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "TRIGGER_READ_VIEW_INITIALIZING");
+            throw new ReadViewUnavailableException("TRIGGER_READ_VIEW_INITIALIZING");
     }
 
     private CoreTriggerOrderStateView decode(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
@@ -86,7 +85,7 @@ public final class TriggerOrderProjectionRepository {
                     || v.updatedAtEpochMillis() != rs.getLong("updated_at_epoch_ms"))
                 throw new IllegalStateException("trigger row identity mismatch");
             return v;
-        } catch (RuntimeException invalid) { throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "TRIGGER_READ_VIEW_INVALID", invalid); }
+        } catch (RuntimeException invalid) { throw new ReadViewUnavailableException("TRIGGER_READ_VIEW_INVALID", invalid); }
     }
 
     private static long[] cursor(String cursor, String scope) {
@@ -103,7 +102,7 @@ public final class TriggerOrderProjectionRepository {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8))); }
         catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
     }
-    private static ResponseStatusException unavailable(Exception cause) {
-        return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "TRIGGER_READ_VIEW_UNAVAILABLE", cause);
+    private static ReadViewUnavailableException unavailable(Exception cause) {
+        return new ReadViewUnavailableException("TRIGGER_READ_VIEW_UNAVAILABLE", cause);
     }
 }

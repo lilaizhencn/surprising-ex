@@ -155,10 +155,9 @@ class OrderServiceTest {
         when(queries.require(product,1001L,9L)).thenReturn(new com.surprising.realtime.api.UserReadView(
             "READY","v",1,null,List.of(),List.of(),9,List.of()));
         assertThat(service.openOrders(1001L,null,10,null,9L).orders()).isEmpty();
-        when(queries.require(product,1001L,9L)).thenThrow(new org.springframework.web.server.ResponseStatusException(
-            org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
+        when(queries.require(product,1001L,9L)).thenThrow(new com.surprising.realtime.api.exception.ReadViewUnavailableException("READ_VIEW_UNAVAILABLE"));
         assertThatThrownBy(()->service.openOrders(1001L,null,10,null,9L))
-            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+            .isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         verifyNoInteractions(aeronOrders,projection);
     }
 
@@ -171,10 +170,9 @@ class OrderServiceTest {
                 com.surprising.aeron.protocol.CoreOrderSide.BUY, 100, 2, 0, 2, false, "OPEN", 1);
         when(queries.order(product, 1001, 91, 9L)).thenReturn(order);
         assertThat(service.get(1001, 91, 9L).orderId()).isEqualTo(91);
-        when(queries.order(product, 1001, 91, 9L)).thenThrow(new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_BEHIND"));
+        when(queries.order(product, 1001, 91, 9L)).thenThrow(new com.surprising.realtime.api.exception.ReadViewUnavailableException("READ_VIEW_BEHIND"));
         assertThatThrownBy(() -> service.get(1001, 91, 9L))
-                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+                .isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         org.mockito.Mockito.verify(queries, never()).require(any(), anyLong(), any());
         verifyNoInteractions(aeronOrders, projection);
     }
@@ -183,7 +181,7 @@ class OrderServiceTest {
     void missingRealtimeDependencyCannotFallBackToCore() {
         var service = service(ProductLine.SPOT, aeronOrders, null, null);
         assertThatThrownBy(() -> service.get(1001, 91))
-                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class)
                 .hasMessageContaining("READ_VIEW_UNAVAILABLE");
         verifyNoInteractions(aeronOrders, projection);
     }
@@ -483,10 +481,9 @@ class OrderServiceTest {
         assertThat(service.cancellationPlan(1001, " 1 ").orderIds()).isEqualTo(all.orderIds());
         assertThat(service.cancellationPlan(1001, "2").orderIds()).isEmpty();
         verifyNoInteractions(aeronOrders, projection);
-        when(realtimeQueries.require(line, 1001L, null)).thenThrow(new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
+        when(realtimeQueries.require(line, 1001L, null)).thenThrow(new com.surprising.realtime.api.exception.ReadViewUnavailableException("READ_VIEW_UNAVAILABLE"));
         assertThatThrownBy(() -> service.cancellationPlan(1001, null))
-                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+                .isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         verifyNoInteractions(aeronOrders, projection);
     }
 

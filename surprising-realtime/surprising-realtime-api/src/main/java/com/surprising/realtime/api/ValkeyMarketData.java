@@ -9,8 +9,7 @@ import com.surprising.product.api.ProductLine;
 import java.time.Duration;
 import java.util.Base64;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 
 /** Router owns one expiring full book per product/instrument; readers never query trading Core. */
 public final class ValkeyMarketData {
@@ -61,8 +60,8 @@ public final class ValkeyMarketData {
         }
     }
 
-    private static ResponseStatusException unavailable() {
-        return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "MARKET_BOOK_UNAVAILABLE");
+    private static ReadViewUnavailableException unavailable() {
+        return new ReadViewUnavailableException("MARKET_BOOK_UNAVAILABLE");
     }
 
     private static String key(ProductLine product, String instrumentId) {

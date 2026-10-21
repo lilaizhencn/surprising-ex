@@ -15,8 +15,7 @@ import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import org.springframework.stereotype.Service;
 import com.surprising.realtime.api.ValkeyUserQueries;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 
 @Service
 public class LeverageService {
@@ -83,7 +82,7 @@ public class LeverageService {
         }
         var account = realtimeQueries.require(resolvedProductLine, userId, null).account();
         if (account == null || account.productLine() != resolvedProductLine || account.userId() != userId) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_ACCOUNT_UNAVAILABLE");
+            throw new ReadViewUnavailableException("READ_VIEW_ACCOUNT_UNAVAILABLE");
         }
         var configured = account.leverages().stream().filter(value -> value.instrumentId().equals(normalizedSymbol)
                 && value.marginMode() == CoreMarginMode.valueOf(normalizedMarginMode.name())).findFirst().orElse(null);

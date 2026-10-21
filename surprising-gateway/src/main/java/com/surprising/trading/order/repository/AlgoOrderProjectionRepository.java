@@ -5,10 +5,9 @@ import com.surprising.aeron.protocol.CoreAlgoOrderView;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
 import org.springframework.dao.DataAccessException;
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import org.springframework.web.server.ResponseStatusException;
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 
 /** User algo reads use only the latest state produced by realtime committed Archive replay. */
 @Repository
@@ -30,7 +29,7 @@ public final class AlgoOrderProjectionRepository {
             requireReady(product);
             return jdbc.query(sql.toString(), this::decode, args.toArray());
         } catch (DataAccessException unavailable) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "ALGO_READ_VIEW_UNAVAILABLE", unavailable);
+            throw new ReadViewUnavailableException("ALGO_READ_VIEW_UNAVAILABLE", unavailable);
         }
     }
 
@@ -53,14 +52,14 @@ public final class AlgoOrderProjectionRepository {
                     + column + "=?", this::decode, product.name(), userId, identity);
             return rows.isEmpty() ? null : rows.getFirst();
         } catch (DataAccessException unavailable) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "ALGO_READ_VIEW_UNAVAILABLE", unavailable);
+            throw new ReadViewUnavailableException("ALGO_READ_VIEW_UNAVAILABLE", unavailable);
         }
     }
 
     private void requireReady(ProductLine product) {
         if (!Integer.valueOf(1).equals(jdbc.queryForObject(
                 "SELECT count(*) FROM core_algo_projection_initialization WHERE product_line=?", Integer.class, product.name())))
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "ALGO_READ_VIEW_INITIALIZING");
+            throw new ReadViewUnavailableException("ALGO_READ_VIEW_INITIALIZING");
     }
 
     private CoreAlgoOrderView decode(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
@@ -77,7 +76,7 @@ public final class AlgoOrderProjectionRepository {
                 throw new IllegalStateException("algo read view identity or progress mismatch");
             return value;
         } catch (RuntimeException invalid) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "ALGO_READ_VIEW_INVALID", invalid);
+            throw new ReadViewUnavailableException("ALGO_READ_VIEW_INVALID", invalid);
         }
     }
 }

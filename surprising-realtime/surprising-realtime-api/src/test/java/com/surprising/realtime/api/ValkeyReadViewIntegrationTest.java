@@ -75,8 +75,8 @@ class ValkeyReadViewIntegrationTest {
         var market = new ValkeyMarketData(redis);
         store.sourceEpoch(product, "current");
         assertThatThrownBy(() -> market.requireBook(product, "1"))
-                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
-                .hasMessageContaining("503");
+                .isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class)
+                .hasMessageContaining("MARKET_BOOK_UNAVAILABLE");
         assertThat(new ValkeySnapshotRequests(redis).books(product, now, 0, 10)).contains("1");
         var frame = new RealtimeFrame(product, RealtimeFrame.Kind.BOOK, 0, 100, 1,
                 1234, 0, "1", "1", CoreStateQueryCodec.encodeOrderBookView(
@@ -142,7 +142,7 @@ class ValkeyReadViewIntegrationTest {
         assertThat(queries.balance(product, 42, "USDT", 7L).orElseThrow().availableUnits()).isZero();
         assertThat(queries.position(product, 42, "1", CoreMarginMode.CROSS, CorePositionSide.NET, 7L)).isEmpty();
         assertThatThrownBy(() -> queries.balance(product, 42, "USDT", 8L))
-                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class)
                 .hasMessageContaining("READ_VIEW_BEHIND");
         assertThatThrownBy(() -> queries.balance(product, 43, "USDT", null))
                 .hasMessageContaining("READ_VIEW_INITIALIZING");

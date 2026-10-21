@@ -16,7 +16,7 @@ import com.surprising.gateway.c2c.repository.*;
 import com.surprising.gateway.c2c.service.C2cQueryService;
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.account.api.model.BalanceResponse;
-import com.surprising.account.provider.service.AccountRequestService;
+import com.surprising.account.provider.service.AccountService;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
 import java.math.BigDecimal;
@@ -112,13 +112,13 @@ public class C2cAdminMarkets {
         long failed=funds.failedSettlementCount();
         if(failed>0) return new C2cReconciliation(C2cReconciliation.Status.REVIEW_REQUIRED,0,failed,null,List.of());
         if(!products.enabled().contains(ProductLine.SPOT)) return unavailable("现货资金查询暂不可用");
-        var config=markets.configuration();var accountQueries=products.service(ProductLine.SPOT,AccountRequestService.class);
+        var config=markets.configuration();var accountQueries=products.service(ProductLine.SPOT,AccountService.class);
         Map<String,BalanceResponse> escrow=null,fees=null;
         // 两个账户均续租并请求实时同步，冷视图未就绪不能按零放行。
         try {escrow=balances(accountQueries.balances(config.escrowUserId()).balances());}
-        catch(org.springframework.web.server.ResponseStatusException unavailable) { /* 仍请求手续费账户 */ }
+        catch(com.surprising.realtime.api.exception.ReadViewUnavailableException unavailable) { /* 仍请求手续费账户 */ }
         try {fees=balances(accountQueries.balances(config.feeUserId()).balances());}
-        catch(org.springframework.web.server.ResponseStatusException unavailable) { /* 未就绪不能放行 */ }
+        catch(com.surprising.realtime.api.exception.ReadViewUnavailableException unavailable) { /* 未就绪不能放行 */ }
         if(escrow==null || fees==null) return unavailable("资金查询视图暂不可用，请稍后核对");
         var expected=new HashMap<String,C2cFundTotals>();
         for(var row:funds.confirmedTotals(config.escrowUserId(),config.feeUserId())) expected.put(row.asset(),row);

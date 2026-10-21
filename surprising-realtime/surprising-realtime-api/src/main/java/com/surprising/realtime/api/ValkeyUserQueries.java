@@ -3,9 +3,8 @@ package com.surprising.realtime.api;
 import com.surprising.product.api.ProductLine;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
-import org.springframework.web.server.ResponseStatusException;
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 
 @Component
 public final class ValkeyUserQueries {
@@ -31,7 +30,7 @@ public final class ValkeyUserQueries {
             var order = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeOrderState(frame.payload());
             if (frame.productLine() != product || frame.userId() != user
                     || order.productLine() != product || order.userId() != user || order.orderId() != orderId)
-                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_ORDER_UNAVAILABLE");
+                throw new ReadViewUnavailableException("READ_VIEW_ORDER_UNAVAILABLE");
             return "OPEN".equals(order.status()) ? order : null;
         }
         return null;
@@ -58,7 +57,7 @@ public final class ValkeyUserQueries {
             UserReadView view, ProductLine product, long user) {
         var account = view.account();
         if (account == null || account.productLine() != product || account.userId() != user)
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_ACCOUNT_UNAVAILABLE");
+            throw new ReadViewUnavailableException("READ_VIEW_ACCOUNT_UNAVAILABLE");
         return account;
     }
 
@@ -75,15 +74,12 @@ public final class ValkeyUserQueries {
             var source = fields == null ? views.read(product, user, now, 15000)
                     : views.readFields(product, user, now, 15000, fields);
             if (!source.status().equals("READY"))
-                throw new ResponseStatusException(
-                        HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_" + source.status());
+                throw new ReadViewUnavailableException("READ_VIEW_" + source.status());
             if (minExportSequence != null && source.exportSequence() < minExportSequence)
-                throw new ResponseStatusException(
-                        HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_BEHIND");
+                throw new ReadViewUnavailableException("READ_VIEW_BEHIND");
             return source;
         } catch (org.springframework.dao.DataAccessException unavailable) {
-            throw new ResponseStatusException(
-                    HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_UNAVAILABLE");
+            throw new ReadViewUnavailableException("READ_VIEW_UNAVAILABLE");
         }
     }
 }

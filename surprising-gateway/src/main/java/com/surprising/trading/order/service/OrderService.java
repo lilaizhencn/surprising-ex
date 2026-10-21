@@ -1,5 +1,7 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
+
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.OrderCommandReceipt;
 import com.surprising.trading.api.model.AmendOrderBatchResponse;
@@ -54,16 +56,14 @@ public class OrderService {
     public java.util.Map<String,Object> tradingMetrics(int window,int limit,ProductLine requestedProduct) {
         var product=currentProductLine();
         if(requestedProduct!=null&&requestedProduct!=product)throw new IllegalArgumentException("product line does not match provider");
-        if(tradingMetrics==null)throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"TRADING_METRICS_UNAVAILABLE");
+        if(tradingMetrics==null)throw new ReadViewUnavailableException("TRADING_METRICS_UNAVAILABLE");
         return tradingMetrics.require(product,window,limit);
     }
     private final com.surprising.trading.order.repository.TradeProjectionRepository tradeProjection;
 
     public com.surprising.trading.api.model.TradeFillQueryResponse ownFills(long userId, String instrumentId,
             Long orderId, Long startTime, Long endTime, int limit, String cursor) {
-        if (tradeProjection == null) throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "TRADE_READ_VIEW_UNAVAILABLE");
+        if (tradeProjection == null) throw new ReadViewUnavailableException("TRADE_READ_VIEW_UNAVAILABLE");
         String instrument = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         return tradeProjection.ownFills(currentProductLine(), userId, instrument, orderId, startTime, endTime, limit, cursor);
     }
@@ -73,8 +73,7 @@ public class OrderService {
         ProductLine product = currentProductLine();
         if (requestedProduct != null && requestedProduct != product)
             throw new IllegalArgumentException("product line does not match provider");
-        if (tradeProjection == null) throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "TRADE_READ_VIEW_UNAVAILABLE");
+        if (tradeProjection == null) throw new ReadViewUnavailableException("TRADE_READ_VIEW_UNAVAILABLE");
         String instrument = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         return tradeProjection.search(product, userId, instrument, orderId, limit, cursor, sort);
     }
@@ -657,8 +656,7 @@ public class OrderService {
     }
 
     private com.surprising.realtime.api.ValkeyUserQueries requireRealtimeQueries() {
-        if (realtimeQueries == null) throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "READ_VIEW_UNAVAILABLE");
+        if (realtimeQueries == null) throw new ReadViewUnavailableException("READ_VIEW_UNAVAILABLE");
         return realtimeQueries;
     }
 

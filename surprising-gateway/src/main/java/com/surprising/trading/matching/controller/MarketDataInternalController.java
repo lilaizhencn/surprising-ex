@@ -24,6 +24,8 @@ public class MarketDataInternalController {
                                                @RequestParam(value = "depth", defaultValue = "30") int depth) {
         try {
             return marketDataService.orderBookSnapshot(instrumentId, depth);
+        } catch (com.surprising.realtime.api.exception.ReadViewUnavailableException unavailable) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, unavailable.getMessage(), unavailable);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

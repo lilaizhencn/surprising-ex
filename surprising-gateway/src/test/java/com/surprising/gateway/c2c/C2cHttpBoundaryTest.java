@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 class C2cHttpBoundaryTest {
     @RestController static class Probe {
         @GetMapping("/__mvc/c2c/failure") public void fail(@RequestParam String reason) {
+            if (reason.equals("read")) throw new com.surprising.realtime.api.exception.ReadViewUnavailableException("ciphertext secret 123456");
             if (reason.equals("state")) throw new IllegalStateException("ciphertext secret 123456");
             if (reason.equals("runtime")) throw new RuntimeException("database password 123456");
             throw new C2cProblem(C2cProblem.Reason.valueOf(reason), "C2C_QA_FAILURE", "business failure");
@@ -49,6 +50,14 @@ class C2cHttpBoundaryTest {
         }
         assertThat(C2cHttpErrors.status(new IllegalStateException("internal")).value()).isEqualTo(500);
         assertThat(C2cHttpErrors.status(C2cProblem.conflict("changed")).value()).isEqualTo(409);
+    }
+
+    @Test void transientNativeReadFailureIsSanitized503RatherThanInternalOrConflict() throws Exception {
+        var mvc = MockMvcBuilders.standaloneSetup(new Probe()).setControllerAdvice(new C2cHttpErrors()).build();
+        mvc.perform(get("/__mvc/c2c/failure").param("reason", "read")).andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("C2C_UNAVAILABLE"))
+                .andExpect(result -> assertThat(result.getResponse().getContentAsString()).doesNotContain("ciphertext", "123456"));
+        assertThat(C2cHttpErrors.status(new com.surprising.realtime.api.exception.ReadViewUnavailableException("READ_VIEW_STALE")).value()).isEqualTo(503);
     }
 
     @Test void controllerBindsConfiguredApprovalHeaderAndPreservesOriginalMetadataAndBodyDigest() {

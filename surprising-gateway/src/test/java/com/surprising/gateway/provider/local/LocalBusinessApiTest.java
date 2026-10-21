@@ -227,6 +227,14 @@ class LocalBusinessApiTest {
                 .doesNotContain("Aeron", "INVALID_COMMAND");
     }
 
+    @Test void nativeReadUnavailableKeepsPublic503ResponseAndOriginalReason() {
+        when(accounts.balances(42L)).thenThrow(new com.surprising.realtime.api.exception.ReadViewUnavailableException("READ_VIEW_STALE"));
+        var response = invoke("account", "/api/v1/accounts/balances?userId=42", HttpMethod.GET, userHeaders(), null);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(new String(response.getBody(), java.nio.charset.StandardCharsets.UTF_8)).contains("READ_VIEW_STALE", "503");
+        verify(accounts).balances(42L);
+    }
+
     private final com.surprising.websocket.provider.service.SubscriptionRegistry websocket = mock(com.surprising.websocket.provider.service.SubscriptionRegistry.class);
 
     private final com.surprising.trading.order.service.OrderRequestService orders = mock(com.surprising.trading.order.service.OrderRequestService.class);
