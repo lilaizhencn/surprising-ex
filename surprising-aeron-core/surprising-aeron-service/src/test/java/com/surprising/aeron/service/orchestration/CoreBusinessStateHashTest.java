@@ -11,7 +11,7 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
-import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
+import com.surprising.aeron.service.orchestration.trade.CoreTestCompletion;
 import com.surprising.aeron.service.state.account.TransferRuntime;
 import com.surprising.aeron.service.state.model.CoreFeePolicyState;
 import com.surprising.product.api.ProductLine;

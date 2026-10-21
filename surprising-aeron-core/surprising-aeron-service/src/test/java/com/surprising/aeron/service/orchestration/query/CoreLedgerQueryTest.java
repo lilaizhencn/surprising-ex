@@ -3,7 +3,7 @@ package com.surprising.aeron.service.orchestration.query;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.orchestration.OwnerAccountReadGuard;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
+import com.surprising.aeron.service.orchestration.trade.CoreTestCompletion;
 import com.surprising.aeron.service.orchestration.retention.TerminalStateRetention;
 import com.surprising.aeron.service.state.*;
 import com.surprising.aeron.service.state.TradingCoreState;

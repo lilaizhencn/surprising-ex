@@ -21,7 +21,7 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
+import com.surprising.aeron.service.orchestration.trade.CoreTestCompletion;
 import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.instrument.api.model.ContractType;

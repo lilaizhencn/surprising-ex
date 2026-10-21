@@ -3,7 +3,7 @@ package com.surprising.aeron.service.orchestration.snapshot;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.aeron.service.matching.MatchingResult;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.service.orchestration.pipeline.CommandSlot;
+import com.surprising.aeron.service.orchestration.trade.CommandSlot;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import java.util.concurrent.CompletableFuture;

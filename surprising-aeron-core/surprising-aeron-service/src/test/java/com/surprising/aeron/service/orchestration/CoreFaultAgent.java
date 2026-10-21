@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
-import com.surprising.aeron.service.orchestration.pipeline.CommandSlot;
-import com.surprising.aeron.service.orchestration.pipeline.OrderBatchExecutor;
+import com.surprising.aeron.service.orchestration.trade.CommandSlot;
+import com.surprising.aeron.service.orchestration.trade.OrderBatchExecutor;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotParser;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassTransform;
@@ -22,7 +22,7 @@ public final class CoreFaultAgent {
             @Override
             public byte[] transform(ClassLoader loader, String name, Class<?> type,
                                     ProtectionDomain domain, byte[] bytes) {
-                boolean core = name.equals("com/surprising/aeron/service/orchestration/pipeline/OrderBatchExecutor");
+                boolean core = name.equals("com/surprising/aeron/service/orchestration/trade/OrderBatchExecutor");
                 boolean snapshot = name.startsWith("com/surprising/aeron/service/orchestration/snapshot/SectionedCoreSnapshotParser$");
                 if (!core && !snapshot) return null;
                 ClassDesc hooks = ClassDesc.of("com.surprising.aeron.service.orchestration.CoreFaults");

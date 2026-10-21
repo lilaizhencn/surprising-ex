@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.orchestration;
 
-import com.surprising.aeron.service.orchestration.pipeline.AccountLaneCommitBenchmark;
+import com.surprising.aeron.service.orchestration.trade.AccountLaneCommitBenchmark;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 

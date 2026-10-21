@@ -1,8 +1,8 @@
 package com.surprising.aeron.service.matcher;
 import com.surprising.aeron.service.config.TradingCpuAffinity;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
-import com.surprising.aeron.service.orchestration.pipeline.CommandSlot;
-import com.surprising.aeron.service.orchestration.pipeline.CommandSlotRing;
+import com.surprising.aeron.service.orchestration.trade.CommandSlot;
+import com.surprising.aeron.service.orchestration.trade.CommandSlotRing;
 import java.util.function.IntConsumer;
 import java.util.function.IntFunction;
 import java.util.function.Supplier;

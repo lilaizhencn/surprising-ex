@@ -2,7 +2,7 @@ package com.surprising.aeron.service.matcher;
 
 import com.surprising.aeron.service.config.TradingCpuAffinity;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
-import com.surprising.aeron.service.orchestration.pipeline.CommandSlot;
+import com.surprising.aeron.service.orchestration.trade.CommandSlot;
 import com.surprising.aeron.service.state.settlement.MatcherSettlementEvent;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -515,8 +515,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                         if (settlement != null && settlement.direct()) settlement.completeMatcherPublication();
                     }
                 }
-                // Retire transport before exposing the command result. Owner may immediately reuse
-                // its command slot after this publication; only local references are used below.
+                // Expose the command result before publishing the transport completion cursor.
+                // Owner may immediately reuse its command slot; only local references are used below.
                 CommandSlot target = slot.resultTarget;
                 CoreMatchingResult routedResult = target != null && slot.failure == null
                         ? (CoreMatchingResult) slot.result : null;

@@ -13,7 +13,7 @@ import java.util.List;
 
 import static com.surprising.aeron.service.state.TradingRuntimeState.*;
 
-/** 撮合后结算派发与完成收集；沿用现货和衍生品结算处理器，保持 Lane 序号。 */
+/** 交易步骤 4：派发撮合事实给所属账户，收集结算完成；使用各产品结算处理器并保持 Lane 序号。 */
 public final class MatcherSettlementDispatcher {
     /** 唯一 owner；仅在其线程访问共享交易状态和提交边界。 */
     final TradingRuntimeState owner;

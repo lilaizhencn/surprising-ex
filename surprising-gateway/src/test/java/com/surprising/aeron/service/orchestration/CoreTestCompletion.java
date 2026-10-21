@@ -2,7 +2,7 @@ package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.service.matching.MatchingResult;
-import com.surprising.aeron.service.orchestration.pipeline.CommandSlot;
+import com.surprising.aeron.service.orchestration.trade.CommandSlot;
 
 /** Test-only synchronous adapter for driving the asynchronous Matcher/Lane pipeline. */
 final class CoreTestCompletion {

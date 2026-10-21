@@ -1,14 +1,14 @@
 package com.surprising.aeron.service.orchestration;
 
-import com.surprising.aeron.service.orchestration.commit.OrderedCommitCoordinator;
+import com.surprising.aeron.service.orchestration.trade.commit.OrderedCommitCoordinator;
 import com.surprising.aeron.service.orchestration.egress.ClusterServiceEgress;
 import com.surprising.aeron.service.orchestration.ingress.OwnerIngressRing;
-import com.surprising.aeron.service.orchestration.pipeline.ClusterCommandWindow;
-import com.surprising.aeron.service.orchestration.pipeline.CommandSlot;
-import com.surprising.aeron.service.orchestration.pipeline.DirectCommandSlot;
-import com.surprising.aeron.service.orchestration.pipeline.OrderBatchPending;
-import com.surprising.aeron.service.orchestration.pipeline.OwnerCommandPipelineState;
-import com.surprising.aeron.service.orchestration.pipeline.PendingMatchingRing;
+import com.surprising.aeron.service.orchestration.trade.ClusterCommandWindow;
+import com.surprising.aeron.service.orchestration.trade.CommandSlot;
+import com.surprising.aeron.service.orchestration.trade.DirectCommandSlot;
+import com.surprising.aeron.service.orchestration.trade.OrderBatchPending;
+import com.surprising.aeron.service.orchestration.trade.OwnerCommandPipelineState;
+import com.surprising.aeron.service.orchestration.trade.PendingMatchingRing;
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;

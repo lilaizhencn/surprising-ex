@@ -59,7 +59,7 @@ class MarketApplicationContextTest {
                 assertThat(ctx).hasNotFailed()
                     .hasSingleBean(com.surprising.realtime.provider.export.TradeExportService.class)
                     .hasSingleBean(com.surprising.realtime.provider.export.TradeExportProperties.class)
-                    .doesNotHaveBean(com.surprising.aeron.service.config.AeronCoreLifecycle.class)
+                    .doesNotHaveBean(com.surprising.aeron.service.bootstrap.AeronCoreLifecycle.class)
                     .doesNotHaveBean(RealtimeRouter.class);
                 assertThat(ctx.getBean(com.surprising.candlestick.provider.config.CandlestickProperties.class)
                     .getKafka().getProductLine()).isEqualTo(line);
@@ -73,7 +73,7 @@ class MarketApplicationContextTest {
                     .doesNotHaveBean(RealtimeRouter.class).doesNotHaveBean(RealtimeJsonPublisher.class)
                     .doesNotHaveBean(com.surprising.realtime.provider.export.TradeExportService.class)
                     .doesNotHaveBean(com.surprising.realtime.provider.export.CommittedOrderProjectionRepository.class)
-                    .doesNotHaveBean(com.surprising.aeron.service.config.AeronCoreLifecycle.class);
+                    .doesNotHaveBean(com.surprising.aeron.service.bootstrap.AeronCoreLifecycle.class);
             if (line == ProductLine.OPTION) {
                 assertThat(ctx).hasSingleBean(com.surprising.realtime.provider.option.OptionQuoteService.class)
                         .hasSingleBean(com.surprising.realtime.provider.option.OptionQuoteController.class);

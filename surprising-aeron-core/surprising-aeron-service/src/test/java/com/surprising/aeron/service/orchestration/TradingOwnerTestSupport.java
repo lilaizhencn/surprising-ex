@@ -5,7 +5,7 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.service.orchestration.egress.ClusterServiceEgress;
 import com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder;
-import com.surprising.aeron.service.orchestration.pipeline.ClusterCommandWindow;
+import com.surprising.aeron.service.orchestration.trade.ClusterCommandWindow;
 import com.surprising.product.api.ProductLine;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;

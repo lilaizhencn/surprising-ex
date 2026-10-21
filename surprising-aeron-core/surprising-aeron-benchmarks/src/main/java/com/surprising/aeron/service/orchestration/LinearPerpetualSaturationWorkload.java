@@ -11,7 +11,7 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
-import com.surprising.aeron.service.orchestration.pipeline.OwnerCommandPipelineState;
+import com.surprising.aeron.service.orchestration.trade.OwnerCommandPipelineState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;

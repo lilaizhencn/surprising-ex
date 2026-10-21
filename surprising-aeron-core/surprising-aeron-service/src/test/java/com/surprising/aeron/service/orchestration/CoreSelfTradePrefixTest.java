@@ -1,8 +1,8 @@
 package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.orchestration.pipeline.ClusterCommandWindow;
-import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
+import com.surprising.aeron.service.orchestration.trade.ClusterCommandWindow;
+import com.surprising.aeron.service.orchestration.trade.CoreTestCompletion;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.HashMap;

@@ -16,7 +16,10 @@ import com.surprising.aeron.service.state.risk.RiskScanRuntime;
 import com.surprising.aeron.service.state.risk.RuntimeRiskStateTransitions;
 import java.util.UUID;
 
-/** 触发单和算法单生命周期命令；各产品线使用所属运行时和订单规则。 */
+/**
+ * 触发流程入口：登记条件 → 价格/预算扫描 → 子订单准入与冻结 → 接回交易撮合、结算与提交。
+ * OCO、追踪、重试和失效留在原生命周期边界；各产品使用所属运行时与订单规则，详见模块 README。
+ */
 public final class TriggerOrderCommands {
     public enum Mutation { CANCEL, CLAIM, COMPLETE, TRAILING, EXPIRE, RETRY }
 

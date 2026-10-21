@@ -18,7 +18,7 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
 import com.surprising.aeron.service.matching.MatchingResult;
-import com.surprising.aeron.service.orchestration.pipeline.BenchmarkMatchingAwait;
+import com.surprising.aeron.service.orchestration.trade.BenchmarkMatchingAwait;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherEventType;

@@ -2,7 +2,7 @@ package com.surprising.aeron.service.orchestration.retention;
 
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
+import com.surprising.aeron.service.orchestration.trade.CoreTestCompletion;
 import com.surprising.aeron.service.state.ledger.SystemLedgerLane;
 import com.surprising.aeron.service.state.ledger.TreasuryRuntime;
 import com.surprising.product.api.ProductLine;

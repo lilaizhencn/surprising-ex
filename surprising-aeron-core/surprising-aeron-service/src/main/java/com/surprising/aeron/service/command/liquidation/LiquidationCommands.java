@@ -9,7 +9,10 @@ import com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProce
 import com.surprising.aeron.service.state.risk.RuntimeLiquidationResolution;
 import java.util.Collection;
 
-/** 衍生品强平执行、撤单推进和结果确认命令。 */
+/**
+ * 强平业务：交易编排完成状态/价格/游标检查和 Matcher 撤单后，在所属 Lane 处理持仓与资金。
+ * 分页撤单推进与 RESOLVE_LIQUIDATION 结果确认各保留原命令边界，详见模块 README。
+ */
 public final class LiquidationCommands {
     private final TradingCoreRuntime owner;
 

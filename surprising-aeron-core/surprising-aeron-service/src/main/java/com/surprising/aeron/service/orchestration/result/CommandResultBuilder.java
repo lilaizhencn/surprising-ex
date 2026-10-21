@@ -23,7 +23,7 @@ import com.surprising.aeron.service.command.support.PrimitiveLongView;
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
 import com.surprising.aeron.service.matching.MatchingResult;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.service.orchestration.pipeline.CommandSlot;
+import com.surprising.aeron.service.orchestration.trade.CommandSlot;
 import com.surprising.aeron.service.state.order.OrderRuntime;
 import com.surprising.product.api.ProductLine;
 import java.util.AbstractList;

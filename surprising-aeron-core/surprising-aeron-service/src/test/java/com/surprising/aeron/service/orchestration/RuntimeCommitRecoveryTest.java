@@ -33,7 +33,7 @@ import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.service.lane.LaneTopology;
-import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
+import com.surprising.aeron.service.orchestration.trade.CoreTestCompletion;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.aeron.service.state.account.TransferRuntime;
 import com.surprising.aeron.service.state.model.CoreFeePolicyState;

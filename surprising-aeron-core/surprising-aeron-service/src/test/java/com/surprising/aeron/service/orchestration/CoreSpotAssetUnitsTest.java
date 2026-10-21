@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
+import com.surprising.aeron.service.orchestration.trade.CoreTestCompletion;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.UUID;
@@ -219,7 +219,7 @@ class CoreSpotAssetUnitsTest {
             throw new AssertionError("Direct command timed out: " + type);
         }
         if (result.resultCode() == CoreResultCode.MATCHING_PENDING) {
-            result = com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion.completeMatchingSynchronously(
+            result = com.surprising.aeron.service.orchestration.trade.CoreTestCompletion.completeMatchingSynchronously(
                     runtime, runtime.matchingSequence(message.header().commandId()), 1_700_000_000_000L + seq, seq);
         }
         return result;

@@ -16,7 +16,7 @@ import com.surprising.aeron.protocol.CoreRoute;
 import com.surprising.aeron.protocol.CoreSettlementProgressCodec;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
+import com.surprising.aeron.service.orchestration.trade.CoreTestCompletion;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.ledger.CoreTreasuryState;

@@ -9,7 +9,10 @@ import com.surprising.aeron.service.state.risk.RiskScanCoordinator;
 import com.surprising.aeron.service.state.risk.RuntimeDerivativeRiskProcessor;
 import com.surprising.aeron.service.state.risk.RuntimeRiskStateTransitions;
 
-/** 衍生品标记价、风险续扫和风险扫描控制命令。 */
+/**
+ * 风控流程入口：标记价更新 → 按预算续扫 → 所属 Lane 估值 → 确定性强平计划 → 提交扫描进度。
+ * 剩余预算推进触发扫描；强平执行由后续复制命令进入交易编排，详见模块 README。
+ */
 public final class RiskCommands {
     private final TradingCoreRuntime owner;
     private static final java.util.function.BooleanSupplier COMPLETE = () -> true;
