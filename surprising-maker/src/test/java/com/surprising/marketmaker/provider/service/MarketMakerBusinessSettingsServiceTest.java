@@ -3,7 +3,7 @@ package com.surprising.marketmaker.provider.service;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import com.surprising.marketmaker.provider.config.*;
-import com.surprising.marketmaker.provider.repository.MarketMakerBusinessSettingsStore;
+import com.surprising.marketmaker.provider.store.MarketMakerBusinessSettingsStore;
 import com.surprising.product.api.ProductLine;
 import jakarta.validation.Validation;
 import java.time.Instant;
@@ -27,7 +27,7 @@ class MarketMakerBusinessSettingsServiceTest {
             settings.quoting().setOrderLevels(8);
             assertThat(properties.getQuoting().getOrderLevels()).isEqualTo(7);
             assertThatThrownBy(() -> service.save(settings, 1, "1", "stale"))
-                    .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+                    .isInstanceOf(com.surprising.marketmaker.provider.exception.MarketMakerSettingsConflictException.class);
             assertThat(properties.getQuoting().getOrderLevels()).isEqualTo(7);
         }
     }

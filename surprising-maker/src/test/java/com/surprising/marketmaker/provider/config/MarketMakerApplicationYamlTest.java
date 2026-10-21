@@ -60,9 +60,9 @@ class MarketMakerApplicationYamlTest {
                         "surprising.market-maker.strategies[0].instrument-ids[0]=1")
                 .run(context -> {
                     assertThat(context).hasNotFailed().doesNotHaveBean(javax.sql.DataSource.class);
-                    assertThat(context.getBean(com.surprising.marketmaker.provider.repository.MarketMakerStrategyOverrideStore.class)
+                    assertThat(context.getBean(com.surprising.marketmaker.provider.store.MarketMakerStrategyOverrideStore.class)
                             .definitions()).singleElement().satisfies(d -> assertThat(d.strategyId()).isEqualTo("yaml-maker"));
-                    assertThat(context.getBean(com.surprising.marketmaker.provider.repository.MarketMakerBusinessSettingsStore.class)
+                    assertThat(context.getBean(com.surprising.marketmaker.provider.store.MarketMakerBusinessSettingsStore.class)
                             .load(product).settings().engine().isEnabled()).isFalse();
                 });
     }
@@ -78,8 +78,8 @@ class MarketMakerApplicationYamlTest {
     @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
     @org.springframework.boot.context.properties.EnableConfigurationProperties(MarketMakerInfrastructureProperties.class)
     @org.springframework.context.annotation.Import({MarketMakerConfiguration.class,
-            com.surprising.marketmaker.provider.repository.MarketMakerBusinessSettingsStore.class,
-            com.surprising.marketmaker.provider.repository.InMemoryMarketMakerStrategyOverrideStore.class,
+            com.surprising.marketmaker.provider.store.MarketMakerBusinessSettingsStore.class,
+            com.surprising.marketmaker.provider.store.InMemoryMarketMakerStrategyOverrideStore.class,
             com.surprising.marketmaker.provider.repository.InMemoryMarketMakerRunEventRepository.class})
     static class MemoryConfiguration {}
 }

@@ -1,5 +1,7 @@
 package com.surprising.marketmaker.provider.controller;
 
+import com.surprising.marketmaker.provider.exception.MarketMakerSettingsConflictException;
+
 import com.surprising.marketmaker.api.model.MarketMakerRunRequest;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyQueryResponse;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyResponse;
@@ -98,6 +100,8 @@ public class AdminMarketMakerController {
         requireAdmin(adminUserId);
         try {
             return marketMakerService.saveStrategyDefinition(definition, adminUserId, reason);
+        } catch (MarketMakerSettingsConflictException conflict) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, conflict.getMessage(), conflict);
         } catch (IllegalArgumentException error) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, error.getMessage(), error);
         }

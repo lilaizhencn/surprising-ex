@@ -1,0 +1,293 @@
+{
+  "audit_date": "2026-10-21",
+  "verified_at_utc": "2026-10-21T16:32:47.331006+00:00",
+  "scope": "做市进程内设置存储与HTTP版本冲突边界",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16",
+  "stages": {
+    "negative": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-maker",
+        "-Dtest=MarketMakerMemorySettingsTest,MarketMakerBusinessSettingsServiceTest,MarketMakerSettingsConflictTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.marketmaker.provider.service.MarketMakerBusinessSettingsServiceTest",
+          "tests": 3,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.repository.MarketMakerMemorySettingsTest",
+          "tests": 5,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.controller.MarketMakerSettingsConflictTest",
+          "tests": 2,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "5ff0a4fa6a2c6b143237f21c2b1f24e878654ad4001dc37923c06a2f7e09772c",
+      "tests": 10,
+      "failures": 5,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-maker",
+        "-Dtest=*Test",
+        "clean",
+        "install"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.marketmaker.provider.service.MarketMakerBusinessSettingsServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.RestReferenceMarketProviderTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.MarketMakerQuoteSlotTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.MarketMakerQuoteArithmeticTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.config.MarketMakerApplicationYamlTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.task.MarketMakerTaskTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.QuotePlannerTest",
+          "tests": 31,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.config.MarketMakerFeignConfigurationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.repository.MarketMakerMemorySettingsTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.MarketMakerServiceTest",
+          "tests": 56,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepositoryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.SurprisingMarketMakerApplicationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.controller.MarketMakerSettingsConflictTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.controller.AdminMarketMakerControllerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.config.MarketMakerFeignConnectionTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "22eef9ab021773a94486cddd782602c5851de9e24bfab75998d04cac16632413",
+      "tests": 131,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-maker",
+        "-Dtest=MarketMakerMemorySettingsTest,MarketMakerBusinessSettingsServiceTest,MarketMakerSettingsConflictTest",
+        "clean",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.marketmaker.provider.repository.MarketMakerMemorySettingsTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.controller.MarketMakerSettingsConflictTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.MarketMakerBusinessSettingsServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "4e55ead096e539c7fbdbd5ac511354e9f09245842bd5a1d4df63cdbd0275214c",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "benchmark_consumer_compilation": {
+    "command": [
+      "mvn",
+      "-pl",
+      "surprising-aeron-core/surprising-aeron-benchmarks",
+      "-am",
+      "-DskipTests",
+      "test-compile"
+    ],
+    "exit_code": 0,
+    "log_sha256": "a60f83125032504eb10c107a506562406af9f9e5d4f8f64031576f32428bd4b2"
+  },
+  "moves": {
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/repository/MarketMakerBusinessSettingsStore.java": "surprising-maker/src/main/java/com/surprising/marketmaker/provider/store/MarketMakerBusinessSettingsStore.java",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/repository/InMemoryMarketMakerStrategyOverrideStore.java": "surprising-maker/src/main/java/com/surprising/marketmaker/provider/store/InMemoryMarketMakerStrategyOverrideStore.java",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/repository/MarketMakerStrategyOverrideStore.java": "surprising-maker/src/main/java/com/surprising/marketmaker/provider/store/MarketMakerStrategyOverrideStore.java"
+  },
+  "assertions": [
+    "两个设置存储与既有策略存储接口归store；它们没有数据库表，不再以Repository组件表示SQL持久化。保留进程内唯一状态、YAML启动初始化、深复制、版本锁和重启边界。",
+    "Store的版本冲突只抛原生MarketMakerSettingsConflictException，两个Controller显式映射HTTP409并保留原提示；不会把底层存储与Web状态耦合。",
+    "Store方法体除包/组件注解与冲突异常类型外保持；同版本替换、策略身份大小写保护及修改定义后清除旧覆盖保持。",
+    "定向10项、完整做市模块131项通过无跳过；撤去版本检查/错误映射的10项负例捕获5项预期失败，源码finally恢复后clean install绿色。",
+    "直接引用的MakerConfigurationReadBenchmark及反应器依赖完成生产/测试源码编译；没有运行JMH或声称性能变化。"
+  ],
+  "source_sha256": {
+    "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/marketmaker/provider/repository/MakerConfigurationReadBenchmark.java": "156396a983e8ad62abdca037e62216a928dbdc76da7931f733f257a091375295",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/controller/AdminMarketMakerController.java": "b9fddd9f569936a9325e6f862e25bec5740371fe976da3f2145beb6f69428d96",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/controller/MarketMakerBusinessSettingsController.java": "0d1a93a8eece98c0b17024822dcb774ec8b386ab44724da10d48d99879b24095",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/exception/MarketMakerSettingsConflictException.java": "8d6a99086c7fdc96122700fed6f2dc0672cc4b2705db4f187394487ac5a7e5d4",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/service/MarketMakerBusinessSettingsService.java": "93310f871742192a5f1e23be989ac1f2e6d93f69868373e6790be47a6b2d7b2f",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/service/MarketMakerService.java": "43bdef1d8b37a31bdb2a2a51fcf2f67e1fb628d4006a148f76773c77243d1049",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/store/InMemoryMarketMakerStrategyOverrideStore.java": "5edc613729c1e0574559e9ef7561caf21efeb18205595ea8936e15fd7f8f138f",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/store/MarketMakerBusinessSettingsStore.java": "fb83a1ebfbab200abc7085a803dac2e5b0519dc8018e81ba7234124b216a99f3",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/store/MarketMakerStrategyOverrideStore.java": "d24a7c4bcd65f97319788295efbeeaa8a49a83ca9df16faeabe8024e7b332f84",
+    "surprising-maker/src/test/java/com/surprising/marketmaker/provider/config/MarketMakerApplicationYamlTest.java": "a82979205d16010c989e78873aac52db6531c0402832118d2f30fb95c382e0d1",
+    "surprising-maker/src/test/java/com/surprising/marketmaker/provider/controller/MarketMakerSettingsConflictTest.java": "d9f3d3609d8d596300c704b95f26a6938574f465bef931662d94b0b11247d262",
+    "surprising-maker/src/test/java/com/surprising/marketmaker/provider/repository/MarketMakerMemorySettingsTest.java": "e3c7caf7285cc8a34449a821ce2a7df0c80c677fa85183c5e257b790dc478aa8",
+    "surprising-maker/src/test/java/com/surprising/marketmaker/provider/service/MarketMakerBusinessSettingsServiceTest.java": "1d9adb4eea6e506e1f8290a85878d7da2740cf9ac438590ba3c1ac5255a4300f",
+    "surprising-maker/src/test/java/com/surprising/marketmaker/provider/service/MarketMakerServiceTest.java": "b219a204d9428c26a12f82215b6717da23dafce2f01b9c9a982ff23386b3ad4b"
+  },
+  "additional_confirmed_findings": "docs/audit/java-mvc-additional-findings-20261022.csv",
+  "not_run": [
+    "新增五处格式/协议绑定问题继续整改，包含本模块Service/Store请求字段校验；不以本批HTTP冲突解耦代替这些问题完成。",
+    "本批未启动实际做市/交易API资金实栈，最终资金核对和全范围门禁继续。"
+  ],
+  "cleanup": {
+    "owned_logs_and_summarized_reports_removed": [
+      "/tmp/surprising-mvc-maker-http-focused.log",
+      "/tmp/surprising-mvc-maker-http-negative.log",
+      "/tmp/surprising-mvc-maker-http-expanded.log",
+      "/tmp/surprising-mvc-maker-http-benchmark-compile.log",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.service.MarketMakerQuoteSlotTest.txt",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.service.MarketMakerBusinessSettingsServiceTest.xml",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.config.MarketMakerFeignConnectionTest.txt",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.service.MarketMakerBusinessSettingsServiceTest.txt",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.service.RestReferenceMarketProviderTest.xml",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.service.MarketMakerQuoteSlotTest.xml",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.service.MarketMakerQuoteArithmeticTest.xml",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.config.MarketMakerApplicationYamlTest.xml",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.service.RestReferenceMarketProviderTest.txt",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.repository.MarketMakerMemorySettingsTest.txt",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.service.QuotePlannerTest.txt",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.task.MarketMakerTaskTest.xml",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.config.MarketMakerFeignConfigurationTest.txt",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.service.QuotePlannerTest.xml",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.SurprisingMarketMakerApplicationTest.txt",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.task.MarketMakerTaskTest.txt",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.config.MarketMakerApplicationYamlTest.txt",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.config.MarketMakerFeignConfigurationTest.xml",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.service.MarketMakerQuoteArithmeticTest.txt",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.controller.AdminMarketMakerControllerTest.txt",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.repository.MarketMakerMemorySettingsTest.xml",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.service.MarketMakerServiceTest.txt",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.service.MarketMakerServiceTest.xml",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.controller.MarketMakerSettingsConflictTest.txt",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepositoryTest.xml",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.SurprisingMarketMakerApplicationTest.xml",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.controller.MarketMakerSettingsConflictTest.xml",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.controller.AdminMarketMakerControllerTest.xml",
+      "surprising-maker/target/surefire-reports/TEST-com.surprising.marketmaker.provider.config.MarketMakerFeignConnectionTest.xml",
+      "surprising-maker/target/surefire-reports/com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepositoryTest.txt"
+    ],
+    "no_database_started": true,
+    "build_outputs_retained": true
+  }
+}

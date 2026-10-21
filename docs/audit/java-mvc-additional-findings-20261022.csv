@@ -1,0 +1,6 @@
+id,rule,current_path,line,status,detail,evidence
+ADD-001,SERVICE_HTTP_PROTOCOL,surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminAccess.java,40,待整改,Service读取HTTP请求并组装协议元数据，且构造带HttpStatus的异常；请求绑定需归Controller，原生业务失败再由HTTP层映射。,
+ADD-002,SERVICE_REQUEST_VALIDATION,surprising-maker/src/main/java/com/surprising/marketmaker/provider/service/MarketMakerBusinessSettingsService.java,21,待整改,Bean Validation、URL/JSON/输入ID解析仍在Service；需移至Controller入口，跨字段业务/安装约束保持Service。,
+ADD-003,STORE_REQUEST_VALIDATION,surprising-maker/src/main/java/com/surprising/marketmaker/provider/store/InMemoryMarketMakerStrategyOverrideStore.java,40,待整改,Store验证admin/reason请求格式，且这些参数不参与存储事实；绑定和校验需归Controller，Store只处理原生状态与版本。,
+ADD-004,REPOSITORY_REQUEST_BINDING,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/funding/provider/repository/FundingRateRepository.java,32,待整改,Repository解析HTTP limit/sort/cursor；需由入口绑定原生查询条件，保留历史费率关联用途与提交投影权威。,
+ADD-005,REPOSITORY_REQUEST_BINDING,surprising-gateway/src/main/java/com/surprising/instrument/provider/repository/InstrumentRepository.java,159,待整改,Repository解析HTTP排序与游标/limit；需由Controller绑定原生查询条件，SQL映射和必要资产关联留在Repository。,

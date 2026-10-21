@@ -1,8 +1,10 @@
 package com.surprising.marketmaker.provider.controller;
 
+import com.surprising.marketmaker.provider.exception.MarketMakerSettingsConflictException;
+
 import com.surprising.marketmaker.provider.config.MarketMakerBusinessSettings;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
-import com.surprising.marketmaker.provider.repository.MarketMakerBusinessSettingsStore;
+import com.surprising.marketmaker.provider.store.MarketMakerBusinessSettingsStore;
 import com.surprising.marketmaker.provider.service.MarketMakerBusinessSettingsService;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineConfiguration;
@@ -29,6 +31,7 @@ public class MarketMakerBusinessSettingsController {
             @RequestParam ProductLine productLine, @RequestBody Update request) {
         check(admin, productLine);
         try { return service.save(request.settings(), request.expectedVersion(), admin, request.reason()); }
+        catch (MarketMakerSettingsConflictException conflict) { throw new ResponseStatusException(HttpStatus.CONFLICT, conflict.getMessage(), conflict); }
         catch (IllegalArgumentException invalid) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid); }
     }
     private void check(String admin, ProductLine line) {

@@ -1,4 +1,4 @@
-package com.surprising.marketmaker.provider.repository;
+package com.surprising.marketmaker.provider.store;
 
 import com.surprising.marketmaker.provider.model.StrategyConfigOverride;
 import com.surprising.product.api.ProductLine;

@@ -1,4 +1,6 @@
-package com.surprising.marketmaker.provider.repository;
+package com.surprising.marketmaker.provider.store;
+
+import com.surprising.marketmaker.provider.exception.MarketMakerSettingsConflictException;
 
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition;
@@ -6,12 +8,10 @@ import com.surprising.marketmaker.provider.model.StrategyConfigOverride;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.*;
-import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Repository;
-import org.springframework.web.server.ResponseStatusException;
+import org.springframework.stereotype.Component;
 
 /** Single-process strategy ownership. Restart restores YAML, never administrator edits. */
-@Repository
+@Component
 public class InMemoryMarketMakerStrategyOverrideStore implements MarketMakerStrategyOverrideStore {
     private final Map<String, MarketMakerStrategyDefinition> definitions = new LinkedHashMap<>();
     private final Map<String, StrategyConfigOverride> overrides = new LinkedHashMap<>();
@@ -44,7 +44,7 @@ public class InMemoryMarketMakerStrategyOverrideStore implements MarketMakerStra
         if (old != null && !old.strategyId().equals(d.strategyId()))
             throw new IllegalArgumentException("existing strategy ID spelling cannot change; create a new strategy");
         if ((old == null ? 0 : old.version()) != d.version())
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "做市配置已更新，请重新加载");
+            throw new MarketMakerSettingsConflictException( "做市配置已更新，请重新加载");
         var saved = new MarketMakerStrategyDefinition(d.strategyId(), d.productLine(), d.enabled(), d.accountIds(),
                 d.instrumentIds(), d.baseQuantitySteps(), d.marginMode(), d.spreadTicks(), d.levelSpacingTicks(),
                 d.maxInventorySteps(), d.maxInventorySkewPpm(), d.orderLevels(), d.initialAnchorPriceTicks(),

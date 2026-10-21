@@ -2,7 +2,7 @@ package com.surprising.marketmaker.provider.service;
 
 import com.surprising.marketmaker.provider.config.MarketMakerBusinessSettings;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
-import com.surprising.marketmaker.provider.repository.MarketMakerBusinessSettingsStore;
+import com.surprising.marketmaker.provider.store.MarketMakerBusinessSettingsStore;
 import jakarta.validation.Validator;
 import org.springframework.stereotype.Service;
 

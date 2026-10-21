@@ -1,16 +1,16 @@
-package com.surprising.marketmaker.provider.repository;
+package com.surprising.marketmaker.provider.store;
+
+import com.surprising.marketmaker.provider.exception.MarketMakerSettingsConflictException;
 
 import com.surprising.marketmaker.provider.config.MarketMakerBusinessSettings;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
-import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Repository;
-import org.springframework.web.server.ResponseStatusException;
+import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 /** Owns versioned settings for this process only. Copies isolate mutable HTTP/configuration objects. */
-@Repository
+@Component
 public class MarketMakerBusinessSettingsStore {
     private final ObjectMapper json;
     private final ProductLine product;
@@ -33,7 +33,7 @@ public class MarketMakerBusinessSettingsStore {
                                       String admin, String reason) {
         requireProduct(line);
         if (expectedVersion != current.version())
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "做市公共设置已更新，请重新加载");
+            throw new MarketMakerSettingsConflictException( "做市公共设置已更新，请重新加载");
         current = copy(new Settings(settings, Math.addExact(current.version(), 1), admin, reason, Instant.now()));
         return copy(current);
     }

@@ -35,7 +35,7 @@ import com.surprising.marketmaker.provider.repository.MarketMakerRunEventReposit
 import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.CursorPage;
 import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.MarketMakerRunEventRecord;
 import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.MarketMakerRunEventWrite;
-import com.surprising.marketmaker.provider.repository.MarketMakerStrategyOverrideStore;
+import com.surprising.marketmaker.provider.store.MarketMakerStrategyOverrideStore;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.consumer.LatestMarkPriceCache;

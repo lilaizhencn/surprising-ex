@@ -1,5 +1,8 @@
 package com.surprising.marketmaker.provider.repository;
 
+import com.surprising.marketmaker.provider.store.InMemoryMarketMakerStrategyOverrideStore;
+import com.surprising.marketmaker.provider.store.MarketMakerBusinessSettingsStore;
+
 import static org.assertj.core.api.Assertions.*;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.config.MarketMakerBusinessSettings;
@@ -9,7 +12,7 @@ import com.surprising.trading.api.model.MarginMode;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.*;
-import org.springframework.web.server.ResponseStatusException;
+import com.surprising.marketmaker.provider.exception.MarketMakerSettingsConflictException;
 import tools.jackson.databind.json.JsonMapper;
 
 class MarketMakerMemorySettingsTest {
@@ -27,7 +30,7 @@ class MarketMakerMemorySettingsTest {
         initial.settings().quoting().setOrderLevels(12);
         assertThat(store.load(line).settings().quoting().getOrderLevels()).isEqualTo(9);
         assertThatThrownBy(() -> store.save(line, MarketMakerBusinessSettings.initialDisabled(), 1, "2", "stale"))
-                .isInstanceOf(ResponseStatusException.class);
+                .isInstanceOf(MarketMakerSettingsConflictException.class);
         assertThat(store.load(line).settings().quoting().getOrderLevels()).isEqualTo(9);
         assertThat(new MarketMakerBusinessSettingsStore(yaml, json).load(line).settings().quoting().getOrderLevels())
                 .isEqualTo(7);
@@ -40,10 +43,10 @@ class MarketMakerMemorySettingsTest {
         var store = new InMemoryMarketMakerStrategyOverrideStore(yaml);
         assertThat(store.definitions()).singleElement().satisfies(d -> assertThat(d.version()).isEqualTo(1));
         assertThatThrownBy(() -> store.saveDefinition(definition(ProductLine.LINEAR_PERPETUAL, 0, 10), "1", "duplicate"))
-                .isInstanceOf(ResponseStatusException.class);
+                .isInstanceOf(MarketMakerSettingsConflictException.class);
         assertThat(store.saveDefinition(definition(ProductLine.LINEAR_PERPETUAL, 1, 12), "1", "edit").version()).isEqualTo(2);
         assertThatThrownBy(() -> store.saveDefinition(definition(ProductLine.LINEAR_PERPETUAL, 1, 99), "2", "stale"))
-                .isInstanceOf(ResponseStatusException.class);
+                .isInstanceOf(MarketMakerSettingsConflictException.class);
         store.saveDefinition(definition(ProductLine.INVERSE_PERPETUAL, 0, 8), "1", "other line");
         assertThat(store.definitions()).hasSize(2);
         assertThat(new InMemoryMarketMakerStrategyOverrideStore(yaml).definitions()).singleElement()
