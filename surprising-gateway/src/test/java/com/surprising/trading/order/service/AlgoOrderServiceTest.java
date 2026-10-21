@@ -14,6 +14,19 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import org.junit.jupiter.api.Test;
 
 class AlgoOrderServiceTest {
+    @Test void missingCommittedAlgoIsANativeAbsenceWithoutCoreOrStoreFallback() {
+        var properties=new TradingOrderProperties();properties.getKafka().setProductLine(ProductLine.SPOT);
+        var store=mock(AeronAlgoOrderStore.class);
+        var projection=mock(com.surprising.trading.order.repository.AlgoOrderProjectionRepository.class);
+        var receipts=mock(com.surprising.trading.order.repository.AeronOrderProjectionRepository.class);
+        var orders=mock(OrderService.class);
+        var service=new AlgoOrderService(properties,orders,store,projection,receipts);
+        assertThatThrownBy(()->service.get(7,99)).isInstanceOf(java.util.NoSuchElementException.class)
+                .hasMessage("algo order is not present in the committed read view");
+        org.mockito.Mockito.verify(projection).byId(ProductLine.SPOT,7,99);
+        org.mockito.Mockito.verifyNoInteractions(store,receipts,orders);
+    }
+
     @Test void creationRecoveryUsesOnlyCommittedReceiptsAndParentState() {
         var properties = new TradingOrderProperties(); properties.getKafka().setProductLine(ProductLine.SPOT);
         var store = mock(AeronAlgoOrderStore.class);

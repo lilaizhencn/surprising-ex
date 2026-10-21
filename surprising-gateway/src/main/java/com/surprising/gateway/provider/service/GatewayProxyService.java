@@ -181,6 +181,11 @@ public class GatewayProxyService {
                     : result.status().terminal() ? HttpStatus.CONFLICT : HttpStatus.SERVICE_UNAVAILABLE;
             return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON)
                     .body(objectMapper.writeValueAsBytes(result));
+        } catch (com.surprising.gateway.provider.exception.ProductTransferSecurityException rejected) {
+            throw new ResponseStatusException(switch (rejected.reason()) {
+                case VALUATION_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
+                case VERIFICATION_REQUIRED -> HttpStatus.PRECONDITION_REQUIRED;
+            }, rejected.getMessage(), rejected);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

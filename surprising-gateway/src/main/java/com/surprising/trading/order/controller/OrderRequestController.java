@@ -208,6 +208,8 @@ public class OrderRequestController {
     public AlgoOrderResponse getAlgo(long userId, long algoOrderId) {
         try {
             return algoOrderService.get(userId, algoOrderId);
+        } catch (java.util.NoSuchElementException missing) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, missing.getMessage(), missing);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

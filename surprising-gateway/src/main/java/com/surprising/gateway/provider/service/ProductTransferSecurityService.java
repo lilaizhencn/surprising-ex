@@ -6,9 +6,8 @@ import com.surprising.asset.repository.AssetRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Map;
-import org.springframework.http.HttpStatus;
+import com.surprising.gateway.provider.exception.ProductTransferSecurityException;
 import org.springframework.stereotype.Service;
-import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -45,13 +44,13 @@ public class ProductTransferSecurityService {
                 usdtValue = valuationClient.toUsdt(transfer.asset(), transfer.amountUnits()
                         .divide(BigDecimal.valueOf(scale)));
             } catch (WithdrawalValuationClient.ValuationUnavailableException ex) {
-                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                throw new ProductTransferSecurityException(ProductTransferSecurityException.Reason.VALUATION_UNAVAILABLE,
                         "transfer valuation is unavailable", ex);
             }
             if (usdtValue.compareTo(threshold) < 0) return;
         }
         if (!verificationService.verify(userId, "LARGE_TRANSFER", emailCode, totpCode, now)) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
+            throw new ProductTransferSecurityException(ProductTransferSecurityException.Reason.VERIFICATION_REQUIRED,
                     "large transfer security verification is required");
         }
     }

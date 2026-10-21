@@ -118,8 +118,7 @@ public class AlgoOrderService {
 
     public AlgoOrderResponse get(long userId, long algoOrderId) {
         var view = projection.byId(currentProductLine(), userId, algoOrderId);
-        if (view == null) throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.NOT_FOUND, "algo order is not present in the committed read view");
+        if (view == null) throw new java.util.NoSuchElementException( "algo order is not present in the committed read view");
         return store.response(view);
     }
 

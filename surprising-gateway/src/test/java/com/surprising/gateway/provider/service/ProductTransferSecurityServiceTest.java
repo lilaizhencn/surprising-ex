@@ -17,7 +17,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.springframework.web.server.ResponseStatusException;
+import com.surprising.gateway.provider.exception.ProductTransferSecurityException;
 import tools.jackson.databind.ObjectMapper;
 
 class ProductTransferSecurityServiceTest {
@@ -46,7 +46,7 @@ class ProductTransferSecurityServiceTest {
 
         assertThatThrownBy(() -> service.requireIfNeeded(42L, body(2_000_000_000_000L),
                 "123456", "654321", Instant.now()))
-                .isInstanceOf(ResponseStatusException.class)
+                .isInstanceOf(ProductTransferSecurityException.class)
                 .hasMessageContaining("large transfer security verification is required");
     }
 
@@ -74,7 +74,7 @@ class ProductTransferSecurityServiceTest {
         scale(1_000_000L);
         when(valuationClient.toUsdt("USDT", new BigDecimal("10000"))).thenReturn(new BigDecimal("10000"));
         assertThatThrownBy(() -> service.requireIfNeeded(42L, body(10_000_000_000L), null, null, Instant.now()))
-                .isInstanceOf(ResponseStatusException.class)
+                .isInstanceOf(ProductTransferSecurityException.class)
                 .hasMessageContaining("large transfer security verification is required");
         verify(verificationService).verify(eq(42L), eq("LARGE_TRANSFER"), eq(null), eq(null), any());
     }
@@ -95,6 +95,15 @@ class ProductTransferSecurityServiceTest {
         assertThatThrownBy(() -> service.requireIfNeeded(42L, body(100L), null, null, Instant.now()))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("asset is not supported");
         org.mockito.Mockito.verifyNoInteractions(valuationClient, verificationService);
+    }
+
+    @Test void unavailableValuationIsNativeAndCannotInvokeSecurityOrFunds() {
+        var service=service();
+        when(valuationClient.toUsdt(eq("USDT"),any())).thenThrow(new WithdrawalValuationClient.ValuationUnavailableException("offline"));
+        assertThatThrownBy(()->service.requireIfNeeded(42L,body(100),null,null,Instant.now()))
+                .isInstanceOfSatisfying(ProductTransferSecurityException.class,
+                        failure->org.assertj.core.api.Assertions.assertThat(failure.reason()).isEqualTo(ProductTransferSecurityException.Reason.VALUATION_UNAVAILABLE));
+        org.mockito.Mockito.verifyNoInteractions(verificationService);
     }
 
     private void scale(long units) {

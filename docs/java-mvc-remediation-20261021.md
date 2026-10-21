@@ -144,3 +144,5 @@
 - HTTP职责5将共享Valkey、订单/杠杆/条件单及四类SQL查询的不可用失败改为原生ReadViewUnavailableException，由公共本地网关/内部HTTP/C2C Advice映射503；C2C对账直接调用AccountService，分别请求两个账户且冷视图不能按零放行。API40项、实时完整187项、Gateway扩大532项中531通过/1项浏览器QA环境跳过；两组负例分别捕获12和14失败，恢复后干净构建绿色，直接基准消费者及依赖源码编译通过。关闭MVC-012,MVC-013,MVC-014,MVC-185,MVC-186,MVC-187,MVC-188,MVC-226,MVC-227及补充ADD-008；见 [读视图HTTP职责验证](validation/java-mvc-readview-http-20261022.json)。复核追加ADD-009至011输入绑定待整改，三处初始化多表复核和指标无类型契约尚未关闭；所属资源清理，最终实栈和其余全范围继续。
 
 - Controller职责1将账户、订单、杠杆、手续费、管理订单和两类条件单的七个请求组件从Service归到controller；保留@Component本地协议边界，HTTP路由仍由原入口负责，业务仍委托原Service。七个主类方法体在类型/类名归一后相同，无新增状态或框架。定向81项、Gateway影响面干净构建422项全部通过无跳过，旧class产物已随clean移除。关闭MVC-201、204至209；见 [请求Controller验证](validation/java-mvc-request-controllers-20261022.json)。所属数据库/日志/报告已清理，剩余多表/业务异常/参数职责及最终实栈继续。
+
+- HTTP职责6将划转估值/安全验证和算法单不存在改为原生失败，协议入口维持503/428/404；安全失败均不进入资金协调器，算法单缺失不回退Core/store。定向105项、干净构建扩大401项全部通过无跳过；16项HTTP负例捕获3项预期失败，逐字节恢复后扩大绿色。关闭MVC-008、011；见 [业务原生失败验证](validation/java-mvc-business-errors-20261022.json)。追加ADD-012原始划转JSON绑定待整改，未将HTTP异常关闭等同于其余职责完成；所属资源已清理，剩余初始化多表、指标契约、参数及最终实栈继续。

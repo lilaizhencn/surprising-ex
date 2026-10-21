@@ -496,3 +496,5 @@ C2C后台的原始请求头、method/path/query、User-Agent和IP由 `c2c.contro
 账户/订单/成交/条件单读视图未就绪、落后、过期或无效使用原生 `ReadViewUnavailableException`；公共本地分发由 `LocalBusinessApi` 映射原503响应，产品内部HTTP由 `ReadViewHttpErrors` / 行情Controller处理。C2C对账直接读取 `AccountService`，仍分别续租并读取托管/手续费账户，任一不可用都不能按零余额放行。
 
 账户和交易本地协议请求组件统一位于各领域 `controller` 包（`AccountRequestController`、`OrderRequestController`、`LeverageRequestController`、`TradingFeeRequestController` 及管理/条件单请求组件）。它们以@Component共享内部HTTP与本地分发的校验/响应逻辑，不声明额外路由；状态变化、下单及查询业务由原Service承担。
+
+划转安全Service的估值不可用/需要验证以原生 `ProductTransferSecurityException` 表示，网关协议入口维持503/428并阻止资金协调器调用。算法单已提交视图中不存在时由Service返回原生NoSuchElementException，订单请求Controller映射404；未就绪仍使用读视图不可用契约，不回退Core或命令存储。

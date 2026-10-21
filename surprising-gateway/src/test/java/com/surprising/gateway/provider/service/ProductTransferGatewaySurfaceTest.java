@@ -56,6 +56,31 @@ class ProductTransferGatewaySurfaceTest {
                 .contains("\"status\":\"COMPLETED\"");
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(com.surprising.gateway.provider.exception.ProductTransferSecurityException.Reason.class)
+    void nativeSecurityFailuresKeepTheirHttpStatusAndNeverStartFundsMovement(
+            com.surprising.gateway.provider.exception.ProductTransferSecurityException.Reason reason) throws Exception {
+        var coordinator=mock(ProductTransferCoordinator.class);
+        var security=mock(ProductTransferSecurityService.class);
+        org.mockito.Mockito.doThrow(new com.surprising.gateway.provider.exception.ProductTransferSecurityException(reason,"security failure"))
+                .when(security).requireIfNeeded(org.mockito.ArgumentMatchers.eq(42L),org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());
+        var local=mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
+        var products=mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
+        when(products.enabled()).thenReturn(List.of(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
+        var proxy=new GatewayProxyService(properties(),new RestTemplate(),userAuthService(),null,null,new ObjectMapper(),
+                coordinator,security,products,local,new com.surprising.gateway.provider.product.GatewayProductSelection(products,new ObjectMapper()));
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
+                new com.surprising.gateway.provider.controller.GatewayProxyController(proxy,products)).build();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/gateway/account/transfers")
+                .header("Authorization","Bearer user").header("Idempotency-Key","original-transfer")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content("{\"asset\":\"USDT\",\"amountUnits\":100}"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().is(
+                        reason==com.surprising.gateway.provider.exception.ProductTransferSecurityException.Reason.VALUATION_UNAVAILABLE?503:428));
+        org.mockito.Mockito.verifyNoInteractions(coordinator);
+    }
+
     private GatewayProperties properties() {
         GatewayProperties properties = new GatewayProperties();
         properties.setRoutes(java.util.Map.of("account",
