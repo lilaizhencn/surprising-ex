@@ -292,9 +292,9 @@ class LocalBusinessApiTest {
     void websocketMetricsRejectsMissingAdminAndForgedRawHttpHeaders() throws Exception {
         assertThat(invoke("websocket-admin", "/api/v1/admin/websocket/metrics", HttpMethod.GET, userHeaders(), null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         verifyNoInteractions(websocket);
-        var proxy = mock(com.surprising.gateway.provider.service.GatewayProxyService.class);
+        var proxy = mock(com.surprising.gateway.provider.controller.GatewayProxyController.class);
         var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
-                new com.surprising.gateway.provider.controller.GatewayProxyController(proxy, mock(com.surprising.gateway.provider.product.GatewayProductServices.class))).build();
+                proxy).build();
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/admin/websocket/metrics")
                 .header("X-Admin-User-Id", "7"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNotFound());

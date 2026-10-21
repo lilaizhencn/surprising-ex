@@ -7,7 +7,7 @@ import com.surprising.gateway.provider.auth.service.ComplianceService;
 import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.service.GatewayProxyService;
+import com.surprising.gateway.provider.controller.GatewayProxyController;
 import com.surprising.gateway.provider.service.CustodyWalletClient;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -37,7 +37,7 @@ import tools.jackson.databind.ObjectMapper;
 public class BinanceApiController {
 
     private final GatewayProperties properties;
-    private final GatewayProxyService gatewayProxyService;
+    private final GatewayProxyController gatewayProxyService;
     private final GatewayApiKeyService apiKeyService;
     private final SensitiveActionVerificationService verificationService;
     private final AuthService authService;
@@ -47,7 +47,7 @@ public class BinanceApiController {
     private final ObjectMapper objectMapper;
 
     public BinanceApiController(GatewayProperties properties,
-                                GatewayProxyService gatewayProxyService,
+                                GatewayProxyController gatewayProxyService,
                                 GatewayApiKeyService apiKeyService,
                                 SensitiveActionVerificationService verificationService,
                                 AuthService authService,

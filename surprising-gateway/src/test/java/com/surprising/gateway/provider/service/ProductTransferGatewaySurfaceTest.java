@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.controller.GatewayProxyController;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -37,8 +39,8 @@ class ProductTransferGatewaySurfaceTest {
         var products = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         when(products.enabled()).thenReturn(java.util.List.of(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
         when(products.local(org.mockito.ArgumentMatchers.any())).thenReturn(local);
-        GatewayProxyService proxy = new GatewayProxyService(properties(), new RestTemplate(), userAuthService(),
-                null, null, new ObjectMapper(), new ProductTransferCoordinator(accountClient), null,
+        GatewayProxyController proxy = new GatewayProxyController(properties(), new RestTemplate(), userAuthService(),
+                null, new ObjectMapper(), new ProductTransferCoordinator(accountClient), null,
                 products, local, new com.surprising.gateway.provider.product.GatewayProductSelection(products, new ObjectMapper()));
         MockHttpServletRequest servletRequest = new MockHttpServletRequest(
                 "POST", "/api/v1/gateway/account/transfers");
@@ -68,10 +70,10 @@ class ProductTransferGatewaySurfaceTest {
         var local=mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
         var products=mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         when(products.enabled()).thenReturn(List.of(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
-        var proxy=new GatewayProxyService(properties(),new RestTemplate(),userAuthService(),null,null,new ObjectMapper(),
+        var proxy=new GatewayProxyController(properties(),new RestTemplate(),userAuthService(),null,new ObjectMapper(),
                 coordinator,security,products,local,new com.surprising.gateway.provider.product.GatewayProductSelection(products,new ObjectMapper()));
         var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
-                new com.surprising.gateway.provider.controller.GatewayProxyController(proxy,products)).build();
+                proxy).build();
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/gateway/account/transfers")
                 .header("Authorization","Bearer user").header("Idempotency-Key","original-transfer")
                 .contentType(org.springframework.http.MediaType.APPLICATION_JSON)

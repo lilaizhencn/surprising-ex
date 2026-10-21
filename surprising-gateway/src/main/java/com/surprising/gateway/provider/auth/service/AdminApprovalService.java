@@ -13,6 +13,7 @@ import com.surprising.gateway.provider.config.GatewayProperties;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.List;
 import org.springframework.stereotype.Service;
 
 /**
@@ -80,6 +81,53 @@ public class AdminApprovalService {
     public AdminApprovalResponse reject(String authorization, long approvalId, String reason) {
         JwtPrincipal principal = authService.authenticateAdminBearer(authorization);
         return approvalRepository.reject(approvalId, principal, reason, Instant.now());
+    }
+
+    public boolean requiresGatewayApproval(String service, String method, String requestPath, boolean adminRequest) {
+        if (!properties.getSecurity().isRequireApprovalForHighRiskAdminWrites()) {
+            return false;
+        }
+        if (!adminRequest || method == null || java.util.Set.of("GET","HEAD","OPTIONS").contains(method)) {
+            return false;
+        }
+        String normalizedService = service == null ? "" : service.trim().toLowerCase(java.util.Locale.ROOT);
+        String path = requestPath == null ? "" : requestPath.toLowerCase(java.util.Locale.ROOT);
+        // Routine business configuration is versioned and audited by its owning service.
+        // Financial adjustments and operational intervention still require dual approval.
+        String prefix = "/api/v1/admin/gateway" + "/" + normalizedService;
+        String suffix = path.startsWith(prefix + "/") ? path.substring(prefix.length()) : "";
+        if ("POST".equals(method) && switch (normalizedService) {
+            case "instrument-admin" -> suffix.equals("/upsert") || suffix.equals("/order-settings") || suffix.matches("/[0-9]+/status");
+            case "market-maker" -> suffix.equals("/business-settings") || suffix.equals("/strategy-definitions")
+                    || suffix.matches("/strategies/[a-z0-9_-]+/(config|pause|resume)");
+            case "insurance-admin" -> suffix.equals("/runtime-config");
+            case "risk", "liquidation", "funding", "adl" -> suffix.equals("/admin/runtime-config");
+            default -> false;
+        }) {
+            return false;
+        }
+        if (List.of("account", "instrument-admin", "insurance-admin", "trading-fees", "trading-leverage",
+                "trading-orders", "market-maker", "risk-admin", "liquidation-admin", "wallet-admin").contains(normalizedService)) {
+            return true;
+        }
+        return switch (normalizedService) {
+            case "risk", "liquidation", "funding", "adl" -> path.endsWith("/admin/runtime-config");
+            default -> false;
+        };
+    }
+
+    public void consumeGatewayApproval(long approvalId, long adminUserId, String service, String method,
+            String requestPath, String query, String bodyHash, Instant now) {
+        if (approvalRepository == null) throw new AdminApprovalRequiredException("admin approval repository is not available");
+        try {
+            approvalRepository.consumeApproved(approvalId,adminUserId,service,method,requestPath,query,bodyHash,now);
+        } catch (IllegalArgumentException | IllegalStateException invalid) {
+            throw new AdminApprovalRequiredException(invalid.getMessage(),invalid);
+        }
+    }
+
+    public void recordGatewayOperation(com.surprising.gateway.provider.auth.model.AdminOperationRecord record) {
+        if (auditRepository != null) auditRepository.record(record);
     }
 
     public String approvalHeaderName() {

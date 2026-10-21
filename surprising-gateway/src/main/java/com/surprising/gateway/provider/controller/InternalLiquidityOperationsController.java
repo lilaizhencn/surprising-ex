@@ -3,7 +3,7 @@ package com.surprising.gateway.provider.controller;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
-import com.surprising.gateway.provider.auth.repository.AdminAuditRepository.AdminOperationRecord;
+import com.surprising.gateway.provider.auth.model.AdminOperationRecord;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.provider.service.InstrumentService;

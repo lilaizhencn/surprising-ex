@@ -144,7 +144,7 @@ public class MfaRecoveryService {
             users.disableMfa(request.userId(), now);
             users.recordSecurityChange(request.userId(), now);
         }
-        audit.recordRequired(new AdminAuditRepository.AdminOperationRecord(
+        audit.recordRequired(new com.surprising.gateway.provider.auth.model.AdminOperationRecord(
                 administrator.userId(), administrator.username(), administrator.roles(),
                 "gateway", "POST", "/api/v1/admin/compliance/mfa-recovery/" + requestId + "/decision",
                 null, null, null, 200, null, true, null, userAgent, ipAddress, now));

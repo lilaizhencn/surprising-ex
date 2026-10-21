@@ -405,7 +405,7 @@ public class ComplianceService {
                                       long documentId,
                                       boolean success,
                                       String errorMessage) {
-        adminAuditRepository.recordRequired(new AdminAuditRepository.AdminOperationRecord(
+        adminAuditRepository.recordRequired(new com.surprising.gateway.provider.auth.model.AdminOperationRecord(
                 principal.userId(), principal.username(), principal.roles(), "gateway", "GET",
                 "/api/v1/admin/compliance/users/" + userId + "/kyc/documents/" + documentId,
                 null, null, null, success ? 200 : 500, null, success, errorMessage, null, null, Instant.now()));

@@ -630,4 +630,13 @@ public class AuthService {
         }
         return value.length() <= max ? value : value.substring(0, max);
     }
+    /** 根据可信账户状态决定能否发起业务写操作；路径/HTTP绑定由Controller提供动作类别。 */
+    public void requireUserGatewayWrite(String status, boolean tradingWrite, boolean withdrawalWrite) {
+        String normalized = status == null ? "" : status.trim().toUpperCase(java.util.Locale.ROOT);
+        if ("TRADE_DISABLED".equals(normalized) && tradingWrite)
+            throw new IllegalStateException("user trading is disabled");
+        if ("WITHDRAW_DISABLED".equals(normalized) && withdrawalWrite)
+            throw new IllegalStateException("user withdrawal is disabled");
+    }
+
 }

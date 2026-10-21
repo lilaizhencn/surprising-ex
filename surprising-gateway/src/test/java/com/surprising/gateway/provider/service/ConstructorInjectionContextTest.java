@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.controller.GatewayProxyController;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -72,7 +74,7 @@ class ConstructorInjectionContextTest {
                     TriggerOrderProjectionRepository.class)) {
                 registerMock(context, type);
             }
-            context.register(GatewayProxyService.class, GatewayProductSelection.class, OrderService.class, TriggerOrderService.class);
+            context.register(com.surprising.gateway.provider.auth.service.AdminApprovalService.class, GatewayProxyController.class, GatewayProductSelection.class, OrderService.class, TriggerOrderService.class);
             context.refresh();
 
             var metrics = context.getBean(TradingMetricsService.class);
@@ -89,7 +91,7 @@ class ConstructorInjectionContextTest {
 
             var request = new MockHttpServletRequest("GET", "/api/v1/gateway/trading-market/depth");
             request.addHeader("X-Product-Line", product.name());
-            assertThat(context.getBean(GatewayProxyService.class).proxy("trading-market", HttpMethod.GET, request, null).getBody())
+            assertThat(context.getBean(GatewayProxyController.class).proxy("trading-market", HttpMethod.GET, request, null).getBody())
                     .isEqualTo("local-view".getBytes(StandardCharsets.UTF_8));
             verify(local).invoke(eq("trading-market"), any(), eq(HttpMethod.GET), any(), any(), any());
             verifyNoInteractions(context.getBean(RestTemplate.class));

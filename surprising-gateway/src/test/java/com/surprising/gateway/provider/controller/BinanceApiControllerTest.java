@@ -18,7 +18,7 @@ import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.CustodyWalletClient;
-import com.surprising.gateway.provider.service.GatewayProxyService;
+import com.surprising.gateway.provider.controller.GatewayProxyController;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import java.nio.charset.StandardCharsets;
 import java.math.BigDecimal;
@@ -53,7 +53,7 @@ class BinanceApiControllerTest {
         GatewayProperties.SymbolScale scale = new GatewayProperties.SymbolScale();
         scale.setQuantityScale(6);
         properties.getBinanceApi().setSymbolScales(Map.of("USDT", scale));
-        GatewayProxyService proxy = mock(GatewayProxyService.class);
+        GatewayProxyController proxy = mock(GatewayProxyController.class);
         AuthService authService = bearerAuth();
         when(proxy.proxyCompat(anyString(), eq("/transfers"), isNull(), eq(HttpMethod.POST), any(), any(), eq(1001L)))
                 .thenReturn(ResponseEntity.ok("{\"transferId\":7123,\"status\":\"COMPLETED\"}"
@@ -89,7 +89,7 @@ class BinanceApiControllerTest {
         GatewayProperties.SymbolScale scale = new GatewayProperties.SymbolScale();
         scale.setQuantityScale(6);
         properties.getBinanceApi().setSymbolScales(Map.of("USDT", scale));
-        GatewayProxyService proxy = mock(GatewayProxyService.class);
+        GatewayProxyController proxy = mock(GatewayProxyController.class);
         when(proxy.proxyCompat(anyString(), eq("/transfers"), isNull(), eq(HttpMethod.POST), any(), any(), eq(1001L)))
                 .thenReturn(ResponseEntity.ok("{\"transferId\":7124,\"status\":\"COMPLETED\"}"
                         .getBytes(StandardCharsets.UTF_8)));
@@ -153,7 +153,7 @@ class BinanceApiControllerTest {
         CustodyWalletClient custodyWalletClient = mock(CustodyWalletClient.class);
         UUID sourceAddressId = UUID.randomUUID();
         when(custodyWalletClient.withdrawalAddressId(1001L, "ETH", "USDT", "1")).thenReturn(sourceAddressId);
-        BinanceApiController controller = new BinanceApiController(properties, mock(GatewayProxyService.class),
+        BinanceApiController controller = new BinanceApiController(properties, mock(GatewayProxyController.class),
                 mock(GatewayApiKeyService.class), verification, authService, compliance,
                 custodyWalletClient, withdrawalService, new ObjectMapper());
 
@@ -181,7 +181,7 @@ class BinanceApiControllerTest {
         properties.getBinanceApi().setSymbolScales(Map.of("BTCUSDT", scale));
         properties.getBinanceApi().setSymbolAliases(Map.of("SPOT:BTCUSDT", "1"));
 
-        GatewayProxyService proxy = mock(GatewayProxyService.class);
+        GatewayProxyController proxy = mock(GatewayProxyController.class);
         AuthService authService = mock(AuthService.class);
         when(authService.authenticateBearer("Bearer token"))
                 .thenReturn(new JwtPrincipal(1001L, "alice", "ACTIVE", List.of(), Instant.now().plusSeconds(60)));
@@ -223,7 +223,7 @@ class BinanceApiControllerTest {
     void accountReportsWithdrawalCapabilityOnlyWhenWalletAndKycAreReady() throws Exception {
         GatewayProperties properties = new GatewayProperties();
         properties.getCustodyWallet().setEnabled(true);
-        GatewayProxyService proxy = mock(GatewayProxyService.class);
+        GatewayProxyController proxy = mock(GatewayProxyController.class);
         when(proxy.proxyCompat(anyString(), eq("/balances"), eq("userId=1001"), eq(HttpMethod.GET),
                 any(), isNull(), eq(1001L)))
                 .thenReturn(ResponseEntity.ok("{\"balances\":[]}".getBytes(StandardCharsets.UTF_8)));
@@ -260,7 +260,7 @@ class BinanceApiControllerTest {
                         "assetSymbols", List.of("USDT")),
                 Map.of("chain", "ETH", "enabled", true, "withdrawalEnabled", false,
                         "assetSymbols", List.of("USDT"))));
-        BinanceApiController controller = new BinanceApiController(properties, mock(GatewayProxyService.class),
+        BinanceApiController controller = new BinanceApiController(properties, mock(GatewayProxyController.class),
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
                 mock(ComplianceService.class), walletClient, mock(CustodyWithdrawalService.class), new ObjectMapper());
 
@@ -293,7 +293,7 @@ class BinanceApiControllerTest {
         scale.setQuantityScale(3);
         properties.getBinanceApi().setSymbolScales(Map.of("BTCUSDT", scale));
         properties.getBinanceApi().setSymbolAliases(Map.of("SPOT:BTCUSDT", "1"));
-        GatewayProxyService proxy = mock(GatewayProxyService.class);
+        GatewayProxyController proxy = mock(GatewayProxyController.class);
         when(proxy.proxyCompat(anyString(), eq("/orderbook"), anyString(), eq(HttpMethod.GET),
                 any(), isNull(), isNull())).thenReturn(ResponseEntity.ok((
                         "{\"bids\":[{\"priceTicks\":12345,\"quantitySteps\":2000}],"
@@ -322,7 +322,7 @@ class BinanceApiControllerTest {
         ComplianceService compliance = mock(ComplianceService.class);
         when(compliance.kyc(1001L)).thenReturn(new KycProfile(1001L, "BASIC", "VERIFIED", "US",
                 "PASSPORT", "self", null, null, null, null, null, null, null));
-        return new BinanceApiController(properties, mock(GatewayProxyService.class),
+        return new BinanceApiController(properties, mock(GatewayProxyController.class),
                 mock(GatewayApiKeyService.class), verification, authService, compliance,
                 mock(CustodyWalletClient.class), withdrawalService, new ObjectMapper());
     }

@@ -71,8 +71,8 @@ public class C2cAdminAccess {
         // 在原业务事务回滚后记录失败，只留异常类别与正文摘要，不写验证码或收款资料。
         audit.recordRequired(record(administrator,request,body,status,false,failureType));
     }
-    private AdminAuditRepository.AdminOperationRecord record(JwtPrincipal principal,C2cAdminRequest request,byte[] body,int status,boolean success,String error) {
-        return new AdminAuditRepository.AdminOperationRecord(principal==null?null:principal.userId(),principal==null?null:principal.username(),
+    private com.surprising.gateway.provider.auth.model.AdminOperationRecord record(JwtPrincipal principal,C2cAdminRequest request,byte[] body,int status,boolean success,String error) {
+        return new com.surprising.gateway.provider.auth.model.AdminOperationRecord(principal==null?null:principal.userId(),principal==null?null:principal.username(),
                 principal==null?List.of():principal.roles(),"c2c",request.method(),request.path(),request.query(),null,hash(body),status,
                 null,success,error,request.userAgent(),request.ip(),Instant.now());
     }

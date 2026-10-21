@@ -510,3 +510,5 @@ C2C后台的原始请求头、method/path/query、User-Agent和IP由 `c2c.contro
 条件单历史查询由 `AdminTriggerOrderRequestController` 校验原始筛选、状态和分页协议，经 `TriggerReadCursors` 绑定为 `CoreTriggerOrderStatus`、`TriggerReadCursor` 和排序方向；Service保留产品归属检查，Repository只处理原生SQL条件和持久化事实。
 
 合约配置由 `InstrumentRequestController` 在调用业务前通过 `InstrumentConfigurationFormats` 检查标识、表示和连接协议格式；`InstrumentValidator` 聚合产品、保证金、资金费、档位及指数源业务规则。内部配置安装入口和基于持久化配置的状态更新仍显式检查表示完整性，均不依赖HTTP Controller。
+
+网关原 `GatewayProxyService` 的请求绑定、路由和HTTP响应转换已合入 `GatewayProxyController`，兼容协议入口复用同一Controller。账户写限制由 `AuthService` 检查；高风险审批策略、匹配和审计持久化经 `AdminApprovalService`。`AdminOperationRecord` 位于 auth.model，审批摘要基于原始正文，查询字符串保持原样。

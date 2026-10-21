@@ -8,7 +8,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalCreateRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.repository.AdminAuditRepository.AdminOperationRecord;
+import com.surprising.gateway.provider.auth.model.AdminOperationRecord;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;

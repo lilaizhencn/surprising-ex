@@ -36,7 +36,7 @@ public class GatewayProductSettings {
         var enabled = products.enable(product, expectedVersion, Long.toString(admin.userId()), reason)
                 .orElseThrow(() -> new OptimisticLockingFailureException("产品线配置已变更，请刷新后重试"));
         // 审计与接入意图在同一事务提交；审计失败不能启用连接。
-        audit.recordRequired(new AdminAuditRepository.AdminOperationRecord(admin.userId(), admin.username(), admin.roles(),
+        audit.recordRequired(new com.surprising.gateway.provider.auth.model.AdminOperationRecord(admin.userId(), admin.username(), admin.roles(),
                 "product-lines", "POST", "/api/v1/admin/product-lines/" + product + "/enable",
                 "version=" + enabled.configurationVersion() + "&reason=" + URLEncoder.encode(reason, StandardCharsets.UTF_8),
                 "database:gateway_product_lines", null, 200, 0L, true, null,
