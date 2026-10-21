@@ -92,6 +92,25 @@ class InternalLiquidityOperationsControllerTest {
         verifyNoInteractions(leverage,audit);
     }
 
+    @Test void nativeCoreRejectionKeeps409AndItsCodeAtTheRealOperationsHttpRoute() throws Exception {
+        when(leverage.set(any())).thenThrow(new com.surprising.trading.order.exception.OrderCommandRejectedException(
+                com.surprising.aeron.protocol.CoreResultCode.LEVERAGE_UPDATE_BLOCKED));
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller(token))
+                .setControllerAdvice(new com.surprising.gateway.provider.controller.advice.OrderRejectionHttpAdvice()).build();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/internal/v1/operations/liquidity/leverage")
+                .with(request->{request.setRemoteAddr("127.0.0.1");return request;})
+                .header("X-Operations-Token",token).header("X-Operation-Id","original-leverage")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content("""
+                        {"userId":2,"productLine":"LINEAR_PERPETUAL","instrumentId":"604","marginMode":"CROSS",
+                         "leveragePpm":2000000,"reason":"operator","repriceCrossMargin":false}
+                        """))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isConflict())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value("LEVERAGE_UPDATE_BLOCKED"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("Close positions")));
+        verify(leverage,times(1)).set(any());
+    }
+
     @Test void disabledMissingOrWrongTokenCannotMutate() {
         for (String configured : new String[]{"", "short", token + "wrong"}) {
             assertThatThrownBy(() -> controller(configured).adjust(funds(AccountType.USDT_PERPETUAL), request()))

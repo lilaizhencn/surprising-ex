@@ -1,5 +1,7 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.trading.order.exception.OrderCommandRejectedException;
+
 import com.surprising.aeron.client.AeronClientPool;
 import io.aeron.driver.MediaDriver;
 import org.springframework.beans.factory.annotation.Qualifier;

@@ -5,6 +5,7 @@ import com.surprising.trading.api.model.LeverageSettingRequest;
 import com.surprising.trading.api.model.LeverageSettingResponse;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.order.service.LeverageService;
+import com.surprising.trading.order.exception.OrderCommandRejectedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.stereotype.Component;
@@ -24,6 +25,8 @@ public class LeverageRequestController {
     public LeverageSettingResponse set(LeverageSettingRequest request, String productLineHeader, String productLineValue) {
         try {
             return leverageService.set(withProductLine(request, productLine(productLineValue, productLineHeader)));
+        } catch (OrderCommandRejectedException rejected) {
+            throw conflict(rejected);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -42,11 +45,19 @@ public class LeverageRequestController {
     public LeverageSettingResponse get(long userId, String instrumentId, MarginMode marginMode, String productLineHeader, String productLineValue) {
         try {
             return leverageService.get(userId, instrumentId, marginMode, productLine(productLineValue, productLineHeader));
+        } catch (OrderCommandRejectedException rejected) {
+            throw conflict(rejected);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         }
+    }
+
+    private ResponseStatusException conflict(OrderCommandRejectedException rejected) {
+        var response = new ResponseStatusException(HttpStatus.CONFLICT,rejected.getMessage(),rejected);
+        response.getBody().setProperty("code",rejected.code().name());
+        return response;
     }
 
     private LeverageSettingRequest withProductLine(LeverageSettingRequest request, ProductLine productLine) {

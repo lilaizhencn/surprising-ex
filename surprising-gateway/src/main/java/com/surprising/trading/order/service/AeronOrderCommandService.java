@@ -1,5 +1,7 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.trading.order.exception.OrderCommandRejectedException;
+
 import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.protocol.CancelOrderCommand;

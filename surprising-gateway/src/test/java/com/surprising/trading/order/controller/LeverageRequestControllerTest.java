@@ -1,7 +1,7 @@
 package com.surprising.trading.order.controller;
 
 import com.surprising.trading.order.service.LeverageService;
-import com.surprising.trading.order.service.OrderCommandRejectedException;
+import com.surprising.trading.order.exception.OrderCommandRejectedException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -27,9 +27,12 @@ class LeverageRequestControllerTest {
         var request = new LeverageSettingRequest(1, ProductLine.LINEAR_PERPETUAL, "604",
                 MarginMode.CROSS, 2_000_000, "web");
         assertThatThrownBy(() -> new LeverageRequestController(leverage).set(request, null, null))
-                .isSameAs(failure)
-                .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode())
-                        .isEqualTo(HttpStatus.CONFLICT));
+                .isInstanceOfSatisfying(ResponseStatusException.class,error -> {
+                    assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(error.getCause()).isSameAs(failure);
+                    assertThat(error.getReason()).contains("Close positions");
+                    assertThat(error.getBody().getProperties()).containsEntry("code","LEVERAGE_UPDATE_BLOCKED");
+                });
     }
 
     @Test

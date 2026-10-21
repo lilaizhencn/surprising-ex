@@ -186,6 +186,9 @@ public final class LocalBusinessApi {
         if (exception instanceof com.surprising.realtime.api.exception.ReadViewUnavailableException unavailable) {
             return error(HttpStatus.SERVICE_UNAVAILABLE, unavailable.getMessage());
         }
+        if (exception instanceof com.surprising.trading.order.exception.OrderCommandRejectedException rejected) {
+            return error(HttpStatus.CONFLICT,rejected.getMessage(),rejected.code().name());
+        }
         if (exception instanceof ResponseStatusException status) {
             var properties = status.getBody().getProperties();
             if (properties != null && properties.get("code") instanceof String code) {

@@ -1,5 +1,7 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.trading.order.exception.OrderCommandRejectedException;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -26,9 +28,8 @@ class OrderAeronGatewayTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> new OrderAeronGateway(clients)
                 .command(CoreMessageType.UPDATE_LEVERAGE, id, 7L, new byte[0]))
                 .isInstanceOfSatisfying(OrderCommandRejectedException.class, error -> {
-                    assertThat(error.getStatusCode().value()).isEqualTo(409);
-                    assertThat(error.getReason()).contains("Close positions").doesNotContain("Aeron");
-                    assertThat(error.getBody().getProperties()).containsEntry("code", "LEVERAGE_UPDATE_BLOCKED");
+                    assertThat(error.getMessage()).contains("Close positions").doesNotContain("Aeron");
+                    assertThat(error.code()).isEqualTo(CoreResultCode.LEVERAGE_UPDATE_BLOCKED);
                 });
     }
 

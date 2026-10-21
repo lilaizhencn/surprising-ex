@@ -217,7 +217,7 @@ class LocalBusinessApiTest {
     @Test
     void returnsStructuredBusinessRejectionForLeverageWithoutChangingItToNotFound() {
         when(leverage.set(any(), any(), any())).thenThrow(
-                new com.surprising.trading.order.service.OrderCommandRejectedException(
+                new com.surprising.trading.order.exception.OrderCommandRejectedException(
                         com.surprising.aeron.protocol.CoreResultCode.LEVERAGE_UPDATE_BLOCKED));
         var result = invoke("trading-leverage", "/api/v1/trading/leverage/settings", HttpMethod.POST,
                 userHeaders(), "{\"userId\":42,\"instrumentId\":\"604\",\"marginMode\":\"CROSS\",\"leveragePpm\":1000000}");

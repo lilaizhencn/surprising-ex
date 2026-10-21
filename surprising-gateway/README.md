@@ -522,3 +522,5 @@ C2C后台的原始请求头、method/path/query、User-Agent和IP由 `c2c.contro
 共享数据结果按职责归model：`gateway.provider.model.ProductAccountAdjustment` 表示已应用/拒绝/未知结果，`websocket.provider.model` 的 `DepthUpdate`、`WebSocketAdminMetrics`、`ChannelMetric` 和 `TimedPayload` 承载深度、指标和载荷时间。字段、深度绝对数量/零删除及序号字符串协议保持；SubscriptionRegistry继续唯一拥有订阅和缓存状态。
 
 Kafka职责归包：独立快照、审计、结算/排空及推送消费入口统一放在各自provider.consumer（价格为index.consumer/mark.consumer），业务和缓存继续由原Service/状态所有者负责。监听topic、group、启动条件与处理顺序保持；做市事件唤醒组件为consumer.MakerQuoteWakeups，原唯一信号状态不变。详见 docs/validation/java-mvc-consumer-packages-20261022.json。
+
+Core订单/杠杆终态拒绝通过 `trading.order.exception.OrderCommandRejectedException` 传递原生CoreResultCode和业务提示。HTTP入口由LeverageRequestController/OrderRejectionHttpAdvice映射409及code，本地网关仍返回原status/message/code JSON；未知结果与未接纳继续走原独立语义。业务异常不引用Spring HTTP类型。

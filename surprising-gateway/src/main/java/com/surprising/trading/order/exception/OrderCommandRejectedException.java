@@ -1,15 +1,17 @@
-package com.surprising.trading.order.service;
+package com.surprising.trading.order.exception;
 
 import com.surprising.aeron.protocol.CoreResultCode;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
 
-/** HTTP boundary for a terminal business rejection; never represents an unknown outcome. */
-public final class OrderCommandRejectedException extends ResponseStatusException {
+/** Core终态业务拒绝；携带原生结果码，未知结果和HTTP映射分别由其边界负责。 */
+public final class OrderCommandRejectedException extends RuntimeException {
+    private final CoreResultCode code;
+
     public OrderCommandRejectedException(CoreResultCode code) {
-        super(HttpStatus.CONFLICT, message(code));
-        getBody().setProperty("code", code.name());
+        super(message(code));
+        this.code = code;
     }
+
+    public CoreResultCode code() { return code; }
 
     private static String message(CoreResultCode code) {
         return switch (code) {
