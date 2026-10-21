@@ -1,5 +1,7 @@
 package com.surprising.candlestick.provider.config;
 
+import com.surprising.realtime.provider.RealtimeRouter;
+import org.springframework.beans.factory.ObjectProvider;
 import com.surprising.candlestick.api.model.CandlePeriod;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.candlestick.provider.aggregation.CandleAccumulator;
@@ -45,10 +47,15 @@ import org.springframework.kafka.support.serializer.JacksonJsonSerde;
  * candle update events, and periodically lets the processor flush dirty snapshots to PostgreSQL.</p>
  */
 public class CandlestickStreamConfiguration {
-    @org.springframework.beans.factory.annotation.Autowired(required=false)
-    private com.surprising.realtime.provider.RealtimeRouter realtime;
-    @org.springframework.beans.factory.annotation.Autowired
-    private tools.jackson.databind.ObjectMapper objectMapper;
+    private final ObjectProvider<RealtimeRouter> realtime;
+    private final tools.jackson.databind.ObjectMapper objectMapper;
+
+    public CandlestickStreamConfiguration(
+            ObjectProvider<RealtimeRouter> realtime,
+            tools.jackson.databind.ObjectMapper objectMapper) {
+        this.realtime = realtime;
+        this.objectMapper = objectMapper;
+    }
 
     @Bean
     public KafkaAdmin candleKafkaAdmin(CandlestickProperties properties) {
@@ -205,11 +212,10 @@ public class CandlestickStreamConfiguration {
     }
 
     private void publishCandle(CandlestickProperties properties, CandleUpdatedEvent event) {
-        if (realtime == null) return;
-        realtime.offer(new com.surprising.aeron.protocol.RealtimeFrame(
+        realtime.ifAvailable(router -> router.offer(new com.surprising.aeron.protocol.RealtimeFrame(
                 properties.getKafka().getProductLine(), com.surprising.aeron.protocol.RealtimeFrame.Kind.CANDLE,
                 0, Math.max(0, event.emittedAt().toEpochMilli()), 0, event.eventTime().toEpochMilli(),
-                0, event.instrumentId(), event.period(), objectMapper.writeValueAsBytes(event)));
+                0, event.instrumentId(), event.period(), objectMapper.writeValueAsBytes(event))));
     }
 
     private <T> JacksonJsonSerde<T> jsonSerde(Class<T> type) {

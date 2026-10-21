@@ -353,3 +353,6 @@ HotSpot JDK 27，基线 `292e4e04` 与当前代码使用相同 ThreadPoolTaskSch
 ### 交割合约结算窗口的指数源
 
 `IndexInstrumentConfigLoader.load` 对两条交割产品线在 SETTLING 保留当前指数源，CLOSED 后移除；其他状态仍按公开可见性筛选。该窗口仍可能处理用户直接减仓，缺失指数/标记价会导致真实交易拒绝，不能用固定价格或其他产品的价格补齐。双产品线参数化回归位于 IndexInstrumentConfigLoaderTest，本轮实际只启动币本位交割。
+
+指数与标记价格Service的运行依赖统一由构造器传入；可选的实时发布器及标记价格Core发布器
+通过ObjectProvider在发布时获取。测试显式构造同样依赖，保留发布顺序、产品线身份和组件缺席时的部署行为。

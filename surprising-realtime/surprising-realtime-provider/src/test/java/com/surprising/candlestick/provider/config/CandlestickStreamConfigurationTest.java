@@ -1,5 +1,7 @@
 package com.surprising.candlestick.provider.config;
 
+import com.surprising.realtime.provider.RealtimeRouter;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -11,7 +13,7 @@ import org.springframework.boot.health.contributor.Status;
 import org.springframework.kafka.config.StreamsBuilderFactoryBean;
 
 class CandlestickStreamConfigurationTest {
-    private final CandlestickStreamConfiguration configuration = new CandlestickStreamConfiguration();
+    private final CandlestickStreamConfiguration configuration = new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper());
 
     @Test
     void provisionsBothSourcesForEachProductLineBeforeAnyTrade() {

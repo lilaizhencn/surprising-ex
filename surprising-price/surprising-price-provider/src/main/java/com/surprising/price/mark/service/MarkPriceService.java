@@ -1,5 +1,7 @@
 package com.surprising.price.mark.service;
 
+import com.surprising.realtime.api.RealtimeJsonPublisher;
+import org.springframework.beans.factory.ObjectProvider;
 import lombok.extern.slf4j.Slf4j;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
@@ -31,8 +33,7 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @Slf4j
 public class MarkPriceService {
-    @org.springframework.beans.factory.annotation.Autowired(required=false)
-    private com.surprising.realtime.api.RealtimeJsonPublisher realtime;
+    private final ObjectProvider<RealtimeJsonPublisher> realtime;
 
     private static final String SEQUENCE_MODULE = "price-mark";
 
@@ -43,7 +44,7 @@ public class MarkPriceService {
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final LatestMarkPriceCache latestMarkPriceCache;
     private final PublicTradeEventMapper publicTradeEventMapper;
-    private MarkPriceCorePublisher corePublisher = null;
+    private final ObjectProvider<MarkPriceCorePublisher> corePublisher;
     private final String nodeId;
 
     private final ConcurrentHashMap<String, IndexPriceEvent> indexPrices = new ConcurrentHashMap<>();
@@ -59,7 +60,11 @@ public class MarkPriceService {
                             MarkPriceCoordinationService coordinationService,
                             @Qualifier("markKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
                             LatestMarkPriceCache latestMarkPriceCache,
-                            PublicTradeEventMapper publicTradeEventMapper) {
+                            PublicTradeEventMapper publicTradeEventMapper,
+                            ObjectProvider<RealtimeJsonPublisher> realtime,
+                            ObjectProvider<MarkPriceCorePublisher> corePublisher) {
+        this.realtime = realtime;
+        this.corePublisher = corePublisher;
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.markPriceCalculator = markPriceCalculator;
@@ -68,11 +73,6 @@ public class MarkPriceService {
         this.latestMarkPriceCache = latestMarkPriceCache;
         this.publicTradeEventMapper = publicTradeEventMapper;
         this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
-    }
-
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setCorePublisher(MarkPriceCorePublisher corePublisher) {
-        this.corePublisher = corePublisher;
     }
 
     public void acceptIndexPrice(IndexPriceEvent event) {
@@ -137,8 +137,8 @@ public class MarkPriceService {
     void onFundingRate(String payload) {
         parse(payload, PerpFundingRateEvent.class, "funding rate", event -> {
             fundingRates.put(event.instrumentId(), event);
-            if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
-                    com.surprising.aeron.protocol.RealtimeFrame.Kind.FUNDING,event.instrumentId(),event.instrumentId(),event.sequence(),event.eventTime(),event);
+            realtime.ifAvailable(publisher -> publisher.publish(properties.getKafka().getProductLine(),
+                    com.surprising.aeron.protocol.RealtimeFrame.Kind.FUNDING,event.instrumentId(),event.instrumentId(),event.sequence(),event.eventTime(),event));
         });
     }
 
@@ -193,14 +193,14 @@ public class MarkPriceService {
         latestMarkPriceCache.update(event);
         log.info("mark.calculated instrumentId={} indexSequence={} tradeSequence={}", instrumentId,
                 index.sequence(), trade == null ? null : trade.sequence());
-        if (corePublisher != null) corePublisher.publish(event);
+        corePublisher.ifAvailable(publisher -> publisher.publish(event));
         MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, index, book, trade,
                 fundingRates.get(instrumentId), basisAverage,
                 properties.getCalculation().getBasisWindow().toSeconds(), now);
         kafkaTemplate.send(properties.priceEventsTopic(), instrumentId, PricePublishedEvent.mark(publication));
-        if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
+        realtime.ifAvailable(publisher -> publisher.publish(properties.getKafka().getProductLine(),
                 com.surprising.aeron.protocol.RealtimeFrame.Kind.MARK, instrumentId, instrumentId,
-                event.sequence(), event.eventTime(), event);
+                event.sequence(), event.eventTime(), event));
 
         return true;
     }

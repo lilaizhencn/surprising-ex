@@ -1,5 +1,7 @@
 package com.surprising.candlestick.provider.config;
 
+import com.surprising.realtime.provider.RealtimeRouter;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -145,7 +147,7 @@ class CandlestickLiveRollupTopologyTest {
         Fixture(ProductLine product) {
             var p=new CandlestickProperties();p.getKafka().setProductLine(product);
             p.setPeriods(Arrays.stream(CandlePeriod.values()).map(CandlePeriod::code).toList());
-            var builder=new StreamsBuilder();new CandlestickStreamConfiguration().candlestickTopology(builder,p,
+            var builder=new StreamsBuilder();new CandlestickStreamConfiguration(new StaticListableBeanFactory().getBeanProvider(RealtimeRouter.class), new tools.jackson.databind.ObjectMapper()).candlestickTopology(builder,p,
                     mock(CandleSink.class),mock(SymbolRegistryService.class),mock(PublicTradeEventMapper.class),hot,minutes);
             var config=new Properties();config.put(StreamsConfig.APPLICATION_ID_CONFIG,"live-rollup-"+product);
             config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG,"unused:9092");

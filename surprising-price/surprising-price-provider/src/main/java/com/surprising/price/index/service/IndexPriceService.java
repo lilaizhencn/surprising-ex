@@ -1,5 +1,7 @@
 package com.surprising.price.index.service;
 
+import com.surprising.realtime.api.RealtimeJsonPublisher;
+import org.springframework.beans.factory.ObjectProvider;
 import lombok.extern.slf4j.Slf4j;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.PricePublishedEvent;
@@ -24,8 +26,7 @@ import org.springframework.stereotype.Service;
 @Service
 @Slf4j
 public class IndexPriceService {
-    @org.springframework.beans.factory.annotation.Autowired(required=false)
-    private com.surprising.realtime.api.RealtimeJsonPublisher realtime;
+    private final ObjectProvider<RealtimeJsonPublisher> realtime;
 
     private static final String SEQUENCE_MODULE = "price-index";
 
@@ -51,7 +52,9 @@ public class IndexPriceService {
                              IndexPriceSequenceRepository sequenceRepository,
                              LatestIndexPriceCache latestIndexPriceCache,
                              @Qualifier("indexKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
-                             MarkPriceService markPriceService) {
+                             MarkPriceService markPriceService,
+                             ObjectProvider<RealtimeJsonPublisher> realtime) {
+        this.realtime = realtime;
         this.properties = properties;
         this.indexInstrumentConfigService = indexInstrumentConfigService;
         this.externalSpotPriceClient = externalSpotPriceClient;
@@ -96,8 +99,8 @@ public class IndexPriceService {
         latestIndexPriceCache.update(event);
         markPriceService.acceptIndexPrice(event);
         kafkaTemplate.send(properties.getKafka().getPriceEventsTopic(), instrumentId, PricePublishedEvent.index(event));
-        if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
-                com.surprising.aeron.protocol.RealtimeFrame.Kind.INDEX,instrumentId,instrumentId,event.sequence(),event.eventTime(),event);
+        realtime.ifAvailable(publisher -> publisher.publish(properties.getKafka().getProductLine(),
+                com.surprising.aeron.protocol.RealtimeFrame.Kind.INDEX,instrumentId,instrumentId,event.sequence(),event.eventTime(),event));
 
     }
 

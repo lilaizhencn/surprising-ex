@@ -1,5 +1,7 @@
 package com.surprising.price.index.service;
 
+import com.surprising.realtime.api.RealtimeJsonPublisher;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -43,6 +45,8 @@ class IndexPriceServiceTest {
         LatestIndexPriceCache latestIndexPriceCache = mock(LatestIndexPriceCache.class);
         KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
         MarkPriceService markPriceService = mock(MarkPriceService.class);
+        var realtime = mock(RealtimeJsonPublisher.class);
+        var publishers = new StaticListableBeanFactory(java.util.Map.of("realtime", realtime));
         Instant now = Instant.now();
 
         when(configService.symbols()).thenReturn(List.of(instrumentId));
@@ -56,13 +60,15 @@ class IndexPriceServiceTest {
         IndexPriceService service = new IndexPriceService(properties, configService, spotPriceClient,
                 latestQuoteStore, new IndexPriceCalculator(properties), leaseRepository, sequenceRepository,
                 latestIndexPriceCache,
-                kafkaTemplate, markPriceService);
+                kafkaTemplate, markPriceService, publishers.getBeanProvider(RealtimeJsonPublisher.class));
 
         service.pollAndPublish();
 
         verify(kafkaTemplate).send(eq("surprising.option.price.events.v1"),
                 eq("45"), any(PricePublishedEvent.class));
         verify(markPriceService).acceptIndexPrice(any(IndexPriceEvent.class));
+        verify(realtime).publish(eq(ProductLine.OPTION), eq(com.surprising.aeron.protocol.RealtimeFrame.Kind.INDEX),
+                eq("45"), eq("45"), eq(77L), any(Instant.class), any(IndexPriceEvent.class));
     }
 
     @Test
@@ -87,7 +93,8 @@ class IndexPriceServiceTest {
 
         new IndexPriceService(properties, configService, spotPriceClient, latestQuoteStore,
                 new IndexPriceCalculator(properties), leaseRepository, sequenceRepository, latestIndexPriceCache,
-                kafkaTemplate, markPriceService).pollAndPublish();
+                kafkaTemplate, markPriceService,
+                new StaticListableBeanFactory().getBeanProvider(RealtimeJsonPublisher.class)).pollAndPublish();
 
         verifyNoInteractions(spotPriceClient);
     }
@@ -118,7 +125,8 @@ class IndexPriceServiceTest {
 
         new IndexPriceService(properties, configService, spotPriceClient, latestQuoteStore,
                 new IndexPriceCalculator(properties), leaseRepository, sequenceRepository, latestIndexPriceCache,
-                kafkaTemplate, markPriceService).pollAndPublish();
+                kafkaTemplate, markPriceService,
+                new StaticListableBeanFactory().getBeanProvider(RealtimeJsonPublisher.class)).pollAndPublish();
 
         verify(spotPriceClient).fetch(instrumentId.getSources().getFirst());
         ArgumentCaptor<IndexPriceEvent> eventCaptor = ArgumentCaptor.forClass(IndexPriceEvent.class);
