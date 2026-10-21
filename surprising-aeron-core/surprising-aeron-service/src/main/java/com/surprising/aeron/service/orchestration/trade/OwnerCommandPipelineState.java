@@ -6,69 +6,71 @@ import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.service.orchestration.ingress.OwnerIngressRing;
 
 /**
- * Owner 命令流水线的唯一状态持有者。
- *
- * <p>这里保存的是“命令处于哪个执行阶段”的运行时状态，不保存订单、余额或持仓等业务事实。
- * 交易 Owner 只负责按日志顺序推进这些状态；Matcher、Account Lane 和业务运行时仍然拥有各自的业务状态。</p>
+ * Owner 独占的命令调度状态：保存响应窗口、控制命令、当前提交队首、依赖阻塞引用、等待通知游标和观测计数。这里决定下一步能推进什么，不拥有订单簿、余额或持仓事实，也不创建计时器或工作线程；窗口模式方法只在启用流水执行时调用。
  */
 public final class OwnerCommandPipelineState {
-    /** 每轮最多处理的完成通知数量，限制单次 Owner 调度的执行时间。 */
+    /** Owner 每轮完成收集使用的批次上限六十四，实际循环由调用方控制。 */
     public static final int COMPLETION_BATCH_SIZE = 64;
-    /** 单条复制命令等待异步执行完成的最长时间。 */
+    /** 异步命令截止点使用的三十秒纳秒间隔，本类只保存截止点。 */
     static final long COMMAND_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
 
-    /** 已准入但尚未提交的撮合命令窗口，所有者是当前 Owner 线程。 */
+    /** 当前 Owner 的响应 FIFO，非窗口模式为空。 */
     private final ClusterCommandWindow commandWindow;
 
+    /**
+     * 创建启用响应 FIFO 窗口的 Owner 调度状态。
+     */
     public OwnerCommandPipelineState() { this(true); }
 
+    /**
+     * 按模式选择是否创建窗口，融合/非流水模式窗口为空，其他字段使用初始值。
+     * @param pipelined 是否创建普通命令响应窗口
+     */
     public OwnerCommandPipelineState(boolean pipelined) {
         commandWindow = pipelined ? new ClusterCommandWindow() : null;
     }
-    /** 当前正在等待直接控制流程或查询结果的命令。 */
+    /** 正在等待直接业务或查询完成的入口条目。 */
     private OwnerIngressRing.Entry activeControl;
-    /** 当前控制命令已经产生、但异步子任务尚未全部完成的响应候选值。 */
+    /** 当前控制命令暂存的可空响应候选。 */
     private CoreResponse controlResponse;
-    /** 当前控制命令等待的 Matcher 序号；零表示没有等待 Matcher 回调。 */
+    /** 控制命令等待的 Matcher 序号，零表示无等待。 */
     private long matchingResponseSequence;
-    /** 当前控制命令收到的 Matcher 终态响应。 */
+    /** 已经匹配等待序号的控制撮合终态响应。 */
     private CoreResponse matchingResponse;
 
-    /** 当前已建立捕获边界的 FIFO 队首；退休前不移动窗口头。 */
+    /** 当前正在提交的窗口队首引用，退休前固定。 */
     private ClusterCommandWindow.Entry committingHead;
-    /** 当前异步命令的超时截止时间。 */
+    /** 当前异步命令保存的 nanoTime 截止点。 */
     private long progressDeadline;
 
-    /** 上一轮被依赖关系挡住的入站命令，用于避免重复准备。 */
+    /** 被现有依赖挡住的入口请求对象。 */
     private CoreMessage blockedIngress;
-    /** 必须退休的最后一个依赖项；引用窗口已有条目，不复制依赖状态。 */
+    /** 必须先退休的依赖前缀最后条目，引用既有窗口对象。 */
     private ClusterCommandWindow.Entry blockedThrough;
 
-    /** 上一轮等待 Matcher 通知时观察到的派发上限。 */
+    /** 上次等待通知时保存的派发上限。 */
     private long waitingDispatchSequence;
-    /** 上一轮等待 Matcher 通知时观察到的完成游标。 */
+    /** 上次等待通知时观察到的完成进度。 */
     private long waitingMatchingProgress;
-    /** 上一轮没有本地进展且没有新通知时，避免无意义地重复扫描。 */
+    /** 上次无进展且无本地工作的等待通知标记。 */
     private boolean waitingMatchingNotification;
 
-    /** Owner 实际推进过的命令阶段数，用于唤醒和工作量判断，不代表业务序号。 */
+    /** Owner 已记录的命令阶段推进次数。 */
     private long commandProgress;
 
-    /** 命令窗口的历史峰值，不参与资金和订单状态判断。 */
+    /** 准入记录时观测到的窗口最大占用。 */
     private int commandWindowHighWaterMark;
-    /** 已经进入确定性提交边界的命令数量。 */
+    /** 已建立队首提交边界的次数，在 beginHeadCommit 增加。 */
     private long drainedCommands;
-    /** 因已有依赖而等待的次数。 */
+    /** 因已有依赖等待的累计次数。 */
     private long dependencyFences;
-    /** 因控制命令而等待的次数。 */
+    /** 因控制边界等待的累计次数。 */
     private long controlFences;
-    /** 因相同命令重复提交而等待的次数。 */
+    /** 依赖等待中被标记为重试的累计次数。 */
     private long retryFences;
 
     /**
-     * 清空本轮 Owner 的命令状态和观测数据。
-     *
-     * <p>启动和测试复用 Owner 实例时调用；不会清空 TradingCoreRuntime 的业务状态。</p>
+     * 清当前窗口及全部控制、等待、依赖和观测字段，供启动或测试复用；不会重置交易运行时的业务状态。
      */
     public void reset() {
         if (commandWindow != null) commandWindow.clear();
@@ -92,9 +94,7 @@ public final class OwnerCommandPipelineState {
     }
 
     /**
-     * 清空命令容器并保留终止日志需要的计数值。
-     *
-     * <p>终止阶段不再接收新命令，但观测计数必须先输出，因此不复用 {@link #reset()}。</p>
+     * 终止时清窗口和活动引用，保留进展/峰值/边界计数及上次等待游标，清等待通知标记，便于随后输出摘要。
      */
     public void clearCommandContainers() {
         if (commandWindow != null) commandWindow.clear();
@@ -109,17 +109,24 @@ public final class OwnerCommandPipelineState {
         waitingMatchingNotification = false;
     }
 
-    /** 返回 Owner 是否已经开始处理一个控制命令。 */
+    /**
+     * 返回是否已登记活动控制入口。
+     */
     public boolean hasActiveControl() {
         return activeControl != null;
     }
 
-    /** 返回当前控制命令。 */
+    /**
+     * 返回当前控制命令的入口条目引用。
+     */
     public OwnerIngressRing.Entry activeControl() {
         return activeControl;
     }
 
-    /** 设置当前控制命令，并清除上一条控制命令的响应候选值。 */
+    /**
+     * 保存控制入口并清上一控制响应及等待 Matcher 水位，不校验 entry 非空。
+     * @param entry 当前控制命令的入口条目引用
+     */
     public void beginControl(OwnerIngressRing.Entry entry) {
         activeControl = entry;
         controlResponse = null;
@@ -127,33 +134,47 @@ public final class OwnerCommandPipelineState {
         matchingResponse = null;
     }
 
-    /** 返回控制命令当前累积的响应候选值。 */
+    /**
+     * 返回当前控制命令暂存的响应候选。
+     */
     public CoreResponse controlResponse() {
         return controlResponse;
     }
 
-    /** 保存控制命令的响应候选值，等待所有异步子任务完成后发送。 */
+    /**
+     * 保存可空响应候选，实际发送时机由 Owner 主流程决定。
+     * @param response 需要暂存或匹配保存的可空/非空响应，具体要求见方法
+     */
     public void controlResponse(CoreResponse response) {
         controlResponse = response;
     }
 
-    /** 记录当前控制命令等待的 Matcher 序号，并清除旧的回调结果。 */
+    /**
+     * 记录当前控制命令等待的序号并清旧响应；本方法不检查序号正数。
+     * @param sequence 控制命令等待或报告完成的 Matcher 序号
+     */
     public void rememberMatchingResponseSequence(long sequence) {
         matchingResponseSequence = sequence;
         matchingResponse = null;
     }
 
-    /** 返回当前控制命令是否等待 Matcher 的异步结果。 */
+    /**
+     * 返回等待序号是否非零，不等于异步子任务已经完成。
+     */
     public boolean hasMatchingResponseSequence() {
         return matchingResponseSequence != 0;
     }
 
-    /** 返回当前控制命令收到的 Matcher 终态响应。 */
+    /**
+     * 返回已经匹配保存的控制撮合终态响应。
+     */
     public CoreResponse matchingResponse() {
         return matchingResponse;
     }
 
-    /** 设置控制命令结束后的清理状态。 */
+    /**
+     * 清当前控制入口、响应候选和等待序号，不移动普通命令窗口。
+     */
     public void finishControl() {
         activeControl = null;
         controlResponse = null;
@@ -161,12 +182,18 @@ public final class OwnerCommandPipelineState {
         matchingResponse = null;
     }
 
-    /** 返回撮合命令窗口。 */
+    /**
+     * 返回当前响应 FIFO，未启用窗口模式时为空。
+     */
     public ClusterCommandWindow commandWindow() {
         return commandWindow;
     }
 
-    /** 记录实际依赖前缀的末项；无关队首退休不触发重新准备。 */
+    /**
+     * 要求依赖前缀在当前窗口内，记录请求对象和该前缀最后一个现有条目；不复制一份依赖集合。
+     * @param request 需要判定或记录依赖的入口请求对象
+     * @param prefixSize 当前必须退休的正依赖前缀长度
+     */
     public void rememberBlockedIngress(CoreMessage request, int prefixSize) {
         if (prefixSize <= 0 || prefixSize > commandWindow.size())
             throw new IllegalArgumentException("invalid ingress dependency prefix");
@@ -174,24 +201,34 @@ public final class OwnerCommandPipelineState {
         blockedThrough = commandWindow.get(prefixSize - 1);
     }
 
-    /** 清除旧的依赖阻塞记录，允许重新准备当前队首命令。 */
+    /**
+     * 清掉阻塞请求和依赖末项的引用，允许入口重新准备。
+     */
     public void clearBlockedIngress() {
         blockedIngress = null;
         blockedThrough = null;
     }
 
-    /** 依赖项退休时同步清除引用，避免环形槽位复用造成误判。 */
+    /**
+     * 按请求对象身份及已记录末项引用判断是否仍阻塞，不在这里扫描窗口或自行退休依赖。
+     * @param request 需要判定或记录依赖的入口请求对象
+     */
     public boolean isIngressBlocked(CoreMessage request) {
         return request == blockedIngress && blockedThrough != null;
     }
 
-    /** 保留被阻塞命令的解码结果，并在命令离开队首时释放临时解码对象。 */
+    /**
+     * 只为仍在入口队首的同一请求保留解码，换请求或队首为空时也清旧阻塞引用；仅用于窗口模式。
+     * @param pending 当前仍在入口队首的请求，空表示没有待准备请求
+     */
     public void retainPendingPreparation(CoreMessage pending) {
         commandWindow.retainDecoded(pending);
         if (pending != blockedIngress || pending == null) clearBlockedIngress();
     }
 
-    /** 为当前 FIFO 队首建立独立的确定性提交边界。 */
+    /**
+     * 要求窗口非空且还没有提交队首，保存当前首项并增加进入提交边界的次数；不在此判断其业务是否已完成。
+     */
     public void beginHeadCommit() {
         if (commandWindow.size() == 0 || committingHead != null) {
             throw new IllegalStateException("invalid command drain boundary");
@@ -200,27 +237,41 @@ public final class OwnerCommandPipelineState {
         drainedCommands++;
     }
 
-    /** 返回当前队首是否已经建立提交边界。 */
+    /**
+     * 返回是否已绑定正在提交的窗口队首。
+     */
     public boolean hasCommittingHead() {
         return committingHead != null;
     }
 
-    /** 返回正在提交的队首，其序号、时间和日志位置直接取自窗口。 */
+    /**
+     * 返回已绑定队首引用，其日志位置与时间保留在条目中。
+     */
     public ClusterCommandWindow.Entry committingHead() {
         return committingHead;
     }
 
-    /** 设置当前异步命令的截止时间。 */
+    /**
+     * 保存当前 nanoTime 加三十秒的截止点，超时判断由调用方后续执行，不在这里启动计时任务。
+     */
     public void startProgressDeadline() {
         progressDeadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
     }
 
-    /** 返回当前异步命令的截止时间。 */
+    /**
+     * 返回上次保存的单调时钟截止点，未设置时为零。
+     */
     public long progressDeadline() {
         return progressDeadline;
     }
 
-    /** 记录一次“等待完成通知但未提交”的状态，供下一轮廉价判断使用。 */
+    /**
+     * 保存本次派发上限和完成进度，只有进度未变且没有本地可推进工作时才标记等待通知。
+     * @param dispatchThrough 本次允许派发到的序号上限
+     * @param matchingProgress 本轮收集后的完成进度
+     * @param progressBefore 本轮开始前观察到的进度
+     * @param hasLocalMatchingWork 是否仍有 Owner 可直接推进的本地撮合工作
+     */
     void rememberMatchingWait(long dispatchThrough, long matchingProgress, long progressBefore,
                               boolean hasLocalMatchingWork) {
         waitingDispatchSequence = dispatchThrough;
@@ -228,7 +279,12 @@ public final class OwnerCommandPipelineState {
         waitingMatchingNotification = matchingProgress == progressBefore && !hasLocalMatchingWork;
     }
 
-    /** 返回本轮是否可以直接跳过未变化的 Matcher 完成扫描。 */
+    /**
+     * 仅当上次在等通知、派发上限和进度都没变且无新完成通知时，允许本轮跳过重复扫描。
+     * @param dispatchThrough 本次允许派发到的序号上限
+     * @param progressBefore 本轮开始前观察到的进度
+     * @param hasMatchingNotifications 是否收到新的 Matcher 完成通知
+     */
     boolean canSkipMatchingPoll(long dispatchThrough, long progressBefore,
                                 boolean hasMatchingNotifications) {
         return waitingMatchingNotification
@@ -237,17 +293,23 @@ public final class OwnerCommandPipelineState {
                 && !hasMatchingNotifications;
     }
 
-    /** 清除等待通知标记，开始一次新的完成收集。 */
+    /**
+     * 清掉等待通知标记，开始一轮新的完成收集。
+     */
     void beginMatchingPoll() {
         waitingMatchingNotification = false;
     }
 
-    /** 返回 Owner 是否正在等待异步完成通知，且当前没有本地可推进工作。 */
+    /**
+     * 返回上次计算保存的等待通知状态，不实时探查 worker。
+     */
     public boolean waitingForMatchingNotification() {
         return waitingMatchingNotification;
     }
 
-    /** 完成当前命令；先释放依赖引用，再清空可复用槽位。 */
+    /**
+     * 调用方确认队首终态后退休一项；若它正是阻塞依赖末项先清引用，随后移窗口、清提交/等待状态并增加进展计数。
+     */
     public void finishHeadCommit() {
         if (committingHead == null) throw new IllegalStateException("no command commit boundary");
         if (committingHead == blockedThrough) clearBlockedIngress();
@@ -257,7 +319,11 @@ public final class OwnerCommandPipelineState {
         commandProgress++;
     }
 
-    /** 控制命令已排空撮合窗口；内部触发子单独立提交，仅保存客户端命令自身的响应。 */
+    /**
+     * 先要求普通窗口空和响应非空，再仅接收与等待序号相同的结果，不匹配的内部子命令结果忽略；同序号重复响应拒绝。本方法不另校验活动控制存在或序号为正。
+     * @param sequence 控制命令等待或报告完成的 Matcher 序号
+     * @param response 需要暂存或匹配保存的可空/非空响应，具体要求见方法
+     */
     public void completeControlMatching(long sequence, CoreResponse response) {
         if (commandWindow != null && commandWindow.size() != 0 || response == null)
             throw new IllegalStateException("control completion requires an empty trading window and a response");
@@ -266,40 +332,55 @@ public final class OwnerCommandPipelineState {
         matchingResponse = response;
     }
 
-    /** 返回 Owner 进展计数。 */
+    /**
+     * 返回 Owner 已记录的推进次数，不是已应用 Core 序号。
+     */
     public long commandProgress() {
         return commandProgress;
     }
 
-    /** 记录一条命令进入撮合窗口，并更新窗口峰值。 */
+    /**
+     * 记录一次入口准入进展，并按当前窗口大小更新观测峰值。
+     */
     public void recordAdmission() {
         commandProgress++;
         if (commandWindow != null)
             commandWindowHighWaterMark = Math.max(commandWindowHighWaterMark, commandWindow.size());
     }
 
-    /** 记录一次控制命令推进。 */
+    /**
+     * 记录一次控制命令推进。
+     */
     public void recordControlProgress() {
         commandProgress++;
     }
 
-    /** 记录一次需要等待控制命令完成的边界。 */
+    /**
+     * 增加控制边界等待次数，不自行阻塞线程。
+     */
     public void recordControlFence() {
         controlFences++;
     }
 
-    /** 记录一次需要等待已有撮合命令的依赖边界。 */
+    /**
+     * 增加依赖等待次数，标为重试时再增加重试边界计数。
+     * @param retry 本次依赖等待是否由同命令重试引起
+     */
     public void recordDependencyFence(boolean retry) {
         dependencyFences++;
         if (retry) retryFences++;
     }
 
-    /** 返回窗口峰值，供兼容测试和运行诊断使用。 */
+    /**
+     * 返回记录准入时观测到的窗口峰值。
+     */
     public int commandWindowHighWaterMark() {
         return commandWindowHighWaterMark;
     }
 
-    /** 返回终止日志使用的命令流水线摘要。 */
+    /**
+     * 组装终止日志摘要：窗口峰值、剩余项、建立提交边界次数及各类等待计数；commands 不是成功完成命令数。
+     */
     public String terminationSummary() {
         return "highWaterMark=" + commandWindowHighWaterMark
                 + " pending=" + (commandWindow == null ? 0 : commandWindow.size())
