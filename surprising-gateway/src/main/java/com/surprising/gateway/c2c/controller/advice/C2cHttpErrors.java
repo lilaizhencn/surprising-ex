@@ -22,7 +22,7 @@ public class C2cHttpErrors {
 
     @ExceptionHandler(C2cProblem.class)
     public ResponseEntity<?> problem(C2cProblem problem) {
-        return error(problem.status(), problem.code(), problem.getMessage());
+        return error(status(problem), problem.code(), problem.getMessage());
     }
     @ExceptionHandler({IllegalArgumentException.class, ArithmeticException.class,
             HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class})
@@ -35,9 +35,9 @@ public class C2cHttpErrors {
     public ResponseEntity<?> conflict(DataIntegrityViolationException failure) {
         return error(HttpStatus.CONFLICT, "C2C_CONFLICT", "资料已变更或与现有记录冲突，请刷新后重试");
     }
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<?> conflict(IllegalStateException failure) {
-        return error(HttpStatus.CONFLICT, "C2C_CONFLICT", failure.getMessage());
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<?> internal(RuntimeException failure) {
+        return error(HttpStatus.INTERNAL_SERVER_ERROR, "C2C_INTERNAL_ERROR", "C2C 状态暂不可确认，请查询原请求，勿重复提交");
     }
     @ExceptionHandler(DataAccessException.class)
     public ResponseEntity<?> storage(DataAccessException failure) {
@@ -51,6 +51,25 @@ public class C2cHttpErrors {
     public ResponseEntity<?> tooLarge(RuntimeException failure) {
         return error(HttpStatus.PAYLOAD_TOO_LARGE,"C2C_ATTACHMENT_TOO_LARGE","文件超过上传限制");
     }
+    /** HTTP响应和Controller失败审计使用相同分类；未知内部异常不暴露细节。 */
+    public static HttpStatus status(RuntimeException failure) {
+        if (failure instanceof C2cProblem problem) return switch (problem.reason()) {
+            case AUTHENTICATION_REQUIRED -> HttpStatus.UNAUTHORIZED;
+            case ACCESS_DENIED -> HttpStatus.FORBIDDEN;
+            case NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
+            case CONFLICT -> HttpStatus.CONFLICT;
+            case UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
+        };
+        if (failure instanceof DataIntegrityViolationException) return HttpStatus.CONFLICT;
+        if (failure instanceof DataAccessException || failure instanceof com.surprising.gateway.provider.service.KycDocumentStorageException)
+            return HttpStatus.SERVICE_UNAVAILABLE;
+        if (failure instanceof org.springframework.web.multipart.MaxUploadSizeExceededException) return HttpStatus.PAYLOAD_TOO_LARGE;
+        if (failure instanceof IllegalArgumentException || failure instanceof ArithmeticException || failure instanceof HttpMessageNotReadableException)
+            return HttpStatus.BAD_REQUEST;
+        return HttpStatus.INTERNAL_SERVER_ERROR;
+    }
+
     private ResponseEntity<?> error(HttpStatus status, String code, String message) {
         return ResponseEntity.status(status).header("Cache-Control", "no-store")
                 .body(Map.of("code", code, "message", message == null ? "操作未完成" : message));

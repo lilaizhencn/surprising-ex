@@ -19,7 +19,8 @@ public class C2cAdminChatController {
     private final C2cAdminAccess access;
     private final C2cAdminChat chat;
     private final ObjectMapper json;
-    public C2cAdminChatController(C2cAdminAccess access,C2cAdminChat chat,ObjectMapper json) {this.access=access;this.chat=chat;this.json=json;}
+    private final C2cAdminRequestBinding requestBinding;
+    public C2cAdminChatController(C2cAdminAccess access,C2cAdminChat chat,ObjectMapper json,C2cAdminRequestBinding requestBinding) {this.access=access;this.chat=chat;this.json=json;this.requestBinding=requestBinding;}
     @GetMapping
     public C2cChatViews.Page history(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID order,
             @RequestParam(defaultValue="0") String after,@RequestParam(required=false) String before,
@@ -28,20 +29,20 @@ public class C2cAdminChatController {
         C2cChatController.pageRange(0,null,0,limit);
         if(latest) {
             if(!"0".equals(after) || before!=null || !"0".equals(afterEvent)) throw new IllegalArgumentException("最近消息不能混用其他游标");
-            return chat.latest(auth,access.request(request),order,limit);
+            return chat.latest(auth,requestBinding.bind(request),order,limit);
         }
         long a=C2cChatCursors.parse(after),e=C2cChatCursors.parse(afterEvent);Long older=before==null?null:C2cChatCursors.parse(before);
-        C2cChatController.pageRange(a,older,e,limit);return chat.history(auth,access.request(request),order,a,older,e,limit);
+        C2cChatController.pageRange(a,older,e,limit);return chat.history(auth,requestBinding.bind(request),order,a,older,e,limit);
     }
     @GetMapping("/requests/{messageRequest}")
     public Map<String,Object> receipt(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID order,
             @PathVariable UUID messageRequest,HttpServletRequest request) {
-        return chat.receipt(auth,access.request(request),order,messageRequest);
+        return chat.receipt(auth,requestBinding.bind(request),order,messageRequest);
     }
     @GetMapping("/attachments/{attachment}")
     public ResponseEntity<byte[]> attachment(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID order,
             @PathVariable UUID attachment,HttpServletRequest request) {
-        return C2cChatController.file(chat.attachment(auth,access.request(request),order,attachment));
+        return C2cChatController.file(chat.attachment(auth,requestBinding.bind(request),order,attachment));
     }
     @PostMapping
     public C2cChatViews.Message reply(@RequestHeader(value="Authorization",required=false) String auth,@PathVariable UUID order,
@@ -49,6 +50,6 @@ public class C2cAdminChatController {
         byte[] original=json.writeValueAsBytes(body);
         if(body.attachmentId()!=null) throw new IllegalArgumentException("客服回复暂只支持文字");
         String text=C2cChatController.messageText(body.text());C2cChatController.requireMessage(body.requestId(),text,null);
-        return chat.reply(auth,access.request(request),order,body.requestId(),text,original);
+        return chat.reply(auth,requestBinding.bind(request),order,body.requestId(),text,original);
     }
 }

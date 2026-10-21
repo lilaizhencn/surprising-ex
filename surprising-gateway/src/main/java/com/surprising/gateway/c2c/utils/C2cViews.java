@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c.utils;
 
+import com.surprising.gateway.c2c.exception.C2cProblem;
+
 import com.surprising.gateway.c2c.repository.C2cSubmissions;
 
 import com.surprising.gateway.c2c.model.C2cAd;
@@ -152,7 +154,7 @@ public final class C2cViews {
         return view;
     }
     public static String quantity(long units, long scale) {
-        if (scale <= 0 || !Long.toString(scale).matches("10*")) throw new IllegalStateException("资产精度未就绪");
+        if (scale <= 0 || !Long.toString(scale).matches("10*")) throw C2cProblem.unavailable("资产精度未就绪");
         return BigDecimal.valueOf(units).divide(BigDecimal.valueOf(scale)).stripTrailingZeros().toPlainString();
     }
     private static String text(Object value) { return value == null ? null : value.toString(); }

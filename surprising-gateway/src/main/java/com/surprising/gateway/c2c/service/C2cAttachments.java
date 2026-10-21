@@ -72,19 +72,19 @@ public class C2cAttachments {
     private C2cAttachment admit(long user,UUID id,String purpose,UUID order,UUID conversation,String name,String mime,int bytes,String hash) {
         String safeName=name;
         return transactions.execute(status->{
-            if(!users.lockForNoKeyUpdate(user)) throw new IllegalStateException("账户不可用");
+            if(!users.lockForNoKeyUpdate(user)) throw C2cProblem.conflict("账户不可用");
             var previous=attachments.find(id).orElse(null);
             if(previous!=null) {
                 if(previous.user()!=user) throw C2cProblem.forbidden("无权访问此文件");
                 if(!Objects.equals(order,previous.order()) || !Objects.equals(conversation,previous.conversation())
                         || !purpose.equals(previous.purpose()) || !safeName.equals(previous.name())
                         || !mime.equals(previous.mime()) || bytes!=previous.bytes() || !hash.equals(previous.sha256()))
-                    throw new IllegalStateException("上传请求已用于其他文件，请保留原请求查询结果");
+                    throw C2cProblem.conflict("上传请求已用于其他文件，请保留原请求查询结果");
                 return previous;
             }
             scope(user,purpose,order,conversation);
             var usage=attachments.usage(user);
-            if(usage.files()>=100 || usage.bytes()+bytes>104857600) throw new C2cProblem(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+            if(usage.files()>=100 || usage.bytes()+bytes>104857600) throw new C2cProblem(C2cProblem.Reason.RATE_LIMITED,
                     "C2C_UPLOAD_LIMIT","文件上传已达限额");
             String key="c2c/"+user+"/"+id;
             attachments.insert(id,user,order,conversation,purpose,key,mime,bytes,hash,safeName);

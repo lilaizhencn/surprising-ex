@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c.service;
 
+import com.surprising.gateway.c2c.model.C2cAdminRequest;
+
 import com.surprising.gateway.c2c.exception.C2cProblem;
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cFundsRepository;
@@ -63,11 +65,11 @@ public class C2cMerchantBonds {
     }
 
     @Transactional
-    public Map<String,Object> configure(String authorization,C2cAdminAccess.Request request,byte[] body,C2cBondPolicyChange input) {
+    public Map<String,Object> configure(String authorization,C2cAdminRequest request,byte[] body,C2cBondPolicyChange input) {
         var actor=admin.write(authorization,request,body);configuration.lockExclusive();
         long revision=policies.find().map(C2cBondPolicy::revision).orElse(0L);
-        if(revision!=input.revision()) throw new IllegalStateException("质押配置已变更，请刷新");
-        if(bonds.anyOutstanding()) throw new IllegalStateException("存在未退还质押，不能改变质押币种或金额");
+        if(revision!=input.revision()) throw C2cProblem.conflict("质押配置已变更，请刷新");
+        if(bonds.anyOutstanding()) throw C2cProblem.conflict("存在未退还质押，不能改变质押币种或金额");
         var asset=assets.byAccountingCode(input.asset()).filter(value -> value.listed() && value.tradingEnabled())
                 .orElseThrow(() -> new IllegalArgumentException("质押资产尚未开放"));
         long units=C2cMoney.quantityUnits(input.amount().toPlainString(),asset.scaleUnits());
@@ -86,12 +88,12 @@ public class C2cMerchantBonds {
         if(bonds.requestExists(user.userId(),input.requestId())) return mine(user.userId(),input.requestId());
         products.requireEnabled(ProductLine.SPOT);configuration.get(true);
         var policy=policies.find().filter(value -> value.revision()==input.policyRevision())
-                .orElseThrow(() -> new IllegalStateException("请刷新当前质押规则"));
+                .orElseThrow(() -> C2cProblem.conflict("请刷新当前质押规则"));
         if(merchants.find(user.userId(),false).filter(value -> List.of("PENDING","APPROVED").contains(value.status())).isEmpty())
-            throw new IllegalStateException("请先提交有效商家申请");
+            throw C2cProblem.conflict("请先提交有效商家申请");
         access.requireCounterparty(user.userId(),markets.markets(true).stream().filter(value -> value.asset().equals(policy.asset()))
-                .findFirst().orElseThrow(() -> new IllegalStateException("请先配置可用的质押资产市场")));
-        if(bonds.outstanding(user.userId())) throw new IllegalStateException("已有质押或在途请求，请查询原记录");
+                .findFirst().orElseThrow(() -> C2cProblem.conflict("请先配置可用的质押资产市场")));
+        if(bonds.outstanding(user.userId())) throw C2cProblem.conflict("已有质押或在途请求，请查询原记录");
         access.verifyFunds(user,authorization,input.emailCode(),input.totpCode());
         UUID id=UUID.randomUUID();bonds.insert(id,user.userId(),input.requestId(),policy.asset(),policy.amountUnits());
         funds.createOrGet("MERCHANT",id,"MERCHANT_BOND",user.userId(),markets.configuration().escrowUserId(),policy.asset(),policy.amountUnits());
@@ -103,13 +105,13 @@ public class C2cMerchantBonds {
         lockUser(user.userId());
         var bond=bonds.findOwned(user.userId(),id,true).orElseThrow(() -> C2cProblem.forbidden("只能退还本人原质押"));
         if(List.of("REFUND_PENDING","RETURNED").contains(bond.status())) return mine(user.userId(),bond.requestId());
-        if(!bond.status().equals("LOCKED")) throw new IllegalStateException("质押尚未确认，请查询原记录");
+        if(!bond.status().equals("LOCKED")) throw C2cProblem.conflict("质押尚未确认，请查询原记录");
         if(merchants.find(user.userId(),false).filter(value -> value.status().equals("SUSPENDED")).isPresent())
-            throw new IllegalStateException("商家已被风控停用，请联系客服处理质押");
+            throw C2cProblem.conflict("商家已被风控停用，请联系客服处理质押");
         // 用户锁阻止本人新建广告/订单/质押；广告全部终止后，其他用户也无法再从原广告创建订单。
         // 分别读取单表事实，不以某次查询结果缓存或推断待确认资金已完成。
         if(ads.activeCount(user.userId())>0 || orders.hasOpenOrders(user.userId()) || funds.hasPendingForUser(user.userId()))
-            throw new IllegalStateException("请先关闭全部广告并结清订单、申诉与在途资金");
+            throw C2cProblem.conflict("请先关闭全部广告并结清订单、申诉与在途资金");
         merchants.withdraw(user.userId());
         funds.createOrGet("MERCHANT",id,"MERCHANT_BOND_REFUND",markets.configuration().escrowUserId(),user.userId(),bond.asset(),bond.amountUnits());
         bonds.updateStatus(id,"REFUND_PENDING");return mine(user.userId(),bond.requestId());
@@ -126,7 +128,7 @@ public class C2cMerchantBonds {
         }
     }
     private void lockUser(long userId) {
-        if(!users.lockForNoKeyUpdate(userId)) throw new IllegalStateException("账户不存在");
+        if(!users.lockForNoKeyUpdate(userId)) throw C2cProblem.conflict("账户不存在");
     }
     private Map<String,Object> view(C2cMerchantBond bond) {
         return Map.of("bondId",bond.id().toString(),"requestId",bond.requestId().toString(),"asset",bond.asset(),

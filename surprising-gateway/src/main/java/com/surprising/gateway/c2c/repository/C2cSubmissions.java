@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c.repository;
 
+import com.surprising.gateway.c2c.exception.C2cProblem;
+
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -33,7 +35,7 @@ public class C2cSubmissions {
     public Submission begin(long userId,String key,String kind,String hash) {
         var value=matching(get(userId,key,true),kind,hash);
         if(value==null) throw new IllegalStateException("原请求尚未持久接收");
-        if(value.status().equals("REJECTED")) throw new IllegalStateException(value.errorMessage()==null?"原请求已停止":value.errorMessage());
+        if(value.status().equals("REJECTED")) throw C2cProblem.conflict(value.errorMessage()==null?"原请求已停止":value.errorMessage());
         return value;
     }
 
@@ -42,7 +44,7 @@ public class C2cSubmissions {
                 UPDATE c2c_submissions SET status='SUCCEEDED',result_id=?,updated_at=now()
                 WHERE user_id=? AND request_key=? AND status='PROCESSING'
                 """,resultId,userId,key);
-        if(changed!=1) throw new IllegalStateException("原请求提交状态已变更");
+        if(changed!=1) throw C2cProblem.conflict("原请求提交状态已变更");
     }
 
     @Transactional
@@ -89,7 +91,7 @@ public class C2cSubmissions {
     }
 
     private static Submission matching(Submission row,String kind,String hash) {
-        if(row!=null && (!row.kind().equals(kind) || !row.hash().equals(hash))) throw new IllegalStateException("原请求内容不匹配");
+        if(row!=null && (!row.kind().equals(kind) || !row.hash().equals(hash))) throw C2cProblem.conflict("原请求内容不匹配");
         return row;
     }
     private Submission read(java.sql.ResultSet r,int n) throws java.sql.SQLException {

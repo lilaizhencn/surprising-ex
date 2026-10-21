@@ -61,7 +61,7 @@ public class C2cProfiles {
     @Transactional
     public Map<String,Object> update(JwtPrincipal user,long revision,String nickname,boolean strangers,int minutes,C2cVerification verification) {
         lockUser(user.userId());var current=profile(user.userId(),true);
-        if(current.revision()!=revision) throw new IllegalStateException("个人设置已变更，请刷新");
+        if(current.revision()!=revision) throw C2cProblem.conflict("个人设置已变更，请刷新");
         if(current.verificationMinutes()!=minutes) {
             var codes=C2cVerification.orEmpty(verification);access.verifySettings(user,codes.emailCode(),codes.totpCode());
         }
@@ -73,19 +73,19 @@ public class C2cProfiles {
 
     @Transactional
     public Map<String,Object> applyMerchant(JwtPrincipal user,long revision,String application) {
-        if(!"NORMAL".equals(user.status())) throw new IllegalStateException("账户当前不能申请商家");
+        if(!"NORMAL".equals(user.status())) throw C2cProblem.conflict("账户当前不能申请商家");
         var kyc=compliance.kyc(user.userId());
         if(kyc==null || !"VERIFIED".equals(kyc.status()) || (kyc.expiresAt()!=null && !kyc.expiresAt().isAfter(Instant.now())))
-            throw new IllegalStateException("请先完成有效身份认证");
+            throw C2cProblem.conflict("请先完成有效身份认证");
         lockUser(user.userId());
         var existing=merchants.find(user.userId(),true);
         if(existing.isEmpty()) {
-            if(revision!=0) throw new IllegalStateException("商家申请状态已变更");
+            if(revision!=0) throw C2cProblem.conflict("商家申请状态已变更");
             merchants.apply(user.userId(),application);
         } else {
             var current=existing.get();
-            if(current.revision()!=revision) throw new IllegalStateException("商家申请状态已变更");
-            if(!List.of("PENDING","REJECTED","WITHDRAWN").contains(current.status())) throw new IllegalStateException("请联系客服处理当前商家状态");
+            if(current.revision()!=revision) throw C2cProblem.conflict("商家申请状态已变更");
+            if(!List.of("PENDING","REJECTED","WITHDRAWN").contains(current.status())) throw C2cProblem.conflict("请联系客服处理当前商家状态");
             merchants.reapply(user.userId(),application);
         }
         return merchant(user.userId());
@@ -99,7 +99,7 @@ public class C2cProfiles {
         lockUser(userId);if(id==null) id=UUID.randomUUID();
         var owner=replies.owner(id);
         if(owner.isPresent() && owner.get()!=userId) throw C2cProblem.forbidden("只能修改本人快捷回复");
-        if(owner.isEmpty() && replies.count(userId)>=30) throw new IllegalStateException("最多保存 30 条快捷回复");
+        if(owner.isEmpty() && replies.count(userId)>=30) throw C2cProblem.conflict("最多保存 30 条快捷回复");
         replies.save(id,userId,content);return Map.of("replyId",id.toString(),"text",content);
     }
     @Transactional
@@ -131,10 +131,10 @@ public class C2cProfiles {
         if(existing.isPresent()) {
             var current=existing.get();
             if(current.userId()!=userId || current.targetUserId()!=target || !Objects.equals(orderId,current.orderId()) || !reason.equals(current.reason()))
-                throw new IllegalStateException("原举报内容不匹配");
+                throw C2cProblem.conflict("原举报内容不匹配");
             return id;
         }
-        if(reports.recentCount(userId)>=20) throw new IllegalStateException("今日举报较多，请等待客服处理");
+        if(reports.recentCount(userId)>=20) throw C2cProblem.conflict("今日举报较多，请等待客服处理");
         reports.insert(id,userId,target,orderId,reason);return id;
     }
     public Map<String,Object> reports(long userId,int limit,int offset) {
@@ -160,11 +160,11 @@ public class C2cProfiles {
         if(target.compareTo(config.minPrice())<0 || target.compareTo(config.maxPrice())>0)
             throw new IllegalArgumentException("预警价格超出市场范围");
         lockUser(userId);
-        if(id==null && revision!=0) throw new IllegalStateException("预警版本无效");
-        if(enabled && alerts.enabledCountExcept(userId,id)>=20) throw new IllegalStateException("最多启用 20 条价格预警");
+        if(id==null && revision!=0) throw C2cProblem.conflict("预警版本无效");
+        if(enabled && alerts.enabledCountExcept(userId,id)>=20) throw C2cProblem.conflict("最多启用 20 条价格预警");
         if(id==null) {
             id=UUID.randomUUID();alerts.insert(id,userId,market,side.name(),target,enabled);
-        } else if(alerts.replace(id,userId,revision,market,side.name(),target,enabled)!=1) throw new IllegalStateException("价格预警已变更，请刷新");
+        } else if(alerts.replace(id,userId,revision,market,side.name(),target,enabled)!=1) throw C2cProblem.conflict("价格预警已变更，请刷新");
         return id;
     }
     @Transactional
@@ -207,6 +207,6 @@ public class C2cProfiles {
         }).orElse(null);
     }
     private void lockUser(long userId) {
-        if(!users.lockForNoKeyUpdate(userId)) throw new IllegalStateException("账户不可用");
+        if(!users.lockForNoKeyUpdate(userId)) throw C2cProblem.conflict("账户不可用");
     }
 }

@@ -1,5 +1,9 @@
 package com.surprising.gateway.c2c.service;
 
+import com.surprising.gateway.c2c.model.C2cAdminRequest;
+
+import com.surprising.gateway.c2c.exception.C2cProblem;
+
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cFundsRepository;
 import com.surprising.gateway.c2c.utils.C2cViews;
@@ -48,18 +52,18 @@ public class C2cAdminMarkets {
     }
 
     @Transactional
-    public Map<String,Object> configure(String authorization,C2cAdminAccess.Request request,byte[] body,C2cConfigurationChange input) {
+    public Map<String,Object> configure(String authorization,C2cAdminRequest request,byte[] body,C2cConfigurationChange input) {
         var administrator=access.write(authorization,request,body);configuration.lockExclusive();var current=markets.configuration();
-        if(current.revision()!=input.revision()) throw new IllegalStateException("C2C 配置已变更，请刷新");
+        if(current.revision()!=input.revision()) throw C2cProblem.conflict("C2C 配置已变更，请刷新");
         if(input.enabled() && !current.enabled() && reconcile().status()!=C2cReconciliation.Status.MATCHED)
-            throw new IllegalStateException("资金尚未核对一致，请先检查待续办或异常资金意图");
+            throw C2cProblem.conflict("资金尚未核对一致，请先检查待续办或异常资金意图");
         configuration.update(input.enabled(),input.maxActiveAds(),administrator.userId());
         access.audit(administrator,request,body);return Map.of("enabled",input.enabled(),"maxActiveAds",input.maxActiveAds(),
                 "revision",Long.toString(current.revision()+1));
     }
 
     @Transactional
-    public Map<String,Object> market(String authorization,C2cAdminAccess.Request request,byte[] body,C2cMarketChange input) {
+    public Map<String,Object> market(String authorization,C2cAdminRequest request,byte[] body,C2cMarketChange input) {
         var administrator=access.write(authorization,request,body);configuration.lockExclusive();
         var asset=assets.byAccountingCode(input.asset()).orElseThrow(() -> new IllegalArgumentException("资产尚未配置"));
         long scale=asset.scaleUnits();C2cMoney.quantityUnits("1",scale);
@@ -69,13 +73,13 @@ public class C2cAdminMarkets {
                 input.minPrice(),input.maxPrice(),input.buyerFeePpm(),input.paymentWindowSeconds(),input.maxOpenOrders(),input.requireKyc(),input.vipMinCompleted(),input.revision());
         var existing=marketRows.find(id,false);
         if(existing.isEmpty()) {
-            if(input.revision()!=0) throw new IllegalStateException("新市场版本无效");
+            if(input.revision()!=0) throw C2cProblem.conflict("新市场版本无效");
             marketRows.insert(desired);
         } else {
             var current=existing.get();
-            if(current.revision()!=input.revision()) throw new IllegalStateException("市场版本已变更，请刷新");
+            if(current.revision()!=input.revision()) throw C2cProblem.conflict("市场版本已变更，请刷新");
             if(!current.asset().equals(input.asset()) || !current.fiat().equals(input.fiat()) || current.fiatDecimals()!=input.fiatDecimals())
-                throw new IllegalStateException("资产、法币和法币精度不能修改，请新建市场");
+                throw C2cProblem.conflict("资产、法币和法币精度不能修改，请新建市场");
             // 先等正在下单的事务结束并暂停广告，原订单继续按自己的价格、费用、付款和时限快照履行。
             ads.pauseByMarket(id);marketRows.update(desired);
         }
@@ -83,15 +87,15 @@ public class C2cAdminMarkets {
     }
 
     @Transactional
-    public Map<String,Object> method(String authorization,C2cAdminAccess.Request request,byte[] body,C2cPaymentMethod input) {
+    public Map<String,Object> method(String authorization,C2cAdminRequest request,byte[] body,C2cPaymentMethod input) {
         var administrator=access.write(authorization,request,body);configuration.lockExclusive();
         var existing=methods.find(input.code());
         if(existing.isEmpty()) {
-            if(input.revision()!=0) throw new IllegalStateException("新收款方式版本无效");
+            if(input.revision()!=0) throw C2cProblem.conflict("新收款方式版本无效");
             methods.insert(input);
         } else {
             var current=existing.get();
-            if(current.revision()!=input.revision()) throw new IllegalStateException("收款方式已变更，请刷新");
+            if(current.revision()!=input.revision()) throw C2cProblem.conflict("收款方式已变更，请刷新");
             ads.pauseByMethod(input.code());
             if((input.requiresBankName() && !current.requiresBankName()) || (!input.supportsQr() && current.supportsQr()))
                 accounts.requireReviewByMethod(input.code());

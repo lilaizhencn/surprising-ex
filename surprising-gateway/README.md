@@ -490,3 +490,5 @@ KYC/OIDC/邮件的协议接入不与业务聚合混放。LoginVerificationModels
 实时状态入口归websocket.provider.controller，条件单历史持久化归trading.trigger.repository；保留原路由和用户/产品筛选。验证见 [其余归包记录](../docs/validation/java-mvc-remaining-packages-20261021.json)。
 
 合约目录本地分发仍由 `gateway.provider.local.InstrumentLocalRoutes` 调用 `instrument.provider.controller.InstrumentRequestController`，不新增内部HTTP路由。Controller解析产品选择、分页及HTTP异常；`InstrumentService.publicCatalog/publicLatest` 负责公开可见性和行情聚合。Repository接收原生 `InstrumentPageQuery`，SQL列只在Repository映射；合约编辑仍在原事务中持行锁检查版本并写配置/Outbox。
+
+C2C后台的原始请求头、method/path/query、User-Agent和IP由 `c2c.controller.C2cAdminRequestBinding` 绑定为 `model.C2cAdminRequest`；审批正文保持原始字节摘要。Service只产生原生 `C2cProblem` 原因，`controller.advice.C2cHttpErrors` 映射HTTP并对未知内部异常脱敏。内部资金/对账状态故障保留PROCESSING回执供核查和原身份续办，不伪造为用户校验拒绝。

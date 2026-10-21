@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c.service;
 
+import com.surprising.gateway.c2c.model.C2cAdminRequest;
+
 import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
 
 import java.util.*;
@@ -19,27 +21,27 @@ public class C2cAdminChat {
         this.access=access;this.orders=orders;this.messages=messages;this.attachments=attachments;
     }
     @Transactional
-    public C2cChatViews.Page history(String auth,C2cAdminAccess.Request request,UUID order,long after,Long before,long event,int limit) {
+    public C2cChatViews.Page history(String auth,C2cAdminRequest request,UUID order,long after,Long before,long event,int limit) {
         var administrator=access.read(auth,true);orders.get(order,false);access.audit(administrator,request,new byte[0]);
         return messages.adminPage(order,after,before,event,limit);
     }
     @Transactional
-    public C2cChatViews.Page latest(String auth,C2cAdminAccess.Request request,UUID order,int limit) {
+    public C2cChatViews.Page latest(String auth,C2cAdminRequest request,UUID order,int limit) {
         var administrator=access.read(auth,true);orders.get(order,false);access.audit(administrator,request,new byte[0]);
         return messages.adminLatest(order,limit);
     }
     @Transactional
-    public Map<String,Object> receipt(String auth,C2cAdminAccess.Request request,UUID order,UUID messageRequest) {
+    public Map<String,Object> receipt(String auth,C2cAdminRequest request,UUID order,UUID messageRequest) {
         var administrator=access.read(auth,true);orders.get(order,false);access.audit(administrator,request,new byte[0]);
         return messages.adminReceipt(administrator.userId(),order,messageRequest);
     }
     @Transactional
-    public C2cAttachmentContent attachment(String auth,C2cAdminAccess.Request request,UUID order,UUID attachment) {
+    public C2cAttachmentContent attachment(String auth,C2cAdminRequest request,UUID order,UUID attachment) {
         var administrator=access.read(auth,true);access.audit(administrator,request,new byte[0]);
         return attachments.adminDownload(attachment,order);
     }
     @Transactional
-    public C2cChatViews.Message reply(String auth,C2cAdminAccess.Request metadata,UUID order,UUID request,String text,byte[] body) {
+    public C2cChatViews.Message reply(String auth,C2cAdminRequest metadata,UUID order,UUID request,String text,byte[] body) {
         access.read(auth,true);var administrator=access.write(auth,metadata,body);
         var result=messages.support(administrator.userId(),order,request,text);
         access.audit(administrator,metadata,body);return result;

@@ -59,6 +59,8 @@ public class C2cSubmissionService {
     }
     private void reject(long user,String key,String kind,String hash,RuntimeException failure) {
         if(failure instanceof C2cProblem problem && problem.retryable()) return;
+        // 内部状态损坏不能伪造为用户校验拒绝，保留原PROCESSING回执供核查/续办。
+        if(failure instanceof IllegalStateException && !(failure instanceof C2cProblem)) return;
         submissions.reject(user,key,kind,hash,"VALIDATION_REJECTED",
                 failure instanceof ArithmeticException?"金额或数量超出精度、范围限制":failure.getMessage());
     }

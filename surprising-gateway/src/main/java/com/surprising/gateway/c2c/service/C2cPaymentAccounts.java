@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c.service;
 
+import com.surprising.gateway.c2c.exception.C2cProblem;
+
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 
 import com.surprising.gateway.c2c.model.C2cPaymentAccount;
@@ -45,8 +47,8 @@ public class C2cPaymentAccounts {
     public C2cPaymentAccount get(long userId, UUID id, boolean requireApproved) {
         var account=accounts.find(userId,id).orElseThrow(()->new IllegalArgumentException("收款账号不存在"));
         if (requireApproved) {
-            if (!"APPROVED".equals(account.status())) throw new IllegalStateException("收款账号需先通过实名审核");
-            if (methods.available(account.method(),account.fiat()).isEmpty()) throw new IllegalStateException("收款方式当前不可用");
+            if (!"APPROVED".equals(account.status())) throw C2cProblem.conflict("收款账号需先通过实名审核");
+            if (methods.available(account.method(),account.fiat()).isEmpty()) throw C2cProblem.conflict("收款方式当前不可用");
         }
         return account;
     }
@@ -76,7 +78,7 @@ public class C2cPaymentAccounts {
         } else {
             pauseAds(userId,id);
             int changed=accounts.replaceDetails(id,userId,revision,fiat,method,encrypted,masked);
-            if(changed!=1) throw new IllegalStateException("收款账号已变更，请刷新");
+            if(changed!=1) throw C2cProblem.conflict("收款账号已变更，请刷新");
         }
         return get(userId,id,false);
     }
@@ -85,19 +87,19 @@ public class C2cPaymentAccounts {
     public void disable(long userId,UUID id,long revision) {
         pauseAds(userId,id);
         int changed=accounts.disable(id,userId,revision);
-        if(changed!=1) throw new IllegalStateException("收款账号已变更，请刷新");
+        if(changed!=1) throw C2cProblem.conflict("收款账号已变更，请刷新");
     }
 
     @Transactional
     public C2cPaymentAccount review(UUID id,long revision,boolean approved,String reason,JwtPrincipal administrator) {
         if(reason==null || reason.isBlank() || reason.length()>1000) throw new IllegalArgumentException("请填写实名核验结论");
         var value=accounts.lock(id).orElseThrow(()->new IllegalArgumentException("收款账号不存在"));
-        if(value.userId()==administrator.userId()) throw new IllegalStateException("不能审核本人的收款账号");
-        if(!"PENDING".equals(value.status()) || value.revision()!=revision) throw new IllegalStateException("收款审核状态已变更");
+        if(value.userId()==administrator.userId()) throw C2cProblem.conflict("不能审核本人的收款账号");
+        if(!"PENDING".equals(value.status()) || value.revision()!=revision) throw C2cProblem.conflict("收款审核状态已变更");
         if(approved) {
             var kyc=compliance.kyc(value.userId());
             if(kyc==null || !"VERIFIED".equals(kyc.status()) || (kyc.expiresAt()!=null && !kyc.expiresAt().isAfter(Instant.now())))
-                throw new IllegalStateException("账号本人尚无有效身份认证");
+                throw C2cProblem.conflict("账号本人尚无有效身份认证");
             var verified=details(value);
             validateDetails(value.userId(),value.fiat(),value.method(),new Details(verified.holderName(),
                     verified.accountNumber(),verified.bankName(),verified.qrAttachmentId()));

@@ -210,11 +210,11 @@ final class C2cHttpFixture implements AutoCloseable {
             jdbc.update("UPDATE c2c_payment_accounts SET status='APPROVED'");
             var controller=new C2cController(bean(C2cAccess.class),bean(C2cAds.class),bean(C2cOrders.class),bean(C2cSubmissionService.class),
                     bean(C2cQueryService.class),bean(C2cQuickQuoteService.class),bean(C2cPaymentAccounts.class),json);
-            mvc=MockMvcBuilders.standaloneSetup(controller,new C2cMerchantController(bean(C2cMerchantBonds.class),bean(C2cAccess.class),bean(C2cAdminAccess.class),json),new C2cStatusController(true,bean(C2cMarketService.class),products),
+            mvc=MockMvcBuilders.standaloneSetup(controller,new C2cMerchantController(bean(C2cMerchantBonds.class),bean(C2cAccess.class),bean(C2cAdminAccess.class),json, new com.surprising.gateway.c2c.controller.C2cAdminRequestBinding(bean(com.surprising.gateway.provider.auth.service.AdminApprovalService.class))),new C2cStatusController(true,bean(C2cMarketService.class),products),
                     new C2cMeController(bean(C2cAccess.class),bean(C2cProfiles.class)),
                     new C2cChatController(bean(C2cAccess.class),bean(C2cConversations.class),bean(C2cMessages.class),bean(C2cAttachments.class)),
-                    new C2cAdminChatController(bean(C2cAdminAccess.class),bean(C2cAdminChat.class),json),
-                    new C2cAdminController(bean(C2cAdminAccess.class),bean(C2cAdminMarkets.class),bean(C2cAdminReview.class),bean(C2cAdminQueryService.class),bean(C2cAdminInitialization.class),json))
+                    new C2cAdminChatController(bean(C2cAdminAccess.class),bean(C2cAdminChat.class),json, new com.surprising.gateway.c2c.controller.C2cAdminRequestBinding(bean(com.surprising.gateway.provider.auth.service.AdminApprovalService.class))),
+                    new C2cAdminController(bean(C2cAdminAccess.class),bean(C2cAdminMarkets.class),bean(C2cAdminReview.class),bean(C2cAdminQueryService.class),bean(C2cAdminInitialization.class),json, new com.surprising.gateway.c2c.controller.C2cAdminRequestBinding(bean(com.surprising.gateway.provider.auth.service.AdminApprovalService.class))))
                     .setControllerAdvice(new C2cHttpErrors()).build();
         } catch(Exception failure) {close();throw failure;}
     }

@@ -1,0 +1,460 @@
+{
+  "verified_at_utc": "2026-10-21T17:02:54.474446+00:00",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16",
+  "scope": "C2C原生异常、HTTP/请求元数据绑定及内部故障回执保护",
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=C2cHttpBoundaryTest,C2cSubmissionBoundaryPostgresTest,C2cAdminHttpPostgresTest,C2cChatPostgresTest,C2cConfigurationValidationTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.c2c.C2cConfigurationValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cHttpBoundaryTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cSubmissionBoundaryPostgresTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "b435bb2ee19037971a1f5378ed80bb643b668dd3454357b223bc66f9147a2668",
+      "tests": 49,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=C2cHttpBoundaryTest,C2cSubmissionBoundaryPostgresTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.c2c.C2cHttpBoundaryTest",
+          "tests": 8,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cSubmissionBoundaryPostgresTest",
+          "tests": 8,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "461a9bc7b0e476f9c541de0a579e66a83f4ec8b664555f6e4d8b9f8c806178b2",
+      "tests": 16,
+      "failures": 3,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative-receipt": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=C2cSubmissionBoundaryPostgresTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.c2c.C2cSubmissionBoundaryPostgresTest",
+          "tests": 8,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "545960f41e6f2d406c80a9d71e3299ffdf891fe22e82413bc00e43e32800f1f2",
+      "tests": 8,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=C2c*Test,!C2cR2GatewayLiveTest,!C2cR2StorageLiveTest",
+        "clean",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.c2c.C2cOrderEventTransactionPostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cProfilesTransactionPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cOrdersPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminQueryPostgresTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cConfigurationValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cCommandValidationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cFundsPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cHttpBoundaryTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cSubmissionsPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cQueryValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdsPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatPersistencePostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cSubmissionBoundaryPostgresTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminQueryControllerTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAccessPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cProfileValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cQueryPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cNotificationsPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cConfigurationTransactionPostgresTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cMoneyTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cBrowserQaTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cReviewTransactionPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "82bb99d2098c4c6ec122abdfa46ef128ccb97be47b2d0c163ce5738541a02937",
+      "tests": 165,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    }
+  },
+  "source_proof": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cAdsRepository.java": "全部SQL text block相同，仅把已识别业务冲突改为原生明确异常",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cSubmissions.java": "全部SQL text block相同，仅把已识别业务冲突改为原生明确异常"
+  },
+  "internal_states_retained": [
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cFundsRepository.java",
+      "line": 51,
+      "source": "throw new IllegalStateException(\"C2C 原资金意图参数冲突，不能重新扣款或改收款人\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cFundsRepository.java",
+      "line": 108,
+      "source": "} catch (java.security.NoSuchAlgorithmException ex) { throw new IllegalStateException(ex); }"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cSubmissions.java",
+      "line": 37,
+      "source": "if(value==null) throw new IllegalStateException(\"原请求尚未持久接收\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cAdsRepository.java",
+      "line": 137,
+      "source": "if(changed!=1) throw new IllegalStateException(\"广告订单库存对账不一致\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/utils/C2cDigests.java",
+      "line": 15,
+      "source": "catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cOrders.java",
+      "line": 94,
+      "source": "throw new IllegalStateException(\"原请求订单归属不匹配\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminMarkets.java",
+      "line": 145,
+      "source": "for(var balance:balances) if(result.putIfAbsent(balance.asset(),balance)!=null) throw new IllegalStateException(\"资金查询返回重复资产\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cNotificationService.java",
+      "line": 31,
+      "source": "if (fired != triggered.size()) throw new IllegalStateException(\"锁定预警的触发数量不一致\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cQueryService.java",
+      "line": 149,
+      "source": "if(!market.fiat().equals(payment.fiat())) throw new IllegalStateException(\"订单收款快照法币不匹配\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cFunds.java",
+      "line": 40,
+      "source": "if (!valid) throw new IllegalStateException(\"C2C 资金意图不符合托管账户归属\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cFunds.java",
+      "line": 50,
+      "source": "default -> throw new IllegalStateException(\"C2C 资金进度无效\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cFunds.java",
+      "line": 61,
+      "source": "default -> throw new IllegalStateException(\"C2C 资金进度无效\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAds.java",
+      "line": 161,
+      "source": "if(intent==null) throw new IllegalStateException(\"广告缺少原资金意图\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cPaymentAccounts.java",
+      "line": 114,
+      "source": "throw new IllegalStateException(\"收款方式与资料不匹配\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cPaymentAccounts.java",
+      "line": 121,
+      "source": "throw new IllegalStateException(\"收款资料归属不匹配\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cR2Storage.java",
+      "line": 36,
+      "source": "|| !properties.getPrefix().endsWith(\"/\")) throw new IllegalStateException(\"C2C 文件目录配置无效\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cR2Storage.java",
+      "line": 45,
+      "source": "throw new IllegalStateException(\"C2C R2 配置不完整\");"
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cR2Storage.java",
+      "line": 49,
+      "source": "&& Set.of(\"127.0.0.1\",\"localhost\").contains(endpoint.getHost())))) throw new IllegalStateException(\"C2C R2 端点配置无效\");"
+    }
+  ],
+  "negative_control": [
+    "撤去原始query绑定、内部500映射和回执保护，16项捕获3失败；该联合负例的HTTP断言先失败，未据此单独声称覆盖回执分支。",
+    "独立仅撤去内部异常回执保护：8项捕获1失败，PROCESSING被误写REJECTED；finally逐字节恢复，随后clean test通过。"
+  ],
+  "initial_failures": [
+    "迁移脚本误把Advice两处503响应常量替换为原生原因，编译发现并修正。",
+    "故障桩恢复使用when时再次触发原故障，改用doReturn恢复；49项定向及最终回归通过。"
+  ],
+  "new_abstractions": {
+    "C2cAdminRequest": "既有嵌套请求事实迁至model，原字段和原始值保留，不新增状态。",
+    "C2cAdminRequestBinding": "三个实际后台Controller共享原始协议绑定和既有审批头配置，避免Service接收Servlet请求。"
+  },
+  "unverified": [
+    "C2cBrowserQaTest未配置C2C_BROWSER_QA_DIR，1项跳过。",
+    "两项外部R2 Live因本批不使用外部存储，明确排除；源代码和测试源码均编译。",
+    "尚未执行最终真实Gateway/Core/做市资金实栈；本批PostgreSQL/HTTP故障回归使用隔离fixture，非外部资金验收。",
+    "ADD-008对账调用HTTP门面仍待整改。"
+  ],
+  "cleanup": {
+    "owned_postgres": "本批独占PostgreSQL已停止并删除",
+    "logs_reports": "本批日志和已汇总Gateway报告已删除，构建产物保留"
+  }
+}

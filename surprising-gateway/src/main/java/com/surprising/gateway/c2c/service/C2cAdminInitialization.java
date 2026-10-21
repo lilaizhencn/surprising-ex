@@ -1,5 +1,9 @@
 package com.surprising.gateway.c2c.service;
 
+import com.surprising.gateway.c2c.model.C2cAdminRequest;
+
+import com.surprising.gateway.c2c.exception.C2cProblem;
+
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.provider.service.AccountCommandGateway;
@@ -28,13 +32,13 @@ public class C2cAdminInitialization {
         this.transactions=new TransactionTemplate(transactions);
     }
 
-    public Map<String,Object> initialize(String authorization, C2cAdminAccess.Request request, byte[] body) {
+    public Map<String,Object> initialize(String authorization, C2cAdminRequest request, byte[] body) {
         Accepted accepted=transactions.execute(transaction -> {
             var administrator=access.write(authorization,request,body);
             products.requireEnabled(ProductLine.SPOT);
             var configuration=markets.configuration(true);
             var configured=markets.markets(false);
-            if(configured.isEmpty()) throw new IllegalStateException("请先配置至少一个 C2C 市场");
+            if(configured.isEmpty()) throw C2cProblem.conflict("请先配置至少一个 C2C 市场");
             // 请求不接受金额、账户或资产；命令按账户及资产固定身份，重复调用仍为同一笔零金额初始化。
             String asset=configured.getFirst().asset();
             access.audit(administrator,request,body);

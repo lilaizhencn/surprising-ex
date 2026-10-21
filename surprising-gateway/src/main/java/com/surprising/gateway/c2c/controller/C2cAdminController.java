@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c.controller;
 
+import com.surprising.gateway.c2c.model.C2cAdminRequest;
+
 import com.surprising.gateway.c2c.service.C2cAdminAccess;
 import com.surprising.gateway.c2c.service.C2cAdminInitialization;
 import com.surprising.gateway.c2c.service.C2cAdminMarkets;
@@ -40,15 +42,16 @@ public class C2cAdminController {
     private final C2cAdminQueryService queries;
     private final C2cAdminInitialization initialization;
     private final ObjectMapper json;
+    private final C2cAdminRequestBinding requestBinding;
     public C2cAdminController(C2cAdminAccess access,C2cAdminMarkets markets,C2cAdminReview review,C2cAdminQueryService queries,
-                              C2cAdminInitialization initialization,ObjectMapper json) {
-        this.access=access;this.markets=markets;this.review=review;this.queries=queries;this.initialization=initialization;this.json=json;
+                              C2cAdminInitialization initialization,ObjectMapper json,C2cAdminRequestBinding requestBinding) {
+        this.access=access;this.markets=markets;this.review=review;this.queries=queries;this.initialization=initialization;this.json=json;this.requestBinding=requestBinding;
     }
 
     @PostMapping("/initialization")
     public Map<String,Object> initialize(@RequestHeader(value="Authorization",required=false) String authorization,
                                          @RequestBody(required=false) byte[] body,HttpServletRequest http) {
-        var request=access.request(http);
+        var request=requestBinding.bind(http);
         return audited(authorization,request,body,()->{
             if(body!=null && body.length>0) throw new IllegalArgumentException("账户初始化不接受金额、账户或其他请求正文");
             return initialization.initialize(authorization,request,body);
@@ -62,7 +65,7 @@ public class C2cAdminController {
     @PutMapping("/configuration")
     public Map<String,Object> configure(@RequestHeader(value="Authorization",required=false) String authorization,
                                        @RequestBody byte[] body,HttpServletRequest http) {
-        var request=access.request(http);
+        var request=requestBinding.bind(http);
         return audited(authorization,request,body,()->{
             var input=read(body,ConfigurationInput.class);reason(input.reason());
             if(input.maxActiveAds()<1 || input.maxActiveAds()>100) throw new IllegalArgumentException("广告限额应为 1 至 100");
@@ -72,7 +75,7 @@ public class C2cAdminController {
     @PostMapping("/markets")
     public Map<String,Object> market(@RequestHeader(value="Authorization",required=false) String authorization,
                                     @RequestBody byte[] body,HttpServletRequest http) {
-        var request=access.request(http);
+        var request=requestBinding.bind(http);
         return audited(authorization,request,body,()->{
             var input=read(body,MarketInput.class);reason(input.reason());
             if(input.asset()==null || !input.asset().matches("[A-Z0-9]{2,20}") || input.fiat()==null || !input.fiat().matches("[A-Z]{3,8}")
@@ -93,7 +96,7 @@ public class C2cAdminController {
     @PostMapping("/payment-methods")
     public Map<String,Object> method(@RequestHeader(value="Authorization",required=false) String authorization,
                                     @RequestBody byte[] body,HttpServletRequest http) {
-        var request=access.request(http);
+        var request=requestBinding.bind(http);
         return audited(authorization,request,body,()->{
             var input=read(body,MethodInput.class);reason(input.reason());
             if(input.code()==null || !input.code().matches("[A-Z][A-Z0-9_]{0,31}") || input.label()==null || input.label().isBlank()
@@ -120,7 +123,7 @@ public class C2cAdminController {
     @PostMapping("/merchants/{id}/review")
     public Map<String,Object> merchantReview(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable long id,@RequestBody byte[] body,HttpServletRequest http) {
-        var request=access.request(http);
+        var request=requestBinding.bind(http);
         return audited(authorization,request,body,()->review.merchant(authorization,request,body,id,read(body,C2cAdminReview.MerchantDecision.class)));
     }
     @GetMapping("/payment-accounts")
@@ -134,13 +137,13 @@ public class C2cAdminController {
     @GetMapping("/payment-accounts/{id}")
     public Map<String,Object> account(@RequestHeader(value="Authorization",required=false) String authorization,
                                      @PathVariable UUID id,HttpServletRequest http) {
-        var request=access.request(http);
+        var request=requestBinding.bind(http);
         return audited(authorization,request,null,()->review.paymentDetails(authorization,request,id));
     }
     @PostMapping("/payment-accounts/{id}/review")
     public Map<String,Object> accountReview(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable UUID id,@RequestBody byte[] body,HttpServletRequest http) {
-        var request=access.request(http);
+        var request=requestBinding.bind(http);
         return audited(authorization,request,body,()->review.payment(authorization,request,body,id,read(body,C2cAdminReview.PaymentDecision.class)));
     }
     @GetMapping("/ads")
@@ -154,13 +157,13 @@ public class C2cAdminController {
     @PostMapping("/ads/{id}/status")
     public Map<String,Object> ad(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable UUID id,@RequestBody byte[] body,HttpServletRequest http) {
-        var request=access.request(http);
+        var request=requestBinding.bind(http);
         return audited(authorization,request,body,()->review.ad(authorization,request,body,id,read(body,C2cAdminReview.AdDecision.class)));
     }
     @PostMapping("/ads/{id}/close")
     public Map<String,Object> closeAd(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable UUID id,@RequestBody byte[] body,HttpServletRequest http) {
-        var request=access.request(http);
+        var request=requestBinding.bind(http);
         return audited(authorization,request,body,()->review.closeAd(authorization,request,body,id,read(body,C2cAdminReview.AdDecision.class)));
     }
     @GetMapping("/orders")
@@ -178,7 +181,7 @@ public class C2cAdminController {
     @GetMapping("/orders/{id}/payment")
     public Map<String,Object> payment(@RequestHeader(value="Authorization",required=false) String authorization,
                                      @PathVariable UUID id,HttpServletRequest http) {
-        var request=access.request(http);
+        var request=requestBinding.bind(http);
         return audited(authorization,request,null,()->review.orderPayment(authorization,request,id));
     }
     @GetMapping("/fund-intents")
@@ -200,7 +203,7 @@ public class C2cAdminController {
     @PostMapping("/appeals/{id}/decision")
     public Map<String,Object> appeal(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable UUID id,@RequestBody byte[] body,HttpServletRequest http) {
-        var request=access.request(http);
+        var request=requestBinding.bind(http);
         return audited(authorization,request,body,()->review.appeal(authorization,request,body,id,read(body,C2cAdminReview.AppealDecision.class)));
     }
     @GetMapping("/reports")
@@ -214,7 +217,7 @@ public class C2cAdminController {
     @PostMapping("/reports/{id}/review")
     public Map<String,Object> report(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable UUID id,@RequestBody byte[] body,HttpServletRequest http) {
-        var request=access.request(http);
+        var request=requestBinding.bind(http);
         return audited(authorization,request,body,()->review.report(authorization,request,body,id,read(body,C2cAdminReview.ReportDecision.class)));
     }
     private static int integerDigits(java.math.BigDecimal value) {return value.precision()-value.scale();}
@@ -236,9 +239,9 @@ public class C2cAdminController {
         if (userId != null && userId <= 0) throw new IllegalArgumentException("用户编号无效");
     }
 
-    private <T> T audited(String authorization,C2cAdminAccess.Request request,byte[] body,Supplier<T> action) {
+    private <T> T audited(String authorization,C2cAdminRequest request,byte[] body,Supplier<T> action) {
         try {return action.get();}
-        catch(RuntimeException failure) {access.failure(authorization,request,body,failure);throw failure;}
+        catch(RuntimeException failure) {access.failure(authorization,request,body,com.surprising.gateway.c2c.controller.advice.C2cHttpErrors.status(failure).value(),failure.getClass().getSimpleName());throw failure;}
     }
     private <T> T read(byte[] body,Class<T> type) {
         try {

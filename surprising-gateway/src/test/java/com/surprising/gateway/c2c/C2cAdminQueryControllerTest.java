@@ -22,7 +22,7 @@ class C2cAdminQueryControllerTest {
     @Test void rejectsMalformedPageStateAndUserBeforeAnyBusinessQuery() throws Exception {
         var queries = mock(C2cAdminQueryService.class);
         var controller = new C2cAdminController(mock(C2cAdminAccess.class), mock(C2cAdminMarkets.class),
-                mock(C2cAdminReview.class), queries, mock(C2cAdminInitialization.class), new ObjectMapper());
+                mock(C2cAdminReview.class), queries, mock(C2cAdminInitialization.class), new ObjectMapper(), org.mockito.Mockito.mock(com.surprising.gateway.c2c.controller.C2cAdminRequestBinding.class));
         var http = standaloneSetup(controller).setControllerAdvice(new C2cHttpErrors()).build();
         for (String path : List.of("merchants", "payment-accounts", "ads", "orders", "fund-intents", "appeals", "reports")) {
             for (String query : List.of("limit=0", "limit=101", "offset=-1", "offset=10001", "status=UNKNOWN")) {

@@ -66,7 +66,7 @@ public class C2cOrders {
 
     @Transactional
     public C2cQuote quote(JwtPrincipal user,UUID adId,String amountType,String amount,UUID paymentAccountId) {
-        if(!markets.configuration(true).enabled()) throw new IllegalStateException("C2C 暂未开放");
+        if(!markets.configuration(true).enabled()) throw C2cProblem.conflict("C2C 暂未开放");
         var ad=ads.get(adId,true);var market=markets.market(ad.marketId(),true);
         requireOffer(user,ad,market);
         if(amountType==null || paymentAccountId==null) throw new IllegalArgumentException("报价与收款方式不完整");
@@ -95,22 +95,22 @@ public class C2cOrders {
             return accepted;
         }
         var config=markets.configuration(true);
-        if(!config.enabled()) throw new IllegalStateException("C2C 暂未开放");
+        if(!config.enabled()) throw C2cProblem.conflict("C2C 暂未开放");
         // 同一用户的新订单限额不能被多个并发吃单请求同时绕过。
         if(!users.lockForNoKeyUpdate(user.userId()))
-            throw new IllegalStateException("账户不可用");
+            throw C2cProblem.conflict("账户不可用");
         var initial=quotes.get(quoteId,false);
         var ad=ads.get(initial.adId(),true);var quote=quotes.get(quoteId,true);
         var market=markets.market(ad.marketId(),true);
-        if(quote.userId()!=user.userId()) throw new IllegalStateException("只能使用本人报价");
+        if(quote.userId()!=user.userId()) throw C2cProblem.conflict("只能使用本人报价");
         if(!quote.expiresAt().isAfter(Instant.now()) || quote.adRevision()!=ad.revision() || quote.marketRevision()!=market.revision())
-            throw new IllegalStateException("报价已失效，请重新获取");
-        if(orders.byQuote(quoteId)!=null) throw new IllegalStateException("报价已使用，请查看原订单");
+            throw C2cProblem.conflict("报价已失效，请重新获取");
+        if(orders.byQuote(quoteId)!=null) throw C2cProblem.conflict("报价已使用，请查看原订单");
         requireOffer(user,ad,market);requireAmount(ad,market,quote.quantityUnits(),quote.fiatAmount());
         var count=orders.openCount(market.id(),user.userId());
-        if(count!=null && count>=market.maxOpenOrders()) throw new IllegalStateException("请先处理进行中的订单");
+        if(count!=null && count>=market.maxOpenOrders()) throw C2cProblem.conflict("请先处理进行中的订单");
         var account=paymentAccount(user.userId(),ad,market,quote.paymentAccountId());
-        if(account.revision()!=quote.accountRevision()) throw new IllegalStateException("收款账号已变更，请重新报价");
+        if(account.revision()!=quote.accountRevision()) throw C2cProblem.conflict("收款账号已变更，请重新报价");
         payments.details(account); // 不能在资金锁定后才发现收款快照不可用。
         ads.allocate(ad,quote.quantityUnits());
         UUID id=UUID.randomUUID();
@@ -134,10 +134,10 @@ public class C2cOrders {
     @Transactional
     public C2cOrder paid(JwtPrincipal user,UUID id,UUID proofId) {
         var order=lockForParticipant(user.userId(),id);
-        if(order.buyerUserId()!=user.userId()) throw new IllegalStateException("只有买方可以确认已付款");
+        if(order.buyerUserId()!=user.userId()) throw C2cProblem.conflict("只有买方可以确认已付款");
         if(order.paidAt()!=null) return order;
         order.status().requirePayment();
-        if(order.paymentExpiresAt()==null || !order.paymentExpiresAt().isAfter(Instant.now())) throw new IllegalStateException("付款时间已结束，请勿继续转账");
+        if(order.paymentExpiresAt()==null || !order.paymentExpiresAt().isAfter(Instant.now())) throw C2cProblem.conflict("付款时间已结束，请勿继续转账");
         if(proofId!=null && !attachments.readyProof(proofId,user.userId(),id)) throw new IllegalArgumentException("付款证明归属不匹配");
         orders.markPaid(order);
         events.append(order.id(),order.buyerUserId(),"BUYER_MARKED_PAID",proofId==null?Map.of():Map.of("proofId",proofId.toString()));
@@ -147,7 +147,7 @@ public class C2cOrders {
     @Transactional
     public C2cOrder release(JwtPrincipal user,String authorization,UUID id,String email,String totp) {
         var order=lockForParticipant(user.userId(),id);
-        if(order.sellerUserId()!=user.userId()) throw new IllegalStateException("只有卖方核对到账后可以放币");
+        if(order.sellerUserId()!=user.userId()) throw C2cProblem.conflict("只有卖方核对到账后可以放币");
         if(order.status()==C2cOrderStatus.RELEASE_PENDING || order.status()==C2cOrderStatus.COMPLETED) return order;
         order.status().requireRelease();
         var market=markets.market(order.marketId(),false);
@@ -160,7 +160,7 @@ public class C2cOrders {
     @Transactional
     public C2cOrder cancel(JwtPrincipal user,UUID id,String reason) {
         var order=lockForParticipant(user.userId(),id);
-        if(order.buyerUserId()!=user.userId()) throw new IllegalStateException("卖方不能主动取消，未付款请等待到期或发起申诉");
+        if(order.buyerUserId()!=user.userId()) throw C2cProblem.conflict("卖方不能主动取消，未付款请等待到期或发起申诉");
         if(order.status()==C2cOrderStatus.REFUND_PENDING || order.status()==C2cOrderStatus.CANCELED || order.status()==C2cOrderStatus.EXPIRED) return order;
         order.status().requireCancellation();
         if(reason==null || reason.isBlank() || reason.length()>1000) throw new IllegalArgumentException("请选择或填写取消原因");
@@ -220,8 +220,8 @@ public class C2cOrders {
         var initial=orders.get(orderId,false);ads.get(initial.adId(),true);var order=orders.get(initial.id(),true);
         String appealStatus=appeals.statusForUpdate(appealId).orElseThrow(()->new IllegalArgumentException("申诉不存在"));
         if(!List.of("OPEN","REVIEWING").contains(appealStatus) || order.status()!=C2cOrderStatus.APPEALED)
-            throw new IllegalStateException("申诉已处理，请刷新订单");
-        if(administrator==order.buyerUserId() || administrator==order.sellerUserId()) throw new IllegalStateException("不能裁决本人交易");
+            throw C2cProblem.conflict("申诉已处理，请刷新订单");
+        if(administrator==order.buyerUserId() || administrator==order.sellerUserId()) throw C2cProblem.conflict("不能裁决本人交易");
         if(reason==null || reason.isBlank() || reason.length()>2000) throw new IllegalArgumentException("请填写证据核验与裁决理由");
         switch(decision) {
             case "RELEASE" -> prepareRelease(order,markets.market(order.marketId(),false),administrator,"APPEAL_RELEASE_APPROVED");
@@ -277,14 +277,14 @@ public class C2cOrders {
         return account;
     }
     private void requireOffer(JwtPrincipal user,C2cAd ad,C2cMarket market) {
-        if(!ad.status().equals("ACTIVE") || ad.availableUnits()<=0) throw new IllegalStateException("广告暂不可交易");
+        if(!ad.status().equals("ACTIVE") || ad.availableUnits()<=0) throw C2cProblem.conflict("广告暂不可交易");
         if(ad.makerUserId()==user.userId()) throw new IllegalArgumentException("不能与本人广告成交");
         access.requireTrading(user,market);access.requireCounterparty(ad.makerUserId(),market);
         markets.requireMerchantBond(ad.makerUserId());
-        if(!merchants.approved(ad.makerUserId())) throw new IllegalStateException("商家当前不可交易");
-        if(relations.blockedEitherDirection(user.userId(),ad.makerUserId())) throw new IllegalStateException("暂不能与该交易对手交易");
+        if(!merchants.approved(ad.makerUserId())) throw C2cProblem.conflict("商家当前不可交易");
+        if(relations.blockedEitherDirection(user.userId(),ad.makerUserId())) throw C2cProblem.conflict("暂不能与该交易对手交易");
         Long completed=orders.completedCount(user.userId());
-        if(completed!=null && completed<ad.minCompleted()) throw new IllegalStateException("尚未满足商家成交笔数要求");
+        if(completed!=null && completed<ad.minCompleted()) throw C2cProblem.conflict("尚未满足商家成交笔数要求");
     }
     private static void requireAmount(C2cAd ad,C2cMarket market,long units,BigDecimal fiat) {
         if(units<=0 || units>ad.availableUnits() || fiat.compareTo(ad.minFiat())<0 || fiat.compareTo(ad.maxFiat())>0

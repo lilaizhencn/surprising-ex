@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c.service;
 
+import com.surprising.gateway.c2c.exception.C2cProblem;
+
 import com.surprising.gateway.c2c.service.C2cAccess;
 import com.surprising.gateway.c2c.service.C2cOrders;
 import com.surprising.gateway.c2c.model.C2cOfferFilter;
@@ -40,6 +42,6 @@ public class C2cQuickQuoteService {
                 // 候选仍执行完整准入；其他异常直接上抛，不隐藏基础设施故障。
             }
         }
-        throw new IllegalStateException("暂无满足金额、收款方式及交易资格的报价");
+        throw C2cProblem.conflict("暂无满足金额、收款方式及交易资格的报价");
     }
 }

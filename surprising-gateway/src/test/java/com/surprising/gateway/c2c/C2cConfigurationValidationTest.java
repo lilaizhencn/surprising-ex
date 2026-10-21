@@ -29,7 +29,7 @@ class C2cConfigurationValidationTest {
     @BeforeEach void setup() {
         markets=mock(C2cAdminMarkets.class);bonds=mock(C2cMerchantBonds.class);json=new ObjectMapper();http=new MockHttpServletRequest();
         var admin=mock(C2cAdminAccess.class);var access=mock(C2cAccess.class);when(access.user(any())).thenReturn(C2cHttpFixture.principal(12));
-        controller=new C2cAdminController(admin,markets,null,null,null,json);merchant=new C2cMerchantController(bonds,access,admin,json);
+        controller=new C2cAdminController(admin,markets,null,null,null,json, org.mockito.Mockito.mock(com.surprising.gateway.c2c.controller.C2cAdminRequestBinding.class));merchant=new C2cMerchantController(bonds,access,admin,json, org.mockito.Mockito.mock(com.surprising.gateway.c2c.controller.C2cAdminRequestBinding.class));
     }
 
     @Test void configurationJsonVersionAndRangesAreValidatedBeforeBusinessWrites() {

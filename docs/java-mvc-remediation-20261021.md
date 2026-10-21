@@ -138,3 +138,5 @@
 - 参数职责2将历史资金费与支付分页的limit、排序、游标、用户/合约输入归FundingController；Service/Repository接收FundingPageQuery原生条件，SQL列映射仍由Repository持有，SQL原文不变。定向41项、完整生命周期干净构建111项通过无跳过；21项负例捕获14项预期失败，恢复后绿色。关闭补充ADD-004和本批复核ADD-006；见 [资金费查询入口验证](validation/java-mvc-funding-query-20261022.json)。真实PostgreSQL验证产品/用户/合约隔离、同时间戳双方向翻页和超过JS精确范围的long ID；所属数据库/日志/报告已清理，其余职责和最终实栈继续。
 
 - HTTP/参数职责3将合约本地请求组件归controller，Service聚合目录可见性与真实行情，原生分页条件经Controller绑定，Repository只选固定SQL列。版本/可见性/结算冲突由原生异常经Controller映射；保留行锁、事务和Outbox。定向70项通过，扩大182项中179通过、3项六Core外部HTTP环境未启动跳过；18项负例捕获17项预期失败。关闭MVC-009、202和补充ADD-005；见 [合约入口验证](validation/java-mvc-instrument-boundary-20261022.json)。复核追加ADD-007格式/业务配置校验混合职责待整改；所属数据库/日志/报告已清理，最终实栈及其余问题继续。
+
+- HTTP职责4将C2cProblem改为原生原因，明确业务冲突，保留18处内部状态/密文/资金进度不变量；HTTP层对内部异常返回脱敏500。后台原始请求绑定归Controller，Service接收model请求事实，失败审计分类由HTTP入口提供。内部异常不把原PROCESSING回执写为校验拒绝。定向49项通过，干净构建C2C165项中164通过、1项浏览器QA未启用跳过；16项联合负例捕获3失败，另8项独立回执负例捕获1失败，恢复后绿色。关闭MVC-004、020和补充ADD-001；见 [C2C原生异常验证](validation/java-mvc-c2c-http-20261022.json)。追加ADD-008账户HTTP门面调用待与共享读视图一起处理；所属资源已清理，外部R2两项Live未运行，其余全范围/实栈继续。

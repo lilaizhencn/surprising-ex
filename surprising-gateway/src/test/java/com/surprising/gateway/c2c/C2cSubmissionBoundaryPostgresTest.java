@@ -90,6 +90,21 @@ class C2cSubmissionBoundaryPostgresTest {
         assertThat(fixture.bean(C2cAdsRepository.class).get(ad,false)).isEqualTo(before);
         assertThat(fixture.bean(C2cPaymentAccounts.class).get(11,fixture.makerAccount,false).status()).isEqualTo("APPROVED");
     }
+    @Test void internalStateFailureKeepsOriginalProcessingReceiptAndCanResumeWithoutDuplicateIntent() throws Exception {
+        String key="qa-internal-state-"+UUID.randomUUID();var payload=fixture.payload("SELL");
+        when(fixture.products.enabled()).thenThrow(new IllegalStateException("ciphertext secret 123456"));
+        var response=fixture.call(HttpMethod.POST,"/api/v1/c2c/ads",11,
+                new C2cController.PublishRequest(key,payload,new C2cVerification("123456","")),500);
+        assertThat(response.get("code")).isEqualTo("C2C_INTERNAL_ERROR");
+        assertThat(response.toString()).doesNotContain("ciphertext", "123456");
+        assertThat(fixture.bean(C2cSubmissions.class).get(11,key,false).status()).isEqualTo("PROCESSING");
+        org.mockito.Mockito.doReturn(List.of(ProductLine.SPOT)).when(fixture.products).enabled();
+        assertThat(fixture.call(HttpMethod.POST,"/api/v1/c2c/ads",11,
+                new C2cController.PublishRequest(key,payload,new C2cVerification("123456","")),200).get("status")).isEqualTo("SUCCEEDED");
+        assertThat(fixture.db.jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents",Long.class)).isEqualTo(1);
+        verifyNoInteractions(fixture.core);
+    }
+
     private String hash(Object payload) {return C2cDigests.sha256(fixture.json.writeValueAsString(payload));}
     private C2cController.Publish invalidPayload() {
         var p=fixture.payload("SELL");return new C2cController.Publish(p.marketId(),p.side(),"1e3",p.quantity(),p.minFiat(),p.maxFiat(),

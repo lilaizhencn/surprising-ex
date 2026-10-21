@@ -81,7 +81,7 @@ public class C2cQueryService {
     public Map<String,Object> offer(UUID id) {
         var ad=ads.get(id,false);
         var market=markets.market(ad.marketId(),true);
-        if(!ad.status().equals("ACTIVE") || ad.availableUnits()<=0) throw new IllegalStateException("广告暂不可交易");
+        if(!ad.status().equals("ACTIVE") || ad.availableUnits()<=0) throw C2cProblem.conflict("广告暂不可交易");
         var view=C2cViews.ad(ad,market,false);
         view.put("merchant",merchant(ad.makerUserId()));
         var enabled=methods.enabledCodes(market.fiat());

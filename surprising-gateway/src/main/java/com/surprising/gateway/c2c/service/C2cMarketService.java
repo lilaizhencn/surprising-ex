@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c.service;
 
+import com.surprising.gateway.c2c.exception.C2cProblem;
+
 import com.surprising.gateway.c2c.repository.C2cFundsRepository;
 import com.surprising.gateway.c2c.model.C2cConfiguration;
 import com.surprising.gateway.c2c.model.C2cMarket;
@@ -42,10 +44,10 @@ public class C2cMarketService {
     }
 
     public void requireMerchantBond(long userId) {
-        if (!bonds.coversCurrentPolicy(userId)) throw new IllegalStateException("商家质押尚未确认，请先完成质押");
+        if (!bonds.coversCurrentPolicy(userId)) throw C2cProblem.conflict("商家质押尚未确认，请先完成质押");
     }
 
     public void requireOpen() {
-        if (!configuration().enabled()) throw new IllegalStateException("C2C 暂未开放");
+        if (!configuration().enabled()) throw C2cProblem.conflict("C2C 暂未开放");
     }
 }

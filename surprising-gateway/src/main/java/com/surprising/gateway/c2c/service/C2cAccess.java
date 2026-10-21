@@ -49,24 +49,24 @@ public class C2cAccess {
     public JwtPrincipal user(String authorization) {
         try { return auth.authenticateBearer(authorization); }
         catch (IllegalArgumentException failure) {
-            throw new C2cProblem(org.springframework.http.HttpStatus.UNAUTHORIZED, "C2C_AUTH_REQUIRED", "请先登录有效账户");
+            throw new C2cProblem(C2cProblem.Reason.AUTHENTICATION_REQUIRED, "C2C_AUTH_REQUIRED", "请先登录有效账户");
         } catch (IllegalStateException failure) { throw C2cProblem.forbidden("账户当前不可使用 C2C"); }
     }
 
     public void requireTrading(JwtPrincipal user, C2cMarket market) { requireTrading(user.userId(),user.status(),market); }
     private void requireTrading(long userId, String status, C2cMarket market) {
-        if (!"NORMAL".equals(status)) throw new IllegalStateException("账户当前不能进行 C2C 交易");
+        if (!"NORMAL".equals(status)) throw C2cProblem.conflict("账户当前不能进行 C2C 交易");
         compliance.requireWithdrawalEligibility(userId);
         if (market.requireKyc()) {
             var kyc = compliance.kyc(userId);
             if (kyc == null || !"VERIFIED".equals(kyc.status())
                     || (kyc.expiresAt() != null && !kyc.expiresAt().isAfter(Instant.now())))
-                throw new IllegalStateException("请先完成有效身份认证");
+                throw C2cProblem.conflict("请先完成有效身份认证");
         }
     }
 
     public void requireCounterparty(long userId, C2cMarket market) {
-        var user=users.find(userId).orElseThrow(()->new IllegalStateException("交易对手不可用"));
+        var user=users.find(userId).orElseThrow(()->C2cProblem.conflict("交易对手不可用"));
         requireTrading(userId,user.status(),market);
     }
 
@@ -81,13 +81,13 @@ public class C2cAccess {
             return true;
         }));
         // 失败次数与验证码消费独立提交，不能被后续业务事务的回滚撤销。
-        if (!accepted) throw new IllegalStateException("请完成邮箱与已绑定验证器的安全验证");
+        if (!accepted) throw C2cProblem.conflict("请完成邮箱与已绑定验证器的安全验证");
     }
 
     public void verifySettings(JwtPrincipal user, String emailCode, String totpCode) {
         boolean accepted = Boolean.TRUE.equals(verification.execute(transaction ->
                 security.verify(user.userId(), "SECURITY_SETTINGS", emailCode, totpCode, Instant.now())));
-        if (!accepted) throw new IllegalStateException("请完成本次安全设置验证");
+        if (!accepted) throw C2cProblem.conflict("请完成本次安全设置验证");
     }
 
 }

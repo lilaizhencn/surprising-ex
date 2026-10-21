@@ -1,27 +1,17 @@
 package com.surprising.gateway.c2c.exception;
 
-import org.springframework.http.HttpStatus;
-
-/** HTTP 业务边界使用明确状态码；不把数据库、密文或验证码异常返回给用户。 */
+/** C2C原生业务失败；不依赖HTTP，响应映射和脱敏由Controller承担。 */
 public final class C2cProblem extends IllegalStateException {
-    final HttpStatus status;
-    final String code;
-
-    public C2cProblem(HttpStatus status, String code, String message) {
-        super(message);
-        this.status = status;
-        this.code = code;
+    public enum Reason { AUTHENTICATION_REQUIRED, ACCESS_DENIED, NOT_FOUND, RATE_LIMITED, CONFLICT, UNAVAILABLE }
+    private final Reason reason;
+    private final String code;
+    public C2cProblem(Reason reason, String code, String message) {
+        super(message); this.reason = reason; this.code = code;
     }
-
-    public HttpStatus status() { return status; }
+    public Reason reason() { return reason; }
     public String code() { return code; }
-
-    public boolean retryable() {return status.is5xxServerError();}
-
-    public static C2cProblem forbidden(String message) {
-        return new C2cProblem(HttpStatus.FORBIDDEN, "C2C_FORBIDDEN", message);
-    }
-    public static C2cProblem unavailable(String message) {
-        return new C2cProblem(HttpStatus.SERVICE_UNAVAILABLE, "C2C_UNAVAILABLE", message);
-    }
+    public boolean retryable() { return reason == Reason.UNAVAILABLE; }
+    public static C2cProblem forbidden(String message) { return new C2cProblem(Reason.ACCESS_DENIED, "C2C_FORBIDDEN", message); }
+    public static C2cProblem unavailable(String message) { return new C2cProblem(Reason.UNAVAILABLE, "C2C_UNAVAILABLE", message); }
+    public static C2cProblem conflict(String message) { return new C2cProblem(Reason.CONFLICT, "C2C_CONFLICT", message); }
 }

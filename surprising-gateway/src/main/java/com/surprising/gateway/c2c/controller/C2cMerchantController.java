@@ -27,8 +27,9 @@ public class C2cMerchantController {
     private final C2cAccess access;
     private final C2cAdminAccess admin;
     private final ObjectMapper json;
-    public C2cMerchantController(C2cMerchantBonds bonds,C2cAccess access,C2cAdminAccess admin,ObjectMapper json) {
-        this.bonds=bonds;this.access=access;this.admin=admin;this.json=json;
+    private final C2cAdminRequestBinding requestBinding;
+    public C2cMerchantController(C2cMerchantBonds bonds,C2cAccess access,C2cAdminAccess admin,ObjectMapper json,C2cAdminRequestBinding requestBinding) {
+        this.bonds=bonds;this.access=access;this.admin=admin;this.json=json;this.requestBinding=requestBinding;
     }
     @GetMapping("/c2c/me/merchant-bond")
     public Map<String,Object> mine(@RequestHeader(value="Authorization",required=false) String authorization,
@@ -54,7 +55,7 @@ public class C2cMerchantController {
     @PutMapping("/admin/c2c/merchant-bond-policy")
     public Map<String,Object> configure(@RequestHeader(value="Authorization",required=false) String authorization,
             @RequestBody byte[] body,HttpServletRequest http) {
-        var request=admin.request(http);
+        var request=requestBinding.bind(http);
         try {
             Policy input;
             try {input=json.readValue(body,Policy.class);}
@@ -65,7 +66,7 @@ public class C2cMerchantController {
                 throw new IllegalArgumentException("请填写至少 5 字、最多 1000 字的管理原因");
             return bonds.configure(authorization,request,body,new C2cBondPolicyChange(version(input.revision(),true),input.asset(),C2cMoney.decimal(input.amount())));
         }
-        catch(RuntimeException failure) {admin.failure(authorization,request,body,failure);throw failure;}
+        catch(RuntimeException failure) {admin.failure(authorization,request,body,com.surprising.gateway.c2c.controller.advice.C2cHttpErrors.status(failure).value(),failure.getClass().getSimpleName());throw failure;}
     }
     private static long version(String value,boolean zero) {
         if(value==null || !value.matches("0|[1-9][0-9]{0,18}")) throw new IllegalArgumentException("请提供十进制版本字符串");

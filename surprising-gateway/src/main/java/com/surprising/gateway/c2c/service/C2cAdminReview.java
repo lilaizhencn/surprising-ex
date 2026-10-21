@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c.service;
 
+import com.surprising.gateway.c2c.model.C2cAdminRequest;
+
 import com.surprising.gateway.c2c.exception.C2cProblem;
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
@@ -52,19 +54,19 @@ public class C2cAdminReview {
     }
 
     @Transactional
-    public Map<String,Object> merchant(String authorization,C2cAdminAccess.Request request,byte[] body,long userId,MerchantDecision input) {
+    public Map<String,Object> merchant(String authorization,C2cAdminRequest request,byte[] body,long userId,MerchantDecision input) {
         var administrator=access.write(authorization,request,body);C2cAdminMarkets.reason(input.reason());
         if(administrator.userId()==userId) throw C2cProblem.forbidden("不能审核本人的商家资格");
         if(!users.lockForNoKeyUpdate(userId)) throw new IllegalArgumentException("用户不存在");
         var current=merchants.find(userId,true).orElseThrow(()->new IllegalArgumentException("商家申请不存在"));
-        if(current.revision()!=C2cAdminMarkets.version(input.revision(),false)) throw new IllegalStateException("商家状态已变更，请刷新");
+        if(current.revision()!=C2cAdminMarkets.version(input.revision(),false)) throw C2cProblem.conflict("商家状态已变更，请刷新");
         String state;
         String tier=current.tier();
         if("APPROVE".equals(input.decision())) {
             markets.requireMerchantBond(userId);
             var user=users.find(userId).orElseThrow();var kyc=compliance.kyc(userId);
             if(!"NORMAL".equals(user.status()) || kyc==null || !"VERIFIED".equals(kyc.status())
-                    || (kyc.expiresAt()!=null && !kyc.expiresAt().isAfter(Instant.now()))) throw new IllegalStateException("用户当前没有有效身份认证或账户受限");
+                    || (kyc.expiresAt()!=null && !kyc.expiresAt().isAfter(Instant.now()))) throw C2cProblem.conflict("用户当前没有有效身份认证或账户受限");
             if(input.tier()==null || !List.of("VERIFIED","VIP").contains(input.tier())) throw new IllegalArgumentException("商家等级无效");
             state="APPROVED";tier=input.tier();
         } else if("REJECT".equals(input.decision()) && "PENDING".equals(current.status())) state="REJECTED";
@@ -78,7 +80,7 @@ public class C2cAdminReview {
     }
 
     @Transactional
-    public Map<String,Object> payment(String authorization,C2cAdminAccess.Request request,byte[] body,UUID id,PaymentDecision input) {
+    public Map<String,Object> payment(String authorization,C2cAdminRequest request,byte[] body,UUID id,PaymentDecision input) {
         var administrator=access.write(authorization,request,body);C2cAdminMarkets.reason(input.reason());
         var account=payment(id);
         if(account.userId()==administrator.userId()) throw C2cProblem.forbidden("不能审核本人的收款资料");
@@ -92,7 +94,7 @@ public class C2cAdminReview {
     }
 
     @Transactional
-    public Map<String,Object> paymentDetails(String authorization,C2cAdminAccess.Request request,UUID id) {
+    public Map<String,Object> paymentDetails(String authorization,C2cAdminRequest request,UUID id) {
         var administrator=access.read(authorization,true);var account=payment(id);
         var result=new LinkedHashMap<>(C2cViews.paymentAccount(account));result.put("details",payments.details(account));
         result.put("manualIdentityVerificationRequired",true);
@@ -103,12 +105,12 @@ public class C2cAdminReview {
 
     public Map<String,Object> order(String authorization,UUID id) {access.read(authorization,false);return queries.adminOrder(id,false);}
     @Transactional
-    public Map<String,Object> orderPayment(String authorization,C2cAdminAccess.Request request,UUID id) {
+    public Map<String,Object> orderPayment(String authorization,C2cAdminRequest request,UUID id) {
         var administrator=access.read(authorization,true);var result=queries.adminOrder(id,true);access.audit(administrator,request,null);return result;
     }
 
     @Transactional
-    public Map<String,Object> ad(String authorization,C2cAdminAccess.Request request,byte[] body,UUID id,AdDecision input) {
+    public Map<String,Object> ad(String authorization,C2cAdminRequest request,byte[] body,UUID id,AdDecision input) {
         var administrator=access.write(authorization,request,body);C2cAdminMarkets.reason(input.reason());
         if("CLOSE".equals(input.action())) throw new IllegalArgumentException("强制关闭与退款须使用双人审批入口");
         var ad=ads.moderate(id,C2cAdminMarkets.version(input.revision(),false),input.action());
@@ -116,7 +118,7 @@ public class C2cAdminReview {
     }
 
     @Transactional
-    public Map<String,Object> closeAd(String authorization,C2cAdminAccess.Request request,byte[] body,UUID id,AdDecision input) {
+    public Map<String,Object> closeAd(String authorization,C2cAdminRequest request,byte[] body,UUID id,AdDecision input) {
         if(!"CLOSE".equals(input.action())) throw new IllegalArgumentException("强制关闭操作无效");
         C2cAdminMarkets.reason(input.reason());var approved=access.resolve(authorization,request,body);
         var owner=adRows.get(id,false).makerUserId();requireIndependent(approved,owner,owner);
@@ -125,7 +127,7 @@ public class C2cAdminReview {
     }
 
     @Transactional
-    public Map<String,Object> appeal(String authorization,C2cAdminAccess.Request request,byte[] body,UUID id,AppealDecision input) {
+    public Map<String,Object> appeal(String authorization,C2cAdminRequest request,byte[] body,UUID id,AppealDecision input) {
         C2cAdminMarkets.reason(input.reason());var approved=access.resolve(authorization,request,body);
         UUID orderId=appeals.orderId(id).orElseThrow(()->new IllegalArgumentException("申诉不存在"));
         var order=orderRows.get(orderId,false);
@@ -135,13 +137,13 @@ public class C2cAdminReview {
     }
 
     @Transactional
-    public Map<String,Object> report(String authorization,C2cAdminAccess.Request request,byte[] body,UUID id,ReportDecision input) {
+    public Map<String,Object> report(String authorization,C2cAdminRequest request,byte[] body,UUID id,ReportDecision input) {
         var administrator=access.write(authorization,request,body);C2cAdminMarkets.reason(input.reason());
         if(input.decision()==null || !List.of("REVIEWED","DISMISSED").contains(input.decision())) throw new IllegalArgumentException("举报结论无效");
         var current=reports.find(id,true).orElseThrow(()->new IllegalArgumentException("举报不存在"));
         if(current.userId()==administrator.userId() || current.targetUserId()==administrator.userId())
             throw C2cProblem.forbidden("不能处理涉及本人的举报");
-        if(!"OPEN".equals(current.status())) throw new IllegalStateException("举报已处理，请刷新");
+        if(!"OPEN".equals(current.status())) throw C2cProblem.conflict("举报已处理，请刷新");
         reports.decide(id,input.decision(),input.reason().trim(),administrator.userId());
         access.audit(administrator,request,body);return Map.of("reportId",id.toString(),"status",input.decision());
     }

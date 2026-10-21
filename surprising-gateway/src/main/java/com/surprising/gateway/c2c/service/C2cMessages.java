@@ -40,7 +40,7 @@ public class C2cMessages {
         return append(administrator,conversations.forOrder(order).id(),request,text,null,true);
     }
     private C2cChatViews.Message append(long user,UUID id,UUID request,String text,UUID attachment,boolean support) {
-        if(!users.lockForNoKeyUpdate(user)) throw new IllegalStateException("账户不可用");
+        if(!users.lockForNoKeyUpdate(user)) throw C2cProblem.conflict("账户不可用");
         var conversation=support?conversations.byId(id,true):conversations.get(user,id,true);
         if(support && (conversation.orderId()==null || user==conversation.low() || user==conversation.high()))
             throw C2cProblem.forbidden("不能以客服身份参与本人的交易");
@@ -49,13 +49,13 @@ public class C2cMessages {
         if(previous.isPresent()) {
             var original=previous.get();
             if(!Objects.equals(original.sender(),user) || !kind.equals(original.kind()) || !text.equals(original.text())
-                    || !Objects.equals(attachment,original.attachment())) throw new IllegalStateException("消息请求号已用于其他内容");
+                    || !Objects.equals(attachment,original.attachment())) throw C2cProblem.conflict("消息请求号已用于其他内容");
             return view(original);
         }
         if(!support) conversations.requireSend(user,conversation);
         if(attachment!=null) attachments.message(user,attachment,conversation);
         var activity=messages.activity(user);
-        if(activity.minute()>=60 || activity.day()>=5000) throw new C2cProblem(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+        if(activity.minute()>=60 || activity.day()>=5000) throw new C2cProblem(C2cProblem.Reason.RATE_LIMITED,
                 "C2C_MESSAGE_LIMIT","发送过于频繁，请稍后再试");
         messages.insert(id,user,request,text,attachment,kind);rows.touch(id);
         return view(messages.byRequest(id,request).orElseThrow());

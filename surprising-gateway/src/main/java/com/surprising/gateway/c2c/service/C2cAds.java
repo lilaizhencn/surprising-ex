@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c.service;
 
+import com.surprising.gateway.c2c.exception.C2cProblem;
+
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cFundsRepository;
 import com.surprising.gateway.c2c.repository.C2cSubmissions;
@@ -47,11 +49,11 @@ public class C2cAds {
             return accepted;
         }
         var configuration=markets.configuration(true);
-        if(!configuration.enabled()) throw new IllegalStateException("C2C 暂未开放");
+        if(!configuration.enabled()) throw C2cProblem.conflict("C2C 暂未开放");
         if (!users.lockForNoKeyUpdate(user.userId()))
-            throw new IllegalStateException("账户不可用");
+            throw C2cProblem.conflict("账户不可用");
         Long active = ads.activeCount(user.userId());
-        if (active != null && active >= configuration.maxActiveAds()) throw new IllegalStateException("请先关闭不再使用的广告");
+        if (active != null && active >= configuration.maxActiveAds()) throw C2cProblem.conflict("请先关闭不再使用的广告");
         var market=markets.market(request.marketId(),true);
         access.requireTrading(user,market);
         requireMerchant(user.userId());
@@ -92,9 +94,9 @@ public class C2cAds {
         if(action==null) throw new IllegalArgumentException("广告操作无效");
         var ad=ads.get(id,true);
         requireOwner(user,ad);
-        if(ad.revision()!=revision) throw new IllegalStateException("广告版本已变更，请刷新");
+        if(ad.revision()!=revision) throw C2cProblem.conflict("广告版本已变更，请刷新");
         if(action.equals("CLOSE") && ad.status().equals("CLOSED")) return ad;
-        if(!List.of("ACTIVE","PAUSED").contains(ad.status())) throw new IllegalStateException("请等待广告资金结果确认");
+        if(!List.of("ACTIVE","PAUSED").contains(ad.status())) throw C2cProblem.conflict("请等待广告资金结果确认");
         switch(action) {
             case "PAUSE" -> ads.setStatus(id,"PAUSED");
             case "RESUME" -> {requirePublishable(ad);ads.setStatus(id,"ACTIVE");}
@@ -110,7 +112,7 @@ public class C2cAds {
     @Transactional
     public C2cAd moderate(UUID id,long revision,String action) {
         var ad=ads.get(id,true);
-        if(ad.revision()!=revision || !List.of("ACTIVE","PAUSED").contains(ad.status())) throw new IllegalStateException("广告已变更或资金尚在确认中");
+        if(ad.revision()!=revision || !List.of("ACTIVE","PAUSED").contains(ad.status())) throw C2cProblem.conflict("广告已变更或资金尚在确认中");
         if("PAUSE".equals(action)) ads.setStatus(id,"PAUSED");
         else if("RESUME".equals(action)) {requirePublishable(ad);ads.setStatus(id,"ACTIVE");}
         else throw new IllegalArgumentException("请选择暂停或恢复广告");
@@ -121,7 +123,7 @@ public class C2cAds {
     @Transactional
     public C2cAd closeByAdministrator(UUID id,long revision) {
         var ad=ads.get(id,true);
-        if(ad.revision()!=revision || !List.of("ACTIVE","PAUSED").contains(ad.status())) throw new IllegalStateException("广告已变更或资金尚在确认中");
+        if(ad.revision()!=revision || !List.of("ACTIVE","PAUSED").contains(ad.status())) throw C2cProblem.conflict("广告已变更或资金尚在确认中");
         closeAvailable(ad);return ads.get(id,false);
     }
 
@@ -136,14 +138,14 @@ public class C2cAds {
         markets.requireOpen();var market=markets.market(ad.marketId(),true);
         access.requireCounterparty(ad.makerUserId(),market);requireMerchant(ad.makerUserId());
         validateTerms(market,ad.price(),ad.minFiat(),ad.maxFiat(),ad.terms(),ad.minCompleted());
-        if(ad.paymentWindowSeconds()>market.paymentWindowSeconds()) throw new IllegalStateException("付款窗口已变更，请关闭后按新规则发布");
+        if(ad.paymentWindowSeconds()>market.paymentWindowSeconds()) throw C2cProblem.conflict("付款窗口已变更，请关闭后按新规则发布");
         if(ad.side().equals("SELL")) for(UUID account:ad.accounts()) payments.get(ad.makerUserId(),account,true);
     }
 
     @Transactional
     public C2cAd edit(JwtPrincipal user,UUID id,long revision,String price,String min,String max,String terms,int minCompleted) {
         var ad=ads.get(id,true);requireOwner(user,ad);
-        if(ad.revision()!=revision || !List.of("ACTIVE","PAUSED").contains(ad.status())) throw new IllegalStateException("广告已变更或资金尚在处理中");
+        if(ad.revision()!=revision || !List.of("ACTIVE","PAUSED").contains(ad.status())) throw C2cProblem.conflict("广告已变更或资金尚在处理中");
         var market=markets.market(ad.marketId(),true);access.requireTrading(user,market);requireMerchant(user.userId());
         validateTerms(market,C2cMoney.decimal(price),C2cMoney.decimal(min),C2cMoney.decimal(max),terms,minCompleted);
         ads.edit(ad,C2cMoney.decimal(price),C2cMoney.decimal(min),C2cMoney.decimal(max),terms==null?"":terms.trim(),minCompleted);
@@ -180,10 +182,10 @@ public class C2cAds {
     private void requireMerchant(long userId) {
         markets.requireMerchantBond(userId);
         if(!merchants.approved(userId))
-            throw new IllegalStateException("请先完成认证商家申请");
+            throw C2cProblem.conflict("请先完成认证商家申请");
     }
     private static void requireOwner(JwtPrincipal user,C2cAd ad) {
-        if(user.userId()!=ad.makerUserId()) throw new IllegalStateException("只能管理本人广告");
+        if(user.userId()!=ad.makerUserId()) throw C2cProblem.conflict("只能管理本人广告");
     }
     private static void validateTerms(C2cMarket market,BigDecimal p,BigDecimal low,BigDecimal high,String terms,int minCompleted) {
         if(p.compareTo(market.minPrice())<0 || p.compareTo(market.maxPrice())>0 || p.scale()>18

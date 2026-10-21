@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c.repository;
 
+import com.surprising.gateway.c2c.exception.C2cProblem;
+
 import com.surprising.gateway.c2c.model.C2cAd;
 import com.surprising.gateway.c2c.model.C2cOffer;
 import com.surprising.gateway.c2c.model.C2cOfferFilter;
@@ -125,7 +127,7 @@ public class C2cAdsRepository {
                 UPDATE c2c_ads SET available_units=available_units-?,reserved_units=reserved_units+?,updated_at=now()
                 WHERE ad_id=? AND status='ACTIVE' AND revision=? AND available_units>=?
                 """,units,units,ad.id(),ad.revision(),units);
-        if(changed!=1) throw new IllegalStateException("广告库存或报价已变更，请重新报价");
+        if(changed!=1) throw C2cProblem.conflict("广告库存或报价已变更，请重新报价");
     }
 
     public void finishOrder(C2cAd ad,long units,boolean completed,boolean restoreStock) {
