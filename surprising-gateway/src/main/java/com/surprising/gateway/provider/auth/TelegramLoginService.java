@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.repository.TelegramIdentityRepository;
+import com.surprising.gateway.provider.auth.repository.TelegramLoginFlowRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -11,15 +13,19 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class TelegramLoginService {
-    private final TelegramLoginRepository flows;
+    private final TelegramLoginFlowRepository flows;
     private final TelegramOidcClient oidc;
+    private final TelegramIdentityRepository identities;
+    private final GatewayUserRepository userRows;
     private final AuthPersistenceService users;
     private final AuthService auth;
     private final SecureRandom random = new SecureRandom();
 
-    public TelegramLoginService(TelegramLoginRepository flows, TelegramOidcClient oidc,
+    public TelegramLoginService(TelegramLoginFlowRepository flows, TelegramIdentityRepository identities, GatewayUserRepository userRows, TelegramOidcClient oidc,
                                 AuthPersistenceService users, AuthService auth) {
         this.flows = flows;
+        this.identities = identities;
+        this.userRows = userRows;
         this.oidc = oidc;
         this.users = users;
         this.auth = auth;
@@ -31,6 +37,9 @@ public class TelegramLoginService {
     public Started start(String deviceId, boolean returnToApp) {
         requireDevice(deviceId);
         if (!enabled()) throw new IllegalStateException("Telegram login is not configured");
+        flows.lockDevice(deviceId);
+        flows.removeExpired();
+        if (flows.activeCount(deviceId) >= 5) throw new IllegalArgumentException("too many Telegram login attempts");
         String state = random(), verifier = random(), nonce = random(), pkce = random();
         Instant expires = Instant.now().plusSeconds(300);
         flows.create(hash(state), hash(verifier), nonce, pkce, deviceId, expires, returnToApp);
@@ -38,6 +47,7 @@ public class TelegramLoginService {
     }
 
     /** Claim is committed before network I/O; duplicate callbacks cannot exchange the code twice. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public Callback callback(String state, String code, String error) {
         requireToken(state);
         String key = hash(state);
@@ -71,14 +81,14 @@ public class TelegramLoginService {
         if (result.failed()) throw new IllegalArgumentException("Telegram authorization was not completed");
         if (result.subject() == null) return null;
         Instant now = Instant.now();
-        long userId = flows.lockIdentity(result.subject()).orElseGet(() -> {
+        long userId = identities.lockIdentity(result.subject()).orElseGet(() -> {
             // No password, email, phone or nickname is used to identify or auto-link an account.
             var user = users.createUser(null, null, null, now);
             users.ensureDefaultRole(user.userId(), now);
-            flows.bind(result.subject(), user.userId(), now);
+            identities.bind(result.subject(), user.userId(), now);
             return user.userId();
         });
-        flows.updateNickname(userId, result.displayName(), now);
+        userRows.updateNickname(userId, result.displayName(), now);
         var login = auth.loginTelegram(userId, request);
         flows.consume(key);
         return login;

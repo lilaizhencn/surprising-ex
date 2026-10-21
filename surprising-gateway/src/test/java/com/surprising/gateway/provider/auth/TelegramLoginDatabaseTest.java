@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.repository.TelegramLoginFlowRepository;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -23,8 +24,12 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 class TelegramLoginDatabaseTest {
     JdbcTemplate admin, jdbc;
     String schema;
-    TelegramLoginRepository repository;
+    TelegramLoginFlowRepository repository;
     TelegramLoginService login;
+    TelegramOidcClient oidc;
+    AuthService auth;
+    GatewayUserRepository userRepository;
+    DataSourceTransactionManager manager;
     String device = "telegram-test-device";
 
     @BeforeEach
@@ -51,27 +56,34 @@ class TelegramLoginDatabaseTest {
         String mobileMigration = Files.readString(Path.of("../deployment/migrations/20261021-telegram-mobile-return.sql"));
         jdbc.execute(mobileMigration);
         jdbc.execute(mobileMigration);
-        repository = new TelegramLoginRepository(jdbc);
-        var oidc = mock(TelegramOidcClient.class);
+        repository = new TelegramLoginFlowRepository(jdbc) {
+            @Override public int activeCount(String deviceId) {
+                int count=super.activeCount(deviceId);
+                if(deviceId.equals("parallel-device")) java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(150));
+                return count;
+            }
+        };
+        oidc = mock(TelegramOidcClient.class);
         when(oidc.enabled()).thenReturn(true);
         when(oidc.authorizationUrl(any(), any(), any())).thenReturn("https://oauth.telegram.org/auth");
         when(oidc.exchange(any(), any(), any())).thenReturn(new TelegramOidcClient.Profile("123456789", "小李 🚀"));
         var users = mock(AuthPersistenceService.class);
-        var userRepository = new GatewayUserRepository(jdbc);
+        userRepository = new GatewayUserRepository(jdbc);
         when(users.createUser(isNull(), isNull(), isNull(), any())).thenAnswer(invocation -> {
             var created = userRepository.create(null, null, null, invocation.getArgument(3));
             return new AuthModels.AuthenticatedUser(created.userId(), null, null, "NORMAL", List.of("USER"), created.createdAt());
         });
-        var auth = mock(AuthService.class);
+        auth = mock(AuthService.class);
         when(auth.loginTelegram(anyLong(), any())).thenAnswer(invocation -> {
             var found = userRepository.find(invocation.getArgument(0)).orElseThrow();
             return new AuthModels.AuthResponse(new AuthModels.AuthenticatedUser(found.userId(), found.username(),
                     found.email(), found.status(), List.of("USER"), found.createdAt(), found.displayName()),
                     "access", "refresh", Instant.now().plusSeconds(60), Instant.now().plusSeconds(600));
         });
-        var proxy = new ProxyFactory(new TelegramLoginService(repository, oidc, users, auth));
+        manager = new DataSourceTransactionManager(ds);
+        var proxy = new ProxyFactory(new TelegramLoginService(repository, new com.surprising.gateway.provider.auth.repository.TelegramIdentityRepository(jdbc), userRepository, oidc, users, auth));
         proxy.setProxyTargetClass(true);
-        proxy.addAdvice(new TransactionInterceptor(new DataSourceTransactionManager(ds), new AnnotationTransactionAttributeSource()));
+        proxy.addAdvice(new TransactionInterceptor(manager, new AnnotationTransactionAttributeSource()));
         login = (TelegramLoginService) proxy.getProxy();
     }
 
@@ -137,12 +149,59 @@ class TelegramLoginDatabaseTest {
     @Test
     void mobileModeSurvivesGatewayInstanceChangeAndWebModeStaysInBrowser() {
         var mobile = login.start(device, true);
-        var restarted = new TelegramLoginRepository(jdbc);
+        var restarted = new TelegramLoginFlowRepository(jdbc);
         var claimed = restarted.claimCallback(TelegramLoginService.hash(mobile.flowId()), Instant.now()).orElseThrow();
         assertThat(claimed.returnToApp()).isTrue();
         var web = login.start(device, false);
         assertThat(restarted.claimCallback(TelegramLoginService.hash(web.flowId()), Instant.now())
                 .orElseThrow().returnToApp()).isFalse();
+    }
+
+    @Test void concurrentStartsKeepThePerDeviceLimitAtFive() throws Exception {
+        var start=new CountDownLatch(1);
+        try(var executor=Executors.newVirtualThreadPerTaskExecutor()) {
+            var results=new java.util.ArrayList<Future<Boolean>>();
+            for(int i=0;i<6;i++)results.add(executor.submit(()->{
+                start.await();
+                try { login.start("parallel-device",false);return true; }
+                catch(IllegalArgumentException ex) { assertThat(ex).hasMessageContaining("too many");return false; }
+            }));
+            start.countDown();int accepted=0;
+            for(var result:results)if(result.get(10,TimeUnit.SECONDS))accepted++;
+            assertThat(accepted).isEqualTo(5);
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_telegram_login_flows WHERE device_id='parallel-device'",Integer.class)).isEqualTo(5);
+        jdbc.update("UPDATE gateway_telegram_login_flows SET expires_at=now()-interval '1 second' WHERE device_id='parallel-device'");
+        assertThat(login.start("parallel-device",false)).isNotNull();
+    }
+    @Test void callbackClaimCommitsBeforeExternalExchangeAndSurvivesCallerRollback() {
+        var flow=login.start(device,false);
+        when(oidc.exchange(any(),any(),any())).thenAnswer(invocation->{
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            assertThat(jdbc.queryForObject("SELECT callback_claimed FROM gateway_telegram_login_flows WHERE state_hash=?",Boolean.class,TelegramLoginService.hash(flow.flowId()))).isTrue();
+            return new TelegramOidcClient.Profile("123456789","小李");
+        });
+        new org.springframework.transaction.support.TransactionTemplate(manager).executeWithoutResult(status->{
+            assertThat(login.callback(flow.flowId(),"authorization-code",null).success()).isTrue();status.setRollbackOnly();
+        });
+        assertThat(repository.claimCallback(TelegramLoginService.hash(flow.flowId()),Instant.now())).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT subject FROM gateway_telegram_login_flows WHERE state_hash=?",String.class,TelegramLoginService.hash(flow.flowId()))).isEqualTo("123456789");
+    }
+    @Test void sessionFailureRollsBackNewIdentityAndAccountAndKeepsAuthorizedFlow() {
+        var flow=authorize();
+        doThrow(new IllegalStateException("session unavailable")).when(auth).loginTelegram(anyLong(),any());
+        assertThatThrownBy(()->complete(flow,device)).hasMessageContaining("session unavailable");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_users",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_telegram_identities",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_telegram_login_flows",Integer.class)).isEqualTo(1);
+    }
+    @Test void secondFactorFailureKeepsTheIdentityAndFlowForTheNextAttempt() {
+        var flow=authorize();
+        doThrow(new LoginVerificationService.VerificationFailure("LOGIN_MFA_ENROLLMENT_REQUIRED")).when(auth).loginTelegram(anyLong(),any());
+        assertThatThrownBy(()->complete(flow,device)).hasMessageContaining("LOGIN_MFA_ENROLLMENT_REQUIRED");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_users",Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_telegram_identities",Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_telegram_login_flows",Integer.class)).isEqualTo(1);
     }
 
 }

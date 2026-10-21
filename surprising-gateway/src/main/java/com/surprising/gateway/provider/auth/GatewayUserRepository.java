@@ -291,4 +291,9 @@ public class GatewayUserRepository {
         jdbcTemplate.update("UPDATE gateway_users SET phone=?,updated_at=? WHERE user_id=?",phone,Timestamp.from(now),userId);
     }
 
+    public void updateNickname(long userId, String name, Instant now) {
+        jdbcTemplate.update("UPDATE gateway_users SET display_name = ?, updated_at = ? WHERE user_id = ?",
+                name, Timestamp.from(now), userId);
+    }
+
 }

@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.TelegramLoginRows;
+import com.surprising.gateway.provider.auth.repository.TelegramLoginFlowRepository;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -10,11 +12,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 class TelegramLoginServiceTest {
-    TelegramLoginRepository repository = mock(TelegramLoginRepository.class);
+    TelegramLoginFlowRepository repository = mock(TelegramLoginFlowRepository.class);
+    com.surprising.gateway.provider.auth.repository.TelegramIdentityRepository identities = mock(com.surprising.gateway.provider.auth.repository.TelegramIdentityRepository.class);
+    GatewayUserRepository userRows = mock(GatewayUserRepository.class);
     TelegramOidcClient oidc = mock(TelegramOidcClient.class);
     AuthPersistenceService users = mock(AuthPersistenceService.class);
     AuthService auth = mock(AuthService.class);
-    TelegramLoginService service = new TelegramLoginService(repository, oidc, users, auth);
+    TelegramLoginService service = new TelegramLoginService(repository, identities, userRows, oidc, users, auth);
     String state = "s".repeat(43), verifier = "v".repeat(43);
     MockHttpServletRequest http = new MockHttpServletRequest();
 
@@ -38,7 +42,7 @@ class TelegramLoginServiceTest {
     @Test
     void pendingAuthorizationCannotCreateUserOrSession() {
         when(repository.lockResult(any(), any(), any(), any()))
-                .thenReturn(Optional.of(new TelegramLoginRepository.Identity(null, null, false)));
+                .thenReturn(Optional.of(new TelegramLoginRows.Result(null, null, false)));
         assertThat(service.complete(state, verifier, "device", http)).isNull();
         verifyNoInteractions(users, auth);
     }
@@ -53,27 +57,27 @@ class TelegramLoginServiceTest {
     @Test
     void registersWithoutPasswordAndReturnsExistingMfaChallenge() {
         when(repository.lockResult(any(), any(), any(), any())).thenReturn(Optional.of(
-                new TelegramLoginRepository.Identity("123", "小李", false)));
+                new TelegramLoginRows.Result("123", "小李", false)));
         when(users.createUser(isNull(), isNull(), isNull(), any()))
                 .thenReturn(new AuthModels.AuthenticatedUser(7, null, null, "NORMAL", List.of("USER"), Instant.now()));
         var challenge = new LoginVerificationService.ChallengeResponse(true, "challenge", Instant.now().plusSeconds(300),
                 List.of(new LoginVerificationService.Method("TOTP", null)), false);
         when(auth.loginTelegram(7, http)).thenReturn(challenge);
         assertThat(service.complete(state, verifier, "device", http)).isSameAs(challenge);
-        verify(repository).bind(eq("123"), eq(7L), any());
+        verify(identities).bind(eq("123"), eq(7L), any());
         verify(users).ensureDefaultRole(eq(7L), any());
-        verify(repository).updateNickname(eq(7L), eq("小李"), any());
+        verify(userRows).updateNickname(eq(7L), eq("小李"), any());
         verify(repository).consume(TelegramLoginService.hash(state));
     }
 
     @Test
     void repeatLoginUsesSubjectEvenWhenNicknameChanges() {
         when(repository.lockResult(any(), any(), any(), any())).thenReturn(Optional.of(
-                new TelegramLoginRepository.Identity("123", "新的昵称", false)));
-        when(repository.lockIdentity("123")).thenReturn(Optional.of(7L));
+                new TelegramLoginRows.Result("123", "新的昵称", false)));
+        when(identities.lockIdentity("123")).thenReturn(Optional.of(7L));
         service.complete(state, verifier, "device", http);
         verifyNoInteractions(users);
-        verify(repository).updateNickname(eq(7L), eq("新的昵称"), any());
+        verify(userRows).updateNickname(eq(7L), eq("新的昵称"), any());
         verify(auth).loginTelegram(7, http);
     }
 
@@ -85,7 +89,7 @@ class TelegramLoginServiceTest {
 
     @Test
     void providerRejectionFailsFlowWithoutTrustingClaims() {
-        when(repository.claimCallback(any(), any())).thenReturn(Optional.of(new TelegramLoginRepository.Flow("nonce", "pkce", false)));
+        when(repository.claimCallback(any(), any())).thenReturn(Optional.of(new TelegramLoginRows.Flow("nonce", "pkce", false)));
         assertThat(service.callback(state, null, "access_denied").success()).isFalse();
         verify(repository).failed(TelegramLoginService.hash(state));
         verifyNoInteractions(oidc);
@@ -93,7 +97,7 @@ class TelegramLoginServiceTest {
 
     @Test
     void forgedIdentityFailsFlowWithoutCreatingUser() {
-        when(repository.claimCallback(any(), any())).thenReturn(Optional.of(new TelegramLoginRepository.Flow("nonce", "pkce", false)));
+        when(repository.claimCallback(any(), any())).thenReturn(Optional.of(new TelegramLoginRows.Flow("nonce", "pkce", false)));
         when(oidc.exchange("code", "pkce", "nonce")).thenThrow(new IllegalArgumentException("forged"));
         assertThat(service.callback(state, "code", null).success()).isFalse();
         verify(repository).failed(TelegramLoginService.hash(state));
@@ -102,7 +106,7 @@ class TelegramLoginServiceTest {
     @Test
     void claimedMobileFlowReturnsOnlyItsValidatedPublicStateEvenOnDenial() {
         when(repository.claimCallback(any(), any()))
-                .thenReturn(Optional.of(new TelegramLoginRepository.Flow("nonce", "pkce", true)));
+                .thenReturn(Optional.of(new TelegramLoginRows.Flow("nonce", "pkce", true)));
         var result = service.callback(state, null, "access_denied");
         assertThat(result.success()).isFalse();
         assertThat(result.returnUrl()).isEqualTo("surprising://auth/telegram?flowId=" + state);

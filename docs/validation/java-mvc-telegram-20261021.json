@@ -1,0 +1,458 @@
+{
+  "date": "2026-10-21",
+  "verified_at_utc": "2026-10-21T13:13:30.076808+00:00",
+  "scope": "Telegram流水、身份映射与用户资料单表职责和登录事务",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16; isolated PostgreSQL 18.4",
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=TelegramLoginServiceTest,TelegramLoginDatabaseTest,TelegramLoginControllerTest,PrimaryAuthenticationDatabaseTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.auth.TelegramLoginControllerTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.TelegramLoginServiceTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.TelegramLoginDatabaseTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.PrimaryAuthenticationDatabaseTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "969ee970e17b35eb01e89cf211ba31e5b52d48a420fee5010cd69bfeced56b71",
+      "tests": 27,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=TelegramLoginDatabaseTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.auth.TelegramLoginDatabaseTest",
+          "tests": 9,
+          "failures": 3,
+          "errors": 1,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "7c0891bd790fffae5fe67e93f4f947022a803aae78a604044629beea9387123f",
+      "tests": 9,
+      "failures": 3,
+      "errors": 1,
+      "skipped": 0
+    },
+    "expanded": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=*Auth*Test,*Compliance*Test,*Kyc*Test,*Mfa*Test,*Support*Test,*Security*Test,*Verification*Test,*Telegram*Test,UserAccessPostgresTest,AdminAuditApprovalPostgresTest",
+        "clean",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.auth.MfaRecoveryServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.LoginVerificationSettingsControllerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.TelegramOidcClientTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.LoginVerificationServiceTest",
+          "tests": 27,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.KycEvidenceReferenceTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.KycDocumentStorageServiceTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AdminAuditApprovalPostgresTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.TelegramLoginControllerTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthPersistenceServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.ExternalKycProviderTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.SensitiveActionVerificationServiceTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.KycNotificationTransactionPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.SecurityNotificationPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AdminComplianceControllerTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.UserSecurityControllerTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.ComplianceServiceTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.AdminSupportControllerTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.TelegramLoginServiceTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.UserSecurityServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.UserAccessPostgresTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.ComplianceValidationTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthServiceTest",
+          "tests": 22,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthTableBoundariesPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.KycApplicationValidationTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.SupportTicketTransactionPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.KycProviderDatabaseTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.EmailVerificationServiceTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.ProductTransferSecurityServiceTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.MfaRecoveryDatabaseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.KycDocumentServiceTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.TelegramLoginDatabaseTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.LoginVerificationDatabaseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.GatewayUserMfaRepositoryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.PrimaryAuthenticationDatabaseTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.GatewayApiKeyAuthenticationIpTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "bcf8103654066d09a836529515234b5ed5f9fadc55e08b2bd58f7be145a63ac7",
+      "tests": 211,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "assertions": [
+    "登录流水与Telegram身份映射分别访问各自单表，昵称更新归用户表Repository；原生投影归model。",
+    "Service按设备事务锁聚合清理/计数/创建，并发六次请求仅五次成功，过期释放后可重新申请。",
+    "回调明确暂停父事务，领取提交后才交换外部代码，父事务回滚也不能使已领取回调再次使用。",
+    "身份级事务锁、账号建立/默认角色/绑定/昵称/会话/流水消费顺序保留；首次并发登录只产生一个账号。",
+    "会话普通失败回滚账号/映射并保留授权流水；既有二次验证失败继续保留可续办账号与流水。",
+    "设备、verifier、过期、一次性消费、移动端返回和实际刷新主认证证明回归通过。"
+  ],
+  "repository_table_footprints": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/TelegramLoginFlowRepository.java": [
+      "gateway_telegram_login_flows"
+    ],
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/TelegramIdentityRepository.java": [
+      "gateway_telegram_identities"
+    ]
+  },
+  "source_sha256": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/GatewayUserRepository.java": "1c8466c84b3ef1bd372903f441ef6c3e39b3b36d106003f98383ef0b10541449",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/TelegramLoginService.java": "61aa9deb023588f0559761538f89fa79bc809b28aef4c7032d6eb0594909c7fb",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/model/TelegramLoginRows.java": "cc59c05649f8eaf4e3bd8b77e93c390eb5070dcba98844dabc5a6b239fa8a4c4",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/TelegramIdentityRepository.java": "0cb61794f5f2d23f02a9665c60e91d3cbd92e28f683bd9a0e1637aad858568b4",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/TelegramLoginFlowRepository.java": "c1ab34aaad06d8c27607f68567533ae8555c792d36a82a81373289b5666cdf6d",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/TelegramLoginDatabaseTest.java": "91535805112401eda0dae82b020f9c8171ff9c5317d52f003ba679721a58c8c5",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/TelegramLoginServiceTest.java": "1921d7449712d600ce84797f68d511f394d64a6555d82f184d1ee8646ad5a3d0"
+  },
+  "not_run": [
+    "Telegram第三方网络交换使用既有OIDC隔离；本批事务/并发/持久化使用真实PostgreSQL，未启动实际第三方登录、Core/Kafka/做市实栈。",
+    "其余KYC/托管/维护/投影、参数/HTTP/包归类、最终门禁与必要实栈仍待继续。"
+  ],
+  "cleanup": {
+    "postgres_stopped": true,
+    "owned_database_removed": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-mvc-telegram-pg-w3cs8xvq",
+    "owned_logs_and_summarized_reports_removed": [
+      "/tmp/surprising-mvc-telegram-expanded.log",
+      "/tmp/surprising-mvc-telegram-negative.log",
+      "/tmp/surprising-mvc-telegram-focused.log",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.MfaRecoveryServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.LoginVerificationSettingsControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.TelegramOidcClientTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.LoginVerificationServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.KycEvidenceReferenceTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.GatewayUserMfaRepositoryTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.KycDocumentStorageServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.KycDocumentStorageServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.AdminAuditApprovalPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.AdminAuditApprovalPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.GatewayApiKeyAuthenticationIpTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.SupportTicketTransactionPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.TelegramLoginControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.PrimaryAuthenticationDatabaseTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.EmailVerificationServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.AuthPersistenceServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.ExternalKycProviderTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.SensitiveActionVerificationServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.AdminComplianceControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.UserSecurityControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.ExternalKycProviderTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.ProductTransferSecurityServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.KycApplicationValidationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.KycNotificationTransactionPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.AuthPersistenceServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.SecurityNotificationPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.AdminComplianceControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.SensitiveActionVerificationServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.UserSecurityControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.ComplianceServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.ComplianceValidationTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.controller.AdminSupportControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.KycNotificationTransactionPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.UserSecurityServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.MfaRecoveryServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.TelegramOidcClientTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.controller.AdminSupportControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.TelegramLoginServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.UserSecurityServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.UserAccessPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.ComplianceValidationTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.AuthServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.UserAccessPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.LoginVerificationDatabaseTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.AuthTableBoundariesPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.TelegramLoginServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.TelegramLoginControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.AuthTableBoundariesPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.KycApplicationValidationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.KycProviderDatabaseTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.SupportTicketTransactionPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.LoginVerificationSettingsControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.KycProviderDatabaseTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.EmailVerificationServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.ProductTransferSecurityServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.AuthServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.MfaRecoveryDatabaseTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.KycEvidenceReferenceTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.ComplianceServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.KycDocumentServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.TelegramLoginDatabaseTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.SecurityNotificationPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.LoginVerificationDatabaseTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.MfaRecoveryDatabaseTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.TelegramLoginDatabaseTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.KycDocumentServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.GatewayUserMfaRepositoryTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.PrimaryAuthenticationDatabaseTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.GatewayApiKeyAuthenticationIpTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.LoginVerificationServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest.xml"
+    ],
+    "build_outputs_retained": true
+  }
+}
