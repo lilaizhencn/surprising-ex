@@ -1,4 +1,7 @@
-package com.surprising.websocket.provider.service;
+package com.surprising.websocket.provider.consumer;
+
+import com.surprising.websocket.provider.service.CandleUpdateCoalescer;
+import com.surprising.websocket.provider.service.SubscriptionRegistry;
 
 import com.surprising.websocket.provider.model.TimedPayload;
 
@@ -30,7 +33,7 @@ import java.time.Instant;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -40,7 +43,7 @@ import tools.jackson.databind.ObjectMapper;
  * reach every node for local fanout; private account/order/position events are filtered again by
  * authenticated user subscriptions before leaving the process.</p>
  */
-@Service
+@Component
 @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name="surprising.realtime.enabled",havingValue="false",matchIfMissing=true)
 @Slf4j
 public class KafkaFanoutConsumer {

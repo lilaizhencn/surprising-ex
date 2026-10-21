@@ -1,4 +1,4 @@
-package com.surprising.trading.order.service;
+package com.surprising.trading.order.consumer;
 
 import com.surprising.trading.api.cache.FeeScheduleSnapshotCache;
 import com.surprising.trading.api.model.FeeScheduleEvent;
@@ -7,11 +7,11 @@ import com.surprising.trading.order.repository.OrderFeeRepository;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 /** 消费费率增量通知并更新本地 JVM 快照；Kafka 不承担费率查询职责。 */
-@Service
+@Component
 public class FeeScheduleSnapshotConsumer {
 
     private final ObjectMapper objectMapper;

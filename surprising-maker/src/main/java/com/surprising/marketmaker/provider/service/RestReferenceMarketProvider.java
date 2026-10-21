@@ -1,5 +1,7 @@
 package com.surprising.marketmaker.provider.service;
 
+import com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups;
+
 import lombok.extern.slf4j.Slf4j;
 
 import com.surprising.instrument.api.model.InstrumentResponse;
@@ -39,7 +41,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     private final MarketMakerProperties properties;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
-    private final com.surprising.marketmaker.provider.task.MakerQuoteWakeups wakeups;
+    private final com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups wakeups;
     private final Object configurationLock = new Object();
     private volatile MarketMakerProperties.ReferenceMarket loadedConfiguration;
     private volatile long configurationGeneration;
@@ -49,7 +51,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
 
     @org.springframework.beans.factory.annotation.Autowired
     public RestReferenceMarketProvider(MarketMakerProperties properties, ObjectMapper objectMapper,
-            com.surprising.marketmaker.provider.task.MakerQuoteWakeups wakeups) {
+            com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups wakeups) {
         this.properties = properties;
         this.wakeups = wakeups;
         this.objectMapper = objectMapper;
@@ -59,7 +61,7 @@ public class RestReferenceMarketProvider implements ReferenceMarketProvider {
     }
 
     RestReferenceMarketProvider(MarketMakerProperties properties, ObjectMapper objectMapper) {
-        this(properties, objectMapper, new com.surprising.marketmaker.provider.task.MakerQuoteWakeups(properties, objectMapper));
+        this(properties, objectMapper, new com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups(properties, objectMapper));
     }
 
     @Override

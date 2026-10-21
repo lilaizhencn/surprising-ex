@@ -1,4 +1,4 @@
-package com.surprising.marketmaker.provider.task;
+package com.surprising.marketmaker.provider.consumer;
 
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.price.api.model.MarkPriceEvent;
@@ -45,17 +45,17 @@ public class MakerQuoteWakeups implements MarkPriceUpdateListener {
         }
     }
 
-    void register(MarketMakerProperties.Strategy strategy) {
+    public void register(MarketMakerProperties.Strategy strategy) {
         registeredStrategies.put(key(strategy), strategy);
         signals.computeIfAbsent(key(strategy), ignored -> new Signal()).wake();
     }
 
-    void await(MarketMakerProperties.Strategy strategy, Duration watchdog) throws InterruptedException {
+    public void await(MarketMakerProperties.Strategy strategy, Duration watchdog) throws InterruptedException {
         Signal signal = signals.get(key(strategy));
         if (signal.ready.tryAcquire(watchdog.toMillis(), TimeUnit.MILLISECONDS)) signal.pending.set(false);
     }
 
-    void clear() { signals.clear(); registeredStrategies.clear(); }
+    public void clear() { signals.clear(); registeredStrategies.clear(); }
 
     @Override
     public void onMarkPriceUpdated(MarkPriceEvent previous, MarkPriceEvent current) {

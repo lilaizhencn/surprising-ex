@@ -1,4 +1,6 @@
-package com.surprising.funding.provider.service;
+package com.surprising.funding.provider.consumer;
+
+import com.surprising.funding.provider.service.LatestFundingRateCache;
 
 import lombok.extern.slf4j.Slf4j;
 

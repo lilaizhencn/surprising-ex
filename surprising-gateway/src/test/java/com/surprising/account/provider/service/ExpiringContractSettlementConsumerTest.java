@@ -1,5 +1,7 @@
 package com.surprising.account.provider.service;
 
+import com.surprising.account.provider.consumer.ExpiringContractSettlementConsumer;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

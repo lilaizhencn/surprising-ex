@@ -1,5 +1,7 @@
 package com.surprising.price.index.service;
 
+import com.surprising.price.index.consumer.IndexPriceAuditConsumer;
+
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;

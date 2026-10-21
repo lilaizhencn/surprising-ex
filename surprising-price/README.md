@@ -362,3 +362,5 @@ HotSpot JDK 27，基线 `292e4e04` 与当前代码使用相同 ThreadPoolTaskSch
 标记价行情接收仍由MarkPriceMarketSubscription持有连接与路由身份，3秒租约续订的时钟入口归mark.task.MarkPriceMarketLeaseTask，仅在realtime启用时装配。验证见 [定时职责记录](../docs/validation/java-mvc-task-boundaries-20261021.json)。
 
 行情探针的HTTP入口与采样聚合分别归probe.controller和probe.service，保留现有探针接口与计算。验证见 [其余归包记录](../docs/validation/java-mvc-remaining-packages-20261021.json)。
+
+Kafka职责归包：独立快照、审计、结算/排空及推送消费入口统一放在各自provider.consumer（价格为index.consumer/mark.consumer），业务和缓存继续由原Service/状态所有者负责。监听topic、group、启动条件与处理顺序保持；做市事件唤醒组件为consumer.MakerQuoteWakeups，原唯一信号状态不变。详见 docs/validation/java-mvc-consumer-packages-20261022.json。

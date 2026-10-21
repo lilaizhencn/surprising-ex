@@ -1,5 +1,7 @@
 package com.surprising.derivatives.lifecycle;
 
+import com.surprising.insurance.provider.consumer.InstrumentSnapshotConsumer;
+
 import com.surprising.derivatives.lifecycle.service.DerivativesInstrumentSnapshotInitializer;
 
 import com.surprising.derivatives.lifecycle.task.DerivativesLifecycleMaintenanceTask;
@@ -67,7 +69,7 @@ class LifecycleApplicationContextTest {
                 .run(ctx -> {
                     assertThat(ctx).hasNotFailed().hasSingleBean(InstrumentSnapshotCache.class)
                             .hasSingleBean(DerivativesAeronClient.class)
-                            .hasSingleBean(com.surprising.insurance.provider.service.InstrumentSnapshotConsumer.class)
+                            .hasSingleBean(com.surprising.insurance.provider.consumer.InstrumentSnapshotConsumer.class)
                             .doesNotHaveBean("adlInstrumentSnapshotConsumer")
                             .doesNotHaveBean("adlInstrumentSnapshotConsumerFactory");
                     var shared = ctx.getBean(InstrumentSnapshotCache.class);
@@ -84,7 +86,7 @@ class LifecycleApplicationContextTest {
                             com.surprising.instrument.api.model.InstrumentStatus.HALT,
                             com.surprising.instrument.api.model.InstrumentEventType.STATUS_CHANGED,
                             java.time.Instant.now(), com.surprising.instrument.api.model.InstrumentResponse.immutableCopy(row), line, 2);
-                    var consumer = ctx.getBean(com.surprising.insurance.provider.service.InstrumentSnapshotConsumer.class);
+                    var consumer = ctx.getBean(com.surprising.insurance.provider.consumer.InstrumentSnapshotConsumer.class);
                     consumer.onInstrumentEvent(new org.apache.kafka.clients.consumer.ConsumerRecord<>(consumer.topic(), 0, 0,
                             com.surprising.instrument.api.InstrumentEventKeys.key(line, 1),
                             ctx.getBean(ObjectMapper.class).writeValueAsString(event)));

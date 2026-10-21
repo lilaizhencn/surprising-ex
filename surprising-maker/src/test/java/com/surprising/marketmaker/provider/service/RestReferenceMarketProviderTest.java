@@ -1,5 +1,7 @@
 package com.surprising.marketmaker.provider.service;
 
+import com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.instrument.api.model.ContractType;
@@ -82,7 +84,7 @@ class RestReferenceMarketProviderTest {
     @Test
     void acceptedChangedStreamBookWakesQuotesButIdenticalHeartbeatDoesNot() {
         var properties = new MarketMakerProperties();
-        var wakeups = org.mockito.Mockito.mock(com.surprising.marketmaker.provider.task.MakerQuoteWakeups.class);
+        var wakeups = org.mockito.Mockito.mock(com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups.class);
         var provider = new RestReferenceMarketProvider(properties, new ObjectMapper(), wakeups);
         var source = source("BINANCE_DEPTH");
         source.setProductLine(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);

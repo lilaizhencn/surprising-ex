@@ -620,3 +620,5 @@ OptionQuoteService只持有源事件与业务聚合，OptionQuoteException为原
 [期权HTTP职责验证](../docs/validation/java-mvc-option-http-20261021.json)包含完整实时模块及负例结果。
 
 共享读视图API的失败使用 `realtime.api.exception.ReadViewUnavailableException`，保留 `READ_VIEW_*` / `MARKET_BOOK_UNAVAILABLE` 原因，不选择HTTP状态。Gateway在Controller/本地协议边界映射503；Redis租约、版本门槛、过期/epoch检查和禁止Core回退的读取规则保持。
+
+Kafka职责归包：独立快照、审计、结算/排空及推送消费入口统一放在各自provider.consumer（价格为index.consumer/mark.consumer），业务和缓存继续由原Service/状态所有者负责。监听topic、group、启动条件与处理顺序保持；做市事件唤醒组件为consumer.MakerQuoteWakeups，原唯一信号状态不变。详见 docs/validation/java-mvc-consumer-packages-20261022.json。

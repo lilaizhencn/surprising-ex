@@ -1,5 +1,7 @@
 package com.surprising.websocket.provider.service;
 
+import com.surprising.websocket.provider.consumer.KafkaFanoutConsumer;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 

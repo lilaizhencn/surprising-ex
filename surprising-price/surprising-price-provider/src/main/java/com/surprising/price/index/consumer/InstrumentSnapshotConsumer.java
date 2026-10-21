@@ -1,4 +1,6 @@
-package com.surprising.price.index.service;
+package com.surprising.price.index.consumer;
+
+import com.surprising.price.index.service.IndexInstrumentConfigService;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.utils.InstrumentSnapshotSupport;
@@ -7,13 +9,13 @@ import com.surprising.price.index.config.IndexPriceProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 /**
  * 指数价格服务消费 Instrument 增量事件并刷新本地配置快照。
  */
-@Service("indexInstrumentSnapshotConsumer")
+@Component("indexInstrumentSnapshotConsumer")
 public class InstrumentSnapshotConsumer {
 
     private final ObjectMapper objectMapper;

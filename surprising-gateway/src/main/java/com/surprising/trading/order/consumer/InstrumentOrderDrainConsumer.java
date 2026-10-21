@@ -1,4 +1,6 @@
-package com.surprising.trading.order.service;
+package com.surprising.trading.order.consumer;
+
+import com.surprising.trading.order.service.InstrumentOrderDrainService;
 
 import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.instrument.api.InstrumentEventKeys;
@@ -6,10 +8,10 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.product.api.utils.ProductTopicNames;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
-@Service
+@Component
 public class InstrumentOrderDrainConsumer {
 
     private final ObjectMapper objectMapper;

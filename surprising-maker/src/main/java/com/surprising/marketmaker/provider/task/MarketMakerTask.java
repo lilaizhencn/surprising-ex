@@ -1,5 +1,7 @@
 package com.surprising.marketmaker.provider.task;
 
+import com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups;
+
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.service.MarketMakerService;
 import jakarta.annotation.PreDestroy;

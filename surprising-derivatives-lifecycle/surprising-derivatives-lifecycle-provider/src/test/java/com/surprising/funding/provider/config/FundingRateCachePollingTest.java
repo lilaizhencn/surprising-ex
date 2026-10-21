@@ -2,7 +2,7 @@ package com.surprising.funding.provider.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.surprising.funding.provider.service.FundingRateKafkaConsumer;
+import com.surprising.funding.provider.consumer.FundingRateKafkaConsumer;
 import com.surprising.funding.provider.service.LatestFundingRateCache;
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.product.api.ProductLine;

@@ -545,3 +545,5 @@ JFR profile 上限 16 MiB。实际内存配置的 definitions＋单策略覆盖�
 [做市HTTP职责验证](../docs/validation/java-mvc-maker-http-20261021.json)包含完整模块与负例；参数/游标职责和最终实栈仍继续。
 
 公共设置入口 `controller/MarketMakerBusinessSettingsController` 负责字段、时长、引用源ID/URL/订阅JSON和修改元数据的格式校验；`MarketMakerBusinessSettingsService` 负责产品/数量业务约束以及保存后安装。策略定义的修改原因在 `AdminMarketMakerController.saveDefinition` 校验；`MarketMakerService` 聚合合约状态和绑定约束，进程内Store仅处理策略事实与乐观版本。
+
+Kafka职责归包：独立快照、审计、结算/排空及推送消费入口统一放在各自provider.consumer（价格为index.consumer/mark.consumer），业务和缓存继续由原Service/状态所有者负责。监听topic、group、启动条件与处理顺序保持；做市事件唤醒组件为consumer.MakerQuoteWakeups，原唯一信号状态不变。详见 docs/validation/java-mvc-consumer-packages-20261022.json。

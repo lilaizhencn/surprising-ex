@@ -1,4 +1,4 @@
-package com.surprising.trading.order.service;
+package com.surprising.trading.order.consumer;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.utils.InstrumentSnapshotSupport;
@@ -7,13 +7,13 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 /**
  * 订单服务消费 Instrument 增量事件并原子替换本地快照。
  */
-@Service("orderInstrumentSnapshotConsumer")
+@Component("orderInstrumentSnapshotConsumer")
 public class InstrumentSnapshotConsumer {
 
     private final ObjectMapper objectMapper;

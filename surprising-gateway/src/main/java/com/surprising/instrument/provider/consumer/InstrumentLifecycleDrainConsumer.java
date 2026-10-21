@@ -1,13 +1,15 @@
-package com.surprising.instrument.provider.service;
+package com.surprising.instrument.provider.consumer;
+
+import com.surprising.instrument.provider.service.InstrumentLifecycleReadinessService;
 
 import com.surprising.instrument.api.model.InstrumentLifecycleDrainEvent;
 import com.surprising.instrument.provider.config.InstrumentProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
-@Service
+@Component
 public class InstrumentLifecycleDrainConsumer {
 
     private final ObjectMapper objectMapper;

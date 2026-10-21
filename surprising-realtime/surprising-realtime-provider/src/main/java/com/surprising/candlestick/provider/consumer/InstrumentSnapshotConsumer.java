@@ -1,4 +1,6 @@
-package com.surprising.candlestick.provider.service;
+package com.surprising.candlestick.provider.consumer;
+
+import com.surprising.candlestick.provider.service.SymbolRegistryService;
 
 import com.surprising.candlestick.provider.config.CandlestickProperties;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
@@ -6,13 +8,13 @@ import com.surprising.instrument.api.utils.InstrumentSnapshotSupport;
 import com.surprising.product.api.utils.ProductTopicNames;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 /**
  * K 线服务消费 Instrument 增量事件并刷新 instrumentId 和精度快照。
  */
-@Service
+@Component
 public class InstrumentSnapshotConsumer {
 
     private final ObjectMapper objectMapper;

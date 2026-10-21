@@ -1,4 +1,6 @@
-package com.surprising.price.index.service;
+package com.surprising.price.index.consumer;
+
+import com.surprising.price.index.service.IndexPriceAuditService;
 
 import lombok.extern.slf4j.Slf4j;
 

@@ -1,5 +1,7 @@
 package com.surprising.gateway.config;
 
+import com.surprising.websocket.provider.consumer.KafkaFanoutConsumer;
+
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.aeron.client.SurprisingAeronClient;
 import io.aeron.driver.MediaDriver;
@@ -19,7 +21,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 @EnableConfigurationProperties({AccountProperties.class, TriggerProperties.class})
 @Import({com.surprising.realtime.api.ValkeyUserQueries.class,
         com.surprising.websocket.provider.config.WebSocketKafkaConfiguration.class,
-        com.surprising.websocket.provider.service.KafkaFanoutConsumer.class})
+        com.surprising.websocket.provider.consumer.KafkaFanoutConsumer.class})
 @EnableKafka @EnableScheduling @EnableTransactionManagement
 public class ProductBusinessConfiguration {
     /** Product context owns transport; business pools own only their separate sessions and queues. */

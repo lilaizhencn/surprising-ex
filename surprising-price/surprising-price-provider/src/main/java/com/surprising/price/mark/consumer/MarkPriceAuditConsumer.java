@@ -1,4 +1,4 @@
-package com.surprising.price.mark.service;
+package com.surprising.price.mark.consumer;
 
 import lombok.extern.slf4j.Slf4j;
 

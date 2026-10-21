@@ -1,34 +1,40 @@
-package com.surprising.marketmaker.provider.service;
+package com.surprising.price.mark.consumer;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.utils.InstrumentSnapshotSupport;
-import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.product.api.utils.ProductTopicNames;
+import com.surprising.price.mark.config.MarkPriceProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
-/** 做市服务消费 Instrument 增量事件，原子替换本地合约快照。 */
-@Service
+/**
+ * 标记价格服务消费 Instrument 增量事件并更新本地快照。
+ */
+@Component("markInstrumentSnapshotConsumer")
 public class InstrumentSnapshotConsumer {
 
     private final ObjectMapper objectMapper;
-    private final MarketMakerProperties properties;
+    private final MarkPriceProperties properties;
     private final InstrumentSnapshotCache snapshotCache;
 
     public InstrumentSnapshotConsumer(ObjectMapper objectMapper,
-                                      MarketMakerProperties properties,
-                                      InstrumentSnapshotCache snapshotCache) {
+                                      MarkPriceProperties properties,
+                                      @Qualifier("markInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache) {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.snapshotCache = snapshotCache;
     }
 
-    @KafkaListener(topics = "#{__listener.topic()}", groupId = "#{__listener.groupId()}",
-            containerFactory = "marketMakerInstrumentSnapshotKafkaListenerContainerFactory")
+    @KafkaListener(
+            topics = "#{__listener.topic()}",
+            groupId = "#{__listener.groupId()}",
+            containerFactory = "instrumentSnapshotKafkaListenerContainerFactory")
     public void onInstrumentEvent(ConsumerRecord<String, String> record) {
-        InstrumentSnapshotSupport.consumeAnyProductLine(objectMapper, record, snapshotCache, "做市服务");
+        InstrumentSnapshotSupport.consume(objectMapper, record, snapshotCache,
+                properties.getKafka().getProductLine(), "标记价格服务");
     }
 
     public String topic() {

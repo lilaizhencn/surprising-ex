@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider;
 
+import com.surprising.websocket.provider.consumer.KafkaFanoutConsumer;
+
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.websocket.provider.config.WebSocketProperties;
 import org.springframework.boot.SpringApplication;
@@ -19,7 +21,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         "com.surprising.instrument.provider", "com.surprising.asset"
 }, excludeFilters = @org.springframework.context.annotation.ComponentScan.Filter(
         type = org.springframework.context.annotation.FilterType.ASSIGNABLE_TYPE,
-        classes = {com.surprising.websocket.provider.service.KafkaFanoutConsumer.class,
+        classes = {com.surprising.websocket.provider.consumer.KafkaFanoutConsumer.class,
                 com.surprising.websocket.provider.config.WebSocketKafkaConfiguration.class}))
 @EnableConfigurationProperties({GatewayProperties.class, WebSocketProperties.class,
         com.surprising.gateway.provider.config.GatewayProductsProperties.class,

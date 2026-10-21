@@ -1,4 +1,6 @@
-package com.surprising.account.provider.service;
+package com.surprising.account.provider.consumer;
+
+import com.surprising.account.provider.service.ExpiringContractSettlementFanoutService;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -9,10 +11,10 @@ import com.surprising.trading.api.KafkaSymbolKeyValidator;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
-@Service
+@Component
 @Slf4j
 public class ExpiringContractSettlementConsumer {
 

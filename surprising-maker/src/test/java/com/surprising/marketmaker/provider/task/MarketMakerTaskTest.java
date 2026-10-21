@@ -1,5 +1,7 @@
 package com.surprising.marketmaker.provider.task;
 
+import com.surprising.marketmaker.provider.consumer.MakerQuoteWakeups;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
