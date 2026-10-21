@@ -111,8 +111,14 @@ public class OrderInternalController {
     }
 
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/algo/{algoOrderId}")
-    public AlgoOrderResponse getAlgo(@PathVariable("algoOrderId") long algoOrderId) {
-        return requests.getAlgo(algoOrderId);
+    public AlgoOrderResponse getAlgo(@RequestParam("userId") long userId, @PathVariable("algoOrderId") long algoOrderId) {
+        return requests.getAlgo(userId, algoOrderId);
+    }
+
+    @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/algo/submission")
+    public ResponseEntity<com.surprising.trading.api.model.AlgoOrderSubmissionResponse> algoSubmission(
+            @RequestParam("userId") long userId, @RequestParam("clientAlgoOrderId") String key) {
+        return requests.algoSubmission(userId, key);
     }
 
     @GetMapping(TradingApiPaths.ORDER_BASE_PATH + "/algo/open")

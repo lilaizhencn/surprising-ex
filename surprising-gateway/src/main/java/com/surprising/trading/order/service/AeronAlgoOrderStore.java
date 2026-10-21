@@ -58,6 +58,10 @@ public class AeronAlgoOrderStore {
         if (value == null) throw new IllegalStateException("算法单不存在: " + id);
         return value;
     }
+    /** Internal trading recovery; the immutable child key makes an unknown placement discoverable. */
+    public com.surprising.aeron.protocol.CoreOrderStateView unlinkedChild(CoreAlgoOrderView parent) {
+        return aeron.orderStateByClientOrderId(parent.userId(), "algo-"+parent.algoOrderId()+"-"+parent.childOrderIds().size());
+    }
     public List<CoreAlgoOrderView> query(long userId, String instrumentId, long dueAt, int limit) {
         return aeron.algoOrders(userId, instrumentId, dueAt, limit);
     }

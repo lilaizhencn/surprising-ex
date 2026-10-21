@@ -14,12 +14,42 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import org.junit.jupiter.api.Test;
 
 class AlgoOrderServiceTest {
+    @Test void creationRecoveryUsesOnlyCommittedReceiptsAndParentState() {
+        var properties = new TradingOrderProperties(); properties.getKafka().setProductLine(ProductLine.SPOT);
+        var store = mock(AeronAlgoOrderStore.class);
+        var projection = mock(com.surprising.trading.order.repository.AlgoOrderProjectionRepository.class);
+        var receipts = mock(com.surprising.trading.order.repository.AeronOrderProjectionRepository.class);
+        var service = new AlgoOrderService(properties,mock(OrderService.class),store,projection,receipts);
+        var command = StableOrderIdentity.algoCommandId(ProductLine.SPOT,7,"original");
+        var pending = new com.surprising.trading.api.model.OrderCommandReceipt(command,"RESULT_UNKNOWN","RESULT_UNKNOWN","",null,java.util.List.of(),null,null);
+        org.mockito.Mockito.when(receipts.algoSubmission(ProductLine.SPOT,7,command)).thenReturn(pending);
+        org.assertj.core.api.Assertions.assertThat(service.submission(7,"original").outcome()).isEqualTo("RESULT_UNKNOWN");
+        org.mockito.Mockito.verifyNoInteractions(store);
+        var parent = mock(com.surprising.aeron.protocol.CoreAlgoOrderView.class);
+        org.mockito.Mockito.when(parent.algoOrderId()).thenReturn(StableOrderIdentity.algoOrderId(ProductLine.SPOT,7,"original"));
+        org.mockito.Mockito.when(projection.byClient(ProductLine.SPOT,7,"original")).thenReturn(parent);
+        var recovered = service.submission(7,"original");
+        org.assertj.core.api.Assertions.assertThat(recovered.code()).isEqualTo("NONE");
+        org.assertj.core.api.Assertions.assertThat(recovered.outcome()).isEqualTo("TERMINAL");
+        org.mockito.Mockito.verify(store).response(parent);
+        org.mockito.Mockito.verify(store,org.mockito.Mockito.never()).get(org.mockito.ArgumentMatchers.anyLong(),org.mockito.ArgumentMatchers.anyLong());
+        org.mockito.Mockito.verify(store,org.mockito.Mockito.never()).query(org.mockito.ArgumentMatchers.anyLong(),org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.anyLong(),org.mockito.ArgumentMatchers.anyInt());
+    }
     @Test
     void twapRejectsChildQuantityThatCannotFinishInsideDuration() {
         AlgoOrderService service = service(ProductLine.LINEAR_PERPETUAL);
         assertThatThrownBy(() -> service.place(new PlaceAlgoOrderRequest(
                 1001L, "twap-small-child", "1", AlgoOrderType.TWAP, OrderSide.BUY,
                 0L, 100L, 10L, 10L, 20L, MarginMode.CROSS, PositionSide.NET,
+                false, false, TimeInForce.IOC, null)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("childQuantitySteps is too small");
+    }
+
+    @Test
+    void twapSliceCeilingCannotOverflowAtTheInt64Boundary() {
+        assertThatThrownBy(() -> service(ProductLine.SPOT).place(new PlaceAlgoOrderRequest(
+                1001L, "twap-int64", "1", AlgoOrderType.TWAP, OrderSide.BUY,
+                0L, Long.MAX_VALUE, 1L, 1L, 20L, MarginMode.CROSS, PositionSide.NET,
                 false, false, TimeInForce.IOC, null)))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("childQuantitySteps is too small");
     }
@@ -56,7 +86,7 @@ class AlgoOrderServiceTest {
             var store = mock(AeronAlgoOrderStore.class);
             var projection = mock(com.surprising.trading.order.repository.AlgoOrderProjectionRepository.class);
             org.mockito.Mockito.when(projection.openOrders(line, 1001, "1", 10)).thenReturn(java.util.List.of());
-            var service = new AlgoOrderService(properties, mock(OrderService.class), store, projection);
+            var service = new AlgoOrderService(properties, mock(OrderService.class), store, projection, mock(com.surprising.trading.order.repository.AeronOrderProjectionRepository.class));
             org.assertj.core.api.Assertions.assertThat(service.openOrders(1001, "1", 10).orders()).isEmpty();
             org.mockito.Mockito.verify(projection).openOrders(line,1001,"1",10);
             org.mockito.Mockito.verifyNoInteractions(store);
@@ -69,6 +99,6 @@ class AlgoOrderServiceTest {
         properties.getAlgo().setMinDurationSeconds(1);
         properties.getAlgo().setMinIntervalSeconds(1);
         return new AlgoOrderService(properties, mock(OrderService.class), mock(AeronAlgoOrderStore.class),
-                mock(com.surprising.trading.order.repository.AlgoOrderProjectionRepository.class));
+                mock(com.surprising.trading.order.repository.AlgoOrderProjectionRepository.class), mock(com.surprising.trading.order.repository.AeronOrderProjectionRepository.class));
     }
 }

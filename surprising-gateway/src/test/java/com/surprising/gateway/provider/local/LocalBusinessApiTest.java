@@ -16,6 +16,20 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
 class LocalBusinessApiTest {
+    @Test void algoRecoveryAndParentReadsRequireTheAuthenticatedOwner() {
+        var response = new com.surprising.trading.api.model.AlgoOrderSubmissionResponse(42,ProductLine.SPOT,"a+b",
+                Long.MAX_VALUE,new java.util.UUID(4,5),"RESULT_UNKNOWN","RESULT_UNKNOWN",null);
+        when(orders.algoSubmission(42,"a+b")).thenReturn(ResponseEntity.accepted().cacheControl(CacheControl.noStore()).body(response));
+        var result = invoke("trading","/api/v1/trading/orders/algo/submission?clientAlgoOrderId=a%2Bb",HttpMethod.GET,userHeaders(),null);
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(result.getHeaders().getCacheControl()).isEqualTo("no-store");
+        verify(orders).algoSubmission(42,"a+b");
+        assertThat(invoke("trading","/api/v1/trading/orders/algo/"+Long.MAX_VALUE,HttpMethod.GET,userHeaders(),null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(orders).getAlgo(42,Long.MAX_VALUE);
+        assertThat(invoke("trading","/api/v1/trading/orders/algo/submission?clientAlgoOrderId=x&userId=43",HttpMethod.GET,userHeaders(),null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(invoke("trading","/api/v1/trading/orders/algo/1?userId=43",HttpMethod.GET,userHeaders(),null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        verifyNoMoreInteractions(orders);
+    }
     @Test void ownTradeHistoryRouteRequiresTheAuthenticatedAccount() {
         var page = new com.surprising.trading.api.model.TradeFillQueryResponse(42, ProductLine.SPOT, 0,
                 java.util.List.of(), null, false, "eventTime.desc", 100);

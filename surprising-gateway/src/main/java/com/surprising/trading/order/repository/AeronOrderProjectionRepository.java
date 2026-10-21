@@ -83,6 +83,13 @@ public class AeronOrderProjectionRepository {
         return commandReceipt(product, commandId, result, List.of());
     }
 
+    public OrderCommandReceipt algoSubmission(ProductLine product, long userId, UUID commandId) {
+        var result = submittedCommand(product, userId, commandId);
+        if (result != null && !"UPSERT_ALGO_ORDER".equals(result.commandType()))
+            throw new IllegalStateException("algo creation command type mismatch");
+        return commandReceipt(product, commandId, result, List.of());
+    }
+
     public OrderCommandReceipt cancellation(ProductLine product, long userId, long orderId, UUID commandId) {
         requirePositive(orderId, "orderId");
         var result = submittedCommand(product, userId, commandId);

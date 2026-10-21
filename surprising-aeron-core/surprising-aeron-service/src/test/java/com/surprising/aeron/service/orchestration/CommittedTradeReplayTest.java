@@ -160,7 +160,7 @@ class CommittedTradeReplayTest {
                     new PlaceOrderCommand(201,"604",CoreOrderSide.BUY,100,2,false,CoreMarginMode.CROSS,
                             CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"algo-701-0")));
             assertThat(replay.algoChanges()).singleElement().satisfies(v -> {
-                assertThat(v.executedQuantitySteps()).isEqualTo(2);assertThat(v.childOrderIds()).isEmpty();
+                assertThat(v.executedQuantitySteps()).isEqualTo(2);assertThat(v.childOrderIds()).containsExactly(201L);
             });
             snapshot=replay.snapshot();
         }
@@ -187,6 +187,28 @@ class CommittedTradeReplayTest {
             assertThat(replay.commandResult().code()).isEqualTo(CoreResultCode.INVALID_ALGO_ORDER_REVISION);
             var retained = new ArrayList<CoreAlgoOrderView>();replay.forEachRetainedAlgo(retained::add);
             assertThat(retained).singleElement().satisfies(v -> {assertThat(v.statusCode()).isEqualTo(3);assertThat(v.revision()).isEqualTo(3);});
+        }
+    }
+
+    @Test void cancelRequestedParentRejectsALateChildBeforeItCanReserveFunds() {
+        try (var replay = new CommittedTradeReplay(ProductLine.SPOT,null)) {
+            send(replay,ProductLine.SPOT,CoreMessageType.REGISTER_INSTRUMENT,0,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("604",0,
+                            "BTC","USDT","USDT",1,1,1,100000,50000,0,0,0,-1,0)));
+            send(replay,ProductLine.SPOT,CoreMessageType.ADJUST_BALANCE,7,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1000000)));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encode(algo(0,1,List.of())));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encode(algo(2,2,List.of())));
+            send(replay,ProductLine.SPOT,CoreMessageType.PLACE_ORDER,7,TradingCommandCodec.encodePlaceOrder(
+                    new PlaceOrderCommand(201,"604",CoreOrderSide.BUY,100,2,false,CoreMarginMode.CROSS,
+                            CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"algo-701-0")));
+            assertThat(replay.commandResult().code()).isEqualTo(CoreResultCode.INVALID_ALGO_CHILD);
+            try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT,replay.snapshot())) {
+                var user = CoreTestCompletion.userState(restored,7);
+                assertThat(user.reservations()).isEmpty();
+                assertThat(user.balances()).allMatch(v->v.lockedUnits()==0);
+                assertThat(user.balances().stream().mapToLong(v->v.availableUnits()).sum()).isEqualTo(1000000);
+            }
         }
     }
 

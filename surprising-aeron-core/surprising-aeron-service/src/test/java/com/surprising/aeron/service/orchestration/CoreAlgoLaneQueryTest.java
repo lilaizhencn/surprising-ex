@@ -14,6 +14,18 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 class CoreAlgoLaneQueryTest {
+    @Test void deadlinePrecedesTheClaimLeaseAndTerminalParentsDoNotHideActiveWork() {
+        var index = new com.surprising.aeron.service.state.index.AlgoOrderIndex(TradingCoreState.empty(LINE));
+        index.apply(999,algo(999,7,"1",TIME+30000,List.of()));
+        assertThat(index.query(7,"",TIME+9999,1)).isEmpty();
+        assertThat(index.query(7,"",TIME+10000,1)).containsExactly(999L);
+        var terminal = new CoreAlgoOrderState(998,7,"ended","1",0,CoreOrderSide.BUY,100,100,10,
+                1,10,CoreMarginMode.CROSS,CorePositionSide.NET,false,false,CoreTimeInForce.GTC,3,
+                0,"",TIME,0,TIME+1,TIME,TIME+1,2,List.of());
+        index.apply(998,terminal);
+        assertThat(index.query(7,"",0,1)).containsExactly(999L);
+        assertThat(index.value(998)).isNotNull();
+    }
     private static final ProductLine LINE = ProductLine.LINEAR_PERPETUAL;
     private static final long TIME = 1_700_000_000_000L;
     private long sequence;

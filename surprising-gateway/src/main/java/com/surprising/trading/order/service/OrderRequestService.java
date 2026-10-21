@@ -205,11 +205,25 @@ public class OrderRequestService {
         }
     }
 
-    public AlgoOrderResponse getAlgo(long algoOrderId) {
+    public AlgoOrderResponse getAlgo(long userId, long algoOrderId) {
         try {
-            return algoOrderService.get(algoOrderId);
+            return algoOrderService.get(userId, algoOrderId);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
+        }
+    }
+
+    public ResponseEntity<com.surprising.trading.api.model.AlgoOrderSubmissionResponse> algoSubmission(long userId, String clientKey) {
+        try {
+            var result = algoOrderService.submission(userId, clientKey);
+            return ResponseEntity.status("TERMINAL".equals(result.outcome()) ? HttpStatus.OK : HttpStatus.ACCEPTED)
+                    .cacheControl(org.springframework.http.CacheControl.noStore()).body(result);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (org.springframework.dao.DataAccessException | IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "committed algo creation result is unavailable", ex);
         }
     }
 

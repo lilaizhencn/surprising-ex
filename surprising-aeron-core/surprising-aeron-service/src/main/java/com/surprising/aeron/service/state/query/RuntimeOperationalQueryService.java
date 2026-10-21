@@ -122,13 +122,19 @@ public final class RuntimeOperationalQueryService {
                     activeCount++;
                 }
             }
+            List<Long> children = state.childOrderIds();
+            if (state.pendingClosedChildId() != 0) {
+                var recovered = new ArrayList<Long>(children);
+                recovered.add(state.pendingClosedChildId());
+                children = List.copyOf(recovered);
+            }
             result.add(new CoreAlgoOrderView(state.algoOrderId(), state.userId(), state.clientAlgoOrderId(),
                     state.instrumentId(), state.algoTypeCode(), state.side(), state.priceTicks(), state.quantitySteps(),
                     state.childQuantitySteps(), state.intervalSeconds(), state.durationSeconds(), state.marginMode(),
                     state.positionSide(), state.reduceOnly(), state.postOnly(), state.timeInForce(), state.statusCode(),
                     state.currentOrderId(), state.rejectReason(), state.startAtEpochMillis(),
                     state.nextSliceAtEpochMillis(), state.completedAtEpochMillis(), state.createdAtEpochMillis(),
-                    state.updatedAtEpochMillis(), state.revision(), state.childOrderIds(), executed, active, activeCount));
+                    state.updatedAtEpochMillis(), state.revision(), children, executed, active, activeCount));
             if (result.size() == MAX_QUERY_ENTITIES) break;
         }
         return List.copyOf(result);

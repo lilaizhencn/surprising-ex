@@ -15,6 +15,26 @@ import java.util.concurrent.atomic.*;
 import org.junit.jupiter.api.Test;
 
 class AlgoOrderCancellationTest {
+    @Test void discoversAnOpenChildWhosePlacementReplyWasLostBeforePlacingAnotherSlice() {
+        var fixture = new Fixture(List.of()); fixture.childActive.set(true);
+        var child = mock(CoreOrderStateView.class);
+        when(child.userId()).thenReturn(7L); when(child.instrumentId()).thenReturn("1");
+        when(child.clientOrderId()).thenReturn("algo-701-0"); when(child.orderId()).thenReturn(900L);
+        when(fixture.gateway.orderStateByClientOrderId(7,"algo-701-0")).thenReturn(child);
+        fixture.service.executeDue(fixture.store.record(fixture.store.get(7,701)),java.time.Instant.now());
+        assertThat(fixture.store.get(7,701).childOrderIds()).containsExactly(900L);
+        assertThat(fixture.store.get(7,701).activeChildOrderCount()).isEqualTo(1);
+        verify(fixture.orders,never()).placeAlgoChild(any());
+    }
+    @Test void elapsedDurationCancelsTheActualChildBeforeTheParentBecomesTerminal() {
+        var fixture = new Fixture(List.of(900L)); fixture.childActive.set(true);
+        fixture.service.executeDue(fixture.store.record(fixture.store.get(7,701)),java.time.Instant.now().plusSeconds(31));
+        assertThat(fixture.store.get(7,701).statusCode()).isEqualTo(AlgoOrderStatus.CANCELED.ordinal());
+        assertThat(fixture.store.get(7,701).rejectReason()).isEqualTo("执行时长已结束");
+        assertThat(fixture.childActive).isFalse();
+        verify(fixture.orders).cancel(new CancelOrderRequest(7,900));
+        verify(fixture.orders,never()).placeAlgoChild(any());
+    }
     @Test
     void cancellationWaitsForTheSchedulerToLinkItsInFlightChild() throws Exception {
         var fixture = new Fixture(List.of());
@@ -25,7 +45,7 @@ class AlgoOrderCancellationTest {
         fixture.onRead = () -> {
             if (Thread.currentThread() == cancelThread.get()) cancelRead.countDown();
         };
-        when(fixture.orders.place(any())).thenAnswer(call -> {
+        when(fixture.orders.placeAlgoChild(any())).thenAnswer(call -> {
             placing.countDown();
             assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
             fixture.childActive.set(true);
@@ -79,19 +99,20 @@ class AlgoOrderCancellationTest {
         final AtomicReference<CoreAlgoOrderView> state;
         final AtomicBoolean childActive = new AtomicBoolean();
         final OrderService orders = mock(OrderService.class);
+        final OrderAeronGateway gateway = mock(OrderAeronGateway.class);
         final AeronAlgoOrderStore store;
         final AlgoOrderService service;
         Runnable onRead = () -> {};
 
         Fixture(List<Long> children) {
+            long now = System.currentTimeMillis();
             state = new AtomicReference<>(new CoreAlgoOrderView(701, 7, "cancel-701", "1", 1,
                     CoreOrderSide.BUY, 100, 2, 1, 1, 30, CoreMarginMode.CROSS, CorePositionSide.NET,
                     false, false, CoreTimeInForce.GTC, AlgoOrderStatus.RUNNING.ordinal(), 0, "",
-                    1, 1, 0, 1, 1, 1, children, 0, 0, 0));
+                    now, now, 0, now, now, 1, children, 0, 0, 0));
             var properties = new TradingOrderProperties();
             properties.getKafka().setProductLine(ProductLine.SPOT);
             properties.getAlgo().setEnabled(true);
-            var gateway = mock(OrderAeronGateway.class);
             when(gateway.algoOrder(7, 701)).thenAnswer(call -> {
                 onRead.run();
                 var v = state.get();
@@ -111,7 +132,7 @@ class AlgoOrderCancellationTest {
             when(gateway.command(eq(CoreMessageType.UPSERT_ALGO_ORDER), any(), eq(7L), any()))
                     .thenAnswer(call -> { state.set(CoreAlgoOrderCodec.decode(call.getArgument(3))); return null; });
             store = new AeronAlgoOrderStore(gateway, properties);
-            service = new AlgoOrderService(properties, orders, store, mock(AlgoOrderProjectionRepository.class));
+            service = new AlgoOrderService(properties, orders, store, mock(AlgoOrderProjectionRepository.class), mock(com.surprising.trading.order.repository.AeronOrderProjectionRepository.class));
             completeCancellation();
         }
 

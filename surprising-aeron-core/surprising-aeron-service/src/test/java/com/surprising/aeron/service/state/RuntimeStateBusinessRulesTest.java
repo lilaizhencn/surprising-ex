@@ -518,7 +518,10 @@ class RuntimeStateBusinessRulesTest {
         var initial = algo(501, 101, 1, List.of());
         TradingCoreState created = reducer.upsertAlgoOrder(funded, 101, initial);
         TradingCoreState withChild = reducer.placeOrder(created, 101,
-                order(601, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, "USDT", 100));
+                new PlaceOrderCommand(601, "1", CoreOrderSide.BUY, 10, 10, false,
+                        CoreMarginMode.CROSS, CorePositionSide.NET,
+                        com.surprising.aeron.protocol.CoreOrderType.LIMIT,
+                        com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "algo-501-0"));
         TradingCoreState linked = reducer.upsertAlgoOrder(withChild, 101, algo(501, 101, 2, List.of(601L)));
 
         assertThat(linked.algoOrders().get(501L).childOrderIds()).containsExactly(601L);

@@ -1,0 +1,217 @@
+{
+  "date": "2026-10-21",
+  "subject": "算法单创建恢复、用户查询与子单准入；提交前定向验证",
+  "baseCommit": "86f8ae3c23f1f1a2458527bbe40066d496517926",
+  "runtime": "HotSpot Amazon Corretto 27+33-FR; Apache Maven 3.9.16",
+  "command": [
+    "mvn",
+    "-B",
+    "-ntp",
+    "-pl",
+    "surprising-gateway",
+    "-am",
+    "-Dtest=CommittedTradeReplayTest,CoreAlgoLaneQueryTest,RuntimeStateBusinessRulesTest,RuntimeStateTransitionsTest,TradingRuntimeStateTest,RuntimeStateQueryServiceTest,AdmissionSettlementFactTest,LaneAdmissionAggregateTest,ReplacementAdmissionEventTest,SharedProductLineSnapshotContractTest,CoreNativeSnapshotProductLineTest,Algo*Test,OrderServiceTest,OrderControllerTest,OrderAeronGatewayTest,AeronOrderCommandServiceTest,OrderPlacementStateServiceTest,StableOrderIdentityTest,LocalBusinessApiTest",
+    "-Dsurefire.failIfNoSpecifiedTests=false",
+    "test"
+  ],
+  "exitCode": 0,
+  "elapsedSeconds": 65.68,
+  "totals": {
+    "tests": 355,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "suites": [
+    {
+      "suite": "com.surprising.aeron.service.orchestration.CommittedTradeReplayTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.orchestration.CoreAlgoLaneQueryTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.orchestration.CoreNativeSnapshotProductLineTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.orchestration.SharedProductLineSnapshotContractTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.state.AdmissionSettlementFactTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.state.LaneAdmissionAggregateTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.state.ReplacementAdmissionEventTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.state.RuntimeStateBusinessRulesTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 36,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.state.RuntimeStateQueryServiceTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.state.RuntimeStateTransitionsTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.aeron.service.state.TradingRuntimeStateTest",
+      "module": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 62,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+      "module": "surprising-gateway",
+      "tests": 35,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.trading.order.controller.OrderControllerTest",
+      "module": "surprising-gateway",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.trading.order.repository.AlgoOrderProjectionPostgresTest",
+      "module": "surprising-gateway",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.trading.order.service.AeronOrderCommandServiceTest",
+      "module": "surprising-gateway",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.trading.order.service.AlgoOrderCancellationTest",
+      "module": "surprising-gateway",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.trading.order.service.AlgoOrderServiceTest",
+      "module": "surprising-gateway",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.trading.order.service.OrderAeronGatewayTest",
+      "module": "surprising-gateway",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.trading.order.service.OrderPlacementStateServiceTest",
+      "module": "surprising-gateway",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.trading.order.service.OrderServiceTest",
+      "module": "surprising-gateway",
+      "tests": 124,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "com.surprising.trading.order.service.StableOrderIdentityTest",
+      "module": "surprising-gateway",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "postgres": {
+    "isolation": "本轮新建独立数据库；仅从 init.sql 建立三张投影表及其索引，测试使用独立 schema",
+    "tests": 5,
+    "skipped": 0
+  },
+  "scope": [
+    "算法创建已提交回执与父单查询、产品和用户隔离、终态父单与 int64 身份",
+    "迟到子单冻结前拒绝、取消/执行到期、丢失回包子单恢复",
+    "普通订单、稳定身份、MVC/local 路由、六产品线状态与快照契约"
+  ],
+  "notRun": [
+    "未重复模块合并阶段的完整 reactor clean verify",
+    "未启动真实交易与做市业务链路；未执行多 gateway 实栈竞态、设备或生产升级验收"
+  ],
+  "logSha256": "42b488223399aa8e0ccc69af2167d0035afb7f54815296527e01b619925f9c57",
+  "cleanup": {
+    "isolatedDatabaseDropped": true,
+    "generatedReportsRemoved": 42,
+    "temporaryHarnessAndLogRemoved": true,
+    "sharedPostgresPreserved": true,
+    "businessServicesStarted": false
+  }
+}

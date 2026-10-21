@@ -129,6 +129,11 @@ public class OrderService {
         return aeronOrders.place(prepareOrder(request));
     }
 
+    OrderResponse placeAlgoChild(PlaceOrderRequest request) {
+        requireAeron();
+        return aeronOrders.place(prepareOrder(request, true));
+    }
+
     public OrderCommandReceipt placeCommand(PlaceOrderRequest request) {
         requireAeron();
         PlaceOrderRequest prepared = prepareOrder(request);
@@ -143,7 +148,13 @@ public class OrderService {
     }
 
     private PlaceOrderRequest prepareOrder(PlaceOrderRequest request) {
+        return prepareOrder(request, false);
+    }
+
+    private PlaceOrderRequest prepareOrder(PlaceOrderRequest request, boolean algoChild) {
         PlaceOrderRequest normalized = normalize(request);
+        if (normalized.clientOrderId().startsWith("algo-") != algoChild)
+            throw new IllegalArgumentException("clientOrderId uses the reserved algo child namespace");
         InstrumentRule instrument = orderValidator.currentRule(normalized.instrumentId()).orElse(null);
         ValidationResult validation = instrument == null
                 ? orderValidator.validate(normalized)

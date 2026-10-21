@@ -10,6 +10,32 @@ public final class RuntimeAlgoOrderStateTransitions {
     private RuntimeAlgoOrderStateTransitions() {
     }
 
+    /** Child admission shares the parent's Account Lane and cancellation cursor. */
+    static void requireChildAdmission(AccountLaneState lane, long userId, ResolvedPlaceOrder child) {
+        String key = child.clientOrderId();
+        if (key == null || !key.startsWith("algo-")) return;
+        int separator = key.lastIndexOf('-');
+        long id; int slice;
+        try {
+            id = Long.parseLong(key.substring(5, separator));
+            slice = Integer.parseInt(key.substring(separator + 1));
+        } catch (RuntimeException invalid) {
+            throw new CoreStateRejectedException("INVALID_ALGO_CHILD", "invalid algo child identity");
+        }
+        var parent = lane.cold.algoOrders.get(id);
+        if (parent == null || !("algo-" + id + "-" + slice).equals(key)
+                || parent.userId() != userId || parent.statusCode() >= 2
+                || !parent.instrumentId().equals(child.instrumentId()) || parent.side() != child.side()
+                || slice != parent.childOrderIds().size() || parent.pendingClosedChildId() != 0
+                || child.quantitySteps() > parent.childQuantitySteps()
+                || child.quantitySteps() > parent.quantitySteps() - parent.retiredExecutedQuantitySteps()) {
+            throw new CoreStateRejectedException("INVALID_ALGO_CHILD", "algo parent cannot admit this child");
+        }
+        var active = lane.orders.get(parent.currentOrderId());
+        if (active != null && !active.status().terminal())
+            throw new CoreStateRejectedException("INVALID_ALGO_CHILD", "algo child is still active");
+    }
+
     /** Fold the execution into its parent on the same settlement Lane before recycling the child. */
     static void retireChild(AccountLaneState lane, RuntimeIdentityRegistry identities,
                             OrderRuntime child, LaneCommitDelta changes) {
@@ -86,7 +112,8 @@ public final class RuntimeAlgoOrderStateTransitions {
             if (next.childOrderIds().size() > current.childOrderIds().size()) {
                 OrderRuntime child = runtime.order(next.childOrderIds().getLast());
                 if ((child == null && current.pendingClosedChildId() != next.childOrderIds().getLast())
-                        || (child != null && (child.userId() != userId || child.symbolId() != symbolId))) {
+                        || (child != null && (child.userId() != userId || child.symbolId() != symbolId
+                        || !("algo-"+current.algoOrderId()+"-"+current.childOrderIds().size()).equals(child.clientOrderId())))) {
                     throw new CoreStateRejectedException("INVALID_ALGO_CHILD",
                             "algo child order is not authoritative");
                 }

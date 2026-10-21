@@ -39,6 +39,7 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class AlgoOrderService {
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(AlgoOrderService.class);
 
     private static final int MAX_OPEN_CANCEL_LIMIT = 1000;
 
@@ -46,16 +47,19 @@ public class AlgoOrderService {
     private final OrderService orderService;
     private final AeronAlgoOrderStore store;
     private final com.surprising.trading.order.repository.AlgoOrderProjectionRepository projection;
+    private final com.surprising.trading.order.repository.AeronOrderProjectionRepository receipts;
 
     @Autowired
     public AlgoOrderService(TradingOrderProperties properties,
                             OrderService orderService,
                             AeronAlgoOrderStore store,
-                            com.surprising.trading.order.repository.AlgoOrderProjectionRepository projection) {
+                            com.surprising.trading.order.repository.AlgoOrderProjectionRepository projection,
+                            com.surprising.trading.order.repository.AeronOrderProjectionRepository receipts) {
         this.properties = properties;
         this.orderService = orderService;
         this.store = store;
         this.projection = projection;
+        this.receipts = receipts;
     }
 
     public AlgoOrderResponse place(PlaceAlgoOrderRequest request) {
@@ -87,7 +91,7 @@ public class AlgoOrderService {
         if (isTerminal(record.status())) {
             return store.response(store.get(record.userId(), record.algoOrderId()));
         }
-        return cancelRecord(record);
+        return cancelRecord(record, null);
     }
 
     public AlgoOrderBatchResponse cancelOpen(CancelOpenAlgoOrdersRequest request) {
@@ -112,12 +116,30 @@ public class AlgoOrderService {
         return batchResponse(results);
     }
 
-    public AlgoOrderResponse get(long algoOrderId) {
-        AlgoOrderRecord record = store.query(0, "", 0, 1000).stream()
-                .filter(value -> value.algoOrderId() == algoOrderId).findFirst().map(store::record)
-                .orElseThrow(() -> new IllegalStateException("算法单不存在: " + algoOrderId));
-        requireCurrentProductLine(record);
-        return store.response(store.get(record.userId(), record.algoOrderId()));
+    public AlgoOrderResponse get(long userId, long algoOrderId) {
+        var view = projection.byId(currentProductLine(), userId, algoOrderId);
+        if (view == null) throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.NOT_FOUND, "algo order is not present in the committed read view");
+        return store.response(view);
+    }
+
+    public com.surprising.trading.api.model.AlgoOrderSubmissionResponse submission(long userId, String clientKey) {
+        String key = emptyToNull(clientKey);
+        if (key == null || key.length() > 64) throw new IllegalArgumentException("clientAlgoOrderId is required and must be at most 64 characters");
+        var product = currentProductLine();
+        var command = StableOrderIdentity.algoCommandId(product, userId, key);
+        long id = StableOrderIdentity.algoOrderId(product, userId, key);
+        var receipt = receipts.algoSubmission(product, userId, command);
+        var parent = projection.byClient(product, userId, key);
+        boolean terminal = "TERMINAL".equals(receipt.outcome());
+        if (parent != null && (parent.algoOrderId() != id || terminal && !"NONE".equals(receipt.code())))
+            throw new IllegalStateException("conflicting committed algo creation facts");
+        // A retained parent is also definitive evidence of creation, even when a snapshot
+        // predates receipt retention. A missing parent/receipt never proves non-admission.
+        boolean accepted = parent != null || terminal && "NONE".equals(receipt.code());
+        return new com.surprising.trading.api.model.AlgoOrderSubmissionResponse(userId, product, key, id, command,
+                accepted || terminal ? "TERMINAL" : "RESULT_UNKNOWN", accepted ? "NONE" : receipt.code(),
+                parent == null ? null : store.response(parent));
     }
 
     public int cancelLifecycleOrders(String instrumentId, int limit) {
@@ -126,7 +148,7 @@ public class AlgoOrderService {
                         Math.max(1, Math.min(limit, MAX_OPEN_CANCEL_LIMIT))).stream()
                 .filter(value -> !isTerminal(AlgoOrderStatus.values()[value.statusCode()]))
                 .map(store::record).toList();
-        orders.forEach(this::cancelRecord);
+        orders.forEach(order -> cancelRecord(order, null));
         return orders.size();
     }
 
@@ -160,11 +182,13 @@ public class AlgoOrderService {
         var due = store.query(0, "", now.toEpochMilli(),
                         Math.max(1, properties.getAlgo().getClaimBatchSize())).stream()
                 .filter(value -> value.statusCode() == AlgoOrderStatus.PENDING.ordinal()
-                        || value.statusCode() == AlgoOrderStatus.RUNNING.ordinal())
+                        || value.statusCode() == AlgoOrderStatus.RUNNING.ordinal()
+                        || value.statusCode() == AlgoOrderStatus.CANCEL_REQUESTED.ordinal())
                 .toList();
         for (var candidate : due) {
             AlgoOrderRecord record = store.record(candidate);
-            AlgoOrderRecord claimed = withStatus(record, AlgoOrderStatus.RUNNING, null,
+            AlgoOrderRecord claimed = withStatus(record, record.status() == AlgoOrderStatus.CANCEL_REQUESTED
+                    ? AlgoOrderStatus.CANCEL_REQUESTED : AlgoOrderStatus.RUNNING, record.rejectReason(),
                     now.plus(lease), null, now, record.currentOrderId());
             var claimedView = store.tryClaim(candidate, claimed);
             if (claimedView == null) {
@@ -173,38 +197,50 @@ public class AlgoOrderService {
             try {
                 executeDue(store.record(claimedView), now);
             } catch (RuntimeException ex) {
-                update(withStatus(store.record(claimedView), AlgoOrderStatus.FAILED, ex.getMessage(),
-                        null, now, now, claimedView.currentOrderId()), claimedView.childOrderIds());
+                // A lost placement/cancellation reply cannot prove failure. Keep the claim;
+                // the next attempt recovers its immutable child key before doing more work.
+                LOG.warn("algo step awaits recovery userId={} algoOrderId={}", claimedView.userId(), claimedView.algoOrderId(), ex);
             }
         }
     }
 
     void executeDue(AlgoOrderRecord record, Instant now) {
         var current = store.get(record.userId(), record.algoOrderId());
+        if (current.statusCode() == AlgoOrderStatus.CANCEL_REQUESTED.ordinal()) {
+            cancelRecord(store.record(current), null);
+            return;
+        }
+        if (isTerminal(AlgoOrderStatus.values()[current.statusCode()])) return;
+        current = recoverUnlinkedChild(current);
+        record = store.record(current);
         AlgoOrderProgress progress = store.progress(current);
         if (progress.executedQuantitySteps() >= record.quantitySteps()
                 && progress.activeChildOrderCount() == 0) {
-        update(withStatus(record, AlgoOrderStatus.COMPLETED, null,
+            update(withStatus(record, AlgoOrderStatus.COMPLETED, null,
                     null, now, now, record.currentOrderId()), current.childOrderIds());
             return;
         }
+        if (!now.isBefore(record.startAt().plusSeconds(record.durationSeconds()))) {
+            cancelRecord(record, "执行时长已结束");
+            return;
+        }
         if (progress.activeChildOrderCount() > 0) {
-        update(withStatus(record, AlgoOrderStatus.RUNNING, null,
+            update(withStatus(record, AlgoOrderStatus.RUNNING, null,
                     now.plusMillis(properties.getAlgo().getScanDelayMs()), null, now, record.currentOrderId()), current.childOrderIds());
             return;
         }
 
         long remainingTarget = Math.subtractExact(record.quantitySteps(), progress.executedQuantitySteps());
         if (remainingTarget <= 0L) {
-        update(withStatus(record, AlgoOrderStatus.COMPLETED, null,
+            update(withStatus(record, AlgoOrderStatus.COMPLETED, null,
                     null, now, now, record.currentOrderId()), current.childOrderIds());
             return;
         }
         long childQuantity = Math.min(record.childQuantitySteps(), remainingTarget);
         PlaceOrderRequest childRequest = childRequest(record, progress.nextSliceIndex(), childQuantity);
-        OrderResponse child = orderService.place(childRequest);
+        OrderResponse child = orderService.placeAlgoChild(childRequest);
         if (child.status() == OrderStatus.REJECTED) {
-        update(withStatus(record, AlgoOrderStatus.FAILED, child.rejectReason(),
+            update(withStatus(record, AlgoOrderStatus.FAILED, child.rejectReason(),
                     null, now, now, null), current.childOrderIds());
             return;
         }
@@ -218,7 +254,7 @@ public class AlgoOrderService {
 
     // Share the existing scheduler monitor: finish linking any locally submitted child
     // before recording cancellation, then refresh the revision and child identities.
-    private synchronized AlgoOrderResponse cancelRecord(AlgoOrderRecord record) {
+    private synchronized AlgoOrderResponse cancelRecord(AlgoOrderRecord record, String requestedReason) {
         var current = store.get(record.userId(), record.algoOrderId());
         record = store.record(current);
         requireCurrentProductLine(record);
@@ -226,9 +262,11 @@ public class AlgoOrderService {
             return store.response(current);
         }
         Instant now = Instant.now();
-        AlgoOrderRecord requested = withStatus(record, AlgoOrderStatus.CANCEL_REQUESTED, null,
-                null, null, now, record.currentOrderId());
+        String reason = requestedReason == null ? record.rejectReason() : requestedReason;
+        AlgoOrderRecord requested = withStatus(record, AlgoOrderStatus.CANCEL_REQUESTED, reason,
+                now.plusSeconds(1), null, now, record.currentOrderId());
         update(requested, current.childOrderIds());
+        current = recoverUnlinkedChild(store.get(record.userId(), record.algoOrderId()));
         RuntimeException cancellationFailure = null;
         for (AlgoOrderChild child : store.children(current)) {
             try {
@@ -238,14 +276,29 @@ public class AlgoOrderService {
             }
         }
         current = store.get(record.userId(), record.algoOrderId());
+        if (isTerminal(AlgoOrderStatus.values()[current.statusCode()])) return store.response(current);
         if (current.activeChildOrderCount() > 0) {
             if (cancellationFailure != null) throw cancellationFailure;
             return store.response(current);
         }
-        AlgoOrderRecord canceled = withStatus(requested, AlgoOrderStatus.CANCELED, null,
-                null, now, Instant.now(), record.currentOrderId());
+        AlgoOrderRecord canceled = withStatus(store.record(current), AlgoOrderStatus.CANCELED, reason,
+                null, now, Instant.now(), current.currentOrderId() == 0 ? null : current.currentOrderId());
         update(canceled, current.childOrderIds());
         return store.response(store.get(canceled.userId(), canceled.algoOrderId()));
+    }
+
+    private com.surprising.aeron.protocol.CoreAlgoOrderView recoverUnlinkedChild(com.surprising.aeron.protocol.CoreAlgoOrderView parent) {
+        var child = store.unlinkedChild(parent);
+        if (child == null) return parent;
+        String key = childClientOrderId(parent.algoOrderId(), parent.childOrderIds().size());
+        if (child.userId() != parent.userId() || !child.instrumentId().equals(parent.instrumentId())
+                || !key.equals(child.clientOrderId())) throw new IllegalStateException("algo child recovery identity mismatch");
+        var children = new ArrayList<Long>(parent.childOrderIds());
+        children.add(child.orderId());
+        var record = store.record(parent);
+        store.upsert(withStatus(record, record.status(), record.rejectReason(), record.nextSliceAt(),
+                record.completedAt(), Instant.now(), child.orderId()), children, parent.revision() + 1);
+        return store.get(parent.userId(), parent.algoOrderId());
     }
 
     private PlaceOrderRequest childRequest(AlgoOrderRecord record, int sliceIndex, long quantitySteps) {
@@ -306,7 +359,8 @@ public class AlgoOrderService {
         if (request.algoType() == AlgoOrderType.TWAP) {
             long maxSlices = (request.durationSeconds() + request.intervalSeconds() - 1L)
                     / request.intervalSeconds();
-            long minChild = (request.quantitySteps() + maxSlices - 1L) / maxSlices;
+            long minChild = request.quantitySteps() / maxSlices
+                    + (request.quantitySteps() % maxSlices == 0 ? 0 : 1);
             if (request.childQuantitySteps() < minChild) {
                 throw new IllegalArgumentException("childQuantitySteps is too small to finish TWAP inside durationSeconds");
             }

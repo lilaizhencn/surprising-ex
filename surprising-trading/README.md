@@ -195,6 +195,17 @@ REST 接口：
 - `POST /api/v1/trading/orders/algo/cancel-open`
 - `GET /api/v1/trading/orders/algo/{algoOrderId}`
 - `GET /api/v1/trading/orders/algo/open`
+- `GET /api/v1/trading/orders/algo/submission?clientAlgoOrderId=<原请求号>`
+
+按算法单 ID 查询和创建结果恢复均按当前认证用户、产品线读取 realtime 已提交投影，
+不会回查在线 Core。创建结果尚未确认时返回 202 `RESULT_UNKNOWN`，已确认返回 200，
+恢复响应使用 `no-store`；投影未初始化或不可用返回 503。详见
+[算法委托查询与恢复](../docs/algo-read-projection.md)。
+
+子单使用保留的 `algo-<父单号>-<切片序号>` 客户端标识，普通下单入口不能使用该前缀。
+调度回包丢失时先从 Core 恢复同一切片，避免重复发单；父单进入取消中后，
+Account Lane 拒绝迟到子单，拒绝发生在冻结之前。执行时长结束会先撤活动子单，
+确认活动数量归零后再终结父单。
 
 ## 止盈、止损和追踪止损
 

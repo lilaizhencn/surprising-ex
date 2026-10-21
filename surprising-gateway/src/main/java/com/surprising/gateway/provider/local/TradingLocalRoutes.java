@@ -54,6 +54,7 @@ public final class TradingLocalRoutes {
     private static final PathPattern AMENDMENT = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/amendments");
     private static final PathPattern CANCELLATION = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/cancellations/{orderId}");
     private static final PathPattern SUBMISSION = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/submission");
+    private static final PathPattern ALGO_SUBMISSION = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/algo/submission");
     private static final PathPattern PRICE_PROTECTION = PathPatternParser.defaultInstance.parse("/api/v1/trading/orders/price-protection");
     private static final PathPattern EFFECTIVE_FEE = PathPatternParser.defaultInstance.parse("/api/v1/trading/fees/effective");
     private static final PathPattern ADMIN_MAINTENANCE_CONTROLLER_LIST = PathPatternParser.defaultInstance.parse("/api/v1/admin/trading/orders/maintenance");
@@ -163,6 +164,8 @@ public final class TradingLocalRoutes {
                 r.query("userId", long.class, null, true), r.path("orderId", long.class));
         if (r.matches(HttpMethod.GET, SUBMISSION)) return orderRequests.submission(
                 r.query("userId", long.class, null, true), r.query("clientOrderId", String.class, null, true));
+        if (r.matches(HttpMethod.GET, ALGO_SUBMISSION)) return orderRequests.algoSubmission(
+                r.query("userId", long.class, null, true), r.query("clientAlgoOrderId", String.class, null, true));
         if (r.matches(HttpMethod.GET, PRICE_PROTECTION)) return orderRequests.priceProtection();
         if (r.matches(HttpMethod.GET, ORDER_BOOK)) {
             return marketDataService.orderBookSnapshot(r.query("instrumentId", String.class, null, true),
@@ -421,7 +424,7 @@ public final class TradingLocalRoutes {
             return orderRequests.commandResult(r.query("userId", long.class, null, true), r.path("commandId", UUID.class));
         }
         if (r.matches(HttpMethod.GET, ORDER_CONTROLLER_GETALGO)) {
-            return orderRequests.getAlgo(r.path("algoOrderId", long.class));
+            return orderRequests.getAlgo(r.query("userId", long.class, null, true), r.path("algoOrderId", long.class));
         }
         if (r.matches(HttpMethod.GET, ORDER_CONTROLLER_GET)) {
             return orderRequests.get(r.query("userId", long.class, null, true),

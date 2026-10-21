@@ -58,6 +58,7 @@
 /api/v1/trading/orders/algo/cancel
 /api/v1/trading/orders/algo/cancel-open
 /api/v1/trading/orders/algo/open
+/api/v1/trading/orders/algo/submission
 /api/v1/trading/orders/algo/{algoOrderId}
 /api/v1/trading/orders/amend
 /api/v1/trading/orders/batch

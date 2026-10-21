@@ -96,16 +96,24 @@ public final class AlgoOrderIndex {
     }
 
     private void add(CoreAlgoOrderState value) {
+        long due = value.nextSliceAtEpochMillis() > 0 ? value.nextSliceAtEpochMillis() : value.startAtEpochMillis();
+        if (value.statusCode() < 2) {
+            long duration = value.durationSeconds();
+            long deadline = duration > (Long.MAX_VALUE - value.startAtEpochMillis()) / 1000
+                    ? Long.MAX_VALUE : value.startAtEpochMillis() + duration * 1000;
+            due = Math.min(due, deadline);
+        }
         AlgoRoute route = new AlgoRoute(value.algoOrderId(), value.userId(), InstrumentIds.parse(value.instrumentId()),
-                value.nextSliceAtEpochMillis(), value.clientAlgoOrderId());
+                due, value.clientAlgoOrderId());
         valuesById.put(value.algoOrderId(), route);
-        AlgoDueKey key = new AlgoDueKey(value.nextSliceAtEpochMillis(), value.algoOrderId());
-        allDue.add(key);
-        idsByUser.computeIfAbsent(value.userId(), ignored -> new TreeSet<>(DUE_ORDER)).add(key);
-        idsBySymbol.computeIfAbsent(route.instrumentId(), ignored -> new TreeSet<>(DUE_ORDER)).add(key);
         if (!value.clientAlgoOrderId().isEmpty()) {
             idsByClient.put(new AlgoClientKey(value.userId(), value.clientAlgoOrderId()), value.algoOrderId());
         }
+        if (value.terminal()) return;
+        AlgoDueKey key = new AlgoDueKey(due, value.algoOrderId());
+        allDue.add(key);
+        idsByUser.computeIfAbsent(value.userId(), ignored -> new TreeSet<>(DUE_ORDER)).add(key);
+        idsBySymbol.computeIfAbsent(route.instrumentId(), ignored -> new TreeSet<>(DUE_ORDER)).add(key);
     }
 
     private void remove(AlgoRoute value) {

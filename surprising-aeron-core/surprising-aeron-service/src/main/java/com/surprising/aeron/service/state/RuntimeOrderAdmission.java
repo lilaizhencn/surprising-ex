@@ -125,6 +125,7 @@ public final class RuntimeOrderAdmission {
             long clientKey, int symbolId, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol, CoreInstrument queryInstrument) {
         runtime.requireLaneAccess(lane, userId);
+        RuntimeAlgoOrderStateTransitions.requireChildAdmission(lane, userId, order);
         if (lane.orders.get(order.orderId()) != null && order.orderId() != excludedOrderId) {
             throw rejected("DUPLICATE_ORDER_ID", "orderId already exists");
         }

@@ -27,13 +27,40 @@ public final class AlgoOrderProjectionRepository {
         }
         sql.append(" ORDER BY created_at_epoch_ms DESC,algo_order_id DESC LIMIT ?"); args.add(limit);
         try {
-            if (!Integer.valueOf(1).equals(jdbc.queryForObject(
-                    "SELECT count(*) FROM core_algo_projection_initialization WHERE product_line=?", Integer.class, product.name())))
-                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "ALGO_READ_VIEW_INITIALIZING");
+            requireReady(product);
             return jdbc.query(sql.toString(), this::decode, args.toArray());
         } catch (DataAccessException unavailable) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "ALGO_READ_VIEW_UNAVAILABLE", unavailable);
         }
+    }
+
+    public CoreAlgoOrderView byId(ProductLine product, long userId, long id) {
+        if (id <= 0) throw new IllegalArgumentException("algoOrderId must be positive");
+        return one(product, userId, "algo_order_id", id);
+    }
+
+    public CoreAlgoOrderView byClient(ProductLine product, long userId, String key) {
+        if (key == null || key.isBlank() || key.length() > 64)
+            throw new IllegalArgumentException("clientAlgoOrderId is required and must be at most 64 characters");
+        return one(product, userId, "client_algo_order_id", key);
+    }
+
+    private CoreAlgoOrderView one(ProductLine product, long userId, String column, Object identity) {
+        if (product == null || userId <= 0) throw new IllegalArgumentException("invalid algo owner");
+        try {
+            requireReady(product);
+            var rows = jdbc.query("SELECT * FROM core_algo_order_projection WHERE product_line=? AND user_id=? AND "
+                    + column + "=?", this::decode, product.name(), userId, identity);
+            return rows.isEmpty() ? null : rows.getFirst();
+        } catch (DataAccessException unavailable) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "ALGO_READ_VIEW_UNAVAILABLE", unavailable);
+        }
+    }
+
+    private void requireReady(ProductLine product) {
+        if (!Integer.valueOf(1).equals(jdbc.queryForObject(
+                "SELECT count(*) FROM core_algo_projection_initialization WHERE product_line=?", Integer.class, product.name())))
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "ALGO_READ_VIEW_INITIALIZING");
     }
 
     private CoreAlgoOrderView decode(java.sql.ResultSet rs, int row) throws java.sql.SQLException {

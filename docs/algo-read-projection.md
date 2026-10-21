@@ -35,3 +35,31 @@
 移动端后续已补齐现货策略列表、用户/产品/永久合约校验、整数精度、资料缺失提示及取消中展示，按此既有接口查询，不新增 Core 查询。原创建请求恢复与现货创建入口仍待实现；端侧验证见 [client 验证记录](validation/spot-algo-client-orders-20261020.json)。
 
 本轮验证单 gateway 的调度/撤销序列，多 gateway 的在途子单关联竞态尚未验收。本轮不代表原生设备、生产升级或全部产品验收。
+
+## 创建恢复与调度补充（2026-10-21）
+
+`OrderInternalController` 与 `TradingLocalRoutes` 补充
+`GET /api/v1/trading/orders/algo/submission?clientAlgoOrderId=<原请求号>`，
+由 `OrderRequestService.algoSubmission` 返回 200 或 202，并设置 `no-store`。
+`AlgoOrderService.submission` 使用原产品、认证用户和客户端业务键生成稳定创建身份，
+只读取 `AeronOrderProjectionRepository.algoSubmission` 的已提交创建回执和
+`AlgoOrderProjectionRepository.byClient` 的父单投影。缺少回执和父单不代表创建失败，
+返回 `RESULT_UNKNOWN`；保留的父单可独立证明创建成功，互相矛盾的已提交事实明确报错。
+按父单 ID 查询也改为按用户读取 SQL 投影，终态父单仍可查询，不再扫描 Core 的调度队列。
+这里补齐的是后端恢复接口，客户端创建交互仍应按各端实际实现单独验收。
+
+`AlgoOrderService.executeDue` 在再次下单前通过原切片的稳定客户端标识恢复未关联子单。
+立即成交并被回收的子单由 `RuntimeOperationalQueryService` 将已有待关联终态子单 ID
+纳入查询结果，不另存一份历史。请求或撤单回包异常会保留可恢复的调度状态，
+下一轮继续处理，不直接把未知结果判为失败。Core 的 `AlgoOrderIndex` 让执行截止时间
+优先于调度租约，并将终态父单移出待执行索引；身份索引仍保留，用于幂等和定点查询。
+
+`OrderService` 区分普通下单与内部算法子单，保留 `algo-` 前缀。
+`RuntimeAlgoOrderStateTransitions.requireChildAdmission` 在所属 Account Lane 的冻结前
+检查父单归属、状态、币对、方向、切片序号、数量和活动子单，阻止取消后的迟到下单。
+到期处理和用户撤单均先记录取消中，再撤实际活动子单，活动数量归零后才写终态。
+这些变更不改变交易状态的持久化字段或协议格式，也不引入新的资金账本。
+
+提交前使用 HotSpot JDK 27 执行 355 项定向测试，全部通过，无跳过；其中 5 项使用
+本轮独立 PostgreSQL 数据库验证投影。未启动真实交易与做市业务链路，未验收多 gateway
+实栈竞态或生产升级。[测试范围与清理记录](validation/algo-order-commit-20261021.json)。
