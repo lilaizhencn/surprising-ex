@@ -6,10 +6,18 @@
   Gateway 和行情应用复用现有 realtime-api 依赖，原 market-data API 与聚合 POM 已移除。
 - 账户、订单、合约三个 API 由根 POM 直接聚合，直接继承 `surprising-parent`；
   三个中间聚合 POM 已移除。API 的 artifactId、目录、Java 包名与跨进程契约保持不变。
-- 仓库 Maven 工程由 29 个减少至 24 个（18 个 JAR、6 个 POM）。六个运行进程及产品线隔离保持不变。
+- 价格、realtime、衍生品生命周期和 Aeron Core 的四个分组目录也不再保留聚合 POM；
+  根 POM 直接聚合其子模块，所有 JAR 模块直接继承 `surprising-parent`。
+  原价格聚合 POM 管理的两个内部依赖版本改为在使用处显式声明 `${project.version}`。
+- 仓库 Maven 工程由 29 → 24 → 20 个（18 个 JAR、2 个 POM）。六个运行进程及产品线隔离保持不变。
   行情和账户对外读入口继续使用 realtime 视图，Core 保留交易裁决、资金结算及原有控制/恢复边界。
 
-源码入口和验证范围见 [Maven 工程收拢记录](docs/validation/maven-module-consolidation-20261021.json)。
+源码入口和验证范围见 [首轮收拢记录](docs/validation/maven-module-consolidation-20261021.json)
+与 [聚合层清理记录](docs/validation/maven-aggregator-flatten-20261021.json)。
+四个目录继续作为源码分组，构建请从仓库根目录使用 `mvn -pl <实际子模块路径> -am …`，
+不再使用目录级 `-f surprising-price/pom.xml` 或 `-pl :surprising-price` 等旧聚合入口。
+本轮使用 HotSpot JDK 27 完成全量 `clean verify`：3,754 项通过、249 项按原有条件跳过，
+无失败或错误；18 个 JAR 的父 POM 和六个应用启动入口核验通过，未启动真实业务栈。
 
 大额划转验证由 `ProductTransferSecurityService` 按 `assets.scale_units` 把最小单位换算为币种数量后估值，不假定所有币种为 8 位精度。`ProductTransferSecurityServiceTest` 覆盖 6/8/18 位精度、阈值边界及未知币种拒绝；与代理、划转协调器联合 58 项测试通过（HotSpot JDK 27）。
 

@@ -5,6 +5,12 @@
 三个 API 的 artifactId 和 Java 包名不变。K 线共享事件归入 `surprising-realtime-api`，
 market-data API 与聚合 POM 已移除；本页旧版本验证数字仅描述当时的合并结果。
 
+价格、realtime、衍生品生命周期与 Aeron Core 的中间聚合 POM 也已移除。
+根 POM 直接聚合全部 18 个 JAR 模块，统一继承 `surprising-parent`，共 20 个 Maven 工程。
+这些目录只保留源码分组；六类运行进程、包名、JAR 名称及部署路径保持不变。
+从仓库根目录使用实际子模块路径构建，详见
+[聚合层清理记录](validation/maven-aggregator-flatten-20261021.json)。
+
 ## 运行边界
 
 `surprising-gateway` 是统一业务应用，保留现有启动类

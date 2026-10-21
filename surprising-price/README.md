@@ -3,6 +3,10 @@
 
 Surprising Exchange 合约指数价格和标记价格模块。
 
+本目录是源码分组，不再保留中间聚合 POM。三个子模块由仓库根 POM 直接聚合，
+统一继承 `surprising-parent`，artifactId、Java 包名和独立价格进程保持不变。
+构建、测试和增量构建命令均从仓库根目录执行。
+
 ## 模块
 
 - `surprising-price-api`：RPC 合约和 Kafka 事件模型。
@@ -261,7 +265,7 @@ GET /api/v1/price/fx/convert?amount=100&fromCurrency=USDT&toCurrency=CNY
 ## 验证
 
 ```bash
-mvn -pl :surprising-price -am test
+mvn -pl surprising-price/surprising-price-provider -am test
 scripts/build-incremental.sh :surprising-price-provider
 ```
 
