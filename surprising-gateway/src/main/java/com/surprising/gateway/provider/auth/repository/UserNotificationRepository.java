@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth.repository;
 
+import com.surprising.gateway.provider.auth.model.NotificationView;
+import java.util.Optional;
+
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -16,7 +19,6 @@ public class UserNotificationRepository {
     }
 
     public List<NotificationView> findForUser(long userId, boolean unreadOnly, int limit) {
-        int safeLimit = Math.max(1, Math.min(limit, 100));
         return jdbcTemplate.query("""
                 SELECT notification_id, category, title, body, read_at, created_at
                   FROM gateway_user_notifications
@@ -31,19 +33,17 @@ public class UserNotificationRepository {
                 rs.getString("body"),
                 rs.getTimestamp("read_at") == null ? null : rs.getTimestamp("read_at").toInstant(),
                 rs.getTimestamp("created_at").toInstant()),
-                userId, unreadOnly, safeLimit);
+                userId, unreadOnly, limit);
     }
 
-    public NotificationView markRead(long userId, long notificationId, Instant now) {
+    public Optional<NotificationView> markRead(long userId, long notificationId, Instant now) {
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_user_notifications
                    SET read_at = COALESCE(read_at, ?)
                  WHERE user_id = ? AND notification_id = ?
                 """, Timestamp.from(now), userId, notificationId);
-        if (updated == 0) {
-            throw new IllegalArgumentException("notification not found");
-        }
-        return findById(userId, notificationId);
+        if (updated == 0) return Optional.empty();
+        return Optional.of(findById(userId, notificationId));
     }
 
     public int markAllRead(long userId, Instant now) {
@@ -75,11 +75,4 @@ public class UserNotificationRepository {
                 rs.getTimestamp("created_at").toInstant()), userId, notificationId);
     }
 
-    public record NotificationView(long notificationId,
-                                   String category,
-                                   String title,
-                                   String body,
-                                   Instant readAt,
-                                   Instant createdAt) {
-    }
 }

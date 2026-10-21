@@ -1,0 +1,282 @@
+{
+  "verified_at_utc": "2026-10-21T18:46:31.365227+00:00",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16",
+  "scope": "站内通知Controller/Service/Repository和原生查询结果职责",
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=UserNotificationControllerPostgresTest,SecurityNotificationPostgresTest,KycNotificationTransactionPostgresTest,C2cNotificationsPostgresTest,AuthServiceTest,Compliance*Test,Mfa*Test",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.auth.MfaRecoveryServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.controller.UserNotificationControllerPostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.KycNotificationTransactionPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.SecurityNotificationPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.ComplianceServiceTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.ComplianceValidationTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthServiceTest",
+          "tests": 22,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cNotificationsPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.MfaRecoveryDatabaseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "be805f7e3c7a4a3891746aecb703b49f3f9470fd4667cbd9fc1762fd64243ee0",
+      "tests": 63,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=UserNotificationControllerPostgresTest#failedResultReadRollsBackTheStateChangeInsteadOfMarkingItReadPartially",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.auth.controller.UserNotificationControllerPostgresTest",
+          "tests": 1,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "0920e47858b54c74a8e2f0be27f3db52ce261849c10ff11d94645c78770e9c73",
+      "tests": 1,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=UserNotificationControllerPostgresTest,SecurityNotificationPostgresTest,KycNotificationTransactionPostgresTest,C2cNotificationsPostgresTest,Auth*Test,Login*Test,Compliance*Test,Mfa*Test,UserSecurity*Test,GatewayProxyControllerTest,ConstructorInjectionContextTest",
+        "clean",
+        "install"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.auth.MfaRecoveryServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.LoginVerificationSettingsControllerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.LoginVerificationServiceTest",
+          "tests": 27,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.controller.UserNotificationControllerPostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthPersistenceServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.KycNotificationTransactionPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.ConstructorInjectionContextTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.SecurityNotificationPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.UserSecurityControllerTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.ComplianceServiceTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.UserSecurityServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.ComplianceValidationTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthServiceTest",
+          "tests": 22,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthTableBoundariesPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cNotificationsPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.MfaRecoveryDatabaseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.LoginVerificationDatabaseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.GatewayProxyControllerTest",
+          "tests": 39,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "ed37213795f80c57d2c11c4f6670879e4e343b51ec9e29cc1c0734a9b8693612",
+      "tests": 163,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "negative_control": "仅撤去markRead的@Transactional，真实HTTP→Service→PostgreSQL在结果解码失败后出现已读状态残留，1项测试按预期失败；finally逐字节恢复后clean install通过。",
+  "new_abstractions": [
+    {
+      "type": "UserNotificationService",
+      "purpose": "拥有可信用户作用域的已读状态时间和更新/结果读取事务，避免Controller聚合持久化写操作；没有新增接口或状态。"
+    },
+    {
+      "type": "NotificationView",
+      "purpose": "原Repository嵌套查询结果归model，公开字段不变。"
+    }
+  ],
+  "source_proof": {
+    "all_repository_sql_text_blocks_unchanged": true,
+    "single_owned_table": "gateway_user_notifications",
+    "controller_no_repository_type": true
+  },
+  "preserved": [
+    "认证主体作为唯一用户作用域，伪造X-User-Id不起作用，不能读取或更新其他用户通知。",
+    "limit继续夹在1至100，未读过滤和原排序不变；重复已读保留首次read_at。",
+    "缺失/非正通知ID仍404，坏凭证401，缺少必需Authorization仍按MVC400，数据库/内部解码失败不伪装成404。",
+    "批量已读只更新本人未读记录；结果读取失败现在由Service事务保证状态回滚。"
+  ],
+  "unverified": "其余全源码复扫协议/包职责候选、最终架构门禁和真实网关/六集群/做市/资金验收仍未完成。",
+  "cleanup": {
+    "owned_postgres": "已停止并删除",
+    "owned_logs_reports": "本批日志和已汇总Gateway报告已清理，构建产物保留"
+  }
+}

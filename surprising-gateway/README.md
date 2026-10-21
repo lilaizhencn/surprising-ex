@@ -516,3 +516,5 @@ C2C后台的原始请求头、method/path/query、User-Agent和IP由 `c2c.contro
 划转HTTP入口先认证，再直接按BigDecimal绑定金额，验证正整数及long范围，经 `ProductTransferAmount` 的精确long原子单位调用安全估值，随后绑定账户枚举/完整命令并调用资金业务。`ProductTransferSecurityService` 和 `ProductTransferCoordinator` 均不再读JSON或HTTP正文；Command/Result/Status/WireRequest位于provider.model，资金命令使用AccountType原生枚举，公开结果返回规范账户代码。资产精度仍由业务查询资产配置决定。
 
 本机流动性运维入口由 `InternalLiquidityOperationsController` 完成loopback/token、合约自定义格式和请求元数据校验；`LiquidityOperationsService` 检查产品并保证审计意图先持久化、再调用资金/杠杆/合约业务、最后记录结果，审计失败不触发额外资金重试。`LiquidityOperationMetadata` 只包含绑定后的审计事实，不带Servlet或Repository对象。
+
+站内通知由 `UserNotificationController` 绑定认证身份、原limit范围和HTTP结果；`UserNotificationService` 按该用户作用域操作，决定已读时间，并在同一事务内完成单条已读更新及结果读取。`UserNotificationRepository` 仅访问gateway_user_notifications，查询结果 `NotificationView` 位于auth.model，缺失事实由Service转为原生未找到，再由入口映射404。
