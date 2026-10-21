@@ -452,3 +452,8 @@ Core命令字节，重启或结果未知时仍使用原命令身份与原载荷�
 `task.MaintenanceTaskRunner` 保留原1000毫秒默认调度。维护池仍保留独立队列和来源标识，
 六产品线任务不能混用。清场、撤单、部分成交续办、快照恢复与动作/任务写故障由
 `MaintenanceIntegrationTest` 结合真实PostgreSQL和Core验证。
+
+GatewayProxyService、OrderService与TriggerOrderService的依赖统一由唯一实际构造器传入。
+产品选择、本地路由、当前查询视图及历史投影依赖以final字段持有；不使用后续反射填充或
+省略依赖的生产便捷构造器。六产品Spring接线和查询不回Core的验证见
+[网关注入验证](../docs/validation/java-mvc-injection-gateway-20261021.json)。

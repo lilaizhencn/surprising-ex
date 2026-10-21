@@ -21,7 +21,7 @@ class BboOrderServiceTest {
         var validator = mock(OrderValidator.class);
         var config = new TradingOrderProperties();
         config.getKafka().setProductLine(product);
-        var service = new OrderService(config, validator, null, commands, null, gateway);
+        var service = new OrderService(config, validator, null, commands, null, gateway, null, null, null);
         var levels = new ArrayList<CoreBookLevelView>();
         for (int i = 0; i < 5; i++) {
             levels.add(new CoreBookLevelView("1", CoreOrderSide.BUY, 96 + i, 10, 1));
@@ -52,7 +52,7 @@ class BboOrderServiceTest {
         var commands = mock(AeronOrderCommandService.class);
         var validator = mock(OrderValidator.class);
         var config = new TradingOrderProperties(); config.getKafka().setProductLine(product);
-        var service = new OrderService(config, validator, null, commands, null, gateway);
+        var service = new OrderService(config, validator, null, commands, null, gateway, null, null, null);
         when(gateway.orderBookSnapshot(eq("1"), anyInt())).thenReturn(new OrderBookSnapshotResponse("1", 1, 50, List.of(), List.of(), java.time.Instant.now()));
         assertThatThrownBy(() -> service.place(request(OrderSide.BUY, BboPriceMode.OPPONENT_5, OrderType.LIMIT, 0)))
                 .hasMessageContaining("BBO_DEPTH_UNAVAILABLE");

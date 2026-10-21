@@ -26,20 +26,20 @@ class TriggerOrderIdentityTest {
     void ocoLookupUsesTheExistingProductUserAndOrderedLegIdentity() {
         var core = mock(TriggerOrderAeronGateway.class);
         var option = properties(); option.setProductLine(ProductLine.OPTION);
-        var service = new TriggerOrderService(option, core);
+        var service = new TriggerOrderService(option, core, null, null);
         var id = service.ocoCommandId(1001, "tp", "sl");
         assertThat(id).isEqualTo(UUID.nameUUIDFromBytes("OPTION:OCO:1001:tp:sl".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         assertThat(service.ocoCommandId(1002, "tp", "sl")).isNotEqualTo(id);
         assertThat(service.ocoCommandId(1001, "sl", "tp")).isNotEqualTo(id);
-        assertThat(new TriggerOrderService(properties(), core).ocoCommandId(1001, "tp", "sl")).isNotEqualTo(id);
+        assertThat(new TriggerOrderService(properties(), core, null, null).ocoCommandId(1001, "tp", "sl")).isNotEqualTo(id);
         org.mockito.Mockito.verifyNoInteractions(core);
     }
 
     @Test
     void privateTriggerQueryDoesNotReturnToCoreOnAReadViewMiss() {
-        var gateway=mock(TriggerOrderAeronGateway.class);var service=new TriggerOrderService(properties(),gateway);
-        var queries=mock(TriggerOrderProjectionRepository.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(service,"triggerProjection",queries);
+        var gateway = mock(TriggerOrderAeronGateway.class);
+        var queries = mock(TriggerOrderProjectionRepository.class);
+        var service = new TriggerOrderService(properties(), gateway, null, queries);
         when(queries.get(ProductLine.LINEAR_PERPETUAL,1001L,99L)).thenReturn(java.util.Optional.empty());
         assertThatThrownBy(()->service.get(1001L,99L)).isInstanceOf(IllegalStateException.class);
         org.mockito.Mockito.verifyNoInteractions(gateway);
@@ -48,7 +48,7 @@ class TriggerOrderIdentityTest {
     @Test
     void missingProjectionIsUnavailableForUserAdminAndTimelineWithoutCoreFallback() {
         var gateway = mock(TriggerOrderAeronGateway.class);
-        var service = new TriggerOrderService(properties(), gateway);
+        var service = new TriggerOrderService(properties(), gateway, null, null);
         assertThatThrownBy(() -> service.get(1001L, 99L)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
         assertThatThrownBy(() -> service.get(99L, ProductLine.LINEAR_PERPETUAL)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
         assertThatThrownBy(() -> service.adminOrders(null, null, null, null, 10)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
@@ -60,8 +60,7 @@ class TriggerOrderIdentityTest {
     void terminalDetailsAndActualPriceSourceComeFromProjectionWithoutCoreReads() {
         var core = mock(TriggerOrderAeronGateway.class);
         var projection = mock(TriggerOrderProjectionRepository.class);
-        var service = new TriggerOrderService(properties(), core);
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "triggerProjection", projection);
+        var service = new TriggerOrderService(properties(), core, null, projection);
         var state = new CoreTriggerOrderStateView(Long.MAX_VALUE, ProductLine.LINEAR_PERPETUAL, 1001,
                 "client", "oco", "1", com.surprising.aeron.protocol.CoreOrderSide.SELL,
                 com.surprising.aeron.protocol.CoreTriggerOrderType.TAKE_PROFIT,
@@ -88,8 +87,8 @@ class TriggerOrderIdentityTest {
                 .thenAnswer(invocation -> invocation.<CoreTriggerOrderStateView>getArgument(2)
                         .materializeCreation(1_700_000_000_000L));
 
-        var first = new TriggerOrderService(properties, gateway).place(request("trigger-client"));
-        var reconstructed = new TriggerOrderService(properties, gateway).place(request("trigger-client"));
+        var first = new TriggerOrderService(properties, gateway, null, null).place(request("trigger-client"));
+        var reconstructed = new TriggerOrderService(properties, gateway, null, null).place(request("trigger-client"));
 
         assertThat(reconstructed.triggerOrderId()).isEqualTo(first.triggerOrderId());
         assertThat(reconstructed.createdAt()).isEqualTo(first.createdAt());
@@ -106,7 +105,7 @@ class TriggerOrderIdentityTest {
                 OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS,
                 PositionSide.NET, null, TriggerPriceSource.INDEX);
 
-        assertThat(new TriggerOrderService(properties(), gateway).place(request).priceSource())
+        assertThat(new TriggerOrderService(properties(), gateway, null, null).place(request).priceSource())
                 .isEqualTo(TriggerPriceSource.INDEX);
         org.mockito.Mockito.verify(gateway).place(any(UUID.class), eq(1001L),
                 org.mockito.ArgumentMatchers.argThat(view ->
@@ -115,7 +114,7 @@ class TriggerOrderIdentityTest {
 
     @Test
     void rejectsMissingClientTriggerOrderIdBeforeCoreSubmission() {
-        TriggerOrderService service = new TriggerOrderService(properties(), mock(TriggerOrderAeronGateway.class));
+        TriggerOrderService service = new TriggerOrderService(properties(), mock(TriggerOrderAeronGateway.class), null, null);
 
         assertThatThrownBy(() -> service.place(request(" ")))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -128,7 +127,7 @@ class TriggerOrderIdentityTest {
         when(gateway.placeOcoPair(any(UUID.class), eq(1001L), any()))
                 .thenAnswer(call -> call.<java.util.List<CoreTriggerOrderStateView>>getArgument(2).stream()
                         .map(view -> view.materializeCreation(1_700_000_000_000L)).toList());
-        var service = new TriggerOrderService(properties(), gateway);
+        var service = new TriggerOrderService(properties(), gateway, null, null);
         var result = service.placeBatch(new com.surprising.trading.api.model.BatchPlaceTriggerOrderRequest(
                 java.util.List.of(leg("sl", TriggerOrderType.STOP_LOSS, 50_000),
                         leg("tp", TriggerOrderType.TAKE_PROFIT, 70_000)), true));
@@ -143,7 +142,7 @@ class TriggerOrderIdentityTest {
     @Test
     void malformedAtomicPairIsRejectedBeforeSendingEitherLeg() {
         var gateway = mock(TriggerOrderAeronGateway.class);
-        var service = new TriggerOrderService(properties(), gateway);
+        var service = new TriggerOrderService(properties(), gateway, null, null);
         assertThatThrownBy(() -> service.placeBatch(new com.surprising.trading.api.model.BatchPlaceTriggerOrderRequest(
                 java.util.List.of(leg("sl", TriggerOrderType.STOP_LOSS, 70_000),
                         leg("tp", TriggerOrderType.TAKE_PROFIT, 50_000)), true)))

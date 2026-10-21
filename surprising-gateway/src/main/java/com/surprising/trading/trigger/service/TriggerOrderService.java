@@ -44,10 +44,8 @@ import org.springframework.stereotype.Service;
 @Service
 @Slf4j
 public class TriggerOrderService {
-    @org.springframework.beans.factory.annotation.Autowired
-    private com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
-    @org.springframework.beans.factory.annotation.Autowired
-    private TriggerOrderProjectionRepository triggerProjection;
+    private final com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
+    private final TriggerOrderProjectionRepository triggerProjection;
 
     private static final long MIN_TRAILING_CALLBACK_RATE_PPM = 1_000L;
     private static final long MAX_TRAILING_CALLBACK_RATE_PPM = 100_000L;
@@ -56,7 +54,11 @@ public class TriggerOrderService {
     private final TriggerOrderAeronGateway aeronGateway;
 
     public TriggerOrderService(TriggerProperties properties,
-                               TriggerOrderAeronGateway aeronGateway) {
+                               TriggerOrderAeronGateway aeronGateway,
+                               com.surprising.realtime.api.ValkeyUserQueries realtimeQueries,
+                               TriggerOrderProjectionRepository triggerProjection) {
+        this.realtimeQueries = realtimeQueries;
+        this.triggerProjection = triggerProjection;
         this.properties = properties;
         this.aeronGateway = aeronGateway;
     }

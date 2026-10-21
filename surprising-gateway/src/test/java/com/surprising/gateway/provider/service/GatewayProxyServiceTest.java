@@ -510,7 +510,6 @@ class GatewayProxyServiceTest {
                 : new tools.jackson.databind.ObjectMapper();
         var transfers = dependencies.length > 4 ? (ProductTransferCoordinator) dependencies[4] : null;
         var security = dependencies.length > 5 ? (ProductTransferSecurityService) dependencies[5] : null;
-        var gateway = new GatewayProxyService(properties, rest, auth, audit, approval, mapper, transfers, security);
         var local = mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
         when(local.productLine()).thenReturn(ProductLine.LINEAR_PERPETUAL);
         org.mockito.Mockito.doAnswer(invocation -> {
@@ -527,13 +526,11 @@ class GatewayProxyServiceTest {
         var products = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         when(products.enabled()).thenReturn(java.util.List.of(ProductLine.LINEAR_PERPETUAL));
         when(products.local(org.mockito.ArgumentMatchers.any())).thenReturn(local);
-        org.springframework.test.util.ReflectionTestUtils.setField(gateway, "products", products);
-        org.springframework.test.util.ReflectionTestUtils.setField(gateway, "sharedBusinessApi", local);
         var selectorProducts = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         when(selectorProducts.enabled()).thenReturn(properties.getRoutes().values().stream().anyMatch(GatewayProperties.BackendRoute::hasProductRoutes)
                 ? java.util.List.of(ProductLine.values()) : java.util.List.of(ProductLine.LINEAR_PERPETUAL));
-        org.springframework.test.util.ReflectionTestUtils.setField(gateway, "productSelection", new com.surprising.gateway.provider.product.GatewayProductSelection(selectorProducts, mapper));
-        return gateway;
+        return new GatewayProxyService(properties, rest, auth, audit, approval, mapper, transfers, security,
+                products, local, new com.surprising.gateway.provider.product.GatewayProductSelection(selectorProducts, mapper));
     }
 
     private GatewayProperties properties() {

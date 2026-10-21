@@ -49,8 +49,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class OrderService {
-    @org.springframework.beans.factory.annotation.Autowired
-    private com.surprising.trading.order.repository.TradingMetricsRepository tradingMetrics;
+    private final com.surprising.trading.order.repository.TradingMetricsRepository tradingMetrics;
 
     public java.util.Map<String,Object> tradingMetrics(int window,int limit,ProductLine requestedProduct) {
         var product=currentProductLine();
@@ -59,8 +58,7 @@ public class OrderService {
                 org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"TRADING_METRICS_UNAVAILABLE");
         return tradingMetrics.require(product,window,limit);
     }
-    @org.springframework.beans.factory.annotation.Autowired
-    private com.surprising.trading.order.repository.TradeProjectionRepository tradeProjection;
+    private final com.surprising.trading.order.repository.TradeProjectionRepository tradeProjection;
 
     public com.surprising.trading.api.model.TradeFillQueryResponse ownFills(long userId, String instrumentId,
             Long orderId, Long startTime, Long endTime, int limit, String cursor) {
@@ -80,8 +78,7 @@ public class OrderService {
         String instrument = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         return tradeProjection.search(product, userId, instrument, orderId, limit, cursor, sort);
     }
-    @org.springframework.beans.factory.annotation.Autowired
-    private com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
+    private final com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
 
     private static final int MAX_CANCEL_BATCH_SIZE = 50;
     private static final String ACTIVE_ORDER_CURSOR_PREFIX = "core-open:v1:";
@@ -93,18 +90,16 @@ public class OrderService {
     private final AeronOrderCommandService aeronOrders;
     private final AeronOrderProjectionRepository aeronOrderProjection;
 
-    public OrderService(TradingOrderProperties properties,
-                        OrderValidator orderValidator,
-                        OrderPlacementStateService placementStateService,
-                        AeronOrderCommandService aeronOrders,
-                        AeronOrderProjectionRepository aeronOrderProjection) {
-        this(properties, orderValidator, placementStateService, aeronOrders, aeronOrderProjection, null);
-    }
-
     @Autowired
     public OrderService(TradingOrderProperties properties, OrderValidator orderValidator,
                         OrderPlacementStateService placementStateService, AeronOrderCommandService aeronOrders,
-                        AeronOrderProjectionRepository aeronOrderProjection, com.surprising.trading.matching.service.MatchingMarketDataService bboOrderBook) {
+                        AeronOrderProjectionRepository aeronOrderProjection, com.surprising.trading.matching.service.MatchingMarketDataService bboOrderBook,
+                        com.surprising.trading.order.repository.TradingMetricsRepository tradingMetrics,
+                        com.surprising.trading.order.repository.TradeProjectionRepository tradeProjection,
+                        com.surprising.realtime.api.ValkeyUserQueries realtimeQueries) {
+        this.tradingMetrics = tradingMetrics;
+        this.tradeProjection = tradeProjection;
+        this.realtimeQueries = realtimeQueries;
         this.bboOrderBook = bboOrderBook;
         this.properties = properties;
         this.orderValidator = orderValidator;
@@ -113,11 +108,7 @@ public class OrderService {
         this.aeronOrderProjection = aeronOrderProjection;
     }
 
-    public OrderService(TradingOrderProperties properties,
-                        OrderValidator orderValidator,
-                        OrderPlacementStateService placementStateService) {
-        this(properties, orderValidator, placementStateService, null, null);
-    }
+
 
     public com.surprising.trading.api.model.OrderPriceProtectionResponse priceProtection() {
         return new com.surprising.trading.api.model.OrderPriceProtectionResponse(

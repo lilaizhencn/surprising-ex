@@ -1,0 +1,386 @@
+{
+  "date": "2026-10-21",
+  "verified_at_utc": "2026-10-21T14:27:42.155309+00:00",
+  "scope": "Gateway代理、普通订单与条件单的构造器依赖、查询视图与产品接线",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16",
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=GatewayProxyServiceTest,ProductTransferGatewaySurfaceTest,OrderServiceTest,BboOrderServiceTest,TriggerOrderRequestServiceTest,TriggerOrderIdentityTest,TriggerLifecycleDrainTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.trading.trigger.service.TriggerOrderIdentityTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderServiceTest",
+          "tests": 124,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.GatewayProxyServiceTest",
+          "tests": 39,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.BboOrderServiceTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.ProductTransferGatewaySurfaceTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.service.TriggerOrderRequestServiceTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.service.TriggerLifecycleDrainTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "d8cb19b74c084f2af5917f74bb98b66fbf9509c6d7008475f5cf797a58ef8e25",
+      "tests": 196,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "boundary": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=ConstructorInjectionContextTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [],
+      "log_sha256": "9f4ab13b6a3711cdc21663f7741a4f89b2c714a255422837b0e844260359e103",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "boundary2": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=ConstructorInjectionContextTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.service.ConstructorInjectionContextTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 6,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "657aadfdeecb90a8628b96757c435c66a0b5e4bcad5c04451c6bac5a3ca7ba20",
+      "tests": 6,
+      "failures": 0,
+      "errors": 6,
+      "skipped": 0
+    },
+    "boundary3": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=ConstructorInjectionContextTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.service.ConstructorInjectionContextTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 6,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "c4b932f8066dde0cca076c99fa4268ac4588f97f2f83044ff15c40d4f7bcd9e4",
+      "tests": 6,
+      "failures": 0,
+      "errors": 6,
+      "skipped": 0
+    },
+    "boundary4": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=ConstructorInjectionContextTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.service.ConstructorInjectionContextTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "d88ad1cf789232dab248e599017bf83be9b66f7fd8d80fb89c5cc5808df8e2e3",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=ConstructorInjectionContextTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.service.ConstructorInjectionContextTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 6,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "6a280caa28d39ff83b85dcbd6e0e4446f39a0acc23ad7afb9e2d942c1fb8f02c",
+      "tests": 6,
+      "failures": 0,
+      "errors": 6,
+      "skipped": 0
+    },
+    "expanded": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=GatewayProxyServiceTest,ProductTransferGatewaySurfaceTest,OrderServiceTest,BboOrderServiceTest,TriggerOrderRequestServiceTest,TriggerOrderIdentityTest,TriggerLifecycleDrainTest,ConstructorInjectionContextTest,LocalBusinessApiTest,InternalBusinessContractTest,ProductCommandMediaDriverTest,ProductBusinessConfigurationTest,GatewayProductSelectionTest,GatewayRuntimeTest,GatewayProductRoutesConfigurationTest,GatewayProductionSecurityConfigurationTest",
+        "clean",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.trading.trigger.service.TriggerOrderIdentityTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderServiceTest",
+          "tests": 124,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.GatewayProductSelectionTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.ConstructorInjectionContextTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.GatewayProxyServiceTest",
+          "tests": 39,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.ProductCommandMediaDriverTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.BboOrderServiceTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.ProductTransferGatewaySurfaceTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.GatewayRuntimeTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.ProductBusinessConfigurationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.service.TriggerOrderRequestServiceTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.InternalBusinessContractTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.service.TriggerLifecycleDrainTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 35,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "70d087e20d125033a3a6ab792108310c9146924dc026f49b735a32c968c7ff33",
+      "tests": 275,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "assertions": [
+    "GatewayProxyService、OrderService和TriggerOrderService仅保留一个实际构造器，注入字段改为final，删除省略运行依赖的生产便捷构造器。",
+    "产品容器、本地API、产品选择器、普通订单指标/成交/Valkey查询及条件单投影通过构造器显式传入。Gateway Mapper不再为空时静默创建。",
+    "测试由构造器传入所用视图，删除相关反射写依赖；保留查询视图不可用时拒绝请求且不回到Core的既有边界。",
+    "六产品实际Spring Bean接线：指标与条件单查对应视图，本地代理使用当前产品，读取不触及Core或外部HTTP。",
+    "定向196项、Spring接线6项、干净扩大275项全部通过无跳过；丢弃产品选择器注入后6项负例全部捕获空依赖，恢复后绿色。"
+  ],
+  "source_sha256": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/GatewayProxyService.java": "87591a11b5b10e9e0a43a6314f6dad6f62e4acb100c6d93ba5d93e7f06577361",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/service/OrderService.java": "0987a0058e65fec9c29842c0795fc4c0ab5723ad1cea9d3ad86a20d2a9613fcf",
+    "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderService.java": "8a0065f96c8e19439b1482c737af8d9d8fd9325ae7472d58490470d4904e3cb7",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/ConstructorInjectionContextTest.java": "012a54ea53edd1a5df1556dd6e5dfed209e5a7ac9c900b99d7f6609e4c481484",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/GatewayProxyServiceTest.java": "5b8cacf1af0953393becc3422accd509a670bbe5217f51c5fffff1cfbdd1ec47",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/ProductTransferGatewaySurfaceTest.java": "4f91aa1994637eda079ad11475f31c12780ee273bb3d6bdf08943b1d7a5a7db2",
+    "surprising-gateway/src/test/java/com/surprising/trading/order/service/BboOrderServiceTest.java": "4e5d3a06bc8ef0902da185073e611cb658fc5228dcde5613c3fd246c2084d532",
+    "surprising-gateway/src/test/java/com/surprising/trading/order/service/OrderServiceTest.java": "389f6a1968b38940ba0f51489390779dbd3188d1f907256c4099c7f53ffa8d62",
+    "surprising-gateway/src/test/java/com/surprising/trading/trigger/service/TriggerLifecycleDrainTest.java": "ea78a587f769cc71157c00566a0c290d4f6e0eaff479b441fee4bcd2931f2247",
+    "surprising-gateway/src/test/java/com/surprising/trading/trigger/service/TriggerOrderIdentityTest.java": "50967a36508d7058cc9885ff6aefa02131fecc9e369377ff218534bc1f6babe9",
+    "surprising-gateway/src/test/java/com/surprising/trading/trigger/service/TriggerOrderRequestServiceTest.java": "9b590d2a3d5fe5c69cc34efd845d678af23b47fa76a01377d23a360c3c246ecc"
+  },
+  "not_run": [
+    "此批为依赖装配，不改资金、订单/条件单命令、精度或事务；未启动实际Core集群/网关API/做市资金链路。",
+    "新Spring夹具的重载选择、DependsOn前置Bean和本地服务白名单已修正；首次编译/接线错误留档，最终275项干净构建覆盖。",
+    "其余关联读取、HTTP职责、包归类、架构门禁及最终资金/API验证继续。"
+  ],
+  "cleanup": {
+    "owned_logs_and_summarized_reports_removed": [
+      "/tmp/surprising-mvc-gateway-injection-boundary4.log",
+      "/tmp/surprising-mvc-gateway-injection-boundary2.log",
+      "/tmp/surprising-mvc-gateway-injection-boundary3.log",
+      "/tmp/surprising-mvc-gateway-injection-boundary.log",
+      "/tmp/surprising-mvc-gateway-injection-negative.log",
+      "/tmp/surprising-mvc-gateway-injection-focused.log",
+      "/tmp/surprising-mvc-gateway-injection-expanded.log",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.trigger.service.TriggerLifecycleDrainTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.trigger.service.TriggerOrderIdentityTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.OrderServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.product.GatewayProductSelectionTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.product.GatewayProductSelectionTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.product.ProductBusinessConfigurationTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.GatewayProxyServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.ConstructorInjectionContextTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.GatewayProxyServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.controller.GatewayRuntimeTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.OrderServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.product.ProductCommandMediaDriverTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.BboOrderServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.trigger.service.TriggerOrderIdentityTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.LocalBusinessApiTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.product.ProductCommandMediaDriverTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.ProductTransferGatewaySurfaceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.controller.GatewayRuntimeTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.trigger.service.TriggerOrderRequestServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.product.ProductBusinessConfigurationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.trigger.service.TriggerOrderRequestServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.InternalBusinessContractTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.trigger.service.TriggerLifecycleDrainTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.ProductTransferGatewaySurfaceTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.InternalBusinessContractTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.ConstructorInjectionContextTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.BboOrderServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.LocalBusinessApiTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest.xml"
+    ],
+    "build_outputs_retained": true,
+    "no_owned_database_or_external_process_started": true
+  }
+}

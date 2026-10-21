@@ -48,12 +48,9 @@ public class GatewayProxyService {
             "X-Contract-Type",
             "X-Forwarded-For");
 
-    @Autowired
-    private com.surprising.gateway.provider.product.GatewayProductServices products;
-    @Autowired
-    private com.surprising.gateway.provider.local.LocalBusinessApi sharedBusinessApi;
-    @Autowired
-    private com.surprising.gateway.provider.product.GatewayProductSelection productSelection;
+    private final com.surprising.gateway.provider.product.GatewayProductServices products;
+    private final com.surprising.gateway.provider.local.LocalBusinessApi sharedBusinessApi;
+    private final com.surprising.gateway.provider.product.GatewayProductSelection productSelection;
 
     private final GatewayProperties properties;
     private final RestTemplate restTemplate;
@@ -64,44 +61,6 @@ public class GatewayProxyService {
     private final ProductTransferCoordinator productTransferCoordinator;
     private final ProductTransferSecurityService productTransferSecurityService;
 
-    public GatewayProxyService(GatewayProperties properties, RestTemplate restTemplate) {
-        this(properties, restTemplate, null, null, null, new ObjectMapper(), null);
-    }
-
-    public GatewayProxyService(GatewayProperties properties, RestTemplate restTemplate, AuthService authService) {
-        this(properties, restTemplate, authService, null, null, new ObjectMapper(), null);
-    }
-
-    public GatewayProxyService(GatewayProperties properties,
-                               RestTemplate restTemplate,
-                               AuthService authService,
-                               AdminAuditRepository adminAuditRepository,
-                               AdminApprovalRepository adminApprovalRepository) {
-        this(properties, restTemplate, authService, adminAuditRepository, adminApprovalRepository,
-                new ObjectMapper(), null);
-    }
-
-    public GatewayProxyService(GatewayProperties properties,
-                               RestTemplate restTemplate,
-                               AuthService authService,
-                               AdminAuditRepository adminAuditRepository,
-                               AdminApprovalRepository adminApprovalRepository,
-                               ObjectMapper objectMapper) {
-        this(properties, restTemplate, authService, adminAuditRepository, adminApprovalRepository,
-                objectMapper, null);
-    }
-
-    public GatewayProxyService(GatewayProperties properties,
-                               RestTemplate restTemplate,
-                               AuthService authService,
-                               AdminAuditRepository adminAuditRepository,
-                               AdminApprovalRepository adminApprovalRepository,
-                               ObjectMapper objectMapper,
-                               ProductTransferCoordinator productTransferCoordinator) {
-        this(properties, restTemplate, authService, adminAuditRepository, adminApprovalRepository,
-                objectMapper, productTransferCoordinator, null);
-    }
-
     @Autowired
     public GatewayProxyService(GatewayProperties properties,
                                RestTemplate restTemplate,
@@ -110,13 +69,19 @@ public class GatewayProxyService {
                                AdminApprovalRepository adminApprovalRepository,
                                ObjectMapper objectMapper,
                                ProductTransferCoordinator productTransferCoordinator,
-                               ProductTransferSecurityService productTransferSecurityService) {
+                               ProductTransferSecurityService productTransferSecurityService,
+                               com.surprising.gateway.provider.product.GatewayProductServices products,
+                               com.surprising.gateway.provider.local.LocalBusinessApi sharedBusinessApi,
+                               com.surprising.gateway.provider.product.GatewayProductSelection productSelection) {
+        this.products = java.util.Objects.requireNonNull(products, "products");
+        this.sharedBusinessApi = java.util.Objects.requireNonNull(sharedBusinessApi, "sharedBusinessApi");
+        this.productSelection = java.util.Objects.requireNonNull(productSelection, "productSelection");
         this.properties = properties;
         this.restTemplate = restTemplate;
         this.authService = authService;
         this.adminAuditRepository = adminAuditRepository;
         this.adminApprovalRepository = adminApprovalRepository;
-        this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+        this.objectMapper = java.util.Objects.requireNonNull(objectMapper, "objectMapper");
         this.productTransferCoordinator = productTransferCoordinator;
         this.productTransferSecurityService = productTransferSecurityService;
     }

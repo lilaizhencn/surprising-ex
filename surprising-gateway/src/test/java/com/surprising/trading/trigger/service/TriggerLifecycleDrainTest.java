@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 class TriggerLifecycleDrainTest {
     private final TriggerOrderAeronGateway core = mock(TriggerOrderAeronGateway.class);
     private final TriggerProperties properties = new TriggerProperties();
-    private TriggerOrderService service() { properties.setProductLine(ProductLine.LINEAR_DELIVERY); return new TriggerOrderService(properties,core); }
+    private TriggerOrderService service() { properties.setProductLine(ProductLine.LINEAR_DELIVERY); return new TriggerOrderService(properties,core, null, null); }
     @Test void cancelsBoundedCorePageAndChecksCurrentOpenState() {
         var order=mock(CoreTriggerOrderStateView.class);
         when(order.productLine()).thenReturn(ProductLine.LINEAR_DELIVERY);

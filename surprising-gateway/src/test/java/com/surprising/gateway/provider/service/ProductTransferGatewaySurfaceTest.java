@@ -32,15 +32,14 @@ class ProductTransferGatewaySurfaceTest {
         when(accountClient.completeTransfer(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.any(ProductTransferOperationRequest.class)))
                 .thenReturn(ProductAccountAdjustment.applied("ok"));
-        GatewayProxyService proxy = new GatewayProxyService(properties(), new RestTemplate(), userAuthService(),
-                null, null, new ObjectMapper(), new ProductTransferCoordinator(accountClient));
         var local = mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
         when(local.productLine()).thenReturn(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
         var products = mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         when(products.enabled()).thenReturn(java.util.List.of(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
         when(products.local(org.mockito.ArgumentMatchers.any())).thenReturn(local);
-        org.springframework.test.util.ReflectionTestUtils.setField(proxy, "products", products);
-        org.springframework.test.util.ReflectionTestUtils.setField(proxy, "productSelection", new com.surprising.gateway.provider.product.GatewayProductSelection(products, new ObjectMapper()));
+        GatewayProxyService proxy = new GatewayProxyService(properties(), new RestTemplate(), userAuthService(),
+                null, null, new ObjectMapper(), new ProductTransferCoordinator(accountClient), null,
+                products, local, new com.surprising.gateway.provider.product.GatewayProductSelection(products, new ObjectMapper()));
         MockHttpServletRequest servletRequest = new MockHttpServletRequest(
                 "POST", "/api/v1/gateway/account/transfers");
         servletRequest.addHeader("Authorization", "Bearer user");

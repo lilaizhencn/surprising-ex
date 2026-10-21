@@ -73,9 +73,8 @@ class OrderServiceTest {
 
     @ParameterizedTest @EnumSource(ProductLine.class)
     void ownFillsReadOnlyTheCommittedProductProjection(ProductLine line) {
-        var service = service(line, aeronOrders);
         var trades = org.mockito.Mockito.mock(com.surprising.trading.order.repository.TradeProjectionRepository.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "tradeProjection", trades);
+        var service = service(line, aeronOrders, realtimeQueries, trades);
         var page = new com.surprising.trading.api.model.TradeFillQueryResponse(1001, line, 0, List.of(), null, false, "eventTime.desc", 10);
         when(trades.ownFills(line, 1001, "1", 91L, 1000L, 2000L, 10, "cursor")).thenReturn(page);
         assertThat(service.ownFills(1001, " 1 ", 91L, 1000L, 2000L, 10, "cursor")).isSameAs(page);
@@ -129,7 +128,7 @@ class OrderServiceTest {
     void priceProtectionUsesTheCurrentProductSettingsWithoutQueryingCore(ProductLine line) {
         var properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(line);
-        var service = new OrderService(properties, orderValidator, placementStateService, aeronOrders, projection);
+        var service = new OrderService(properties, orderValidator, placementStateService, aeronOrders, projection, null, null, null, null);
         properties.getRisk().setMarketMaxSlippagePpm(12345);
         assertThat(service.priceProtection()).isEqualTo(
                 new com.surprising.trading.api.model.OrderPriceProtectionResponse(line, 12345));
@@ -151,9 +150,8 @@ class OrderServiceTest {
 
     @ParameterizedTest @EnumSource(ProductLine.class)
     void enabledOpenOrderQueryUsesOnlyValkeyAndPassesTheRequiredWatermark(ProductLine product) {
-        var service=service(product,aeronOrders);
         var queries=org.mockito.Mockito.mock(com.surprising.realtime.api.ValkeyUserQueries.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(service,"realtimeQueries",queries);
+        var service = service(product,aeronOrders, queries, null);
         when(queries.require(product,1001L,9L)).thenReturn(new com.surprising.realtime.api.UserReadView(
             "READY","v",1,null,List.of(),List.of(),9,List.of()));
         assertThat(service.openOrders(1001L,null,10,null,9L).orders()).isEmpty();
@@ -167,9 +165,8 @@ class OrderServiceTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
     void pointOrderQueryPassesIdentityAndWatermarkWithoutReadingTheWholeUser(ProductLine product) {
-        var service = service(product, aeronOrders);
         var queries = org.mockito.Mockito.mock(com.surprising.realtime.api.ValkeyUserQueries.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "realtimeQueries", queries);
+        var service = service(product, aeronOrders, queries, null);
         var order = new com.surprising.aeron.protocol.CoreOrderStateView(91, product, 1001, "1",
                 com.surprising.aeron.protocol.CoreOrderSide.BUY, 100, 2, 0, 2, false, "OPEN", 1);
         when(queries.order(product, 1001, 91, 9L)).thenReturn(order);
@@ -184,8 +181,7 @@ class OrderServiceTest {
 
     @Test
     void missingRealtimeDependencyCannotFallBackToCore() {
-        var service = service(ProductLine.SPOT, aeronOrders);
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "realtimeQueries", null);
+        var service = service(ProductLine.SPOT, aeronOrders, null, null);
         assertThatThrownBy(() -> service.get(1001, 91))
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
                 .hasMessageContaining("READ_VIEW_UNAVAILABLE");
@@ -194,9 +190,8 @@ class OrderServiceTest {
 
     @ParameterizedTest @EnumSource(ProductLine.class)
     void terminalOrderRemainsQueryableFromCommittedRealtimeProjection(ProductLine product) {
-        var service = service(product, aeronOrders);
         var queries = org.mockito.Mockito.mock(com.surprising.realtime.api.ValkeyUserQueries.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "realtimeQueries", queries);
+        var service = service(product, aeronOrders, queries, null);
         var filled = response(91, "client-91", OrderStatus.FILLED);
         when(projection.byOrder(product, 1001L, 91, 9L))
                 .thenReturn(ProjectionReadResult.ok(List.of(filled), null, false, 9, 9));
@@ -206,9 +201,8 @@ class OrderServiceTest {
 
     @ParameterizedTest @EnumSource(ProductLine.class)
     void terminalClientOrderRemainsQueryableAfterItLeavesTheActiveReadView(ProductLine product) {
-        var service = service(product, aeronOrders);
         var queries = org.mockito.Mockito.mock(com.surprising.realtime.api.ValkeyUserQueries.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "realtimeQueries", queries);
+        var service = service(product, aeronOrders, queries, null);
         when(queries.require(product, 1001, 9L)).thenReturn(new com.surprising.realtime.api.UserReadView(
                 "READY", "v", 1, null, List.of(), List.of(), 9, List.of()));
         var filled = response(91, "client-91", OrderStatus.FILLED);
@@ -280,7 +274,7 @@ class OrderServiceTest {
         properties.getKafka().setProductLine(line);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
         var service = new OrderService(properties, orderValidator, new OrderPlacementStateService(gateway),
-                aeronOrders, projection);
+                aeronOrders, projection, null, null, null, null);
         when(aeronOrders.place(any())).thenReturn(response(91, "close-1", OrderStatus.ACCEPTED));
 
         service.closePosition(new ClosePositionRequest(1001L, "close-1", "1",
@@ -569,13 +563,18 @@ class OrderServiceTest {
     }
 
     private OrderService service(ProductLine productLine, AeronOrderCommandService aeron) {
+        return service(productLine, aeron, realtimeQueries, null);
+    }
+
+    private OrderService service(ProductLine productLine, AeronOrderCommandService aeron,
+            com.surprising.realtime.api.ValkeyUserQueries queries,
+            com.surprising.trading.order.repository.TradeProjectionRepository trades) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(productLine);
         when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
-        var service = new OrderService(properties, orderValidator, placementStateService, aeron, projection);
-        when(realtimeQueries.require(productLine, 1001L, null)).thenReturn(readView(List.of()));
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "realtimeQueries", realtimeQueries);
-        return service;
+        if (queries != null) when(queries.require(productLine, 1001L, null)).thenReturn(readView(List.of()));
+        return new OrderService(properties, orderValidator, placementStateService, aeron, projection,
+                null, null, trades, queries);
     }
 
     private PlaceOrderRequest request(String clientOrderId) {

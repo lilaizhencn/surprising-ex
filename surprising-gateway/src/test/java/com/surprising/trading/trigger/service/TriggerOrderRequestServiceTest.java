@@ -25,7 +25,7 @@ class TriggerOrderRequestServiceTest {
         for (var product : com.surprising.product.api.ProductLine.values()) {
             var properties = new com.surprising.trading.trigger.config.TriggerProperties();
             properties.setProductLine(product);
-            var service = new TriggerOrderService(properties, core);
+            var service = new TriggerOrderService(properties, core, null, null);
             var requests = new TriggerOrderRequestService(service, results);
             var placement = service.submissionCommandId(1001, " original-single ");
             org.assertj.core.api.Assertions.assertThat(placement).isEqualTo(
@@ -51,7 +51,7 @@ class TriggerOrderRequestServiceTest {
         properties.setProductLine(com.surprising.product.api.ProductLine.OPTION);
         var core = mock(TriggerOrderAeronGateway.class);
         var results = mock(com.surprising.trading.order.service.OrderService.class);
-        var requests = new TriggerOrderRequestService(new TriggerOrderService(properties, core), results);
+        var requests = new TriggerOrderRequestService(new TriggerOrderService(properties, core, null, null), results);
         for (String key : java.util.List.of("", " ", "x".repeat(65)))
             assertStatus(() -> requests.submission(1001, key), HttpStatus.BAD_REQUEST);
         assertStatus(() -> requests.submission(0, "original"), HttpStatus.BAD_REQUEST);
@@ -65,7 +65,7 @@ class TriggerOrderRequestServiceTest {
         var properties = new com.surprising.trading.trigger.config.TriggerProperties();
         properties.setProductLine(com.surprising.product.api.ProductLine.OPTION);
         var core = mock(TriggerOrderAeronGateway.class);
-        var service = new TriggerOrderService(properties, core);
+        var service = new TriggerOrderService(properties, core, null, null);
         var results = mock(com.surprising.trading.order.service.OrderService.class);
         var command = service.ocoCommandId(1001L, "tp-original", "sl-original");
         var receipt = new com.surprising.trading.api.model.OrderCommandReceipt(command,
@@ -83,7 +83,7 @@ class TriggerOrderRequestServiceTest {
         properties.setProductLine(com.surprising.product.api.ProductLine.OPTION);
         var core = mock(TriggerOrderAeronGateway.class);
         var results = mock(com.surprising.trading.order.service.OrderService.class);
-        var requests = new TriggerOrderRequestService(new TriggerOrderService(properties, core), results);
+        var requests = new TriggerOrderRequestService(new TriggerOrderService(properties, core, null, null), results);
         assertStatus(() -> requests.ocoSubmission(1001L, "tp", "tp"), HttpStatus.BAD_REQUEST);
         assertStatus(() -> requests.ocoSubmission(0, "tp", "sl"), HttpStatus.BAD_REQUEST);
         org.mockito.Mockito.verifyNoInteractions(core, results);
