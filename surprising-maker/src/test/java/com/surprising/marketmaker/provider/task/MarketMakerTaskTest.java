@@ -2,7 +2,6 @@ package com.surprising.marketmaker.provider.task;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
-
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.marketmaker.provider.service.MarketMakerService;
 import com.surprising.product.api.ProductLine;
@@ -114,7 +113,7 @@ class MarketMakerTaskTest {
         try {
             task.start(); assertThat(first.await(3, TimeUnit.SECONDS)).isTrue();
             String payload = mapper.writeValueAsString(new com.surprising.trading.api.model.PublicTradeEvent(
-                    "trade", 1, "604", com.surprising.trading.api.model.OrderSide.BUY, 100, 1, java.time.Instant.now(), "trace"));
+                    "trade", 1, "604", com.surprising.trading.api.model.OrderSide.BUY, 100, 1, java.time.Instant.now()));
             String topic = com.surprising.product.api.ProductTopicNames.of(ProductLine.LINEAR_PERPETUAL).matchTradesTopic();
             wakeups.onTrade(new org.apache.kafka.clients.consumer.ConsumerRecord<>(topic, 0, 1, "653", payload));
             Thread.sleep(100); assertThat(calls.get()).isEqualTo(1);

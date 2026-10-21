@@ -25,7 +25,6 @@
 - 自己的做市订单通过 `clientOrderId` 前缀识别；过期、偏离目标价格或不再需要的订单会撤掉。
 - 可选参考市场校准按轮次 fail closed：如果开启的 WebSocket/REST 外部 source 不可用且没有新鲜缓存，provider 会回退到本地 mark/order-book 报价模型，不使用过期外部深度继续报价。
 - 这个服务只能部署在内网。不要把做市商控制接口暴露给普通公网用户。
-- HTTP `X-Trace-Id` 会被接收并透传到下游 Feign 调用。定时策略会生成 traceId，最后一轮的值会暴露在 `/strategies` 返回里。
 
 ## 接口
 
@@ -38,7 +37,6 @@ curl 'http://localhost:9096/api/v1/market-maker/strategies'
 curl -X POST 'http://localhost:9096/api/v1/market-maker/strategies/btc-usdt-mm-a/pause'
 curl -X POST 'http://localhost:9096/api/v1/market-maker/strategies/btc-usdt-mm-a/resume'
 curl -X POST 'http://localhost:9096/api/v1/market-maker/run-once' \
-  -H 'X-Trace-Id: trace-mm-manual-1' \
   -H 'Content-Type: application/json' \
   -d '{"strategyId":"btc-usdt-mm-a","instrumentId":"604"}'
 ```
@@ -64,12 +62,12 @@ curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/metrics?limit=200'
 curl 'http://localhost:9094/api/v1/admin/gateway/market-maker/strategy-logs?limit=200&sort=createdAt.desc' -H 'Authorization: Bearer <admin-token>'
 ```
 
-`/metrics` 聚合策略/账号/Symbol 维度的库存占用、owned live 挂单、目标报价覆盖率、缺失报价、陈旧报价、偏离目标报价、盘口价差、TraceId 和异常列表。异常类型包含 `NO_LIVE_QUOTES`、`MISSING_DESIRED_QUOTES`、`STALE_QUOTES`、`OFF_TARGET_QUOTES`、`INVENTORY_LIMIT_REACHED`、`INSTRUMENT_NOT_TRADING` 和 `METRIC_COLLECTION_FAILED`。
+`/metrics` 聚合策略/账号/Symbol 维度的库存占用、owned live 挂单、目标报价覆盖率、缺失报价、陈旧报价、偏离目标报价、盘口价差和异常列表。异常类型包含 `NO_LIVE_QUOTES`、`MISSING_DESIRED_QUOTES`、`STALE_QUOTES`、`OFF_TARGET_QUOTES`、`INVENTORY_LIMIT_REACHED`、`INSTRUMENT_NOT_TRADING` 和 `METRIC_COLLECTION_FAILED`。
 
 做市 PnL 归因接口已从交易主库移除。订单、成交、手续费流水和持仓的关联属于财务运营查询；后续应由
 独立财务运营模块消费领域事件，在独立数据库建立投影并提供归因、对账和运营报表。
 
-`/strategy-logs` 读取当前进程最多 2,048 条内存诊断记录，记录 cycle 成功/失败、报价对账、IOC 交易提交/拒绝、跳过轮次、错误信息、计数器、节点 id 和 TraceId。接口支持 `limit/cursor/sort` 游标分页，排序白名单为 `createdAt.desc`、`createdAt.asc`，响应保留 `events/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。事件写入是 best-effort，不会阻断报价循环。
+`/strategy-logs` 读取当前进程最多 2,048 条内存诊断记录，记录 cycle 成功/失败、报价对账、IOC 交易提交/拒绝、跳过轮次、错误信息、计数器、节点 id。接口支持 `limit/cursor/sort` 游标分页，排序白名单为 `createdAt.desc`、`createdAt.asc`，响应保留 `events/count` 并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`。事件写入是 best-effort，不会阻断报价循环。
 
 `InMemoryMarketMakerRunEventRepository` 保留有界诊断记录，重启即清空；参考行情样本不落库、不另建队列。
 做市模块不依赖 PostgreSQL、JDBC、Redis 或其他外部存储，也不创建数据库连接池。
@@ -183,7 +181,7 @@ surprising:
 7. 按库存偏移和库存上限调整报价数量和方向。
 8. 首次读取开放订单后在本地缓存；缓存更新由下单、批量撤单结果和短周期 REST 对账共同驱动。撤单结果不完整或请求超时时，保留未确认订单，不在同一轮重复补单。
 9. 每轮先撤旧单再补缺口，不设置每轮订单操作总数上限；开放订单数、批量协议大小和资金风控仍分别校验。
-10. 把本轮 traceId 透传给 trading provider，后续订单事件、撮合事件、账户结算、风控事件和私有 WebSocket 推送都可以关联排查。
+10. 记录策略、产品线、合约、账户、轮次序号和结果；订单与成交通过各自业务 ID 定位。
 
 参考市场校准在 `websocket-enabled=true` 时优先维护 WebSocket 本地订单簿；没有新鲜流式盘口时，回退 REST 深度快照。内置解析器覆盖 Binance depth stream、OKX books 和 Bybit V5 orderbook 消息，足够让压测时的本地盘口档位、档间距和每档数量跟随主流交易所深度；生产前仍需要补一轮启用流式 source 的长时间真实进程压测证据。
 

@@ -203,10 +203,7 @@ public class CandleRollupProcessor implements Processor<String, CandleUpdatedEve
         if (hotCache != null) {
             hotCache.put(event);
         }
-        String id = CandleKey.traceId(properties.getKafka().getProductLine(), event);
-        var headers = new org.apache.kafka.common.header.internals.RecordHeaders();
-        headers.add("X-Trace-Id", id.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
-        context.forward(new Record<>(instrumentId, event, timestamp, headers));
+        context.forward(new Record<>(instrumentId, event, timestamp));
     }
 
     private void closeElapsedRollups(long timestamp) {

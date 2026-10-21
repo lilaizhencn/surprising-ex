@@ -6,7 +6,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.OrderEvent;
 import com.surprising.trading.api.model.OrderEventType;
@@ -33,37 +32,36 @@ class SubscriptionRegistryTest {
         var topic = new SubscriptionTopic(WsChannel.EXECUTION_REPORTS, "1", null, 1001L, product);
         var time = Instant.parse("2026-09-26T00:00:00Z");
         registry.publishTimedBatch(topic, java.util.List.of(new SubscriptionRegistry.TimedPayload("fill", time)));
-        ArgumentCaptor<ClientConnection.TracedMessage> messages = ArgumentCaptor.forClass(ClientConnection.TracedMessage.class);
+        ArgumentCaptor<String> messages = ArgumentCaptor.forClass(String.class);
         verify(subscriber).send(messages.capture());
-        var event = new ObjectMapper().readTree(messages.getValue().payload());
-        assertThat(event.path("traceId").asText()).isEqualTo(messages.getValue().traceId());
+        var event = new ObjectMapper().readTree(messages.getValue());
         assertThat(event.path("instrumentId").asText()).isEqualTo("1");
         assertThat(event.path("productLine").asText()).isEqualTo(product.name());
         assertThat(event.path("userId").asLong()).isEqualTo(1001);
     }
 
     @Test
-    void timedBatchRetainsEachMessageRootAcrossFanoutAndAmbientContext() {
+    void timedBatchPreservesEachPayloadAndEventTime() {
         var registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
-        var subscriber = connection("traced-batch");
+        var subscriber = connection("timed-batch");
         var topic = new SubscriptionTopic(WsChannel.TRADES, "1", null, null, ProductLine.LINEAR_PERPETUAL);
         registry.add(subscriber);
         registry.subscribe(subscriber, topic);
-        when(subscriber.sendTracedBatch(org.mockito.ArgumentMatchers.anyList())).thenReturn(true);
-        try (var scope = com.surprising.trading.api.TraceContext.open("ambient")) {
-            registry.publishTimedBatch(topic, java.util.List.of(
-                    new SubscriptionRegistry.TimedPayload("first", Instant.now(), "root-1"),
-                    new SubscriptionRegistry.TimedPayload("second", Instant.now(), "root-2")));
-            assertThat(com.surprising.trading.api.TraceContext.current()).isEqualTo("ambient");
-        }
+        when(subscriber.sendBatch(org.mockito.ArgumentMatchers.anyList())).thenReturn(true);
+        var firstTime = Instant.parse("2026-09-26T00:00:00Z");
+        var secondTime = firstTime.plusSeconds(1);
+        registry.publishTimedBatch(topic, java.util.List.of(
+                new SubscriptionRegistry.TimedPayload("first", firstTime),
+                new SubscriptionRegistry.TimedPayload("second", secondTime)));
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<java.util.List<ClientConnection.TracedMessage>> batch = ArgumentCaptor.forClass(java.util.List.class);
-        verify(subscriber).sendTracedBatch(batch.capture());
-        assertThat(batch.getValue()).extracting(ClientConnection.TracedMessage::traceId).containsExactly("root-1", "root-2");
-        for (var message : batch.getValue()) {
-            assertThat(new ObjectMapper().readTree(message.payload()).path("traceId").asText()).isEqualTo(message.traceId());
-        }
-        assertThat(com.surprising.trading.api.TraceContext.current()).isNull();
+        ArgumentCaptor<java.util.List<String>> batch = ArgumentCaptor.forClass(java.util.List.class);
+        verify(subscriber).sendBatch(batch.capture());
+        var first = new ObjectMapper().readTree(batch.getValue().getFirst());
+        var second = new ObjectMapper().readTree(batch.getValue().getLast());
+        assertThat(first.path("data").asText()).isEqualTo("first");
+        assertThat(second.path("data").asText()).isEqualTo("second");
+        assertThat(first.path("eventTime").asText()).isEqualTo(firstTime.toString());
+        assertThat(second.path("eventTime").asText()).isEqualTo(secondTime.toString());
     }
 
     @Test
@@ -100,16 +98,16 @@ class SubscriptionRegistryTest {
 
         OrderEvent event = new OrderEvent(1L, 11L, 1001L, "1",
                 OrderEventType.ACCEPTED, OrderStatus.ACCEPTED, null,
-                Instant.parse("2026-07-01T00:00:00Z"), "trace-private-1");
+                Instant.parse("2026-07-01T00:00:00Z"));
         registry.publish(new SubscriptionTopic(WsChannel.ORDERS, "1", null, 1001L),
                 event, event.eventTime());
 
-        ArgumentCaptor<ClientConnection.TracedMessage> symbolPayload = ArgumentCaptor.forClass(ClientConnection.TracedMessage.class);
-        ArgumentCaptor<ClientConnection.TracedMessage> wildcardPayload = ArgumentCaptor.forClass(ClientConnection.TracedMessage.class);
+        ArgumentCaptor<String> symbolPayload = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> wildcardPayload = ArgumentCaptor.forClass(String.class);
         verify(user1001Symbol).send(symbolPayload.capture());
         verify(user1001Wildcard).send(wildcardPayload.capture());
-        verify(user2002SameSymbol, never()).send(any(ClientConnection.TracedMessage.class));
-        assertThat(symbolPayload.getValue().payload()).contains("\"userId\":1001", "\"instrumentId\":\"1\"");
+        verify(user2002SameSymbol, never()).send(any(String.class));
+        assertThat(symbolPayload.getValue()).contains("\"userId\":1001", "\"instrumentId\":\"1\"");
         assertThat(wildcardPayload.getValue()).isEqualTo(symbolPayload.getValue());
     }
 
@@ -118,7 +116,7 @@ class SubscriptionRegistryTest {
         SubscriptionRegistry registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
         ClientConnection failed = connection("s-failed");
         ClientConnection healthy = connection("s-healthy");
-        when(failed.send(any(ClientConnection.TracedMessage.class))).thenReturn(false);
+        when(failed.send(any(String.class))).thenReturn(false);
         registry.add(failed);
         registry.add(healthy);
         SubscriptionTopic topic = new SubscriptionTopic(WsChannel.POSITIONS, "2", null, 3003L);
@@ -127,9 +125,9 @@ class SubscriptionRegistryTest {
 
         registry.publish(topic, "payload", Instant.parse("2026-07-01T00:00:00Z"));
 
-        verify(failed).send(any(ClientConnection.TracedMessage.class));
+        verify(failed).send(any(String.class));
         verify(failed).close();
-        verify(healthy).send(any(ClientConnection.TracedMessage.class));
+        verify(healthy).send(any(String.class));
         assertThat(registry.subscriberCount(topic)).isEqualTo(1);
         assertThat(registry.backpressureRejectionCount()).isEqualTo(1);
     }
@@ -145,7 +143,7 @@ class SubscriptionRegistryTest {
         registry.publish(new SubscriptionTopic(WsChannel.INDEX_PRICE, "1", null, null),
                 "payload", Instant.parse("2026-07-01T00:00:00Z"));
 
-        verify(productSubscriber, never()).send(any(ClientConnection.TracedMessage.class));
+        verify(productSubscriber, never()).send(any(String.class));
     }
 
     @Test
@@ -194,16 +192,16 @@ class SubscriptionRegistryTest {
         registry.unsubscribe(first, topic);
         registry.subscribe(first, topic);
         registry.publishDepth(topic, new com.surprising.aeron.protocol.CoreOrderBookView(3, java.util.List.of()), "v3", "book", Instant.now());
-        var messages = ArgumentCaptor.forClass(ClientConnection.TracedMessage.class);
+        var messages = ArgumentCaptor.forClass(String.class);
         verify(first, org.mockito.Mockito.times(3)).send(messages.capture());
-        assertThat(messages.getAllValues().get(0).payload()).contains("\"updateType\":\"SNAPSHOT\"");
-        assertThat(messages.getAllValues().get(1).payload()).contains("\"updateType\":\"DELTA\"", "\"previousSequence\":\"1\"");
-        assertThat(messages.getAllValues().get(2).payload()).contains("\"updateType\":\"SNAPSHOT\"");
-        var joined = ArgumentCaptor.forClass(ClientConnection.TracedMessage.class);
+        assertThat(messages.getAllValues().get(0)).contains("\"updateType\":\"SNAPSHOT\"");
+        assertThat(messages.getAllValues().get(1)).contains("\"updateType\":\"DELTA\"", "\"previousSequence\":\"1\"");
+        assertThat(messages.getAllValues().get(2)).contains("\"updateType\":\"SNAPSHOT\"");
+        var joined = ArgumentCaptor.forClass(String.class);
         verify(second, org.mockito.Mockito.times(2)).send(joined.capture());
-        assertThat(joined.getAllValues().get(0).payload()).contains("\"updateType\":\"SNAPSHOT\"");
-        assertThat(joined.getAllValues().get(1).payload()).contains("\"updateType\":\"DELTA\"", "\"previousSequence\":\"2\"");
-        verify(otherProduct, never()).send(any(ClientConnection.TracedMessage.class));
+        assertThat(joined.getAllValues().get(0)).contains("\"updateType\":\"SNAPSHOT\"");
+        assertThat(joined.getAllValues().get(1)).contains("\"updateType\":\"DELTA\"", "\"previousSequence\":\"2\"");
+        verify(otherProduct, never()).send(any(String.class));
     }
 
     @Test
@@ -211,15 +209,15 @@ class SubscriptionRegistryTest {
         var registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
         var failed = connection("failed-depth");
         var healthy = connection("healthy-depth");
-        when(failed.send(any(ClientConnection.TracedMessage.class))).thenReturn(false);
+        when(failed.send(any(String.class))).thenReturn(false);
         var topic = new SubscriptionTopic(WsChannel.DEPTH, "1", null, null, ProductLine.SPOT);
         registry.add(failed); registry.add(healthy);
         registry.subscribe(failed, topic); registry.subscribe(healthy, topic);
         for (int seq = 1; seq <= 2; seq++)
             registry.publishDepth(topic, new com.surprising.aeron.protocol.CoreOrderBookView(seq, java.util.List.of()), "v" + seq, "book", Instant.now());
-        var messages = ArgumentCaptor.forClass(ClientConnection.TracedMessage.class);
+        var messages = ArgumentCaptor.forClass(String.class);
         verify(healthy, org.mockito.Mockito.times(2)).send(messages.capture());
-        assertThat(messages.getAllValues().get(1).payload()).contains("\"updateType\":\"DELTA\"");
+        assertThat(messages.getAllValues().get(1)).contains("\"updateType\":\"DELTA\"");
         assertThat(registry.subscriberCount(topic)).isEqualTo(1);
         verify(failed).close();
     }
@@ -246,10 +244,10 @@ class SubscriptionRegistryTest {
         registry.publishDepth(topic, new com.surprising.aeron.protocol.CoreOrderBookView(3, java.util.List.of()),
                 "v3", "book", Instant.now());
         verify(mapper, org.mockito.Mockito.times(1)).writeValueAsString(org.mockito.ArgumentMatchers.any());
-        var messages = ArgumentCaptor.forClass(ClientConnection.TracedMessage.class);
+        var messages = ArgumentCaptor.forClass(String.class);
         verify(joined, org.mockito.Mockito.times(2)).send(messages.capture());
-        assertThat(messages.getAllValues().get(0).payload()).contains("\"updateType\":\"SNAPSHOT\"");
-        assertThat(messages.getAllValues().get(1).payload()).contains("\"previousSequence\":\"2\"");
+        assertThat(messages.getAllValues().get(0)).contains("\"updateType\":\"SNAPSHOT\"");
+        assertThat(messages.getAllValues().get(1)).contains("\"previousSequence\":\"2\"");
     }
 
     private ClientConnection connection(String id) {
@@ -260,7 +258,7 @@ class SubscriptionRegistryTest {
         ClientConnection connection = mock(ClientConnection.class);
         when(connection.id()).thenReturn(id);
         when(connection.authenticatedUserId()).thenReturn(userId);
-        when(connection.send(any(ClientConnection.TracedMessage.class))).thenReturn(true);
+        when(connection.send(any(String.class))).thenReturn(true);
         return connection;
     }
 }

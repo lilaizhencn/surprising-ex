@@ -1,7 +1,6 @@
 package com.surprising.websocket.provider.service;
 
 import com.surprising.aeron.protocol.CoreOrderBookView;
-import com.surprising.trading.api.TraceContext;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import com.surprising.websocket.api.model.WsServerMessage;
@@ -135,11 +134,11 @@ public class SubscriptionRegistry {
         var baselines = depthBaselines.computeIfAbsent(topic, ignored -> new HashMap<>());
         // Invocation-local: the same immutable baseline produces the same wire message.
         // Identity keys avoid hashing/comparing all levels and never conflate distinct books.
-        var encodedByBaseline = new java.util.IdentityHashMap<CoreOrderBookView, ClientConnection.TracedMessage>();
+        var encodedByBaseline = new java.util.IdentityHashMap<CoreOrderBookView, String>();
         for (ClientConnection connection : connections) {
             var previous = baselines.get(connection.id());
             if (previous != null && book.exportSequence() <= previous.exportSequence()) continue;
-            ClientConnection.TracedMessage message = encodedByBaseline.get(previous);
+            String message = encodedByBaseline.get(previous);
             if (message == null) {
                 var update = DepthUpdate.between(previous, book);
                 message = encode(WsServerMessage.event(topic,
@@ -178,7 +177,7 @@ public class SubscriptionRegistry {
         fanoutMessages.add(events.size());
         if (!hasSubscribers(topic)) return;
         var messages = events.stream().map(event -> encode(WsServerMessage.event(
-                topic, event.payload(), event.eventTime(), event.traceId()))).toList();
+                topic, event.payload(), event.eventTime()))).toList();
         fanout(topic, messages);
     }
 
@@ -291,8 +290,8 @@ public class SubscriptionRegistry {
                 .register(meterRegistry);
     }
 
-    private ClientConnection.TracedMessage encode(WsServerMessage message) {
-        return new ClientConnection.TracedMessage(objectMapper.writeValueAsString(message), message.traceId());
+    private String encode(WsServerMessage message) {
+        return objectMapper.writeValueAsString(message);
     }
 
     private boolean hasSubscribers(SubscriptionTopic topic) {
@@ -301,19 +300,19 @@ public class SubscriptionRegistry {
                 && subscriberCount(topic.withSymbol(SubscriptionTopic.WILDCARD)) > 0;
     }
 
-    private void fanout(SubscriptionTopic topic, List<ClientConnection.TracedMessage> messages) {
+    private void fanout(SubscriptionTopic topic, List<String> messages) {
         sendEncodedBatch(topic, messages);
         if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.instrumentId())) {
             sendEncodedBatch(topic.withSymbol(SubscriptionTopic.WILDCARD), messages);
         }
     }
 
-    private void sendEncodedBatch(SubscriptionTopic subscription, List<ClientConnection.TracedMessage> messages) {
+    private void sendEncodedBatch(SubscriptionTopic subscription, List<String> messages) {
         Set<ClientConnection> connections = subscribers.get(subscription);
         if (connections == null || connections.isEmpty()) return;
         for (ClientConnection connection : connections) {
             boolean accepted = messages.size() == 1
-                    ? connection.send(messages.getFirst()) : connection.sendTracedBatch(messages);
+                    ? connection.send(messages.getFirst()) : connection.sendBatch(messages);
             if (!accepted) {
                 backpressureRejections.increment();
                 remove(connection.id());
@@ -336,13 +335,8 @@ public class SubscriptionRegistry {
             int subscriberCount) {
     }
 
-    public record TimedPayload(Object payload, Instant eventTime, String traceId) {
-        public TimedPayload(Object payload, Instant eventTime) {
-            this(payload, eventTime, TraceContext.current());
-        }
-        public TimedPayload {
-            traceId = TraceContext.normalizeOrCreate(traceId);
-        }
+    public record TimedPayload(Object payload, Instant eventTime) {
+
     }
     public WebSocketAdminMetrics metrics(String adminUserId, String adminUsername) {
         return new WebSocketAdminMetrics(java.time.Instant.now(), adminUserId, adminUsername,

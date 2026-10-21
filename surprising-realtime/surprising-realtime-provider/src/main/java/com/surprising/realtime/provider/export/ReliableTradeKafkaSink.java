@@ -3,11 +3,8 @@ package com.surprising.realtime.provider.export;
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.*;
 import com.surprising.trading.api.model.*;
-
 import org.apache.kafka.clients.producer.*;
-
 import tools.jackson.databind.ObjectMapper;
-
 import java.nio.*;
 import java.time.Instant;
 import java.util.*;
@@ -57,11 +54,9 @@ final class ReliableTradeKafkaSink implements AutoCloseable {
                                 OrderSide.valueOf(CoreOrderSide.values()[side].name()),
                                 price,
                                 quantity,
-                                Instant.ofEpochMilli(frame.timestamp()),
-                                "core-" + product + "-" + frame.sequence());
+                                Instant.ofEpochMilli(frame.timestamp()));
                 tradeSequence = event.sequence();
                 var record = new ProducerRecord<String, String>(topic, frame.instrumentId(), mapper.writeValueAsString(event));
-                record.headers().add("X-Trace-Id", event.traceId().getBytes(java.nio.charset.StandardCharsets.US_ASCII));
                 producer.send(record);
             }
             producer.commitTransaction();

@@ -1,7 +1,6 @@
 package com.surprising.price.index.service;
 
 import lombok.extern.slf4j.Slf4j;
-
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.api.model.QuoteTransport;
@@ -93,14 +92,13 @@ public class IndexPriceService {
         long sequence = sequenceRepository.next(SEQUENCE_MODULE, instrumentId);
         IndexPriceEvent event = indexPriceCalculator.calculate(instrumentId, sequence, symbolConfig.getMinValidSources(),
                 quotes, Instant.now());
-        try (var trace = com.surprising.trading.api.TraceContext.open(
-                "price-" + properties.getKafka().getProductLine() + "-INDEX-" + instrumentId + "-" + sequence)) {
-            latestIndexPriceCache.update(event);
-            markPriceService.acceptIndexPrice(event);
-            kafkaTemplate.send(properties.getKafka().getPriceEventsTopic(), instrumentId, PricePublishedEvent.index(event));
-            if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
-                    com.surprising.aeron.protocol.RealtimeFrame.Kind.INDEX,instrumentId,instrumentId,event.sequence(),event.eventTime(),event);
-        }
+
+        latestIndexPriceCache.update(event);
+        markPriceService.acceptIndexPrice(event);
+        kafkaTemplate.send(properties.getKafka().getPriceEventsTopic(), instrumentId, PricePublishedEvent.index(event));
+        if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
+                com.surprising.aeron.protocol.RealtimeFrame.Kind.INDEX,instrumentId,instrumentId,event.sequence(),event.eventTime(),event);
+
     }
 
     private boolean ownsSymbol(String instrumentId) {

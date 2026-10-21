@@ -1,7 +1,6 @@
 package com.surprising.marketmaker.provider.config;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.TraceContext;
 import feign.RequestInterceptor;
 import feign.Request;
 import java.time.Duration;
@@ -12,11 +11,9 @@ import org.springframework.context.annotation.Configuration;
 public class MarketMakerFeignConfiguration {
 
     @Bean
-    public RequestInterceptor marketMakerTraceRequestInterceptor() {
+    public RequestInterceptor marketMakerProductLineRequestInterceptor() {
         return template -> {
-            String traceId = TraceContext.current();
-            template.removeHeader(TraceContext.TRACE_ID_HEADER);
-            template.header(TraceContext.TRACE_ID_HEADER, traceId == null ? TraceContext.newTraceId() : traceId);
+
             ProductLine productLine = MarketMakerProductLineContext.current();
             if (productLine != null) {
                 template.header("X-Product-Line", productLine.name());

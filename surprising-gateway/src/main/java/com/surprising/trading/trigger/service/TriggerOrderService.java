@@ -1,7 +1,6 @@
 package com.surprising.trading.trigger.service;
 
 import lombok.extern.slf4j.Slf4j;
-
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreTimeInForce;
@@ -514,24 +513,24 @@ public class TriggerOrderService {
     private List<AdminTriggerOrderTimelineEvent> timelineEvents(TriggerOrderResponse order) {
         List<AdminTriggerOrderTimelineEvent> events = new ArrayList<>();
         events.add(new AdminTriggerOrderTimelineEvent("CREATED", TriggerOrderStatus.PENDING, null, null, null,
-                null, order.traceId(), order.createdAt()));
+                null, order.createdAt()));
         if (order.status() == TriggerOrderStatus.EXPIRED) {
             events.add(new AdminTriggerOrderTimelineEvent("EXPIRED", order.status(), null, null, null,
-                    "expiresAt reached", order.traceId(), order.updatedAt()));
+                    "expiresAt reached", order.updatedAt()));
         }
         if (order.status() == TriggerOrderStatus.CANCELED) {
             events.add(new AdminTriggerOrderTimelineEvent("CANCELED", order.status(), null, null, null,
-                    "trigger order canceled", order.traceId(), order.updatedAt()));
+                    "trigger order canceled", order.updatedAt()));
         }
         if (order.triggeredAt() != null) {
             events.add(new AdminTriggerOrderTimelineEvent("TRIGGERED_" + order.priceSource().name(), order.status(), order.triggerSequence(),
-                    order.triggeredPriceTicks(), null, null, order.traceId(), order.triggeredAt()));
+                    order.triggeredPriceTicks(), null, null, order.triggeredAt()));
         }
         if (order.placedOrderId() != null) {
             events.add(new AdminTriggerOrderTimelineEvent(
                     order.status() == TriggerOrderStatus.TRIGGER_FAILED ? "EXECUTION_REJECTED" : "EXECUTION_PLACED",
                     order.status(), order.triggerSequence(), order.triggeredPriceTicks(), order.placedOrderId(),
-                    order.rejectReason(), order.traceId(), order.updatedAt()));
+                    order.rejectReason(), order.updatedAt()));
         }
         return events.stream().sorted(Comparator.comparing(AdminTriggerOrderTimelineEvent::eventTime)).toList();
     }

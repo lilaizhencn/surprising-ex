@@ -17,7 +17,6 @@ public record MarketMakerStrategyResponse(
         long canceledOrders,
         long rejectedOrders,
         long skippedCycles,
-        String lastTraceId,
         String lastError,
         Instant lastCycleTime) {
 
@@ -32,11 +31,10 @@ public record MarketMakerStrategyResponse(
                                        long canceledOrders,
                                        long rejectedOrders,
                                        long skippedCycles,
-                                       String lastTraceId,
                                        String lastError,
                                        Instant lastCycleTime) {
         this(strategyId, ProductLine.LINEAR_PERPETUAL, instrumentIds, accountIds, status, configuredEnabled,
                 runtimePaused, cycleSequence, submittedOrders, canceledOrders, rejectedOrders, skippedCycles,
-                lastTraceId, lastError, lastCycleTime);
+                lastError, lastCycleTime);
     }
 }

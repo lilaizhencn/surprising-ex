@@ -73,8 +73,7 @@ public class MfaRecoveryController {
             var result = recovery.decide(requestId, admin.userId(), request.approved(), request.reason(), Instant.now());
             audit.record(new AdminAuditRepository.AdminOperationRecord(admin.userId(), admin.username(), admin.roles(),
                     "gateway", "POST", "/api/v1/admin/compliance/mfa-recovery/" + requestId + "/decision",
-                    null, null, null, 200, null, true, null, null,
-                    servletRequest.getHeader("User-Agent"), servletRequest.getRemoteAddr(), Instant.now()));
+                    null, null, null, 200, null, true, null, servletRequest.getHeader("User-Agent"), servletRequest.getRemoteAddr(), Instant.now()));
             return result;
         } catch (IllegalArgumentException ex) { throw badRequest(ex); }
         catch (IllegalStateException ex) { throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex); }

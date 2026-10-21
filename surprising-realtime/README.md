@@ -500,7 +500,7 @@ HotSpot JDK 27 定向测试 61 个测试类，按最后一次类结果去重共 
 
 `CommittedOrderProjectionRepository` 及资金页测试直接消费 `CommittedTradeReplay.CommittedFundingPage`。资金费支付记录来自确定性回放的实际已提交页；不增设旧类型转接类。
 
-`CandlestickStreamConfiguration` 按现有十字段 `RealtimeFrame` 构造K线帧。`RealtimeRouter` 用产品线和日志序号生成传输日志关联标识；`ReliableTradeKafkaSink` 在Kafka出口生成同一标识，写入公开成交事件及 `X-Trace-Id` header。提交/失败日志使用实际产品线、成交ID和日志位置定位，协议帧不携带另一份追踪状态。
+`CandlestickStreamConfiguration` 按现有十字段 `RealtimeFrame` 构造 K 线帧。`RealtimeRouter` 使用产品线、实体 ID 和日志序号记录发送结果；`ReliableTradeKafkaSink` 使用产品线、成交 ID 和日志位置记录事务提交或失败。Kafka 消息和 WebSocket 推送只携带业务数据。
 
 ## 按订单 ID 的点查询
 

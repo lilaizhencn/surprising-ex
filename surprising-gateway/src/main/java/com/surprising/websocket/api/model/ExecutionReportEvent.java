@@ -25,6 +25,5 @@ public record ExecutionReportEvent(
         Long filledQuantitySteps,
         Boolean orderCompleted,
         String reason,
-        String traceId,
         Instant eventTime) {
 }

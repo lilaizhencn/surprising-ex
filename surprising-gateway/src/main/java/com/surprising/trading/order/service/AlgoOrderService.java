@@ -76,7 +76,7 @@ public class AlgoOrderService {
                 normalized.quantitySteps(), normalized.childQuantitySteps(), normalized.intervalSeconds(),
                 normalized.durationSeconds(), normalized.marginMode(), normalized.positionSide(), normalized.reduceOnly(),
                 normalized.postOnly(), normalized.timeInForce(), AlgoOrderStatus.PENDING, null, null,
-                commandId.toString(), normalized.startAt(), null, null, null, null);
+                normalized.startAt(), null, null, null, null);
         var persisted = store.upsert(record, List.of(), 1);
         AlgoOrderResponse response = store.response(store.get(persisted.userId(), persisted.algoOrderId()));
         return response;
@@ -333,7 +333,7 @@ public class AlgoOrderService {
                 order.clientAlgoOrderId(), order.instrumentId(), order.algoType(), order.side(), order.priceTicks(),
                 order.quantitySteps(), order.childQuantitySteps(), order.intervalSeconds(), order.durationSeconds(),
                 order.marginMode(), order.positionSide(), order.reduceOnly(), order.postOnly(), order.timeInForce(),
-                status, currentOrderId, reason, order.traceId(), order.startAt(), nextSliceAt, completedAt,
+                status, currentOrderId, reason, order.startAt(), nextSliceAt, completedAt,
                 order.createdAt(), now);
     }
 

@@ -1,7 +1,6 @@
 package com.surprising.gateway.provider.service;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.config.GatewayTraceFilter;
 import com.surprising.gateway.provider.auth.AdminApprovalRepository;
 import com.surprising.gateway.provider.auth.AdminAuditRepository;
 import com.surprising.gateway.provider.auth.AdminAuditRepository.AdminOperationRecord;
@@ -47,8 +46,7 @@ public class GatewayProxyService {
             "X-Product-Line",
             "X-Account-Type",
             "X-Contract-Type",
-            "X-Forwarded-For",
-            GatewayTraceFilter.TRACE_ID_HEADER);
+            "X-Forwarded-For");
 
     @Autowired
     private com.surprising.gateway.provider.product.GatewayProductServices products;
@@ -436,9 +434,7 @@ public class GatewayProxyService {
                                 GatewayProperties.BackendRoute route) {
         HttpHeaders headers = new HttpHeaders();
         for (String name : FORWARDED_HEADERS) {
-            String value = GatewayTraceFilter.TRACE_ID_HEADER.equals(name)
-                    ? traceId(request)
-                    : request.getHeader(name);
+            String value = request.getHeader(name);
             if (HttpHeaders.AUTHORIZATION.equalsIgnoreCase(name)
                     && route != null
                     && route.hasBasicAuth()) {
@@ -497,7 +493,6 @@ public class GatewayProxyService {
                     request.getRequestURI(),
                     request.getQueryString(),
                     bodyHash,
-                    traceId(request),
                     Instant.now());
         } catch (IllegalArgumentException | IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
@@ -625,7 +620,6 @@ public class GatewayProxyService {
                 durationMs,
                 success,
                 errorMessage,
-                traceId(request),
                 request.getHeader(HttpHeaders.USER_AGENT),
                 clientIp(request),
                 Instant.now()));
@@ -677,14 +671,6 @@ public class GatewayProxyService {
 
     private String gatewayPrefix(HttpServletRequest request) {
         return isAdminRequest(request) ? ADMIN_GATEWAY_PREFIX : GATEWAY_PREFIX;
-    }
-
-    private String traceId(HttpServletRequest request) {
-        Object value = request.getAttribute(GatewayTraceFilter.TRACE_ID_ATTRIBUTE);
-        if (value instanceof String traceId && !traceId.isBlank()) {
-            return traceId;
-        }
-        return request.getHeader(GatewayTraceFilter.TRACE_ID_HEADER);
     }
 
     private static String trimTrailingSlash(String value) {

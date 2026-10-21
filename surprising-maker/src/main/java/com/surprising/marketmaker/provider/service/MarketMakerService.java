@@ -1,7 +1,6 @@
 package com.surprising.marketmaker.provider.service;
 
 import lombok.extern.slf4j.Slf4j;
-
 import com.surprising.account.api.client.AccountRpcApi;
 import com.surprising.account.api.model.PositionResponse;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
@@ -30,7 +29,6 @@ import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPriceResponse;
 import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.TraceContext;
 import com.surprising.trading.api.model.BatchCancelOrdersRequest;
 import com.surprising.trading.api.model.AmendOrderRequest;
 import com.surprising.trading.api.model.AmendOrderBatchResponse;
@@ -137,14 +135,9 @@ public class MarketMakerService {
 
     /** 一个策略的连续工作线程入口；false 表示暂停、未取得租约或本轮失败。 */
     public boolean runScheduledStrategy(String strategyId, ProductLine productLine) {
-        String traceId = TraceContext.currentOrCreate();
-        try {
-            var strategy = findStrategy(strategyId, productLine);
-            if (!properties.getEngine().isEnabled()) strategy.setEnabled(false);
-            return runStrategy(strategy, null, traceId, false);
-        } finally {
-            TraceContext.clear();
-        }
+        var strategy = findStrategy(strategyId, productLine);
+        if (!properties.getEngine().isEnabled()) strategy.setEnabled(false);
+        return runStrategy(strategy, null, false);
     }
 
     /** 测试吃单独立于被动报价；同一策略币对仍只允许一个吃单任务。 */
@@ -152,17 +145,13 @@ public class MarketMakerService {
         if (!properties.getEngine().isEnabled() || !properties.getTrade().isEnabled()) return false;
         MarketMakerProperties.Strategy strategy = findStrategy(strategyId, productLine);
         if (!strategy.isEnabled() || state(strategy).paused()) return false;
-        String traceId = TraceContext.currentOrCreate();
-        try {
-            boolean submitted = false;
-            for (String instrumentId : strategy.getInstrumentIds()) submitted |= tradeSymbol(strategy, normalizeSymbol(instrumentId), traceId);
-            return submitted;
-        } finally {
-            TraceContext.clear();
-        }
+
+        boolean submitted = false;
+        for (String instrumentId : strategy.getInstrumentIds()) submitted |= tradeSymbol(strategy, normalizeSymbol(instrumentId));
+        return submitted;
     }
 
-    private boolean tradeSymbol(MarketMakerProperties.Strategy strategy, String instrumentId, String traceId) {
+    private boolean tradeSymbol(MarketMakerProperties.Strategy strategy, String instrumentId) {
         if (!properties.getTrade().isEnabled()) return false;
         AtomicBoolean lock = cycleLocks.computeIfAbsent(strategyKey(strategy) + ":" + instrumentId + ":trade",
                 ignored -> new AtomicBoolean());
@@ -174,7 +163,7 @@ public class MarketMakerService {
             requireTradable(instrument, strategy.getProductLine());
             MarkPriceResponse mark = currentMarkPrice(strategy.getProductLine(), instrumentId, instrument.changeId());
             StrategyRuntimeState state = state(strategy);
-            return maybeTrade(strategy, state, state.cycleSequence(), instrumentId, instrument, mark, Instant.now(), traceId);
+            return maybeTrade(strategy, state, state.cycleSequence(), instrumentId, instrument, mark, Instant.now());
         } catch (RuntimeException ex) {
             log.warn("Market-maker simulated trade failed strategyId={} instrumentId={} error={}",
                     strategy.getStrategyId(), instrumentId, ex.getMessage());
@@ -293,21 +282,17 @@ public class MarketMakerService {
     }
 
     public MarketMakerStrategyQueryResponse runOnce(MarketMakerRunRequest request) {
-        String traceId = TraceContext.currentOrCreate();
         String requestedStrategyId = normalizeOptional(request == null ? null : request.strategyId());
         String requestedSymbol = normalizeOptional(request == null ? null : request.instrumentId());
         ProductLine requestedProductLine = request == null ? null : request.productLine();
-        try {
-            for (MarketMakerProperties.Strategy strategy : strategiesSnapshot(requestedProductLine)) {
-                if (requestedStrategyId != null && !strategy.getStrategyId().equalsIgnoreCase(requestedStrategyId)) {
-                    continue;
-                }
-                runStrategy(strategy, requestedSymbol, traceId, true);
+
+        for (MarketMakerProperties.Strategy strategy : strategiesSnapshot(requestedProductLine)) {
+            if (requestedStrategyId != null && !strategy.getStrategyId().equalsIgnoreCase(requestedStrategyId)) {
+                continue;
             }
-            return strategies();
-        } finally {
-            TraceContext.clear();
+            runStrategy(strategy, requestedSymbol, true);
         }
+        return strategies();
     }
 
     public MarketMakerAdminMetricsResponse adminMetrics(int limit) {
@@ -525,8 +510,7 @@ public class MarketMakerService {
                     plan.quotes().stream().filter(quote -> quote.side() == OrderSide.BUY).count(),
                     plan.quotes().stream().filter(quote -> quote.side() == OrderSide.SELL).count(),
                     matchedDesired, missingDesired, staleOwned, offTargetOwned, bestBid, bestAsk,
-                    spreadTicks, spreadPpm, markTicks, quoteCoveragePpm, state.lastTraceId(),
-                    state.lastError(), state.lastCycleTime(), null, liquidity);
+                    spreadTicks, spreadPpm, markTicks, quoteCoveragePpm, state.lastError(), state.lastCycleTime(), null, liquidity);
         } catch (RuntimeException ex) {
             String message = ex.getMessage();
             anomalies.add(anomaly("CRITICAL", "METRIC_COLLECTION_FAILED", strategyId, productLine, instrumentId, accountId,
@@ -537,7 +521,7 @@ public class MarketMakerService {
                     state.cycleSequence(), state.submittedOrders(), state.canceledOrders(), state.rejectedOrders(),
                     state.skippedCycles(), 0, 0, effectiveMaxInventorySteps(strategy), 0, 0, null,
                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    state.lastTraceId(), state.lastError(), state.lastCycleTime(), message, null);
+                    state.lastError(), state.lastCycleTime(), message, null);
         } finally {
             MarketMakerProductLineContext.set(previousProductLine);
         }
@@ -657,7 +641,6 @@ public class MarketMakerService {
                                 long rejectedOrders,
                                 String skippedReason,
                                 String errorMessage,
-                                String traceId,
                                 Instant createdAt) {
         try {
             runEventRepository.record(new MarketMakerRunEventWrite(
@@ -673,7 +656,6 @@ public class MarketMakerService {
                     Math.max(0L, rejectedOrders),
                     skippedReason,
                     errorMessage,
-                    traceId,
                     createdAt));
         } catch (RuntimeException ex) {
             log.warn("Failed to record market-maker run event strategyId={} instrumentId={} eventType={} error={}",
@@ -681,7 +663,7 @@ public class MarketMakerService {
         }
     }
 
-    private boolean runStrategy(MarketMakerProperties.Strategy strategy, String requestedSymbol, String traceId, boolean tradeAfterQuote) {
+    private boolean runStrategy(MarketMakerProperties.Strategy strategy, String requestedSymbol, boolean tradeAfterQuote) {
         StrategyRuntimeState state = state(strategy);
         boolean completed = false;
         long cycleSequence = state.nextCycleSequence();
@@ -690,7 +672,7 @@ public class MarketMakerService {
             if (requestedSymbol != null && !instrumentId.equalsIgnoreCase(requestedSymbol)) {
                 continue;
             }
-            completed |= runStrategySymbol(strategy, state, cycleSequence, instrumentId, traceId, tradeAfterQuote);
+            completed |= runStrategySymbol(strategy, state, cycleSequence, instrumentId, tradeAfterQuote);
         }
         return completed;
     }
@@ -699,14 +681,13 @@ public class MarketMakerService {
                                    StrategyRuntimeState state,
                                    long cycleSequence,
                                    String instrumentId,
-                                   String traceId,
                                    boolean tradeAfterQuote) {
         String executionKey = strategyKey(strategy) + ":" + instrumentId;
         AtomicBoolean cycleLock = cycleLocks.computeIfAbsent(executionKey, ignored -> new AtomicBoolean());
         if (!cycleLock.compareAndSet(false, true)) {
             state.addSkipped(1L);
             recordRunEvent(strategy, instrumentId, null, cycleSequence, "SKIPPED",
-                    0, 0, 0, "CYCLE_IN_PROGRESS", null, traceId, Instant.now());
+                    0, 0, 0, "CYCLE_IN_PROGRESS", null, Instant.now());
             return false;
         }
         ProductLine previousProductLine = MarketMakerProductLineContext.current();
@@ -723,7 +704,7 @@ public class MarketMakerService {
                         var result = cancelOrders(strategy.getProductLine(), accountId, instrumentId, requests);
                         state.addCanceled(result.completed());
                         recordRunEvent(strategy, instrumentId, accountId, cycleSequence, "STRATEGY_DRAINING",
-                                0, result.completed(), result.failed().size(), "STRATEGY_DISABLED_OR_PAUSED", null, traceId, now);
+                                0, result.completed(), result.failed().size(), "STRATEGY_DISABLED_OR_PAUSED", null, now);
                     }
                     return false;
                 }
@@ -745,7 +726,7 @@ public class MarketMakerService {
                     long accountId = input.userId();
                     ReconcileResult result = quoteAccount(strategy, state, cycleSequence, instrumentId, instrument,
                             orderBook, markPrice, referenceOrderBook, volatilityTicks, accountId,
-                            input.signedInventorySteps(), input.makerFeeRatePpm(), now, traceId);
+                            input.signedInventorySteps(), input.makerFeeRatePpm(), now);
                     rejectedQuotes += result.rejected();
                     if (result.rejected() > 0 && quoteRejection == null)
                         quoteRejection = result.rejectionReason();
@@ -754,22 +735,22 @@ public class MarketMakerService {
                 // Retain successful orders and let the next normal cycle retry under the same risk checks.
                 if (rejectedQuotes > 0) {
                     String reason = "Quote replenishment rejected: " + rejectedQuotes + " orders; " + quoteRejection;
-                    state.markFailure(traceId, reason, now);
+                    state.markFailure(reason, now);
                     recordRunEvent(strategy, instrumentId, null, cycleSequence, "CYCLE_FAILED",
-                            0, 0, rejectedQuotes, null, reason, traceId, now);
+                            0, 0, rejectedQuotes, null, reason, now);
                     return false;
                 }
-                if (tradeAfterQuote) tradeSymbol(strategy, instrumentId, traceId);
-                state.markSuccess(traceId, now);
+                if (tradeAfterQuote) tradeSymbol(strategy, instrumentId);
+                state.markSuccess(now);
                 recordRunEvent(strategy, instrumentId, null, cycleSequence, "CYCLE_SUCCESS",
-                        0, 0, 0, null, null, traceId, now);
+                        0, 0, 0, null, null, now);
                 return true;
             } catch (RuntimeException ex) {
                 log.warn("Market-maker cycle failed strategyId={} instrumentId={} error={}",
                         strategy.getStrategyId(), instrumentId, ex.getMessage());
-                state.markFailure(traceId, ex.getMessage(), now);
+                state.markFailure(ex.getMessage(), now);
                 recordRunEvent(strategy, instrumentId, null, cycleSequence, "CYCLE_FAILED",
-                        0, 0, 0, null, ex.getMessage(), traceId, now);
+                        0, 0, 0, null, ex.getMessage(), now);
                 return false;
             }
         } finally {
@@ -801,8 +782,7 @@ public class MarketMakerService {
                               long accountId,
                               long inventorySteps,
                               long makerFeeRatePpm,
-                              Instant now,
-                              String traceId) {
+                              Instant now) {
         List<OrderResponse> openOrders = openOrders(strategy.getProductLine(), accountId, instrumentId, now);
         OrderBookSnapshotResponse otherLiquidity = excludeOwnQuotes(orderBook, openOrders);
         QuotePlan plan = properties.getReferenceMarket().isEnabled() && referenceOrderBook == null
@@ -815,7 +795,7 @@ public class MarketMakerService {
         state.addSubmitted(result.submitted());
         state.addRejected(result.rejected());
         recordRunEvent(strategy, instrumentId, accountId, cycleSequence, "QUOTE_RECONCILED",
-                result.submitted(), result.canceled(), result.rejected(), null, result.rejectionReason(), traceId, now);
+                result.submitted(), result.canceled(), result.rejected(), null, result.rejectionReason(), now);
         return result;
     }
 
@@ -1195,8 +1175,7 @@ public class MarketMakerService {
                             String instrumentId,
                             InstrumentResponse instrument,
                             MarkPriceResponse markPrice,
-                            Instant now,
-                            String traceId) {
+                            Instant now) {
         MarketMakerProperties.Trade trade = properties.getTrade();
         if (!trade.isEnabled()) {
             return false;
@@ -1213,24 +1192,24 @@ public class MarketMakerService {
                 instrument, orderBook, markPrice, position.signedQuantitySteps(), ThreadLocalRandom.current());
         if (requests.isEmpty()) return false;
         if (requests.size() > 1) return tradeBatch(strategy, instrumentId, accountId, cycleSequence,
-                requests, state, traceId, now);
+                requests, state, now);
         PlaceOrderRequest request = requests.getFirst();
         OrderCommandReceipt receipt = orderRpcApi.place(request);
         OrderResponse response = receiptResult(receipt, OrderResponse.class);
         if (response == null || response.status() == OrderStatus.REJECTED) {
             state.addRejected(1L);
             recordRunEvent(strategy, instrumentId, accountId, cycleSequence, "TRADE_REJECTED",
-                    0, 0, 1, null, response == null ? receiptMessage(receipt) : response.rejectReason(), traceId, now);
+                    0, 0, 1, null, response == null ? receiptMessage(receipt) : response.rejectReason(), now);
             return false;
         }
         state.addSubmitted(1L);
         if (response.executedQuantitySteps() <= 0) {
             recordRunEvent(strategy, instrumentId, accountId, cycleSequence, "TRADE_NO_FILL",
-                    1, 0, 0, "NO_EXECUTION", null, traceId, now);
+                    1, 0, 0, "NO_EXECUTION", null, now);
             return false;
         }
         recordRunEvent(strategy, instrumentId, accountId, cycleSequence, "TRADE_EXECUTED",
-                1, 0, 0, null, null, traceId, now);
+                1, 0, 0, null, null, now);
         return true;
     }
 
@@ -1283,7 +1262,7 @@ public class MarketMakerService {
     /** Submit ordinary simulated-user orders together; the core validates and settles every order. */
     private boolean tradeBatch(MarketMakerProperties.Strategy strategy, String instrumentId, long accountId,
                                long cycleSequence, List<PlaceOrderRequest> requests,
-                               StrategyRuntimeState state, String traceId, Instant now) {
+                               StrategyRuntimeState state, Instant now) {
         int count = requests.size();
         OrderCommandReceipt receipt = orderRpcApi.placeBatch(new BatchPlaceOrderRequest(requests));
         OrderBatchResponse response = receiptResult(receipt, OrderBatchResponse.class);
@@ -1308,7 +1287,7 @@ public class MarketMakerService {
         recordRunEvent(strategy, instrumentId, accountId, cycleSequence,
                 executed > 0 ? "TRADE_EXECUTED" : missingOrderDetails > 0 ? "TRADE_SUBMITTED"
                         : accepted > 0 ? "TRADE_NO_FILL" : "TRADE_REJECTED", accepted, 0, count - accepted,
-                executed > 0 || missingOrderDetails > 0 ? null : "NO_EXECUTION", rejectionReason, traceId, now);
+                executed > 0 || missingOrderDetails > 0 ? null : "NO_EXECUTION", rejectionReason, now);
         return executed > 0 || missingOrderDetails > 0;
     }
 
@@ -1732,7 +1711,7 @@ public class MarketMakerService {
                 List.copyOf(strategy.getInstrumentIds()),
                 List.copyOf(strategy.getAccountIds()), status, strategy.isEnabled(), state.paused(),
                 state.cycleSequence(), state.submittedOrders(), state.canceledOrders(), state.rejectedOrders(),
-                state.skippedCycles(), state.lastTraceId(), state.lastError(), state.lastCycleTime());
+                state.skippedCycles(), state.lastError(), state.lastCycleTime());
     }
 
     private MarketMakerStrategyStatus status(MarketMakerProperties.Strategy strategy, StrategyRuntimeState state) {
@@ -1953,7 +1932,6 @@ public class MarketMakerService {
                                             long spreadPpm,
                                             long markPriceTicks,
                                             long quoteCoveragePpm,
-                                            String lastTraceId,
                                             String lastError,
                                             Instant lastCycleTime,
                                             String error,

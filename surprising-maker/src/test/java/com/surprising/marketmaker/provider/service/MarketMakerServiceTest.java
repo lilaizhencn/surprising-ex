@@ -1,7 +1,6 @@
 package com.surprising.marketmaker.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-
 import com.surprising.account.api.client.AccountRpcApi;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.BalanceQueryResponse;
@@ -326,7 +325,6 @@ class MarketMakerServiceTest {
                 .satisfies(strategy -> {
                     assertThat(strategy.status()).isEqualTo(MarketMakerStrategyStatus.RUNNING);
                     assertThat(strategy.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
-                    assertThat(strategy.lastTraceId()).isNotBlank();
                 });
         assertThat(fixtures.orderRpc.placeRequests).hasSize(6);
         assertThat(fixtures.orderRpc.placeRequests)
@@ -892,7 +890,6 @@ class MarketMakerServiceTest {
                     assertThat(event.instrumentId()).isEqualTo("1");
                     assertThat(event.accountId()).isEqualTo(900001L);
                     assertThat(event.submittedOrders()).isEqualTo(6L);
-                    assertThat(event.traceId()).isNotBlank();
                 });
     }
 
@@ -904,7 +901,7 @@ class MarketMakerServiceTest {
         Instant createdAt = Instant.parse("2026-07-03T00:00:00Z");
         runEventRepository.runEventPage = new CursorPage<>(List.of(new MarketMakerRunEventRecord(
                 77L, "47", ProductLine.LINEAR_PERPETUAL, "1", 900001L, "mm-test", 9L,
-                "QUOTE_RECONCILED", 2L, 1L, 0L, null, null, "trace-1", createdAt)),
+                "QUOTE_RECONCILED", 2L, 1L, 0L, null, null, createdAt)),
                 "next", true, "createdAt.desc", 25);
 
         var response = service.runLogs(ProductLine.LINEAR_PERPETUAL, "47", "1", 900001L,

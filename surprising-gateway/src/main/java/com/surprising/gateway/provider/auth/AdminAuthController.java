@@ -16,7 +16,6 @@ import com.surprising.gateway.provider.auth.AuthModels.AdminUserStatusRequest;
 import com.surprising.gateway.provider.auth.AuthModels.AdminOperationLogQueryResponse;
 import com.surprising.gateway.provider.auth.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.AuthModels.LoginLogQueryResponse;
-import com.surprising.gateway.provider.config.GatewayTraceFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -346,15 +345,7 @@ public class AdminAuthController {
                 request.getHeader(adminApprovalService.approvalHeaderName()),
                 request.getMethod(),
                 request.getRequestURI(),
-                request.getQueryString(),
-                traceId(request));
+                request.getQueryString());
     }
 
-    private String traceId(HttpServletRequest request) {
-        Object value = request.getAttribute(GatewayTraceFilter.TRACE_ID_ATTRIBUTE);
-        if (value instanceof String traceId && !traceId.isBlank()) {
-            return traceId;
-        }
-        return request.getHeader(GatewayTraceFilter.TRACE_ID_HEADER);
-    }
 }

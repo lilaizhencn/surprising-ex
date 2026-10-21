@@ -20,7 +20,7 @@ public class GatewayCorsConfig implements WebMvcConfigurer {
                         "https://ex.tokdou.com")
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
-                .exposedHeaders("Content-Disposition", "X-Trace-Id")
+                .exposedHeaders("Content-Disposition")
                 .maxAge(3600);
     }
 }

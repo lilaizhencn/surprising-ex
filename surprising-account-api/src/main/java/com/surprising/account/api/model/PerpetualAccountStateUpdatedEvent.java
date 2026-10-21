@@ -28,8 +28,7 @@ public record PerpetualAccountStateUpdatedEvent(
         List<PositionMargin> positionMargins,
         List<OrderLock> orderLocks,
         PositionMode positionMode,
-        Instant eventTime,
-        String traceId) {
+        Instant eventTime) {
 
     public static final int CURRENT_SCHEMA_VERSION = 1;
 
@@ -67,7 +66,7 @@ public record PerpetualAccountStateUpdatedEvent(
         if (eventTime == null) {
             throw new IllegalArgumentException("eventTime is required");
         }
-        traceId = traceId == null || traceId.isBlank() ? null : traceId.trim();
+
     }
 
     public String partitionKey() {

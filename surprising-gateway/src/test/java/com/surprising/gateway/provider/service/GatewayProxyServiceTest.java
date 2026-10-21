@@ -2,8 +2,6 @@ package com.surprising.gateway.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
-import com.surprising.gateway.provider.config.GatewayTraceFilter;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.auth.AdminApprovalRepository;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
@@ -26,7 +24,6 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
-
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
@@ -460,21 +457,6 @@ class GatewayProxyServiceTest {
     }
 
     @Test
-    void forwardsTraceIdFromGatewayFilterAttribute() {
-        GatewayProperties properties = properties();
-        CapturingRestTemplate restTemplate = new CapturingRestTemplate();
-        GatewayProxyService controller = gateway(properties, restTemplate);
-        MockHttpServletRequest request = new MockHttpServletRequest(
-                "GET", "/api/v1/gateway/remote-market/BTC-USDT/1m");
-        request.setAttribute(GatewayTraceFilter.TRACE_ID_ATTRIBUTE, "trace-gateway-1");
-
-        controller.proxy("remote-market", HttpMethod.GET, request, null);
-
-        assertThat(restTemplate.requestEntity.getHeaders().getFirst(GatewayTraceFilter.TRACE_ID_HEADER))
-                .isEqualTo("trace-gateway-1");
-    }
-
-    @Test
     void forwardsProductLineHeadersToTheSelectedBackend() {
         GatewayProperties properties = properties();
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
@@ -621,7 +603,6 @@ class GatewayProxyServiceTest {
                 String requestPath,
                 String queryString,
                 String bodyHash,
-                String traceId,
                 Instant now) {
             this.approvalId = approvalId;
             this.requesterUserId = requesterUserId;

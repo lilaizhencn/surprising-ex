@@ -135,7 +135,7 @@
   - 在 `TradingSnapshotV36Reader` 中通过消费并丢弃流中的历史 `traceId` 文本字节保持历史快照二进制固件 100% 兼容。
 - **网关边界 `surprising-gateway` 适配**：
   - `RealtimeWebSocketBridge` 直接使用 `"core-" + f.productLine() + "-" + f.sequence()` 作为网关侧日志追踪上下文 ID；
-  - `TriggerOrderService`、`TriggerOrderAeronGateway`、`AeronAlgoOrderStore` 在网关边界使用 `StableOrderIdentity` 确定性派生对外 HTTP DTO 的 `traceId`，Core 内部零感知。
+  - 2026-10-21 更新：网关 DTO 和非 Core 服务的追踪字段也已删除。订单、事件和命令 ID 继续承担业务身份与幂等职责。
 - **验证**：`grep -rn "traceId\|TraceIds\|withTraceId" surprising-aeron-core/src` 0 命中；HotSpot JDK 27 下 `surprising-aeron-protocol`（240 项）、`surprising-aeron-client`（66 项）及 `surprising-aeron-service` 全部受影响核心测试（120 项）100% 通过。
 
 ### P6【已完成】彻底移除命令 UUID 分配，全链路 commandId 双 long 标量化

@@ -31,7 +31,6 @@ public record AlgoOrderRecord(
         AlgoOrderStatus status,
         Long currentOrderId,
         String rejectReason,
-        String traceId,
         Instant startAt,
         Instant nextSliceAt,
         Instant completedAt,

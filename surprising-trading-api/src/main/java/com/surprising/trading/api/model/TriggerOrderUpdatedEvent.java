@@ -8,8 +8,7 @@ public record TriggerOrderUpdatedEvent(
         long eventId,
         ProductLine productLine,
         TriggerOrderResponse order,
-        Instant eventTime,
-        String traceId) {
+        Instant eventTime) {
 
     public TriggerOrderUpdatedEvent {
         if (eventId <= 0) {

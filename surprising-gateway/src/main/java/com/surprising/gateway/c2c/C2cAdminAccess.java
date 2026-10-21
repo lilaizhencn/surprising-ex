@@ -3,7 +3,6 @@ package com.surprising.gateway.c2c;
 import com.surprising.gateway.provider.auth.*;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.AuthModels.AdminApprovalResponse;
-import com.surprising.gateway.provider.config.GatewayTraceFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -14,9 +13,9 @@ import org.springframework.stereotype.Service;
 /** 后台权限、精确请求审批和审计的边界；不接受业务自行传入的管理员身份。 */
 @Service
 public class C2cAdminAccess {
-    record Request(String approvalId,String method,String path,String query,String trace,String userAgent,String ip) {
+    record Request(String approvalId,String method,String path,String query,String userAgent,String ip) {
         AdminApprovalService.AdminRequestMetadata approvalMetadata() {
-            return new AdminApprovalService.AdminRequestMetadata(approvalId,method,path,query,trace);
+            return new AdminApprovalService.AdminRequestMetadata(approvalId,method,path,query);
         }
     }
     record Approved(JwtPrincipal administrator,AdminApprovalResponse approval) { }
@@ -32,9 +31,9 @@ public class C2cAdminAccess {
     }
 
     Request request(HttpServletRequest request) {
-        Object trace=request.getAttribute(GatewayTraceFilter.TRACE_ID_ATTRIBUTE);
+
         return new Request(request.getHeader(approvals.approvalHeaderName()),request.getMethod(),request.getRequestURI(),
-                request.getQueryString(),trace==null?null:trace.toString(),request.getHeader("User-Agent"),request.getRemoteAddr());
+                request.getQueryString(),request.getHeader("User-Agent"),request.getRemoteAddr());
     }
     JwtPrincipal read(String authorization,boolean sensitive) {
         try {return auth.requireAdminPermission(authorization,sensitive?"admin.c2c.sensitive.read":"admin.c2c.read");}
@@ -58,7 +57,7 @@ public class C2cAdminAccess {
         try {
             long id=Long.parseLong(value);
             var approved=approvalRows.consumeApproved(id,administrator.userId(),"c2c",request.method(),request.path(),
-                    request.query(),hash(body),request.trace(),Instant.now());
+                    request.query(),hash(body),Instant.now());
             if(approved.approverUserId()==null || approved.approverUserId()==administrator.userId()) throw approvalRequired();
             var reviewer=users.find(approved.approverUserId());
             if(reviewer.isEmpty() || "FROZEN".equals(reviewer.get().status())) throw approvalRequired();
@@ -80,7 +79,7 @@ public class C2cAdminAccess {
     private AdminAuditRepository.AdminOperationRecord record(JwtPrincipal principal,Request request,byte[] body,int status,boolean success,String error) {
         return new AdminAuditRepository.AdminOperationRecord(principal==null?null:principal.userId(),principal==null?null:principal.username(),
                 principal==null?List.of():principal.roles(),"c2c",request.method(),request.path(),request.query(),null,hash(body),status,
-                null,success,error,request.trace(),request.userAgent(),request.ip(),Instant.now());
+                null,success,error,request.userAgent(),request.ip(),Instant.now());
     }
     static String hash(byte[] body) {
         if(body==null || body.length==0) return null;

@@ -19,8 +19,7 @@ public record AccountUserCommand(
         String sourceReference,
         String dependsOnCommandId,
         String payload,
-        Instant occurredAt,
-        String traceId) {
+        Instant occurredAt) {
 
     public static final int CURRENT_SCHEMA_VERSION = 1;
 
@@ -43,7 +42,7 @@ public record AccountUserCommand(
         dependsOnCommandId = normalizeOptional(dependsOnCommandId, 160);
         payload = requireText(payload, "payload", 1_000_000);
         occurredAt = occurredAt == null ? Instant.now() : occurredAt;
-        traceId = normalizeOptional(traceId, 160);
+
     }
 
     public String partitionKey() {

@@ -12,7 +12,7 @@ public final class StrategyRuntimeState {
     private final AtomicLong canceledOrders = new AtomicLong();
     private final AtomicLong rejectedOrders = new AtomicLong();
     private final AtomicLong skippedCycles = new AtomicLong();
-    private volatile String lastTraceId;
+
     private volatile String lastError;
     private volatile Instant lastCycleTime;
 
@@ -72,22 +72,18 @@ public final class StrategyRuntimeState {
         return lastError;
     }
 
-    public String lastTraceId() {
-        return lastTraceId;
-    }
-
     public Instant lastCycleTime() {
         return lastCycleTime;
     }
 
-    public void markSuccess(String traceId, Instant now) {
-        this.lastTraceId = traceId;
+    public void markSuccess(Instant now) {
+
         this.lastError = null;
         this.lastCycleTime = now;
     }
 
-    public void markFailure(String traceId, String error, Instant now) {
-        this.lastTraceId = traceId;
+    public void markFailure(String error, Instant now) {
+
         this.lastError = error;
         this.lastCycleTime = now;
     }

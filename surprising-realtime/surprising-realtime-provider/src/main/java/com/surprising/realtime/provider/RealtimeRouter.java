@@ -4,15 +4,11 @@ import com.surprising.aeron.client.*;
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.*;
-
 import io.aeron.*;
-
 import jakarta.annotation.PreDestroy;
-
 import org.agrona.concurrent.UnsafeBuffer;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
-
 import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -22,7 +18,7 @@ import java.util.concurrent.atomic.LongAdder;
 @Component
 @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "surprising.realtime.router.enabled", havingValue = "true", matchIfMissing = true)
 public final class RealtimeRouter implements AutoCloseable {
-    private static final org.slf4j.Logger traceLog = org.slf4j.LoggerFactory.getLogger(RealtimeRouter.class);
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RealtimeRouter.class);
     private static final System.Logger LOG = System.getLogger(RealtimeRouter.class.getName());
     private final ArrayBlockingQueue<RealtimeFrame> inbound = new ArrayBlockingQueue<>(8192);
     private final RealtimeRouterProperties config;
@@ -97,8 +93,8 @@ public final class RealtimeRouter implements AutoCloseable {
         if (queuedBytes.addAndGet(bytes) > 16 * 1024 * 1024 || !inbound.offer(frame)) {
             queuedBytes.addAndGet(-bytes);
             inputDropped.increment();
-            traceLog.warn("router.input.dropped traceId={} productLine={} kind={} entityId={}",
-                    traceId(frame), frame.productLine(), frame.kind(), frame.entityId());
+            log.warn("router.input.dropped productLine={} kind={} entityId={}",
+                    frame.productLine(), frame.kind(), frame.entityId());
             return false;
         }
         return true;
@@ -174,8 +170,8 @@ public final class RealtimeRouter implements AutoCloseable {
                 } catch (RuntimeException failure) {
                     dirtySources.add(frame.productLine());
                     failures.increment();
-                    traceLog.warn("router.failed traceId={} productLine={} kind={} entityId={} error={}",
-                            traceId(frame), frame.productLine(), frame.kind(), frame.entityId(), failure.getClass().getSimpleName());
+                    log.warn("router.failed productLine={} kind={} entityId={} error={}",
+                            frame.productLine(), frame.kind(), frame.entityId(), failure.getClass().getSimpleName());
                     LOG.log(System.Logger.Level.WARNING, "Realtime frame routing failed", failure);
                 }
             }
@@ -184,8 +180,8 @@ public final class RealtimeRouter implements AutoCloseable {
             frames.forEach(frame -> dirtySources.add(frame.productLine()));
             failures.increment();
             inputDropped.add(frames.size());
-            for (var frame : frames) traceLog.warn("router.batch.failed traceId={} productLine={} kind={} error={}",
-                    traceId(frame), frame.productLine(), frame.kind(), failure.getClass().getSimpleName());
+            for (var frame : frames) log.warn("router.batch.failed productLine={} kind={} error={}",
+                    frame.productLine(), frame.kind(), failure.getClass().getSimpleName());
             LOG.log(System.Logger.Level.WARNING, "Realtime route lookup failed", failure);
         } finally {
             for (var frame : frames) queuedBytes.addAndGet(-frame.payloadLength() - 448);
@@ -303,8 +299,8 @@ public final class RealtimeRouter implements AutoCloseable {
             }
             long result = node.publication.offer(buffer);
             if (result > 0) {
-                traceLog.info("router.send.end traceId={} productLine={} kind={} entityId={} node={} result=OFFERED",
-                        traceId(f), f.productLine(), f.kind(), f.entityId(), entry.getKey());
+                log.info("router.send.end productLine={} kind={} entityId={} node={} result=OFFERED",
+                        f.productLine(), f.kind(), f.entityId(), entry.getKey());
                 continue;
             }
             if (result == Publication.CLOSED || result == Publication.MAX_POSITION_EXCEEDED) {
@@ -321,16 +317,16 @@ public final class RealtimeRouter implements AutoCloseable {
         if (pendingFrames.get() >= 8192 || pendingBytes.get() + bytes.length > 16 * 1024 * 1024) {
             transportDropped.increment();
             transportCapacityDropped.increment();
-            traceLog.warn("router.queue.dropped traceId={} productLine={} kind={} entityId={}",
-                    traceId(frame), product, frame.kind(), frame.entityId());
+            log.warn("router.queue.dropped productLine={} kind={} entityId={}",
+                    product, frame.kind(), frame.entityId());
             dirtySources.add(product);
             return;
         }
-        node.pending.addLast(new PendingFrame(new UnsafeBuffer(bytes), product, System.nanoTime(), traceId(frame)));
+        node.pending.addLast(new PendingFrame(new UnsafeBuffer(bytes), product, System.nanoTime()));
         pendingFrames.incrementAndGet();
         pendingBytes.addAndGet(bytes.length);
-        traceLog.info("router.queued traceId={} productLine={} kind={} entityId={}",
-                traceId(frame), product, frame.kind(), frame.entityId());
+        log.info("router.queued productLine={} kind={} entityId={}",
+                product, frame.kind(), frame.entityId());
     }
 
     private void retryPending() {
@@ -349,8 +345,8 @@ public final class RealtimeRouter implements AutoCloseable {
                 }
                 long result = node.publication.offer(frame.buffer);
                 if (result > 0) {
-                    traceLog.info("router.send.end traceId={} productLine={} result=OFFERED queueMs={}",
-                            frame.traceId, frame.product, (now - frame.enqueuedAt) / 1_000_000.0);
+                    log.info("router.send.end productLine={} result=OFFERED queueMs={}",
+                            frame.product, (now - frame.enqueuedAt) / 1_000_000.0);
                     releaseFirst(node);
                 }
                 else if (result == Publication.CLOSED || result == Publication.MAX_POSITION_EXCEEDED) {
@@ -371,8 +367,8 @@ public final class RealtimeRouter implements AutoCloseable {
     private void discardFirst(Node node) {
         var frame = node.pending.getFirst();
         dirtySources.add(frame.product);
-        traceLog.warn("router.send.end traceId={} productLine={} result=DROPPED queueMs={}",
-                frame.traceId, frame.product, (System.nanoTime() - frame.enqueuedAt) / 1_000_000.0);
+        log.warn("router.send.end productLine={} result=DROPPED queueMs={}",
+                frame.product, (System.nanoTime() - frame.enqueuedAt) / 1_000_000.0);
         transportDropped.increment();
         releaseFirst(node);
     }
@@ -491,11 +487,7 @@ public final class RealtimeRouter implements AutoCloseable {
         }
     }
 
-    private static String traceId(RealtimeFrame frame) {
-        return "core-" + frame.productLine() + "-" + frame.sequence();
-    }
-
-    private record PendingFrame(UnsafeBuffer buffer, ProductLine product, long enqueuedAt, String traceId) {}
+    private record PendingFrame(UnsafeBuffer buffer, ProductLine product, long enqueuedAt) {}
 
     private record Request(long id, long at) {}
 }

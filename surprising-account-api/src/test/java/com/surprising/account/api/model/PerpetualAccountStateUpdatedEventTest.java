@@ -2,7 +2,6 @@ package com.surprising.account.api.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionMode;
@@ -24,7 +23,7 @@ class PerpetualAccountStateUpdatedEventTest {
                 List.of(new PerpetualAccountStateUpdatedEvent.PositionMargin("1", "usdt",
                         MarginMode.ISOLATED, PositionSide.NET, 20L)),
                 List.of(new PerpetualAccountStateUpdatedEvent.OrderLock("usdt", 30L)),
-                PositionMode.ONE_WAY, Instant.EPOCH, "trace");
+                PositionMode.ONE_WAY, Instant.EPOCH);
 
         assertThat(event.accountType()).isEqualTo("USDT_PERPETUAL");
         assertThat(event.balances().getFirst().asset()).isEqualTo("USDT");

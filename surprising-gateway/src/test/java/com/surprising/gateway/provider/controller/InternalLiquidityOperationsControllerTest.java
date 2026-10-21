@@ -3,7 +3,6 @@ package com.surprising.gateway.provider.controller;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
 import com.surprising.account.provider.service.AccountCommandGateway;
@@ -81,7 +80,9 @@ class InternalLiquidityOperationsControllerTest {
         var body = funds(AccountType.USDT_PERPETUAL);
         controller(token).adjust(body, request());
         var order = inOrder(audit, accounts);
-        order.verify(audit).recordRequired(argThat(r -> r.responseStatus() == 202 && r.traceId().equals(body.referenceId())));
+        order.verify(audit).recordRequired(argThat(r -> r.responseStatus() == 202
+                && r.queryString().contains("referenceId=" + body.referenceId())
+                && r.requestBodySha256().length() == 64));
         order.verify(accounts).adjustProductBalance(body, null, "SYSTEM:LIQUIDITY_OPERATIONS");
         order.verify(audit).recordRequired(argThat(r -> r.success() && r.requestBodySha256().length() == 64));
     }

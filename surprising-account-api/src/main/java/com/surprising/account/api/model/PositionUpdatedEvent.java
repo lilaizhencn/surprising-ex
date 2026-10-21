@@ -31,8 +31,7 @@ public record PositionUpdatedEvent(
         long marginUnits,
         Instant positionUpdatedAt,
         Instant marginUpdatedAt,
-        Instant eventTime,
-        String traceId) {
+        Instant eventTime) {
 
     public static final int CURRENT_SCHEMA_VERSION = 1;
 

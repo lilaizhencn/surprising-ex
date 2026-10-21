@@ -57,7 +57,7 @@ public class PerpetualAccountStateInternalController {
             return new PerpetualAccountStateUpdatedEvent(
                     PerpetualAccountStateUpdatedEvent.CURRENT_SCHEMA_VERSION, revision, revision, productLine, userId,
                     accountType(productLine).name(), balances, List.of(), positions, margins, locks,
-                    PositionMode.valueOf(state.positionMode().name()), now, "aeron-query");
+                    PositionMode.valueOf(state.positionMode().name()), now);
         } catch (IllegalArgumentException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
         } catch (IllegalStateException exception) {

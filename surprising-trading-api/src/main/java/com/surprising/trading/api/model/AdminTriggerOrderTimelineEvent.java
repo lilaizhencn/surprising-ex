@@ -9,6 +9,5 @@ public record AdminTriggerOrderTimelineEvent(
         Long triggerPriceTicks,
         Long placedOrderId,
         String reason,
-        String traceId,
         Instant eventTime) {
 }

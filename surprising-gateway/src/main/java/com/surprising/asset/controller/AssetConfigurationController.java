@@ -63,8 +63,7 @@ public class AssetConfigurationController {
         try {
             return approvals.requireWrite(authorization, "admin.wallet.write", "gateway-admin",
                     new AdminApprovalService.AdminRequestMetadata(request.getHeader(approvals.approvalHeaderName()),
-                            request.getMethod(), request.getRequestURI(), request.getQueryString(),
-                            request.getHeader("X-Trace-Id")), body).userId();
+                            request.getMethod(), request.getRequestURI(), request.getQueryString()), body).userId();
         } catch (AdminApprovalService.AdminApprovalRequiredException ex) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
         }

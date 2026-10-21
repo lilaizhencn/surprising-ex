@@ -16,7 +16,7 @@ final class CoreTestCompletion {
             throw new IllegalArgumentException("invalid synchronous matching fence");
         }
         CoreResponse requestedResponse = null;
-        try {
+
             while (true) {
                 owner.matchingProgress.drainMatchingCompletions();
                 long sequence = requestedSequence != 0 && owner.pendingMatching.contains(requestedSequence)
@@ -55,8 +55,7 @@ final class CoreTestCompletion {
                 throw new IllegalStateException("synchronous matcher did not produce a terminal response for sequence " + requestedSequence);
             }
             return requestedResponse;
-        } finally {
-        }
+
     }
 
     private static MatchingResult awaitMatchingResult(TradingCoreRuntime owner, long sequence) {

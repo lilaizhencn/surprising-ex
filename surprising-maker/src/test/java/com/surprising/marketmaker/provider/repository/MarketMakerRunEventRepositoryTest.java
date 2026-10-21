@@ -18,7 +18,7 @@ class MarketMakerRunEventRepositoryTest {
         var time = Instant.parse("2026-10-08T00:00:00Z");
         for (int i = 0; i < 2050; i++) store.record(new MarketMakerRunEventRepository.MarketMakerRunEventWrite(
                 "test-maker", i % 2 == 0 ? ProductLine.SPOT : ProductLine.LINEAR_PERPETUAL, "1", 2L, "node", i,
-                "CYCLE_SUCCESS", 0, 0, 0, null, "x".repeat(1500), "trace", time));
+                "CYCLE_SUCCESS", 0, 0, 0, null, "x".repeat(1500), time));
         var page = store.findPage(ProductLine.SPOT, "TEST-MAKER", "1", 2L, "CYCLE_SUCCESS", 1000, null, null);
         assertThat(page.items()).hasSize(1000);
         assertThat(page.items()).allSatisfy(e -> {

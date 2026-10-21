@@ -33,8 +33,7 @@ class PublicTradeEventMapperTest {
                 OrderSide.BUY,
                 6_000_000L,
                 2L,
-                Instant.parse("2026-07-31T00:00:00Z"),
-                "trace:1");
+                Instant.parse("2026-07-31T00:00:00Z"));
 
         var first = mapper.toTradeEvent(trade);
         var second = mapper.toTradeEvent(trade);
@@ -54,9 +53,9 @@ class PublicTradeEventMapperTest {
         properties.getKafka().setProductLine(ProductLine.INVERSE_DELIVERY);
         PublicTradeEventMapper mapper = new PublicTradeEventMapper(snapshots, properties);
         var first = mapper.toTradeEvent(new PublicTradeEvent("inverse-1", 1, "1", OrderSide.BUY,
-                500_000, 2, Instant.parse("2026-07-31T00:00:00Z"), "inverse"));
+                500_000, 2, Instant.parse("2026-07-31T00:00:00Z")));
         var second = mapper.toTradeEvent(new PublicTradeEvent("inverse-2", 2, "1", OrderSide.SELL,
-                250_000, 2, Instant.parse("2026-07-31T00:00:01Z"), "inverse"));
+                250_000, 2, Instant.parse("2026-07-31T00:00:01Z")));
         assertThat(first.price()).isEqualByComparingTo("50000");
         assertThat(first.quantity()).isEqualByComparingTo("0.04");
         assertThat(second.quantity()).isEqualByComparingTo("0.08");

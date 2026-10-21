@@ -7,7 +7,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-
 import com.surprising.candlestick.api.model.CandleStatus;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.candlestick.api.model.TradeEvent;
@@ -210,14 +209,13 @@ class CandlestickRollupTopologyTest {
                     properties.getKafka().getCandleTopic(), Serdes.String().deserializer(), candleSerde.deserializer());
 
             trades.pipeInput("1", new PublicTradeEvent(
-                    "t1", 1, "1", OrderSide.BUY, 2, 1, tradeTime, "trace"));
+                    "t1", 1, "1", OrderSide.BUY, 2, 1, tradeTime));
             assertThat(output.readValuesToList()).hasSize(2)
                     .allSatisfy(event -> assertThat(event.status()).isEqualTo(CandleStatus.PARTIAL));
             // Export can repeat the same identity after Kafka commit / checkpoint crash window.
             trades.pipeInput("1", new PublicTradeEvent(
-                    "t1", 1, "1", OrderSide.BUY, 2, 1, tradeTime, "trace"));
+                    "t1", 1, "1", OrderSide.BUY, 2, 1, tradeTime));
             assertThat(output.isEmpty()).isTrue();
-
 
             driver.advanceWallClockTime(Duration.ofSeconds(1));
             assertThat(output.isEmpty()).isTrue();
@@ -390,7 +388,7 @@ class CandlestickRollupTopologyTest {
                     properties.getKafka().getCandleTopic(), Serdes.String().deserializer(), candleSerde.deserializer());
 
             trades.pipeInput("1", new PublicTradeEvent(
-                    "t1", 1, "1", OrderSide.BUY, 2, 1, tradeTime, "trace-1"));
+                    "t1", 1, "1", OrderSide.BUY, 2, 1, tradeTime));
             assertThat(output.readValuesToList()).hasSize(2)
                     .allSatisfy(event -> assertThat(event.status()).isEqualTo(CandleStatus.PARTIAL));
             driver.advanceWallClockTime(Duration.ofSeconds(1));
@@ -400,12 +398,12 @@ class CandlestickRollupTopologyTest {
             assertThat(rollup.status()).isEqualTo(CandleStatus.PARTIAL);
 
             trades.pipeInput("1", new PublicTradeEvent(
-                    "t2", 2, "1", OrderSide.BUY, 10, 1, tradeTime.plusSeconds(1), "trace-2"));
+                    "t2", 2, "1", OrderSide.BUY, 10, 1, tradeTime.plusSeconds(1)));
             assertThat(output.isEmpty()).isTrue(); // replacement is not published before durable write
             driver.advanceWallClockTime(Duration.ofSeconds(1));
             assertThat(output.isEmpty()).isTrue(); // failed SQL keeps the dirty replacement for retry
             trades.pipeInput("1", new PublicTradeEvent(
-                    "t2", 2, "1", OrderSide.BUY, 10, 1, tradeTime.plusSeconds(1), "duplicate"));
+                    "t2", 2, "1", OrderSide.BUY, 10, 1, tradeTime.plusSeconds(1)));
             driver.advanceWallClockTime(Duration.ofSeconds(1));
             var revised = output.readValue();
             assertThat(revised.status()).isEqualTo(CandleStatus.CLOSED);

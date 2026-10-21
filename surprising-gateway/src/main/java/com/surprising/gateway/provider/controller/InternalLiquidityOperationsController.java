@@ -120,7 +120,9 @@ public class InternalLiquidityOperationsController {
     private AdminOperationRecord record(ProductLine product, HttpServletRequest request, String reference, String reason,
                                         String hash, int status, boolean success, String error) {
         return new AdminOperationRecord(null, "SYSTEM:LIQUIDITY_OPERATIONS", List.of("OPERATIONS"),
-                "liquidity-operations", "POST", request.getRequestURI(), reason, product.name(),
-                hash, status, 0L, success, error, reference, "host-local-operations", request.getRemoteAddr(), Instant.now());
+                "liquidity-operations", "POST", request.getRequestURI(),
+                "referenceId=" + java.net.URLEncoder.encode(reference, java.nio.charset.StandardCharsets.UTF_8)
+                        + "&reason=" + java.net.URLEncoder.encode(reason, java.nio.charset.StandardCharsets.UTF_8), product.name(),
+                hash, status, 0L, success, error, "host-local-operations", request.getRemoteAddr(), Instant.now());
     }
 }

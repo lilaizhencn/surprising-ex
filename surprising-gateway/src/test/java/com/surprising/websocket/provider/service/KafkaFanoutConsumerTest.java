@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
-
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.OrderEvent;
@@ -63,7 +62,7 @@ class KafkaFanoutConsumerTest {
                 properties);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
         OrderEvent event = new OrderEvent(1L, 11L, 1001L, "45",
-                OrderEventType.ACCEPTED, OrderStatus.ACCEPTED, null, eventTime, "trace-order-topic");
+                OrderEventType.ACCEPTED, OrderStatus.ACCEPTED, null, eventTime);
 
         assertThatThrownBy(() -> consumer.onOrderEvent(new ConsumerRecord<>(
                 "surprising.linear-delivery.order.events.v1", 0, 0L,
@@ -108,7 +107,7 @@ class KafkaFanoutConsumerTest {
         verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.MARK_PRICE, "1", null, null,
                         ProductLine.LINEAR_PERPETUAL)),
                 events.capture());
-        assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime(), "kafka-surprising.linear-perp.price.events.v1-0-0"));
+        assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime()));
     }
 
     @Test
@@ -126,7 +125,7 @@ class KafkaFanoutConsumerTest {
         verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.INDEX_PRICE, "1", null, null,
                         ProductLine.LINEAR_PERPETUAL)),
                 events.capture());
-        assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime(), "kafka-surprising.linear-perp.price.events.v1-0-0"));
+        assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime()));
     }
 
     @Test
@@ -163,8 +162,7 @@ class KafkaFanoutConsumerTest {
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
         OrderEvent event = new OrderEvent(1L, 11L, 1001L, SubscriptionTopic.WILDCARD,
-                OrderEventType.CANCEL_REQUESTED, OrderStatus.CANCEL_REQUESTED, "reduce-only-pruned", eventTime,
-                "trace-1");
+                OrderEventType.CANCEL_REQUESTED, OrderStatus.CANCEL_REQUESTED, "reduce-only-pruned", eventTime);
 
         consumer.onOrderEvent(new ConsumerRecord<>("surprising.linear-perp.order.events.v1", 0, 0L,
                 SubscriptionTopic.WILDCARD, objectMapper.writeValueAsString(event)));
@@ -185,7 +183,6 @@ class KafkaFanoutConsumerTest {
         assertThat(report.orderEventType()).isEqualTo("CANCEL_REQUESTED");
         assertThat(report.orderStatus()).isEqualTo("CANCEL_REQUESTED");
         assertThat(report.reason()).isEqualTo("reduce-only-pruned");
-        assertThat(report.traceId()).isEqualTo("trace-1");
     }
 
     @Test
@@ -198,9 +195,9 @@ class KafkaFanoutConsumerTest {
                 TriggerOrderType.STOP_LOSS, TriggerCondition.LESS_OR_EQUAL,
                 60_000L, OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS,
                 PositionSide.NET, TriggerOrderStatus.CANCELED, null, null, null,
-                "POSITION_CLOSED", "trace-trigger", null, null, eventTime.minusSeconds(60), eventTime);
+                "POSITION_CLOSED", null, null, eventTime.minusSeconds(60), eventTime);
         TriggerOrderUpdatedEvent event = new TriggerOrderUpdatedEvent(
-                701L, ProductLine.LINEAR_PERPETUAL, order, eventTime, "trace-trigger");
+                701L, ProductLine.LINEAR_PERPETUAL, order, eventTime);
 
         consumer.onTriggerOrderEvent(new ConsumerRecord<>("surprising.linear-perp.trigger-order.events.v1", 0, 0L,
                 "1", objectMapper.writeValueAsString(event)));
@@ -240,8 +237,7 @@ class KafkaFanoutConsumerTest {
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
         RiskAccountUpdatedEvent event = new RiskAccountUpdatedEvent(1L, 10L, 1001L, "USDT",
-                1_000_000L, 25_000L, 1_025_000L, 100_000L, 97_560L, RiskStatus.NORMAL, eventTime,
-                "trace-risk-1");
+                1_000_000L, 25_000L, 1_025_000L, 100_000L, 97_560L, RiskStatus.NORMAL, eventTime);
 
         assertThatThrownBy(() -> consumer.onAccountRisk(new ConsumerRecord<>("surprising.linear-perp.risk.account.events.v1",
                 0, 0L, "1002:USDT", objectMapper.writeValueAsString(event))))
@@ -259,7 +255,7 @@ class KafkaFanoutConsumerTest {
                 PositionUpdatedEvent.CURRENT_SCHEMA_VERSION, 91L, 2L, ProductLine.LINEAR_PERPETUAL,
                 7L, 1001L, "1", 1L, MarginMode.CROSS, PositionSide.LONG,
                 10L, 65_000L, 650_000L, 0L, "USDT", 100_000L,
-                eventTime, eventTime, eventTime, "trace-position-1");
+                eventTime, eventTime, eventTime);
 
         consumer.onPosition(new ConsumerRecord<>("surprising.linear-perp.account.position.events.v1", 0, 0L,
                 event.partitionKey(), objectMapper.writeValueAsString(event)));
@@ -281,7 +277,7 @@ class KafkaFanoutConsumerTest {
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
         RiskPositionUpdatedEvent event = new RiskPositionUpdatedEvent(2L, 10L, 1001L, "1",
                 MarginMode.CROSS, PositionSide.SHORT, 7L, "USDT", -10L, 65_000L, 67_000L, 670_000L,
-                -20_000L, 100_000L, 0L, 95_238L, RiskStatus.NORMAL, eventTime, "trace-risk-position-1");
+                -20_000L, 100_000L, 0L, 95_238L, RiskStatus.NORMAL, eventTime);
 
         consumer.onPositionRisk(new ConsumerRecord<>("surprising.linear-perp.risk.position.events.v1", 0, 0L,
                 "1", objectMapper.writeValueAsString(event)));

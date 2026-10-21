@@ -5,17 +5,13 @@ import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.*;
 import com.surprising.websocket.api.model.*;
-
 import jakarta.annotation.PreDestroy;
-
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.env.Environment;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-
 import tools.jackson.databind.ObjectMapper;
-
 import java.time.*;
 import java.util.*;
 
@@ -117,13 +113,6 @@ public final class RealtimeWebSocketBridge
     }
 
     private void receive(RealtimeFrame f) {
-        String id = "core-" + f.productLine() + "-" + f.sequence();
-        try (var trace = com.surprising.trading.api.TraceContext.open(id)) {
-            receiveTraced(f);
-        }
-    }
-
-    private void receiveTraced(RealtimeFrame f) {
         if (f.kind() == RealtimeFrame.Kind.SNAPSHOT_UNAVAILABLE) {
             registry.publishUserSnapshot(
                     f.productLine(),

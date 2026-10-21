@@ -1,7 +1,6 @@
 package com.surprising.gateway.provider.auth;
 
 import lombok.extern.slf4j.Slf4j;
-
 import com.surprising.gateway.provider.auth.AuthModels.AdminOperationLogResponse;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -21,7 +20,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 @Slf4j
 public class AdminAuditRepository {
-
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -44,8 +42,8 @@ public class AdminAuditRepository {
                 INSERT INTO gateway_admin_operation_logs (
                     admin_user_id, admin_username, admin_roles, service, http_method, request_path,
                     query_string, target_uri, request_body_sha256, response_status, duration_ms, success,
-                    error_message, trace_id, user_agent, ip_address, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    error_message, user_agent, ip_address, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 record.adminUserId(),
                 record.adminUsername(),
@@ -60,7 +58,6 @@ public class AdminAuditRepository {
                 record.durationMs(),
                 record.success(),
                 truncate(record.errorMessage(), 1024),
-                truncate(record.traceId(), 128),
                 truncate(record.userAgent(), 512),
                 truncate(record.ipAddress(), 128),
                 Timestamp.from(record.createdAt() == null ? Instant.now() : record.createdAt()));
@@ -105,7 +102,7 @@ public class AdminAuditRepository {
         List<AdminOperationLogResponse> rows = jdbcTemplate.query("""
                 SELECT operation_id, admin_user_id, admin_username, admin_roles, service, http_method,
                        request_path, query_string, target_uri, request_body_sha256, response_status,
-                       duration_ms, success, error_message, trace_id, user_agent, ip_address, created_at
+                       duration_ms, success, error_message, user_agent, ip_address, created_at
                   FROM gateway_admin_operation_logs
                  WHERE (CAST(? AS text) IS NULL OR admin_user_id = ?)
                    AND (CAST(? AS text) IS NULL OR service = ?)
@@ -138,7 +135,6 @@ public class AdminAuditRepository {
                 nullableLong(rs, "duration_ms"),
                 rs.getBoolean("success"),
                 rs.getString("error_message"),
-                rs.getString("trace_id"),
                 rs.getString("user_agent"),
                 rs.getString("ip_address"),
                 rs.getTimestamp("created_at").toInstant());
@@ -207,7 +203,6 @@ public class AdminAuditRepository {
             Long durationMs,
             boolean success,
             String errorMessage,
-            String traceId,
             String userAgent,
             String ipAddress,
             Instant createdAt) {

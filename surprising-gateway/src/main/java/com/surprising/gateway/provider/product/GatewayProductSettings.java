@@ -61,7 +61,7 @@ public class GatewayProductSettings {
                 "product-lines", "POST", "/api/v1/admin/product-lines/" + product + "/enable",
                 "version=" + rows.getFirst().configurationVersion() + "&reason=" + java.net.URLEncoder.encode(request.reason().trim(), java.nio.charset.StandardCharsets.UTF_8),
                 "database:gateway_product_lines", null, 200, 0L, true, null,
-                null, null, null, Instant.now()));
+                null, null, Instant.now()));
         return rows.getFirst();
     }
 }

@@ -24,6 +24,7 @@ final class C2cDatabaseFixture implements AutoCloseable {
         try {
             jdbc.execute("""
                     CREATE TABLE gateway_users(user_id BIGSERIAL PRIMARY KEY,username TEXT,email TEXT,phone TEXT,
+                        display_name TEXT NOT NULL DEFAULT '',
                         password_hash TEXT NOT NULL DEFAULT 'TEST_ONLY',status TEXT NOT NULL DEFAULT 'NORMAL',
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now())
                     """);

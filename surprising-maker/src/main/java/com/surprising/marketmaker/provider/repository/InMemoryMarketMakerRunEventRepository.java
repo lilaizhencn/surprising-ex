@@ -19,8 +19,7 @@ public class InMemoryMarketMakerRunEventRepository implements MarketMakerRunEven
         if (events.size() == CAPACITY) events.removeFirst();
         events.addLast(new MarketMakerRunEventRecord(++sequence, v.strategyId(), v.productLine(), v.instrumentId(),
                 v.accountId(), v.nodeId(), v.cycleSequence(), v.eventType(), v.submittedOrders(), v.canceledOrders(),
-                v.rejectedOrders(), v.skippedReason(), truncate(v.errorMessage(), 1000), truncate(v.traceId(), 128),
-                v.createdAt() == null ? Instant.now() : v.createdAt()));
+                v.rejectedOrders(), v.skippedReason(), truncate(v.errorMessage(), 1000), v.createdAt() == null ? Instant.now() : v.createdAt()));
     }
     @Override public List<MarketMakerRunEventRecord> find(ProductLine line, String strategy, String instrument,
                                                          Long account, String type, int limit) {

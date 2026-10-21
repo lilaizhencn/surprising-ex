@@ -6,7 +6,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
@@ -93,7 +92,6 @@ class TriggerOrderIdentityTest {
         var reconstructed = new TriggerOrderService(properties, gateway).place(request("trigger-client"));
 
         assertThat(reconstructed.triggerOrderId()).isEqualTo(first.triggerOrderId());
-        assertThat(reconstructed.traceId()).isEqualTo(first.traceId());
         assertThat(reconstructed.createdAt()).isEqualTo(first.createdAt());
     }
 

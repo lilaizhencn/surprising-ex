@@ -2070,7 +2070,6 @@ CREATE TABLE IF NOT EXISTS market_maker_strategy_run_events (
     rejected_orders             BIGINT NOT NULL DEFAULT 0,
     skipped_reason              TEXT,
     error_message               TEXT,
-    trace_id                    TEXT,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT market_maker_run_events_product_line_check CHECK (
         product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
@@ -2105,11 +2104,6 @@ CREATE INDEX IF NOT EXISTS market_maker_run_events_account_time_idx
     ON market_maker_strategy_run_events (product_line, account_id, created_at DESC)
     WHERE account_id IS NOT NULL;
 
-DROP INDEX IF EXISTS market_maker_run_events_trace_idx;
-CREATE INDEX IF NOT EXISTS market_maker_run_events_trace_idx
-    ON market_maker_strategy_run_events (product_line, trace_id)
-    WHERE trace_id IS NOT NULL;
-
 CREATE TABLE IF NOT EXISTS market_maker_reference_samples (
     sample_id                   BIGSERIAL PRIMARY KEY,
     product_line                TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
@@ -2126,7 +2120,6 @@ CREATE TABLE IF NOT EXISTS market_maker_reference_samples (
     mid_price_ticks             BIGINT NOT NULL,
     spread_ticks                BIGINT NOT NULL,
     received_at                 TIMESTAMPTZ NOT NULL,
-    trace_id                    TEXT,
     sampled_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT market_maker_reference_samples_product_line_check CHECK (
         product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
@@ -2926,7 +2919,6 @@ CREATE TABLE IF NOT EXISTS gateway_admin_operation_logs (
     duration_ms          BIGINT,
     success              BOOLEAN NOT NULL,
     error_message        TEXT,
-    trace_id             TEXT,
     user_agent           TEXT,
     ip_address           TEXT,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -2943,10 +2935,6 @@ CREATE INDEX IF NOT EXISTS gateway_admin_operation_logs_service_time_idx
 
 CREATE INDEX IF NOT EXISTS gateway_admin_operation_logs_time_idx
     ON gateway_admin_operation_logs (created_at DESC);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_operation_logs_trace_idx
-    ON gateway_admin_operation_logs (trace_id)
-    WHERE trace_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS gateway_admin_approval_requests (
     approval_id          BIGSERIAL PRIMARY KEY,
@@ -2966,7 +2954,6 @@ CREATE TABLE IF NOT EXISTS gateway_admin_approval_requests (
     expires_at           TIMESTAMPTZ NOT NULL,
     decided_at           TIMESTAMPTZ,
     consumed_at          TIMESTAMPTZ,
-    consumed_trace_id    TEXT,
     CONSTRAINT gateway_admin_approval_status_check CHECK (
         status IN ('PENDING', 'APPROVED', 'REJECTED', 'CONSUMED')
     ),
@@ -2984,10 +2971,6 @@ CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_status_time_idx
 
 CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_service_time_idx
     ON gateway_admin_approval_requests (service, requested_at DESC);
-
-CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_consumed_trace_idx
-    ON gateway_admin_approval_requests (consumed_trace_id)
-    WHERE consumed_trace_id IS NOT NULL;
 
 -- 09. Aeron Core audit, history projections and WebSocket delivery audit.
 
@@ -3375,7 +3358,6 @@ BEGIN
             WHEN 'order_id' THEN '系统订单唯一标识。'
             WHEN 'user_id' THEN '用户唯一标识；系统账户的取值规则由业务模块定义。'
             WHEN 'event_id' THEN '不可变业务事件唯一标识。'
-            WHEN 'trace_id' THEN '跨服务请求链路追踪标识。'
             WHEN 'reference_id' THEN '外部或跨账本业务引用标识。'
             WHEN 'idempotency_key' THEN '调用方提供的幂等键。'
             WHEN 'request_fingerprint' THEN '规范化请求内容的指纹，用于检测幂等键冲突。'

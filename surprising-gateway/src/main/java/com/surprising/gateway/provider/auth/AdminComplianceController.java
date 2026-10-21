@@ -10,7 +10,6 @@ import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycUpdateRequest;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTag;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTagCreateRequest;
-import com.surprising.gateway.provider.config.GatewayTraceFilter;
 import com.surprising.gateway.provider.service.KycDocumentNotFoundException;
 import com.surprising.gateway.provider.service.KycDocumentStorageException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -255,8 +254,7 @@ public class AdminComplianceController {
                 request.getHeader(complianceService.approvalHeaderName()),
                 request.getMethod(),
                 request.getRequestURI(),
-                request.getQueryString(),
-                traceId(request));
+                request.getQueryString());
     }
 
     private <T> T readBody(byte[] body, Class<T> type) {
@@ -265,14 +263,6 @@ public class AdminComplianceController {
         } catch (JacksonException ex) {
             throw new IllegalArgumentException("invalid request body", ex);
         }
-    }
-
-    private String traceId(HttpServletRequest request) {
-        Object value = request.getAttribute(GatewayTraceFilter.TRACE_ID_ATTRIBUTE);
-        if (value instanceof String traceId && !traceId.isBlank()) {
-            return traceId;
-        }
-        return request.getHeader(GatewayTraceFilter.TRACE_ID_HEADER);
     }
 
     public record ComplianceUserQueryResponse(int count,

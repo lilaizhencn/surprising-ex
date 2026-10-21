@@ -51,7 +51,7 @@ public class AdminApprovalRepository {
                 RETURNING approval_id, requester_user_id, requester_username, approver_user_id,
                           approver_username, service, http_method, request_path, query_string,
                           request_body_sha256, reason, decision_reason, status, requested_at,
-                          expires_at, decided_at, consumed_at, consumed_trace_id
+                          expires_at, decided_at, consumed_at
                 """, this::toResponse,
                 requester.userId(), requester.username(), service, method, requestPath, queryString,
                 bodyHash, reason, Timestamp.from(now), Timestamp.from(expiresAt));
@@ -91,7 +91,6 @@ public class AdminApprovalRepository {
                                                  String requestPath,
                                                  String queryString,
                                                  String bodyHash,
-                                                 String traceId,
                                                  Instant now) {
         AdminApprovalResponse current = requireForUpdate(approvalId);
         if (!"APPROVED".equals(current.status())) {
@@ -113,14 +112,13 @@ public class AdminApprovalRepository {
         return jdbcTemplate.queryForObject("""
                 UPDATE gateway_admin_approval_requests
                    SET status = 'CONSUMED',
-                       consumed_at = ?,
-                       consumed_trace_id = ?
+                       consumed_at = ?
                  WHERE approval_id = ?
                 RETURNING approval_id, requester_user_id, requester_username, approver_user_id,
                           approver_username, service, http_method, request_path, query_string,
                           request_body_sha256, reason, decision_reason, status, requested_at,
-                          expires_at, decided_at, consumed_at, consumed_trace_id
-                """, this::toResponse, Timestamp.from(now), blankToNull(traceId), approvalId);
+                          expires_at, decided_at, consumed_at
+                """, this::toResponse, Timestamp.from(now), approvalId);
     }
 
     public List<AdminApprovalResponse> approvals(String status,
@@ -163,7 +161,7 @@ public class AdminApprovalRepository {
                 SELECT approval_id, requester_user_id, requester_username, approver_user_id,
                        approver_username, service, http_method, request_path, query_string,
                        request_body_sha256, reason, decision_reason, status, requested_at,
-                       expires_at, decided_at, consumed_at, consumed_trace_id
+                       expires_at, decided_at, consumed_at
                   FROM gateway_admin_approval_requests
                  WHERE (CAST(? AS text) IS NULL OR status = ?)
                    AND (CAST(? AS text) IS NULL OR requester_user_id = ?)
@@ -196,7 +194,7 @@ public class AdminApprovalRepository {
                 RETURNING approval_id, requester_user_id, requester_username, approver_user_id,
                           approver_username, service, http_method, request_path, query_string,
                           request_body_sha256, reason, decision_reason, status, requested_at,
-                          expires_at, decided_at, consumed_at, consumed_trace_id
+                          expires_at, decided_at, consumed_at
                 """, this::toResponse,
                 status, approver.userId(), approver.username(), blankToNull(reason),
                 Timestamp.from(now), approvalId);
@@ -207,7 +205,7 @@ public class AdminApprovalRepository {
                 SELECT approval_id, requester_user_id, requester_username, approver_user_id,
                        approver_username, service, http_method, request_path, query_string,
                        request_body_sha256, reason, decision_reason, status, requested_at,
-                       expires_at, decided_at, consumed_at, consumed_trace_id
+                       expires_at, decided_at, consumed_at
                   FROM gateway_admin_approval_requests
                  WHERE approval_id = ?
                  FOR UPDATE
@@ -245,8 +243,7 @@ public class AdminApprovalRepository {
                 rs.getTimestamp("requested_at").toInstant(),
                 rs.getTimestamp("expires_at").toInstant(),
                 nullableInstant(rs, "decided_at"),
-                nullableInstant(rs, "consumed_at"),
-                rs.getString("consumed_trace_id"));
+                nullableInstant(rs, "consumed_at"));
     }
 
     private Long nullableLong(ResultSet rs, String column) throws SQLException {

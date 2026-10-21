@@ -28,7 +28,6 @@ public record TriggerOrderResponse(
         Long triggerSequence,
         Long triggeredPriceTicks,
         String rejectReason,
-        String traceId,
         Instant expiresAt,
         Instant triggeredAt,
         Instant createdAt,
@@ -49,13 +48,12 @@ public record TriggerOrderResponse(
                                 OrderType orderType, TimeInForce timeInForce, long priceTicks,
                                 long quantitySteps, MarginMode marginMode, PositionSide positionSide,
                                 TriggerOrderStatus status, Long placedOrderId, Long triggerSequence,
-                                Long triggeredPriceTicks, String rejectReason, String traceId,
-                                Instant expiresAt, Instant triggeredAt, Instant createdAt, Instant updatedAt) {
+                                Long triggeredPriceTicks, String rejectReason, Instant expiresAt, Instant triggeredAt, Instant createdAt, Instant updatedAt) {
         this(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId, instrumentId, side,
                 triggerType, triggerCondition, triggerPriceTicks, activationPriceTicks, callbackRatePpm,
                 highestPriceTicks, lowestPriceTicks, activatedAt, orderType, timeInForce, priceTicks,
                 quantitySteps, marginMode, positionSide, status, placedOrderId, triggerSequence,
-                triggeredPriceTicks, rejectReason, traceId, expiresAt, triggeredAt, createdAt, updatedAt,
+                triggeredPriceTicks, rejectReason, expiresAt, triggeredAt, createdAt, updatedAt,
                 TriggerPriceSource.MARK);
     }
 
@@ -78,7 +76,6 @@ public record TriggerOrderResponse(
                                 Long triggerSequence,
                                 Long triggeredPriceTicks,
                                 String rejectReason,
-                                String traceId,
                                 Instant expiresAt,
                                 Instant triggeredAt,
                                 Instant createdAt,
@@ -86,7 +83,7 @@ public record TriggerOrderResponse(
         this(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId, instrumentId, side, triggerType,
                 triggerCondition, triggerPriceTicks, null, null, null, null, null, orderType, timeInForce,
                 priceTicks, quantitySteps, marginMode, PositionSide.NET, status, placedOrderId, triggerSequence,
-                triggeredPriceTicks, rejectReason, traceId, expiresAt, triggeredAt, createdAt, updatedAt);
+                triggeredPriceTicks, rejectReason, expiresAt, triggeredAt, createdAt, updatedAt);
     }
 
     public TriggerOrderResponse(long triggerOrderId,
@@ -109,7 +106,6 @@ public record TriggerOrderResponse(
                                 Long triggerSequence,
                                 Long triggeredPriceTicks,
                                 String rejectReason,
-                                String traceId,
                                 Instant expiresAt,
                                 Instant triggeredAt,
                                 Instant createdAt,
@@ -117,6 +113,6 @@ public record TriggerOrderResponse(
         this(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId, instrumentId, side, triggerType,
                 triggerCondition, triggerPriceTicks, null, null, null, null, null, orderType, timeInForce,
                 priceTicks, quantitySteps, marginMode, positionSide, status, placedOrderId, triggerSequence,
-                triggeredPriceTicks, rejectReason, traceId, expiresAt, triggeredAt, createdAt, updatedAt);
+                triggeredPriceTicks, rejectReason, expiresAt, triggeredAt, createdAt, updatedAt);
     }
 }

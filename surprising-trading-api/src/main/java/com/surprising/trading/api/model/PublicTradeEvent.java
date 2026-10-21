@@ -10,6 +10,5 @@ public record PublicTradeEvent(
         OrderSide takerSide,
         long priceTicks,
         long quantitySteps,
-        Instant eventTime,
-        String traceId) {
+        Instant eventTime) {
 }

@@ -64,7 +64,7 @@ class RecentTradeQueryServiceTest {
     private ConsumerRecord<String, String> record(long offset, String instrument, long sequence) {
         return new ConsumerRecord<>(partition.topic(), 0, offset, instrument,
                 mapper.writeValueAsString(new PublicTradeEvent("trade-" + sequence, sequence, instrument,
-                        OrderSide.BUY, 80000L, 6L, Instant.parse("2026-10-09T00:00:00Z"), "trace-" + sequence)));
+                        OrderSide.BUY, 80000L, 6L, Instant.parse("2026-10-09T00:00:00Z"))));
     }
 
     @Test void reusesOneConsumerAndKeepsCommittedBoundaryInstrumentQuantityAndDescendingOrder() {

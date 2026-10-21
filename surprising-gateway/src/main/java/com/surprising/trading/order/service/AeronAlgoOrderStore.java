@@ -67,10 +67,7 @@ public class AeronAlgoOrderStore {
     }
     public AlgoOrderRecord record(CoreAlgoOrderView value) {
         var productLine = properties.getKafka().getProductLine();
-        String traceId = productLine != null && value.userId() > 0
-                && value.clientAlgoOrderId() != null && !value.clientAlgoOrderId().isBlank()
-                ? StableOrderIdentity.algoCommandId(productLine, value.userId(), value.clientAlgoOrderId()).toString()
-                : null;
+
         return new AlgoOrderRecord(value.algoOrderId(), productLine, value.userId(), empty(value.clientAlgoOrderId()),
                 value.instrumentId(), AlgoOrderType.values()[value.algoTypeCode()], OrderSide.valueOf(value.side().name()),
                 value.priceTicks(), value.quantitySteps(), value.childQuantitySteps(), value.intervalSeconds(),
@@ -78,7 +75,7 @@ public class AeronAlgoOrderStore {
                 PositionSide.valueOf(value.positionSide().name()), value.reduceOnly(), value.postOnly(),
                 TimeInForce.valueOf(value.timeInForce().name()), AlgoOrderStatus.values()[value.statusCode()],
                 value.currentOrderId() == 0 ? null : value.currentOrderId(), empty(value.rejectReason()),
-                traceId, instant(value.startAtEpochMillis()), instant(value.nextSliceAtEpochMillis()),
+                instant(value.startAtEpochMillis()), instant(value.nextSliceAtEpochMillis()),
                 instant(value.completedAtEpochMillis()), instant(value.createdAtEpochMillis()), instant(value.updatedAtEpochMillis()));
     }
     public AlgoOrderProgress progress(CoreAlgoOrderView value) {

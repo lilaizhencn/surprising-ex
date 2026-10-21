@@ -11,7 +11,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
-
 import com.surprising.product.api.ProductLine;
 import com.surprising.price.api.model.IndexPriceEvent;
 import com.surprising.price.api.model.MarkPriceEvent;
@@ -221,7 +220,7 @@ class MarkPriceServiceTest {
                 mock(LatestMarkPriceCache.class), mapper);
         Instant now = Instant.parse("2026-08-25T00:00:00Z");
         PublicTradeEvent event = new PublicTradeEvent("match-1", 1L, "1", OrderSide.BUY,
-                10_005L, 200L, now, "trace-1");
+                10_005L, 200L, now);
         PerpTradeEvent mapped = new PerpTradeEvent("1", "match-1", 1L, now,
                 new BigDecimal("100.05"), BigDecimal.ONE, "BUY");
         when(mapper.toPerpTradeEvent(event)).thenReturn(mapped);

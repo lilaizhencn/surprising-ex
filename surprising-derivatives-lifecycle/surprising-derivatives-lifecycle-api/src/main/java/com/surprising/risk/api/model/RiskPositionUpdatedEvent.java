@@ -24,8 +24,7 @@ public record RiskPositionUpdatedEvent(
         long positionMarginUnits,
         long marginRatioPpm,
         RiskStatus status,
-        Instant eventTime,
-        String traceId) {
+        Instant eventTime) {
 
     public RiskPositionUpdatedEvent {
         if (productLine == null) {
@@ -52,35 +51,11 @@ public record RiskPositionUpdatedEvent(
                                     long positionMarginUnits,
                                     long marginRatioPpm,
                                     RiskStatus status,
-                                    Instant eventTime,
-                                    String traceId) {
+                                    Instant eventTime) {
         this(eventId, ProductLine.LINEAR_PERPETUAL, snapshotId, userId, instrumentId, marginMode, positionSide,
                 instrumentChangeId, settleAsset, signedQuantitySteps, entryPriceTicks, markPriceTicks,
                 notionalUnits, unrealizedPnlUnits, maintenanceMarginUnits, positionMarginUnits, marginRatioPpm,
-                status, eventTime, traceId);
-    }
-
-    public RiskPositionUpdatedEvent(long eventId,
-                                    long snapshotId,
-                                    long userId,
-                                    String instrumentId,
-                                    MarginMode marginMode,
-                                    long instrumentChangeId,
-                                    String settleAsset,
-                                    long signedQuantitySteps,
-                                    long entryPriceTicks,
-                                    long markPriceTicks,
-                                    long notionalUnits,
-                                    long unrealizedPnlUnits,
-                                    long maintenanceMarginUnits,
-                                    long positionMarginUnits,
-                                    long marginRatioPpm,
-                                    RiskStatus status,
-                                    Instant eventTime,
-                                    String traceId) {
-        this(eventId, snapshotId, userId, instrumentId, marginMode, PositionSide.NET, instrumentChangeId, settleAsset,
-                signedQuantitySteps, entryPriceTicks, markPriceTicks, notionalUnits, unrealizedPnlUnits,
-                maintenanceMarginUnits, positionMarginUnits, marginRatioPpm, status, eventTime, traceId);
+                status, eventTime);
     }
 
     public RiskPositionUpdatedEvent(long eventId,
@@ -100,8 +75,9 @@ public record RiskPositionUpdatedEvent(
                                     long marginRatioPpm,
                                     RiskStatus status,
                                     Instant eventTime) {
-        this(eventId, snapshotId, userId, instrumentId, marginMode, PositionSide.NET, instrumentChangeId, settleAsset, signedQuantitySteps,
-                entryPriceTicks, markPriceTicks, notionalUnits, unrealizedPnlUnits, maintenanceMarginUnits,
-                positionMarginUnits, marginRatioPpm, status, eventTime, null);
+        this(eventId, snapshotId, userId, instrumentId, marginMode, PositionSide.NET, instrumentChangeId, settleAsset,
+                signedQuantitySteps, entryPriceTicks, markPriceTicks, notionalUnits, unrealizedPnlUnits,
+                maintenanceMarginUnits, positionMarginUnits, marginRatioPpm, status, eventTime);
     }
+
 }

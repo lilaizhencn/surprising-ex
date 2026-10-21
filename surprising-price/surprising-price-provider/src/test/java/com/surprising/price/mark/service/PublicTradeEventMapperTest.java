@@ -1,7 +1,6 @@
 package com.surprising.price.mark.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentResponse;
@@ -31,7 +30,7 @@ class PublicTradeEventMapperTest {
                 new MarkPriceEncodingService(properties, cache, audit));
 
         var trade = mapper.toPerpTradeEvent(new PublicTradeEvent("trade-8", 42L, "1",
-                OrderSide.BUY, 12_345L, 2_000_001L, now, "trace-8"));
+                OrderSide.BUY, 12_345L, 2_000_001L, now));
 
         assertThat(trade.instrumentId()).isEqualTo("1");
         assertThat(trade.tradeId()).isEqualTo("trade-8");

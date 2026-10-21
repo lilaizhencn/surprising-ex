@@ -236,7 +236,6 @@ REST 接口：
 ```bash
 curl -X POST 'http://localhost:9084/api/v1/trading/trigger-orders' \
   -H 'Content-Type: application/json' \
-  -H 'X-Trace-Id: trace-tp-1001' \
   -d '{
     "userId": 1001,
     "clientTriggerOrderId": "tp-1001-1",
@@ -274,12 +273,9 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&inst
 `TriggerOrderIndex` 按产品内 instrument 与来源隔离待触发价格档，`TriggerOrderCommands` 逐来源续扫，执行前再次核对来源价格、序号和条件。
 来源写入 Core 触发单状态和快照；归档中的旧版触发单按原来的 `MARK` 语义解码，旧版价格快照的最新成交价为不可用。
 
-## TraceId 链路追踪
+## 业务定位
 
-- 前端或 BFF 可以传 `X-Trace-Id`；未传时 gateway/order 入口会自动生成。
-- `surprising-gateway` 中的 订单业务包 只在当前 HTTP 请求内用 ThreadLocal 保存 traceId，请求结束会清理；提交 Aeron 前把它写入稳定 Core command 元数据。
-- Core command、领域事件和私有 WebSocket 事件沿用同一个 traceId，查询不参与在线裁决。
-- 生产日志建议同时输出 `traceId`、`orderId`、`commandId`、`tradeId`、instrumentId 和 Kafka topic/partition/offset。
+日志按产品线、`orderId`、`commandId`、`tradeId`、`instrumentId` 和 Kafka topic/partition/offset 定位。业务身份与幂等规则继续由交易契约和 Core 承担。
 
 ## 保证金冻结
 
@@ -480,7 +476,6 @@ matching provider 不再持有本地盘口或自行裁决自成交。
 ```bash
 curl -X POST 'http://localhost:9084/api/v1/trading/orders' \
   -H 'Content-Type: application/json' \
-  -H 'X-Trace-Id: trace-demo-1001' \
   -d '{
     "userId": 1001,
     "clientOrderId": "cli-1001-1",
@@ -515,7 +510,6 @@ curl -X POST 'http://localhost:9084/api/v1/trading/orders' \
 ```bash
 curl -X POST 'http://localhost:9084/api/v1/trading/orders/cancel' \
   -H 'Content-Type: application/json' \
-  -H 'X-Trace-Id: trace-demo-cancel-1001' \
   -d '{"userId":1001,"orderId":1}'
 ```
 

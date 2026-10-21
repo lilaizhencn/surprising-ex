@@ -8,7 +8,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-
 import com.surprising.gateway.provider.announcement.AnnouncementModels.Announcement;
 import com.surprising.gateway.provider.announcement.AnnouncementModels.PublishRequest;
 import com.surprising.gateway.provider.announcement.AnnouncementModels.Translation;
@@ -29,7 +28,7 @@ class AnnouncementServiceTest {
     private final AnnouncementService service = new AnnouncementService(repository, auth, approvals);
     private final JwtPrincipal actor = new JwtPrincipal(9L, "operator", "ACTIVE", List.of("ADMIN"), Instant.now().plusSeconds(60));
     private final AdminApprovalService.AdminRequestMetadata metadata =
-            new AdminApprovalService.AdminRequestMetadata("approval-1", "POST", "/api/v1/admin/announcements/7/publish", null, "trace-1");
+            new AdminApprovalService.AdminRequestMetadata("approval-1", "POST", "/api/v1/admin/announcements/7/publish", null);
 
     @Test
     void publishingRequiresBothSupportedLocalesBeforeChangingStatus() {

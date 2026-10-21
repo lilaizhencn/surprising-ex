@@ -275,7 +275,6 @@ public final class AuthModels {
             Long durationMs,
             boolean success,
             String errorMessage,
-            String traceId,
             String userAgent,
             String ipAddress,
             Instant createdAt) {
@@ -323,8 +322,7 @@ public final class AuthModels {
             Instant requestedAt,
             Instant expiresAt,
             Instant decidedAt,
-            Instant consumedAt,
-            String consumedTraceId) {
+            Instant consumedAt) {
     }
 
     public record AdminApprovalQueryResponse(

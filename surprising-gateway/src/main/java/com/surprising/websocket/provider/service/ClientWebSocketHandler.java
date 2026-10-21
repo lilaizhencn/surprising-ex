@@ -48,12 +48,6 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
-        try (var trace = com.surprising.trading.api.TraceContext.open(com.surprising.trading.api.TraceContext.newTraceId())) {
-            handleTracedMessage(session, message);
-        }
-    }
-
-    private void handleTracedMessage(WebSocketSession session, TextMessage message) {
         ClientConnection connection = connection(session);
         String operation="";
         try {

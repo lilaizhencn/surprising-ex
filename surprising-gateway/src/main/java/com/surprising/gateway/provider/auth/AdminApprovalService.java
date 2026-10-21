@@ -124,7 +124,6 @@ public class AdminApprovalService {
                     request.requestUri(),
                     request.queryString(),
                     bodySha256(body),
-                    request.traceId(),
                     Instant.now());
         } catch (IllegalArgumentException | IllegalStateException ex) {
             throw new AdminApprovalRequiredException(ex.getMessage(), ex);
@@ -154,8 +153,7 @@ public class AdminApprovalService {
             String approvalId,
             String method,
             String requestUri,
-            String queryString,
-            String traceId) {
+            String queryString) {
     }
 
     public static class AdminApprovalRequiredException extends RuntimeException {

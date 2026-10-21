@@ -397,7 +397,7 @@ public class ComplianceService {
         adminAuditRepository.record(new AdminAuditRepository.AdminOperationRecord(
                 principal.userId(), principal.username(), principal.roles(), "gateway", "GET",
                 "/api/v1/admin/compliance/users/" + userId + "/kyc/documents/" + documentId,
-                null, null, null, success ? 200 : 500, null, success, errorMessage, null, null, null, Instant.now()));
+                null, null, null, success ? 200 : 500, null, success, errorMessage, null, null, Instant.now()));
     }
 
     public List<RiskTag> riskTags(Long userId, String status, int limit) {

@@ -62,7 +62,7 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 
 私有订阅不传 `symbol` 时使用通配符 `*`，表示接收该认证用户的所有相关事件。
 
-`triggerOrders` 推送完整的 `TriggerOrderUpdatedEvent` 包装，包含 `eventId`、`productLine`、`order`、`eventTime` 和 `traceId`。客户端把 `PENDING`/`TRIGGERING` 快照保留在开放条件单列表，收到终态立即移除；重复或乱序 `eventId` 必须忽略，重连后要重新拉 REST 开放条件单快照。
+`triggerOrders` 推送完整的 `TriggerOrderUpdatedEvent` 包装，包含 `eventId`、`productLine`、`order`、`eventTime`。客户端把 `PENDING`/`TRIGGERING` 快照保留在开放条件单列表，收到终态立即移除；重复或乱序 `eventId` 必须忽略，重连后要重新拉 REST 开放条件单快照。
 
 ## 持仓推送链路
 
@@ -82,7 +82,6 @@ matching trade
 这样前端不会看到从原始撮合结果推导出来、但账户状态还没落定的持仓。
 
 account outbox 是至少一次投递。客户端更新本地状态时应把 `eventId` 和 `tradeId` 当成去重/版本提示。
-私有持仓消息在可用时也会携带原始交易链路的 `traceId`，方便客服和运维把 WebSocket 推送关联到订单、撮合成交和账户结算行。
 
 `positions` 是账户持仓状态频道，不是实时 PnL 计算器。它在账户结算后推送签名数量、开仓均价、已实现盈亏和保证金模式。后端权威的未实现盈亏、权益、维持保证金和保证金率要订阅：
 
@@ -90,7 +89,6 @@ account outbox 是至少一次投递。客户端更新本地状态时应把 `eve
 - `accountRisk`：`userId + settleAsset` 维度账户风险快照，包含钱包余额、总未实现盈亏、权益、维持保证金、保证金率和状态。
 
 前端可以把 `positions` 和公共 `mark` 更新组合起来做更高频的视觉插值，但和爆仓系统一致的权威值来自 risk-provider 的 `positionRisk` / `accountRisk` 事件。
-由账户持仓更新触发的风险事件会尽量携带原交易 `traceId`；定时兜底扫描产生的风险事件可能没有 traceId。
 
 ## 用户状态和节点选择
 

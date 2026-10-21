@@ -10,17 +10,6 @@ public record OrderEvent(
         OrderEventType eventType,
         OrderStatus status,
         String reason,
-        Instant eventTime,
-        String traceId) {
+        Instant eventTime) {
 
-    public OrderEvent(long eventId,
-                      long orderId,
-                      long userId,
-                      String instrumentId,
-                      OrderEventType eventType,
-                      OrderStatus status,
-                      String reason,
-                      Instant eventTime) {
-        this(eventId, orderId, userId, instrumentId, eventType, status, reason, eventTime, null);
-    }
 }

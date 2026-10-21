@@ -40,7 +40,6 @@ public interface MarketMakerRunEventRepository {
             long rejectedOrders,
             String skippedReason,
             String errorMessage,
-            String traceId,
             Instant createdAt) {
     }
 
@@ -58,7 +57,6 @@ public interface MarketMakerRunEventRepository {
             long rejectedOrders,
             String skippedReason,
             String errorMessage,
-            String traceId,
             Instant createdAt) {
     }
 

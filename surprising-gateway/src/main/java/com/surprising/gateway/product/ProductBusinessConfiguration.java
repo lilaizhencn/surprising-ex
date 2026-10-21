@@ -17,8 +17,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 @Configuration(proxyBeanMethods = false)
 @ComponentScan(basePackages = {"com.surprising.account.provider", "com.surprising.trading", "com.surprising.price.consumer"})
 @EnableConfigurationProperties({AccountProperties.class, TriggerProperties.class})
-@Import({com.surprising.trading.api.kafka.KafkaTraceAutoConfiguration.class,
-        com.surprising.realtime.api.ValkeyUserQueries.class,
+@Import({com.surprising.realtime.api.ValkeyUserQueries.class,
         com.surprising.websocket.provider.config.WebSocketKafkaConfiguration.class,
         com.surprising.websocket.provider.service.KafkaFanoutConsumer.class})
 @EnableKafka @EnableScheduling @EnableTransactionManagement

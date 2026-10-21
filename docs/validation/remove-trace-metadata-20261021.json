@@ -1,0 +1,342 @@
+{
+  "date": "2026-10-21",
+  "scope": "移除交易后端、后台管理端和移动客户端的字符串追踪元数据；保留业务 ID、幂等、资金不变量、审批及审计。",
+  "backendBaseCommit": "376e251270b717e07ab1529396a6a98c8c4b1f9b",
+  "toolchain": {
+    "jdk": "Amazon Corretto HotSpot 27+33-FR",
+    "maven": "3.9.16"
+  },
+  "backend": {
+    "command": "JAVA_HOME=/Users/atomex/.sdkman/candidates/java/27.0.0-amzn MAVEN_OPTS=-Xmx1536m mvn -B -ntp -fae clean verify",
+    "exitCode": 0,
+    "reactorProjects": 24,
+    "tests": {
+      "modules": [
+        {
+          "module": "surprising-account-api",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "module": "surprising-aeron-core/surprising-aeron-benchmarks",
+          "tests": 315,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "module": "surprising-aeron-core/surprising-aeron-client",
+          "tests": 66,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "module": "surprising-aeron-core/surprising-aeron-protocol",
+          "tests": 250,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "module": "surprising-aeron-core/surprising-aeron-service",
+          "tests": 1557,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 2
+        },
+        {
+          "module": "surprising-aeron-core/surprising-aeron-tools",
+          "tests": 22,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "module": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+          "tests": 63,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 3
+        },
+        {
+          "module": "surprising-gateway",
+          "tests": 1209,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 200
+        },
+        {
+          "module": "surprising-instrument-api",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "module": "surprising-maker",
+          "tests": 129,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "module": "surprising-price/surprising-price-consumer",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "module": "surprising-price/surprising-price-provider",
+          "tests": 105,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1
+        },
+        {
+          "module": "surprising-product-api",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "module": "surprising-realtime/surprising-realtime-api",
+          "tests": 40,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "module": "surprising-realtime/surprising-realtime-provider",
+          "tests": 178,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 44
+        },
+        {
+          "module": "surprising-trading-api",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "total": {
+        "tests": 3988,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 250
+      }
+    },
+    "packagedArtifacts": {
+      "jars": [
+        "surprising-account-api/target/surprising-account-api-1.0.0-SNAPSHOT.jar",
+        "surprising-aeron-core/surprising-aeron-benchmarks/target/surprising-aeron-benchmarks-1.0.0-SNAPSHOT.jar",
+        "surprising-aeron-core/surprising-aeron-client/target/surprising-aeron-client-1.0.0-SNAPSHOT.jar",
+        "surprising-aeron-core/surprising-aeron-protocol/target/surprising-aeron-protocol-1.0.0-SNAPSHOT.jar",
+        "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service-1.0.0-SNAPSHOT.jar",
+        "surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools-1.0.0-SNAPSHOT.jar",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/target/surprising-derivatives-lifecycle-api-1.0.0-SNAPSHOT.jar",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT.jar",
+        "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT.jar",
+        "surprising-instrument-api/target/surprising-instrument-api-1.0.0-SNAPSHOT.jar",
+        "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT.jar",
+        "surprising-price/surprising-price-api/target/surprising-price-api-1.0.0-SNAPSHOT.jar",
+        "surprising-price/surprising-price-consumer/target/surprising-price-consumer-1.0.0-SNAPSHOT.jar",
+        "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT.jar",
+        "surprising-product-api/target/surprising-product-api-1.0.0-SNAPSHOT.jar",
+        "surprising-realtime/surprising-realtime-api/target/surprising-realtime-api-1.0.0-SNAPSHOT.jar",
+        "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT.jar",
+        "surprising-trading-api/target/surprising-trading-api-1.0.0-SNAPSHOT.jar"
+      ],
+      "projectClassesScanned": 2856,
+      "traceReferences": []
+    },
+    "sourceAndCurrentConfigurationTraceReferences": 0
+  },
+  "postgresIntegration": {
+    "version": "18.4",
+    "command": "INSTRUMENT_TEST_JDBC_URL=jdbc:postgresql://localhost:5432/ex_trace_c2c_20261021_qa mvn -B -ntp -pl :surprising-gateway -am '-Dtest=C2c*PostgresTest,AdminAuditApprovalPostgresTest' -Dsurefire.failIfNoSpecifiedTests=false test",
+    "exitCode": 0,
+    "totals": {
+      "tests": 95,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "suites": [
+      {
+        "suite": "com.surprising.gateway.c2c.C2cOrdersPostgresTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.gateway.provider.auth.AdminAuditApprovalPostgresTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.gateway.c2c.C2cFundsPostgresTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.gateway.c2c.C2cSubmissionsPostgresTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.gateway.c2c.C2cAdsPostgresTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.gateway.c2c.C2cAccessPostgresTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "fixtureRepair": "首次扩大联调时发现临时 gateway_users 表缺少 display_name，导致广告续办查询失败；补齐测试表字段后重跑全部 C2C PostgreSQL 测试。生产逻辑未改动。",
+    "environment": "独立数据库与每用例独立 schema；真实 PostgreSQL、Spring 事务和 MockMvc；外部身份及 Core 连接受控。"
+  },
+  "migration": {
+    "database": "ex_trace_cleanup_20261021_qa",
+    "server": "18.4 (Homebrew)",
+    "migrationExecutions": 2,
+    "preservedBusinessRows": 4,
+    "businessRowSha256": {
+      "market_maker_strategy_run_events": "605c5aad0694f40a1eb8346de399f4b3723b988aaa44451fddd498ce2d80bc61",
+      "market_maker_reference_samples": "e389f5eb8629f32fe48e42955d27f2007e2d3bcc109e27c4ab4a272c601e9fb4",
+      "gateway_admin_operation_logs": "b0c4266b622006299354aeb8ec7b256e74b381abb3729835777f2df3a2c78310",
+      "gateway_admin_approval_requests": "e10a07b2c6a23fea60a2b612f70b210cb625ef7ca98d99ecd8dc90f02bdb73a9"
+    },
+    "remainingTraceColumns": 0,
+    "remainingTraceIndexes": 0,
+    "freshInitExitCode": 0,
+    "databaseDropped": true
+  },
+  "adminWeb": {
+    "commit": "6e5769653b7936ae620b351d3a1915c40481ad62",
+    "commands": [
+      "npm run lint",
+      "npm run build",
+      "bun test tests"
+    ],
+    "exitCodes": [
+      0,
+      0,
+      0
+    ],
+    "passed": 16,
+    "failures": 0
+  },
+  "client": {
+    "baseCommit": "7d0e3bf",
+    "commit": "a040621afe5592bc7cab3e9188f19db8f837f057",
+    "committedApiMatchesIsolatedTest": true,
+    "analyzeExitCode": 0,
+    "testExitCode": 0,
+    "passed": 532,
+    "skipped": 12,
+    "preexistingWorkExcluded": true,
+    "logSha256": {
+      "flutter-isolated-analyze.log": "cbb1d520fb7ed0a6052d4b7df02c4cc6a6332b100614f29d022d9de47ca2d186",
+      "flutter-isolated-test.log": "77debd6c6bd222e1843374408071a3e48196b5867c97783eb1a74d8baa7343f2"
+    },
+    "isolatedDirectoryRemoved": true
+  },
+  "evidenceLogSha256": {
+    "clean-verify.log": "e920c319ffff8ad82378c88596b2ed9a53d8528929452d08f241fb59d0298739",
+    "admin-postgres.log": "037e9d56e86dfe6796d095a4c2b3cf693a05e72b577782bb378e080194f209f7",
+    "c2c-postgres.log": "8759c3421c8842396aecc331b4a1dd375de70077a64bde54d51a9b70126c66c9",
+    "c2c-postgres-2.log": "369a6c265ad4da1ecae743f8b6eb4137d13b65559237588e657645465094aeba",
+    "c2c-all-postgres.log": "8056044075adfc86c3eaba5361df53d257238931f726e934f11768ad09ab6dfb",
+    "fresh-init.log": "d47d20d7a002c72016e8969bc58c1498059b3e41c6c429c6a2e0816fb5392411",
+    "admin-lint.log": "d42c3636f32ef74a518f6843324ee65ae8148aa3ee49633d0e42886017d64845",
+    "admin-build.log": "a51eb9eb71dbcd0ca3af818be08d050b26261fafe45acc155e998828cded0948",
+    "admin-tests.log": "42b584e3b5b02b7d4f9cc8d2055f338eb9b5fac10af4f0b6809819f5db281878",
+    "flutter-isolated-analyze.log": "cbb1d520fb7ed0a6052d4b7df02c4cc6a6332b100614f29d022d9de47ca2d186",
+    "flutter-isolated-test.log": "77debd6c6bd222e1843374408071a3e48196b5867c97783eb1a74d8baa7343f2"
+  },
+  "preexistingIndexPatchSha256": "c7684ef699b14f825f3f33102683f421c1fa5b7e0c8307ef3a0761aabfbbb3d2",
+  "cleanup": {
+    "testDatabasesDropped": true,
+    "isolatedClientDirectoryRemoved": true,
+    "testReportDirectoriesRemoved": 16,
+    "temporaryQaDirectoryRemoved": true,
+    "businessServicesStarted": false,
+    "sharedPostgresStopped": false
+  },
+  "limits": [
+    "未发布、未重启业务服务、未进行手机真机联调。",
+    "全量构建中的 250 项按测试环境条件跳过；其中 C2C 与审计审批相关数据库测试已通过上述独立联调覆盖。",
+    "补充修复仅涉及共用测试表字段，生产 Java 代码与全量 clean verify 时一致。",
+    "未做性能前后对比，不据此声明吞吐或延迟收益。",
+    "原始临时日志与报告已按项目要求清理，保留命令、测试统计及校验和。"
+  ]
+}

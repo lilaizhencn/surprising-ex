@@ -5,7 +5,6 @@ import com.surprising.gateway.provider.announcement.AnnouncementModels.AdminPage
 import com.surprising.gateway.provider.announcement.AnnouncementModels.AuditEntry;
 import com.surprising.gateway.provider.announcement.AnnouncementModels.SaveRequest;
 import com.surprising.gateway.provider.auth.AdminApprovalService;
-import com.surprising.gateway.provider.config.GatewayTraceFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -97,12 +96,10 @@ public class AdminAnnouncementController {
     }
 
     private AdminApprovalService.AdminRequestMetadata requestMetadata(HttpServletRequest request) {
-        Object trace = request.getAttribute(GatewayTraceFilter.TRACE_ID_ATTRIBUTE);
-        String traceId = trace instanceof String value && !value.isBlank()
-                ? value : request.getHeader(GatewayTraceFilter.TRACE_ID_HEADER);
+
         return new AdminApprovalService.AdminRequestMetadata(
                 request.getHeader(approvals.approvalHeaderName()), request.getMethod(),
-                request.getRequestURI(), request.getQueryString(), traceId);
+                request.getRequestURI(), request.getQueryString());
     }
 
     private <T> T readBody(byte[] body, Class<T> type) {

@@ -16,8 +16,7 @@ public record LiquidationFeeSettledEvent(
         String asset,
         long amountUnits,
         long feeRatePpm,
-        Instant eventTime,
-        String traceId) {
+        Instant eventTime) {
 
     public LiquidationFeeSettledEvent {
         marginMode = MarginMode.defaultIfNull(marginMode);
@@ -37,9 +36,8 @@ public record LiquidationFeeSettledEvent(
                                       String asset,
                                       long amountUnits,
                                       long feeRatePpm,
-                                      Instant eventTime,
-                                      String traceId) {
+                                      Instant eventTime) {
         this(eventId, tradeId, orderId, liquidationOrderId, candidateId, userId, instrumentId, marginMode,
-                "USDT_PERPETUAL", asset, amountUnits, feeRatePpm, eventTime, traceId);
+                "USDT_PERPETUAL", asset, amountUnits, feeRatePpm, eventTime);
     }
 }

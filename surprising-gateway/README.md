@@ -138,7 +138,6 @@ Gateway 会拒绝未知 service 名称。它不会把用户输入拼成任意后
 ## 安全模型
 
 当前实现要求私有路由携带经过校验的 `Authorization: Bearer`。gateway 完成认证后向下游注入可信 `X-User-Id`。
-`X-Trace-Id` 所有路由都可以带；gateway 会清洗、回写给客户端并转发给后端 provider。它只用于可观测性和排障，不能参与认证或鉴权判断。
 
 后台路径 `/api/v1/admin/...` 只接受具备 `SUPPORT`、`ADMIN` 或 `SUPER_ADMIN` 的 Bearer Token，并继续用权限点限制实际访问范围。后台代理会向下游注入 `X-Admin-User-Id`、`X-Admin-Username`、`X-Admin-Roles`；客服只读接口 `/api/v1/admin/support/users/{userId}/overview` 只聚合 gateway 本地用户状态和合规摘要，不查询账户、订单、成交或风险在线服务；客服工单接口 `/api/v1/admin/support/tickets` 支持工单查询、创建、备注时间线和状态变更，写操作要求 `admin.support.write`。原跨域用户详情接口 `/api/v1/admin/users/{userId}/profile` 已移除。合规风控接口 `/api/v1/admin/compliance/...` 管理 KYC 档案、风险标签和 AML case。风控后台代理服务名 `risk-admin` 转发到 `/api/v1/admin/risk`，仅用于规则覆盖和爆仓候选后台分页查询。强平后台代理服务名 `liquidation-admin` 转发到 `/api/v1/admin/liquidations`，用于强平订单分页和候选取消运营动作。管理员 TOTP 2FA 可通过 `/api/v1/admin/security/mfa` 绑定、确认和关闭，生产环境可设置 `surprising.gateway.security.require-admin-mfa=true` 强制管理员登录提供动态码。
 
@@ -435,3 +434,7 @@ HotSpot JDK 27，对比 `243158a8` 的该方法与当前实现，使用相同 Ob
 ## 现货改单处理结果查询（2026-10-19）
 
 `GET /api/v1/gateway/trading/amendments?clientRequestId=<原请求号>` 通过原产品与认证用户的 replacementCommandId 读取 realtime 已提交回执，并验证类型为 AMEND_ORDER。MVC/local FUSED 路由及路径清单同步，未知返回 202，不可用 503，no-store；不访问 Core。两端补齐 clientRequestId 并在发送前保存，响应丢失后只读恢复。先更新 gateway 再更新两端，沿用既有 SQL 回执表和历史回补；详见 [说明](../docs/realtime-command-results.md)。
+
+## 诊断字段清理（2026-10-21）
+
+HTTP、Kafka、WebSocket 和事件 DTO 已移除字符串追踪元数据；后台操作与审批保留管理员、请求摘要、业务引用、双人审批和一次性消费校验。新库使用 `init.sql`；已有库先停止旧版 gateway、maker、price 和 realtime，执行 `deployment/migrations/20261021-remove-trace-metadata.sql`，再启动新版。迁移只删除四个诊断字段及其依赖索引，保留业务行；删除后不能直接回滚旧版应用。详见 [运行诊断](../docs/observability/runtime-diagnostics.md)。
