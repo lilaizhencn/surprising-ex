@@ -4865,6 +4865,7 @@ CREATE TABLE IF NOT EXISTS gateway_telegram_identities (
 );
 CREATE TABLE IF NOT EXISTS gateway_telegram_login_flows (
     state_hash TEXT PRIMARY KEY,
+    return_to_app BOOLEAN NOT NULL DEFAULT false,
     verifier_hash TEXT NOT NULL,
     nonce TEXT NOT NULL,
     code_verifier TEXT NOT NULL,

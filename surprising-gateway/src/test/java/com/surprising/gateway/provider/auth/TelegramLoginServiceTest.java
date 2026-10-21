@@ -21,17 +21,17 @@ class TelegramLoginServiceTest {
     @Test
     void startUsesIndependentRandomSecretsAndHashesBearerVerifier() {
         when(oidc.enabled()).thenReturn(true);
-        var started = service.start("device-1");
+        var started = service.start("device-1", false);
         assertThat(started.flowId()).hasSize(43).isNotEqualTo(started.verifier());
         assertThat(started.expiresAt()).isAfter(Instant.now()).isBefore(Instant.now().plusSeconds(301));
         verify(repository).create(eq(TelegramLoginService.hash(started.flowId())),
-                eq(TelegramLoginService.hash(started.verifier())), anyString(), anyString(), eq("device-1"), any());
+                eq(TelegramLoginService.hash(started.verifier())), anyString(), anyString(), eq("device-1"), any(), eq(false));
     }
 
     @Test
     void missingConfigurationAndInvalidInputCannotStartLogin() {
-        assertThatThrownBy(() -> service.start("device")).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> service.start("")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.start("device", false)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> service.start("", false)).isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(repository);
     }
 
@@ -85,18 +85,38 @@ class TelegramLoginServiceTest {
 
     @Test
     void providerRejectionFailsFlowWithoutTrustingClaims() {
-        when(repository.claimCallback(any(), any())).thenReturn(Optional.of(new TelegramLoginRepository.Flow("nonce", "pkce")));
-        assertThat(service.callback(state, null, "access_denied")).isFalse();
+        when(repository.claimCallback(any(), any())).thenReturn(Optional.of(new TelegramLoginRepository.Flow("nonce", "pkce", false)));
+        assertThat(service.callback(state, null, "access_denied").success()).isFalse();
         verify(repository).failed(TelegramLoginService.hash(state));
         verifyNoInteractions(oidc);
     }
 
     @Test
     void forgedIdentityFailsFlowWithoutCreatingUser() {
-        when(repository.claimCallback(any(), any())).thenReturn(Optional.of(new TelegramLoginRepository.Flow("nonce", "pkce")));
+        when(repository.claimCallback(any(), any())).thenReturn(Optional.of(new TelegramLoginRepository.Flow("nonce", "pkce", false)));
         when(oidc.exchange("code", "pkce", "nonce")).thenThrow(new IllegalArgumentException("forged"));
-        assertThat(service.callback(state, "code", null)).isFalse();
+        assertThat(service.callback(state, "code", null).success()).isFalse();
         verify(repository).failed(TelegramLoginService.hash(state));
         verifyNoInteractions(users, auth);
     }
+    @Test
+    void claimedMobileFlowReturnsOnlyItsValidatedPublicStateEvenOnDenial() {
+        when(repository.claimCallback(any(), any()))
+                .thenReturn(Optional.of(new TelegramLoginRepository.Flow("nonce", "pkce", true)));
+        var result = service.callback(state, null, "access_denied");
+        assertThat(result.success()).isFalse();
+        assertThat(result.returnUrl()).isEqualTo("surprising://auth/telegram?flowId=" + state);
+        assertThatThrownBy(() -> service.callback("\"><script>", "code", null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void mobileStartPersistsTheReturnModeWithoutChangingOidcSecurity() {
+        when(oidc.enabled()).thenReturn(true);
+        var result = service.start("device", true);
+        verify(repository).create(eq(TelegramLoginService.hash(result.flowId())),
+                eq(TelegramLoginService.hash(result.verifier())), anyString(), anyString(), eq("device"), any(), eq(true));
+        verify(oidc).authorizationUrl(eq(result.flowId()), anyString(), anyString());
+    }
+
 }

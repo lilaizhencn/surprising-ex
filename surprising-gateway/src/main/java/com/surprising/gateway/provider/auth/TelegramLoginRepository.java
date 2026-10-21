@@ -14,7 +14,7 @@ public class TelegramLoginRepository {
     public TelegramLoginRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
     public void create(String stateHash, String verifierHash, String nonce, String pkce,
-                       String deviceId, Instant expiresAt) {
+                       String deviceId, Instant expiresAt, boolean returnToApp) {
         jdbc.update("DELETE FROM gateway_telegram_login_flows WHERE expires_at < now()");
         Integer active = jdbc.queryForObject("""
                 SELECT count(*) FROM gateway_telegram_login_flows WHERE device_id = ?
@@ -22,17 +22,17 @@ public class TelegramLoginRepository {
         if (active != null && active >= 5) throw new IllegalArgumentException("too many Telegram login attempts");
         jdbc.update("""
                 INSERT INTO gateway_telegram_login_flows
-                    (state_hash, verifier_hash, nonce, code_verifier, device_id, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """, stateHash, verifierHash, nonce, pkce, deviceId, Timestamp.from(expiresAt));
+                    (state_hash, verifier_hash, nonce, code_verifier, device_id, expires_at, return_to_app)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, stateHash, verifierHash, nonce, pkce, deviceId, Timestamp.from(expiresAt), returnToApp);
     }
 
     public Optional<Flow> claimCallback(String stateHash, Instant now) {
         return jdbc.query("""
                 UPDATE gateway_telegram_login_flows SET callback_claimed = true
                  WHERE state_hash = ? AND expires_at > ? AND NOT callback_claimed
-                RETURNING nonce, code_verifier
-                """, (rs, row) -> new Flow(rs.getString("nonce"), rs.getString("code_verifier")),
+                RETURNING nonce, code_verifier, return_to_app
+                """, (rs, row) -> new Flow(rs.getString("nonce"), rs.getString("code_verifier"), rs.getBoolean("return_to_app")),
                 stateHash, Timestamp.from(now)).stream().findFirst();
     }
 
@@ -86,6 +86,6 @@ public class TelegramLoginRepository {
                 name, Timestamp.from(now), userId);
     }
 
-    public record Flow(String nonce, String codeVerifier) {}
+    public record Flow(String nonce, String codeVerifier, boolean returnToApp) {}
     public record Identity(String subject, String displayName, boolean failed) {}
 }

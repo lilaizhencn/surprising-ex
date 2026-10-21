@@ -28,33 +28,34 @@ public class TelegramLoginService {
     public boolean enabled() { return oidc.enabled(); }
 
     @Transactional
-    public Started start(String deviceId) {
+    public Started start(String deviceId, boolean returnToApp) {
         requireDevice(deviceId);
         if (!enabled()) throw new IllegalStateException("Telegram login is not configured");
         String state = random(), verifier = random(), nonce = random(), pkce = random();
         Instant expires = Instant.now().plusSeconds(300);
-        flows.create(hash(state), hash(verifier), nonce, pkce, deviceId, expires);
+        flows.create(hash(state), hash(verifier), nonce, pkce, deviceId, expires, returnToApp);
         return new Started(state, verifier, oidc.authorizationUrl(state, nonce, hash(pkce)), expires);
     }
 
     /** Claim is committed before network I/O; duplicate callbacks cannot exchange the code twice. */
-    public boolean callback(String state, String code, String error) {
+    public Callback callback(String state, String code, String error) {
         requireToken(state);
         String key = hash(state);
         var flow = flows.claimCallback(key, Instant.now())
                 .orElseThrow(() -> new IllegalArgumentException("Telegram login expired or already used"));
+        String returnUrl = flow.returnToApp() ? "surprising://auth/telegram?flowId=" + state : null;
         if (error != null || code == null || code.isBlank() || code.length() > 4096) {
             flows.failed(key);
-            return false;
+            return new Callback(false, returnUrl);
         }
         try {
             var profile = oidc.exchange(code, flow.codeVerifier(), flow.nonce());
             flows.authorized(key, profile.subject(), profile.displayName());
-            return true;
+            return new Callback(true, returnUrl);
         } catch (RuntimeException failure) {
             // Never reflect provider tokens, authorization codes or remote error bodies.
             flows.failed(key);
-            return false;
+            return new Callback(false, returnUrl);
         }
     }
 
@@ -106,5 +107,6 @@ public class TelegramLoginService {
             throw new IllegalArgumentException("device identifier is required");
     }
 
+    public record Callback(boolean success, String returnUrl) {}
     public record Started(String flowId, String verifier, String authorizationUrl, Instant expiresAt) {}
 }

@@ -48,6 +48,9 @@ class TelegramLoginDatabaseTest {
         jdbc.execute(migration);
         // Re-running migrations must preserve existing identities and flows.
         jdbc.execute(migration);
+        String mobileMigration = Files.readString(Path.of("../deployment/migrations/20261021-telegram-mobile-return.sql"));
+        jdbc.execute(mobileMigration);
+        jdbc.execute(mobileMigration);
         repository = new TelegramLoginRepository(jdbc);
         var oidc = mock(TelegramOidcClient.class);
         when(oidc.enabled()).thenReturn(true);
@@ -76,8 +79,8 @@ class TelegramLoginDatabaseTest {
     void cleanup() { if (schema != null && admin != null) admin.execute("DROP SCHEMA " + schema + " CASCADE"); }
 
     TelegramLoginService.Started authorize() {
-        var flow = login.start(device);
-        assertThat(login.callback(flow.flowId(), "authorization-code", null)).isTrue();
+        var flow = login.start(device, false);
+        assertThat(login.callback(flow.flowId(), "authorization-code", null).success()).isTrue();
         return flow;
     }
 
@@ -131,4 +134,15 @@ class TelegramLoginDatabaseTest {
         assertThatThrownBy(() -> complete(flow, device)).isInstanceOf(IllegalArgumentException.class);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_users", Integer.class)).isZero();
     }
+    @Test
+    void mobileModeSurvivesGatewayInstanceChangeAndWebModeStaysInBrowser() {
+        var mobile = login.start(device, true);
+        var restarted = new TelegramLoginRepository(jdbc);
+        var claimed = restarted.claimCallback(TelegramLoginService.hash(mobile.flowId()), Instant.now()).orElseThrow();
+        assertThat(claimed.returnToApp()).isTrue();
+        var web = login.start(device, false);
+        assertThat(restarted.claimCallback(TelegramLoginService.hash(web.flowId()), Instant.now())
+                .orElseThrow().returnToApp()).isFalse();
+    }
+
 }

@@ -19,32 +19,43 @@ public class TelegramLoginController {
     public ResponseEntity<Config> config() { return noStore().body(new Config(login.enabled())); }
 
     @PostMapping("/start")
-    public ResponseEntity<TelegramLoginService.Started> start(@RequestHeader("X-Device-Id") String deviceId) {
-        return noStore().body(login.start(deviceId));
+    public ResponseEntity<TelegramLoginService.Started> start(@RequestHeader("X-Device-Id") String deviceId,
+            @RequestBody(required = false) Start request) {
+        return noStore().body(login.start(deviceId, request != null && Boolean.TRUE.equals(request.returnToApp())));
     }
 
     @GetMapping(value = "/callback", produces = MediaType.TEXT_HTML_VALUE)
     public ResponseEntity<String> callback(@RequestParam(required = false) String state,
             @RequestParam(required = false) String code, @RequestParam(required = false) String error) {
-        boolean success = false;
+        TelegramLoginService.Callback result = null;
         int status = 200;
         try {
-            success = login.callback(state, code, error);
+            result = login.callback(state, code, error);
         } catch (IllegalArgumentException invalid) {
             status = 400;
         } catch (RuntimeException unavailable) {
             status = 503;
         }
+        boolean success = result != null && result.success();
         String title = success ? "授权完成" : "授权未完成";
         String message = success ? "请返回 Surprising 继续登录。" : "请返回 Surprising 重新发起登录。";
-        // Browsers negotiate text/html. JSON exception handlers cannot serialize
-        // under that content type and previously turned expired callbacks into 500s.
+        String nonce = java.util.UUID.randomUUID().toString();
+        // Only a claimed mobile flow supplies this fixed, token-free return URL.
+        String returnLink = result == null || result.returnUrl() == null ? ""
+                : "<a id=\"return\" href=\"" + result.returnUrl() + "\">返回 Surprising</a>"
+                  + "<p>未自动打开时，请点击上方按钮。</p><script nonce=\"" + nonce
+                  + "\">window.location.replace(document.getElementById('return').href);</script>";
         return ResponseEntity.status(status).cacheControl(CacheControl.noStore())
-                .header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
-                .header("Referrer-Policy", "no-referrer").contentType(MediaType.TEXT_HTML)
+                .header("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
+                        + "script-src 'nonce-" + nonce + "'; style-src 'nonce-" + nonce + "'")
+                .header("Referrer-Policy", "no-referrer").contentType(new MediaType("text", "html", java.nio.charset.StandardCharsets.UTF_8))
                 .body("<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\">"
                         + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-                        + "<title>Surprising</title><h1>" + title + "</h1><p>" + message + "</p></html>");
+                        + "<title>Surprising</title><style nonce=\"" + nonce + "\">"
+                        + "body{font:16px system-ui;background:#111318;color:#f2f0f3;text-align:center;padding:64px 20px}"
+                        + "a{display:inline-block;background:#7c9aff;color:#111318;padding:14px 24px;"
+                        + "border-radius:12px;text-decoration:none}p{line-height:1.6}</style>"
+                        + "<h1>" + title + "</h1><p>" + message + "</p>" + returnLink + "</html>");
     }
 
     @PostMapping("/complete")
@@ -78,6 +89,7 @@ public class TelegramLoginController {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore());
     }
 
+    public record Start(Boolean returnToApp) {}
     public record Config(boolean enabled) {}
     public record Pending(boolean pending) {}
     public record Complete(
