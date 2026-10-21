@@ -1,5 +1,9 @@
 package com.surprising.derivatives.lifecycle;
 
+import com.surprising.derivatives.lifecycle.task.DerivativesLifecycleMaintenanceTask;
+import com.surprising.derivatives.lifecycle.service.LifecycleBusinessSettingsService;
+import com.surprising.derivatives.lifecycle.model.LifecycleSettingsSnapshot;
+import com.surprising.derivatives.lifecycle.model.LifecycleBusinessSettings;
 import com.surprising.funding.provider.service.FundingService;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.product.api.ProductLine;
@@ -47,7 +51,7 @@ class LifecycleApplicationContextTest {
                 .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class))
                 .withBean(LifecycleBusinessSettingsService.class.getName(), LifecycleBusinessSettingsService.class, () -> {
                     var settings = mock(LifecycleBusinessSettingsService.class);
-                    org.mockito.Mockito.when(settings.current()).thenReturn(new LifecycleBusinessSettingsService.Settings(
+                    org.mockito.Mockito.when(settings.current()).thenReturn(new LifecycleSettingsSnapshot(
                             1, LifecycleBusinessSettings.initial(), "SYSTEM", "composition fixture", java.time.Instant.now()));
                     return settings;
                 })

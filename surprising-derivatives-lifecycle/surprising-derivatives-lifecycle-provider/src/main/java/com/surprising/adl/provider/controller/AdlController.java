@@ -97,15 +97,21 @@ public class AdlController {
     public Map<String, Object> updateRuntimeConfig(@RequestHeader("X-Admin-User-Id") String adminUserId,
                                                    @RequestBody RuntimeConfigUpdate request) {
         try {
+            if (request == null || request.expectedVersion() == null || request.expectedVersion() < 1
+                    || adminUserId == null || !adminUserId.matches("[1-9][0-9]*") || request.reason() == null
+                    || request.reason().isBlank() || request.reason().length() > 1000)
+                throw new IllegalArgumentException("expectedVersion, administrator and reason (1-1000 characters) are required");
+            if (request.minDeficitAgeMs() != null || request.maxMarkAgeMs() != null)
+                throw new IllegalArgumentException("ADL eligibility and mark freshness are owned by Core, not provider scanner settings");
             return runtimeConfigService.update(
                     adminUserId, request.expectedVersion(),
                     request.scannerEnabled(),
                     request.scanDelayMs(),
-                    request.minDeficitAgeMs(),
-                    request.maxMarkAgeMs(),
                     request.batchSize(),
                     request.maxDeleveragesPerDeficit(),
-                    request.candidateMultiplier(), request.reason());
+                    request.candidateMultiplier(), request.reason().trim());
+        } catch (org.springframework.dao.OptimisticLockingFailureException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

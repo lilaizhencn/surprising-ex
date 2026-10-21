@@ -50,9 +50,15 @@ public class LiquidationController {
     public Map<String, Object> updateRuntimeConfig(@RequestHeader("X-Admin-User-Id") String admin,
             @RequestBody RuntimeConfigUpdate request) {
         try {
+            if (request == null || request.expectedVersion() == null || request.expectedVersion() < 1
+                    || admin == null || !admin.matches("[1-9][0-9]*") || request.reason() == null
+                    || request.reason().isBlank() || request.reason().length() > 1000)
+                throw new IllegalArgumentException("expectedVersion, administrator and reason (1-1000 characters) are required");
             return runtimeConfigService.update(admin, request.expectedVersion(), request.executionEnabled(),
                     request.liquidationFeeRatePpm(), request.delayMs(), request.workBatchSize(),
-                    request.maxPagesPerRun(), request.maxWorkBytes(), request.reason());
+                    request.maxPagesPerRun(), request.maxWorkBytes(), request.reason().trim());
+        } catch (org.springframework.dao.OptimisticLockingFailureException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

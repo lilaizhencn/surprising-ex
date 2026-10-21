@@ -1,5 +1,10 @@
 package com.surprising.derivatives.lifecycle;
 
+import com.surprising.derivatives.lifecycle.task.DerivativesLifecycleMaintenanceTask;
+import com.surprising.derivatives.lifecycle.task.LifecycleMaintenanceScheduling;
+import com.surprising.derivatives.lifecycle.service.LifecycleBusinessSettingsService;
+import com.surprising.derivatives.lifecycle.model.LifecycleSettingsSnapshot;
+import com.surprising.derivatives.lifecycle.model.LifecycleBusinessSettings;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.task.FundingMaintenanceTask;
 import com.surprising.product.api.ProductLine;
@@ -9,7 +14,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ScheduledFuture;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
@@ -68,8 +72,8 @@ class LifecycleMaintenanceSchedulingTest {
         assertThat(lifecycle).hasSize(stopped);
     }
 
-    private static LifecycleBusinessSettingsService.Settings snapshot(LifecycleBusinessSettings value) {
-        return new LifecycleBusinessSettingsService.Settings(1, value, "SYSTEM", "schedule test", Instant.now());
+    private static LifecycleSettingsSnapshot snapshot(LifecycleBusinessSettings value) {
+        return new LifecycleSettingsSnapshot(1, value, "SYSTEM", "schedule test", Instant.now());
     }
     private record Scheduled(Runnable task, ScheduledFuture<?> future) {}
     private static TaskScheduler scheduler(List<Scheduled> tasks) {

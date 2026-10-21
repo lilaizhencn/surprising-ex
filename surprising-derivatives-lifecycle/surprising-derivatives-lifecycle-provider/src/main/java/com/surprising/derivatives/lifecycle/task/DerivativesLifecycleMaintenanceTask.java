@@ -1,4 +1,4 @@
-package com.surprising.derivatives.lifecycle;
+package com.surprising.derivatives.lifecycle.task;
 
 import com.surprising.adl.provider.service.AdlService;
 import com.surprising.insurance.provider.service.InsuranceService;

@@ -109,8 +109,14 @@ public class InsuranceController {
     public Map<String, Object> updateRuntimeConfig(@RequestHeader("X-Admin-User-Id") String adminUserId,
                                                    @RequestBody RuntimeConfigUpdate request) {
         try {
+            if (request == null || request.expectedVersion() == null || request.expectedVersion() < 1
+                    || adminUserId == null || !adminUserId.matches("[1-9][0-9]*") || request.reason() == null
+                    || request.reason().isBlank() || request.reason().length() > 1000)
+                throw new IllegalArgumentException("expectedVersion, administrator and reason (1-1000 characters) are required");
             return runtimeConfigService.update(
-                    adminUserId, request.expectedVersion(), request.coverageEnabled(), request.scanDelayMs(), request.batchSize(), request.reason());
+                    adminUserId, request.expectedVersion(), request.coverageEnabled(), request.scanDelayMs(), request.batchSize(), request.reason().trim());
+        } catch (org.springframework.dao.OptimisticLockingFailureException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

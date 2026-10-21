@@ -1,7 +1,7 @@
 package com.surprising.adl.provider.service;
 
-import com.surprising.derivatives.lifecycle.LifecycleBusinessSettings;
-import com.surprising.derivatives.lifecycle.LifecycleBusinessSettingsService;
+import com.surprising.derivatives.lifecycle.service.LifecycleBusinessSettingsService;
+import com.surprising.derivatives.lifecycle.model.LifecycleBusinessSettings;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 
@@ -16,19 +16,17 @@ public class AdlRuntimeConfigService {
                 "scanner", Map.of("enabled", value.enabled(), "scanDelayMs", value.scanDelayMs(), "batchSize", value.batchSize(),
                         "maxDeleveragesPerDeficit", value.maxDeleveragesPerDeficit(), "candidateMultiplier", value.candidateMultiplier()));
     }
-    public Map<String, Object> update(String admin, Long expectedVersion, Boolean enabled, Long scanDelayMs,
-            Long minDeficitAgeMs, Long maxMarkAgeMs, Integer batchSize, Integer maxDeleveragesPerDeficit,
+    public Map<String, Object> update(String admin, long expectedVersion, Boolean enabled, Long scanDelayMs,
+            Integer batchSize, Integer maxDeleveragesPerDeficit,
             Integer candidateMultiplier, String reason) {
-        if (minDeficitAgeMs != null || maxMarkAgeMs != null)
-            throw new IllegalArgumentException("ADL eligibility and mark freshness are owned by Core, not provider scanner settings");
         synchronized (settings) {
-        var all = settings.current().settings();
-        var old = all.adl();
-        var next = new LifecycleBusinessSettings.Adl(value(enabled, old.enabled()), value(scanDelayMs, old.scanDelayMs()),
-                value(batchSize, old.batchSize()), value(maxDeleveragesPerDeficit, old.maxDeleveragesPerDeficit()),
-                value(candidateMultiplier, old.candidateMultiplier()));
-        settings.save(new LifecycleBusinessSettings(all.funding(), all.liquidation(), all.insurance(), next), expectedVersion, admin, reason);
-        return current();
+            var all = settings.current().settings();
+            var old = all.adl();
+            var next = new LifecycleBusinessSettings.Adl(value(enabled, old.enabled()), value(scanDelayMs, old.scanDelayMs()),
+                    value(batchSize, old.batchSize()), value(maxDeleveragesPerDeficit, old.maxDeleveragesPerDeficit()),
+                    value(candidateMultiplier, old.candidateMultiplier()));
+            settings.save(new LifecycleBusinessSettings(all.funding(), all.liquidation(), all.insurance(), next), expectedVersion, admin, reason);
+            return current();
         }
     }
     private static <T> T value(T update, T previous) { return update == null ? previous : update; }

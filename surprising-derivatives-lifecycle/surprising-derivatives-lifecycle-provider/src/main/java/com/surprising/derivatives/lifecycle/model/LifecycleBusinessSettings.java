@@ -1,4 +1,4 @@
-package com.surprising.derivatives.lifecycle;
+package com.surprising.derivatives.lifecycle.model;
 
 /** 后台保存的生命周期业务参数；连接、线程和节点身份不属于该记录。 */
 public record LifecycleBusinessSettings(Funding funding, Liquidation liquidation, Insurance insurance, Adl adl) {

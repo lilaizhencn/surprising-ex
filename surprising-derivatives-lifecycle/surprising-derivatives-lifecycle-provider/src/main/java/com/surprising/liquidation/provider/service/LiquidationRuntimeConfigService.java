@@ -1,7 +1,7 @@
 package com.surprising.liquidation.provider.service;
 
-import com.surprising.derivatives.lifecycle.LifecycleBusinessSettings;
-import com.surprising.derivatives.lifecycle.LifecycleBusinessSettingsService;
+import com.surprising.derivatives.lifecycle.service.LifecycleBusinessSettingsService;
+import com.surprising.derivatives.lifecycle.model.LifecycleBusinessSettings;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.stereotype.Service;
@@ -30,16 +30,16 @@ public class LiquidationRuntimeConfigService {
         return Map.of("scope", "DATABASE", "version", saved.version(), "updatedBy", saved.updatedBy(), "reason", saved.reason(),
                 "execution", Map.of("enabled", value.enabled(), "liquidationFeeRatePpm", value.feeRatePpm()), "coordinator", coordinator);
     }
-    public Map<String, Object> update(String admin, Long expectedVersion, Boolean enabled, Long feeRatePpm,
+    public Map<String, Object> update(String admin, long expectedVersion, Boolean enabled, Long feeRatePpm,
             Long delayMs, Integer workBatchSize, Integer maxPagesPerRun, Integer maxWorkBytes, String reason) {
         synchronized (settings) {
-        var all = settings.current().settings();
-        var old = all.liquidation();
-        var next = new LifecycleBusinessSettings.Liquidation(value(enabled, old.enabled()), value(feeRatePpm, old.feeRatePpm()),
-                value(delayMs, old.delayMs()), value(workBatchSize, old.workBatchSize()), value(maxPagesPerRun, old.maxPagesPerRun()),
-                value(maxWorkBytes, old.maxWorkBytes()));
-        settings.save(new LifecycleBusinessSettings(all.funding(), next, all.insurance(), all.adl()), expectedVersion, admin, reason);
-        return current();
+            var all = settings.current().settings();
+            var old = all.liquidation();
+            var next = new LifecycleBusinessSettings.Liquidation(value(enabled, old.enabled()), value(feeRatePpm, old.feeRatePpm()),
+                    value(delayMs, old.delayMs()), value(workBatchSize, old.workBatchSize()), value(maxPagesPerRun, old.maxPagesPerRun()),
+                    value(maxWorkBytes, old.maxWorkBytes()));
+            settings.save(new LifecycleBusinessSettings(all.funding(), next, all.insurance(), all.adl()), expectedVersion, admin, reason);
+            return current();
         }
     }
     private static <T> T value(T update, T previous) { return update == null ? previous : update; }

@@ -1,5 +1,8 @@
-package com.surprising.derivatives.lifecycle;
+package com.surprising.derivatives.lifecycle.task;
 
+import com.surprising.derivatives.lifecycle.task.DerivativesLifecycleMaintenanceTask;
+import com.surprising.derivatives.lifecycle.service.LifecycleBusinessSettingsService;
+import com.surprising.derivatives.lifecycle.model.LifecycleSettingsSnapshot;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.funding.provider.task.FundingMaintenanceTask;
 import org.springframework.beans.factory.ObjectProvider;
@@ -35,7 +38,7 @@ public final class LifecycleMaintenanceScheduling implements SmartLifecycle {
             jobs.add(new Job(separateScheduler, funding::settleDueRates, () -> properties.getSettlement().getSettleDelayMs()));
         }
     }
-    @EventListener public void settingsInstalled(LifecycleBusinessSettingsService.Settings settings) {
+    @EventListener public void settingsInstalled(LifecycleSettingsSnapshot settings) {
         jobs.forEach(Job::refresh);
     }
 

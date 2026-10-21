@@ -1,5 +1,7 @@
 package com.surprising.derivatives.lifecycle;
 
+import com.surprising.derivatives.lifecycle.service.LifecycleBusinessSettingsService;
+import com.surprising.derivatives.lifecycle.model.LifecycleBusinessSettings;
 import static org.assertj.core.api.Assertions.*;
 import com.surprising.adl.provider.config.AdlProperties;
 import com.surprising.adl.provider.service.AdlRuntimeConfigService;
@@ -16,7 +18,6 @@ import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.mock.env.MockEnvironment;
-import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Dedicated local PostgreSQL only: persisted versions, reload and atomic validation across all derivatives. */
@@ -37,7 +38,7 @@ class LifecycleBusinessSettingsIntegrationTest {
         var adl = infra.adlProperties(risk);
         var funding = new FundingConfiguration().fundingProperties(env, risk);
         var beans = new StaticListableBeanFactory(line.isFundingProduct() ? Map.of("funding", funding) : Map.of());
-        var service = new LifecycleBusinessSettingsService(jdbc, JsonMapper.builder().findAndAddModules().build(), risk,
+        var service = new LifecycleBusinessSettingsService(new com.surprising.derivatives.lifecycle.repository.LifecycleBusinessSettingsRepository(jdbc, JsonMapper.builder().findAndAddModules().build()), risk,
                 beans.getBeanProvider(FundingProperties.class), liquidation, insurance, adl, event -> {});
         service.initialize();
         return new Instance(service, funding, liquidation, insurance, adl);
@@ -68,14 +69,12 @@ class LifecycleBusinessSettingsIntegrationTest {
         assertThat(second.service.current()).isEqualTo(first.service.current());
         assertThat(instance(jdbc, line).service.current()).isEqualTo(first.service.current());
         assertThatThrownBy(() -> second.service.save(initial.settings(), initial.version(), "43", "stale edit"))
-                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("409");
+                .isInstanceOf(org.springframework.dao.OptimisticLockingFailureException.class);
         var api = new AdlRuntimeConfigService(first.service);
-        assertThatThrownBy(() -> api.update("42", first.service.current().version(), true, 10L, null, null,
+        assertThatThrownBy(() -> api.update("42", first.service.current().version(), true, 10L,
                 100, 10, 3, "invalid interval")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> api.update("42", first.service.current().version(), true, 100L, null, null,
+        assertThatThrownBy(() -> api.update("42", first.service.current().version(), true, 100L,
                 100, 100, 11, "invalid candidate budget")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> first.service.save(initial.settings(), first.service.current().version(), "42", " "))
-                .isInstanceOf(IllegalArgumentException.class);
         second.service.reload();
         assertThat(second.service.current()).isEqualTo(first.service.current());
         assertThat(first.service.current().settings()).isEqualTo(modified);

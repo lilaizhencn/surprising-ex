@@ -1,0 +1,353 @@
+{
+  "date": "2026-10-21",
+  "verified_at_utc": "2026-10-21T12:22:02.011014+00:00",
+  "scope": "五条衍生品线生命周期设置、四领域管理入口与task分层",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16; isolated PostgreSQL 18.4",
+  "stages": {
+    "initial_compile": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+        "-Dtest=LifecycleBusinessSettingsIntegrationTest,LifecycleSettingsBoundaryPostgresTest,LifecycleSettingsSchedulingEventTest,LifecycleMaintenanceSchedulingTest,LifecycleApplicationContextTest,FundingControllerTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [],
+      "log_sha256": "03382f04b39355a9c30f080bf97088fe6d7170dcbced0fdc8b9df25cd9bd1c09",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+        "-Dtest=LifecycleBusinessSettingsIntegrationTest,LifecycleSettingsBoundaryPostgresTest,LifecycleSettingsControllerTest,LifecycleSettingsSchedulingEventTest,LifecycleMaintenanceSchedulingTest,LifecycleApplicationContextTest,FundingControllerTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleApplicationContextTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleSettingsSchedulingEventTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleSettingsBoundaryPostgresTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleMaintenanceSchedulingTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.controller.FundingControllerTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleSettingsControllerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleBusinessSettingsIntegrationTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "b85b958912038125e05e6409bd66916532f9f43a59ef8f4584899223e72c3b6b",
+      "tests": 35,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+        "-Dtest=LifecycleSettingsBoundaryPostgresTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleSettingsBoundaryPostgresTest",
+          "tests": 10,
+          "failures": 10,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "ab8b64173ee53254bb459dd17d512132f41da7534445795ab71122c80abffa7c",
+      "tests": 10,
+      "failures": 10,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+        "-Dtest=*Test",
+        "clean",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.liquidation.provider.service.LiquidationAeronGatewayTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.service.FundingAeronGatewayTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleApplicationContextTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.config.FundingRateCachePollingTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleSettingsSchedulingEventTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.insurance.provider.service.InsuranceAeronGatewayTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.service.FundingMathTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.service.FundingTimeTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.risk.provider.service.LiquidationPriceCalculatorTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleSettingsBoundaryPostgresTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.service.FundingServiceTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.repository.FundingHistoryPostgresTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.FundingCompositionTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleMaintenanceSchedulingTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.controller.FundingControllerTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.liquidation.provider.service.LiquidationServiceTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleSettingsControllerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.config.FundingKafkaConfigurationTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleBusinessSettingsIntegrationTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "51a08f3517b28fd7bdbbea359dca2532e35398cb1f2d4764e002b3a731c2baf2",
+      "tests": 85,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "assertions": [
+    "Lifecycle Repository只读写lifecycle_business_settings，完整规则和安装快照独立归model，Service不含SQL、HTTP异常或调度注解。",
+    "四领域Controller校验版本、管理员、原因及禁止修改的Core所有参数，Service只聚合局部修改；版本冲突在Controller映射409。",
+    "五产品分别验证数据库非法类型/缺字段/空值/无效范围不安装不发事件，修正后继续加载，其余产品保持不变。",
+    "实际Spring代理保存独立提交，调用方回滚后数据库版本、当前快照与运行规则一致。",
+    "保留资金费仅在永续装配、独立fundingScheduler、节点身份和配置安装完成事件；维护调度及刷新入口归task。",
+    "生产扫描的五产品容器、既有调度不重叠/调整/关闭及Funding业务测试均通过。"
+  ],
+  "initial_failures": [
+    "包迁移脚本误将四个Service引用放入model包，初次编译失败；修正所有引用并保留原测试后定向35及完整85通过。"
+  ],
+  "source_sha256": {
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/adl/provider/controller/AdlController.java": "a6b5974b283a5dc3f310f88a7309469800f0644af6943b6487739621aa3195ca",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/adl/provider/service/AdlRuntimeConfigService.java": "e43fab047d69a1f4bfddc30966f8f80ad00940c4f7698d30b65a5d6f34606b5e",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/derivatives/lifecycle/model/LifecycleBusinessSettings.java": "8e173178fe59c5b8343c35b87e1176386cd245e725fd75e9113b775c417eff57",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/derivatives/lifecycle/model/LifecycleSettingsSnapshot.java": "2d128309bb0c10a8b8793bed545081299d69fb613016dd266130f98869e7f050",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/derivatives/lifecycle/repository/LifecycleBusinessSettingsRepository.java": "6388ba88f78613d7d9c91eb403cb87847f65a4f4e0aad91d85a843995f874d4e",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/derivatives/lifecycle/service/LifecycleBusinessSettingsService.java": "6561fd0e735a881c2434d0dbfa3f36d07ab7899166ae2df1bdc06983b0e8bebb",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/derivatives/lifecycle/task/DerivativesLifecycleMaintenanceTask.java": "77cba6b2216445e655ca568b7e6d825ba738ff966c5744a575dd55b4365916b8",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/derivatives/lifecycle/task/LifecycleBusinessSettingsTask.java": "0b3c2a83c77263a291e991f86642f200502a3eb6e1c8c0cd84e0b5f9d309e9bf",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/derivatives/lifecycle/task/LifecycleMaintenanceScheduling.java": "2e83033073399953a34d9524c8db7924a86df48056e070c92732f919cdd1aeef",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/funding/provider/controller/FundingController.java": "66a26891457dcd70c3c5e950423f1b3b38fc1ea725bb58510d7453f58d08eee5",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/funding/provider/service/FundingRuntimeConfigService.java": "5c9c76be1eb496d0a2d0e5f46d82e7a70076acdfca9899cab7f5535a89756893",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/controller/InsuranceController.java": "9eb88bf19678a91850bee7e3f37c949c18d53f314b4f84eab3559647a515c138",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/service/InsuranceRuntimeConfigService.java": "d00890dbc4b538d22f584adf698df89f0ee159647d3f4e989cb9463e43e75434",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/controller/LiquidationController.java": "f2feacfb167c5a5e9263fe96755ccd9f0f85ad6313d7514c40971a46a5d14a38",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationRuntimeConfigService.java": "04f59c392a781068bf9dcd47a81b25fba77c1ed3c690b218dfdd7be0141723cc",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/test/java/com/surprising/derivatives/lifecycle/FundingCompositionTest.java": "f5c258cf9232b75d935afa56ce525f1db34f0cc839c8ae4921e09000683e358d",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/test/java/com/surprising/derivatives/lifecycle/LifecycleApplicationContextTest.java": "8ebca012ee95478c1ae1c84cd988374a5c58bfbbfc3be7d53d2829649066aa0c",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/test/java/com/surprising/derivatives/lifecycle/LifecycleBusinessSettingsIntegrationTest.java": "1669ccfae6232e749304d21c43facd8e5a2f192ca6bf30afcce16f91ba307f6d",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/test/java/com/surprising/derivatives/lifecycle/LifecycleMaintenanceSchedulingTest.java": "ae6fe9dcfddf8428e6e942577dfd9ecce1bc2361eb2ae4d8e273cea6812c7286",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/test/java/com/surprising/derivatives/lifecycle/LifecycleSettingsBoundaryPostgresTest.java": "27880f2fe652e8cc022220d18ec15b9f8ba0546bc0f58104b9d638acef06c390",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/test/java/com/surprising/derivatives/lifecycle/LifecycleSettingsControllerTest.java": "952a79650bfaa63fb4ae752327ae3636e26ae8c88f8ce49bc72b80f03e085da4",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/test/java/com/surprising/derivatives/lifecycle/LifecycleSettingsSchedulingEventTest.java": "bde2268f2a2af8415e39fac3ab7edadad2ef81449d07662fab6dbf3252d24cd7"
+  },
+  "not_run": [
+    "未启动Kafka/Core/做市实栈资金费、强平、ADL及保险闭环；本批未修改计算、资金核算、Core协议及状态。",
+    "其余多表Repository、HTTP职责、包归类、最终架构门禁和必要实栈待继续。"
+  ],
+  "cleanup": {
+    "postgres_stopped": true,
+    "owned_database_removed": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-mvc-lifecycle-pg-c_bo3z4_",
+    "owned_logs_and_summarized_reports_removed": [
+      "/tmp/surprising-mvc-lifecycle-api-build.log",
+      "/tmp/surprising-mvc-lifecycle-focused.log",
+      "/tmp/surprising-mvc-lifecycle-expanded.log",
+      "/tmp/surprising-mvc-lifecycle-negative.log",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.derivatives.lifecycle.FundingCompositionTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.liquidation.provider.service.LiquidationAeronGatewayTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.funding.provider.service.FundingAeronGatewayTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.derivatives.lifecycle.LifecycleApplicationContextTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.funding.provider.config.FundingRateCachePollingTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.derivatives.lifecycle.LifecycleSettingsSchedulingEventTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.funding.provider.controller.FundingControllerTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.derivatives.lifecycle.LifecycleApplicationContextTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.insurance.provider.service.InsuranceAeronGatewayTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.insurance.provider.service.InsuranceAeronGatewayTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.derivatives.lifecycle.LifecycleMaintenanceSchedulingTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.funding.provider.service.FundingMathTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.funding.provider.service.FundingTimeTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.risk.provider.service.LiquidationPriceCalculatorTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.risk.provider.service.LiquidationPriceCalculatorTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.derivatives.lifecycle.LifecycleSettingsBoundaryPostgresTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.funding.provider.service.FundingServiceTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.funding.provider.repository.FundingHistoryPostgresTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.funding.provider.repository.FundingHistoryPostgresTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.funding.provider.config.FundingRateCachePollingTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.derivatives.lifecycle.FundingCompositionTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.funding.provider.service.FundingAeronGatewayTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.derivatives.lifecycle.LifecycleMaintenanceSchedulingTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.derivatives.lifecycle.LifecycleSettingsControllerTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.funding.provider.service.FundingTimeTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.funding.provider.service.FundingMathTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.funding.provider.controller.FundingControllerTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.liquidation.provider.service.LiquidationServiceTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.derivatives.lifecycle.LifecycleBusinessSettingsIntegrationTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.derivatives.lifecycle.LifecycleSettingsControllerTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.liquidation.provider.service.LiquidationAeronGatewayTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.funding.provider.service.FundingServiceTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.funding.provider.config.FundingKafkaConfigurationTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.derivatives.lifecycle.LifecycleSettingsBoundaryPostgresTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.liquidation.provider.service.LiquidationServiceTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.derivatives.lifecycle.LifecycleSettingsSchedulingEventTest.txt",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/TEST-com.surprising.derivatives.lifecycle.LifecycleBusinessSettingsIntegrationTest.xml",
+      "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surefire-reports/com.surprising.funding.provider.config.FundingKafkaConfigurationTest.txt"
+    ],
+    "build_outputs_retained": true
+  }
+}
