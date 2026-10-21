@@ -1,9 +1,10 @@
 package com.surprising.realtime.provider.option.service;
 
 import com.surprising.realtime.provider.option.utils.Black76Reference;
+import com.surprising.realtime.provider.option.model.OptionQuote;
+import com.surprising.realtime.provider.option.exception.OptionQuoteException;
 
 import com.surprising.product.api.utils.InstrumentIds;
-import com.surprising.product.api.utils.ProductTopicNames;
 
 import com.surprising.candlestick.provider.config.CandlestickProperties;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
@@ -12,16 +13,10 @@ import com.surprising.price.api.model.*;
 import com.surprising.product.api.*;
 import java.math.BigDecimal;
 import java.time.*;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.http.HttpStatus;
-import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
-import org.springframework.web.server.ResponseStatusException;
-import tools.jackson.databind.ObjectMapper;
 
 /** realtime 拥有可重建的期权价格读视图；不查询在线 Core、不写账户、不保存派生 Greeks。 */
 @Service
@@ -29,52 +24,40 @@ import tools.jackson.databind.ObjectMapper;
 public final class OptionQuoteService {
     private static final Duration MAX_AGE = Duration.ofSeconds(5);
     private final InstrumentSnapshotCache instruments;
-    private final ObjectMapper mapper;
     private final Clock clock;
     // 每合约仅保留一个不可变源事件；Kafka 写、HTTP 读，过期/结束条目由 prune 清除。
     private final ConcurrentHashMap<String, MarkPricePublishedEvent> latest = new ConcurrentHashMap<>();
-    private final String group = "surprising-option-reference-" + UUID.randomUUID();
 
     @Autowired
-    public OptionQuoteService(InstrumentSnapshotCache instruments, ObjectMapper mapper, CandlestickProperties properties) {
-        this(instruments, mapper, Clock.systemUTC());
+    public OptionQuoteService(InstrumentSnapshotCache instruments, CandlestickProperties properties) {
+        this(instruments, Clock.systemUTC());
         if (properties.getKafka().getProductLine() != ProductLine.OPTION)
             throw new IllegalArgumentException("option market view requires OPTION product");
     }
 
-    public OptionQuoteService(InstrumentSnapshotCache instruments, ObjectMapper mapper, Clock clock) {
+    public OptionQuoteService(InstrumentSnapshotCache instruments, Clock clock) {
         this.instruments = instruments;
-        this.mapper = mapper;
         this.clock = clock;
     }
 
-    public String topic() { return ProductTopicNames.of(ProductLine.OPTION).priceEventsTopic(); }
-    public String groupId() { return group; }
-
-    @KafkaListener(topics = "#{__listener.topic()}", groupId = "#{__listener.groupId()}",
-            properties = "auto.offset.reset=latest",
-            containerFactory = "candlestickInstrumentSnapshotKafkaListenerContainerFactory")
-    public void onPrice(ConsumerRecord<String, String> record) throws Exception {
-        if (!topic().equals(record.topic())) throw new IllegalArgumentException("option price topic mismatch");
-        var publication = mapper.readValue(record.value(), PricePublishedEvent.class);
-        if (!publication.instrumentId().equals(record.key())) throw new IllegalArgumentException("option price key mismatch");
-        if (publication.eventType() != PriceEventType.MARK_PRICE) return;
-        var mark = publication.markPrice().result();
-        if (mark.productLine() != ProductLine.OPTION || mark.sequence() <= 0 || mark.instrumentChangeId() <= 0)
+    public void accept(int instrumentId, MarkPricePublishedEvent publication) {
+        var mark = publication.result();
+        if (mark.productLine() != ProductLine.OPTION || mark.sequence() <= 0 || mark.instrumentChangeId() <= 0
+                || !Integer.toString(instrumentId).equals(mark.instrumentId()))
             throw new IllegalArgumentException("option price identity mismatch");
-        var instrument = instruments.current(ProductLine.OPTION, InstrumentIds.parse(mark.instrumentId())).orElse(null);
+        var instrument = instruments.current(ProductLine.OPTION, instrumentId).orElse(null);
         if (!active(instrument, clock.instant())) return;
         latest.compute(mark.instrumentId(), (id, previous) -> previous == null
                 || mark.instrumentChangeId() > previous.result().instrumentChangeId()
                 || mark.instrumentChangeId() == previous.result().instrumentChangeId() && mark.sequence() > previous.result().sequence()
-                ? publication.markPrice() : previous);
+                ? publication : previous);
     }
 
-    public Quote quote(String instrumentId) {
-        int id = InstrumentIds.parse(instrumentId);
+    public OptionQuote quote(int id) {
+        String instrumentId = Integer.toString(id);
         if (!instruments.initialized(ProductLine.OPTION)) throw unavailable();
         var instrument = instruments.current(ProductLine.OPTION, id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "option instrument not found"));
+                .orElseThrow(() -> OptionQuoteException.notFound());
         var now = clock.instant();
         if (!active(instrument, now)) throw unavailable();
         var publication = latest.get(instrumentId);
@@ -117,7 +100,7 @@ public final class OptionQuoteService {
         Instant validUntil = mark.eventTime().plus(MAX_AGE);
         if (index.eventTime().plus(MAX_AGE).isBefore(validUntil)) validUntil = index.eventTime().plus(MAX_AGE);
         if (instrument.expiryTime().isBefore(validUntil)) validUntil = instrument.expiryTime();
-        return new Quote("OPTION", instrumentId, instrument.underlyingInstrumentId(), instrument.underlyingProductLine(),
+        return new OptionQuote("OPTION", instrumentId, instrument.underlyingInstrumentId(), instrument.underlyingProductLine(),
                 instrument.optionType(), instrument.expiryTime(), Long.toString(instrument.strikePriceUnits()), strike,
                 instrument.baseAsset(), instrument.quoteAsset(), mark.markPrice(), mark.indexPrice(), mark.sameExpiryForwardPrice(),
                 intrinsic, mark.eventTime(), validUntil, Long.toString(mark.sequence()),
@@ -142,11 +125,6 @@ public final class OptionQuoteService {
     private static boolean fresh(Instant time, Instant now) { return time != null && !time.isAfter(now) && time.isAfter(now.minus(MAX_AGE)); }
     private static boolean usable(PriceStatus status) { return status != null && status != PriceStatus.STALE && status != PriceStatus.INSUFFICIENT_SOURCES; }
     private static boolean positive(BigDecimal value) { return value != null && value.signum() > 0; }
-    private static ResponseStatusException unavailable() { return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "OPTION_REFERENCE_UNAVAILABLE"); }
+    private static OptionQuoteException unavailable() { return OptionQuoteException.unavailable(); }
 
-    public record Quote(String productLine, String instrumentId, String underlyingInstrumentId, ProductLine underlyingProductLine,
-                        OptionType optionType, Instant expiryTime, String strikePriceUnits, BigDecimal strikePrice,
-                        String baseAsset, String quoteAsset, BigDecimal premiumPrice, BigDecimal underlyingIndexPrice,
-                        BigDecimal sameExpiryForwardPrice, BigDecimal intrinsicValue, Instant asOf, Instant validUntil,
-                        String sourcePriceSequence, String model, BigDecimal discountFactor, String unit, Black76Reference.Greeks greeks) {}
 }

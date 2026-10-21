@@ -1,0 +1,467 @@
+{
+  "audit_date": "2026-10-21",
+  "verified_at_utc": "2026-10-21T16:15:48.393792+00:00",
+  "scope": "期权报价的Controller、Kafka协议入口、原生模型和业务异常",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16; isolated PostgreSQL 18.4",
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-realtime/surprising-realtime-provider",
+        "-Dtest=OptionQuote*Test,Black76ReferenceTest,MarketApplicationContextTest",
+        "clean",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.realtime.provider.MarketApplicationContextTest",
+          "tests": 20,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.option.OptionQuoteServiceTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.option.Black76ReferenceTest",
+          "tests": 18,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.option.OptionQuoteControllerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "48dd4bbf400ab945057e05db13cae749527a1042fa6a9c20a019a6a17b4bf6bb",
+      "tests": 51,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-realtime/surprising-realtime-provider",
+        "-Dtest=OptionQuoteServiceTest,OptionQuoteControllerTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.realtime.provider.option.OptionQuoteServiceTest",
+          "tests": 10,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.option.OptionQuoteControllerTest",
+          "tests": 3,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "b6ef280e3c5d8c4feba0f7356a61be00210f20a972375d3dd604c9891d2985f1",
+      "tests": 13,
+      "failures": 4,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-realtime/surprising-realtime-provider",
+        "-Dtest=*Test",
+        "clean",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.realtime.provider.MarketApplicationContextTest",
+          "tests": 20,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.CommittedFundingProjectionPostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.candlestick.provider.config.CandlestickRollupTopologyTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.option.OptionQuoteServiceTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.candlestick.provider.aggregation.CandleMathTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.ArchiveReplayIntegrationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.CommittedTradingStatisticsPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.candlestick.provider.repository.PostgresCandleSinkTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.option.Black76ReferenceTest",
+          "tests": 18,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.candlestick.provider.config.CandlestickPropertiesTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.ExportBatchTest",
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.candlestick.provider.config.CandlestickStreamConfigurationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.candlestick.provider.service.PublicTradeEventMapperTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.ArchiveReplayTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.RealtimeRouterPropertiesTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.option.OptionQuoteControllerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.candlestick.provider.aggregation.CandleRollupAccumulatorTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.CommittedDeliveryRepairIntegrationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.CommittedProjectionConfigurationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.CommittedAlgoProjectionPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.candlestick.provider.service.CandleQueryServiceTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.candlestick.provider.service.CandleHotCacheTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.CommittedPortfolioRepairIntegrationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.TradeExportServiceTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.candlestick.provider.repository.CandleQueryPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.candlestick.provider.repository.CandleQueryRepositoryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.RealtimeRouterIntegrationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.candlestick.provider.service.SymbolRegistryServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.ReliableTradeKafkaSinkTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.CommittedPortfolioHistoryPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.candlestick.provider.config.CandlestickLiveRollupTopologyTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.candlestick.provider.service.RecentTradeQueryServiceTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.TradeExportCheckpointTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.CommittedDeliveryProjectionPostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest",
+          "tests": 21,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.realtime.provider.export.CommittedFundingRepairIntegrationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "756172efaa386bcce7db9a76ab91397e824e7d4c9921304bef375d902e4a0f16",
+      "tests": 187,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "assertions": [
+    "Controller校验canonical instrumentId并转换int，显式把业务未找到/参考价不可用映射404/503；参数错误400和产品头404在进入Service前拒绝。",
+    "Service不再依赖HTTP、Kafka ConsumerRecord或JSON Mapper，保留唯一源价格缓存、按版本/序号更新、生命周期/新鲜度/完整来源检查和原报价/Greeks计算。输入改为原生ID与不可变价格源，仍在业务所有者检查产品/版本和合约身份。",
+    "Kafka协议与Topic/key/ID解析归consumer，保持OPTION条件、原监听工厂、latest偏移、Topic及临时group前缀；没有新增价格状态或回退来源。清理任务仍归task。",
+    "只读报价归model.OptionQuote；原字段、单位、有效期和64位字符串保持，异常归exception并只含原生原因。",
+    "51项定向和187项完整实时模块干净构建通过无跳过；撤去产品头、错误映射、Kafka边界和原生身份检查的13项负例捕获4项预期失败，finally恢复后完整模块绿色。",
+    "完整模块覆盖真实数据库、提交投影、Archive恢复/Kafka及六产品市场容器；新增MockMvc验证无效ID不调用业务、状态映射和Long.MAX_VALUE字符串。"
+  ],
+  "source_sha256": {
+    "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/option/consumer/OptionQuotePriceConsumer.java": "c14e1fe1c27a61c556edf0cdf48c551247d168c4fee9ede85c01ca396252d362",
+    "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/option/controller/OptionQuoteController.java": "a34e3a094f4e643bfca27bb606ac0af14dacdc6556b0f24701358b046da85972",
+    "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/option/exception/OptionQuoteException.java": "2ae584db416feb42129ff43e339053958c1e3c257fe3c28d6d7dc4fa52cb20c5",
+    "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/option/model/OptionQuote.java": "307796f6980e6c3432111ffae8f53b9f37162be96dc308b494c78a2803f9f3eb",
+    "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/option/service/OptionQuoteService.java": "d9acf8377843c2c93891d6bae25c0cc5b0db2d608564790c140ddb088f37d191",
+    "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/MarketApplicationContextTest.java": "8560f51bc42ccb7173195a0dad166dcc3f8cf27a99174660363eaaed448bf445",
+    "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/option/OptionQuoteControllerTest.java": "96a14e31534dd74eae2c63a79085ac294cf3b2d0d38e73f3bfa66b7ba51ebf44",
+    "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/option/OptionQuoteServiceTest.java": "e51dcbbe78c3f89d80df8ad1a4cd060faea9d9869dfdbab67fe0b3269051e057"
+  },
+  "not_run": [
+    "报价为只读参考，本批未运行实际交易API/做市资金实栈，也不把该测试当作资金或风险准入验证。",
+    "其余底层HTTP异常、Controller参数/游标、三个投影表职责与最终全范围门禁继续。"
+  ],
+  "cleanup": {
+    "postgres_stopped": true,
+    "owned_database_removed": "/tmp/surprising-mvc-option-http-pg-knp_1p3n",
+    "owned_logs_and_summarized_reports_removed": [
+      "/tmp/surprising-mvc-option-http-negative.log",
+      "/tmp/surprising-mvc-option-http-focused.log",
+      "/tmp/surprising-mvc-option-http-expanded.log",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.repository.CandleQueryRepositoryTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.MarketApplicationContextTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.option.OptionQuoteServiceTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedFundingProjectionPostgresTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.config.CandlestickRollupTopologyTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.config.CandlestickLiveRollupTopologyTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.aggregation.CandleMathTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.option.OptionQuoteServiceTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.aggregation.CandleMathTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.config.CandlestickPropertiesTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.ArchiveReplayIntegrationTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.TradeExportCheckpointTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedTradingStatisticsPostgresTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.config.CandlestickStreamConfigurationTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedAlgoProjectionPostgresTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.aggregation.CandleRollupAccumulatorTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedFundingProjectionPostgresTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.repository.PostgresCandleSinkTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.option.Black76ReferenceTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.config.CandlestickPropertiesTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.ArchiveReplayIntegrationTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedTradingStatisticsPostgresTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.repository.PostgresCandleSinkTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.ExportBatchTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.option.Black76ReferenceTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.ArchiveReplayTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.config.CandlestickStreamConfigurationTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedDeliveryRepairIntegrationTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.PublicTradeEventMapperTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.ArchiveReplayTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.RealtimeRouterPropertiesTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.option.OptionQuoteControllerTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.aggregation.CandleRollupAccumulatorTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedDeliveryRepairIntegrationTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedProjectionConfigurationTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedAlgoProjectionPostgresTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.RecentTradeQueryServiceTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.repository.CandleQueryPostgresTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.TradeExportServiceTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedPortfolioHistoryPostgresTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.CandleQueryServiceTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.ExportBatchTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.CandleHotCacheTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedPortfolioRepairIntegrationTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.TradeExportServiceTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedPortfolioRepairIntegrationTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.repository.CandleQueryPostgresTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.CandleHotCacheTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.repository.CandleQueryRepositoryTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.PublicTradeEventMapperTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.SymbolRegistryServiceTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedFundingRepairIntegrationTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.config.CandlestickRollupTopologyTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.option.OptionQuoteControllerTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.RealtimeRouterIntegrationTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedProjectionConfigurationTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.RealtimeRouterPropertiesTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.SymbolRegistryServiceTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.RealtimeRouterIntegrationTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.ReliableTradeKafkaSinkTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.ReliableTradeKafkaSinkTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedTradeExportIntegrationTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedPortfolioHistoryPostgresTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.config.CandlestickLiveRollupTopologyTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.candlestick.provider.service.RecentTradeQueryServiceTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.TradeExportCheckpointTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedDeliveryProjectionPostgresTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.MarketApplicationContextTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.realtime.provider.export.CommittedDeliveryProjectionPostgresTest.txt",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/TEST-com.surprising.realtime.provider.export.CommittedFundingRepairIntegrationTest.xml",
+      "surprising-realtime/surprising-realtime-provider/target/surefire-reports/com.surprising.candlestick.provider.service.CandleQueryServiceTest.txt"
+    ]
+  }
+}

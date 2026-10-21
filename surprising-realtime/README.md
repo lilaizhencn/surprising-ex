@@ -612,3 +612,9 @@ RealtimeRouterProperties统一归provider.config；路由器配置键、默认�
 期权价格视图的状态与清理规则仍归OptionQuoteService；5秒调度入口归option.task.OptionQuotePruneTask，仅OPTION市场装配。验证见 [定时职责记录](../docs/validation/java-mvc-task-boundaries-20261021.json)。
 
 期权入口、聚合和Black-76参考计算分别归option.controller、option.service与option.utils；清理时钟仍归option.task，保持OPTION专属装配。验证见 [其余归包记录](../docs/validation/java-mvc-remaining-packages-20261021.json)。
+
+期权报价的HTTP参数和状态映射由option.controller.OptionQuoteController处理，业务只接收原生int合约ID。
+option.consumer.OptionQuotePriceConsumer负责Kafka协议，沿用原Topic、监听工厂及latest消费；
+OptionQuoteService只持有源事件与业务聚合，OptionQuoteException为原生业务原因，报价归model.OptionQuote。
+保留OPTION范围、短有效期、精度/版本/来源一致性和只读参考定位。
+[期权HTTP职责验证](../docs/validation/java-mvc-option-http-20261021.json)包含完整实时模块及负例结果。

@@ -2,6 +2,8 @@ package com.surprising.realtime.provider.option;
 
 import com.surprising.realtime.provider.option.controller.OptionQuoteController;
 import com.surprising.realtime.provider.option.service.OptionQuoteService;
+import com.surprising.realtime.provider.option.consumer.OptionQuotePriceConsumer;
+import com.surprising.realtime.provider.option.exception.OptionQuoteException;
 
 import static org.assertj.core.api.Assertions.*;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
@@ -21,7 +23,9 @@ class OptionQuoteServiceTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final InstrumentSnapshotCache instruments = new InstrumentSnapshotCache();
     private final MutableClock clock = new MutableClock();
-    private final OptionQuoteService service = new OptionQuoteService(instruments, mapper, clock);
+    private final OptionQuoteService service = new OptionQuoteService(instruments, clock);
+
+    private final OptionQuotePriceConsumer consumer = new OptionQuotePriceConsumer(service, mapper);
 
     @BeforeEach void initialize() { instrument("TRADING", 7, NOW.plusSeconds(365 * 86400)); }
 
@@ -53,14 +57,14 @@ class OptionQuoteServiceTest {
         return new MarkPricePublishedEvent(mark, index, null, null, null, BigDecimal.ZERO, 0, time);
     }
     private void accept(MarkPricePublishedEvent event) throws Exception {
-        service.onPrice(new ConsumerRecord<>(service.topic(), 0, 1, "74", mapper.writeValueAsString(PricePublishedEvent.mark(event))));
+        consumer.onPrice(new ConsumerRecord<>(consumer.topic(), 0, 1, "74", mapper.writeValueAsString(PricePublishedEvent.mark(event))));
     }
-    private void unavailable() { assertThatThrownBy(() -> service.quote("74")).isInstanceOfSatisfying(ResponseStatusException.class,
-            failure -> assertThat(failure.getStatusCode().value()).isEqualTo(503)); }
+    private void unavailable() { assertThatThrownBy(() -> service.quote(74)).isInstanceOfSatisfying(OptionQuoteException.class,
+            failure -> assertThat(failure.reason()).isEqualTo(OptionQuoteException.Reason.REFERENCE_UNAVAILABLE)); }
 
     @Test void servesCoherentQuoteWithExplicitModelUnitsAndShortValidity() throws Exception {
         accept(event(1, 7, PriceStatus.HEALTHY, NOW, "7.965567455405796"));
-        var quote = service.quote("74");
+        var quote = service.quote(74);
         assertThat(quote.greeks().impliedVolatility()).isCloseTo(.2, within(1e-8));
         assertThat(quote.underlyingIndexPrice()).isEqualByComparingTo("100");
         assertThat(quote.sameExpiryForwardPrice()).isEqualByComparingTo("100");
@@ -73,19 +77,19 @@ class OptionQuoteServiceTest {
         accept(event(1, 7, PriceStatus.HEALTHY, NOW, "7.965567455405796"));
         clock.time = NOW.plusSeconds(5); unavailable(); service.prune(); unavailable();
         accept(event(2, 7, PriceStatus.HEALTHY, clock.time, "7.965567455405796"));
-        assertThat(service.quote("74").sourcePriceSequence()).isEqualTo("2");
+        assertThat(service.quote(74).sourcePriceSequence()).isEqualTo("2");
     }
     @Test void newerInvalidStatusDisablesOldQuoteButOutOfOrderCannotRegressIt() throws Exception {
         accept(event(2, 7, PriceStatus.HEALTHY, NOW, "7.965567455405796"));
         accept(event(1, 7, PriceStatus.STALE, NOW, "7.965567455405796"));
-        assertThat(service.quote("74").sourcePriceSequence()).isEqualTo("2");
+        assertThat(service.quote(74).sourcePriceSequence()).isEqualTo("2");
         accept(event(3, 7, PriceStatus.STALE, NOW, "7.965567455405796")); unavailable();
     }
     @Test void metadataVersionLifecycleAndExpiryMismatchCannotReuseAQuote() throws Exception {
         accept(event(1, 7, PriceStatus.HEALTHY, NOW, "7.965567455405796"));
         instrument("TRADING", 8, NOW.plusSeconds(365 * 86400)); unavailable();
         accept(event(2, 8, PriceStatus.HEALTHY, NOW, "7.965567455405796"));
-        assertThat(service.quote("74").greeks()).isNotNull();
+        assertThat(service.quote(74).greeks()).isNotNull();
         instrument("HALT", 9, NOW.plusSeconds(365 * 86400)); unavailable();
         instrument("TRADING", 10, NOW.plusSeconds(365 * 86400 + 1));
         accept(event(3, 10, PriceStatus.HEALTHY, NOW, "7.965567455405796")); unavailable();
@@ -96,7 +100,7 @@ class OptionQuoteServiceTest {
         service.prune(); unavailable();
         accept(event(3, 7, PriceStatus.HEALTHY, NOW, "8")); unavailable();
         instrument("TRADING", 8, NOW.plusSeconds(365 * 86400));
-        assertThat(service.quote("74").sourcePriceSequence()).isEqualTo("2");
+        assertThat(service.quote(74).sourcePriceSequence()).isEqualTo("2");
     }
 
     @Test void lifecycleRevisionIsNotTheFrozenPriceEncodingVersion() throws Exception {
@@ -105,35 +109,42 @@ class OptionQuoteServiceTest {
         updated.put("lastChangeId", 99);
         instruments.replace(ProductLine.OPTION, List.of(mapper.convertValue(updated, InstrumentResponse.class)), Map.of("USDT", 100_000_000L));
         accept(event(1, 7, PriceStatus.HEALTHY, NOW, "8"));
-        assertThat(service.quote("74").greeks()).isNotNull();
+        assertThat(service.quote(74).greeks()).isNotNull();
     }
 
     @Test void haltedContractRemainsQueryableWhileClosedOrExpiredContractsDoNot() throws Exception {
         instrument("HALT", 8, NOW.plusSeconds(365 * 86400));
         accept(event(1, 8, PriceStatus.HEALTHY, NOW, "8"));
-        assertThat(service.quote("74").greeks()).isNotNull();
+        assertThat(service.quote(74).greeks()).isNotNull();
         instrument("CLOSED", 9, NOW.plusSeconds(365 * 86400)); unavailable();
         instrument("SETTLING", 10, NOW); unavailable();
     }
 
     @Test void retainsRealPriceWithoutInventingGreeksWhenModelHasNoSolution() throws Exception {
         accept(event(1, 7, PriceStatus.HEALTHY, NOW, "101"));
-        assertThat(service.quote("74").premiumPrice()).isEqualByComparingTo("101");
-        assertThat(service.quote("74").greeks()).isNull();
+        assertThat(service.quote(74).premiumPrice()).isEqualByComparingTo("101");
+        assertThat(service.quote(74).greeks()).isNull();
     }
     @Test void refusesUnknownInstrumentWrongTopicKeyProductAndFutureTime() throws Exception {
-        assertThatThrownBy(() -> service.quote("bad")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> service.quote("75")).isInstanceOfSatisfying(ResponseStatusException.class,
-                failure -> assertThat(failure.getStatusCode().value()).isEqualTo(404));
+        assertThatThrownBy(() -> new OptionQuoteController(service).quote("bad", null)).isInstanceOfSatisfying(ResponseStatusException.class,
+                failure -> assertThat(failure.getStatusCode().value()).isEqualTo(400));
+        assertThatThrownBy(() -> service.quote(75)).isInstanceOfSatisfying(OptionQuoteException.class,
+                failure -> assertThat(failure.reason()).isEqualTo(OptionQuoteException.Reason.INSTRUMENT_NOT_FOUND));
         var payload = mapper.writeValueAsString(PricePublishedEvent.mark(event(1, 7, PriceStatus.HEALTHY, NOW, "8")));
-        assertThatThrownBy(() -> service.onPrice(new ConsumerRecord<>("wrong", 0, 1, "74", payload))).hasMessageContaining("topic");
-        assertThatThrownBy(() -> service.onPrice(new ConsumerRecord<>(service.topic(), 0, 1, "75", payload))).hasMessageContaining("key");
-        assertThatThrownBy(() -> service.onPrice(new ConsumerRecord<>(service.topic(), 0, 1, "74",
+        assertThatThrownBy(() -> consumer.onPrice(new ConsumerRecord<>("wrong", 0, 1, "74", payload))).hasMessageContaining("topic");
+        assertThatThrownBy(() -> consumer.onPrice(new ConsumerRecord<>(consumer.topic(), 0, 1, "75", payload))).hasMessageContaining("key");
+        assertThatThrownBy(() -> consumer.onPrice(new ConsumerRecord<>(consumer.topic(), 0, 1, "74",
                 payload.replace("\"productLine\":\"OPTION\"", "\"productLine\":\"SPOT\"")))).hasMessageContaining("identity");
         accept(event(2, 7, PriceStatus.HEALTHY, NOW.plusMillis(1), "8")); unavailable();
         assertThatThrownBy(() -> new OptionQuoteController(service).quote("74", "SPOT")).isInstanceOfSatisfying(ResponseStatusException.class,
                 failure -> assertThat(failure.getStatusCode().value()).isEqualTo(404));
     }
+    @Test void businessOwnerRejectsAnEventFromAnotherNativeInstrument() {
+        assertThatThrownBy(() -> service.accept(75, event(1, 7, PriceStatus.HEALTHY, NOW, "8")))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("identity");
+        unavailable();
+    }
+
     private static class MutableClock extends Clock {
         Instant time = NOW;
         public ZoneId getZone() { return ZoneOffset.UTC; }

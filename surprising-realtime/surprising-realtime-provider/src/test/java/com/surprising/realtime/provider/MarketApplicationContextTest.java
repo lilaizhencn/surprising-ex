@@ -78,10 +78,12 @@ class MarketApplicationContextTest {
                     .doesNotHaveBean(com.surprising.aeron.service.bootstrap.AeronCoreLifecycle.class);
             if (line == ProductLine.OPTION) {
                 assertThat(ctx).hasSingleBean(com.surprising.realtime.provider.option.service.OptionQuoteService.class)
+                        .hasSingleBean(com.surprising.realtime.provider.option.consumer.OptionQuotePriceConsumer.class)
                         .hasSingleBean(com.surprising.realtime.provider.option.controller.OptionQuoteController.class)
                         .hasSingleBean(com.surprising.realtime.provider.option.task.OptionQuotePruneTask.class);
             } else {
                 assertThat(ctx).doesNotHaveBean(com.surprising.realtime.provider.option.service.OptionQuoteService.class)
+                        .doesNotHaveBean(com.surprising.realtime.provider.option.consumer.OptionQuotePriceConsumer.class)
                         .doesNotHaveBean(com.surprising.realtime.provider.option.controller.OptionQuoteController.class)
                         .doesNotHaveBean(com.surprising.realtime.provider.option.task.OptionQuotePruneTask.class);
             }
