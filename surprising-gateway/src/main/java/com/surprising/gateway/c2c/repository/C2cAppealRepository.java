@@ -14,6 +14,28 @@ public class C2cAppealRepository {
 
     public C2cAppealRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
+    public Optional<UUID> openForOrder(UUID orderId) {
+        return jdbc.query("SELECT appeal_id FROM c2c_appeals WHERE order_id=? AND status IN ('OPEN','REVIEWING')",
+                (r, n) -> r.getObject(1, UUID.class), orderId).stream().findFirst();
+    }
+
+    public void insert(UUID id, UUID orderId, long opener, String previousStatus, String reason) {
+        jdbc.update("INSERT INTO c2c_appeals(appeal_id,order_id,opener_user_id,previous_order_status,reason) VALUES(?,?,?,?,?)",
+                id, orderId, opener, previousStatus, reason);
+    }
+
+    public Optional<String> statusForUpdate(UUID id) {
+        return jdbc.query("SELECT status FROM c2c_appeals WHERE appeal_id=? FOR UPDATE", (r, n) -> r.getString(1), id)
+                .stream().findFirst();
+    }
+
+    public void resolve(UUID id, String decision, String reason, long administrator, long approvalId) {
+        jdbc.update("""
+                UPDATE c2c_appeals SET status='RESOLVED',decision=?,decision_reason=?,decided_by=?,approval_id=?,resolved_at=now()
+                WHERE appeal_id=?
+                """, decision, reason, administrator, approvalId, id);
+    }
+
     public Optional<UUID> orderId(UUID id) {
         return jdbc.query("SELECT order_id FROM c2c_appeals WHERE appeal_id=?",
                 (r, n) -> r.getObject(1, UUID.class), id).stream().findFirst();

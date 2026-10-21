@@ -1,7 +1,10 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cAd;
 import com.surprising.gateway.c2c.model.C2cMarket;
+import com.surprising.gateway.c2c.model.C2cOrder;
 import com.surprising.gateway.c2c.model.C2cPaymentAccount;
+import com.surprising.gateway.c2c.model.C2cQuote;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -31,7 +34,7 @@ public final class C2cViews {
         return view;
     }
 
-    public static Map<String,Object> ad(C2cAdsRepository.Ad ad, C2cMarket market, boolean own) {
+    public static Map<String,Object> ad(C2cAd ad, C2cMarket market, boolean own) {
         var view = new LinkedHashMap<String,Object>();
         view.put("adId", ad.id().toString());
         view.put("makerUserId", Long.toString(ad.makerUserId()));
@@ -58,7 +61,7 @@ public final class C2cViews {
         return view;
     }
 
-    static Map<String,Object> quote(C2cOrdersRepository.Quote quote, C2cMarket market) {
+    static Map<String,Object> quote(C2cQuote quote, C2cMarket market) {
         var view = new LinkedHashMap<String,Object>();
         view.put("quoteId", quote.id().toString());
         view.put("ownerUserId", Long.toString(quote.userId()));
@@ -79,7 +82,7 @@ public final class C2cViews {
         return view;
     }
 
-    public static Map<String,Object> order(C2cOrdersRepository.Order order, C2cMarket market) {
+    public static Map<String,Object> order(C2cOrder order, C2cMarket market) {
         var view = new LinkedHashMap<String,Object>();
         view.put("orderId", order.id().toString());
         view.put("quoteId", order.quoteId().toString());

@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cOrder;
 import com.surprising.gateway.provider.service.KycDocumentStorageException;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -152,7 +153,7 @@ public class C2cAttachments {
         var order=orders.get(orderContext,false);C2cOrders.requireParticipant(user,order);
         if(!qrMatches(attachment,order)) throw C2cProblem.forbidden("收款码与订单快照不匹配");
     }
-    private boolean qrMatches(Attachment attachment,C2cOrdersRepository.Order order) {
+    private boolean qrMatches(Attachment attachment,C2cOrder order) {
         return attachment.user()==order.sellerUserId() && attachment.id().toString().equals(
                 payments.details(order.sellerUserId(),order.paymentCiphertext()).get("qrAttachmentId"));
     }

@@ -1,11 +1,12 @@
 package com.surprising.gateway.c2c;
 
-import com.surprising.gateway.c2c.service.C2cMarketService;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.surprising.account.api.model.*;
+import com.surprising.gateway.c2c.model.C2cOrderStatus;
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.auth.*;
 import java.time.Instant;
 import java.util.*;

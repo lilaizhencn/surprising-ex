@@ -3,6 +3,7 @@ package com.surprising.gateway.c2c;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import com.surprising.gateway.c2c.model.C2cAd;
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
@@ -43,7 +44,7 @@ class C2cAdsPostgresTest {
                 VALUES(?,11,'CNY','ALIPAY','fixture ciphertext','****0000','APPROVED')
                 """,paymentId);
         rows=new C2cAdsRepository(jdbc);intents=new C2cFundsRepository(jdbc);access=mock(C2cAccess.class);
-        ads=new C2cAds(rows,C2cDatabaseFixture.markets(jdbc),C2cDatabaseFixture.payments(jdbc,null,null,null),access,intents,jdbc,new ObjectMapper(),new C2cSubmissions(jdbc));
+        ads=C2cDatabaseFixture.ads(jdbc,rows,C2cDatabaseFixture.markets(jdbc),C2cDatabaseFixture.payments(jdbc,null,null,null),access,intents,new ObjectMapper(),new C2cSubmissions(jdbc));
         var accounts=mock(ProductAccountClient.class);
         var applied=new ProductAccountAdjustment(ProductAccountAdjustment.Status.APPLIED,null);
         when(accounts.transferOut(any(),any())).thenReturn(applied);
@@ -53,10 +54,10 @@ class C2cAdsPostgresTest {
     }
     @AfterEach void cleanup() {if(db!=null)db.close();}
     private C2cAds.Publish request() {return new C2cAds.Publish(marketId,"SELL","6.65","10","1","10000",List.of("ALIPAY"),List.of(paymentId),900,"QA terms",0);}
-    private C2cAdsRepository.Ad publish() {
+    private C2cAd publish() {
         new C2cSubmissions(db.jdbc).admit(owner.userId(),"original-ad-request-0001","AD_PUBLISH",C2cDigests.sha256(new ObjectMapper().writeValueAsString(request())));
         return db.transaction(()->ads.publish(owner,"Bearer fixture","original-ad-request-0001",request(),"123456",""));}
-    private C2cAdsRepository.Ad active() {
+    private C2cAd active() {
         var ad=publish();var intent=db.jdbc.queryForObject("SELECT intent_id FROM c2c_fund_intents WHERE owner_id=?",UUID.class,ad.id());
         funds.resume(intent);db.transaction(()->{ads.finishFunding(ad.id());return null;});return rows.get(ad.id(),false);
     }

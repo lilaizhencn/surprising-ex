@@ -1,12 +1,15 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cAd;
 import com.surprising.gateway.c2c.model.C2cMarket;
+import com.surprising.gateway.c2c.repository.C2cMerchantRepository;
+import com.surprising.gateway.c2c.repository.C2cPaymentMethodRepository;
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.GatewayUserRepository;
 import java.math.BigDecimal;
 import java.util.*;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -23,16 +26,19 @@ public class C2cAds {
     private final C2cAccess access;
     private final C2cFundsRepository funds;
     private final C2cSubmissions submissions;
-    private final JdbcTemplate jdbc;
+    private final GatewayUserRepository users;
+    private final C2cMerchantRepository merchants;
+    private final C2cPaymentMethodRepository paymentMethods;
     private final ObjectMapper json;
-    public C2cAds(C2cAdsRepository ads,C2cMarketService markets,C2cPaymentAccounts payments,C2cAccess access,
-                   C2cFundsRepository funds,JdbcTemplate jdbc,ObjectMapper json,C2cSubmissions submissions) {
-        this.submissions=submissions;
-        this.ads=ads;this.markets=markets;this.payments=payments;this.access=access;this.funds=funds;this.jdbc=jdbc;this.json=json;
+    public C2cAds(C2cAdsRepository ads, C2cMarketService markets, C2cPaymentAccounts payments, C2cAccess access,
+                  C2cFundsRepository funds, ObjectMapper json, C2cSubmissions submissions,
+                  GatewayUserRepository users, C2cMerchantRepository merchants, C2cPaymentMethodRepository paymentMethods) {
+        this.ads=ads; this.markets=markets; this.payments=payments; this.access=access; this.funds=funds;
+        this.json=json; this.submissions=submissions; this.users=users; this.merchants=merchants; this.paymentMethods=paymentMethods;
     }
 
     @Transactional
-    C2cAdsRepository.Ad publish(JwtPrincipal user,String authorization,String key,Publish request,String email,String totp) {
+    C2cAd publish(JwtPrincipal user,String authorization,String key,Publish request,String email,String totp) {
         requireKey(key);
         if(request==null) throw new IllegalArgumentException("广告资料不完整");
         if((request.methodCodes()!=null && request.methodCodes().stream().anyMatch(Objects::isNull))
@@ -47,9 +53,9 @@ public class C2cAds {
         }
         var configuration=markets.configuration(true);
         if(!configuration.enabled()) throw new IllegalStateException("C2C 暂未开放");
-        if (jdbc.query("SELECT user_id FROM gateway_users WHERE user_id=? FOR NO KEY UPDATE",(r,n)->r.getLong(1),user.userId()).isEmpty())
+        if (!users.lockForNoKeyUpdate(user.userId()))
             throw new IllegalStateException("账户不可用");
-        Long active = jdbc.queryForObject("SELECT count(*) FROM c2c_ads WHERE maker_user_id=? AND status NOT IN ('CLOSED','REJECTED')",Long.class,user.userId());
+        Long active = ads.activeCount(user.userId());
         if (active != null && active >= configuration.maxActiveAds()) throw new IllegalStateException("请先关闭不再使用的广告");
         var market=markets.market(request.marketId(),true);
         access.requireTrading(user,market);
@@ -66,7 +72,7 @@ public class C2cAds {
         var accounts=request.paymentAccountIds()==null?List.<UUID>of():request.paymentAccountIds().stream().distinct().sorted().toList();
         if(methods.isEmpty() || methods.size()>8 || methods.stream().anyMatch(m->!m.matches("[A-Z][A-Z0-9_]{0,31}")))
             throw new IllegalArgumentException("请选择收付款方式");
-        for(String method:methods) if(!Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM c2c_payment_methods WHERE code=? AND enabled AND ?=ANY(currencies))",Boolean.class,method,market.fiat())))
+        for(String method:methods) if(paymentMethods.available(method,market.fiat()).isEmpty())
             throw new IllegalArgumentException("收付款方式尚未开放");
         if(request.side().equals("SELL")) {
             var actual=new HashSet<String>();
@@ -78,9 +84,11 @@ public class C2cAds {
             }
             if(!actual.equals(new HashSet<>(methods))) throw new IllegalArgumentException("收款账号与广告方式不匹配");
         } else if(!accounts.isEmpty()) throw new IllegalArgumentException("买入广告由出售方选择本人收款账号");
-        var ad=ads.create(user.userId(),market.id(),request.side(),price,units,
+        UUID adId=UUID.randomUUID();
+        String initialStatus=request.side().equals("SELL")?"RESERVING":"ACTIVE";
+        var ad=ads.create(adId,user.userId(),market.id(),request.side(),price,units,
                 C2cMoney.decimal(request.minFiat()),C2cMoney.decimal(request.maxFiat()),methods,accounts,window,
-                request.terms()==null?"":request.terms().trim(),request.minCompleted());
+                request.terms()==null?"":request.terms().trim(),request.minCompleted(),initialStatus);
         if(request.side().equals("SELL")) {
             access.verifyFunds(user,authorization,email,totp);
             funds.createOrGet("AD",ad.id(),"AD_RESERVE",user.userId(),configuration.escrowUserId(),market.asset(),units);
@@ -90,7 +98,7 @@ public class C2cAds {
     }
 
     @Transactional
-    C2cAdsRepository.Ad status(JwtPrincipal user,String authorization,UUID id,long revision,String action,String email,String totp) {
+    C2cAd status(JwtPrincipal user,String authorization,UUID id,long revision,String action,String email,String totp) {
         if(action==null) throw new IllegalArgumentException("广告操作无效");
         var ad=ads.get(id,true);
         requireOwner(user,ad);
@@ -110,7 +118,7 @@ public class C2cAds {
     }
 
     @Transactional
-    C2cAdsRepository.Ad moderate(UUID id,long revision,String action) {
+    C2cAd moderate(UUID id,long revision,String action) {
         var ad=ads.get(id,true);
         if(ad.revision()!=revision || !List.of("ACTIVE","PAUSED").contains(ad.status())) throw new IllegalStateException("广告已变更或资金尚在确认中");
         if("PAUSE".equals(action)) ads.setStatus(id,"PAUSED");
@@ -121,20 +129,20 @@ public class C2cAds {
 
     // 只由已消费双人审批的后台入口调用；退款金额和收款人始终来自锁定的原广告。
     @Transactional
-    C2cAdsRepository.Ad closeByAdministrator(UUID id,long revision) {
+    C2cAd closeByAdministrator(UUID id,long revision) {
         var ad=ads.get(id,true);
         if(ad.revision()!=revision || !List.of("ACTIVE","PAUSED").contains(ad.status())) throw new IllegalStateException("广告已变更或资金尚在确认中");
         closeAvailable(ad);return ads.get(id,false);
     }
 
-    private void closeAvailable(C2cAdsRepository.Ad ad) {
+    private void closeAvailable(C2cAd ad) {
         if(ad.side().equals("SELL") && ad.availableUnits()>0) {
             var config=markets.configuration();var market=markets.market(ad.marketId(),false);
             funds.createOrGet("AD",ad.id(),"AD_REFUND",config.escrowUserId(),ad.makerUserId(),market.asset(),ad.availableUnits());
             ads.closeAvailable(ad,"CLOSING");
         } else ads.closeAvailable(ad,"CLOSED");
     }
-    private void requirePublishable(C2cAdsRepository.Ad ad) {
+    private void requirePublishable(C2cAd ad) {
         markets.requireOpen();var market=markets.market(ad.marketId(),true);
         access.requireCounterparty(ad.makerUserId(),market);requireMerchant(ad.makerUserId());
         validateTerms(market,ad.price().toPlainString(),ad.minFiat().toPlainString(),ad.maxFiat().toPlainString(),ad.terms(),ad.minCompleted());
@@ -143,7 +151,7 @@ public class C2cAds {
     }
 
     @Transactional
-    C2cAdsRepository.Ad edit(JwtPrincipal user,UUID id,long revision,String price,String min,String max,String terms,int minCompleted) {
+    C2cAd edit(JwtPrincipal user,UUID id,long revision,String price,String min,String max,String terms,int minCompleted) {
         var ad=ads.get(id,true);requireOwner(user,ad);
         if(ad.revision()!=revision || !List.of("ACTIVE","PAUSED").contains(ad.status())) throw new IllegalStateException("广告已变更或资金尚在处理中");
         var market=markets.market(ad.marketId(),true);access.requireTrading(user,market);requireMerchant(user.userId());
@@ -157,14 +165,12 @@ public class C2cAds {
         var ad=ads.get(id,true);
         if(!List.of("RESERVING","CLOSING").contains(ad.status())) return;
         String purpose=ad.status().equals("RESERVING")?"AD_RESERVE":"AD_REFUND";
-        var intents=jdbc.query("SELECT status FROM c2c_fund_intents WHERE owner_type='AD' AND owner_id=? AND purpose=?",(r,n)->r.getString(1),id,purpose);
-        if(intents.isEmpty()) throw new IllegalStateException("广告缺少原资金意图");
-        if(intents.getFirst().equals("APPLIED")) {
+        var intent=funds.find("AD",id,purpose);
+        if(intent==null) throw new IllegalStateException("广告缺少原资金意图");
+        if(intent.status().equals("APPLIED")) {
             if(purpose.equals("AD_REFUND")) ads.setStatus(id,"CLOSED");
             else {
-                boolean approved=Boolean.TRUE.equals(jdbc.queryForObject("""
-                        SELECT EXISTS(SELECT 1 FROM c2c_merchants WHERE user_id=? AND status='APPROVED')
-                        """,Boolean.class,ad.makerUserId()));
+                boolean approved=merchants.approved(ad.makerUserId());
                 boolean paymentReady=ad.accounts().stream().allMatch(account->{
                     try {payments.get(ad.makerUserId(),account,true);return true;}catch(IllegalStateException ex){return false;}
                 });
@@ -178,15 +184,15 @@ public class C2cAds {
                 } catch(IllegalArgumentException | IllegalStateException unavailable) {marketReady=false;}
                 ads.setStatus(id,approved && paymentReady && marketReady && markets.configuration().enabled()?"ACTIVE":"PAUSED");
             }
-        } else if(purpose.equals("AD_RESERVE") && intents.getFirst().equals("REJECTED")) ads.closeAvailable(ad,"REJECTED");
+        } else if(purpose.equals("AD_RESERVE") && intent.status().equals("REJECTED")) ads.closeAvailable(ad,"REJECTED");
     }
 
     private void requireMerchant(long userId) {
         markets.requireMerchantBond(userId);
-        if(!Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM c2c_merchants WHERE user_id=? AND status='APPROVED')",Boolean.class,userId)))
+        if(!merchants.approved(userId))
             throw new IllegalStateException("请先完成认证商家申请");
     }
-    private static void requireOwner(JwtPrincipal user,C2cAdsRepository.Ad ad) {
+    private static void requireOwner(JwtPrincipal user,C2cAd ad) {
         if(user.userId()!=ad.makerUserId()) throw new IllegalStateException("只能管理本人广告");
     }
     static void requireKey(String key) {

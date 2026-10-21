@@ -11,6 +11,12 @@ public class C2cAttachmentRepository {
 
     public C2cAttachmentRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
+    public boolean readyProof(UUID attachmentId, long owner, UUID orderId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM c2c_attachments WHERE attachment_id=? AND user_id=? AND order_id=? AND purpose='PROOF' AND status='READY')
+                """, Boolean.class, attachmentId, owner, orderId));
+    }
+
     public boolean readyPaymentQr(UUID attachmentId, long owner) {
         return Boolean.TRUE.equals(jdbc.queryForObject("""
                 SELECT EXISTS(SELECT 1 FROM c2c_attachments WHERE attachment_id=? AND user_id=? AND purpose='PAYMENT_QR' AND status='READY')

@@ -1,5 +1,20 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.repository.C2cAppealRepository;
+import com.surprising.gateway.c2c.repository.C2cAttachmentRepository;
+import com.surprising.gateway.c2c.repository.C2cConfigurationRepository;
+import com.surprising.gateway.c2c.repository.C2cMarketRepository;
+import com.surprising.gateway.c2c.repository.C2cMerchantBondRepository;
+import com.surprising.gateway.c2c.repository.C2cMerchantRepository;
+import com.surprising.gateway.c2c.repository.C2cOrderEventRepository;
+import com.surprising.gateway.c2c.repository.C2cPaymentAccountRepository;
+import com.surprising.gateway.c2c.repository.C2cPaymentMethodRepository;
+import com.surprising.gateway.c2c.repository.C2cQuoteRepository;
+import com.surprising.gateway.c2c.repository.C2cRelationRepository;
+import com.surprising.gateway.c2c.service.C2cMarketService;
+import com.surprising.gateway.provider.auth.ComplianceService;
+import com.surprising.gateway.provider.auth.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.TotpService;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
@@ -8,6 +23,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.ObjectMapper;
 
 /** 每个用例独占并清理自己的 schema，不改共享用户、币种或资金表。 */
 final class C2cDatabaseFixture implements AutoCloseable {
@@ -47,19 +63,33 @@ final class C2cDatabaseFixture implements AutoCloseable {
         jdbc.execute("CREATE SEQUENCE "+table+"_qa_sequence");
         jdbc.execute("ALTER TABLE "+table+" ALTER COLUMN "+column+" SET DEFAULT nextval('"+table+"_qa_sequence')");
     }
-    static C2cPaymentAccounts payments(JdbcTemplate jdbc, com.surprising.gateway.provider.auth.TotpService secrets,
-                                       tools.jackson.databind.ObjectMapper json,
-                                       com.surprising.gateway.provider.auth.ComplianceService compliance) {
-        return new C2cPaymentAccounts(new com.surprising.gateway.c2c.repository.C2cPaymentAccountRepository(jdbc),
-                new com.surprising.gateway.c2c.repository.C2cPaymentMethodRepository(jdbc),new C2cAdsRepository(jdbc),
-                new com.surprising.gateway.c2c.repository.C2cAttachmentRepository(jdbc),secrets,json,compliance);
+    static C2cAds ads(JdbcTemplate jdbc, C2cAdsRepository rows, C2cMarketService markets, C2cPaymentAccounts payments,
+                      C2cAccess access, C2cFundsRepository funds, ObjectMapper json, C2cSubmissions submissions) {
+        return new C2cAds(rows,markets,payments,access,funds,json,submissions,new GatewayUserRepository(jdbc),
+                new C2cMerchantRepository(jdbc),new C2cPaymentMethodRepository(jdbc));
     }
 
-    static com.surprising.gateway.c2c.service.C2cMarketService markets(JdbcTemplate jdbc) {
-        return new com.surprising.gateway.c2c.service.C2cMarketService(
-                new com.surprising.gateway.c2c.repository.C2cConfigurationRepository(jdbc),
-                new com.surprising.gateway.c2c.repository.C2cMarketRepository(jdbc),
-                new com.surprising.gateway.c2c.repository.C2cMerchantBondRepository(jdbc));
+    static C2cOrders orders(JdbcTemplate jdbc, C2cOrdersRepository rows, C2cAdsRepository ads, C2cMarketService markets,
+                            C2cPaymentAccounts payments, C2cAccess access, C2cFundsRepository funds,
+                            C2cSubmissions submissions, ObjectMapper json) {
+        return new C2cOrders(rows,ads,markets,payments,access,funds,submissions,new GatewayUserRepository(jdbc),
+                new C2cQuoteRepository(jdbc),new C2cOrderEventRepository(jdbc,json),new C2cAttachmentRepository(jdbc),
+                new C2cAppealRepository(jdbc),new C2cMerchantRepository(jdbc),new C2cRelationRepository(jdbc));
+    }
+
+    static C2cPaymentAccounts payments(JdbcTemplate jdbc, TotpService secrets,
+                                       ObjectMapper json,
+                                       ComplianceService compliance) {
+        return new C2cPaymentAccounts(new C2cPaymentAccountRepository(jdbc),
+                new C2cPaymentMethodRepository(jdbc),new C2cAdsRepository(jdbc),
+                new C2cAttachmentRepository(jdbc),secrets,json,compliance);
+    }
+
+    static C2cMarketService markets(JdbcTemplate jdbc) {
+        return new C2cMarketService(
+                new C2cConfigurationRepository(jdbc),
+                new C2cMarketRepository(jdbc),
+                new C2cMerchantBondRepository(jdbc));
     }
     // Controlled Core fixture: a pre-existing approved merchant has already committed its bond.
     void seedMerchantBond(long userId) {

@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cQuote;
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
@@ -149,8 +150,7 @@ public class C2cController {
     }
     @GetMapping("/quotes/{id}")
     public Map<String,Object> quote(@RequestHeader(value="Authorization",required=false) String authorization,@PathVariable UUID id) {
-        var user=access.user(authorization);var quote=orderRows.quote(id,false);
-        if(quote.userId()!=user.userId()) throw C2cProblem.forbidden("只能查看本人报价");
+        var user=access.user(authorization);var quote=orders.ownedQuote(user.userId(),id);
         return quoteView(quote);
     }
 
@@ -258,7 +258,7 @@ public class C2cController {
         }
         return view;
     }
-    private Map<String,Object> quoteView(C2cOrdersRepository.Quote quote) {
+    private Map<String,Object> quoteView(C2cQuote quote) {
         var ad=adRows.get(quote.adId(),false);var market=markets.market(ad.marketId(),false);
         var view=C2cViews.quote(quote,market);
         boolean accountReady;

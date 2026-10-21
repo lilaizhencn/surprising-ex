@@ -3,6 +3,10 @@ package com.surprising.gateway.c2c;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import com.surprising.gateway.c2c.model.C2cAd;
+import com.surprising.gateway.c2c.model.C2cOrder;
+import com.surprising.gateway.c2c.model.C2cOrderStatus;
+import com.surprising.gateway.c2c.model.C2cQuote;
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.*;
@@ -51,29 +55,29 @@ class C2cOrdersPostgresTest {
         makerAccount=payments.save(11,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Seller","qa-seller-account","",null)).id();
         sellerAccount=payments.save(12,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Taker","qa-taker-account","",null)).id();
         jdbc.update("UPDATE c2c_payment_accounts SET status='APPROVED'");
-        adRows=new C2cAdsRepository(jdbc);orderRows=new C2cOrdersRepository(jdbc,json);intents=new C2cFundsRepository(jdbc);
+        adRows=new C2cAdsRepository(jdbc);orderRows=new C2cOrdersRepository(jdbc);intents=new C2cFundsRepository(jdbc);
         requests=new C2cSubmissions(jdbc);access=mock(C2cAccess.class);var markets=C2cDatabaseFixture.markets(jdbc);
-        ads=new C2cAds(adRows,markets,payments,access,intents,jdbc,json,requests);
-        orders=new C2cOrders(orderRows,adRows,markets,payments,access,intents,jdbc,requests);
+        ads=C2cDatabaseFixture.ads(jdbc,adRows,markets,payments,access,intents,json,requests);
+        orders=C2cDatabaseFixture.orders(jdbc,orderRows,adRows,markets,payments,access,intents,requests,json);
         core=mock(ProductAccountClient.class);var applied=new ProductAccountAdjustment(ProductAccountAdjustment.Status.APPLIED,null);
         when(core.transferOut(any(),any())).thenReturn(applied);when(core.transferIn(any(),any())).thenReturn(applied);when(core.completeTransfer(any(),any())).thenReturn(applied);
         funds=new C2cFunds(intents,core,markets);
     }
     @AfterEach void cleanup(){if(db!=null)db.close();}
-    private C2cAdsRepository.Ad ad(String side) {
+    private C2cAd ad(String side) {
         var body=new C2cAds.Publish(marketId,side,"6.65","10","1","10000",List.of("ALIPAY"),side.equals("SELL")?List.of(makerAccount):List.of(),900,"Original terms",0);
         String key="qa-ad-"+UUID.randomUUID();requests.admit(11,key,"AD_PUBLISH",C2cDigests.sha256(json.writeValueAsString(body)));
         var value=db.transaction(()->ads.publish(user(11),"Bearer fixture",key,body,"123456",""));
         settle();return adRows.get(value.id(),false);
     }
-    private C2cOrdersRepository.Quote quote(C2cAdsRepository.Ad ad,long actor,String quantity) {
+    private C2cQuote quote(C2cAd ad,long actor,String quantity) {
         return db.transaction(()->orders.quote(user(actor),ad.id(),"CRYPTO",quantity,ad.side().equals("SELL")?makerAccount:sellerAccount));
     }
-    private C2cOrdersRepository.Order create(C2cOrdersRepository.Quote quote,long actor,String key) {
+    private C2cOrder create(C2cQuote quote,long actor,String key) {
         requests.admit(actor,key,"ORDER_CREATE",C2cDigests.sha256(quote.id().toString()));
         return db.transaction(()->orders.create(user(actor),"Bearer fixture",key,quote.id(),"123456",""));
     }
-    private C2cOrdersRepository.Order create(C2cAdsRepository.Ad ad) {return create(quote(ad,12,"2"),12,"qa-order-"+UUID.randomUUID());}
+    private C2cOrder create(C2cAd ad) {return create(quote(ad,12,"2"),12,"qa-order-"+UUID.randomUUID());}
     private void settle() {
         for(var id:db.jdbc.query("SELECT intent_id FROM c2c_fund_intents WHERE status NOT IN ('APPLIED','REJECTED') ORDER BY created_at",(r,n)->r.getObject(1,UUID.class))) funds.resume(id);
         for(var ad:adRows.progress(64))db.transaction(()->{ads.finishFunding(ad.id());return null;});
@@ -166,7 +170,7 @@ class C2cOrdersPostgresTest {
         assertThat(adRows.get(ad.id(),false).reservedUnits()).isEqualTo(700000000);
         assertThat(db.jdbc.queryForObject("SELECT count(*) FROM c2c_orders",Integer.class)).isOne();
     }
-    private boolean attempt(C2cOrdersRepository.Quote q,long id) {
+    private boolean attempt(C2cQuote q,long id) {
         try{create(q,id,"qa-concurrent-order-"+id);return true;}catch(IllegalArgumentException|IllegalStateException rejected){return false;}
     }
 }

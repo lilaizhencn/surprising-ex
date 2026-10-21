@@ -14,6 +14,11 @@ public class C2cMerchantRepository {
 
     public C2cMerchantRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
+    public boolean approved(long userId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM c2c_merchants WHERE user_id=? AND status='APPROVED')",
+                Boolean.class, userId));
+    }
+
     public Optional<C2cMerchant> find(long userId, boolean lock) {
         return jdbc.query("SELECT * FROM c2c_merchants WHERE user_id=?" + (lock ? " FOR UPDATE" : ""),
                 (r, n) -> new C2cMerchant(r.getLong("user_id"), r.getString("status"), r.getString("tier"),

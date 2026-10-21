@@ -113,15 +113,15 @@ final class C2cHttpFixture implements AutoCloseable {
             context.registerBean(PlatformTransactionManager.class,db.transactions::getTransactionManager);
             context.registerBean(C2cMarketService.class,()->C2cDatabaseFixture.markets(jdbc));
             context.registerBean(C2cAdsRepository.class,()->new C2cAdsRepository(jdbc));
-            context.registerBean(C2cOrdersRepository.class,()->new C2cOrdersRepository(jdbc,json));
+            context.registerBean(C2cOrdersRepository.class,()->new C2cOrdersRepository(jdbc));
             context.registerBean(C2cSubmissions.class,()->new C2cSubmissions(jdbc));
             context.registerBean(C2cFundsRepository.class,()->new C2cFundsRepository(jdbc));
             context.registerBean(C2cPaymentAccounts.class,()->C2cDatabaseFixture.payments(jdbc,new TotpService(properties),json,compliance));
             context.registerBean(C2cAccess.class,()->new C2cAccess(auth,compliance,security,new C2cProfileRepository(jdbc),new C2cSecurityGrantRepository(jdbc),new GatewayUserRepository(jdbc),db.transactions.getTransactionManager()));
-            context.registerBean(C2cAds.class,()->new C2cAds(bean(C2cAdsRepository.class),bean(C2cMarketService.class),bean(C2cPaymentAccounts.class),
-                    bean(C2cAccess.class),bean(C2cFundsRepository.class),jdbc,json,bean(C2cSubmissions.class)));
-            context.registerBean(C2cOrders.class,()->new C2cOrders(bean(C2cOrdersRepository.class),bean(C2cAdsRepository.class),bean(C2cMarketService.class),
-                    bean(C2cPaymentAccounts.class),bean(C2cAccess.class),bean(C2cFundsRepository.class),jdbc,bean(C2cSubmissions.class)));
+            context.registerBean(C2cAds.class,()->C2cDatabaseFixture.ads(jdbc,bean(C2cAdsRepository.class),bean(C2cMarketService.class),bean(C2cPaymentAccounts.class),
+                    bean(C2cAccess.class),bean(C2cFundsRepository.class),json,bean(C2cSubmissions.class)));
+            context.registerBean(C2cOrders.class,()->C2cDatabaseFixture.orders(jdbc,bean(C2cOrdersRepository.class),bean(C2cAdsRepository.class),bean(C2cMarketService.class),
+                    bean(C2cPaymentAccounts.class),bean(C2cAccess.class),bean(C2cFundsRepository.class),bean(C2cSubmissions.class),json));
             context.registerBean(C2cFunds.class,()->new C2cFunds(bean(C2cFundsRepository.class),core,bean(C2cMarketService.class)));
             context.registerBean(C2cQueries.class,()->new C2cQueries(jdbc,bean(C2cAdsRepository.class),bean(C2cOrdersRepository.class),
                     bean(C2cMarketService.class),bean(C2cPaymentAccounts.class),json));

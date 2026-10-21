@@ -30,7 +30,7 @@ class C2cAdminQueryPostgresTest {
         fixture = new C2cHttpFixture();
         jdbc = new CountingJdbc(fixture.db.jdbc.getDataSource());
         queries = new C2cAdminQueryService(new C2cMerchantRepository(jdbc), new C2cPaymentAccountRepository(jdbc),
-                new C2cAdsRepository(jdbc), new C2cOrdersRepository(jdbc, fixture.json), new C2cFundsRepository(jdbc),
+                new C2cAdsRepository(jdbc), new C2cOrdersRepository(jdbc), new C2cFundsRepository(jdbc),
                 new C2cAppealRepository(jdbc), new C2cReportRepository(jdbc), new C2cMarketRepository(jdbc));
     }
 

@@ -4,8 +4,10 @@ import com.surprising.gateway.c2c.C2cAdsRepository;
 import com.surprising.gateway.c2c.C2cFundsRepository;
 import com.surprising.gateway.c2c.C2cOrdersRepository;
 import com.surprising.gateway.c2c.C2cViews;
+import com.surprising.gateway.c2c.model.C2cAd;
 import com.surprising.gateway.c2c.model.C2cAdminViews;
 import com.surprising.gateway.c2c.model.C2cMarket;
+import com.surprising.gateway.c2c.model.C2cOrder;
 import com.surprising.gateway.c2c.model.C2cPage;
 import com.surprising.gateway.c2c.repository.C2cAppealRepository;
 import com.surprising.gateway.c2c.repository.C2cMarketRepository;
@@ -65,7 +67,7 @@ public class C2cAdminQueryService {
 
     public C2cPage<Map<String, Object>> ads(String status, Long userId, UUID market, int limit, int offset) {
         var rows = ads.adminPage(status, userId, market, limit + 1, offset);
-        var pageMarkets = markets.byIds(rows.stream().limit(limit).map(C2cAdsRepository.Ad::marketId).toList())
+        var pageMarkets = markets.byIds(rows.stream().limit(limit).map(C2cAd::marketId).toList())
                 .stream().collect(Collectors.toMap(C2cMarket::id, Function.identity()));
         var items = rows.stream().limit(limit).map(ad -> C2cViews.ad(ad, pageMarkets.get(ad.marketId()), true)).toList();
         return new C2cPage<>(items, rows.size() > limit, offset);
@@ -73,7 +75,7 @@ public class C2cAdminQueryService {
 
     public C2cPage<Map<String, Object>> orders(String status, Long userId, UUID orderId, UUID market, int limit, int offset) {
         var rows = orders.adminPage(status, userId, orderId, market, limit + 1, offset);
-        var pageMarkets = markets.byIds(rows.stream().limit(limit).map(C2cOrdersRepository.Order::marketId).toList())
+        var pageMarkets = markets.byIds(rows.stream().limit(limit).map(C2cOrder::marketId).toList())
                 .stream().collect(Collectors.toMap(C2cMarket::id, Function.identity()));
         var items = rows.stream().limit(limit).map(order -> C2cViews.order(order, pageMarkets.get(order.marketId()))).toList();
         return new C2cPage<>(items, rows.size() > limit, offset);

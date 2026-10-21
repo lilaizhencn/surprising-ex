@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cAd;
+import com.surprising.gateway.c2c.model.C2cOrder;
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import java.math.BigDecimal;
@@ -17,7 +19,7 @@ import tools.jackson.databind.ObjectMapper;
 public class C2cQueries {
     record Filter(UUID marketId, String side, String amount, String method, Long merchantId, boolean vipOnly,
                   int minCompleted, int minCompletionRate, int maxPaymentSeconds, String sort, int limit, int offset) { }
-    private record Offer(C2cAdsRepository.Ad ad, String nickname, String tier,
+    private record Offer(C2cAd ad, String nickname, String tier,
                          long completed, long ended, long completedTotal, BigDecimal paidSeconds, BigDecimal releasedSeconds) { }
     private final JdbcTemplate jdbc;
     private final C2cAdsRepository ads;
@@ -176,7 +178,7 @@ public class C2cQueries {
         return orderDetails(orders.get(id,false),includePayment);
     }
 
-    private Map<String,Object> orderDetails(C2cOrdersRepository.Order order,boolean includePayment) {
+    private Map<String,Object> orderDetails(C2cOrder order,boolean includePayment) {
         UUID id=order.id();
         var market = markets.market(order.marketId(),false);
         var view = C2cViews.order(order,market);
@@ -218,7 +220,7 @@ public class C2cQueries {
                         "revision",Long.toString(r.getLong("revision"))),enabledOnly);
     }
 
-    private List<Map<String,Object>> paymentOptions(C2cAdsRepository.Ad ad) {
+    private List<Map<String,Object>> paymentOptions(C2cAd ad) {
         return jdbc.query("""
                 SELECT a.* FROM c2c_payment_accounts a JOIN c2c_payment_methods m ON m.code=a.method_code
                 WHERE a.user_id=? AND a.account_id=ANY(?::uuid[]) AND a.status='APPROVED' AND m.enabled AND a.fiat=ANY(m.currencies)

@@ -1,4 +1,4 @@
-package com.surprising.gateway.c2c;
+package com.surprising.gateway.c2c.model;
 
 /** SQL 中的订单流程；资产是否实际移动只由对应 Core 资金指令的已提交结果决定。 */
 public enum C2cOrderStatus {

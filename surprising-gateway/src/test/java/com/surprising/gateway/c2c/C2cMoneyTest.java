@@ -1,6 +1,8 @@
 package com.surprising.gateway.c2c;
 
 import static org.assertj.core.api.Assertions.*;
+
+import com.surprising.gateway.c2c.model.C2cOrderStatus;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
 
