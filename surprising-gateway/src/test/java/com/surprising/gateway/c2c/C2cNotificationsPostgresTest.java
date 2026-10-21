@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.controller.C2cMeController;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.clearInvocations;

@@ -1,0 +1,487 @@
+{
+  "date": "2026-10-21",
+  "verified_at_utc": "2026-10-21T15:41:49.218117+00:00",
+  "scope": "C2C剩余32个平铺类按MVC和接入职责归包",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16; isolated PostgreSQL 18.4",
+  "stages": {
+    "initial_visibility_compile": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=C2c*Test,!C2cR2GatewayLiveTest,!C2cR2StorageLiveTest,ScheduledBusinessTasksContextTest,WebSocket*Test,ClientConnectionTest,ConstructorInjectionContextTest",
+        "clean",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [],
+      "log_sha256": "36e1cc2d17860daf74e189d8f9f3978b348b3f996995e6d75a09f6a7cbf95ba9",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=C2c*Test,!C2cR2GatewayLiveTest,!C2cR2StorageLiveTest,ScheduledBusinessTasksContextTest,WebSocket*Test,ClientConnectionTest,ConstructorInjectionContextTest",
+        "clean",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.c2c.C2cOrderEventTransactionPostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.config.WebSocketPropertiesTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cProfilesTransactionPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cOrdersPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminQueryPostgresTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.ScheduledBusinessTasksContextTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cConfigurationValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cCommandValidationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cFundsPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cSubmissionsPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cQueryValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdsPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.ConstructorInjectionContextTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.config.WebSocketKafkaConfigurationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatPersistencePostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cSubmissionBoundaryPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminQueryControllerTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAccessPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cProfileValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cQueryPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cNotificationsPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cConfigurationTransactionPostgresTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.config.WebSocketServerConfigurationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cMoneyTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cBrowserQaTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1
+        },
+        {
+          "class": "com.surprising.websocket.provider.config.WebSocketApplicationYamlTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cReviewTransactionPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "ab18aac3d64cbf3f8af5529c7320f5dfc0ffb6b99b7599ac299c5280d557965c",
+      "tests": 171,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    }
+  },
+  "moves": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminReview.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminReview.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminChat.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminChat.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cOrders.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cOrders.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cFundsRepository.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cFundsRepository.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cHttpErrors.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/advice/C2cHttpErrors.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cMessages.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cMessages.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminMarkets.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminMarkets.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cChatRealtime.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/websocket/C2cChatRealtime.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cProblem.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/exception/C2cProblem.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cConversations.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cConversations.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAttachments.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAttachments.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminChatController.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cAdminChatController.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cProfiles.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cProfiles.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cViews.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/utils/C2cViews.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminAccess.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminAccess.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cSubmissions.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cSubmissions.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cFunds.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cFunds.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAds.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAds.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cMerchantController.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cMerchantController.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cPaymentAccounts.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cPaymentAccounts.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cStatusController.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cStatusController.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cChatController.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cChatController.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cMeController.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cMeController.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cR2Storage.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cR2Storage.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminController.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cAdminController.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cMerchantBonds.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cMerchantBonds.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdsRepository.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cAdsRepository.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cOrdersRepository.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cOrdersRepository.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cController.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cController.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cVerification.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/model/C2cVerification.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminInitialization.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminInitialization.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAccess.java": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAccess.java"
+  },
+  "assertions": [
+    "Controller、Service、Repository、ControllerAdvice、异常、验证输入模型、视图工具和WebSocket连接适配分别归职责包；原平铺目录不再保留Java类。",
+    "同步Spring按类型依赖、直接调用方、测试与通配包引用；跨包所需方法/模型显式公开，异常状态/代码通过访问器读取，构造器显式公开。",
+    "逐文件比较证明业务方法体、SQL、产品/用户筛选、幂等请求摘要、锁、事务、调度、响应字段和路由保持；仅包/引用/可见性及两个状态访问器发生变化。",
+    "真实PostgreSQL和MockMvc覆盖C2C审批、权限、广告/订单/商家/收款/聊天/附件/提交；附加WebSocket、真实定时线程和六产品构造器接线回归。"
+  ],
+  "source_sha256": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cAdminChatController.java": "317b201f5d34631f61a17e8aacb644c68498f0f25a565b1be618b12f81fd01d8",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cAdminController.java": "214c6933d1ca2de5c1568176e5673d35b2e4ffc60efe2391d571fb966ec6ac88",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cChatController.java": "5982ff41f6af61905f558f82db4bc4efcdac87241512f6b5009b32d99df513bb",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cController.java": "f770cb30b00becba3cf11e706ae2970effe9032a5b17ccc33c165faa83e66025",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cMeController.java": "318f9965c0079ee9e8ed89d5ea57a00f4675690cfdc056b3cb6969446d62d74b",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cMerchantController.java": "3588ea390431c57e7b3ba11ef7446ab8439dfbf3549b6eff4d8298d34f751fbe",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cStatusController.java": "62c1fe039b4185a3ae3499db286866e553a9406134b0c96575dde3c1b9ea072e",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/advice/C2cHttpErrors.java": "38ca8482bf3d360c6378765aea098b8107aab14914a16c16ee9195c9d3745c8b",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/exception/C2cProblem.java": "a90b924a64dbc0ff4c7630ff919ab7a3cfa4e89507c6dfa228fa662618d4f14c",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/model/C2cVerification.java": "f91d171d63deb8f52468fed8656b25e514955ddb7febf4f7c6110491cf65dd05",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cAdsRepository.java": "411041f8eac6fed680120a3e818200e06ae67580a8de71ba71fb4bd68783e435",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cFundsRepository.java": "363e3397f63b9b4e6b5235e92ea927077ce75c76bbc79e11826a5414227b13c8",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cOrdersRepository.java": "d287e934f6bf42c2e6d6f2fcbc3bcf95567902ffc67066e81d04b37eb0577550",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cSubmissions.java": "498798ae1263ebb12f92fa30acb06755b3b3e22f22a624921fe0a669bcaba96c",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAccess.java": "10058d7baac96ca0b69bb536d6a5e365bd8d14b8b06e1dd983e0b95d6eae2a81",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminAccess.java": "d983a190a81e13642ad27026c34fea939121fc8cc80b80ed811d119acc8238e8",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminChat.java": "7e44a7e2b9e6a8f9c22a1499bdc2141456e5131851efd564d1eb2ca10c669a8a",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminInitialization.java": "4a1e547bb47f2cbdf8d443874951fa86661a17ffe0086d4bf55b30782c6efaa1",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminMarkets.java": "e2d1e9b54880f355a510f04fb90b5716b56357bcd11446383ba17716a18e4778",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminQueryService.java": "5a9e4401708d37547c71111f9f9d41e2fb5ba130f9d3034bf685c8c4bb7a5162",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminReview.java": "bd1cb20344f3100a442a82b28b5eccc6b135feff506389ed43f03c79ee9a69c7",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAds.java": "4489390ba6ff3963c4837bb95a8718601e3d2fd0c1de84b6c9c114a7cf133b0c",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAttachments.java": "14d9b59972ee67c4067f6ce123e91cf28b84637baa4b31c524351f70c04b8af5",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cConversations.java": "617910ae1d5516e0892363a32590ccc5924959e93b9f703f210c0ae3fc8fcdca",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cFunds.java": "24059c7fb267e3013128f96ab7b47054f25174ca17e2d04275a5d3cd6a066238",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cMarketService.java": "e3afb3e22a7ba8435a9d5ef7f295984e805c83dab6ad1fa134052ef004df7198",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cMerchantBonds.java": "a48bc7de9238896905249196b5dfd93caf8050c649fffbe1d35b2e12318edbbd",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cMessages.java": "c95550d3aec7559f05e329430f5f58a3f8b61b014b17ed4e5083097dbb94fd47",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cOrders.java": "a3a23d522794b508287289669dcdeb13d9ca7d0f577fa67d6cbc2d1168770013",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cPaymentAccounts.java": "0179f9b5846f9f508dfda42ac78020320cc451920822025ece17f1ebb840d42a",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cProfiles.java": "86a766581d8d420692c7b11d906acebda62ad21b064fcc9718070953db258dd5",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cQueryService.java": "acbe56777db381cb05ce5021dc890eb0c030d97c2ddbcdc9af6837528ed17e2b",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cQuickQuoteService.java": "bbfe64ce44aa3190f41113da3ba4529bf3cd4c758a95c26ca1a93b7da7603605",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cR2Storage.java": "9a6cd3ca90ccc9631ee186dba097347b70c5c8ef53085aae74ff974b88bebfc1",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cSettlement.java": "cd052bfcc1c64e032774ae8b48d4a1bd7317ef701a597f98c63bf7ae5b74cc1a",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cSubmissionService.java": "99665ae94d75421b088fa4a9cfbd57f3c6910eebc1ccff4445a8bf418879920f",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/task/C2cChatTask.java": "216bd83c74d139b671b1b2ffd07ac79e94974e828c1650eb8ce119c90f02c0b3",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/task/C2cMerchantBondTask.java": "8b833ac20558c041e4a680a642bdea950d071cf9d1546c7f66e9d745a2953209",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/utils/C2cViews.java": "0f2f5d4e3f208c24155b8b03e324904a9a393f7c3538d5e9ddf8deb0b4dcff18",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/websocket/C2cChatRealtime.java": "62f02c0e66d4f1a12615d4ea4c0618f6e6c07b1946d9ae5c8145d691757040d7",
+    "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/ClientWebSocketHandler.java": "11bdb1b5dbfcaa154a0961abb010a579dac62611a20b098f0fde810a7ef75d2f",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAccessPostgresTest.java": "3adcc244e8017f95e084ff28237551eff86f9fca1134877ec72c22c7ea13ae3a",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAdminHttpPostgresTest.java": "aedbdca73668d6391152e52807f230df8b10bf4364c63fb52871dc4a1636f24a",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAdminQueryControllerTest.java": "e532d34d31b8a26105db71a2344d546ca2fe3f6205ccf13105b937d62c6fa611",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAdminQueryPostgresTest.java": "3bcf707e4c9fb442c7833c983bad850e3d51f105800d9044cd0dacd23824f3a3",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAdsPostgresTest.java": "ddaae51b31ba18ad2b8e4378f032c5928f9776e69c54742f57d361e87f8e65f4",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAttachmentsPostgresTest.java": "9459de167e313f68463d68b58f14691b68c2cb0184665debdc3535c5eb9989f4",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cBrowserQaTest.java": "4fe30eb5dbb0ca70664849a16b2f3e31d1c34cf46f43f6db9ff50aef32c4acff",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cChatPersistencePostgresTest.java": "4812e3cfd3051289f6cba01cd57360b3a30f14412d9868436e3da75863d5325c",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cChatPostgresTest.java": "04ffe09fa89426fce8b166d94f20ef509a027ebd26b5b7445933ce8734c8f4df",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cChatRealtimePostgresTest.java": "cb64a590b12cffdfe015205d2dfc7f678ae344d7eff418751a0ec7158b48d4ae",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cChatValidationTest.java": "c0a4e345760ca0b0a5a1f355e52b76ab14d408b20652ae9589d0fb8b9b65546c",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cCommandValidationTest.java": "fd6e9d61859d0a99388d412fcdaf6b2038f560cb05cd52a8a0ed00744c6190c7",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cConfigurationTransactionPostgresTest.java": "1519bf64d1d6775ec0b4d25ac56d67674dfc5617cd01df6903a61880663650f2",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cConfigurationValidationTest.java": "fe1d64a6a3d89a47daf820e15476345a787ccca901b2ed8c6ce6f83d00af1d70",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cDatabaseFixture.java": "bbe38c272bed901d80421287958262fae82c4e10d7348d21a848d79ae419ceb7",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cFundsPostgresTest.java": "c5348f3ec43bcf9cf97ead6e67a5650d522275e2cbfed93125d029480f536a6f",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cHttpFixture.java": "fdd564098e8b41cd02db6265de92c54bdf75c9f2011bd90bed0a071e65f3ea79",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cHttpPostgresTest.java": "6cae037cecd2fb18eb9a04113bff351186928fcb36dbc232e0c1c60ae13a262c",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cMeHttpPostgresTest.java": "e423a656b983dc77e5a4f9681db947f2011538fbd1f549be80358277730437b9",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cMerchantBondPostgresTest.java": "ad5eaf16d107b3b8590054fbde4e0353495876d1bff87f61b581dbc2ab45d28c",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cNotificationsPostgresTest.java": "4fe5c30c2751c9a2dd59542d53a0742e180223332c5a01b3a1178f6a3e93934c",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cOrderEventTransactionPostgresTest.java": "6206a166406a81918dda52c6fd57ffba8a3c8377d6503d7fe1ad044e5b61af59",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cOrdersPostgresTest.java": "0b24533cad24411554445e5fc04ecc8d7cb6b6d6f7efbe4b8e2cffd62e95e488",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cProfileValidationTest.java": "addbdba7747ba3f0a99c613809cf7f425fb8d19927bc602790421646393a9475",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cProfilesTransactionPostgresTest.java": "a48d6c9ff2ec9f857817b69a1c9c054cd414ff32174689c7ddc1f37a00185ae3",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cQueryPostgresTest.java": "01f82fc5f4356469c4e17543a1e5da4ffdab2010adf3f63e2247ff4e8f630f9e",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cQueryValidationTest.java": "a51251896cb9e2aa9bdaee6d61c89d7a18f3597d6200d74a8ebae4effc8aa9b0",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cR2GatewayLiveTest.java": "558d33581f85b356ef33146f7d9e14f306a3edb074c5bc9c79687cbcfab9b6b5",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cR2StorageLiveTest.java": "e542e687ad91c70cf3572b57f54c2b46dadfcfa1d9071b6d03fa6b1fcfd6616c",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cReviewTransactionPostgresTest.java": "870da918e112c39289f55bece8ff6fccde7d2d1f162bab7f7a8638b1cd27b7fc",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cSubmissionBoundaryPostgresTest.java": "943e4de9e4537128a0867ed9f4aa8e3a934d740db937a7c4e0f7cb5ec06c38cf",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cSubmissionsPostgresTest.java": "f3e1328741b1cb9109c5ffe84151e1471221f401db205679b79346f7e9b2ebc9",
+    "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/ClientWebSocketHandlerTest.java": "5548bbec014e2d51acbec8170ffbe008c1d1ce9ccdc33202f305388699510634"
+  },
+  "not_run": [
+    "浏览器QA C2cBrowserQaTest未配置专用环境，171项中170通过、1项浏览器容器跳过；当前验证为真实数据库与MockMvc/Socket入口，最终浏览器实栈继续待完整阶段。",
+    "两项外部R2 Live测试明确排除：本批不改存储实现或配置，既有本地附件/HTTP/重试回归运行；没有使用实际R2凭据。",
+    "业务异常仍携带HTTP状态及通用IllegalState映射、C2C服务请求元数据绑定/校验继续待HTTP职责阶段；本批只关闭归包问题。",
+    "未启动外部API/做市资金实栈，最终资金核对和其余全范围整改继续。"
+  ],
+  "cleanup": {
+    "postgres_stopped": true,
+    "owned_database_removed": "/tmp/surprising-mvc-c2c-packages-pg-0k1aqut5",
+    "owned_logs_and_summarized_reports_removed": [
+      "/tmp/surprising-mvc-c2c-packages-focused.log",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cOrderEventTransactionPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cNotificationsPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.websocket.provider.config.WebSocketPropertiesTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cProfilesTransactionPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cOrdersPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cAdminQueryPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cQueryPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cChatPersistencePostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.websocket.provider.config.WebSocketServerConfigurationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cChatRealtimePostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cAttachmentsPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cSubmissionsPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cMeHttpPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.config.ScheduledBusinessTasksContextTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cQueryValidationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cConfigurationValidationTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cCommandValidationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cAttachmentsPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cFundsPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cSubmissionsPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cQueryValidationTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cAdsPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.ConstructorInjectionContextTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cAccessPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cAdminQueryPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cChatValidationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cConfigurationValidationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cMerchantBondPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.websocket.provider.config.WebSocketKafkaConfigurationTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cAdminHttpPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cOrderEventTransactionPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cAdminQueryControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cBrowserQaTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cSubmissionBoundaryPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cProfileValidationTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cHttpPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cChatPersistencePostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cSubmissionBoundaryPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cChatPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cChatValidationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cAdminQueryControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cAdminHttpPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cAccessPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cReviewTransactionPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.config.ScheduledBusinessTasksContextTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cChatPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cHttpPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cProfileValidationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cMerchantBondPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cAdsPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cQueryPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cNotificationsPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cConfigurationTransactionPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.websocket.provider.config.WebSocketPropertiesTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cConfigurationTransactionPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cChatRealtimePostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cOrdersPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cMoneyTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.ConstructorInjectionContextTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cFundsPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cCommandValidationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cMeHttpPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.websocket.provider.config.WebSocketServerConfigurationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.websocket.provider.config.WebSocketApplicationYamlTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cMoneyTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cProfilesTransactionPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cBrowserQaTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.websocket.provider.config.WebSocketApplicationYamlTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.websocket.provider.config.WebSocketKafkaConfigurationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cReviewTransactionPostgresTest.xml"
+    ]
+  }
+}

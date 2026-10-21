@@ -1,5 +1,8 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.repository.C2cFundsRepository;
+import com.surprising.gateway.c2c.service.C2cFunds;
+
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;

@@ -1,5 +1,13 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.controller.C2cChatController;
+import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
+import com.surprising.gateway.c2c.service.C2cAttachments;
+import com.surprising.gateway.c2c.service.C2cConversations;
+import com.surprising.gateway.c2c.service.C2cMessages;
+import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cR2Storage;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.verifyNoInteractions;
 

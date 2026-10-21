@@ -121,3 +121,5 @@
 - 包归类2拆出六个Task定时入口，业务状态与原续办顺序留在Service/接入组件；保留频率、条件、C2C专用调度器和WebSocket首次租约。三模块按类去重198项通过无跳过；撤去调度注解与期权产品条件的负例均捕获预期失败。关闭MVC-159、163、164、165、166、168；全项目生产Scheduled类24个均在task。见 [定时职责验证](validation/java-mvc-task-boundaries-20261021.json)。所属数据库/日志/报告已清理，其余MVC职责与最终实栈继续。
 
 - 包归类3将13个分页、金额、ID、Topic和快照工具归utils，并同步14个直接源码模块的引用；所有受影响Java方法体在包/导入/类型全名/可见性归一后相等。24项目反应器编译及9模块867项测试通过无跳过；首轮Gateway的跨包directionSql可见性已修正并续编通过。关闭MVC-236至248；见 [工具归包验证](validation/java-mvc-utils-packages-20261021.json)。所属数据库和报告已清理，Controller/Service/Repository及HTTP职责继续。
+
+- 包归类4完成C2C剩余32个平铺类的MVC、异常、模型、工具及WebSocket归包，保留业务方法、SQL、锁/事务、路由和字段。干净构建170项通过，浏览器QA1项环境未启用，关闭28条原归包命中；尚未关闭的HTTP/异常规则同步更新当前路径。见 [C2C归包验证](validation/java-mvc-c2c-packages-20261021.json)。所属数据库/日志/报告已清理；两项外部R2 Live未运行，理由见记录，其余全范围整改继续。

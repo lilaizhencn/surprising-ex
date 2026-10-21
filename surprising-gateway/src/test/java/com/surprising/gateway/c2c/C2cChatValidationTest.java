@@ -1,5 +1,11 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.controller.C2cChatController;
+import com.surprising.gateway.c2c.service.C2cAccess;
+import com.surprising.gateway.c2c.service.C2cAttachments;
+import com.surprising.gateway.c2c.service.C2cConversations;
+import com.surprising.gateway.c2c.service.C2cMessages;
+
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;

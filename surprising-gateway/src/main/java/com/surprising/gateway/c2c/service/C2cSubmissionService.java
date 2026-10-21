@@ -1,10 +1,10 @@
 package com.surprising.gateway.c2c.service;
 
-import com.surprising.gateway.c2c.C2cAccess;
-import com.surprising.gateway.c2c.C2cAds;
-import com.surprising.gateway.c2c.C2cOrders;
-import com.surprising.gateway.c2c.C2cProblem;
-import com.surprising.gateway.c2c.C2cSubmissions;
+import com.surprising.gateway.c2c.service.C2cAccess;
+import com.surprising.gateway.c2c.service.C2cAds;
+import com.surprising.gateway.c2c.service.C2cOrders;
+import com.surprising.gateway.c2c.exception.C2cProblem;
+import com.surprising.gateway.c2c.repository.C2cSubmissions;
 import com.surprising.gateway.c2c.model.C2cAdPublish;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import java.util.Map;

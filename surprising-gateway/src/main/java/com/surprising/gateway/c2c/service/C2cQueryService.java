@@ -1,12 +1,12 @@
 package com.surprising.gateway.c2c.service;
 
-import com.surprising.gateway.c2c.C2cAdsRepository;
-import com.surprising.gateway.c2c.C2cOrders;
-import com.surprising.gateway.c2c.C2cOrdersRepository;
-import com.surprising.gateway.c2c.C2cPaymentAccounts;
-import com.surprising.gateway.c2c.C2cProblem;
-import com.surprising.gateway.c2c.C2cSubmissions;
-import com.surprising.gateway.c2c.C2cViews;
+import com.surprising.gateway.c2c.repository.C2cAdsRepository;
+import com.surprising.gateway.c2c.service.C2cOrders;
+import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
+import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.exception.C2cProblem;
+import com.surprising.gateway.c2c.repository.C2cSubmissions;
+import com.surprising.gateway.c2c.utils.C2cViews;
 import com.surprising.gateway.c2c.model.*;
 import com.surprising.gateway.c2c.repository.*;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;

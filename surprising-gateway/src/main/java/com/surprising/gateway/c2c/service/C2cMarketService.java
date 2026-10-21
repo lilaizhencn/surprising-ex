@@ -1,6 +1,6 @@
 package com.surprising.gateway.c2c.service;
 
-import com.surprising.gateway.c2c.C2cFundsRepository;
+import com.surprising.gateway.c2c.repository.C2cFundsRepository;
 import com.surprising.gateway.c2c.model.C2cConfiguration;
 import com.surprising.gateway.c2c.model.C2cMarket;
 import com.surprising.gateway.c2c.repository.C2cConfigurationRepository;

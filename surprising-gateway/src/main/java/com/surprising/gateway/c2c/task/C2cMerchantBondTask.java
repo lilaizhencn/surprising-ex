@@ -1,6 +1,6 @@
 package com.surprising.gateway.c2c.task;
 
-import com.surprising.gateway.c2c.C2cMerchantBonds;
+import com.surprising.gateway.c2c.service.C2cMerchantBonds;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;

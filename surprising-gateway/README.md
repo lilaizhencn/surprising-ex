@@ -475,3 +475,8 @@ C2C运行配置与R2属性归c2c.config；产品业务容器配置归gateway.con
 C2C续办聚合归c2c.service.C2cSettlement，定时线程入口归c2c.task.C2cSettlementTask并保留专用调度器；合约同步、持仓推送和实时租约分别由trading.order.task及websocket.provider.task触发原Service。验证见 [定时职责记录](../docs/validation/java-mvc-task-boundaries-20261021.json)。
 
 分页工具归account.api.utils、trading.api.utils和gateway.provider.auth.utils；金额工具归c2c.utils.C2cMoney。Repository仍只接收原有数据访问参数；Controller参数绑定的剩余整改另行跟踪。验证见 [工具归包记录](../docs/validation/java-mvc-utils-packages-20261021.json)。
+
+C2C入口归c2c.controller，HTTP异常映射归controller.advice；业务聚合归service，持久化归repository。
+异常归exception，输入与原生视图归model，金额/游标/响应字段工具归utils，聊天连接适配归websocket，
+定时入口归task，配置归config。原始完整请求审批摘要、用户/产品范围、事务和权限检查保持。
+[归包验证](../docs/validation/java-mvc-c2c-packages-20261021.json)记录包迁移与HTTP/数据库回归；HTTP业务边界仍按整改表继续处理。

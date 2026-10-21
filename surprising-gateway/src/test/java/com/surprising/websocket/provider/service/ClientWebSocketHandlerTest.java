@@ -3,7 +3,7 @@ package com.surprising.websocket.provider.service;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-import com.surprising.gateway.c2c.C2cChatRealtime;
+import com.surprising.gateway.c2c.websocket.C2cChatRealtime;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.AuthService;
 import com.surprising.gateway.provider.product.GatewayProductServices;

@@ -1,7 +1,7 @@
 package com.surprising.gateway.c2c.service;
 
-import com.surprising.gateway.c2c.C2cAccess;
-import com.surprising.gateway.c2c.C2cOrders;
+import com.surprising.gateway.c2c.service.C2cAccess;
+import com.surprising.gateway.c2c.service.C2cOrders;
 import com.surprising.gateway.c2c.model.C2cOfferFilter;
 import com.surprising.gateway.c2c.model.C2cQuickQuoteSpec;
 import com.surprising.gateway.c2c.model.C2cQuote;

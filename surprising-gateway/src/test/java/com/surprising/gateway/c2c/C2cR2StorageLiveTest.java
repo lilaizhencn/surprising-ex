@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cR2Storage;
+
 import com.surprising.gateway.c2c.config.C2cR2Properties;
 
 import static org.assertj.core.api.Assertions.*;

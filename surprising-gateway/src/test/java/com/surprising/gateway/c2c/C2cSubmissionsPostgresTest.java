@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.repository.C2cSubmissions;
+
 import static org.assertj.core.api.Assertions.*;
 import java.util.*;
 import java.util.concurrent.*;

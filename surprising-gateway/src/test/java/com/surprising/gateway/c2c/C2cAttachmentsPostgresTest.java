@@ -1,5 +1,8 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.controller.C2cChatController;
+import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+
 import static org.assertj.core.api.Assertions.*;
 import java.io.ByteArrayOutputStream;
 import java.util.*;

@@ -15,9 +15,9 @@ import tools.jackson.databind.ObjectMapper;
 public class ClientWebSocketHandler extends TextWebSocketHandler {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ClientWebSocketHandler.class);
 
-    private com.surprising.gateway.c2c.C2cChatRealtime c2c;
+    private com.surprising.gateway.c2c.websocket.C2cChatRealtime c2c;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
-    void c2c(com.surprising.gateway.c2c.C2cChatRealtime chat) {this.c2c=chat;}
+    void c2c(com.surprising.gateway.c2c.websocket.C2cChatRealtime chat) {this.c2c=chat;}
     private RealtimeWebSocketBridge realtime;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     void realtime(RealtimeWebSocketBridge bridge) {this.realtime=bridge;}
@@ -56,7 +56,7 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
             operation=envelope.path("op").asString("");
             if(operation.startsWith("c2c.")) {
                 if(c2c==null) throw new IllegalArgumentException("C2C is not available");
-                c2c.handle(connection,objectMapper.treeToValue(envelope,com.surprising.gateway.c2c.C2cChatRealtime.Command.class));
+                c2c.handle(connection,objectMapper.treeToValue(envelope,com.surprising.gateway.c2c.websocket.C2cChatRealtime.Command.class));
                 return;
             }
             WsClientCommand command = objectMapper.treeToValue(envelope, WsClientCommand.class);

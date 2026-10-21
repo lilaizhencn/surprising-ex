@@ -1,5 +1,15 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.controller.C2cAdminController;
+import com.surprising.gateway.c2c.controller.C2cMeController;
+import com.surprising.gateway.c2c.controller.C2cMerchantController;
+import com.surprising.gateway.c2c.model.C2cVerification;
+import com.surprising.gateway.c2c.repository.C2cAdsRepository;
+import com.surprising.gateway.c2c.repository.C2cFundsRepository;
+import com.surprising.gateway.c2c.service.C2cFunds;
+import com.surprising.gateway.c2c.service.C2cMerchantBonds;
+import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 

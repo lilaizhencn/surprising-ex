@@ -1,5 +1,10 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.controller.C2cController;
+import com.surprising.gateway.c2c.repository.C2cAdsRepository;
+import com.surprising.gateway.c2c.repository.C2cFundsRepository;
+import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.gateway.c2c.repository.C2cAppealRepository;

@@ -1,5 +1,14 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.controller.C2cChatController;
+import com.surprising.gateway.c2c.controller.advice.C2cHttpErrors;
+import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
+import com.surprising.gateway.c2c.service.C2cAccess;
+import com.surprising.gateway.c2c.service.C2cConversations;
+import com.surprising.gateway.c2c.service.C2cMessages;
+import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
+import com.surprising.gateway.c2c.service.C2cR2Storage;
+
 import com.surprising.gateway.c2c.config.C2cR2Properties;
 
 import static org.assertj.core.api.Assertions.*;

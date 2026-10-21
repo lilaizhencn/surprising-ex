@@ -1,5 +1,11 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.exception.C2cProblem;
+import com.surprising.gateway.c2c.service.C2cAccess;
+import com.surprising.gateway.c2c.service.C2cConversations;
+import com.surprising.gateway.c2c.service.C2cMessages;
+import com.surprising.gateway.c2c.websocket.C2cChatRealtime;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
