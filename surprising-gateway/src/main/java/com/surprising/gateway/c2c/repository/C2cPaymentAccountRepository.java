@@ -2,6 +2,7 @@ package com.surprising.gateway.c2c.repository;
 
 import com.surprising.gateway.c2c.model.C2cAdminRows.PaymentAccount;
 import com.surprising.gateway.c2c.model.C2cPaymentAccount;
+import com.surprising.gateway.c2c.model.C2cPaymentOption;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
@@ -16,6 +17,17 @@ public class C2cPaymentAccountRepository {
     private final JdbcTemplate jdbc;
 
     public C2cPaymentAccountRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+    /** 当前广告明确列出的本人账号为根，关联付款方式仅判断启用及法币；只选脱敏三字段，不选择密文。 */
+    public List<C2cPaymentOption> approvedOptions(long userId, List<UUID> accountIds) {
+        return jdbc.query("""
+                SELECT a.account_id,a.method_code,a.masked_label FROM c2c_payment_accounts a
+                JOIN c2c_payment_methods m ON m.code=a.method_code
+                WHERE a.user_id=? AND a.account_id=ANY(?::uuid[]) AND a.status='APPROVED' AND m.enabled AND a.fiat=ANY(m.currencies)
+                ORDER BY a.account_id
+                """, (r, n) -> new C2cPaymentOption(r.getObject("account_id", UUID.class), r.getString("method_code"),
+                        r.getString("masked_label")), userId, "{" + String.join(",", accountIds.stream().map(UUID::toString).toList()) + "}");
+    }
 
     public List<C2cPaymentAccount> byUser(long userId) {
         return jdbc.query("SELECT * FROM c2c_payment_accounts WHERE user_id=? ORDER BY created_at DESC,account_id", this::read, userId);

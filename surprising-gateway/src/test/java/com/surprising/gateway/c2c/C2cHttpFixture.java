@@ -1,5 +1,8 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cQueryService;
+import com.surprising.gateway.c2c.service.C2cQuickQuoteService;
+
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -120,21 +123,23 @@ final class C2cHttpFixture implements AutoCloseable {
             context.registerBean(C2cNotificationService.class,()->new C2cNotificationService(new C2cPriceAlertRepository(jdbc),
                     new C2cNotificationRepository(jdbc),new C2cSecurityGrantRepository(jdbc),new C2cQuoteRepository(jdbc)));
             context.registerBean(C2cPaymentAccounts.class,()->C2cDatabaseFixture.payments(jdbc,new TotpService(properties),json,compliance));
-            context.registerBean(C2cAccess.class,()->new C2cAccess(auth,compliance,security,new C2cProfileRepository(jdbc),new C2cSecurityGrantRepository(jdbc),new GatewayUserRepository(jdbc),db.transactions.getTransactionManager()));
+            context.registerBean(C2cAccess.class,()->new C2cAccess(auth,compliance,security,new C2cProfileRepository(jdbc),new C2cSecurityGrantRepository(jdbc),new GatewayUserRepository(jdbc),db.transactions.getTransactionManager(),bean(C2cMarketService.class),products));
             context.registerBean(C2cAds.class,()->C2cDatabaseFixture.ads(jdbc,bean(C2cAdsRepository.class),bean(C2cMarketService.class),bean(C2cPaymentAccounts.class),
                     bean(C2cAccess.class),bean(C2cFundsRepository.class),json,bean(C2cSubmissions.class)));
             context.registerBean(C2cOrders.class,()->C2cDatabaseFixture.orders(jdbc,bean(C2cOrdersRepository.class),bean(C2cAdsRepository.class),bean(C2cMarketService.class),
                     bean(C2cPaymentAccounts.class),bean(C2cAccess.class),bean(C2cFundsRepository.class),bean(C2cSubmissions.class),json));
             context.registerBean(C2cFunds.class,()->new C2cFunds(bean(C2cFundsRepository.class),core,bean(C2cMarketService.class)));
-            context.registerBean(C2cQueries.class,()->new C2cQueries(jdbc,bean(C2cAdsRepository.class),bean(C2cOrdersRepository.class),
-                    bean(C2cMarketService.class),bean(C2cPaymentAccounts.class),json));
+            context.registerBean(C2cQueryService.class,()->C2cDatabaseFixture.queries(jdbc,bean(C2cAdsRepository.class),bean(C2cOrdersRepository.class),
+                    bean(C2cMarketService.class),bean(C2cPaymentAccounts.class),json,bean(C2cSubmissions.class)));
+            context.registerBean(C2cQuickQuoteService.class,()->new C2cQuickQuoteService(bean(C2cQueryService.class),
+                    bean(C2cMarketService.class),bean(C2cAccess.class),bean(C2cOrders.class)));
             context.registerBean(C2cProfiles.class,()->new C2cProfiles(jdbc,bean(C2cAccess.class),compliance,new GatewayUserRepository(jdbc),
                     bean(C2cOrdersRepository.class),bean(C2cMarketService.class),json));
             context.registerBean(AdminAuditRepository.class,()->new AdminAuditRepository(jdbc));
             context.registerBean(AdminApprovalRepository.class,()->new AdminApprovalRepository(jdbc));
             context.registerBean(AdminApprovalService.class,()->new AdminApprovalService(auth,bean(AdminAuditRepository.class),bean(AdminApprovalRepository.class),properties));
             context.registerBean(C2cAdminAccess.class,()->new C2cAdminAccess(auth,bean(AdminApprovalService.class),bean(AdminApprovalRepository.class),bean(AdminAuditRepository.class),new GatewayUserRepository(jdbc)));
-            context.registerBean(C2cAdminMarkets.class,()->new C2cAdminMarkets(jdbc,bean(C2cMarketService.class),bean(C2cQueries.class),bean(C2cAdminAccess.class),products));
+            context.registerBean(C2cAdminMarkets.class,()->new C2cAdminMarkets(jdbc,bean(C2cMarketService.class),bean(C2cQueryService.class),bean(C2cAdminAccess.class),products));
             context.registerBean(C2cMerchantBonds.class,()->new C2cMerchantBonds(jdbc,bean(C2cFundsRepository.class),bean(C2cMarketService.class),bean(C2cAccess.class),bean(C2cAdminAccess.class),products));
             context.registerBean(C2cAdminInitialization.class,()->new C2cAdminInitialization(bean(C2cAdminAccess.class),bean(C2cMarketService.class),products,db.transactions.getTransactionManager()));
             context.registerBean(C2cMerchantRepository.class,()->new C2cMerchantRepository(jdbc));
@@ -147,7 +152,7 @@ final class C2cHttpFixture implements AutoCloseable {
                     bean(C2cFundsRepository.class),bean(C2cAppealRepository.class),bean(C2cReportRepository.class),bean(C2cMarketRepository.class)));
             context.registerBean(C2cAdminReview.class,()->new C2cAdminReview(bean(C2cAdminAccess.class),bean(C2cMerchantRepository.class),bean(C2cAppealRepository.class),
                     bean(C2cPaymentAccountRepository.class),bean(C2cReportRepository.class),bean(C2cMarketService.class),bean(C2cAdsRepository.class),bean(C2cAds.class),
-                    bean(C2cOrdersRepository.class),bean(C2cOrders.class),bean(C2cPaymentAccounts.class),bean(C2cQueries.class),compliance,new GatewayUserRepository(jdbc)));
+                    bean(C2cOrdersRepository.class),bean(C2cOrders.class),bean(C2cPaymentAccounts.class),bean(C2cQueryService.class),compliance,new GatewayUserRepository(jdbc)));
             context.registerBean(C2cConversations.class,()->new C2cConversations(jdbc,bean(C2cOrdersRepository.class)));
             context.registerBean(C2cAttachments.class,()->new C2cAttachments(jdbc,bean(C2cConversations.class),bean(C2cOrdersRepository.class),
                     bean(C2cPaymentAccounts.class),new C2cR2Storage(r2),db.transactions.getTransactionManager()));
@@ -157,9 +162,8 @@ final class C2cHttpFixture implements AutoCloseable {
             makerAccount=bean(C2cPaymentAccounts.class).save(11,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Maker","qa-maker-account","",null)).id();
             takerAccount=bean(C2cPaymentAccounts.class).save(12,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Taker","qa-taker-account","",null)).id();
             jdbc.update("UPDATE c2c_payment_accounts SET status='APPROVED'");
-            var controller=new C2cController(bean(C2cAccess.class),bean(C2cMarketService.class),bean(C2cAds.class),bean(C2cAdsRepository.class),
-                    bean(C2cOrders.class),bean(C2cOrdersRepository.class),bean(C2cSubmissions.class),bean(C2cQueries.class),
-                    bean(C2cPaymentAccounts.class),products,json);
+            var controller=new C2cController(bean(C2cAccess.class),bean(C2cAds.class),bean(C2cOrders.class),bean(C2cSubmissions.class),
+                    bean(C2cQueryService.class),bean(C2cQuickQuoteService.class),bean(C2cPaymentAccounts.class),json);
             mvc=MockMvcBuilders.standaloneSetup(controller,new C2cMerchantController(bean(C2cMerchantBonds.class),bean(C2cAccess.class),bean(C2cAdminAccess.class),json),new C2cStatusController(true,bean(C2cMarketService.class),products),
                     new C2cMeController(bean(C2cAccess.class),bean(C2cProfiles.class)),
                     new C2cChatController(bean(C2cAccess.class),bean(C2cConversations.class),bean(C2cMessages.class),bean(C2cAttachments.class)),

@@ -154,8 +154,8 @@ public class C2cAttachments {
         if(!qrMatches(attachment,order)) throw C2cProblem.forbidden("收款码与订单快照不匹配");
     }
     private boolean qrMatches(Attachment attachment,C2cOrder order) {
-        return attachment.user()==order.sellerUserId() && attachment.id().toString().equals(
-                payments.details(order.sellerUserId(),order.paymentCiphertext()).get("qrAttachmentId"));
+        return attachment.user()==order.sellerUserId() && attachment.id().equals(
+                payments.details(order.sellerUserId(),order.paymentCiphertext()).qrAttachmentId());
     }
     private Content content(Attachment attachment) {
         byte[] bytes=storage.read(attachment.key());

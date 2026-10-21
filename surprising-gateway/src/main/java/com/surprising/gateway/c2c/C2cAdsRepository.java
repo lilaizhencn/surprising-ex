@@ -1,6 +1,9 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.model.C2cAd;
+import com.surprising.gateway.c2c.model.C2cOffer;
+import com.surprising.gateway.c2c.model.C2cOfferFilter;
+import com.surprising.gateway.c2c.model.C2cMarket;
 import java.math.BigDecimal;
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -11,6 +14,51 @@ public class C2cAdsRepository {
 
     private final JdbcTemplate jdbc;
     public C2cAdsRepository(JdbcTemplate jdbc) {this.jdbc=jdbc;}
+
+    /**
+     * 广告为稳定分页根。共用资格视图决定基础资格；档案/商家提供显示字段，订单LATERAL聚合提供统计筛选。
+     * 关系仅用于当前查看者的EXISTS排除；各关联不扩大广告行数，只读当前有界页，不查询或复制Core余额。
+     */
+    public List<C2cOffer> eligiblePage(C2cOfferFilter filter, C2cMarket market, String makerSide, long viewerId) {
+        BigDecimal amount=filter.amount();
+        String direction=makerSide.equals("SELL")?"ASC":"DESC";
+        String sort=switch(filter.sort()) {
+            case PRICE -> "a.price "+direction+",a.ad_id";
+            case COMPLETED -> "s.completed_total DESC,a.price "+direction+",a.ad_id";
+        };
+        return jdbc.query("""
+                SELECT a.*,COALESCE(p.nickname,'商家'||right(a.maker_user_id::text,6)) AS merchant_nickname,c.tier,
+                    s.completed_30d,s.ended_30d,s.completed_total,s.paid_seconds,s.released_seconds
+                FROM c2c_eligible_ads a
+                JOIN c2c_merchants c ON c.user_id=a.maker_user_id
+                LEFT JOIN c2c_profiles p ON p.user_id=a.maker_user_id
+                LEFT JOIN LATERAL (
+                    SELECT count(*) FILTER (WHERE status='COMPLETED' AND completed_at>=now()-interval '30 days') AS completed_30d,
+                        count(*) FILTER (WHERE status IN ('COMPLETED','CANCELED','EXPIRED') AND COALESCE(completed_at,canceled_at)>=now()-interval '30 days') AS ended_30d,
+                        count(*) FILTER (WHERE status='COMPLETED') AS completed_total,
+                        avg(EXTRACT(EPOCH FROM paid_at-(payment_expires_at-payment_window_seconds*interval '1 second'))) FILTER(WHERE status='COMPLETED') AS paid_seconds,
+                        avg(EXTRACT(EPOCH FROM completed_at-paid_at)) FILTER(WHERE status='COMPLETED') AS released_seconds
+                    FROM c2c_orders WHERE buyer_user_id=a.maker_user_id OR seller_user_id=a.maker_user_id
+                ) s ON true
+                WHERE a.market_id=? AND a.side=?
+                    AND (CAST(? AS numeric) IS NULL OR (? BETWEEN a.min_fiat AND a.max_fiat
+                        AND ROUND(a.available_units::numeric*a.price/?,?)>=?))
+                    AND (CAST(? AS text) IS NULL OR ?=ANY(a.method_codes))
+                    AND (CAST(? AS bigint) IS NULL OR a.maker_user_id=?)
+                    AND (?=false OR c.tier='VIP')
+                    AND s.completed_total>=? AND (?=0 OR (s.ended_30d>0 AND s.completed_30d*100>=s.ended_30d*?))
+                    AND a.payment_window_seconds<=? AND a.maker_user_id<>?
+                    AND NOT EXISTS(SELECT 1 FROM c2c_relations r WHERE r.kind='BLOCK' AND
+                        ((r.user_id=? AND r.target_user_id=a.maker_user_id) OR (r.target_user_id=? AND r.user_id=a.maker_user_id)))
+                ORDER BY %s LIMIT ? OFFSET ?
+                """.formatted(sort), (r,n) -> new C2cOffer(read(r,n),r.getString("merchant_nickname"),r.getString("tier"),
+                        r.getLong("completed_30d"),r.getLong("ended_30d"),r.getLong("completed_total"),
+                        r.getBigDecimal("paid_seconds"),r.getBigDecimal("released_seconds")),
+                market.id(),makerSide,amount,amount,market.assetScale(),market.fiatDecimals(),amount,
+                filter.method(),filter.method(),filter.merchantId(),filter.merchantId(),filter.vipOnly(),
+                filter.minCompleted(),filter.minCompletionRate(),filter.minCompletionRate(),filter.maxPaymentSeconds(),viewerId,viewerId,viewerId,
+                filter.limit()+1,filter.offset());
+    }
 
     public Long activeCount(long userId) {
         return jdbc.queryForObject("SELECT count(*) FROM c2c_ads WHERE maker_user_id=? AND status NOT IN ('CLOSED','REJECTED')", Long.class, userId);
@@ -34,7 +82,7 @@ public class C2cAdsRepository {
                 """, this::read, status, status, userId, userId, market, market, count, offset);
     }
 
-    C2cAd get(UUID id,boolean lock) {
+    public C2cAd get(UUID id,boolean lock) {
         var rows=jdbc.query("SELECT * FROM c2c_ads WHERE ad_id=?"+(lock?" FOR UPDATE":""),this::read,id);
         if(rows.isEmpty()) throw new IllegalArgumentException("广告不存在");
         return rows.getFirst();
@@ -52,7 +100,7 @@ public class C2cAdsRepository {
         return get(id,false);
     }
 
-    List<C2cAd> mine(long userId,int limit) {
+    public List<C2cAd> mine(long userId,int limit) {
         return jdbc.query("SELECT * FROM c2c_ads WHERE maker_user_id=? ORDER BY created_at DESC,ad_id LIMIT ?",this::read,userId,limit);
     }
 

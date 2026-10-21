@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cQueryService;
+
 import com.surprising.gateway.c2c.model.C2cPaymentAccount;
 import com.surprising.gateway.c2c.repository.C2cAppealRepository;
 import com.surprising.gateway.c2c.repository.C2cMerchantRepository;
@@ -32,13 +34,13 @@ public class C2cAdminReview {
     private final C2cOrdersRepository orderRows;
     private final C2cOrders orders;
     private final C2cPaymentAccounts payments;
-    private final C2cQueries queries;
+    private final C2cQueryService queries;
     private final ComplianceService compliance;
     private final GatewayUserRepository users;
 
     public C2cAdminReview(C2cAdminAccess access,C2cMerchantRepository merchants,C2cAppealRepository appeals,
                           C2cPaymentAccountRepository paymentRows,C2cReportRepository reports,C2cMarketService markets,C2cAdsRepository adRows,C2cAds ads,
-                          C2cOrdersRepository orderRows,C2cOrders orders,C2cPaymentAccounts payments,C2cQueries queries,
+                          C2cOrdersRepository orderRows,C2cOrders orders,C2cPaymentAccounts payments,C2cQueryService queries,
                           ComplianceService compliance,GatewayUserRepository users) {
         this.access=access;this.merchants=merchants;this.appeals=appeals;this.paymentRows=paymentRows;this.reports=reports;this.markets=markets;this.adRows=adRows;this.ads=ads;
         this.orderRows=orderRows;this.orders=orders;this.payments=payments;this.queries=queries;this.compliance=compliance;this.users=users;

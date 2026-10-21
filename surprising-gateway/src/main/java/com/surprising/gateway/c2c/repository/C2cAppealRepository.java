@@ -1,6 +1,7 @@
 package com.surprising.gateway.c2c.repository;
 
 import com.surprising.gateway.c2c.model.C2cAdminRows.Appeal;
+import com.surprising.gateway.c2c.model.C2cAppealTimeline;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -13,6 +14,16 @@ public class C2cAppealRepository {
     private final JdbcTemplate jdbc;
 
     public C2cAppealRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+    public List<C2cAppealTimeline> timeline(UUID orderId) {
+        return jdbc.query("""
+                SELECT appeal_id,opener_user_id,reason,status,decision,decision_reason,created_at,resolved_at
+                FROM c2c_appeals WHERE order_id=? ORDER BY created_at
+                """, (r, n) -> new C2cAppealTimeline(r.getObject("appeal_id", UUID.class), r.getLong("opener_user_id"),
+                        r.getString("reason"), r.getString("status"), r.getString("decision"), r.getString("decision_reason"),
+                        r.getTimestamp("created_at").toInstant(),
+                        r.getTimestamp("resolved_at") == null ? null : r.getTimestamp("resolved_at").toInstant()), orderId);
+    }
 
     public Optional<UUID> openForOrder(UUID orderId) {
         return jdbc.query("SELECT appeal_id FROM c2c_appeals WHERE order_id=? AND status IN ('OPEN','REVIEWING')",

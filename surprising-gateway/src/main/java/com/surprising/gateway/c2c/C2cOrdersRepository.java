@@ -1,6 +1,7 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.model.C2cOrder;
+import com.surprising.gateway.c2c.model.C2cUserOrderFilter;
 import com.surprising.gateway.c2c.model.C2cOrderPlacement;
 import com.surprising.gateway.c2c.model.C2cOrderStatus;
 import java.sql.Timestamp;
@@ -17,6 +18,23 @@ public class C2cOrdersRepository {
     private final JdbcTemplate jdbc;
     public C2cOrdersRepository(JdbcTemplate jdbc) {this.jdbc=jdbc;}
 
+    public List<C2cOrder> mine(long userId, C2cUserOrderFilter filter) {
+        String status=switch(filter.scope()) {
+            case ONGOING -> "o.status NOT IN ('COMPLETED','CANCELED','EXPIRED','FAILED')";
+            case APPEALED -> "o.status='APPEALED'";
+            case ENDED -> "o.status IN ('COMPLETED','CANCELED','EXPIRED','FAILED')";
+            case ALL -> "true";
+        };
+        String side=filter.side().name();
+        return jdbc.query("""
+                SELECT o.* FROM c2c_orders o WHERE (o.buyer_user_id=? OR o.seller_user_id=?) AND %s
+                    AND (CAST(? AS uuid) IS NULL OR o.market_id=?) AND (CAST(? AS uuid) IS NULL OR o.order_id=?)
+                    AND (?='ALL' OR (?='BUY' AND o.buyer_user_id=?) OR (?='SELL' AND o.seller_user_id=?))
+                ORDER BY o.created_at DESC,o.order_id DESC LIMIT ? OFFSET ?
+                """.formatted(status),this::readOrder,userId,userId,filter.marketId(),filter.marketId(),filter.orderId(),filter.orderId(),
+                side,side,userId,side,userId,filter.limit()+1,filter.offset());
+    }
+
     public List<C2cOrder> adminPage(String status, Long userId, UUID orderId, UUID market, int count, int offset) {
         return jdbc.query("""
                 SELECT * FROM c2c_orders WHERE (CAST(? AS text) IS NULL OR status=?)
@@ -26,7 +44,7 @@ public class C2cOrdersRepository {
                 """, this::readOrder, status, status, userId, userId, userId, orderId, orderId, market, market, count, offset);
     }
 
-    C2cOrder get(UUID id,boolean lock) {
+    public C2cOrder get(UUID id,boolean lock) {
         var rows=jdbc.query("SELECT * FROM c2c_orders WHERE order_id=?"+(lock?" FOR UPDATE":""),this::readOrder,id);
         if(rows.isEmpty()) throw new IllegalArgumentException("订单不存在");
         return rows.getFirst();
@@ -54,7 +72,7 @@ public class C2cOrdersRepository {
                 """, Long.class, marketId, userId, userId);
     }
 
-    Long completedCount(long userId) {
+    public Long completedCount(long userId) {
         return jdbc.queryForObject("SELECT count(*) FROM c2c_orders WHERE status='COMPLETED' AND (buyer_user_id=? OR seller_user_id=?)",
                 Long.class, userId, userId);
     }

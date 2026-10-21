@@ -13,7 +13,7 @@ import java.util.Map;
 public final class C2cViews {
     private C2cViews() { }
 
-    static Map<String,Object> market(C2cMarket market) {
+    public static Map<String,Object> market(C2cMarket market) {
         var view = new LinkedHashMap<String,Object>();
         view.put("marketId", market.id().toString());
         view.put("asset", market.asset());
@@ -61,7 +61,7 @@ public final class C2cViews {
         return view;
     }
 
-    static Map<String,Object> quote(C2cQuote quote, C2cMarket market) {
+    public static Map<String,Object> quote(C2cQuote quote, C2cMarket market) {
         var view = new LinkedHashMap<String,Object>();
         view.put("quoteId", quote.id().toString());
         view.put("ownerUserId", Long.toString(quote.userId()));
@@ -118,7 +118,7 @@ public final class C2cViews {
                 "status", account.status(), "revision", Long.toString(account.revision()));
     }
 
-    static Map<String,Object> submission(long userId, String key, String kind, String hash, C2cSubmissions.Submission receipt) {
+    public static Map<String,Object> submission(long userId, String key, String kind, String hash, C2cSubmissions.Submission receipt) {
         var view = new LinkedHashMap<String,Object>();
         view.put("ownerUserId", Long.toString(userId));
         view.put("requestKey", key);

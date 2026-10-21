@@ -2,6 +2,7 @@ package com.surprising.gateway.c2c.repository;
 
 import com.surprising.gateway.c2c.model.C2cAdminRows.Merchant;
 import com.surprising.gateway.c2c.model.C2cMerchant;
+import com.surprising.gateway.c2c.model.C2cMerchantStats;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -13,6 +14,23 @@ public class C2cMerchantRepository {
     private final JdbcTemplate jdbc;
 
     public C2cMerchantRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+    /** 单个商家为根，关联唯一档案和订单统计只用于公开资料展示；聚合不扩大商家行数，不读取付款或KYC原件。 */
+    public Optional<C2cMerchantStats> stats(long userId) {
+        return jdbc.query("""
+                SELECT COALESCE(p.nickname,'商家'||right(c.user_id::text,6)) AS nickname,c.status,c.tier,
+                    count(o.order_id) FILTER(WHERE o.status='COMPLETED' AND o.completed_at>=now()-interval '30 days') AS completed,
+                    count(o.order_id) FILTER(WHERE o.status IN ('COMPLETED','CANCELED','EXPIRED') AND COALESCE(o.completed_at,o.canceled_at)>=now()-interval '30 days') AS ended,
+                    count(o.order_id) FILTER(WHERE o.status='COMPLETED') AS total,
+                    avg(EXTRACT(EPOCH FROM o.paid_at-(o.payment_expires_at-o.payment_window_seconds*interval '1 second'))) FILTER(WHERE o.status='COMPLETED') AS paid_seconds,
+                    avg(EXTRACT(EPOCH FROM o.completed_at-o.paid_at)) FILTER(WHERE o.status='COMPLETED') AS released_seconds
+                FROM c2c_merchants c LEFT JOIN c2c_profiles p USING(user_id)
+                LEFT JOIN c2c_orders o ON o.buyer_user_id=c.user_id OR o.seller_user_id=c.user_id
+                WHERE c.user_id=? GROUP BY c.user_id,p.nickname,c.status,c.tier
+                """, (r,n)->new C2cMerchantStats(userId,r.getString("nickname"),r.getString("status"),r.getString("tier"),
+                r.getLong("completed"),r.getLong("ended"),r.getLong("total"),r.getBigDecimal("paid_seconds"),
+                r.getBigDecimal("released_seconds")),userId).stream().findFirst();
+    }
 
     public boolean approved(long userId) {
         return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM c2c_merchants WHERE user_id=? AND status='APPROVED')",

@@ -8,7 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 /** 新建广告/订单的持久接收凭据；GET 不重发资金命令，停止操作与业务提交争用同一行锁。 */
 @Repository
 public class C2cSubmissions {
-    record Submission(long userId,String key,String kind,String hash,String status,UUID resultId,String errorCode,String errorMessage) { }
+    public record Submission(long userId,String key,String kind,String hash,String status,UUID resultId,String errorCode,String errorMessage) { }
     private final JdbcTemplate jdbc;
     public C2cSubmissions(JdbcTemplate jdbc) {this.jdbc=jdbc;}
 
@@ -27,7 +27,7 @@ public class C2cSubmissions {
                 .stream().findFirst().orElse(null);
     }
 
-    Submission lookup(long userId,String key,String kind,String hash) {
+    public Submission lookup(long userId,String key,String kind,String hash) {
         validate(key,kind,hash);
         return matching(get(userId,key,false),kind,hash);
     }

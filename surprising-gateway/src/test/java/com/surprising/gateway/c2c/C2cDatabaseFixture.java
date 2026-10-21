@@ -12,6 +12,7 @@ import com.surprising.gateway.c2c.repository.C2cPaymentMethodRepository;
 import com.surprising.gateway.c2c.repository.C2cQuoteRepository;
 import com.surprising.gateway.c2c.repository.C2cRelationRepository;
 import com.surprising.gateway.c2c.service.C2cMarketService;
+import com.surprising.gateway.c2c.service.C2cQueryService;
 import com.surprising.gateway.provider.auth.ComplianceService;
 import com.surprising.gateway.provider.auth.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.TotpService;
@@ -76,6 +77,13 @@ final class C2cDatabaseFixture implements AutoCloseable {
         return new C2cOrders(rows,ads,markets,payments,access,funds,submissions,new GatewayUserRepository(jdbc),
                 new C2cQuoteRepository(jdbc),new C2cOrderEventRepository(jdbc,json),new C2cAttachmentRepository(jdbc),
                 new C2cAppealRepository(jdbc),new C2cMerchantRepository(jdbc),new C2cRelationRepository(jdbc));
+    }
+
+    static C2cQueryService queries(JdbcTemplate jdbc,C2cAdsRepository ads,C2cOrdersRepository orders,
+                                    C2cMarketService markets,C2cPaymentAccounts payments,ObjectMapper json,C2cSubmissions submissions) {
+        return new C2cQueryService(ads,orders,markets,new C2cMarketRepository(jdbc),payments,new C2cMerchantRepository(jdbc),
+                new C2cPaymentMethodRepository(jdbc),new C2cPaymentAccountRepository(jdbc),new C2cOrderEventRepository(jdbc,json),
+                new C2cAppealRepository(jdbc),submissions);
     }
 
     static C2cPaymentAccounts payments(JdbcTemplate jdbc, TotpService secrets,

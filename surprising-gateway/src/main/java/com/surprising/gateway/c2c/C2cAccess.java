@@ -10,6 +10,9 @@ import com.surprising.gateway.provider.auth.ComplianceService;
 import com.surprising.gateway.provider.auth.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.SensitiveActionVerificationService;
 import java.time.Instant;
+import com.surprising.gateway.c2c.service.C2cMarketService;
+import com.surprising.gateway.provider.product.GatewayProductServices;
+import com.surprising.product.api.ProductLine;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -25,12 +28,20 @@ public class C2cAccess {
     private final C2cSecurityGrantRepository grants;
     private final GatewayUserRepository users;
     private final TransactionTemplate verification;
+    private final C2cMarketService markets;
+    private final GatewayProductServices products;
     public C2cAccess(AuthService auth, ComplianceService compliance,
                      SensitiveActionVerificationService security, C2cProfileRepository profiles, C2cSecurityGrantRepository grants, GatewayUserRepository users,
-                     PlatformTransactionManager transactions) {
+                     PlatformTransactionManager transactions,C2cMarketService markets,GatewayProductServices products) {
+        this.markets=markets;this.products=products;
         this.auth = auth; this.compliance = compliance; this.security = security; this.profiles = profiles; this.grants = grants; this.users = users;
         verification = new TransactionTemplate(transactions);
         verification.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
+    public void requireNewTrading() {
+        markets.requireOpen();
+        if(!products.enabled().contains(ProductLine.SPOT)) throw C2cProblem.unavailable("现货资金服务尚未就绪，请稍后查询原请求");
     }
 
     JwtPrincipal user(String authorization) {
@@ -40,7 +51,7 @@ public class C2cAccess {
         } catch (IllegalStateException failure) { throw C2cProblem.forbidden("账户当前不可使用 C2C"); }
     }
 
-    void requireTrading(JwtPrincipal user, C2cMarket market) { requireTrading(user.userId(),user.status(),market); }
+    public void requireTrading(JwtPrincipal user, C2cMarket market) { requireTrading(user.userId(),user.status(),market); }
     private void requireTrading(long userId, String status, C2cMarket market) {
         if (!"NORMAL".equals(status)) throw new IllegalStateException("账户当前不能进行 C2C 交易");
         compliance.requireWithdrawalEligibility(userId);

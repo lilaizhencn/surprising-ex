@@ -32,7 +32,8 @@ class C2cAccessPostgresTest {
         security = mock(SensitiveActionVerificationService.class);
         access = new C2cAccess(mock(AuthService.class), compliance, security, new com.surprising.gateway.c2c.repository.C2cProfileRepository(db.jdbc),
                 new com.surprising.gateway.c2c.repository.C2cSecurityGrantRepository(db.jdbc),
-                mock(GatewayUserRepository.class), db.transactions.getTransactionManager());
+                mock(GatewayUserRepository.class), db.transactions.getTransactionManager(),
+                C2cDatabaseFixture.markets(db.jdbc),mock(com.surprising.gateway.provider.product.GatewayProductServices.class));
     }
     @AfterEach void cleanup() { if (db != null) db.close(); }
 

@@ -57,7 +57,7 @@ public class C2cOrders {
     }
 
     @Transactional
-    C2cQuote quote(JwtPrincipal user,UUID adId,String amountType,String amount,UUID paymentAccountId) {
+    public C2cQuote quote(JwtPrincipal user,UUID adId,String amountType,String amount,UUID paymentAccountId) {
         if(!markets.configuration(true).enabled()) throw new IllegalStateException("C2C 暂未开放");
         var ad=ads.get(adId,true);var market=markets.market(ad.marketId(),true);
         requireOffer(user,ad,market);
@@ -240,7 +240,7 @@ public class C2cOrders {
         ads.get(initial.adId(),true);
         var order=orders.get(id,true);requireParticipant(userId,order);return order;
     }
-    static void requireParticipant(long userId,C2cOrder order) {
+    public static void requireParticipant(long userId,C2cOrder order) {
         if(userId!=order.buyerUserId() && userId!=order.sellerUserId()) throw C2cProblem.forbidden("只能查看和操作本人订单");
     }
     private void prepareRelease(C2cOrder order,C2cMarket market,Long actor,String event) {

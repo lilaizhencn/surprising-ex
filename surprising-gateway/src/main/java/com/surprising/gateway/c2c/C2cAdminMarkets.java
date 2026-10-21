@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cQueryService;
+
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.account.api.model.BalanceResponse;
 import com.surprising.account.provider.service.AccountRequestService;
@@ -22,11 +24,11 @@ public class C2cAdminMarkets {
                               boolean requiresBankName,boolean supportsQr,String reason) { }
     private final JdbcTemplate jdbc;
     private final C2cMarketService markets;
-    private final C2cQueries queries;
+    private final C2cQueryService queries;
     private final C2cAdminAccess access;
     private final GatewayProductServices products;
 
-    public C2cAdminMarkets(JdbcTemplate jdbc,C2cMarketService markets,C2cQueries queries,C2cAdminAccess access,GatewayProductServices products) {
+    public C2cAdminMarkets(JdbcTemplate jdbc,C2cMarketService markets,C2cQueryService queries,C2cAdminAccess access,GatewayProductServices products) {
         this.jdbc=jdbc;this.markets=markets;this.queries=queries;this.access=access;this.products=products;
     }
     Map<String,Object> configuration(String authorization) {

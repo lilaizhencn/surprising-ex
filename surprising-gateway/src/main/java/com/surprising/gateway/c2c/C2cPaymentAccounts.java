@@ -1,6 +1,8 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.model.C2cPaymentAccount;
+import com.surprising.gateway.c2c.model.C2cPaymentDetails;
+import com.surprising.gateway.c2c.model.C2cPaymentEnvelope;
 import com.surprising.gateway.c2c.repository.C2cAttachmentRepository;
 import com.surprising.gateway.c2c.repository.C2cPaymentAccountRepository;
 import com.surprising.gateway.c2c.repository.C2cPaymentMethodRepository;
@@ -36,7 +38,7 @@ public class C2cPaymentAccounts {
         return accounts.byUser(userId);
     }
 
-    C2cPaymentAccount get(long userId, UUID id, boolean requireApproved) {
+    public C2cPaymentAccount get(long userId, UUID id, boolean requireApproved) {
         var account=accounts.find(userId,id).orElseThrow(()->new IllegalArgumentException("收款账号不存在"));
         if (requireApproved) {
             if (!"APPROVED".equals(account.status())) throw new IllegalStateException("收款账号需先通过实名审核");
@@ -48,13 +50,9 @@ public class C2cPaymentAccounts {
     @Transactional
     C2cPaymentAccount save(long userId, UUID id, long revision, String fiat, String method, Details details) {
         validateDetails(userId,fiat,method,details);
-        var envelope = new LinkedHashMap<String,Object>();
-        envelope.put("purpose","C2C_PAYMENT"); envelope.put("userId",Long.toString(userId));
-        envelope.put("fiat",fiat); envelope.put("methodCode",method);
-        envelope.put("holderName",Normalizer.normalize(details.holderName().trim(),Normalizer.Form.NFKC));
-        envelope.put("accountNumber",details.accountNumber().trim());
-        envelope.put("bankName",details.bankName()==null?"":details.bankName().trim());
-        envelope.put("qrAttachmentId",details.qrAttachmentId()==null?null:details.qrAttachmentId().toString());
+        var envelope = new C2cPaymentEnvelope("C2C_PAYMENT",Long.toString(userId),fiat,method,
+                Normalizer.normalize(details.holderName().trim(),Normalizer.Form.NFKC),details.accountNumber().trim(),
+                details.bankName()==null?"":details.bankName().trim(),details.qrAttachmentId());
         String encrypted=secrets.encryptSecret(json.writeValueAsString(envelope));
         String number=details.accountNumber().trim();
         String masked="****"+number.substring(Math.max(0,number.length()-4));
@@ -88,28 +86,26 @@ public class C2cPaymentAccounts {
             if(kyc==null || !"VERIFIED".equals(kyc.status()) || (kyc.expiresAt()!=null && !kyc.expiresAt().isAfter(Instant.now())))
                 throw new IllegalStateException("账号本人尚无有效身份认证");
             var verified=details(value);
-            Object qr=verified.get("qrAttachmentId");
-            validateDetails(value.userId(),value.fiat(),value.method(),new Details((String)verified.get("holderName"),
-                    (String)verified.get("accountNumber"),(String)verified.get("bankName"),qr==null?null:UUID.fromString(qr.toString())));
+            validateDetails(value.userId(),value.fiat(),value.method(),new Details(verified.holderName(),
+                    verified.accountNumber(),verified.bankName(),verified.qrAttachmentId()));
         }
         accounts.review(id,approved?"APPROVED":"REJECTED",reason.trim(),administrator.userId());
         return get(value.userId(),id,false);
     }
 
-    Map<String,Object> details(C2cPaymentAccount account) {
+    public C2cPaymentDetails details(C2cPaymentAccount account) {
         var result = details(account.userId(), account.ciphertext());
-        if (!account.fiat().equals(result.get("fiat")) || !account.method().equals(result.get("methodCode")))
+        if (!account.fiat().equals(result.fiat()) || !account.method().equals(result.methodCode()))
             throw new IllegalStateException("收款方式与资料不匹配");
         return result;
     }
 
-    Map<String,Object> details(long ownerUserId, String ciphertext) {
-        var result=json.readValue(secrets.decryptSecret(ciphertext),Map.class);
-        if(!"C2C_PAYMENT".equals(result.get("purpose")) || !Long.toString(ownerUserId).equals(result.get("userId")))
+    public C2cPaymentDetails details(long ownerUserId, String ciphertext) {
+        var envelope=json.readValue(secrets.decryptSecret(ciphertext),C2cPaymentEnvelope.class);
+        if(!"C2C_PAYMENT".equals(envelope.purpose()) || !Long.toString(ownerUserId).equals(envelope.userId()))
             throw new IllegalStateException("收款资料归属不匹配");
-        var safe=new LinkedHashMap<String,Object>();
-        for(String field:List.of("fiat","methodCode","holderName","accountNumber","bankName","qrAttachmentId")) safe.put(field,result.get(field));
-        return safe;
+        return new C2cPaymentDetails(envelope.fiat(),envelope.methodCode(),envelope.holderName(),envelope.accountNumber(),
+                envelope.bankName(),envelope.qrAttachmentId());
     }
 
     private void validateDetails(long userId,String fiat,String method,Details details) {

@@ -1,12 +1,12 @@
 package com.surprising.gateway.c2c;
 
-import com.surprising.gateway.c2c.model.C2cQuote;
-import com.surprising.gateway.c2c.service.C2cMarketService;
+import com.surprising.gateway.c2c.model.C2cOfferFilter;
+import com.surprising.gateway.c2c.model.C2cUserOrderFilter;
+import com.surprising.gateway.c2c.model.C2cQuickQuoteSpec;
+import com.surprising.gateway.c2c.service.C2cQueryService;
+import com.surprising.gateway.c2c.service.C2cQuickQuoteService;
 import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.product.GatewayProductServices;
-import com.surprising.product.api.ProductLine;
-import java.time.Instant;
 import java.util.*;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.*;
@@ -30,28 +30,23 @@ public class C2cController {
     public record PaymentDisable(String revision,C2cVerification verification) { }
 
     private final C2cAccess access;
-    private final C2cMarketService markets;
     private final C2cAds ads;
-    private final C2cAdsRepository adRows;
     private final C2cOrders orders;
-    private final C2cOrdersRepository orderRows;
     private final C2cSubmissions submissions;
-    private final C2cQueries queries;
+    private final C2cQueryService queries;
+    private final C2cQuickQuoteService quickQuotes;
     private final C2cPaymentAccounts payments;
-    private final GatewayProductServices products;
     private final ObjectMapper json;
 
-    public C2cController(C2cAccess access,C2cMarketService markets,C2cAds ads,C2cAdsRepository adRows,
-                         C2cOrders orders,C2cOrdersRepository orderRows,C2cSubmissions submissions,C2cQueries queries,
-                         C2cPaymentAccounts payments,GatewayProductServices products,ObjectMapper json) {
-        this.access=access;this.markets=markets;this.ads=ads;this.adRows=adRows;this.orders=orders;this.orderRows=orderRows;
-        this.submissions=submissions;this.queries=queries;this.payments=payments;this.products=products;this.json=json;
+    public C2cController(C2cAccess access,C2cAds ads,C2cOrders orders,C2cSubmissions submissions,
+                         C2cQueryService queries,C2cQuickQuoteService quickQuotes,C2cPaymentAccounts payments,ObjectMapper json) {
+        this.access=access;this.ads=ads;this.orders=orders;this.submissions=submissions;this.queries=queries;
+        this.quickQuotes=quickQuotes;this.payments=payments;this.json=json;
     }
 
     @GetMapping("/markets")
     public Map<String,Object> markets() {
-        return Map.of("markets",markets.markets(true).stream().map(C2cViews::market).toList(),
-                "paymentMethods",queries.paymentMethods(true),"serverTime",Instant.now().toString());
+        return queries.markets();
     }
 
     @GetMapping("/ads")
@@ -62,15 +57,21 @@ public class C2cController {
             @RequestParam(defaultValue="0") int minCompleted,@RequestParam(defaultValue="0") int minCompletionRate,
             @RequestParam(defaultValue="3600") int maxPaymentSeconds,@RequestParam(defaultValue="PRICE") String sort,
             @RequestParam(defaultValue="20") int limit,@RequestParam(defaultValue="0") int offset) {
-        requireNewTrading();
+        access.requireNewTrading();
         var viewer=authorization==null?null:access.user(authorization);
-        return queries.offers(new C2cQueries.Filter(marketId,side,amount,methodCode,merchantId,vipOnly,
-                minCompleted,minCompletionRate,maxPaymentSeconds,sort,limit,offset),viewer);
+        if(limit<1 || limit>50 || offset<0 || offset>10000 || minCompleted<0 || minCompleted>1000000
+                || minCompletionRate<0 || minCompletionRate>100 || maxPaymentSeconds<60 || maxPaymentSeconds>3600
+                || (merchantId!=null && merchantId<=0)) throw new IllegalArgumentException("筛选或分页参数无效");
+        requireMethod(methodCode);
+        var filter=new C2cOfferFilter(marketId,side(side),amount==null || amount.isBlank()?null:C2cMoney.decimal(amount),
+                methodCode,merchantId,vipOnly,minCompleted,minCompletionRate,maxPaymentSeconds,
+                choice(C2cOfferFilter.Sort.class,sort,"排序方式无效"),limit,offset);
+        return queries.offers(filter,viewer);
     }
 
     @GetMapping("/ads/{id}")
     public Map<String,Object> offer(@PathVariable UUID id) {
-        requireNewTrading();return queries.offer(id);
+        access.requireNewTrading();return queries.offer(id);
     }
     @GetMapping("/merchants/{userId}")
     public Map<String,Object> merchant(@PathVariable long userId) {return queries.merchant(userId);}
@@ -78,7 +79,8 @@ public class C2cController {
     @GetMapping("/me/ads")
     public Map<String,Object> myAds(@RequestHeader(value="Authorization",required=false) String authorization,
                                     @RequestParam(defaultValue="100") int limit) {
-        var user=access.user(authorization);return Map.of("items",queries.myAds(user.userId(),limit));
+        var user=access.user(authorization);requirePage(limit,0);
+        return Map.of("items",queries.myAds(user.userId(),limit));
     }
     @PostMapping("/ads")
     public Map<String,Object> publish(@RequestHeader(value="Authorization",required=false) String authorization,
@@ -89,7 +91,7 @@ public class C2cController {
         var receipt=submissions.admit(user.userId(),request.requestKey(),"AD_PUBLISH",hash);
         if(receipt.status().equals("PROCESSING")) {
             try {
-                requireNewTrading();
+                access.requireNewTrading();
                 var codes=C2cVerification.orEmpty(request.verification());
                 ads.publish(user,authorization,request.requestKey(),request.payload(),codes.emailCode(),codes.totpCode());
             } catch (IllegalArgumentException | IllegalStateException | ArithmeticException failure) {
@@ -104,54 +106,38 @@ public class C2cController {
                                       @PathVariable UUID id,@RequestBody AdAction request) {
         var user=access.user(authorization);var codes=C2cVerification.orEmpty(request.verification());
         var ad=ads.status(user,authorization,id,revision(request.revision()),request.action(),codes.emailCode(),codes.totpCode());
-        return C2cViews.ad(ad,markets.market(ad.marketId(),false),true);
+        return queries.ownAdView(ad);
     }
     @PatchMapping("/ads/{id}")
     public Map<String,Object> edit(@RequestHeader(value="Authorization",required=false) String authorization,
                                   @PathVariable UUID id,@RequestBody AdEdit request) {
         var user=access.user(authorization);
         var ad=ads.edit(user,id,revision(request.revision()),request.price(),request.minFiat(),request.maxFiat(),request.terms(),request.minCompleted());
-        return C2cViews.ad(ad,markets.market(ad.marketId(),false),true);
+        return queries.ownAdView(ad);
     }
 
     @PostMapping("/quotes")
     public Map<String,Object> quote(@RequestHeader(value="Authorization",required=false) String authorization,
                                    @RequestBody QuoteRequest request) {
-        var user=access.user(authorization);requireNewTrading();
+        var user=access.user(authorization);access.requireNewTrading();
         var quote=orders.quote(user,request.adId(),request.amountType(),request.amount(),request.paymentAccountId());
-        return quoteView(quote);
+        return queries.quoteView(quote);
     }
     @PostMapping("/quotes/quick")
     public Map<String,Object> quick(@RequestHeader(value="Authorization",required=false) String authorization,
                                    @RequestBody QuickQuoteRequest request) {
-        var user=access.user(authorization);requireNewTrading();
-        var market=markets.market(request.marketId(),true);access.requireTrading(user,market);
-        if("SELL".equals(request.side()) && request.paymentAccountId()==null) throw new IllegalArgumentException("请先选择本人已审核收款账号");
-        var result=queries.offers(new C2cQueries.Filter(request.marketId(),request.side(),request.amount(),request.methodCode(),
-                null,false,0,0,3600,"PRICE",20,0),user);
-        for(Object item:(List<?>)result.get("items")) {
-            var ad=(Map<?,?>)item;
-            UUID id=UUID.fromString((String)ad.get("adId"));
-            UUID accountId=request.paymentAccountId();
-            if("BUY".equals(request.side())) {
-                var detail=queries.offer(id);
-                var options=((List<?>)detail.get("paymentOptions")).stream().map(value->(Map<?,?>)value)
-                        .filter(value->request.methodCode()==null || request.methodCode().equals(value.get("methodCode"))).toList();
-                if(options.isEmpty()) continue;
-                accountId=UUID.fromString((String)options.getFirst().get("accountId"));
-            }
-            try {
-                return quoteView(orders.quote(user,id,"FIAT",request.amount(),accountId));
-            } catch (IllegalArgumentException | IllegalStateException unavailable) {
-                // 每个候选仍做完整准入；这里只生成报价，不分配库存或发送资金指令。
-            }
-        }
-        throw new IllegalStateException("暂无满足金额、收款方式及交易资格的报价");
+        var user=access.user(authorization);access.requireNewTrading();
+        if(request.marketId()==null) throw new IllegalArgumentException("请选择交易市场");
+        var side=side(request.side());requireMethod(request.methodCode());
+        if(side==C2cOfferFilter.Side.SELL && request.paymentAccountId()==null)
+            throw new IllegalArgumentException("请先选择本人已审核收款账号");
+        var spec=new C2cQuickQuoteSpec(request.marketId(),side,C2cMoney.decimal(request.amount()),request.methodCode(),request.paymentAccountId());
+        return queries.quoteView(quickQuotes.quote(user,spec));
     }
     @GetMapping("/quotes/{id}")
     public Map<String,Object> quote(@RequestHeader(value="Authorization",required=false) String authorization,@PathVariable UUID id) {
         var user=access.user(authorization);var quote=orders.ownedQuote(user.userId(),id);
-        return quoteView(quote);
+        return queries.quoteView(quote);
     }
 
     @PostMapping("/orders")
@@ -163,7 +149,7 @@ public class C2cController {
         var receipt=submissions.admit(user.userId(),request.requestKey(),"ORDER_CREATE",hash);
         if(receipt.status().equals("PROCESSING")) {
             try {
-                requireNewTrading();var codes=C2cVerification.orEmpty(request.verification());
+                access.requireNewTrading();var codes=C2cVerification.orEmpty(request.verification());
                 orders.create(user,authorization,request.requestKey(),request.quoteId(),codes.emailCode(),codes.totpCode());
             } catch (IllegalArgumentException | IllegalStateException | ArithmeticException failure) {
                 rejectValidation(user,request.requestKey(),"ORDER_CREATE",hash,failure);throw failure;
@@ -176,7 +162,10 @@ public class C2cController {
             @RequestParam(defaultValue="ONGOING") String state,@RequestParam(required=false) UUID marketId,
             @RequestParam(defaultValue="ALL") String side,@RequestParam(required=false) UUID orderId,
             @RequestParam(defaultValue="30") int limit,@RequestParam(defaultValue="0") int offset) {
-        var user=access.user(authorization);return queries.myOrders(user.userId(),state,marketId,side,orderId,limit,offset);
+        var user=access.user(authorization);requirePage(limit,offset);
+        var filter=new C2cUserOrderFilter(choice(C2cUserOrderFilter.Scope.class,state,"订单查询条件无效"),marketId,
+                choice(C2cUserOrderFilter.Side.class,side,"订单查询条件无效"),orderId,limit,offset);
+        return queries.myOrders(user.userId(),filter);
     }
     @GetMapping("/orders/{id}")
     public Map<String,Object> order(@RequestHeader(value="Authorization",required=false) String authorization,@PathVariable UUID id) {
@@ -243,41 +232,25 @@ public class C2cController {
     }
 
     private Map<String,Object> receipt(JwtPrincipal user,String key,String kind,String hash) {
-        var receipt=submissions.lookup(user.userId(),key,kind,hash);
-        var view=C2cViews.submission(user.userId(),key,kind,hash,receipt);
-        if(receipt!=null && receipt.status().equals("SUCCEEDED")) {
-            if(kind.equals("ORDER_CREATE")) {
-                var order=orderRows.get(receipt.resultId(),false);
-                if(order.creatorUserId()!=user.userId()) throw C2cProblem.forbidden("原订单归属不匹配");
-                view.put("result",C2cViews.order(order,markets.market(order.marketId(),false)));
-            } else {
-                var ad=adRows.get(receipt.resultId(),false);
-                if(ad.makerUserId()!=user.userId()) throw C2cProblem.forbidden("原广告归属不匹配");
-                view.put("result",C2cViews.ad(ad,markets.market(ad.marketId(),false),true));
-            }
-        }
-        return view;
+        return queries.submission(user.userId(),key,kind,hash);
     }
-    private Map<String,Object> quoteView(C2cQuote quote) {
-        var ad=adRows.get(quote.adId(),false);var market=markets.market(ad.marketId(),false);
-        var view=C2cViews.quote(quote,market);
-        boolean accountReady;
-        try {
-            long seller=ad.side().equals("SELL")?ad.makerUserId():quote.userId();
-            accountReady=payments.get(seller,quote.paymentAccountId(),true).revision()==quote.accountRevision();
-        } catch(IllegalArgumentException | IllegalStateException unavailable) {accountReady=false;}
-        view.put("valid",accountReady && quote.expiresAt().isAfter(Instant.now()) && quote.adRevision()==ad.revision() && quote.marketRevision()==market.revision()
-                && "ACTIVE".equals(ad.status()) && ad.availableUnits()>=quote.quantityUnits() && market.enabled() && markets.configuration().enabled());
-        return view;
+    private static C2cOfferFilter.Side side(String value) {
+        return choice(C2cOfferFilter.Side.class,value,"请选择购买或出售");
+    }
+    private static <T extends Enum<T>> T choice(Class<T> type,String value,String message) {
+        try { return Enum.valueOf(type,value); }
+        catch(IllegalArgumentException | NullPointerException failure) {throw new IllegalArgumentException(message);}
+    }
+    private static void requireMethod(String value) {
+        if(value!=null && !value.matches("[A-Z][A-Z0-9_]{0,31}")) throw new IllegalArgumentException("收款方式格式无效");
+    }
+    private static void requirePage(int limit,int offset) {
+        if(limit<1 || limit>100 || offset<0 || offset>10000) throw new IllegalArgumentException("分页数量无效");
     }
     private void rejectValidation(JwtPrincipal user,String key,String kind,String hash,RuntimeException failure) {
         if(failure instanceof C2cProblem problem && problem.status.is5xxServerError()) return;
         submissions.reject(user.userId(),key,kind,hash,"VALIDATION_REJECTED",
                 failure instanceof ArithmeticException?"金额或数量超出精度、范围限制":failure.getMessage());
-    }
-    private void requireNewTrading() {
-        markets.requireOpen();
-        if(!products.enabled().contains(ProductLine.SPOT)) throw C2cProblem.unavailable("现货资金服务尚未就绪，请稍后查询原请求");
     }
     static long revision(String value) {
         long revision=revisionAllowZero(value);
