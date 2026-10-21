@@ -14,6 +14,13 @@ import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.aeron.service.state.model.CoreMarkPriceState;
 import com.surprising.aeron.service.state.order.OrderReservation;
 
+/**
+ * 交易步骤 2 的订单规则决策：把下单意图解析成可供账户准入使用的订单参数。
+ *
+ * <p>结合币对、标记价、费率和到期状态检查价格、数量及产品规则；异步准入可先 prepare，
+ * 再用 resolvePrepared 完成决策。本类不执行撮合，也不把订单规则通过视为资金已经冻结；
+ * 资金和持仓容量继续由 {@link RuntimeOrderAdmission} 及所属账户处理。</p>
+ */
 public final class CoreOrderDecisionResolver {
 
     private static final long PPM = 1_000_000L;

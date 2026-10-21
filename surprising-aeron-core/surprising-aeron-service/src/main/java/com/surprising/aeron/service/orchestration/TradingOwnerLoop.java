@@ -21,7 +21,14 @@ import org.springframework.stereotype.Component;
 
 import static com.surprising.aeron.service.orchestration.egress.ClusterServiceEgress.NO_SESSION_ID;
 
-/** Owns the trading Owner thread and its single-producer/single-consumer input boundary. */
+/**
+ * 启动步骤 7–9、交易步骤 1：启动 Owner 线程，交接 Cluster 命令并管理线程退出。
+ *
+ * <p>{@link #start(Cluster, SectionedCoreSnapshotCodec.RecoveryBuffer)} 在 Owner 线程创建或恢复
+ * {@link TradingCoreOwner} 的运行时，再激活工作资源，
+ * 最后绑定 Owner CPU。Cluster 回调通过单生产者、单消费者输入环交出命令和日志元数据；
+ * 本类管理线程交接，业务规则由 {@link TradingCoreRuntime} 及对应业务类执行。</p>
+ */
 @Component
 public final class TradingOwnerLoop implements Runnable {
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(TradingOwnerLoop.class);
@@ -65,7 +72,11 @@ public final class TradingOwnerLoop implements Runnable {
         input = coreOwner.ingress();
     }
 
-    /** Starts the Owner thread after the Aeron Cluster service has started. */
+    /**
+     * 启动 Owner，并等待创建、恢复和激活的启动边界完成后返回。
+     * @param cluster 已启动的 Cluster，提供本成员编号、角色、日志时间和位置
+     * @param restored 从快照读出的恢复分块；首次启动为 null
+     */
     public void start(Cluster cluster, SectionedCoreSnapshotCodec.RecoveryBuffer restored) {
         this.cluster = cluster;
         failure = null;

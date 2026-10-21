@@ -27,8 +27,8 @@ import java.util.function.Supplier;
  * 交易步骤 3：在途登记、固定分片、准入门闩与 Matcher 提交；衔接步骤 4 的账户结算事件。
  *
  * <p>该边界拥有环槽登记、固定 Matcher 路由、提交、Lane 结算事件收集和完成结果读取。
- * {@link TradingCoreRuntime} 仍是唯一状态 owner；本类只组织跨线程交接，不维护第二份订单、
- * 余额或持仓状态。</p>
+ * {@link TradingCoreRuntime} 在 Owner 线程组织命令；账户、订单簿和账本由所属执行者持有。
+ * 本类只组织交接和完成推进，不维护第二份订单、余额或持仓状态。</p>
  */
 public final class CoreMatchingFlow {
 

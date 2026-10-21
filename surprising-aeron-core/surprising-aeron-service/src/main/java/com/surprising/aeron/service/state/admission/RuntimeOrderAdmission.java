@@ -20,6 +20,13 @@ import com.surprising.aeron.service.state.order.OrderRuntime;
 import com.surprising.aeron.service.state.order.RuntimeAlgoOrderStateTransitions;
 import com.surprising.aeron.service.state.position.PositionRuntime;
 
+/**
+ * 交易步骤 2 的账户准入检查：根据用户余额、持仓和已有委托计算新订单需要的预留。
+ *
+ * <p>先由 {@link CoreOrderDecisionResolver} 解析订单规则，再检查客户订单身份、保证金、
+ * 杠杆、平仓容量与生命周期限制，返回所需金额。这里的检查和计算不等于订单已成交；
+ * 订单及冻结写入由订单状态变更入口负责，成交后的扣增和释放由结算流程负责。</p>
+ */
 public final class RuntimeOrderAdmission {
 
     private static final long PPM = 1_000_000L;

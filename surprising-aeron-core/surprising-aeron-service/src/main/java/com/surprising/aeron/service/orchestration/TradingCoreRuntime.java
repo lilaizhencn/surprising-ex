@@ -91,8 +91,12 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * 唯一交易执行入口，按集群日志顺序组织准入、撮合和有序提交。
- * 产品命令、批量执行、结果账本、查询及快照由所属组件管理；不持有旧探测运行时副本。
+ * 交易步骤 1 的业务执行入口，按集群日志顺序组织后续准入、撮合和有序提交。
+ *
+ * <p>从 apply 进入：撮合命令交给 MatchingCommandAdmission 和 CoreMatchingFlow，
+ * 其他业务命令交给各业务 Commands，完成推进交给 OrderedCommitCoordinator。
+ * 本类在 Owner 线程组织命令和依赖；账户、订单簿和系统账本仍由各自所有者持有，
+ * 不能把持有运行时入口理解为可以跨线程直接读写所有业务状态。</p>
  */
 public final class TradingCoreRuntime implements AutoCloseable {
 

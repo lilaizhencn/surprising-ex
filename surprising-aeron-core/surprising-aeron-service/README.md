@@ -1,12 +1,128 @@
 # aeron-service 代码导航
 
-本模块按业务状态与执行流程分类；仍是同一个 Maven 模块。`state` 根包仅保留
-`TradingCoreState`（恢复和导出用状态）与 `TradingRuntimeState`（在线状态入口）。
-`orchestration` 根包保留 `TradingCoreOwner`、`TradingCoreRuntime`、`TradingOwnerLoop`、
-`TradingExecutionMode` 与 `OwnerLogContext`，承接 Owner 生命周期及命令主流程。
+本模块是交易 Core 的执行服务。每个节点只服务一条产品线，处理 Cluster 已复制的命令；
+HTTP 接入、价格生产、生命周期调度和外部查询投影由其他服务承担。
+六条产品线的账户、订单簿和风险模型各自隔离，公共执行骨架通过产品规则选择资金计算。
+
+先读本文的启动和业务步骤，再进入对应源码。更完整的模块架构、配置表、启动命令、
+各业务时序和快照恢复见 [Aeron 总 README](../README.md)。下面的编号表示阅读顺序，
+不表示增加线程、队列或提交阶段；同一公共类可能被多条业务复用。
+
+## 启动：配置加载、恢复与线程启动
+
+```mermaid
+flowchart TD
+    A[1–2. SurprisingCoreApplication.main] --> B[Spring 非 Web 上下文 / CoreConfiguration]
+    B --> C[3–5. AeronCoreLifecycle.startAndAwaitShutdown]
+    C --> D[Driver / Archive / Consensus]
+    D --> E[ClusteredServiceContainer / AeronTradingClusterService.onStart]
+    E --> F[6–8. 读取快照分块 / TradingOwnerLoop.start]
+    F --> G[trading-owner 线程: TradingCoreOwner.start / restoreSnapshot]
+    G --> H[9. TradingCoreRuntime.activate]
+    H --> I[按执行模式启动 Matcher / Account Lane，启动 System Ledger]
+    I --> J[绑定 Owner CPU，完成启动边界]
+    J --> K[10. 回放快照后日志，再处理在线命令]
+```
+
+| 阅读步骤 | 类和入口 | 实际职责 |
+| --- | --- | --- |
+| 1–2 配置 | [`SurprisingCoreApplication`](src/main/java/com/surprising/aeron/service/SurprisingCoreApplication.java)、[`CoreConfiguration`](src/main/java/com/surprising/aeron/service/config/CoreConfiguration.java) | 加载 Spring 配置，绑定 `surprising.aeron`，创建产品拓扑和 CPU 配置；不创建初始业务余额 |
+| 3–5 Aeron 资源 | [`AeronCoreLifecycle`](src/main/java/com/surprising/aeron/service/bootstrap/AeronCoreLifecycle.java) | 启动 Driver、Archive、Consensus 和 Service Container，等待关闭并逆序释放资源 |
+| 6–8 恢复与 Owner | [`AeronTradingClusterService`](src/main/java/com/surprising/aeron/service/cluster/AeronTradingClusterService.java)、[`TradingOwnerLoop`](src/main/java/com/surprising/aeron/service/orchestration/TradingOwnerLoop.java)、[`TradingCoreOwner`](src/main/java/com/surprising/aeron/service/orchestration/TradingCoreOwner.java) | 回调线程读取快照分块；在 Owner 线程创建或恢复交易运行时 |
+| 9 工作资源 | [`TradingCoreRuntime`](src/main/java/com/surprising/aeron/service/orchestration/TradingCoreRuntime.java)、[`TradingRuntimeState`](src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java) | 激活恢复后的拓扑与状态；启动工作资源后才收窄 Owner 的 CPU mask |
+| 10 回放 | `AeronTradingClusterService.onSessionMessage` → `TradingOwnerLoop.enqueue` | 把已复制日志及其时间、位置交给 Owner；回放与在线命令沿用同一交易规则 |
+
+配置有两种读取方式，不能混用：`CoreConfiguration` 绑定的产品线、成员地址、目录和
+CPU 配置可以来自 Spring 配置源；`TradingExecutionMode`、`LaneTopology` 等直接读取的
+JVM system property 要通过 `java -D...` 设置。当前 [application.yml](src/main/resources/application.yml)
+只提供默认关闭的 CPU 亲和性配置；节点启动还必须指定产品线。
+币对、余额和标记价通过业务命令进入日志，重启从快照与日志恢复，不从数据库自动补载。
+
+| 线程 / 模式 | 负责的状态或工作 |
+| --- | --- |
+| Cluster Service agent | 会话、解码、快照 Publication 和真正的网络回包；不直接修改账户 |
+| `trading-owner-<memberId>` | 按日志顺序推进命令、依赖、完成条件和提交水位 |
+| FUSED，默认 | Owner 内联执行 Matcher 和账户工作，不创建独立 Matcher / Account Lane 线程 |
+| PIPELINED | `core-matcher-<id>` 持有分片订单簿；`core-account-lane-<id>` 按用户持有账户、订单和持仓 |
+| `core-system-ledger-lane`，两种模式均有 | Treasury、系统资金和持久化资金索引；其完成回执参与业务完成条件 |
+| 可选实时 sender / receiver | 配置实时通道后启动；发送已提交帧或把控制请求交给 Owner |
+
+## 下单：按六步顺着源码读
+
+```mermaid
+flowchart LR
+    A[1. Cluster 回调 → Owner → Runtime.apply] --> B[2. 命令校验 / 账户准入与冻结]
+    B --> C[3. CoreMatchingFlow → Matcher]
+    C --> D[4. MatcherSettlementEvent → 所属账户 Lane]
+    D --> L[System Ledger 财务事实]
+    D --> E[5. OrderedCommitCoordinator 有序提交]
+    L --> E
+    E --> F[6. 幂等终态 / 实时帧 / egress 回包]
+```
+
+| 步骤 | 关键类，按阅读顺序排列 | 交接与完成条件 |
+| --- | --- | --- |
+| 1 输入 | `AeronTradingClusterService` → `TradingOwnerLoop` → `TradingCoreOwner` → `TradingCoreRuntime.apply` | 交接命令、指纹、会话和日志元数据；检查协议、产品线和幂等 |
+| 2 准入 | [`MatchingCommandAdmission`](src/main/java/com/surprising/aeron/service/orchestration/trade/MatchingCommandAdmission.java) → [`CoreOrderDecisionResolver`](src/main/java/com/surprising/aeron/service/state/admission/CoreOrderDecisionResolver.java) → `PlaceAdmissionEvent` / [`RuntimeOrderAdmission`](src/main/java/com/surprising/aeron/service/state/admission/RuntimeOrderAdmission.java) | 检查订单规则、资金、保证金、平仓容量及生命周期冲突；所属账户完成订单和预留变更 |
+| 3 撮合 | [`CoreMatchingFlow`](src/main/java/com/surprising/aeron/service/orchestration/trade/CoreMatchingFlow.java) → `MatcherCommandPipeline` → `DeterministicExchangeCoreAdapter` | 固定分片并交接命令；PIPELINED 可提前提交带门闩的输入，账户准入成功后才能撮合 |
+| 4 结算 | [`MatcherSettlementDispatcher`](src/main/java/com/surprising/aeron/service/state/settlement/MatcherSettlementDispatcher.java) / `MatcherSettlementEvent` → `RuntimeSpotMatchProcessor` / `RuntimeDerivativeMatchProcessor` | Matcher 事实直接交给所属账户，按产品计算余额、冻结、费用与持仓变化；财务事实交给 Ledger |
+| 5 提交 | [`OrderedCommitCoordinator`](src/main/java/com/surprising/aeron/service/orchestration/trade/commit/OrderedCommitCoordinator.java) → `CommitPublication` | 核验证据、收集账户与账本完成，按命令顺序提交；不在此重复计算资金 |
+| 6 输出 | `CommandResultLedger`、`TradingRealtimeBoundary`、`ClusterServiceEgress` | 保存可幂等重试的终态，输出实时变化，并由 Cluster 回调线程发送响应 |
+
+内部 `MATCHING_PENDING`、队列入队成功和 Matcher 执行完成均不能单独作为客户端交易终态。
+业务拒单保留拒绝结果；需要回滚时只回滚该命令拥有的变化；无法核对的执行故障由故障与恢复边界处理。
+
+## 撤单、触发单、风控与强平
+
+这些业务共用上面的输入、账户所有权、提交和回包边界。流程图中的箭头表示业务依赖，
+并不表示所有步骤都在一次命令内自动完成。
+
+```mermaid
+flowchart TD
+    C[CANCEL_ORDER] --> CA[MatchingCommandAdmission: 归属与路由]
+    CA --> CM[CoreMatchingFlow / Matcher 撤单]
+    CM --> CS[Lane 按撮合结果释放剩余冻结 → 有序提交]
+    T[PLACE_TRIGGER_ORDER / OCO_PAIR] --> TS[TriggerOrderCommands: 登记条件 / TriggerOrderIndex]
+    P[APPLY_MARK_PRICE] --> R[RiskCommands: 更新价格 / 初始化扫描]
+    N[CONTINUE_RISK_SCAN] --> RC[RiskScanCoordinator → RiskLaneProcessor]
+    R --> N
+    RC --> LP[Lane 估值 / Owner 确定性编号 / PLANNED 计划]
+    RC --> TC[剩余预算推进 PendingTriggerScan]
+    TS --> TC
+    TC --> TA[条件成立: 重新准入 / 冻结子订单 / 处理 OCO]
+    TA --> TM[appendQueuedMatching → 共用撮合、结算和提交]
+    LP --> LE[后续 EXECUTE_LIQUIDATION 命令]
+    LE --> LC[ExecutionCheck → 分页 Matcher 撤单]
+    LC --> LR[撤单完成后处理持仓 / 资金 → 提交]
+    LR --> LF[后续 RESOLVE_LIQUIDATION 确认结果]
+    LF -.按需要另发命令.-> I[保险基金 / EXECUTE_ADL]
+```
+
+| 业务 | 入口与后续关键类 | 阅读时需要区分 |
+| --- | --- | --- |
+| 撤单 | `MatchingCommandAdmission.validatePendingCancel` → `CoreMatchingFlow` → `MatcherSettlementEvent` | 所属 Lane 依据 Matcher 结果更新订单、释放冻结，不能收到请求就先解冻 |
+| 改单 / 批量 | `ReplacementAdmissionEvent`；`OrderBatchExecutor` / `OrderBatchPending` | 改单处理新旧预留差异；批量保留项游标和整批终态 |
+| 触发 / 止盈止损 / OCO | [`TriggerOrderCommands`](src/main/java/com/surprising/aeron/service/command/trigger/TriggerOrderCommands.java) → `PendingTriggerScan` → `TriggerExecutionContinuation` → `MatchingCommandAdmission.appendQueuedMatching` | 条件记录与子订单是不同生命周期；条件成立后仍须重新准入、冻结和撮合 |
+| 风控 | [`RiskCommands`](src/main/java/com/surprising/aeron/service/command/risk/RiskCommands.java) → `RuntimeDerivativeRiskProcessor` → `RiskScanCoordinator` → `RiskLaneProcessor` | 按价格序号、修订和预算续扫；扫描生成强平计划，不直接等于强平执行 |
+| 强平 | `MatchingCommandAdmission` / `CoreMatchingFlow` → `ExecutionCheck` / `CrossShardCancellationCoordinator` → [`LiquidationCommands`](src/main/java/com/surprising/aeron/service/command/liquidation/LiquidationCommands.java) → `RuntimeDerivativeLiquidationProcessor` | 先校验状态、价格和游标，分批撤单；撤单未完成时只提交进度，后续命令继续 |
+| 强平确认 / 保险 / ADL | `RuntimeLiquidationResolution`；`InsuranceFundCommands`；`AdlCommands` / `RuntimeAdlExecution` | 各有独立复制命令和幂等边界，并非每次强平都无条件执行 |
+| 资金费 / 交割 / 行权 | `PerpetualFundingCommands` / `RuntimePerpetualFundingProcessor`；`InstrumentSettlementCommands` / `RuntimeLifecycleSettlementContinuation` | 分页资金费与到期结算各保留游标；到期结算先完成撤单，再推进持仓和账本 |
+| 余额 / 划转 | `DirectCommandDispatcher` → `BalanceTransferCommands` → `RuntimeAccountStateTransitions` / `TransferRuntime` | 所属账户与 Ledger 完成后由 `DirectCommandSlot` 续接提交，保留跨产品划转幂等 |
+
+快照入口为 `AeronTradingClusterService.onTakeSnapshot` → `TradingOwnerLoop.captureSnapshotSections`
+→ `CoreSnapshotLifecycle`。先排空快照边界前的命令，再捕获同一 fence 的账户、Matcher、账本、
+幂等和业务游标；恢复时一起还原，不能只加载订单簿或余额。完整时序见 [快照与恢复](../README.md#快照与恢复)。
+
+## 包结构：业务包配合步骤导航
+
+`state` 根包保留 `TradingCoreState`（恢复和导出状态）与 `TradingRuntimeState`（在线状态入口）；
+`orchestration` 根包保留 Owner 生命周期与命令执行入口。包名使用业务职责，
+步骤写在本文、`package-info.java` 和关键类注释里。公共槽位、索引和模型不强制归属某一步。
 
 | 包 | 职责与主要入口 |
 | --- | --- |
+| `config` / `bootstrap` | 配置绑定 / Aeron 资源启动；`CoreConfiguration`、`AeronCoreLifecycle` |
+| `cluster` / `orchestration` | 交易步骤 1：Cluster 回调、Owner 线程和运行时入口 |
 | `state.account` | 用户、余额、客户订单身份和 Lane 所有权；`AccountLaneState`、`RuntimeAccountRollback` |
 | `state.order` / `state.admission` | 订单和冻结状态；下单准入、待完成预留及准入回执 |
 | `state.position` / `state.index` | 持仓、平仓容量及持仓/OI/ADL 等派生索引 |
@@ -17,25 +133,32 @@
 | `state.snapshot` | 状态物化、投影、Lane 快照及哈希 |
 | `state.identity` / `state.fee` / `state.instrument` | 运行时身份字典、费率策略及币对状态推进 |
 | `state.query` / `state.realtime` | 核心读取与回放查询、实时捕获；不承担外部行情查询服务 |
-| `orchestration.pipeline` | 命令窗口、槽位、撮合准入、批次与依赖推进 |
-| `orchestration.commit` / `orchestration.result` | 有序提交与发布；响应构建、结果幂等和响应缓冲租约 |
+| `orchestration.trade` | 交易步骤 2–3：准入与撮合编排；共用命令窗口、槽位、批次与依赖推进 |
+| `orchestration.trade.commit` / `orchestration.result` | 交易步骤 5：有序提交与发布；响应构建、结果幂等和缓冲租约 |
 | `orchestration.egress` / `orchestration.ingress` | Aeron 响应交接与 Owner 输入环 |
+| `orchestration.realtime` / `command.*` | 交易步骤 6 的实时输出 / 风控、触发、强平等业务入口 |
 | `orchestration.query` | `CoreQueryService`：订单簿、账户、风险、预检及划转内部查询 |
 | `orchestration.snapshot` / `orchestration.replay` | Cluster 快照生命周期与分段编解码；已提交日志的离线回放 |
 | `orchestration.retention` | 终态保留与 tombstone 清理 |
 | `lane` | Lane 拓扑、线程与序号队列 |
 
-顺着交易流程阅读：`TradingCoreOwner` 接收命令 → `pipeline` 准入与撮合 →
+顺着交易流程阅读：`TradingCoreOwner` 接收命令 → `trade` 准入与撮合 →
 `state.settlement` 交给所属账户 Lane → `state.ledger` 应用财务事实 →
-`commit` 按序提交 → `result` / `egress` 交出响应。失败仍由既有回滚和故障传播处理。
+`trade.commit` 按序提交 → `result` / `egress` 交出响应。失败仍由既有回滚和故障传播处理。
+
+不再把 `trade` 按 `pack1`、`pack2` 拆开：准入、撮合推进和批量命令共享包内槽位及生命周期操作，
+机械拆包会扩大访问权限；`CommandSlot`、`PendingMatchingRing`、`DirectCommandSlot` 等也被多条业务共用。
+新增职责仍先放入对应业务包，不为凑步骤增加透传类，不把步骤编号写进业务状态或协议。
 
 跨包协作方法属于 Core 内部接口，调用方继续遵守 Owner、Account Lane 和 Ledger 的线程所有权，
 以及查询屏障、命令槽和响应缓冲的租约。账户表保持封装，逐实体读写和快照导出分别提供入口；
 包迁移不新增账户镜像、线程、队列、提交阶段或快照字段。`CoreQueryService` 原名为
 `OrderBookQueryService`，改名用于体现已有的多类内部查询职责。
 
-本轮包整理的验证命令、模块结果、条件跳过项及清理记录见
+历史包整理的验证命令、模块结果、条件跳过项及清理记录见
 [验证记录](../../docs/validation/aeron-service-packages-20261021.json)。
+交易包及启动包后续迁移的记录见 [Aeron 总 README 的验证记录](../README.md#本轮验证记录2026-10-21)。
+这些是对应改动时的验证证据；当前导航修订仅修改文档和注释，不据此宣称重新运行了交易或恢复测试。
 
 # 保证金写入简化（2026-10-18）
 
