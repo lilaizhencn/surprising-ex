@@ -8,7 +8,7 @@ import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.*;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.maintenance.MaintenanceAeronGateway;
+import com.surprising.trading.maintenance.service.MaintenanceAeronGateway;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import java.util.List;
 import java.time.Instant;

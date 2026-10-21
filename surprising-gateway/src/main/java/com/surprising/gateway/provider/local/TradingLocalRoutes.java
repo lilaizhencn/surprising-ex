@@ -25,7 +25,7 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PlaceAlgoOrderRequest;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PlaceTriggerOrderRequest;
-import com.surprising.trading.maintenance.AdminMaintenanceRequestService;
+import com.surprising.trading.maintenance.controller.AdminMaintenanceController;
 import com.surprising.trading.order.service.AdminOrderRequestService;
 import com.surprising.trading.order.service.LeverageRequestService;
 import com.surprising.trading.order.service.OrderRequestService;
@@ -34,7 +34,7 @@ import com.surprising.trading.order.service.InstrumentCoreSyncService;
 import com.surprising.trading.trigger.service.AdminTriggerOrderRequestService;
 import com.surprising.trading.trigger.service.TriggerOrderRequestService;
 import java.util.UUID;
-import com.surprising.trading.maintenance.MaintenanceRequest;
+import com.surprising.trading.maintenance.controller.MaintenanceRequest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -109,7 +109,7 @@ public final class TradingLocalRoutes {
 
     private final com.surprising.trading.matching.service.MatchingMarketDataService marketDataService;
     private static final PathPattern ORDER_BOOK = PathPatternParser.defaultInstance.parse("/api/v1/trading/market/orderbook");
-    private final AdminMaintenanceRequestService adminMaintenanceRequests;
+    private final AdminMaintenanceController adminMaintenanceRequests;
     private final TriggerOrderRequestService triggerOrderRequests;
     private final AdminTriggerOrderRequestService adminTriggerOrderRequests;
     private final LeverageRequestService leverageRequests;
@@ -118,7 +118,7 @@ public final class TradingLocalRoutes {
     private final AdminOrderRequestService adminOrderRequests;
     private final InstrumentCoreSyncService instrumentCoreSyncService;
 
-    public TradingLocalRoutes(AdminMaintenanceRequestService adminMaintenanceRequests,
+    public TradingLocalRoutes(AdminMaintenanceController adminMaintenanceRequests,
             TriggerOrderRequestService triggerOrderRequests,
             AdminTriggerOrderRequestService adminTriggerOrderRequests,
             LeverageRequestService leverageRequests,

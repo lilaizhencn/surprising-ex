@@ -5,7 +5,7 @@ import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.maintenance.MaintenanceAeronGateway;
+import com.surprising.trading.maintenance.service.MaintenanceAeronGateway;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import java.util.Comparator;
 import java.util.UUID;

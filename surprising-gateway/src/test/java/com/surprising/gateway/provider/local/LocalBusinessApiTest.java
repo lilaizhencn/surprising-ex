@@ -239,7 +239,7 @@ class LocalBusinessApiTest {
 
     private final com.surprising.instrument.provider.service.InstrumentRequestService instruments = mock(com.surprising.instrument.provider.service.InstrumentRequestService.class);
 
-    private final com.surprising.trading.maintenance.AdminMaintenanceRequestService maintenance = mock(com.surprising.trading.maintenance.AdminMaintenanceRequestService.class);
+    private final com.surprising.trading.maintenance.controller.AdminMaintenanceController maintenance = mock(com.surprising.trading.maintenance.controller.AdminMaintenanceController.class);
 
     private final AccountProperties accountProperties = new AccountProperties();
 

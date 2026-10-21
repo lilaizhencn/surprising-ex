@@ -438,3 +438,17 @@ HotSpot JDK 27，对比 `243158a8` 的该方法与当前实现，使用相同 Ob
 ## 诊断字段清理（2026-10-21）
 
 HTTP、Kafka、WebSocket 和事件 DTO 已移除字符串追踪元数据；后台操作与审批保留管理员、请求摘要、业务引用、双人审批和一次性消费校验。新库使用 `init.sql`；已有库先停止旧版 gateway、maker、price 和 realtime，执行 `deployment/migrations/20261021-remove-trace-metadata.sql`，再启动新版。迁移只删除四个诊断字段及其依赖索引，保留业务行；删除后不能直接回滚旧版应用。详见 [运行诊断](../docs/observability/runtime-diagnostics.md)。
+
+## 交易维护的请求、事务与调度
+
+维护入口为 `com.surprising.trading.maintenance.controller.AdminMaintenanceController`，由现有
+`TradingLocalRoutes` 本地分发，不增加 HTTP 路由。入口检查身份、产品头、游标和64位字符串参数，
+转换为 `model.MaintenanceCommand`；Service检查现货限制、清场范围、价格组合和请求幂等身份。
+
+`service.MaintenanceService` 在同一事务持有任务行锁，读取持久动作、执行一个Core命令，
+再完成动作与推进任务。`repository.MaintenanceRepository` 仅访问任务表，
+`repository.MaintenanceActionRepository` 仅访问动作表。动作以 `MaintenanceActionPlan` 保存最终
+Core命令字节，重启或结果未知时仍使用原命令身份与原载荷；不依赖Core命令对象的JSON属性。
+`task.MaintenanceTaskRunner` 保留原1000毫秒默认调度。维护池仍保留独立队列和来源标识，
+六产品线任务不能混用。清场、撤单、部分成交续办、快照恢复与动作/任务写故障由
+`MaintenanceIntegrationTest` 结合真实PostgreSQL和Core验证。

@@ -4,7 +4,7 @@ import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.service.AccountAeronGateway;
 import com.surprising.gateway.product.ProductBusinessConfiguration;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.maintenance.MaintenanceAeronGateway;
+import com.surprising.trading.maintenance.service.MaintenanceAeronGateway;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.service.OrderAeronGateway;
 import com.surprising.trading.trigger.config.TriggerProperties;

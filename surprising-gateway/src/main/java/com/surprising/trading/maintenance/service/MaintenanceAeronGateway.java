@@ -1,4 +1,4 @@
-package com.surprising.trading.maintenance;
+package com.surprising.trading.maintenance.service;
 
 import com.surprising.aeron.client.AeronClientPool;
 import io.aeron.driver.MediaDriver;

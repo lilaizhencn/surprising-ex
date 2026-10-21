@@ -1,6 +1,8 @@
 package com.surprising.aeron.service.orchestration;
 
-import com.surprising.trading.maintenance.*;
+import com.surprising.trading.maintenance.model.*;
+import com.surprising.trading.maintenance.repository.*;
+import com.surprising.trading.maintenance.service.*;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -47,11 +49,11 @@ class MaintenanceIntegrationTest {
                     CoreOrderType.LIMIT,CoreTimeInForce.GTC,90,1,CoreMarginMode.CROSS,CorePositionSide.NET,CoreTriggerOrderStatus.PENDING,
                     0,0,0,"",0,0,0,0,1,0,0);
             submit(22,CoreMessageType.PLACE_TRIGGER_ORDER,CoreTriggerOrderCodec.encodeState(trigger));
-            var request = new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.CANCEL,"0","upgrade test");
+            var request = new MaintenanceCommand(UUID.randomUUID(),"1",0,MaintenanceCommand.Mode.CANCEL,0,"upgrade test");
             var task = fixture.service.create("1",request);
             assertThat(fixture.service.create("1",request).id()).isEqualTo(task.id());
             fixture.service.tick(); fixture.service.tick(); // gate and durable trigger cancellation intent
-            assertThat(fixture.repository.pendingAction(fixture.service.get(task.taskId()))).isNotNull();
+            assertThat(fixture.actionRepository.pendingAction(fixture.service.get(task.taskId()))).isNotNull();
             restartCore();
             var resumed = fixture.newService();
             run(resumed,task.taskId());
@@ -79,11 +81,11 @@ class MaintenanceIntegrationTest {
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(111,CoreOrderSide.SELL,false)));
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(112,CoreOrderSide.BUY,false)));
             long initial = total();
-            var task = fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.SETTLEMENT,"120","delisting test"));
+            var task = fixture.service.create("1",new MaintenanceCommand(UUID.randomUUID(),"1",0,MaintenanceCommand.Mode.SETTLEMENT,120,"delisting test"));
             dropSettlementReply.set(true);
             run(fixture.service,task.taskId());
             assertThat(fixture.service.get(task.taskId()).status()).isEqualTo("BLOCKED");
-            assertThat(fixture.repository.pendingAction(fixture.service.get(task.taskId()))).isNotNull();
+            assertThat(fixture.actionRepository.pendingAction(fixture.service.get(task.taskId()))).isNotNull();
             restartCore();
             var resumed = fixture.newService(); resumed.retry(task.taskId()); run(resumed,task.taskId());
             assertThat(resumed.get(task.taskId()).status()).isEqualTo("COMPLETED");
@@ -100,10 +102,10 @@ class MaintenanceIntegrationTest {
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(111,CoreOrderSide.SELL,false)));
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(112,CoreOrderSide.BUY,false)));
             long initial = total();
-            var task = fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","22",MaintenanceRequest.Mode.MARKET,"0","partial close test"));
+            var task = fixture.service.create("1",new MaintenanceCommand(UUID.randomUUID(),"1",22,MaintenanceCommand.Mode.MARKET,0,"partial close test"));
             run(fixture.service,task.taskId());
             assertThat(fixture.service.get(task.taskId()).status()).isEqualTo("BLOCKED");
-            assertThat(fixture.service.get(task.taskId()).phase()).isEqualTo("VERIFY");
+            assertThat(fixture.service.get(task.taskId()).phase()).as(fixture.service.get(task.taskId()).error()).isEqualTo("VERIFY");
             assertThat(fixture.service.preview("1",22,0).positions()).isNotEmpty();
             assertThat(total()).isEqualTo(initial);
             fixture.service.retry(task.taskId()); run(fixture.service,task.taskId());
@@ -115,16 +117,16 @@ class MaintenanceIntegrationTest {
     }
 
     @ParameterizedTest @org.junit.jupiter.params.provider.MethodSource("matchingModes")
-    void matchingCloseReportsPartialFillThenRetriesOnlyTheRemainingPosition(ProductLine product,MaintenanceRequest.Mode mode) throws Exception {
+    void matchingCloseReportsPartialFillThenRetriesOnlyTheRemainingPosition(ProductLine product,MaintenanceCommand.Mode mode) throws Exception {
         try (var fixture = fixture(product)) {
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(111,CoreOrderSide.SELL,false)));
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(112,CoreOrderSide.BUY,false)));
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(113,CoreOrderSide.BUY,true,2)));
             long initial = total();
-            var task = fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","22",mode,mode==MaintenanceRequest.Mode.LIMIT?"100":"0","partial matching close"));
+            var task = fixture.service.create("1",new MaintenanceCommand(UUID.randomUUID(),"1",22,mode,mode==MaintenanceCommand.Mode.LIMIT?100:0,"partial matching close"));
             run(fixture.service,task.taskId());
             assertThat(fixture.service.get(task.taskId()).status()).as(fixture.service.get(task.taskId()).error()).isEqualTo("BLOCKED");
-            assertThat(fixture.service.preview("1",22,0).positions()).singleElement().satisfies(p -> assertThat(p.signedQuantitySteps()).isEqualTo("2"));
+            assertThat(fixture.service.preview("1",22,0).positions()).as(fixture.service.get(task.taskId()).error()).singleElement().satisfies(p -> assertThat(p.signedQuantitySteps()).isEqualTo("2"));
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(114,CoreOrderSide.BUY,true,2)));
             fixture.service.retry(task.taskId()); run(fixture.service,task.taskId());
             assertThat(fixture.service.get(task.taskId()).status()).as(fixture.service.get(task.taskId()).error()).isEqualTo("COMPLETED");
@@ -136,7 +138,7 @@ class MaintenanceIntegrationTest {
 
     static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> matchingModes() {
         return java.util.Arrays.stream(ProductLine.values()).filter(p->p!=ProductLine.SPOT)
-                .flatMap(p->java.util.stream.Stream.of(MaintenanceRequest.Mode.MARKET,MaintenanceRequest.Mode.LIMIT)
+                .flatMap(p->java.util.stream.Stream.of(MaintenanceCommand.Mode.MARKET,MaintenanceCommand.Mode.LIMIT)
                         .map(m->org.junit.jupiter.params.provider.Arguments.of(p,m)));
     }
 
@@ -151,7 +153,7 @@ class MaintenanceIntegrationTest {
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(hedgedOrder(114,CoreOrderSide.SELL,CorePositionSide.SHORT,3)));
             assertThat(fixture.service.preview("1",0,0).positions()).hasSize(4);
             long initial=total();
-            var task=fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.SETTLEMENT,"120","hedged clearance"));
+            var task=fixture.service.create("1",new MaintenanceCommand(UUID.randomUUID(),"1",0,MaintenanceCommand.Mode.SETTLEMENT,120,"hedged clearance"));
             run(fixture.service,task.taskId());
             assertThat(fixture.service.get(task.taskId()).status()).as(fixture.service.get(task.taskId()).error()).isEqualTo("COMPLETED");
             assertThat(fixture.service.preview("1",0,0).positions()).isEmpty();
@@ -166,7 +168,7 @@ class MaintenanceIntegrationTest {
             var progress=CoreFundingProgressCodec.decode(submit(0,CoreMessageType.APPLY_FUNDING,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(51,"1",10_000,0,1))).data());
             assertThat(progress.complete()).isFalse();
-            var task=fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.CANCEL,"0","wait for funding"));
+            var task=fixture.service.create("1",new MaintenanceCommand(UUID.randomUUID(),"1",0,MaintenanceCommand.Mode.CANCEL,0,"wait for funding"));
             fixture.service.tick();
             assertThat(fixture.service.get(task.taskId()).status()).isEqualTo("BLOCKED");
             assertThat(fixture.service.get(task.taskId()).roundNo()).isEqualTo(1);
@@ -188,19 +190,19 @@ class MaintenanceIntegrationTest {
                     new ApplyMarkPriceCommand("1",10_000,2,1_700_000_000_100L)));
             submit(0,CoreMessageType.CONTINUE_RISK_SCAN,TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(16)));
             assertThat(state.tradingState().riskState().liquidations()).isNotEmpty();
-            var task=fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.SETTLEMENT,"120","wait for liquidation"));
+            var task=fixture.service.create("1",new MaintenanceCommand(UUID.randomUUID(),"1",0,MaintenanceCommand.Mode.SETTLEMENT,120,"wait for liquidation"));
             fixture.service.tick();
             assertThat(fixture.service.get(task.taskId()).phase()).isEqualTo("GATE_REJECTED");
             assertThat(fixture.service.preview("1",0,0).gateMode()).isEqualTo("TRADING");
             assertThat(fixture.service.release(task.taskId()).status()).isEqualTo("RELEASED");
             assertThat(state.tradingState().riskState().liquidations()).isNotEmpty();
-            assertThat(fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.CANCEL,"0","new task")).id()).isNotEqualTo(task.id());
+            assertThat(fixture.service.create("1",new MaintenanceCommand(UUID.randomUUID(),"1",0,MaintenanceCommand.Mode.CANCEL,0,"new task")).id()).isNotEqualTo(task.id());
         }
     }
 
     @Test void unknownGateAndReleaseOutcomesResumeTheirOwnPhaseAndIdentity() throws Exception {
         try(var fixture=fixture(ProductLine.LINEAR_PERPETUAL)) {
-            var task=fixture.service.create("1",new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.CANCEL,"0","gate recovery"));
+            var task=fixture.service.create("1",new MaintenanceCommand(UUID.randomUUID(),"1",0,MaintenanceCommand.Mode.CANCEL,0,"gate recovery"));
             dropGateReply.set(true); fixture.service.tick();
             assertThat(fixture.service.get(task.taskId()).status()).isEqualTo("BLOCKED");
             assertThat(fixture.service.get(task.taskId()).roundNo()).isZero();
@@ -220,9 +222,9 @@ class MaintenanceIntegrationTest {
     @Test void providerReplicasSkipLockedTasksAndCannotMixProductLines() throws Exception {
         try(var fixture=fixture(ProductLine.LINEAR_PERPETUAL);
             var executor=java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
-            var first=fixture.repository.create(line,"1",new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.CANCEL,"0","first"));
-            var second=fixture.repository.create(line,"1",new MaintenanceRequest(UUID.randomUUID(),"2","",MaintenanceRequest.Mode.CANCEL,"0","second"));
-            assertThatThrownBy(()->fixture.repository.get(ProductLine.SPOT,first.taskId(),false)).isInstanceOf(IllegalArgumentException.class);
+            var first=fixture.repository.create(line,"1",new MaintenanceCommand(UUID.randomUUID(),"1",0,MaintenanceCommand.Mode.CANCEL,0,"first"));
+            var second=fixture.repository.create(line,"1",new MaintenanceCommand(UUID.randomUUID(),"2",0,MaintenanceCommand.Mode.CANCEL,0,"second"));
+            assertThat(fixture.repository.get(ProductLine.SPOT,first.taskId(),false)).isNull();
             var locked=new java.util.concurrent.CountDownLatch(1);
             var release=new java.util.concurrent.CountDownLatch(1);
             var transaction=new org.springframework.transaction.support.TransactionTemplate(new DataSourceTransactionManager(fixture.source));
@@ -242,9 +244,64 @@ class MaintenanceIntegrationTest {
     }
 
     @Test void rejectsUnsafeScopesAndPrices() {
-        assertThatThrownBy(() -> new MaintenanceRequest(UUID.randomUUID(),"1","22",MaintenanceRequest.Mode.SETTLEMENT,"120","test")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.LIMIT,"0","test")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new MaintenanceRequest(UUID.randomUUID(),"1","",MaintenanceRequest.Mode.MARKET,"0","test").validate(ProductLine.SPOT)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new MaintenanceCommand(UUID.randomUUID(),"1",22,MaintenanceCommand.Mode.SETTLEMENT,120,"test").validate(ProductLine.LINEAR_PERPETUAL)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new MaintenanceCommand(UUID.randomUUID(),"1",0,MaintenanceCommand.Mode.LIMIT,0,"test").validate(ProductLine.LINEAR_PERPETUAL)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new MaintenanceCommand(UUID.randomUUID(),"1",0,MaintenanceCommand.Mode.MARKET,0,"test").validate(ProductLine.SPOT)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void reusedRequestIdCannotChangeApprovedIntentOrAdministrator() throws Exception {
+        try (var fixture = fixture(ProductLine.SPOT)) {
+            var request = new MaintenanceCommand(UUID.randomUUID(), "1", 0, MaintenanceCommand.Mode.CANCEL, 0, "approved intent");
+            var original = fixture.service.create("1", request);
+            assertThatThrownBy(() -> fixture.service.create("2", request))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("requestId");
+            var changed = new MaintenanceCommand(request.requestId(), "1", 0, MaintenanceCommand.Mode.CANCEL, 0, "changed intent");
+            assertThatThrownBy(() -> fixture.service.create("1", changed))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("requestId");
+            assertThat(fixture.service.get(original.taskId()).request()).isEqualTo(request);
+            assertThat(fixture.service.get(original.taskId()).adminUserId()).isEqualTo("1");
+        }
+    }
+
+    @Test
+    void parentTaskWriteFailurePreservesTheSamePendingActionForRecovery() throws Exception {
+        try (var fixture = fixture(ProductLine.SPOT)) {
+            submit(11, CoreMessageType.PLACE_ORDER, TradingCommandCodec.encodePlaceOrder(order(111, CoreOrderSide.SELL, false)));
+            long initial = total();
+            var task = fixture.service.create("1", new MaintenanceCommand(UUID.randomUUID(), "1", 0,
+                    MaintenanceCommand.Mode.CANCEL, 0, "action transaction fault"));
+            fixture.service.tick(); // gate
+            fixture.service.tick(); // triggers -> orders
+            fixture.service.tick(); // persist cancellation intent
+            var pending = fixture.actionRepository.pendingAction(fixture.service.get(task.taskId()));
+            assertThat(pending).isNotNull();
+            var jdbc = new JdbcTemplate(fixture.source);
+            jdbc.execute("""
+                    CREATE FUNCTION mvc_maintenance_reject_task_write() RETURNS trigger LANGUAGE plpgsql AS $$
+                    BEGIN RAISE EXCEPTION 'injected parent task write failure'; END; $$
+                    """);
+            jdbc.execute("CREATE TRIGGER mvc_maintenance_reject_task_write BEFORE UPDATE ON trading_maintenance_task "
+                    + "FOR EACH ROW EXECUTE FUNCTION mvc_maintenance_reject_task_write()");
+            try {
+                assertThatThrownBy(fixture.service::tick).isInstanceOf(org.springframework.dao.DataAccessException.class);
+                assertThat(fixture.actionRepository.pendingAction(fixture.service.get(task.taskId())))
+                        .isEqualTo(pending);
+            } finally {
+                jdbc.execute("DROP TRIGGER mvc_maintenance_reject_task_write ON trading_maintenance_task");
+                jdbc.execute("DROP FUNCTION mvc_maintenance_reject_task_write()");
+            }
+            restartCore();
+            var resumed = fixture.newService();
+            run(resumed, task.taskId());
+            assertThat(resumed.get(task.taskId()).status()).isEqualTo("COMPLETED");
+            assertThat(resumed.actions(task.taskId(), "")).singleElement().satisfies(action -> {
+                assertThat(action.key()).isEqualTo(pending.key());
+                assertThat(action.requestJson()).isEqualTo(pending.requestJson());
+                assertThat(action.completed()).isTrue();
+            });
+            assertThat(total()).isEqualTo(initial);
+        }
     }
 
     private Fixture fixture(ProductLine product) throws Exception {
@@ -261,17 +318,23 @@ class MaintenanceIntegrationTest {
         final TradingOrderProperties properties = new TradingOrderProperties();
         final MaintenanceAeronGateway gateway = mock(MaintenanceAeronGateway.class);
         final MaintenanceRepository repository;
+        final MaintenanceActionRepository actionRepository;
         final MaintenanceService service;
         Fixture() throws Exception {
             source.setUrl(System.getenv("MAINTENANCE_TEST_JDBC_URL")); source.setUser(System.getenv("INSTRUMENT_TEST_DB_USER")); source.setPassword(System.getenv("INSTRUMENT_TEST_DB_PASSWORD"));
             var jdbc = new JdbcTemplate(source);
             // Dedicated test database must be initialized once with the root init.sql.
             jdbc.execute("TRUNCATE trading_maintenance_action,trading_maintenance_task RESTART IDENTITY CASCADE");
-            repository = new MaintenanceRepository(jdbc); properties.getKafka().setProductLine(line);
+            repository = new MaintenanceRepository(jdbc); actionRepository = new MaintenanceActionRepository(jdbc); properties.getKafka().setProductLine(line);
             when(gateway.maintenance(anyString(),anyLong(),anyInt())).thenAnswer(i -> CoreMaintenanceCodec.decodePage(query(0,CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY,CoreMaintenanceCodec.encodeQuery(new CoreMaintenanceCodec.Query(i.getArgument(0),i.getArgument(1),i.getArgument(2)))).data()));
             when(gateway.userState(anyLong())).thenAnswer(i -> CoreStateQueryCodec.decodeUserState(query(i.getArgument(0),CoreMessageType.USER_STATE_QUERY,new byte[0]).data()));
             when(gateway.openOrders(anyLong(),anyString(),anyLong(),anyInt())).thenAnswer(i -> CoreStateQueryCodec.decodeOpenOrders(query(i.getArgument(0),CoreMessageType.USER_OPEN_ORDERS_QUERY,CoreStateQueryCodec.encodeOpenOrdersQuery(new CoreOpenOrdersQuery(i.getArgument(1),i.getArgument(2),i.getArgument(3)))).data()).orders());
-            when(gateway.orderState(anyLong(),anyLong())).thenAnswer(i -> CoreStateQueryCodec.decodeOrderState(query(i.getArgument(0),CoreMessageType.ORDER_STATE_QUERY,TradingCommandCodec.encodeOrderStateQuery(i.getArgument(1))).data()));
+            when(gateway.orderState(anyLong(),anyLong())).thenAnswer(i -> {
+                var response = query(i.getArgument(0), CoreMessageType.ORDER_STATE_QUERY,
+                        TradingCommandCodec.encodeOrderStateQuery(i.getArgument(1)));
+                return response.resultCode() == CoreResultCode.ENTITY_NOT_FOUND ? null
+                        : CoreStateQueryCodec.decodeOrderState(response.data());
+            });
             when(gateway.settlementProgress(anyString())).thenAnswer(i -> CoreSettlementProgressCodec.decode(query(0,CoreMessageType.SETTLEMENT_PROGRESS_QUERY,CoreStateQueryCodec.encodeSettlementProgressQuery(i.getArgument(0))).data()));
             when(gateway.command(any(),any(),anyLong(),any())).thenAnswer(i -> {
                 var response = apply((CoreMessageType)i.getArgument(0),i.getArgument(1),i.getArgument(2),i.getArgument(3));
@@ -287,7 +350,7 @@ class MaintenanceIntegrationTest {
             when(gateway.triggerState(anyLong(),anyLong())).thenAnswer(i -> CoreTriggerOrderCodec.decodeList(query(i.getArgument(0),CoreMessageType.TRIGGER_ORDER_QUERY,CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(i.getArgument(1),"",0,1))).data()).getFirst());
             service=newService();
         }
-        MaintenanceService newService() { return new MaintenanceService(properties,repository,gateway,new ObjectMapper(),new DataSourceTransactionManager(source)); }
+        MaintenanceService newService() { return new MaintenanceService(properties,repository,actionRepository,gateway,new ObjectMapper(),new DataSourceTransactionManager(source)); }
         @Override public void close() { state.close(); }
     }
     private void restartCore() { byte[] snapshot=state.snapshot(900); state.close(); state=TradingCoreRuntime.fromSnapshot(line,snapshot); }
@@ -295,15 +358,64 @@ class MaintenanceIntegrationTest {
     private CoreResponse submit(long user,CoreMessageType type,byte[] bytes) { var response=apply(type,UUID.randomUUID(),user,bytes); assertThat(response.commandStatus()).as("%s",response.resultCode()).isEqualTo(ResponseStatus.APPLIED); return response; }
     private CoreResponse apply(CoreMessageType type,UUID id,long user,byte[] bytes) {
         long seq=++sequence; var message=new CoreMessage(CoreMessageHeader.command(type,id,line,CommandSource.OPERATIONS,998,seq,user,1_700_000_000_000L+seq,seq),bytes);
-        var response=state.apply(message);
-        if(response.resultCode()==CoreResultCode.MATCHING_PENDING) response=CoreTestCompletion.completeMatchingSynchronously(state, state.matchingSequence(id),message.header().submittedAtEpochMillis(),seq);
-        while(state.pendingMatching.firstSequence()!=0) CoreTestCompletion.completeMatchingSynchronously(state, state.pendingMatching.firstSequence(),message.header().submittedAtEpochMillis(),seq);
+        var response = applyAndAwait(message);
         return response;
     }
     private CoreResponse query(long user,CoreMessageType type,byte[] bytes) {
         var header=CoreMessageHeader.query(type,UUID.randomUUID(),line,CommandSource.OPERATIONS,998,++sequence,user,1_700_000_000_000L+sequence,sequence);
-        var response=state.apply(new CoreMessage(header,bytes)); assertThat(response.status()).as("%s: %s",type,response.resultCode()).isEqualTo(ResponseStatus.OK); return response;
+        var response=applyAndAwait(new CoreMessage(header,bytes));
+        if (type != CoreMessageType.ORDER_STATE_QUERY || response.resultCode() != CoreResultCode.ENTITY_NOT_FOUND) {
+            assertThat(response.status()).as("%s: %s",type,response.resultCode()).isEqualTo(ResponseStatus.OK);
+        }
+        return response;
     }
+    /** 测试按集群的实际异步入口推进Lane/Matcher/提交，不将null或MATCHING_PENDING当终态。 */
+    private CoreResponse applyAndAwait(CoreMessage message) {
+        state.activate();
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        var window = new com.surprising.aeron.service.orchestration.trade.ClusterCommandWindow();
+        boolean independent = state.prepareClusterPipelineScope(message, window);
+        while (!independent && state.requiresOwnerLaneAccessForPreparation(message)
+                && !state.runtimeState().tryAcquireOwnerLaneAccess()) {
+            if (System.nanoTime() >= deadline) throw new AssertionError("Lane handoff timeout");
+            Thread.onSpinWait();
+        }
+        state.runtimeState().enterAsynchronousCommandScope();
+        try {
+            long timestamp = message.header().submittedAtEpochMillis();
+            long position = message.header().sourceSequence();
+            CoreResponse response = state.applyDecodedCommand(message, timestamp, position,
+                    window.decodedIfPresent(message), independent);
+            while (state.directCommand.active()) {
+                response = state.directCommand.poll(state);
+                if (System.nanoTime() >= deadline) throw new AssertionError("direct command timeout");
+                Thread.onSpinWait();
+            }
+            long requestedSequence = state.matchingSequence(message.header().commandId());
+            CoreResponse[] completed = {response};
+            while (state.pendingMatching.firstSequence() != 0) {
+                state.commits.commitReadyMatching(64, timestamp, position, false,
+                        (id, result) -> { if (id == requestedSequence) completed[0] = result; });
+                if (System.nanoTime() >= deadline) throw new AssertionError("matching command timeout");
+                Thread.onSpinWait();
+            }
+            response = completed[0];
+            if (message.header().kind() == WireMessageKind.QUERY
+                    && response.resultCode() == CoreResultCode.MATCHING_PENDING) {
+                long id = state.bookQueries.querySequence(message.header().commandId());
+                while ((response = state.bookQueries.takeQueryResult(id)) == null) {
+                    state.assertHealthy();
+                    if (System.nanoTime() >= deadline) throw new AssertionError("query timeout");
+                    Thread.onSpinWait();
+                }
+            }
+            return response;
+        } finally {
+            state.runtimeState().exitAsynchronousCommandScope();
+            state.runtimeState().releaseOwnerLaneAccess();
+        }
+    }
+
     private static PlaceOrderCommand order(long id,CoreOrderSide side,boolean reduce) { return new PlaceOrderCommand(id,"1",side,100,4,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
     private static PlaceOrderCommand order(long id,CoreOrderSide side,boolean reduce,long quantity) { return new PlaceOrderCommand(id,"1",side,100,quantity,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
     private static PlaceOrderCommand hedgedOrder(long id,CoreOrderSide side,CorePositionSide positionSide,long quantity) { return new PlaceOrderCommand(id,"1",side,100,quantity,false,CoreMarginMode.CROSS,positionSide,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
