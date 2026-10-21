@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cNotificationService;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -107,15 +109,15 @@ class C2cMeHttpPostgresTest {
         UUID ad=fixture.publish("SELL");
         var saved=fixture.call(HttpMethod.POST,"/api/v1/c2c/me/price-alerts",12,
                 new C2cMeController.Alert(null,"0",fixture.marketId,"BUY","6.65",true),200);
-        UUID id=UUID.fromString((String)saved.get("alertId"));var jobs=new C2cNotificationJobs(fixture.db.jdbc);
-        assertThat(fixture.db.transaction(jobs::notifyPriceAlerts)).isEqualTo(1);
-        assertThat(fixture.db.transaction(jobs::notifyPriceAlerts)).isZero();
+        UUID id=UUID.fromString((String)saved.get("alertId"));var jobs=fixture.bean(C2cNotificationService.class);
+        assertThat(jobs.processBatch()).isEqualTo(1);
+        assertThat(jobs.processBatch()).isZero();
         fixture.call(HttpMethod.POST,"/api/v1/c2c/me/price-alerts",12,new C2cMeController.Alert(id,"1",fixture.marketId,"BUY","6.60",true),409);
         fixture.call(HttpMethod.POST,"/api/v1/c2c/me/price-alerts",12,new C2cMeController.Alert(id,"2",fixture.marketId,"BUY","6.60",true),200);
-        assertThat(fixture.db.transaction(jobs::notifyPriceAlerts)).isZero();
+        assertThat(jobs.processBatch()).isZero();
         var row=fixture.bean(C2cAdsRepository.class).get(ad,false);
         fixture.call(HttpMethod.PATCH,"/api/v1/c2c/ads/"+ad,11,new C2cController.AdEdit(Long.toString(row.revision()),"6.50","1","10000","Synthetic terms",0),200);
-        assertThat(fixture.db.transaction(jobs::notifyPriceAlerts)).isEqualTo(1);
+        assertThat(jobs.processBatch()).isEqualTo(1);
         var notifications=fixture.call(HttpMethod.GET,"/api/v1/c2c/me/notifications",12,null,200);
         assertThat(notifications.get("unreadCount")).isEqualTo("2");
         String through=(String)((Map<?,?>)((List<?>)notifications.get("items")).getFirst()).get("notificationId");
@@ -128,17 +130,17 @@ class C2cMeHttpPostgresTest {
     @Test void alertsRespectBlockedOrExpiredMerchantsAndClosedMarket() throws Exception {
         fixture.publish("SELL");
         fixture.call(HttpMethod.POST,"/api/v1/c2c/me/price-alerts",12,new C2cMeController.Alert(null,"0",fixture.marketId,"BUY","7",true),200);
-        var jobs=new C2cNotificationJobs(fixture.db.jdbc);
+        var jobs=fixture.bean(C2cNotificationService.class);
         fixture.call(HttpMethod.PUT,"/api/v1/c2c/me/relations/BLOCK/11",12,null,200);
-        assertThat(fixture.db.transaction(jobs::notifyPriceAlerts)).isZero();
+        assertThat(jobs.processBatch()).isZero();
         fixture.call(HttpMethod.DELETE,"/api/v1/c2c/me/relations/BLOCK/11",12,null,200);
         fixture.db.jdbc.update("UPDATE gateway_user_kyc_profiles SET expires_at=now()-interval '1 second' WHERE user_id=11");
-        assertThat(fixture.db.transaction(jobs::notifyPriceAlerts)).isZero();
+        assertThat(jobs.processBatch()).isZero();
         fixture.db.jdbc.update("UPDATE gateway_user_kyc_profiles SET expires_at=NULL WHERE user_id=11");
         fixture.db.jdbc.update("UPDATE c2c_configuration SET enabled=false");
-        assertThat(fixture.db.transaction(jobs::notifyPriceAlerts)).isZero();
+        assertThat(jobs.processBatch()).isZero();
         fixture.db.jdbc.update("UPDATE c2c_configuration SET enabled=true");
-        assertThat(fixture.db.transaction(jobs::notifyPriceAlerts)).isEqualTo(1);
+        assertThat(jobs.processBatch()).isEqualTo(1);
     }
 
     private Map<?,?> escrow() throws Exception {

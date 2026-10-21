@@ -12,6 +12,14 @@ public class C2cSecurityGrantRepository {
 
     public C2cSecurityGrantRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
+    public int deleteExpired(int limit) {
+        return jdbc.update("""
+                DELETE FROM c2c_security_grants WHERE (user_id,token_hash) IN (
+                    SELECT user_id,token_hash FROM c2c_security_grants WHERE expires_at<now()
+                    ORDER BY expires_at LIMIT ? FOR UPDATE SKIP LOCKED)
+                """, limit);
+    }
+
     public boolean active(long userId, String tokenHash) {
         return Boolean.TRUE.equals(jdbc.queryForObject("""
                 SELECT EXISTS(SELECT 1 FROM c2c_security_grants WHERE user_id=? AND token_hash=? AND expires_at>now())

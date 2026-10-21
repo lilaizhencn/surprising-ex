@@ -60,16 +60,13 @@ public class C2cQueries {
             default -> throw new IllegalArgumentException("排序方式无效");
         };
         long viewerId = viewer == null ? 0 : viewer.userId();
+        // 只读资格视图集中基础交易资格；档案和订单统计仅为当前稳定广告页补充展示/筛选，不扩展独立写职责。
         var rows = jdbc.query("""
                 SELECT a.*,COALESCE(p.nickname,'商家'||right(a.maker_user_id::text,6)) AS merchant_nickname,c.tier,
                     s.completed_30d,s.ended_30d,s.completed_total,s.paid_seconds,s.released_seconds
-                FROM c2c_ads a
-                JOIN c2c_merchants c ON c.user_id=a.maker_user_id AND c.status='APPROVED'
-                JOIN c2c_merchant_bonds b ON b.user_id=c.user_id AND b.status='LOCKED'
-                JOIN c2c_merchant_bond_policy bp ON bp.asset=b.asset AND b.amount_units>=bp.amount_units
-                JOIN gateway_users u ON u.user_id=a.maker_user_id AND u.status='NORMAL'
+                FROM c2c_eligible_ads a
+                JOIN c2c_merchants c ON c.user_id=a.maker_user_id
                 LEFT JOIN c2c_profiles p ON p.user_id=a.maker_user_id
-                LEFT JOIN gateway_user_kyc_profiles k ON k.user_id=a.maker_user_id
                 LEFT JOIN LATERAL (
                     SELECT count(*) FILTER (WHERE status='COMPLETED' AND completed_at>=now()-interval '30 days') AS completed_30d,
                         count(*) FILTER (WHERE status IN ('COMPLETED','CANCELED','EXPIRED') AND COALESCE(completed_at,canceled_at)>=now()-interval '30 days') AS ended_30d,
@@ -78,9 +75,7 @@ public class C2cQueries {
                         avg(EXTRACT(EPOCH FROM completed_at-paid_at)) FILTER(WHERE status='COMPLETED') AS released_seconds
                     FROM c2c_orders WHERE buyer_user_id=a.maker_user_id OR seller_user_id=a.maker_user_id
                 ) s ON true
-                WHERE a.market_id=? AND a.side=? AND a.status='ACTIVE' AND a.available_units>0
-                    AND ROUND(a.available_units::numeric*a.price/?,?)>=a.min_fiat
-                    AND (?=false OR (k.status='VERIFIED' AND (k.expires_at IS NULL OR k.expires_at>now())))
+                WHERE a.market_id=? AND a.side=?
                     AND (CAST(? AS numeric) IS NULL OR (? BETWEEN a.min_fiat AND a.max_fiat
                         AND ROUND(a.available_units::numeric*a.price/?,?)>=?))
                     AND (CAST(? AS text) IS NULL OR ?=ANY(a.method_codes))
@@ -90,15 +85,14 @@ public class C2cQueries {
                     AND a.payment_window_seconds<=? AND a.maker_user_id<>?
                     AND NOT EXISTS(SELECT 1 FROM c2c_relations r WHERE r.kind='BLOCK' AND
                         ((r.user_id=? AND r.target_user_id=a.maker_user_id) OR (r.target_user_id=? AND r.user_id=a.maker_user_id)))
-                    AND EXISTS(SELECT 1 FROM c2c_payment_methods pm WHERE pm.enabled AND pm.code=ANY(a.method_codes) AND ?=ANY(pm.currencies))
                 ORDER BY %s LIMIT ? OFFSET ?
                 """.formatted(sort), (r,n) -> new Offer(ads.read(r,n),r.getString("merchant_nickname"),r.getString("tier"),
                         r.getLong("completed_30d"),r.getLong("ended_30d"),r.getLong("completed_total"),
                         r.getBigDecimal("paid_seconds"),r.getBigDecimal("released_seconds")),
-                market.id(),makerSide,market.assetScale(),market.fiatDecimals(),market.requireKyc(),amount,amount,market.assetScale(),market.fiatDecimals(),amount,
+                market.id(),makerSide,amount,amount,market.assetScale(),market.fiatDecimals(),amount,
                 filter.method(),filter.method(),filter.merchantId(),filter.merchantId(),filter.vipOnly(),
                 filter.minCompleted(),filter.minCompletionRate(),filter.minCompletionRate(),filter.maxPaymentSeconds(),viewerId,viewerId,viewerId,
-                market.fiat(),filter.limit()+1,filter.offset());
+                filter.limit()+1,filter.offset());
         var methods = enabledMethods(market.fiat());
         var visible = rows.stream().limit(filter.limit()).map(row -> {
             var view = C2cViews.ad(row.ad(),market,false);

@@ -18,6 +18,16 @@ public class C2cQuoteRepository {
 
     public C2cQuoteRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
+    /** 关联订单仅为保留所有已引用报价及审计事实；只删除本表中过期超过一天且未引用的有界批次。 */
+    public int deleteExpiredUnreferenced(int limit) {
+        return jdbc.update("""
+                DELETE FROM c2c_quotes WHERE quote_id IN (
+                    SELECT q.quote_id FROM c2c_quotes q WHERE q.expires_at<now()-interval '1 day'
+                        AND NOT EXISTS(SELECT 1 FROM c2c_orders o WHERE o.quote_id=q.quote_id)
+                    ORDER BY q.expires_at LIMIT ? FOR UPDATE OF q SKIP LOCKED)
+                """, limit);
+    }
+
     public C2cQuote get(UUID id, boolean lock) {
         var rows = jdbc.query("SELECT * FROM c2c_quotes WHERE quote_id=?" + (lock ? " FOR UPDATE" : ""), this::read, id);
         if (rows.isEmpty()) throw new IllegalArgumentException("报价不存在或已过期");
