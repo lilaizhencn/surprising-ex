@@ -1,30 +1,30 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.repository.CustodyWithdrawalRepository;
+import com.surprising.gateway.provider.model.CustodyWithdrawalModels;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class CustodyWithdrawalRefundService {
 
-    private final CustodyWithdrawalRepository repository;
+    private final CustodyWithdrawalStateService states;
     private final SpotAccountClient spotAccountClient;
 
-    public CustodyWithdrawalRefundService(CustodyWithdrawalRepository repository,
+    public CustodyWithdrawalRefundService(CustodyWithdrawalStateService states,
                                           SpotAccountClient spotAccountClient) {
-        this.repository = repository;
+        this.states = states;
         this.spotAccountClient = spotAccountClient;
     }
 
     @Transactional
-    public void refund(CustodyWithdrawalRepository.WithdrawalRecord record,
+    public void refund(CustodyWithdrawalModels.WithdrawalRecord record,
                        String spotReason,
                        String stateReason) {
         refund(record, spotReason, stateReason, null);
     }
 
     @Transactional
-    public void refund(CustodyWithdrawalRepository.WithdrawalRecord record,
+    public void refund(CustodyWithdrawalModels.WithdrawalRecord record,
                        String spotReason,
                        String stateReason,
                        String walletResponse) {
@@ -32,14 +32,14 @@ public class CustodyWithdrawalRefundService {
                 || "REJECTED".equals(record.status())) {
             return;
         }
-        CustodyWithdrawalRepository.WithdrawalRecord pending = walletResponse == null
-                ? repository.markRefundPending(record.withdrawalId(), stateReason)
-                : repository.markRefundPending(record.withdrawalId(), stateReason, walletResponse);
+        CustodyWithdrawalModels.WithdrawalRecord pending = walletResponse == null
+                ? states.markRefundPending(record.withdrawalId(), stateReason)
+                : states.markRefundPending(record.withdrawalId(), stateReason, walletResponse);
         if (pending == null || !"REFUND_PENDING".equals(pending.status())) {
             return;
         }
         spotAccountClient.adjustBalance(pending.userId(), pending.assetSymbol(), pending.amountUnits(),
                 pending.spotDebitReference() + ":refund", spotReason);
-        repository.markRefunded(pending.withdrawalId(), pending.walletResponse(), stateReason);
+        states.markRefunded(pending.withdrawalId(), pending.walletResponse(), stateReason);
     }
 }

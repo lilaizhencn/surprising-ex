@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.model.CustodyWithdrawalModels;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
@@ -8,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.repository.CustodyWithdrawalRepository;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +20,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,6 +47,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
     private JdbcTemplate jdbcTemplate;
     private TransactionTemplate transactionTemplate;
     private CustodyWithdrawalRepository repository;
+    private CustodyWithdrawalStateService states;
     private CustodyWalletClient walletClient;
     private SpotAccountClient spotAccountClient;
     private CustodyWithdrawalReconciliationService reconciliationService;
@@ -70,6 +74,9 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 () -> Mockito.mock(WithdrawalValuationClient.class));
         applicationContext.registerBean(ObjectMapper.class, () -> new ObjectMapper());
         applicationContext.registerBean(CustodyWithdrawalRepository.class);
+        applicationContext.registerBean(com.surprising.gateway.provider.repository.CustodyWithdrawalEventRepository.class);
+        applicationContext.registerBean(com.surprising.gateway.provider.repository.CustodyWithdrawalActionRepository.class);
+        applicationContext.registerBean(CustodyWithdrawalStateService.class);
         applicationContext.registerBean(CustodyWithdrawalRefundService.class);
         applicationContext.registerBean(CustodyWithdrawalReconciliationService.class);
         applicationContext.registerBean(com.surprising.asset.service.AssetConfigurationService.class,
@@ -77,6 +84,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
         applicationContext.registerBean(CustodyWithdrawalService.class);
         applicationContext.refresh();
         repository = applicationContext.getBean(CustodyWithdrawalRepository.class);
+        states = applicationContext.getBean(CustodyWithdrawalStateService.class);
         reconciliationService = applicationContext.getBean(CustodyWithdrawalReconciliationService.class);
         withdrawalService = applicationContext.getBean(CustodyWithdrawalService.class);
         PlatformTransactionManager transactionManager =
@@ -92,6 +100,11 @@ class CustodyWithdrawalReconciliationPostgresTest {
                     + "DISABLE TRIGGER gateway_wallet_withdrawal_events_immutable_trigger");
             jdbcTemplate.execute("ALTER TABLE gateway_wallet_withdrawal_actions "
                     + "DISABLE TRIGGER gateway_wallet_withdrawal_actions_immutable_trigger");
+            for (String table : List.of("gateway_wallet_withdrawal_actions", "gateway_wallet_withdrawal_events")) {
+                jdbcTemplate.update("DELETE FROM " + table + " WHERE withdrawal_id IN "
+                        + "(SELECT withdrawal_id FROM gateway_wallet_withdrawals WHERE user_id = 43)");
+            }
+            jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawals WHERE user_id = 43");
             jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawal_actions WHERE withdrawal_id = ?", withdrawalId);
             jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawal_events WHERE withdrawal_id = ?", withdrawalId);
             jdbcTemplate.update("DELETE FROM gateway_wallet_withdrawals WHERE withdrawal_id = ?", withdrawalId);
@@ -108,17 +121,78 @@ class CustodyWithdrawalReconciliationPostgresTest {
     }
 
     @Test
+    void repeatedIntentReturnsOriginalAndRejectsChangedPayloadWithoutAnotherEvent() {
+        var first = states.createOrGet(intent("intent-repeat", "hash-one", new BigDecimal("50")));
+        var repeated = states.createOrGet(intent("intent-repeat", "hash-one", new BigDecimal("50")));
+        assertThat(first.created()).isTrue();
+        assertThat(repeated.created()).isFalse();
+        assertThat(repeated.record().withdrawalId()).isEqualTo(first.record().withdrawalId());
+        assertThatThrownBy(() -> states.createOrGet(intent("intent-repeat", "hash-two", new BigDecimal("50"))))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("idempotency key");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM gateway_wallet_withdrawal_events "
+                + "WHERE withdrawal_id = ?", Integer.class, first.record().withdrawalId())).isEqualTo(1);
+    }
+
+    @Test
+    void quotaLockSerializesIntentsUntilOriginalTransactionCommits() throws Exception {
+        CountDownLatch firstInserted = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        Future<?> first = executor.submit(() -> inTransaction(() -> {
+            states.createOrGet(intent("quota-first", "hash-first", new BigDecimal("25")));
+            firstInserted.countDown();
+            await(releaseFirst);
+        }));
+        assertThat(firstInserted.await(2, TimeUnit.SECONDS)).isTrue();
+        Future<?> second = executor.submit(() -> {
+            secondStarted.countDown();
+            return states.createOrGet(intent("quota-second", "hash-second", new BigDecimal("25")));
+        });
+        try {
+            assertThat(secondStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> second.get(200, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+        } finally {
+            releaseFirst.countDown();
+        }
+        first.get(5, TimeUnit.SECONDS);
+        assertThatThrownBy(() -> second.get(5, TimeUnit.SECONDS)).hasCauseInstanceOf(IllegalArgumentException.class)
+                .hasStackTraceContaining("daily withdrawal limit exceeded");
+        assertThat(repository.dailyTotal(43L)).isEqualByComparingTo("25");
+        assertThat(repository.findByUserAndIdempotency(43L, "quota-second")).isNull();
+    }
+
+    @Test
+    void failedIntentEventLeavesNeitherIntentNorConsumedQuota() {
+        rejectEventInserts();
+        try {
+            assertThatThrownBy(() -> states.createOrGet(intent("intent-event-failed", "hash", new BigDecimal("25"))))
+                    .isInstanceOf(org.springframework.dao.DataAccessException.class);
+            assertThat(repository.findByUserAndIdempotency(43L, "intent-event-failed")).isNull();
+            assertThat(repository.dailyTotal(43L)).isEqualByComparingTo("0");
+        } finally {
+            allowEventInserts();
+        }
+        assertThat(states.createOrGet(intent("intent-event-failed", "hash", new BigDecimal("25"))).created()).isTrue();
+    }
+
+    private CustodyWithdrawalModels.CreateRequest intent(String key, String hash, BigDecimal dailyLimit) {
+        return new CustodyWithdrawalModels.CreateRequest(43L, key, hash, "ETH", "USDT", UUID.randomUUID(),
+                "0xrecipient", "25", 25_000_000L, new BigDecimal("25"), "intent:" + key,
+                "intent:" + key, "{}", false, dailyLimit);
+    }
+
+    @Test
     void confirmationThatWinsTheOutcomeLockDoesNotCreditSpot() throws Exception {
         when(walletClient.withdrawalsByExternalReference(
                 "custody-wallet-withdrawal:integration", "ETH", "USDT", 20))
                 .thenReturn(List.of(walletRow("CONFIRMED")));
-        CustodyWithdrawalRepository.WithdrawalRecord record = repository.find(withdrawalId);
+        CustodyWithdrawalModels.WithdrawalRecord record = repository.find(withdrawalId);
         CountDownLatch confirmationUpdated = new CountDownLatch(1);
         CountDownLatch releaseConfirmation = new CountDownLatch(1);
 
         Future<?> confirmation = executor.submit(() -> inTransaction(() -> {
             repository.lockForOutcome(withdrawalId);
-            repository.markCompleted(withdrawalId, "{}", "wallet-integration");
+            states.markCompleted(withdrawalId, "{}", "wallet-integration");
             confirmationUpdated.countDown();
             await(releaseConfirmation);
         }));
@@ -146,12 +220,12 @@ class CustodyWithdrawalReconciliationPostgresTest {
                     await(allowCustodyRead);
                     return List.of(walletRow("FAILED"));
                 });
-        CustodyWithdrawalRepository.WithdrawalRecord record = repository.find(withdrawalId);
+        CustodyWithdrawalModels.WithdrawalRecord record = repository.find(withdrawalId);
 
         Future<?> reconciliation = executor.submit(() -> reconciliationService.reconcile(record));
         assertThat(custodyReadStarted.await(2, TimeUnit.SECONDS)).isTrue();
         Future<?> confirmation = executor.submit(() -> inTransaction(
-                () -> repository.markCompleted(withdrawalId, "{}", "wallet-integration")));
+                () -> states.markCompleted(withdrawalId, "{}", "wallet-integration")));
         allowCustodyRead.countDown();
         reconciliation.get(5, TimeUnit.SECONDS);
         assertThatThrownBy(() -> confirmation.get(5, TimeUnit.SECONDS))
@@ -168,7 +242,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
     void invalidCompletionSourceDoesNotChangeWithdrawalState() {
         forceStatus("PENDING_APPROVAL");
 
-        assertThatThrownBy(() -> repository.markCompleted(withdrawalId, "{}", "wallet-integration"))
+        assertThatThrownBy(() -> states.markCompleted(withdrawalId, "{}", "wallet-integration"))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(repository.find(withdrawalId).status()).isEqualTo("PENDING_APPROVAL");
     }
@@ -177,15 +251,15 @@ class CustodyWithdrawalReconciliationPostgresTest {
     void conditionalTransitionsRejectExistingWithdrawalInInvalidState() {
         forceStatus("COMPLETED");
 
-        assertThatThrownBy(() -> repository.markDebited(withdrawalId, "debit"))
+        assertThatThrownBy(() -> states.markDebited(withdrawalId, "debit"))
                 .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> repository.markDebitUnknown(withdrawalId, "unknown"))
+        assertThatThrownBy(() -> states.markDebitUnknown(withdrawalId, "unknown"))
                 .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> repository.markSubmitted(withdrawalId, "{}", "wallet-integration"))
+        assertThatThrownBy(() -> states.markSubmitted(withdrawalId, "{}", "wallet-integration"))
                 .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> repository.markBroadcastUnknown(withdrawalId, "{}", "unknown"))
+        assertThatThrownBy(() -> states.markBroadcastUnknown(withdrawalId, "{}", "unknown"))
                 .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> repository.markRejected(withdrawalId, "INVALID", "invalid"))
+        assertThatThrownBy(() -> states.markRejected(withdrawalId, "INVALID", "invalid"))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(repository.find(withdrawalId).status()).isEqualTo("COMPLETED");
     }
@@ -194,23 +268,23 @@ class CustodyWithdrawalReconciliationPostgresTest {
     void repeatedTargetTransitionsAreIdempotentButAdminTransitionsRemainStrict() {
         forceStatus("PROCESSING");
 
-        repository.markDebited(withdrawalId, "debit");
-        repository.markDebited(withdrawalId, "debit");
-        repository.markSubmitted(withdrawalId, "{\"id\":\"wallet-integration\"}", "wallet-integration");
-        assertThatThrownBy(() -> repository.markSubmitted(
+        states.markDebited(withdrawalId, "debit");
+        states.markDebited(withdrawalId, "debit");
+        states.markSubmitted(withdrawalId, "{\"id\":\"wallet-integration\"}", "wallet-integration");
+        assertThatThrownBy(() -> states.markSubmitted(
                 withdrawalId, "{\"id\":\"different\"}", "different"))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(repository.find(withdrawalId).status()).isEqualTo("SUBMITTED");
         assertThat(repository.find(withdrawalId).walletWithdrawalId()).isEqualTo("wallet-integration");
 
-        assertThatThrownBy(() -> repository.approve(withdrawalId, 99L, "admin", "late approval"))
+        assertThatThrownBy(() -> states.approve(withdrawalId, 99L, "admin", "late approval"))
                 .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> repository.reject(withdrawalId, 99L, "admin", "late rejection"))
+        assertThatThrownBy(() -> states.reject(withdrawalId, 99L, "admin", "late rejection"))
                 .isInstanceOf(IllegalStateException.class);
 
         forceStatus("PENDING_APPROVAL");
-        repository.markRejected(withdrawalId, "REJECTED", "rejected");
-        repository.markRejected(withdrawalId, "REJECTED", "duplicate rejection");
+        states.markRejected(withdrawalId, "REJECTED", "rejected");
+        states.markRejected(withdrawalId, "REJECTED", "duplicate rejection");
         assertThat(repository.find(withdrawalId).status()).isEqualTo("REJECTED");
     }
 
@@ -218,7 +292,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
     void submittedWithdrawalCannotBeDowngradedToBroadcastUnknown() {
         forceStatus("SUBMITTED");
 
-        assertThatThrownBy(() -> repository.markBroadcastUnknown(withdrawalId, "{}", "late timeout"))
+        assertThatThrownBy(() -> states.markBroadcastUnknown(withdrawalId, "{}", "late timeout"))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(repository.find(withdrawalId).status()).isEqualTo("SUBMITTED");
     }
@@ -355,15 +429,15 @@ class CustodyWithdrawalReconciliationPostgresTest {
                     "UPDATE gateway_wallet_withdrawals SET wallet_withdrawal_id = 'wallet-owned' WHERE withdrawal_id = ?",
                     withdrawalId))
                     .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
-            assertThatThrownBy(() -> repository.findByWalletReference(
+            assertThatThrownBy(() -> states.findByWalletReference(
                     "wallet-owned", "custody-wallet-withdrawal:integration"))
                     .isInstanceOf(IllegalStateException.class);
 
-            CustodyWithdrawalRepository.WithdrawalRecord bound = repository.findByWalletReference(
+            CustodyWithdrawalModels.WithdrawalRecord bound = states.findByWalletReference(
                     "wallet-bound", "custody-wallet-withdrawal:integration");
             assertThat(bound.walletWithdrawalId()).isEqualTo("wallet-bound");
             assertThat(repository.find(withdrawalId).walletWithdrawalId()).isEqualTo("wallet-bound");
-            assertThatThrownBy(() -> repository.findByWalletReference(
+            assertThatThrownBy(() -> states.findByWalletReference(
                     "wallet-other", "custody-wallet-withdrawal:integration"))
                     .isInstanceOf(IllegalStateException.class);
         } finally {
@@ -377,7 +451,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
         UUID otherId = insertWithdrawal("custody-wallet-withdrawal:other-state", "wallet-owned-state");
 
         try {
-            assertThatThrownBy(() -> repository.markSubmitted(
+            assertThatThrownBy(() -> states.markSubmitted(
                     withdrawalId, "{}", "wallet-owned-state"))
                     .isInstanceOf(IllegalStateException.class);
             assertThat(repository.find(withdrawalId).status()).isEqualTo("DEBITED");
@@ -391,8 +465,8 @@ class CustodyWithdrawalReconciliationPostgresTest {
     void duplicateCompletionForSameTargetIsIdempotent() {
         forceStatus("SUBMITTED");
 
-        repository.markCompleted(withdrawalId, "{}", "wallet-integration");
-        repository.markCompleted(withdrawalId, "{}", "wallet-integration");
+        states.markCompleted(withdrawalId, "{}", "wallet-integration");
+        states.markCompleted(withdrawalId, "{}", "wallet-integration");
 
         assertThat(repository.find(withdrawalId).status()).isEqualTo("COMPLETED");
     }
@@ -401,7 +475,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
     void automaticStateChangesAppendImmutableWithdrawalEvents() {
         forceStatus("DEBITED");
 
-        repository.markSubmitted(withdrawalId, "{\"id\":\"wallet-integration\"}", "wallet-integration");
+        states.markSubmitted(withdrawalId, "{\"id\":\"wallet-integration\"}", "wallet-integration");
 
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM gateway_wallet_withdrawal_events
@@ -438,19 +512,9 @@ class CustodyWithdrawalReconciliationPostgresTest {
     @Test
     void eventInsertFailureRollsBackWithdrawalState() {
         forceStatus("DEBITED");
-        jdbcTemplate.execute("""
-                CREATE OR REPLACE FUNCTION gateway_wallet_withdrawal_events_reject_insert()
-                RETURNS trigger LANGUAGE plpgsql AS $$
-                BEGIN
-                    RAISE EXCEPTION 'test audit insert failure';
-                END;
-                $$
-                """);
-        jdbcTemplate.execute("CREATE TRIGGER gateway_wallet_withdrawal_events_reject_insert_trigger "
-                + "BEFORE INSERT ON gateway_wallet_withdrawal_events FOR EACH ROW "
-                + "EXECUTE FUNCTION gateway_wallet_withdrawal_events_reject_insert()");
+        rejectEventInserts();
         try {
-            assertThatThrownBy(() -> repository.markSubmitted(
+            assertThatThrownBy(() -> states.markSubmitted(
                     withdrawalId, "{\"id\":\"wallet-integration\"}", "wallet-integration"))
                     .isInstanceOf(org.springframework.dao.DataAccessException.class);
             assertThat(repository.find(withdrawalId).status()).isEqualTo("DEBITED");
@@ -458,9 +522,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
                     SELECT COUNT(*) FROM gateway_wallet_withdrawal_events WHERE withdrawal_id = ?
                     """, Integer.class, withdrawalId)).isZero();
         } finally {
-            jdbcTemplate.execute("DROP TRIGGER gateway_wallet_withdrawal_events_reject_insert_trigger "
-                    + "ON gateway_wallet_withdrawal_events");
-            jdbcTemplate.execute("DROP FUNCTION gateway_wallet_withdrawal_events_reject_insert()");
+            allowEventInserts();
         }
     }
 
@@ -468,7 +530,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
     void adminStateAndActionAuditRollbackTogetherWhenAuditInsertFails() {
         forceStatus("PENDING_APPROVAL");
 
-        assertThatThrownBy(() -> repository.approve(withdrawalId, 99L, "admin", "manual approval"))
+        assertThatThrownBy(() -> states.approve(withdrawalId, 99L, "admin", "manual approval"))
                 .isInstanceOf(RuntimeException.class);
         assertThat(repository.find(withdrawalId).status()).isEqualTo("PENDING_APPROVAL");
     }
@@ -477,7 +539,7 @@ class CustodyWithdrawalReconciliationPostgresTest {
     void retryCannotBypassPendingApproval() {
         forceStatus("PENDING_APPROVAL");
 
-        assertThatThrownBy(() -> repository.recordAdminRetry(withdrawalId, 99L, "admin", "manual retry"))
+        assertThatThrownBy(() -> states.recordAdminRetry(withdrawalId, 99L, "admin", "manual retry"))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(repository.find(withdrawalId).status()).isEqualTo("PENDING_APPROVAL");
     }
@@ -498,6 +560,26 @@ class CustodyWithdrawalReconciliationPostgresTest {
         assertThatThrownBy(() -> jdbcTemplate.update(
                 "DELETE FROM gateway_wallet_withdrawal_actions WHERE action_id = ?", actionId))
                 .hasMessageContaining("gateway wallet withdrawal actions are immutable");
+    }
+
+    private void rejectEventInserts() {
+        jdbcTemplate.execute("""
+                CREATE OR REPLACE FUNCTION gateway_wallet_withdrawal_events_reject_insert()
+                RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    RAISE EXCEPTION 'test audit insert failure';
+                END;
+                $$
+                """);
+        jdbcTemplate.execute("CREATE TRIGGER gateway_wallet_withdrawal_events_reject_insert_trigger "
+                + "BEFORE INSERT ON gateway_wallet_withdrawal_events FOR EACH ROW "
+                + "EXECUTE FUNCTION gateway_wallet_withdrawal_events_reject_insert()");
+    }
+
+    private void allowEventInserts() {
+        jdbcTemplate.execute("DROP TRIGGER gateway_wallet_withdrawal_events_reject_insert_trigger "
+                + "ON gateway_wallet_withdrawal_events");
+        jdbcTemplate.execute("DROP FUNCTION gateway_wallet_withdrawal_events_reject_insert()");
     }
 
     private DataSource dataSource() {
@@ -521,7 +603,8 @@ class CustodyWithdrawalReconciliationPostgresTest {
                 + "created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
                 + "submitted_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, admin_user_id BIGINT, "
                 + "admin_username TEXT, admin_reason TEXT, "
-                + "CONSTRAINT gateway_wallet_withdrawals_wallet_id_uq UNIQUE (wallet_withdrawal_id))");
+                + "CONSTRAINT gateway_wallet_withdrawals_wallet_id_uq UNIQUE (wallet_withdrawal_id), "
+                + "CONSTRAINT gateway_wallet_withdrawal_idempotency_uq UNIQUE (user_id, idempotency_key))");
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS gateway_wallet_withdrawal_actions ("
                 + "action_id UUID PRIMARY KEY, withdrawal_id UUID NOT NULL REFERENCES gateway_wallet_withdrawals, "
                 + "admin_user_id BIGINT NOT NULL REFERENCES gateway_users, admin_username TEXT NOT NULL, "

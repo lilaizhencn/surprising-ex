@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.model.CustodyWithdrawalModels;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -25,24 +26,25 @@ class CustodyWithdrawalServiceTest {
     void unknownCustodyResponseKeepsFundsInBroadcastUnknownWithoutRefund() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWithdrawalStateService states = Mockito.mock(CustodyWithdrawalStateService.class);
         CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
         SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
-        CustodyWithdrawalRepository.WithdrawalRecord record = record(withdrawalId, "PROCESSING");
+        CustodyWithdrawalModels.WithdrawalRecord record = record(withdrawalId, "PROCESSING");
         when(assets.amountUnits("USDT", "25")).thenReturn(25_000_000L);
         when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
-        when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(record, true));
-        when(repository.markDebited(eq(withdrawalId), any())).thenReturn(record(withdrawalId, "DEBITED"));
+        when(states.createOrGet(any())).thenReturn(new CustodyWithdrawalModels.CreateResult(record, true));
+        when(states.markDebited(eq(withdrawalId), any())).thenReturn(record(withdrawalId, "DEBITED"));
         when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-unknown")))
                 .thenThrow(new IllegalStateException("custody request timed out"));
 
-        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+        CustodyWithdrawalService service = service(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient);
 
         assertThatThrownBy(() -> service.submit(42L, "withdraw-unknown", request()))
                 .isInstanceOf(CustodyWithdrawalService.WithdrawalUnknownException.class);
-        verify(repository).markBroadcastUnknown(eq(withdrawalId), any(), eq("custody request timed out"));
+        verify(states).markBroadcastUnknown(eq(withdrawalId), any(), eq("custody request timed out"));
         verify(spotAccountClient, never()).adjustBalance(eq(42L), eq("USDT"), eq(25_000_000L),
                 eq("custody-wallet-withdrawal:withdraw-unknown:refund"), any());
     }
@@ -51,139 +53,144 @@ class CustodyWithdrawalServiceTest {
     void concurrentSubmissionThatAlreadyPersistedDoesNotDowngradeToBroadcastUnknown() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWithdrawalStateService states = Mockito.mock(CustodyWithdrawalStateService.class);
         CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
         SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
-        CustodyWithdrawalRepository.WithdrawalRecord processing = record(withdrawalId, "PROCESSING",
+        CustodyWithdrawalModels.WithdrawalRecord processing = record(withdrawalId, "PROCESSING",
                 "withdraw-concurrent");
-        CustodyWithdrawalRepository.WithdrawalRecord debited = record(withdrawalId, "DEBITED",
+        CustodyWithdrawalModels.WithdrawalRecord debited = record(withdrawalId, "DEBITED",
                 "withdraw-concurrent");
-        CustodyWithdrawalRepository.WithdrawalRecord submitted = record(withdrawalId, "SUBMITTED",
+        CustodyWithdrawalModels.WithdrawalRecord submitted = record(withdrawalId, "SUBMITTED",
                 "withdraw-concurrent");
         when(assets.amountUnits("USDT", "25")).thenReturn(25_000_000L);
         when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
-        when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(processing, true));
-        when(repository.markDebited(eq(withdrawalId), any())).thenReturn(debited);
+        when(states.createOrGet(any())).thenReturn(new CustodyWithdrawalModels.CreateResult(processing, true));
+        when(states.markDebited(eq(withdrawalId), any())).thenReturn(debited);
         when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-concurrent")))
                 .thenReturn(Map.of("id", "wallet-concurrent",
                         "externalReference", "custody-wallet-withdrawal:withdraw-concurrent"));
-        when(repository.markSubmitted(eq(withdrawalId), any(), eq("wallet-concurrent")))
+        when(states.markSubmitted(eq(withdrawalId), any(), eq("wallet-concurrent")))
                 .thenThrow(new IllegalStateException("already submitted"));
         when(repository.find(withdrawalId)).thenReturn(submitted);
 
-        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+        CustodyWithdrawalService service = service(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient);
 
         assertThat(service.submit(42L, "withdraw-concurrent", request()).status()).isEqualTo("SUBMITTED");
-        verify(repository, never()).markBroadcastUnknown(any(), any(), any());
+        verify(states, never()).markBroadcastUnknown(any(), any(), any());
     }
 
     @Test
     void timeoutAfterConcurrentSubmissionDoesNotDowngradeToBroadcastUnknown() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWithdrawalStateService states = Mockito.mock(CustodyWithdrawalStateService.class);
         CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
         SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
-        CustodyWithdrawalRepository.WithdrawalRecord processing = record(withdrawalId, "PROCESSING",
+        CustodyWithdrawalModels.WithdrawalRecord processing = record(withdrawalId, "PROCESSING",
                 "withdraw-timeout-race");
-        CustodyWithdrawalRepository.WithdrawalRecord debited = record(withdrawalId, "DEBITED",
+        CustodyWithdrawalModels.WithdrawalRecord debited = record(withdrawalId, "DEBITED",
                 "withdraw-timeout-race");
-        CustodyWithdrawalRepository.WithdrawalRecord submitted = record(withdrawalId, "SUBMITTED",
+        CustodyWithdrawalModels.WithdrawalRecord submitted = record(withdrawalId, "SUBMITTED",
                 "withdraw-timeout-race");
         when(assets.amountUnits("USDT", "25")).thenReturn(25_000_000L);
         when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
-        when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(processing, true));
-        when(repository.markDebited(eq(withdrawalId), any())).thenReturn(debited);
+        when(states.createOrGet(any())).thenReturn(new CustodyWithdrawalModels.CreateResult(processing, true));
+        when(states.markDebited(eq(withdrawalId), any())).thenReturn(debited);
         when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-timeout-race")))
                 .thenThrow(new IllegalStateException("custody request timed out"));
-        when(repository.markBroadcastUnknown(eq(withdrawalId), any(), eq("custody request timed out")))
+        when(states.markBroadcastUnknown(eq(withdrawalId), any(), eq("custody request timed out")))
                 .thenThrow(new IllegalStateException("already submitted"));
         when(repository.find(withdrawalId)).thenReturn(submitted);
 
-        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+        CustodyWithdrawalService service = service(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient);
 
         assertThat(service.submit(42L, "withdraw-timeout-race", request()).status()).isEqualTo("SUBMITTED");
-        verify(repository).markBroadcastUnknown(eq(withdrawalId), any(), eq("custody request timed out"));
+        verify(states).markBroadcastUnknown(eq(withdrawalId), any(), eq("custody request timed out"));
     }
 
     @Test
     void localSubmissionStateConflictDoesNotBecomeBroadcastUnknown() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWithdrawalStateService states = Mockito.mock(CustodyWithdrawalStateService.class);
         CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
         SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
-        CustodyWithdrawalRepository.WithdrawalRecord processing = record(withdrawalId, "PROCESSING",
+        CustodyWithdrawalModels.WithdrawalRecord processing = record(withdrawalId, "PROCESSING",
                 "withdraw-local-conflict");
-        CustodyWithdrawalRepository.WithdrawalRecord debited = record(withdrawalId, "DEBITED",
+        CustodyWithdrawalModels.WithdrawalRecord debited = record(withdrawalId, "DEBITED",
                 "withdraw-local-conflict");
         when(assets.amountUnits("USDT", "25")).thenReturn(25_000_000L);
         when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
-        when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(processing, true));
-        when(repository.markDebited(eq(withdrawalId), any())).thenReturn(debited);
+        when(states.createOrGet(any())).thenReturn(new CustodyWithdrawalModels.CreateResult(processing, true));
+        when(states.markDebited(eq(withdrawalId), any())).thenReturn(debited);
         when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-local-conflict")))
                 .thenReturn(Map.of("id", "wallet-local-conflict",
                         "externalReference", "custody-wallet-withdrawal:withdraw-local-conflict"));
-        when(repository.markSubmitted(eq(withdrawalId), any(), eq("wallet-local-conflict")))
+        when(states.markSubmitted(eq(withdrawalId), any(), eq("wallet-local-conflict")))
                 .thenThrow(new IllegalStateException("invalid local status"));
         when(repository.find(withdrawalId)).thenReturn(debited);
 
-        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+        CustodyWithdrawalService service = service(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient);
 
         assertThatThrownBy(() -> service.submit(42L, "withdraw-local-conflict", request()))
                 .isInstanceOf(IllegalStateException.class);
-        verify(repository, never()).markBroadcastUnknown(any(), any(), any());
+        verify(states, never()).markBroadcastUnknown(any(), any(), any());
     }
 
     @Test
     void rejectedCustodyResponseRefundsExactlyOnceAndReturnsRejected() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWithdrawalStateService states = Mockito.mock(CustodyWithdrawalStateService.class);
         CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
         SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
-        CustodyWithdrawalRepository.WithdrawalRecord record = record(withdrawalId, "PROCESSING", "withdraw-rejected");
+        CustodyWithdrawalModels.WithdrawalRecord record = record(withdrawalId, "PROCESSING", "withdraw-rejected");
         when(assets.amountUnits("USDT", "25")).thenReturn(25_000_000L);
         when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
-        when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(record, true));
-        when(repository.markDebited(eq(withdrawalId), any())).thenReturn(
+        when(states.createOrGet(any())).thenReturn(new CustodyWithdrawalModels.CreateResult(record, true));
+        when(states.markDebited(eq(withdrawalId), any())).thenReturn(
                 record(withdrawalId, "DEBITED", "withdraw-rejected"));
-        when(repository.markRefundPending(eq(withdrawalId), any()))
+        when(states.markRefundPending(eq(withdrawalId), any()))
                 .thenReturn(record(withdrawalId, "REFUND_PENDING", "withdraw-rejected"));
         when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-rejected")))
                 .thenThrow(new CustodyWalletClient.CustodyWalletRejectedException("rejected", 400, null));
 
-        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+        CustodyWithdrawalService service = service(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient);
 
         assertThatThrownBy(() -> service.submit(42L, "withdraw-rejected", request()))
                 .isInstanceOf(CustodyWithdrawalService.WithdrawalRejectedException.class);
         verify(spotAccountClient).adjustBalance(42L, "USDT", 25_000_000L,
                 "custody-wallet-withdrawal:withdraw-rejected:refund", "custody wallet withdrawal rejected refund");
-        verify(repository).markRefunded(eq(withdrawalId), any(), eq("custody wallet rejected withdrawal"));
+        verify(states).markRefunded(eq(withdrawalId), any(), eq("custody wallet rejected withdrawal"));
     }
 
     @Test
     void retryingSameIdempotencyKeyDoesNotCreateAnotherWithdrawalIntent() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWithdrawalStateService states = Mockito.mock(CustodyWithdrawalStateService.class);
         CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
         SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
-        CustodyWithdrawalRepository.WithdrawalRecord record = record(withdrawalId, "SUBMITTED");
+        CustodyWithdrawalModels.WithdrawalRecord record = record(withdrawalId, "SUBMITTED");
         when(assets.amountUnits("USDT", "25")).thenReturn(25_000_000L);
         when(valuationClient.toUsdt("USDT", new BigDecimal("25"))).thenReturn(new BigDecimal("25"));
-        when(repository.createOrGet(any())).thenReturn(new CustodyWithdrawalRepository.CreateResult(record, false));
+        when(states.createOrGet(any())).thenReturn(new CustodyWithdrawalModels.CreateResult(record, false));
 
-        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+        CustodyWithdrawalService service = service(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient);
 
         CustodyWithdrawalService.WithdrawalResponse response =
@@ -198,24 +205,25 @@ class CustodyWithdrawalServiceTest {
     void retryingDebitUnknownReusesTheSameLedgerReference() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWithdrawalStateService states = Mockito.mock(CustodyWithdrawalStateService.class);
         CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
         SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
-        CustodyWithdrawalRepository.WithdrawalRecord unknown = record(withdrawalId, "DEBIT_UNKNOWN", "withdraw-retry");
+        CustodyWithdrawalModels.WithdrawalRecord unknown = record(withdrawalId, "DEBIT_UNKNOWN", "withdraw-retry");
         when(repository.find(withdrawalId)).thenReturn(unknown);
-        when(repository.markDebited(eq(withdrawalId), any()))
+        when(states.markDebited(eq(withdrawalId), any()))
                 .thenReturn(record(withdrawalId, "DEBITED", "withdraw-retry"));
         when(walletClient.createWithdrawal(eq(42L), any(), eq("custody-wallet-withdrawal:withdraw-retry")))
                 .thenReturn(Map.of("id", "wallet-withdrawal-1",
                         "externalReference", "custody-wallet-withdrawal:withdraw-retry"));
-        when(repository.markSubmitted(eq(withdrawalId), any(), eq("wallet-withdrawal-1")))
+        when(states.markSubmitted(eq(withdrawalId), any(), eq("wallet-withdrawal-1")))
                 .thenReturn(record(withdrawalId, "SUBMITTED", "withdraw-retry"));
 
-        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+        CustodyWithdrawalService service = service(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient);
 
-        when(repository.recordAdminRetry(eq(withdrawalId), eq(7L), eq("admin"), eq("manual retry")))
+        when(states.recordAdminRetry(eq(withdrawalId), eq(7L), eq("admin"), eq("manual retry")))
                 .thenReturn(unknown);
         CustodyWithdrawalService.WithdrawalResponse response =
                 service.retry(withdrawalId, 7L, "admin", "manual retry");
@@ -230,16 +238,17 @@ class CustodyWithdrawalServiceTest {
     void failedCustodyWebhookWaitsForCustodyTerminalStateBeforeRefunding() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWithdrawalStateService states = Mockito.mock(CustodyWithdrawalStateService.class);
         CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
         SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
-        CustodyWithdrawalRepository.WithdrawalRecord record = record(withdrawalId, "SUBMITTED", "withdraw-failed");
-        when(repository.findByWalletReference("wallet-withdrawal-1", "custody-wallet-withdrawal:withdraw-failed"))
+        CustodyWithdrawalModels.WithdrawalRecord record = record(withdrawalId, "SUBMITTED", "withdraw-failed");
+        when(states.findByWalletReference("wallet-withdrawal-1", "custody-wallet-withdrawal:withdraw-failed"))
                 .thenReturn(record);
-        CustodyWithdrawalRepository.WithdrawalRecord pending =
+        CustodyWithdrawalModels.WithdrawalRecord pending =
                 record(withdrawalId, "FAILED_PENDING", "withdraw-failed");
-        when(repository.markFailurePending(eq(withdrawalId), any(), any(), eq("wallet-withdrawal-1")))
+        when(states.markFailurePending(eq(withdrawalId), any(), any(), eq("wallet-withdrawal-1")))
                 .thenReturn(pending);
         when(repository.listPendingFailures(any(), eq(50))).thenReturn(java.util.List.of(pending));
         when(walletClient.withdrawalsByExternalReference(
@@ -248,12 +257,12 @@ class CustodyWithdrawalServiceTest {
                         "id", "wallet-withdrawal-1",
                         "externalReference", "custody-wallet-withdrawal:withdraw-failed",
                         "status", "FAILED", "asset", "USDT", "chain", "ETH", "amount", "25")));
-        when(repository.markRefundPending(eq(withdrawalId), any()))
+        when(states.markRefundPending(eq(withdrawalId), any()))
                 .thenReturn(record(withdrawalId, "REFUND_PENDING", "withdraw-failed"));
-        when(repository.markRefunded(eq(withdrawalId), any(), eq("custody wallet withdrawal failed")))
+        when(states.markRefunded(eq(withdrawalId), any(), eq("custody wallet withdrawal failed")))
                 .thenReturn(record(withdrawalId, "REFUNDED", "withdraw-failed"));
 
-        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+        CustodyWithdrawalService service = service(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient);
 
         service.handleWebhook("WITHDRAWAL.FAILED", Map.of(
@@ -267,22 +276,23 @@ class CustodyWithdrawalServiceTest {
 
         verify(spotAccountClient).adjustBalance(42L, "USDT", 25_000_000L,
                 "custody-wallet-withdrawal:withdraw-failed:refund", "custody wallet withdrawal failed");
-        verify(repository).markRefunded(eq(withdrawalId), any(), eq("custody wallet withdrawal failed"));
+        verify(states).markRefunded(eq(withdrawalId), any(), eq("custody wallet withdrawal failed"));
     }
 
     @Test
     void lateFailureAfterConfirmationDoesNotCreditSpotBalanceAgain() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWithdrawalStateService states = Mockito.mock(CustodyWithdrawalStateService.class);
         CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
         SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
-        CustodyWithdrawalRepository.WithdrawalRecord completed = record(withdrawalId, "COMPLETED", "withdraw-late");
-        when(repository.findByWalletReference("wallet-withdrawal-1", "custody-wallet-withdrawal:withdraw-late"))
+        CustodyWithdrawalModels.WithdrawalRecord completed = record(withdrawalId, "COMPLETED", "withdraw-late");
+        when(states.findByWalletReference("wallet-withdrawal-1", "custody-wallet-withdrawal:withdraw-late"))
                 .thenReturn(completed);
 
-        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+        CustodyWithdrawalService service = service(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient);
 
         assertThatThrownBy(() -> service.handleWebhook("WITHDRAWAL.FAILED", Map.of(
@@ -292,27 +302,28 @@ class CustodyWithdrawalServiceTest {
                 .isInstanceOf(IllegalStateException.class);
 
         verify(spotAccountClient, never()).adjustBalance(any(Long.class), any(), any(Long.class), any(), any());
-        verify(repository, never()).markRefundPending(any(), any());
+        verify(states, never()).markRefundPending(any(), any());
     }
 
     @Test
     void broadcastUnknownWebhookDoesNotSilentlyAcceptFailurePendingState() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWithdrawalStateService states = Mockito.mock(CustodyWithdrawalStateService.class);
         CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
         SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
-        CustodyWithdrawalRepository.WithdrawalRecord pending =
+        CustodyWithdrawalModels.WithdrawalRecord pending =
                 record(withdrawalId, "FAILED_PENDING", "withdraw-webhook-conflict");
-        when(repository.findByWalletReference("wallet-webhook-conflict",
+        when(states.findByWalletReference("wallet-webhook-conflict",
                 "custody-wallet-withdrawal:withdraw-webhook-conflict")).thenReturn(pending);
-        when(repository.recordLateBroadcastUnknownObservation(eq(withdrawalId), eq("wallet-webhook-conflict"),
+        when(states.recordLateBroadcastUnknownObservation(eq(withdrawalId), eq("wallet-webhook-conflict"),
                 any(), any(), eq(null))).thenReturn(false);
-        when(repository.markBroadcastUnknown(eq(withdrawalId), any(), any(), eq("wallet-webhook-conflict")))
+        when(states.markBroadcastUnknown(eq(withdrawalId), any(), any(), eq("wallet-webhook-conflict")))
                 .thenThrow(new IllegalStateException("invalid webhook source status"));
 
-        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+        CustodyWithdrawalService service = service(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient);
 
         assertThatThrownBy(() -> service.handleWebhook("WITHDRAWAL.BROADCAST_UNKNOWN", Map.of(
@@ -326,19 +337,20 @@ class CustodyWithdrawalServiceTest {
     void lateBroadcastUnknownWebhookKeepsProviderEventIdOnWithdrawalAudit() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWithdrawalStateService states = Mockito.mock(CustodyWithdrawalStateService.class);
         CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
         SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
-        CustodyWithdrawalRepository.WithdrawalRecord submitted =
+        CustodyWithdrawalModels.WithdrawalRecord submitted =
                 record(withdrawalId, "SUBMITTED", "withdraw-webhook-late");
-        when(repository.findByWalletReference("wallet-webhook-late",
+        when(states.findByWalletReference("wallet-webhook-late",
                 "custody-wallet-withdrawal:withdraw-webhook-late", "provider-event-late"))
                 .thenReturn(submitted);
-        when(repository.recordLateBroadcastUnknownObservation(eq(withdrawalId), eq("wallet-webhook-late"),
+        when(states.recordLateBroadcastUnknownObservation(eq(withdrawalId), eq("wallet-webhook-late"),
                 any(), any(), eq("provider-event-late"))).thenReturn(true);
 
-        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+        CustodyWithdrawalService service = service(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient);
 
         service.handleWebhook("provider-event-late", "WITHDRAWAL.BROADCAST_UNKNOWN", Map.of(
@@ -346,7 +358,7 @@ class CustodyWithdrawalServiceTest {
                         "externalReference", "custody-wallet-withdrawal:withdraw-webhook-late",
                         "asset", "USDT", "chain", "ETH", "amount", "25")));
 
-        verify(repository).recordLateBroadcastUnknownObservation(eq(withdrawalId), eq("wallet-webhook-late"),
+        verify(states).recordLateBroadcastUnknownObservation(eq(withdrawalId), eq("wallet-webhook-late"),
                 any(), eq("late broadcast-unknown webhook ignored after local status advanced"),
                 eq("provider-event-late"));
     }
@@ -355,18 +367,19 @@ class CustodyWithdrawalServiceTest {
     void confirmationWinsAfterFailureIsHeldForAuthoritativeReconciliation() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWithdrawalStateService states = Mockito.mock(CustodyWithdrawalStateService.class);
         CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
         SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
         UUID withdrawalId = UUID.randomUUID();
-        CustodyWithdrawalRepository.WithdrawalRecord pending =
+        CustodyWithdrawalModels.WithdrawalRecord pending =
                 record(withdrawalId, "FAILED_PENDING", "withdraw-ordering");
-        when(repository.findByWalletReference("wallet-withdrawal-1", "custody-wallet-withdrawal:withdraw-ordering"))
+        when(states.findByWalletReference("wallet-withdrawal-1", "custody-wallet-withdrawal:withdraw-ordering"))
                 .thenReturn(pending);
-        when(repository.markCompleted(eq(withdrawalId), any(), eq("wallet-withdrawal-1")))
+        when(states.markCompleted(eq(withdrawalId), any(), eq("wallet-withdrawal-1")))
                 .thenReturn(record(withdrawalId, "COMPLETED", "withdraw-ordering"));
 
-        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+        CustodyWithdrawalService service = service(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient);
 
         service.handleWebhook("WITHDRAWAL.CONFIRMED", Map.of(
@@ -374,15 +387,16 @@ class CustodyWithdrawalServiceTest {
                         "externalReference", "custody-wallet-withdrawal:withdraw-ordering",
                         "asset", "USDT", "chain", "ETH", "amount", "25")));
 
-        verify(repository).markCompleted(eq(withdrawalId), any(), eq("wallet-withdrawal-1"));
+        verify(states).markCompleted(eq(withdrawalId), any(), eq("wallet-withdrawal-1"));
         verify(spotAccountClient, never()).adjustBalance(any(Long.class), any(), any(Long.class), any(), any());
-        verify(repository, never()).markRefundPending(any(), any());
+        verify(states, never()).markRefundPending(any(), any());
     }
 
     @Test
     void localHistoryRemainsAvailableWhenCustodyHistoryIsUnavailable() {
         GatewayProperties properties = new GatewayProperties();
         CustodyWithdrawalRepository repository = Mockito.mock(CustodyWithdrawalRepository.class);
+        CustodyWithdrawalStateService states = Mockito.mock(CustodyWithdrawalStateService.class);
         CustodyWalletClient walletClient = Mockito.mock(CustodyWalletClient.class);
         SpotAccountClient spotAccountClient = Mockito.mock(SpotAccountClient.class);
         WithdrawalValuationClient valuationClient = Mockito.mock(WithdrawalValuationClient.class);
@@ -391,7 +405,7 @@ class CustodyWithdrawalServiceTest {
         when(repository.listForUser(42L, "ETH", "USDT", 50))
                 .thenReturn(java.util.List.of(record(UUID.randomUUID(), "BROADCAST_UNKNOWN", "withdraw-history")));
 
-        CustodyWithdrawalService service = service(properties, repository, walletClient, spotAccountClient,
+        CustodyWithdrawalService service = service(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient);
 
         assertThat(service.history(42L, "ETH", "USDT", 50))
@@ -404,14 +418,15 @@ class CustodyWithdrawalServiceTest {
 
     private CustodyWithdrawalService service(GatewayProperties properties,
                                              CustodyWithdrawalRepository repository,
+                                             CustodyWithdrawalStateService states,
                                              CustodyWalletClient walletClient,
                                              SpotAccountClient spotAccountClient,
                                              WithdrawalValuationClient valuationClient) {
         CustodyWithdrawalRefundService refundService =
-                new CustodyWithdrawalRefundService(repository, spotAccountClient);
+                new CustodyWithdrawalRefundService(states, spotAccountClient);
         CustodyWithdrawalReconciliationService reconciliationService =
-                new CustodyWithdrawalReconciliationService(repository, walletClient, refundService, new ObjectMapper());
-        return new CustodyWithdrawalService(properties, repository, walletClient, spotAccountClient,
+                new CustodyWithdrawalReconciliationService(repository, states, walletClient, refundService, new ObjectMapper());
+        return new CustodyWithdrawalService(properties, repository, states, walletClient, spotAccountClient,
                 valuationClient, refundService, reconciliationService, new ObjectMapper(), assets);
     }
 
@@ -420,12 +435,12 @@ class CustodyWithdrawalServiceTest {
                 UUID.randomUUID(), "ETH", "USDT", "0xrecipient", "25", null);
     }
 
-    private CustodyWithdrawalRepository.WithdrawalRecord record(UUID id, String status) {
+    private CustodyWithdrawalModels.WithdrawalRecord record(UUID id, String status) {
         return record(id, status, "withdraw-unknown");
     }
 
-    private CustodyWithdrawalRepository.WithdrawalRecord record(UUID id, String status, String key) {
-        return new CustodyWithdrawalRepository.WithdrawalRecord(
+    private CustodyWithdrawalModels.WithdrawalRecord record(UUID id, String status, String key) {
+        return new CustodyWithdrawalModels.WithdrawalRecord(
                 id, 42L, key, "hash", "ETH", "USDT", UUID.randomUUID(),
                 "0xrecipient", "25", 25_000_000L, new BigDecimal("25"),
                 "custody-wallet-withdrawal:" + key,

@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.repository;
 
+import com.surprising.gateway.provider.model.CustodyWithdrawalModels.CreateRequest;
+import com.surprising.gateway.provider.model.CustodyWithdrawalModels.WithdrawalRecord;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -7,55 +9,30 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 
+/** 只访问gateway_wallet_withdrawals；状态规则、动作审计和事件原子提交由StateService聚合。 */
 @Repository
 public class CustodyWithdrawalRepository {
-
-    private static final Set<String> RETRYABLE_STATUSES =
-            Set.of("DEBIT_UNKNOWN", "BROADCAST_UNKNOWN", "REFUND_PENDING");
-
     private final JdbcTemplate jdbcTemplate;
 
     public CustodyWithdrawalRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    @Transactional
-    public CreateResult createOrGet(CreateRequest request) {
-        WithdrawalRecord existing = findByUserAndIdempotency(request.userId(), request.idempotencyKey());
-        if (existing != null) {
-            if (!existing.requestHash().equals(request.requestHash())) {
-                throw new IllegalArgumentException("idempotency key was reused with a different withdrawal request");
-            }
-            return new CreateResult(existing, false);
-        }
-        jdbcTemplate.execute("SELECT pg_advisory_xact_lock(" + request.userId() + ")");
-        existing = findByUserAndIdempotency(request.userId(), request.idempotencyKey());
-        if (existing != null) {
-            if (!existing.requestHash().equals(request.requestHash())) {
-                throw new IllegalArgumentException("idempotency key was reused with a different withdrawal request");
-            }
-            return new CreateResult(existing, false);
-        }
-        BigDecimal dailyTotal = jdbcTemplate.queryForObject("""
+    public BigDecimal dailyTotal(long userId) {
+        return jdbcTemplate.queryForObject("""
                 SELECT COALESCE(SUM(usdt_value), 0)
                   FROM gateway_wallet_withdrawals
                  WHERE user_id = ?
                    AND created_at >= date_trunc('day', now())
                    AND status NOT IN ('REJECTED', 'REFUNDED')
-                """, BigDecimal.class, request.userId());
-        if (dailyTotal != null && dailyTotal.add(request.usdtValue()).compareTo(request.dailyLimitUsdt()) > 0) {
-            throw new IllegalArgumentException("daily withdrawal limit exceeded");
-        }
-        UUID id = UUID.randomUUID();
-        String status = request.requiresApproval() ? "PENDING_APPROVAL" : "PROCESSING";
-        Instant now = Instant.now();
+                """, BigDecimal.class, userId);
+    }
+
+    public void insertIntent(UUID id, CreateRequest request, String status, Instant now) {
         jdbcTemplate.update("""
                 INSERT INTO gateway_wallet_withdrawals (
                     withdrawal_id, user_id, idempotency_key, request_sha256, chain, asset_symbol,
@@ -66,10 +43,6 @@ public class CustodyWithdrawalRepository {
                 request.assetSymbol(), request.custodyAddressId(), request.toAddress(), request.amount(),
                 request.amountUnits(), request.usdtValue(), request.externalReference(),
                 request.spotDebitReference(), request.requestPayload(), status, Timestamp.from(now), Timestamp.from(now));
-        WithdrawalRecord created = find(id);
-        insertTransitionEvent(id, "INTENT_CREATED", "USER", null, status, null,
-                request.requestPayload(), "withdrawal intent created");
-        return new CreateResult(created, true);
     }
 
     public WithdrawalRecord find(UUID withdrawalId) {
@@ -83,113 +56,12 @@ public class CustodyWithdrawalRepository {
         return rows.isEmpty() ? null : rows.getFirst();
     }
 
-    @Transactional
-    public void recordWebhookObservation(UUID id, String walletWithdrawalId, String payload, String reason) {
-        recordWebhookObservation(id, walletWithdrawalId, payload, reason, null);
-    }
-
-    @Transactional
-    public void recordWebhookObservation(UUID id, String walletWithdrawalId, String payload, String reason,
-                                         String providerEventId) {
-        WithdrawalRecord record = find(id);
-        if (record == null) {
-            throw new IllegalStateException("withdrawal intent does not exist");
-        }
-        insertTransitionEvent(id, "WEBHOOK_IDEMPOTENT", "CUSTODY_WALLET", record.status(), record.status(),
-                walletWithdrawalId, providerEventId, payload, reason);
-    }
-
-    @Transactional
-    public boolean recordLateBroadcastUnknownObservation(UUID id, String walletWithdrawalId, String payload,
-                                                         String reason, String providerEventId) {
-        WithdrawalRecord record = lockAndValidateWalletReference(id, walletWithdrawalId);
-        if (!Set.of("SUBMITTED", "COMPLETED", "REFUNDED", "REJECTED").contains(record.status())) {
-            return false;
-        }
-        insertTransitionEvent(id, "WEBHOOK_IDEMPOTENT", "CUSTODY_WALLET", record.status(), record.status(),
-                walletWithdrawalId, providerEventId, payload, reason);
-        return true;
-    }
-
-    @Transactional
-    public WithdrawalRecord findByWalletReference(String walletWithdrawalId, String externalReference) {
-        return findByWalletReference(walletWithdrawalId, externalReference, null);
-    }
-
-    @Transactional
-    public WithdrawalRecord findByWalletReference(String walletWithdrawalId, String externalReference,
-                                                  String providerEventId) {
-        if ((walletWithdrawalId == null || walletWithdrawalId.isBlank())
-                && (externalReference == null || externalReference.isBlank())) {
-            throw new IllegalArgumentException("withdrawal webhook identifiers are required");
-        }
-        if (externalReference != null && !externalReference.isBlank()) {
-            List<WithdrawalRecord> rows = jdbcTemplate.query(
-                    selectSql("external_reference = ?", 2), this::toRecord, externalReference);
-            if (rows.size() > 1) {
-                throw new IllegalStateException("withdrawal webhook external reference is ambiguous");
-            }
-            if (rows.isEmpty()) {
-                return null;
-            }
-            WithdrawalRecord record = rows.getFirst();
-            if (walletWithdrawalId == null || walletWithdrawalId.isBlank()) {
-                return record;
-            }
-            if (record.walletWithdrawalId() != null
-                    && !record.walletWithdrawalId().equals(walletWithdrawalId)) {
-                throw new IllegalStateException("withdrawal webhook wallet id does not match local intent");
-            }
-            if (record.walletWithdrawalId() == null) {
-                WithdrawalRecord owner = findByWalletWithdrawalId(walletWithdrawalId);
-                if (owner != null && !owner.withdrawalId().equals(record.withdrawalId())) {
-                    throw new IllegalStateException("withdrawal webhook wallet id is already bound");
-                }
-                int updated;
-                try {
-                    updated = jdbcTemplate.update("""
+    public int bindWalletId(UUID id, String walletWithdrawalId) {
+        return jdbcTemplate.update("""
                             UPDATE gateway_wallet_withdrawals
                                SET wallet_withdrawal_id = ?, updated_at = now()
                              WHERE withdrawal_id = ? AND wallet_withdrawal_id IS NULL
-                            """, walletWithdrawalId, record.withdrawalId());
-                } catch (DataIntegrityViolationException ex) {
-                    throw new IllegalStateException("withdrawal webhook wallet id is already bound", ex);
-                }
-                if (updated == 0) {
-                    WithdrawalRecord current = find(record.withdrawalId());
-                    if (current == null) {
-                        return null;
-                    }
-                    if (current.walletWithdrawalId() != null
-                            && !current.walletWithdrawalId().equals(walletWithdrawalId)) {
-                        throw new IllegalStateException("withdrawal webhook wallet id does not match local intent");
-                    }
-                }
-                if (updated == 1) {
-                    insertTransitionEvent(record.withdrawalId(), "WALLET_ID_BOUND", "CUSTODY_WALLET",
-                            record.status(), record.status(), walletWithdrawalId, providerEventId, "{}",
-                            "wallet withdrawal id correlated by external reference");
-                }
-                return find(record.withdrawalId());
-            }
-            return record;
-        }
-        String predicate = "wallet_withdrawal_id = ?";
-        Object[] args = new Object[]{walletWithdrawalId};
-        List<WithdrawalRecord> rows = jdbcTemplate.query(selectSql(predicate, 2), this::toRecord, args);
-        if (rows.size() > 1) {
-            throw new IllegalStateException("withdrawal webhook identifiers are ambiguous");
-        }
-        return rows.isEmpty() ? null : rows.getFirst();
-    }
-
-    private WithdrawalRecord findByWalletWithdrawalId(String walletWithdrawalId) {
-        List<WithdrawalRecord> rows = jdbcTemplate.query(
-                selectSql("wallet_withdrawal_id = ?", 2), this::toRecord, walletWithdrawalId);
-        if (rows.size() > 1) {
-            throw new IllegalStateException("withdrawal webhook wallet id is ambiguous");
-        }
-        return rows.isEmpty() ? null : rows.getFirst();
+                            """, walletWithdrawalId, id);
     }
 
     public List<WithdrawalRecord> listForUser(long userId, String chain, String asset, int limit) {
@@ -227,95 +99,49 @@ public class CustodyWithdrawalRepository {
                 this::toRecord, seconds);
     }
 
-    @Transactional
-    public WithdrawalRecord recordAdminRetry(UUID id, long adminUserId, String adminUsername, String reason) {
-        int updated = jdbcTemplate.update("""
+    public int recordAdminRetryRow(UUID id, long adminUserId, String adminUsername, String reason) {
+        return jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET admin_user_id = ?, admin_username = ?, admin_reason = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('DEBIT_UNKNOWN', 'BROADCAST_UNKNOWN', 'REFUND_PENDING')
                 """, adminUserId, adminUsername, reason, id);
-        WithdrawalRecord record = requireRetryable(id, updated, "withdrawal is not retryable in its current state");
-        insertAdminAction(id, adminUserId, adminUsername, "RETRY", reason);
-        if (updated == 1) {
-            insertTransitionEvent(id, "ADMIN_RETRY", "ADMIN", record.status(), record.status(),
-                    record.walletWithdrawalId(), "{}", reason);
-        }
-        return record;
     }
 
-    @Transactional
-    public WithdrawalRecord approve(UUID id, long adminUserId, String adminUsername, String reason) {
-        WithdrawalRecord before = find(id);
-        int updated = jdbcTemplate.update("""
+    public int approveRow(UUID id, long adminUserId, String adminUsername, String reason) {
+        return jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'PROCESSING', admin_user_id = ?, admin_username = ?, admin_reason = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status = 'PENDING_APPROVAL'
                 """, adminUserId, adminUsername, reason, id);
-        WithdrawalRecord record = requireConditionalUpdate(id, updated, "withdrawal is not pending approval");
-        insertAdminAction(id, adminUserId, adminUsername, "APPROVE", reason);
-        recordTransitionEvent(id, "ADMIN_APPROVED", "ADMIN", before, record, updated,
-                record.walletWithdrawalId(), "{}", reason);
-        return record;
     }
 
-    @Transactional
-    public WithdrawalRecord reject(UUID id, long adminUserId, String adminUsername, String reason) {
-        WithdrawalRecord before = find(id);
-        int updated = jdbcTemplate.update("""
+    public int rejectRow(UUID id, long adminUserId, String adminUsername, String reason) {
+        return jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'REJECTED', error_code = 'ADMIN_REJECTED', error_message = ?,
                        admin_user_id = ?, admin_username = ?, admin_reason = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status = 'PENDING_APPROVAL'
                 """, reason, adminUserId, adminUsername, reason, id);
-        WithdrawalRecord record = requireConditionalUpdate(id, updated, "withdrawal is not pending approval");
-        insertAdminAction(id, adminUserId, adminUsername, "REJECT", reason);
-        recordTransitionEvent(id, "ADMIN_REJECTED", "ADMIN", before, record, updated,
-                record.walletWithdrawalId(), "{}", reason);
-        return record;
     }
 
-    @Transactional
-    public WithdrawalRecord markDebited(UUID id, String reason) {
-        lockForOutcome(id);
-        WithdrawalRecord before = find(id);
-        int updated = jdbcTemplate.update("""
+    public int markDebitedRow(UUID id) {
+        return jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'DEBITED', error_code = NULL, error_message = NULL, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('PROCESSING', 'DEBIT_UNKNOWN', 'DEBITED')
                 """, id);
-        WithdrawalRecord record = requireTransition(id, updated, "cannot transition withdrawal to DEBITED", "DEBITED");
-        recordTransitionEvent(id, "DEBITED", "SPOT_ACCOUNT", before, record, updated,
-                record.walletWithdrawalId(), "{}", reason);
-        return record;
     }
 
-    @Transactional
-    public WithdrawalRecord markDebitUnknown(UUID id, String error) {
-        lockForOutcome(id);
-        WithdrawalRecord before = find(id);
-        int updated = jdbcTemplate.update("""
+    public int markDebitUnknownRow(UUID id, String error) {
+        return jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'DEBIT_UNKNOWN', error_code = 'SPOT_UNKNOWN', error_message = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('PROCESSING', 'DEBIT_UNKNOWN')
                 """, error, id);
-        WithdrawalRecord record = requireTransition(id, updated, "cannot transition withdrawal to DEBIT_UNKNOWN", "DEBIT_UNKNOWN");
-        recordTransitionEvent(id, "DEBIT_UNKNOWN", "SPOT_ACCOUNT", before, record, updated,
-                record == null ? null : record.walletWithdrawalId(), "{}", error);
-        return record;
     }
 
-    @Transactional
-    public WithdrawalRecord markSubmitted(UUID id, String walletResponse, String walletWithdrawalId) {
-        return markSubmitted(id, walletResponse, walletWithdrawalId, null);
-    }
-
-    @Transactional
-    public WithdrawalRecord markSubmitted(UUID id, String walletResponse, String walletWithdrawalId,
-                                          String providerEventId) {
-        WithdrawalRecord before = lockAndValidateWalletReference(id, walletWithdrawalId);
-        int updated;
-        try {
-            updated = jdbcTemplate.update("""
+    public int markSubmittedRow(UUID id, String walletResponse, String walletWithdrawalId) {
+        return jdbcTemplate.update("""
                     UPDATE gateway_wallet_withdrawals
                        SET status = 'SUBMITTED', wallet_response = COALESCE(wallet_response, ?::jsonb),
                            wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
@@ -323,60 +149,20 @@ public class CustodyWithdrawalRepository {
                            error_message = NULL
                      WHERE withdrawal_id = ? AND status IN ('DEBITED', 'BROADCAST_UNKNOWN', 'SUBMITTED')
                     """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, id);
-        } catch (DataIntegrityViolationException ex) {
-            throw new IllegalStateException("wallet withdrawal id is already bound", ex);
-        }
-        WithdrawalRecord record = requireTransition(id, updated, "cannot mark withdrawal submitted", "SUBMITTED");
-        recordTransitionEvent(id, "SUBMITTED", "CUSTODY_WALLET", before, record, updated,
-                walletWithdrawalId, walletResponse, null, providerEventId);
-        return record;
     }
 
-    @Transactional
-    public WithdrawalRecord markBroadcastUnknown(UUID id, String walletResponse, String error) {
-        return markBroadcastUnknown(id, walletResponse, error, null);
-    }
-
-    @Transactional
-    public WithdrawalRecord markBroadcastUnknown(UUID id, String walletResponse, String error,
-                                                 String walletWithdrawalId) {
-        return markBroadcastUnknown(id, walletResponse, error, walletWithdrawalId, null);
-    }
-
-    @Transactional
-    public WithdrawalRecord markBroadcastUnknown(UUID id, String walletResponse, String error,
-                                                 String walletWithdrawalId, String providerEventId) {
-        WithdrawalRecord before = lockAndValidateWalletReference(id, walletWithdrawalId);
-        int updated;
-        try {
-            updated = jdbcTemplate.update("""
+    public int markBroadcastUnknownRow(UUID id, String walletResponse, String error, String walletWithdrawalId) {
+        return jdbcTemplate.update("""
                     UPDATE gateway_wallet_withdrawals
                        SET status = 'BROADCAST_UNKNOWN', wallet_response = ?::jsonb,
                            wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
                            error_code = 'CUSTODY_UNKNOWN', error_message = ?, updated_at = now()
                      WHERE withdrawal_id = ? AND status IN ('DEBITED', 'BROADCAST_UNKNOWN')
                     """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, error, id);
-        } catch (DataIntegrityViolationException ex) {
-            throw new IllegalStateException("wallet withdrawal id is already bound", ex);
-        }
-        WithdrawalRecord record = requireTransition(id, updated, "cannot mark withdrawal broadcast unknown", "BROADCAST_UNKNOWN");
-        recordTransitionEvent(id, "BROADCAST_UNKNOWN", "CUSTODY_WALLET", before, record, updated,
-                walletWithdrawalId, walletResponse, error, providerEventId);
-        return record;
     }
 
-    @Transactional
-    public WithdrawalRecord markCompleted(UUID id, String walletResponse, String walletWithdrawalId) {
-        return markCompleted(id, walletResponse, walletWithdrawalId, null);
-    }
-
-    @Transactional
-    public WithdrawalRecord markCompleted(UUID id, String walletResponse, String walletWithdrawalId,
-                                          String providerEventId) {
-        WithdrawalRecord before = lockAndValidateWalletReference(id, walletWithdrawalId);
-        int updated;
-        try {
-            updated = jdbcTemplate.update("""
+    public int markCompletedRow(UUID id, String walletResponse, String walletWithdrawalId) {
+        return jdbcTemplate.update("""
                     UPDATE gateway_wallet_withdrawals
                        SET status = 'COMPLETED', wallet_response = ?::jsonb,
                            wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
@@ -384,184 +170,44 @@ public class CustodyWithdrawalRepository {
                            error_code = NULL, error_message = NULL
                      WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN', 'FAILED_PENDING')
                     """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, id);
-        } catch (DataIntegrityViolationException ex) {
-            throw new IllegalStateException("wallet withdrawal id is already bound", ex);
-        }
-        WithdrawalRecord record = requireTransition(id, updated, "cannot mark withdrawal completed", "COMPLETED");
-        recordTransitionEvent(id, "COMPLETED", "CUSTODY_WALLET", before, record, updated,
-                walletWithdrawalId, walletResponse, null, providerEventId);
-        return record;
     }
 
-    @Transactional
-    public WithdrawalRecord markFailurePending(UUID id, String walletResponse, String error,
-                                               String walletWithdrawalId) {
-        return markFailurePending(id, walletResponse, error, walletWithdrawalId, null);
-    }
-
-    @Transactional
-    public WithdrawalRecord markFailurePending(UUID id, String walletResponse, String error,
-                                               String walletWithdrawalId, String providerEventId) {
-        WithdrawalRecord before = lockAndValidateWalletReference(id, walletWithdrawalId);
-        int updated;
-        try {
-            updated = jdbcTemplate.update("""
+    public int markFailurePendingRow(UUID id, String walletResponse, String error, String walletWithdrawalId) {
+        return jdbcTemplate.update("""
                     UPDATE gateway_wallet_withdrawals
                        SET status = 'FAILED_PENDING', wallet_response = ?::jsonb,
                            wallet_withdrawal_id = COALESCE(wallet_withdrawal_id, ?),
                            error_code = 'CUSTODY_FAILURE_PENDING', error_message = ?, updated_at = now()
                      WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN', 'FAILED_PENDING')
                     """, walletResponse == null ? "{}" : walletResponse, walletWithdrawalId, error, id);
-        } catch (DataIntegrityViolationException ex) {
-            throw new IllegalStateException("wallet withdrawal id is already bound", ex);
-        }
-        WithdrawalRecord record = requireTransition(id, updated, "cannot mark withdrawal failure pending", "FAILED_PENDING");
-        recordTransitionEvent(id, "FAILED_PENDING", "CUSTODY_WALLET", before, record, updated,
-                walletWithdrawalId, walletResponse, error, providerEventId);
-        return record;
     }
 
-    @Transactional
-    public WithdrawalRecord markRefundPending(UUID id, String error) {
-        return markRefundPending(id, error, null);
-    }
-
-    @Transactional
-    public WithdrawalRecord markRefundPending(UUID id, String error, String walletResponse) {
-        lockForOutcome(id);
-        WithdrawalRecord before = find(id);
-        int updated = jdbcTemplate.update("""
+    public int markRefundPendingRow(UUID id, String error, String walletResponse) {
+        return jdbcTemplate.update("""
                    UPDATE gateway_wallet_withdrawals
                    SET status = 'REFUND_PENDING', wallet_response = COALESCE(?::jsonb, wallet_response),
                        error_code = 'REFUND_UNKNOWN', error_message = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN',
                                                         'FAILED_PENDING', 'REFUND_PENDING')
                 """, walletResponse, error, id);
-        WithdrawalRecord record = requireTransition(id, updated, "cannot mark withdrawal refund pending", "REFUND_PENDING");
-        recordTransitionEvent(id, "REFUND_PENDING", "RECONCILIATION", before, record, updated,
-                record == null ? null : record.walletWithdrawalId(), walletResponse, error);
-        return record;
     }
 
-    @Transactional
-    public WithdrawalRecord markRefunded(UUID id, String walletResponse, String reason) {
-        lockForOutcome(id);
-        WithdrawalRecord before = find(id);
-        int updated = jdbcTemplate.update("""
+    public int markRefundedRow(UUID id, String walletResponse, String reason) {
+        return jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'REFUNDED', wallet_response = ?::jsonb, error_code = 'REFUNDED',
                        error_message = ?, completed_at = COALESCE(completed_at, now()), updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('DEBITED', 'SUBMITTED', 'BROADCAST_UNKNOWN',
                                                         'FAILED_PENDING', 'REFUND_PENDING')
                 """, walletResponse == null ? "{}" : walletResponse, reason, id);
-        WithdrawalRecord record = requireTransition(id, updated, "cannot mark withdrawal refunded", "REFUNDED");
-        recordTransitionEvent(id, "REFUNDED", "SPOT_ACCOUNT", before, record, updated,
-                record == null ? null : record.walletWithdrawalId(), walletResponse, reason);
-        return record;
     }
 
-    @Transactional
-    public WithdrawalRecord markRejected(UUID id, String code, String error) {
-        lockForOutcome(id);
-        WithdrawalRecord before = find(id);
-        int updated = jdbcTemplate.update("""
+    public int markRejectedRow(UUID id, String code, String error) {
+        return jdbcTemplate.update("""
                 UPDATE gateway_wallet_withdrawals
                    SET status = 'REJECTED', error_code = ?, error_message = ?, updated_at = now()
                  WHERE withdrawal_id = ? AND status IN ('PENDING_APPROVAL', 'PROCESSING', 'REJECTED')
                 """, code, error, id);
-        WithdrawalRecord record = requireTransition(id, updated, "cannot mark withdrawal rejected", "REJECTED");
-        recordTransitionEvent(id, "REJECTED", "SPOT_ACCOUNT", before, record, updated,
-                record == null ? null : record.walletWithdrawalId(), "{}", error);
-        return record;
-    }
-
-    private WithdrawalRecord requireConditionalUpdate(UUID id, int updated, String message) {
-        WithdrawalRecord record = find(id);
-        if (updated == 0) {
-            throw new IllegalStateException(message + "; current status is "
-                    + (record == null ? "missing" : record.status()));
-        }
-        return record;
-    }
-
-    private WithdrawalRecord requireTransition(UUID id, int updated, String message, String targetStatus) {
-        WithdrawalRecord record = find(id);
-        if (updated == 0 && (record == null || !targetStatus.equals(record.status()))) {
-            throw new IllegalStateException(message + "; current status is "
-                    + (record == null ? "missing" : record.status()));
-        }
-        return record;
-    }
-
-    private WithdrawalRecord requireRetryable(UUID id, int updated, String message) {
-        WithdrawalRecord record = find(id);
-        if (updated == 0 && (record == null || !RETRYABLE_STATUSES.contains(record.status()))) {
-            throw new IllegalStateException(message + "; current status is "
-                    + (record == null ? "missing" : record.status()));
-        }
-        return record;
-    }
-
-    private WithdrawalRecord lockAndValidateWalletReference(UUID id, String walletWithdrawalId) {
-        lockForOutcome(id);
-        WithdrawalRecord current = find(id);
-        if (current == null) {
-            throw new IllegalStateException("withdrawal intent does not exist");
-        }
-        if (walletWithdrawalId != null && !walletWithdrawalId.isBlank()
-                && current.walletWithdrawalId() != null
-                && !current.walletWithdrawalId().equals(walletWithdrawalId)) {
-            throw new IllegalStateException("wallet withdrawal id does not match local intent");
-        }
-        return current;
-    }
-
-    private void recordTransitionEvent(UUID id, String eventType, String source,
-                                       WithdrawalRecord before, WithdrawalRecord after, int updated,
-                                       String walletWithdrawalId, String payload, String reason) {
-        recordTransitionEvent(id, eventType, source, before, after, updated,
-                walletWithdrawalId, payload, reason, null);
-    }
-
-    private void recordTransitionEvent(UUID id, String eventType, String source,
-                                       WithdrawalRecord before, WithdrawalRecord after, int updated,
-                                       String walletWithdrawalId, String payload, String reason,
-                                       String providerEventId) {
-        if (updated == 1 && before != null && after != null) {
-            insertTransitionEvent(id, eventType, source, before.status(), after.status(),
-                    walletWithdrawalId, providerEventId, payload, reason);
-        }
-    }
-
-    private void insertTransitionEvent(UUID id, String eventType, String source,
-                                       String fromStatus, String toStatus, String walletWithdrawalId,
-                                       String payload, String reason) {
-        insertTransitionEvent(id, eventType, source, fromStatus, toStatus, walletWithdrawalId, null, payload, reason);
-    }
-
-    private void insertTransitionEvent(UUID id, String eventType, String source,
-                                       String fromStatus, String toStatus, String walletWithdrawalId,
-                                       String providerEventId, String payload, String reason) {
-        jdbcTemplate.update("""
-                INSERT INTO gateway_wallet_withdrawal_events (
-                    event_id, withdrawal_id, event_type, source, from_status, to_status,
-                    wallet_withdrawal_id, provider_event_id, payload, reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
-                """, UUID.randomUUID(), id, eventType, source, fromStatus, toStatus,
-                walletWithdrawalId, providerEventId, payload == null || payload.isBlank() ? "{}" : payload,
-                reason == null ? null : reason.substring(0, Math.min(reason.length(), 2000)));
-    }
-
-    private void insertAdminAction(UUID withdrawalId, long adminUserId, String adminUsername,
-                                   String action, String reason) {
-        if (reason == null || reason.isBlank()) {
-            throw new IllegalArgumentException("admin action reason is required");
-        }
-        jdbcTemplate.update("""
-                INSERT INTO gateway_wallet_withdrawal_actions
-                    (action_id, withdrawal_id, admin_user_id, admin_username, action, reason)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """, UUID.randomUUID(), withdrawalId, adminUserId, adminUsername, action, reason.trim());
     }
 
     public void lockForOutcome(UUID id) {
@@ -590,6 +236,25 @@ public class CustodyWithdrawalRepository {
         return selectSql(predicate, limit);
     }
 
+    public List<WithdrawalRecord> findByExternalReference(String externalReference) {
+        return jdbcTemplate.query(selectSql("external_reference = ?", 2), this::toRecord, externalReference);
+    }
+
+    public List<WithdrawalRecord> findByWalletId(String walletWithdrawalId) {
+        return jdbcTemplate.query(selectSql("wallet_withdrawal_id = ?", 2), this::toRecord, walletWithdrawalId);
+    }
+    /** 用户日额度锁；必须由Service事务持有到意图与事件一并提交。 */
+    public void lockUserQuota(long userId) {
+        jdbcTemplate.execute(connection -> {
+            var statement = connection.prepareStatement("SELECT pg_advisory_xact_lock(?)");
+            statement.setLong(1, userId);
+            return statement;
+        }, (org.springframework.jdbc.core.PreparedStatementCallback<Void>) statement -> {
+            statement.execute();
+            return null;
+        });
+    }
+
     private WithdrawalRecord toRecord(ResultSet rs, int rowNum) throws SQLException {
         return new WithdrawalRecord(
                 rs.getObject("withdrawal_id", UUID.class), rs.getLong("user_id"), rs.getString("idempotency_key"),
@@ -602,37 +267,15 @@ public class CustodyWithdrawalRepository {
                 nullableInstant(rs, "submitted_at"), nullableInstant(rs, "completed_at"),
                 nullableLong(rs, "admin_user_id"), rs.getString("admin_username"), rs.getString("admin_reason"));
     }
-
     private Instant instant(ResultSet rs, String column) throws SQLException {
         return rs.getTimestamp(column).toInstant();
     }
-
     private Instant nullableInstant(ResultSet rs, String column) throws SQLException {
         Timestamp timestamp = rs.getTimestamp(column);
         return timestamp == null ? null : timestamp.toInstant();
     }
-
     private Long nullableLong(ResultSet rs, String column) throws SQLException {
         long value = rs.getLong(column);
         return rs.wasNull() ? null : value;
-    }
-
-    public record CreateRequest(long userId, String idempotencyKey, String requestHash, String chain,
-                                String assetSymbol, UUID custodyAddressId, String toAddress, String amount,
-                                long amountUnits, BigDecimal usdtValue, String externalReference,
-                                String spotDebitReference, String requestPayload, boolean requiresApproval,
-                                BigDecimal dailyLimitUsdt) {
-    }
-
-    public record CreateResult(WithdrawalRecord record, boolean created) {
-    }
-
-    public record WithdrawalRecord(UUID withdrawalId, long userId, String idempotencyKey, String requestHash,
-                                   String chain, String assetSymbol, UUID custodyAddressId, String toAddress,
-                                   String amount, long amountUnits, BigDecimal usdtValue, String externalReference,
-                                   String spotDebitReference, String requestPayload, String status,
-                                   String walletResponse, String walletWithdrawalId, String errorCode,
-                                   String errorMessage, Instant createdAt, Instant updatedAt, Instant submittedAt,
-                                   Instant completedAt, Long adminUserId, String adminUsername, String adminReason) {
     }
 }

@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.model.CustodyWithdrawalModels;
 import lombok.extern.slf4j.Slf4j;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
@@ -27,6 +28,7 @@ public class CustodyWithdrawalService {
 
     private final GatewayProperties properties;
     private final CustodyWithdrawalRepository repository;
+    private final CustodyWithdrawalStateService states;
     private final CustodyWalletClient walletClient;
     private final SpotAccountClient spotAccountClient;
     private final WithdrawalValuationClient valuationClient;
@@ -37,6 +39,7 @@ public class CustodyWithdrawalService {
 
     public CustodyWithdrawalService(GatewayProperties properties,
                                     CustodyWithdrawalRepository repository,
+                                    CustodyWithdrawalStateService states,
                                     CustodyWalletClient walletClient,
                                     SpotAccountClient spotAccountClient,
                                     WithdrawalValuationClient valuationClient,
@@ -46,6 +49,7 @@ public class CustodyWithdrawalService {
         this.properties = properties;
         this.assets = assets;
         this.repository = repository;
+        this.states = states;
         this.walletClient = walletClient;
         this.spotAccountClient = spotAccountClient;
         this.valuationClient = valuationClient;
@@ -64,15 +68,15 @@ public class CustodyWithdrawalService {
         String externalReference = "custody-wallet-withdrawal:"
                 + sha256(userId + ":" + normalizedKey).substring(0, 32);
         String payload = payload(request, externalReference);
-        CustodyWithdrawalRepository.CreateResult result = repository.createOrGet(
-                new CustodyWithdrawalRepository.CreateRequest(
+        CustodyWithdrawalModels.CreateResult result = states.createOrGet(
+                new CustodyWithdrawalModels.CreateRequest(
                         userId, normalizedKey, sha256(canonical(request, amountUnits, usdtValue)),
                         request.chain().trim(), request.assetSymbol().trim().toUpperCase(), request.custodyAddressId(),
                         request.toAddress().trim(), request.amount().trim(), amountUnits, usdtValue,
                         externalReference, spotReference, payload,
                         usdtValue.compareTo(properties.getWithdrawal().getSingleApprovalThresholdUsdt()) >= 0,
                         properties.getWithdrawal().getDailyLimitUsdt()));
-        CustodyWithdrawalRepository.WithdrawalRecord record = result.record();
+        CustodyWithdrawalModels.WithdrawalRecord record = result.record();
         if ("PENDING_APPROVAL".equals(record.status()) || terminal(record.status())) {
             return response(record);
         }
@@ -81,22 +85,22 @@ public class CustodyWithdrawalService {
     }
 
     public WithdrawalResponse approve(UUID withdrawalId, long adminUserId, String adminUsername, String reason) {
-        CustodyWithdrawalRepository.WithdrawalRecord record = repository.approve(
+        CustodyWithdrawalModels.WithdrawalRecord record = states.approve(
                 withdrawalId, adminUserId, adminUsername, reason);
         return continueSubmission(record);
     }
 
     public WithdrawalResponse reject(UUID withdrawalId, long adminUserId, String adminUsername, String reason) {
-        return response(repository.reject(withdrawalId, adminUserId, adminUsername, reason));
+        return response(states.reject(withdrawalId, adminUserId, adminUsername, reason));
     }
 
     public WithdrawalResponse retry(UUID withdrawalId, long adminUserId, String adminUsername, String reason) {
-        return continueSubmission(repository.recordAdminRetry(withdrawalId, adminUserId, adminUsername, reason));
+        return continueSubmission(states.recordAdminRetry(withdrawalId, adminUserId, adminUsername, reason));
     }
 
     public List<Map<String, Object>> adminList(String status, int limit) {
         List<Map<String, Object>> rows = new ArrayList<>();
-        for (CustodyWithdrawalRepository.WithdrawalRecord record : repository.list(status, limit)) {
+        for (CustodyWithdrawalModels.WithdrawalRecord record : repository.list(status, limit)) {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("withdrawalId", record.withdrawalId());
             row.put("userId", record.userId());
@@ -136,7 +140,7 @@ public class CustodyWithdrawalService {
         } catch (IllegalStateException ex) {
             custodyUnavailable = true;
         }
-        for (CustodyWithdrawalRepository.WithdrawalRecord record
+        for (CustodyWithdrawalModels.WithdrawalRecord record
                 : repository.listForUser(userId, chain, asset, limit)) {
             Map<String, Object> matched = null;
             if (record.walletWithdrawalId() != null) {
@@ -171,7 +175,7 @@ public class CustodyWithdrawalService {
     }
 
     public void reconcileFailedWithdrawals() {
-        for (CustodyWithdrawalRepository.WithdrawalRecord record
+        for (CustodyWithdrawalModels.WithdrawalRecord record
                 : repository.listPendingFailures(properties.getWithdrawal().getFailureReconciliationDelay(), 50)) {
             try {
                 reconciliationService.reconcile(record);
@@ -181,7 +185,7 @@ public class CustodyWithdrawalService {
         }
     }
 
-    private WithdrawalResponse continueSubmission(CustodyWithdrawalRepository.WithdrawalRecord record) {
+    private WithdrawalResponse continueSubmission(CustodyWithdrawalModels.WithdrawalRecord record) {
         if (record == null) {
             throw new IllegalStateException("withdrawal intent does not exist");
         }
@@ -196,7 +200,7 @@ public class CustodyWithdrawalService {
         if (!"DEBITED".equals(record.status()) && !"SUBMITTED".equals(record.status())
                 && !"BROADCAST_UNKNOWN".equals(record.status())) {
             debit(record);
-            record = repository.markDebited(record.withdrawalId(), "custody wallet withdrawal");
+            record = states.markDebited(record.withdrawalId(), "custody wallet withdrawal");
         }
         if ("SUBMITTED".equals(record.status())) {
             return response(record);
@@ -211,9 +215,9 @@ public class CustodyWithdrawalService {
             throw new WithdrawalRejectedException("custody wallet rejected withdrawal; funds were released", ex);
         } catch (RuntimeException ex) {
             try {
-                repository.markBroadcastUnknown(record.withdrawalId(), "{}", message(ex));
+                states.markBroadcastUnknown(record.withdrawalId(), "{}", message(ex));
             } catch (IllegalStateException stateEx) {
-                CustodyWithdrawalRepository.WithdrawalRecord current = repository.find(record.withdrawalId());
+                CustodyWithdrawalModels.WithdrawalRecord current = repository.find(record.withdrawalId());
                 if (current != null && submissionOutcomeAdvanced(current.status())) {
                     return response(current);
                 }
@@ -228,10 +232,10 @@ public class CustodyWithdrawalService {
         if (walletWithdrawalId == null || walletExternalReference == null
                 || !record.externalReference().equals(walletExternalReference)) {
             try {
-                repository.markBroadcastUnknown(record.withdrawalId(), json(walletResponse),
+                states.markBroadcastUnknown(record.withdrawalId(), json(walletResponse),
                         "custody wallet response identity does not match local withdrawal", null);
             } catch (IllegalStateException stateEx) {
-                CustodyWithdrawalRepository.WithdrawalRecord current = repository.find(record.withdrawalId());
+                CustodyWithdrawalModels.WithdrawalRecord current = repository.find(record.withdrawalId());
                 if (current != null && submissionOutcomeAdvanced(current.status())) {
                     return response(current);
                 }
@@ -240,10 +244,10 @@ public class CustodyWithdrawalService {
             throw new WithdrawalUnknownException("custody wallet withdrawal identity is unknown", null);
         }
         try {
-            record = repository.markSubmitted(record.withdrawalId(), json(walletResponse), walletWithdrawalId);
+            record = states.markSubmitted(record.withdrawalId(), json(walletResponse), walletWithdrawalId);
             return response(record);
         } catch (IllegalStateException ex) {
-            CustodyWithdrawalRepository.WithdrawalRecord current = repository.find(record.withdrawalId());
+            CustodyWithdrawalModels.WithdrawalRecord current = repository.find(record.withdrawalId());
             if (current != null && submissionOutcomeAdvanced(current.status())) {
                 return response(current);
             }
@@ -282,9 +286,9 @@ public class CustodyWithdrawalService {
         if (walletWithdrawalId == null || externalReference == null) {
             throw new IllegalArgumentException("withdrawal webhook wallet id and external reference are required");
         }
-        CustodyWithdrawalRepository.WithdrawalRecord record = providerEventId == null
-                ? repository.findByWalletReference(walletWithdrawalId, externalReference)
-                : repository.findByWalletReference(walletWithdrawalId, externalReference, providerEventId);
+        CustodyWithdrawalModels.WithdrawalRecord record = providerEventId == null
+                ? states.findByWalletReference(walletWithdrawalId, externalReference)
+                : states.findByWalletReference(walletWithdrawalId, externalReference, providerEventId);
         if (record == null) {
             throw new IllegalArgumentException("withdrawal webhook does not match a local withdrawal");
         }
@@ -294,10 +298,10 @@ public class CustodyWithdrawalService {
                 || "REJECTED".equals(record.status())) {
             if (terminalWebhookIsIdempotent(record.status(), normalizedType)) {
                 if (providerEventId == null) {
-                    repository.recordWebhookObservation(record.withdrawalId(), walletWithdrawalId, json(event),
+                    states.recordWebhookObservation(record.withdrawalId(), walletWithdrawalId, json(event),
                             "idempotent terminal webhook: " + normalizedType);
                 } else {
-                    repository.recordWebhookObservation(record.withdrawalId(), walletWithdrawalId, json(event),
+                    states.recordWebhookObservation(record.withdrawalId(), walletWithdrawalId, json(event),
                             "idempotent terminal webhook: " + normalizedType, providerEventId);
                 }
                 return;
@@ -308,38 +312,38 @@ public class CustodyWithdrawalService {
         switch (normalizedType) {
             case "WITHDRAWAL.CREATED", "WITHDRAWAL.BROADCAST" -> {
                 if (providerEventId == null) {
-                    repository.markSubmitted(record.withdrawalId(), response, walletWithdrawalId);
+                    states.markSubmitted(record.withdrawalId(), response, walletWithdrawalId);
                 } else {
-                    repository.markSubmitted(record.withdrawalId(), response, walletWithdrawalId, providerEventId);
+                    states.markSubmitted(record.withdrawalId(), response, walletWithdrawalId, providerEventId);
                 }
             }
             case "WITHDRAWAL.BROADCAST_UNKNOWN" -> {
-                boolean observed = repository.recordLateBroadcastUnknownObservation(record.withdrawalId(),
+                boolean observed = states.recordLateBroadcastUnknownObservation(record.withdrawalId(),
                         walletWithdrawalId, response,
                         "late broadcast-unknown webhook ignored after local status advanced", providerEventId);
                 if (!observed) {
                     if (providerEventId == null) {
-                        repository.markBroadcastUnknown(record.withdrawalId(), response,
+                        states.markBroadcastUnknown(record.withdrawalId(), response,
                                 "custody wallet broadcast status is unknown", walletWithdrawalId);
                     } else {
-                        repository.markBroadcastUnknown(record.withdrawalId(), response,
+                        states.markBroadcastUnknown(record.withdrawalId(), response,
                                 "custody wallet broadcast status is unknown", walletWithdrawalId, providerEventId);
                     }
                 }
             }
             case "WITHDRAWAL.CONFIRMED" -> {
                 if (providerEventId == null) {
-                    repository.markCompleted(record.withdrawalId(), response, walletWithdrawalId);
+                    states.markCompleted(record.withdrawalId(), response, walletWithdrawalId);
                 } else {
-                    repository.markCompleted(record.withdrawalId(), response, walletWithdrawalId, providerEventId);
+                    states.markCompleted(record.withdrawalId(), response, walletWithdrawalId, providerEventId);
                 }
             }
             case "WITHDRAWAL.FAILED" -> {
                 if (providerEventId == null) {
-                    repository.markFailurePending(record.withdrawalId(), response,
+                    states.markFailurePending(record.withdrawalId(), response,
                             "custody wallet withdrawal failed", walletWithdrawalId);
                 } else {
-                    repository.markFailurePending(record.withdrawalId(), response,
+                    states.markFailurePending(record.withdrawalId(), response,
                             "custody wallet withdrawal failed", walletWithdrawalId, providerEventId);
                 }
             }
@@ -347,33 +351,33 @@ public class CustodyWithdrawalService {
         }
     }
 
-    private void debit(CustodyWithdrawalRepository.WithdrawalRecord record) {
+    private void debit(CustodyWithdrawalModels.WithdrawalRecord record) {
         try {
             spotAccountClient.adjustBalance(record.userId(), record.assetSymbol(), -record.amountUnits(),
                     record.spotDebitReference(), "custody wallet withdrawal");
         } catch (SpotAccountClient.SpotAccountRejectedException ex) {
-            repository.markRejected(record.withdrawalId(), "SPOT_REJECTED", message(ex));
+            states.markRejected(record.withdrawalId(), "SPOT_REJECTED", message(ex));
             throw new WithdrawalRejectedException("spot account rejected withdrawal", ex);
         } catch (RuntimeException ex) {
-            repository.markDebitUnknown(record.withdrawalId(), message(ex));
+            states.markDebitUnknown(record.withdrawalId(), message(ex));
             throw new WithdrawalUnknownException("spot account debit status is unknown", ex);
         }
     }
 
-    private void refund(CustodyWithdrawalRepository.WithdrawalRecord record,
+    private void refund(CustodyWithdrawalModels.WithdrawalRecord record,
                         String spotReason,
                         String stateReason) {
         refund(record, spotReason, stateReason, null);
     }
 
-    private void refund(CustodyWithdrawalRepository.WithdrawalRecord record,
+    private void refund(CustodyWithdrawalModels.WithdrawalRecord record,
                         String spotReason,
                         String stateReason,
                         String walletResponse) {
         try {
             refundService.refund(record, spotReason, stateReason, walletResponse);
         } catch (RuntimeException ex) {
-            repository.markRefundPending(record.withdrawalId(), message(ex));
+            states.markRefundPending(record.withdrawalId(), message(ex));
             throw new WithdrawalUnknownException("withdrawal refund status is unknown", ex);
         }
     }
@@ -388,7 +392,7 @@ public class CustodyWithdrawalService {
         return json(evidence);
     }
 
-    private Map<String, Object> withdrawalPayload(CustodyWithdrawalRepository.WithdrawalRecord record) {
+    private Map<String, Object> withdrawalPayload(CustodyWithdrawalModels.WithdrawalRecord record) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("custodyAddressId", record.custodyAddressId());
         payload.put("chain", record.chain());
@@ -444,7 +448,7 @@ public class CustodyWithdrawalService {
         return value == null || String.valueOf(value).isBlank() ? fallback : String.valueOf(value);
     }
 
-    private void validateWebhookData(CustodyWithdrawalRepository.WithdrawalRecord record,
+    private void validateWebhookData(CustodyWithdrawalModels.WithdrawalRecord record,
                                      Map<String, Object> data) {
         String asset = stringValue(data.get("assetSymbol"), stringValue(data.get("asset"), null));
         if (asset == null || !record.assetSymbol().equalsIgnoreCase(asset)) {
@@ -497,14 +501,14 @@ public class CustodyWithdrawalService {
         return throwable.getMessage() == null ? throwable.getClass().getSimpleName() : throwable.getMessage();
     }
 
-    private String custodyIdempotencyKey(CustodyWithdrawalRepository.WithdrawalRecord record) {
+    private String custodyIdempotencyKey(CustodyWithdrawalModels.WithdrawalRecord record) {
         if (record.externalReference() != null && !record.externalReference().isBlank()) {
             return record.externalReference();
         }
         return "custody-wallet-idempotency:" + sha256(record.userId() + ":" + record.idempotencyKey());
     }
 
-    private WithdrawalResponse response(CustodyWithdrawalRepository.WithdrawalRecord record) {
+    private WithdrawalResponse response(CustodyWithdrawalModels.WithdrawalRecord record) {
         return new WithdrawalResponse(record.withdrawalId(), record.status(), record.walletWithdrawalId(),
                 record.usdtValue(), record.createdAt(), record.updatedAt());
     }

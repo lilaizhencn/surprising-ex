@@ -1,0 +1,296 @@
+{
+  "date": "2026-10-21",
+  "verified_at_utc": "2026-10-21T13:34:45.262503+00:00",
+  "scope": "托管提现主表/动作/事件单表职责及状态事务聚合",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16; isolated PostgreSQL 18.4",
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=CustodyWithdrawalServiceTest,CustodyWithdrawalReconciliationPostgresTest,CustodyWalletWebhookServiceTest,CustodyWalletControllerTest,CustodyWalletClientTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [],
+      "log_sha256": "c97e5a8c01e8d50e7d794117d97c4bc0f2ac554b190a1022eb4f0b02fcb6d184",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "focused2": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=CustodyWithdrawalServiceTest,CustodyWithdrawalReconciliationPostgresTest,CustodyWalletWebhookServiceTest,CustodyWalletControllerTest,CustodyWalletClientTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [],
+      "log_sha256": "8d7e24b76e4c55f6c5c6f5712a45d5d2c6c87a4112ad4061dfa4d9570bfae91e",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "focused3": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=CustodyWithdrawalServiceTest,CustodyWithdrawalReconciliationPostgresTest,CustodyWalletWebhookServiceTest,CustodyWalletControllerTest,CustodyWalletClientTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.service.CustodyWalletClientTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.CustodyWithdrawalServiceTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.CustodyWithdrawalReconciliationPostgresTest",
+          "tests": 22,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.CustodyWalletControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "cf48b257dc9c5605c43301711f012ba3c2bd1937aa7b21dd97f732c1a9ccc51b",
+      "tests": 55,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "boundary": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=CustodyWithdrawalReconciliationPostgresTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.service.CustodyWithdrawalReconciliationPostgresTest",
+          "tests": 25,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "ffc937644e2fbdc4e5e78f62671d2cf661f6aa87458a4f2e6ee940742b0c6df6",
+      "tests": 25,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=CustodyWithdrawalReconciliationPostgresTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.service.CustodyWithdrawalReconciliationPostgresTest",
+          "tests": 25,
+          "failures": 1,
+          "errors": 4,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "5984a6821b8db65b36df3f7429d9611f147d7aedaf261cd272eef3698946b7a4",
+      "tests": 25,
+      "failures": 1,
+      "errors": 4,
+      "skipped": 0
+    },
+    "expanded": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=Custody*,SpotAccountClientTest,WithdrawalValuationClientTest,GatewayStartupConfigurationTest,GatewayInfrastructureIsolationTest,GatewayProduct*Test,GatewayProtocolBoundaryTest",
+        "clean",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.product.GatewayProductSelectionTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.CustodyWalletClientTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.CustodyWithdrawalServiceTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.CustodyWithdrawalReconciliationPostgresTest",
+          "tests": 25,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.CustodyWalletControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.GatewayProductSettingsIntegrationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.SpotAccountClientTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "331e4eda1cef60899a5cfa1d359f06886343a68f1d3c6fa91203c67dfc2070a1",
+      "tests": 83,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    }
+  },
+  "assertions": [
+    "提现主表、动作、事件各由一个Repository访问；状态、日额度和幂等由StateService聚合，模型归model。",
+    "保留原有状态条件更新、终态保护、钱包ID唯一绑定与冲突检查、用户日额度锁和提现结果锁。",
+    "意图、动作、状态和不可变事件在Service事务原子提交；事件/动作失败回滚，意图失败不消耗额度并可重试。",
+    "确认胜出后不退款；退款持有结果锁直到Spot调用及状态提交，后到确认不能穿过锁；相同请求不创建第二意图或事件。",
+    "SQL、真实数据库故障、并发及Spring代理已覆盖；外部钱包/Spot适配器在此批使用测试替身，不据此宣称线上资金守恒或真实钱包已验证。"
+  ],
+  "repository_table_footprints": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/CustodyWithdrawalRepository.java": [
+      "gateway_wallet_withdrawals"
+    ],
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/CustodyWithdrawalEventRepository.java": [
+      "gateway_wallet_withdrawal_events"
+    ],
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/CustodyWithdrawalActionRepository.java": [
+      "gateway_wallet_withdrawal_actions"
+    ]
+  },
+  "source_sha256": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/model/CustodyWithdrawalModels.java": "576d89c34d34ce436553ea884e48a0cd0eb8b419dd5545b77f7a358196390402",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/CustodyWithdrawalActionRepository.java": "3be8ff217948c31a157c48f9b8105e109584fef85f1adb82b12e6c2773754ab6",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/CustodyWithdrawalEventRepository.java": "7ce97bcd8bd1d7810d586d7c11bfa5bedd9437a391715da93de62548b655721e",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/CustodyWithdrawalRepository.java": "2c3ff35fafcad7fc7ee98c1a5bf0580c58fd006281cd0766971578706e8cb2f7",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalReconciliationService.java": "54c9f8376ab0880fd47cb380f2108c85992836b37f51553cde47ba94448de131",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalRefundService.java": "36e6a780cbd0b22e46c7e2444e327384266746f2a00d67c2e265b07cb3a21515",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalService.java": "4a3d309ea1d6fb351f77e6d4b08641346ad075bbde08d48b427dadd6f0f41d4a",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/CustodyWithdrawalStateService.java": "958150bc22c4935d2a8d9aef6e41f6aad25c560e42176fc8d6fc7f57fd42108a",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/CustodyWithdrawalReconciliationPostgresTest.java": "14cc91329ce78d79c7527f4836b122f73563043e23c7de5f667682e9cd2cd99b",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/CustodyWithdrawalServiceTest.java": "ca20720c95e19383b1ba943f1579129e69f91e34ba43e522a662c97a7d6ad57f"
+  },
+  "not_run": [
+    "扩大83项中GatewayProductSettingsIntegrationTest一项缺少其专用数据库环境而跳过，该设置链路此前独立干净构建264项已验证。本批所有提现数据库25项实际运行且无跳过。",
+    "本批未启动实际wallet、Core集群或API资金核对；对账/资金实栈留在完整整改的最后阶段。",
+    "提现请求格式、HTTP职责及其余全范围整改继续。"
+  ],
+  "cleanup": {
+    "postgres_stopped": true,
+    "owned_database_removed": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-mvc-withdrawal-pg-p13z7jtf",
+    "owned_logs_and_summarized_reports_removed": [
+      "/tmp/surprising-mvc-withdrawal-expanded.log",
+      "/tmp/surprising-mvc-withdrawal-negative.log",
+      "/tmp/surprising-mvc-withdrawal-boundary.log",
+      "/tmp/surprising-mvc-withdrawal-focused3.log",
+      "/tmp/surprising-mvc-withdrawal-focused2.log",
+      "/tmp/surprising-mvc-withdrawal-focused.log",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.CustodyWithdrawalServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.product.GatewayProductSelectionTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.product.GatewayProductSelectionTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.CustodyWalletClientTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.CustodyWithdrawalServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.CustodyWithdrawalReconciliationPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.controller.CustodyWalletControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.SpotAccountClientTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.CustodyWalletClientTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.CustodyWithdrawalReconciliationPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.product.GatewayProductSettingsIntegrationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.controller.CustodyWalletControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.SpotAccountClientTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.product.GatewayProductSettingsIntegrationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.CustodyWalletWebhookServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest.xml"
+    ],
+    "build_outputs_retained": true
+  }
+}

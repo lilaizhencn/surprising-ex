@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.model.CustodyWithdrawalModels;
 import com.surprising.gateway.provider.repository.CustodyWithdrawalRepository;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -20,22 +21,25 @@ public class CustodyWithdrawalReconciliationService {
     private static final int MAX_PAGES = 1_000;
 
     private final CustodyWithdrawalRepository repository;
+    private final CustodyWithdrawalStateService states;
     private final CustodyWalletClient walletClient;
     private final CustodyWithdrawalRefundService refundService;
     private final ObjectMapper objectMapper;
 
     public CustodyWithdrawalReconciliationService(CustodyWithdrawalRepository repository,
+                                    CustodyWithdrawalStateService states,
                                                   CustodyWalletClient walletClient,
                                                   CustodyWithdrawalRefundService refundService,
                                                   ObjectMapper objectMapper) {
         this.repository = repository;
+        this.states = states;
         this.walletClient = walletClient;
         this.refundService = refundService;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
     }
 
     @Transactional
-    public void reconcile(CustodyWithdrawalRepository.WithdrawalRecord record) {
+    public void reconcile(CustodyWithdrawalModels.WithdrawalRecord record) {
         if (record.externalReference() == null || record.externalReference().isBlank()) {
             return;
         }
@@ -85,13 +89,13 @@ public class CustodyWithdrawalReconciliationService {
         String status = stringValue(walletRecord.get("status"), "").toUpperCase(Locale.ROOT);
         String response = json(walletRecord);
         if ("CONFIRMED".equals(status)) {
-            repository.markCompleted(record.withdrawalId(), response, walletWithdrawalId);
+            states.markCompleted(record.withdrawalId(), response, walletWithdrawalId);
         } else if (Set.of("FAILED", "REJECTED", "CANCELLED").contains(status)) {
             refundService.refund(record, "custody wallet withdrawal failed", "custody wallet withdrawal failed");
         }
     }
 
-    private boolean matchesRecord(CustodyWithdrawalRepository.WithdrawalRecord record,
+    private boolean matchesRecord(CustodyWithdrawalModels.WithdrawalRecord record,
                                   Map<String, Object> walletRecord) {
         String walletWithdrawalId = stringValue(walletRecord.get("withdrawalId"),
                 stringValue(walletRecord.get("id"), null));
