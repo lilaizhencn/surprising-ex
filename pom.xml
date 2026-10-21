@@ -15,21 +15,13 @@
     <modules>
         <module>surprising-parent</module>
         <module>surprising-product-api</module>
-        <module>surprising-aeron-core/surprising-aeron-protocol</module>
-        <module>surprising-aeron-core/surprising-aeron-service</module>
-        <module>surprising-aeron-core/surprising-aeron-client</module>
-        <module>surprising-aeron-core/surprising-aeron-tools</module>
-        <module>surprising-aeron-core/surprising-aeron-benchmarks</module>
-        <module>surprising-instrument/surprising-instrument-api</module>
-        <module>surprising-price/surprising-price-api</module>
-        <module>surprising-price/surprising-price-consumer</module>
-        <module>surprising-price/surprising-price-provider</module>
-        <module>surprising-trading/surprising-trading-api</module>
-        <module>surprising-account/surprising-account-api</module>
-        <module>surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api</module>
-        <module>surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider</module>
-        <module>surprising-realtime/surprising-realtime-api</module>
-        <module>surprising-realtime/surprising-realtime-provider</module>
+        <module>surprising-aeron-core</module>
+        <module>surprising-instrument-api</module>
+        <module>surprising-price</module>
+        <module>surprising-trading-api</module>
+        <module>surprising-account-api</module>
+        <module>surprising-derivatives-lifecycle</module>
+        <module>surprising-realtime</module>
         <module>surprising-gateway</module>
         <module>surprising-maker</module>
     </modules>

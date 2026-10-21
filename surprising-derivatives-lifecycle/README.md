@@ -3,8 +3,8 @@
 `surprising-derivatives-lifecycle-provider` 统一运行资金费、风险、强平、保险基金和 ADL。
 默认端口 `9087`，启动类 `SurprisingDerivativesLifecycleApplication`，Core 保持独立。
 
-本目录是源码分组，不再保留中间聚合 POM。API 与 provider 由仓库根 POM
-直接聚合，沿用已有的 `surprising-parent` 继承关系和 artifactId。
+本目录包含 API 与 provider，保留聚合 POM 供 Maven/IDE 分组。
+两个子模块沿用直接继承 `surprising-parent` 的关系和已有 artifactId。
 下方构建命令均从仓库根目录执行。
 
 ## 资金费业务顺序

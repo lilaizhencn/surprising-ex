@@ -1,7 +1,7 @@
 # 统一行情应用：成交导出、K 线与实时路由
 
-本目录只作源码分组，不再保留中间聚合 POM。`surprising-realtime-api` 和
-`surprising-realtime-provider` 由仓库根 POM 直接聚合，统一继承 `surprising-parent`。
+本目录保留聚合 POM，供 Maven/IDE 将 `surprising-realtime-api` 和
+`surprising-realtime-provider` 分组导航；两个子模块统一直接继承 `surprising-parent`。
 构建从仓库根目录执行 `mvn -pl surprising-realtime/surprising-realtime-provider -am package`；
 现有 artifactId、Java 包名和行情进程入口不变。
 

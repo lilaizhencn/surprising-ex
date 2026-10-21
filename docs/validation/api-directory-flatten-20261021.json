@@ -1,0 +1,404 @@
+{
+  "date": "2026-10-21",
+  "subject": "独立 API 目录展开，多子模块恢复聚合入口",
+  "baseCommit": "28f334cede5e7fd8c65dfc59b89a04a681b80c18",
+  "structure": {
+    "beforeProjects": 20,
+    "afterProjects": 24,
+    "jarModules": 18,
+    "groupAggregatorsRestored": [
+      "surprising-aeron-core",
+      "surprising-derivatives-lifecycle",
+      "surprising-price",
+      "surprising-realtime"
+    ],
+    "retainedEffectiveConfigurationsCompared": 20,
+    "effectiveConfigurationIdenticalAfterPathNormalization": true,
+    "sourceFilesUnchanged": 1924,
+    "relocations": {
+      "surprising-account/surprising-account-api": "surprising-account-api",
+      "surprising-trading/surprising-trading-api": "surprising-trading-api",
+      "surprising-instrument/surprising-instrument-api": "surprising-instrument-api"
+    }
+  },
+  "tests": {
+    "totals": {
+      "tests": 56,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "suites": [
+      {
+        "suite": "com.surprising.product.api.InstrumentIdsTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.product.api.ProductLineTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.product.api.ProductTopicNamesTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.instrument.api.InstrumentEventKeysTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.instrument.api.cache.InstrumentSnapshotSupportTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.instrument.api.model.ContractTypeProductLineTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.instrument.api.math.PerpetualContractMathTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.trading.api.kafka.KafkaTraceAutoConfigurationTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.trading.api.KafkaSymbolKeyValidatorTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.trading.api.model.OrderCommandReceiptJsonContractTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.trading.api.http.HttpTraceFilterTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.trading.api.model.MakerQuoteInputsTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.trading.api.TraceContextTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.trading.api.client.OrderRpcApiContractTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.account.api.model.AccountTypeProductLineTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "suite": "com.surprising.account.api.model.PerpetualAccountStateUpdatedEventTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "jars": {
+      "surprising-account-api": {
+        "classAndResourceEntries": 27,
+        "contentIdentical": true,
+        "sha256": "cd5e842ff62154a31b6d5a6c576cee883a1689f1a61b35c2a50303737db77d4b"
+      },
+      "surprising-trading-api": {
+        "classAndResourceEntries": 84,
+        "contentIdentical": true,
+        "sha256": "c731d860f2c56b9a5063782b827ac722d2e39de9de6bd8c3381862e04bcb5e50"
+      },
+      "surprising-instrument-api": {
+        "classAndResourceEntries": 28,
+        "contentIdentical": true,
+        "sha256": "fa1e6464e237ef10d2e9528307bb3795161a7d317ab2fe5c80efa4c1d0c82edb"
+      }
+    }
+  },
+  "mavenRuns": [
+    {
+      "label": "api-tests",
+      "command": [
+        "mvn",
+        "-B",
+        "-ntp",
+        "-pl",
+        "surprising-account-api,surprising-trading-api,surprising-instrument-api",
+        "-am",
+        "clean",
+        "verify"
+      ],
+      "startedAt": 1792562389.414471,
+      "exitCode": 0,
+      "finishedAt": 1792562407.68149
+    },
+    {
+      "label": "reactor-package",
+      "command": [
+        "mvn",
+        "-B",
+        "-ntp",
+        "-DskipTests",
+        "package"
+      ],
+      "startedAt": 1792562407.682486,
+      "exitCode": 0,
+      "finishedAt": 1792562499.291837
+    },
+    {
+      "label": "final-hierarchy-package",
+      "command": [
+        "mvn",
+        "-B",
+        "-ntp",
+        "-DskipTests",
+        "package"
+      ],
+      "startedAt": 1792562618.415008,
+      "exitCode": 0,
+      "finishedAt": 1792562709.1242461
+    }
+  ],
+  "groupBuildValidation": {
+    "groups": [
+      "surprising-aeron-core",
+      "surprising-price",
+      "surprising-realtime",
+      "surprising-derivatives-lifecycle"
+    ],
+    "plan": "incrementalBuild=PLAN goal=package withTests=false modules=surprising-aeron-core,surprising-price,surprising-realtime,surprising-derivatives-lifecycle,surprising-aeron-core/surprising-aeron-protocol,surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-client,surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks,surprising-price/surprising-price-api,surprising-price/surprising-price-consumer,surprising-price/surprising-price-provider,surprising-realtime/surprising-realtime-api,surprising-realtime/surprising-realtime-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway,surprising-maker\nmvn -pl surprising-aeron-core,surprising-price,surprising-realtime,surprising-derivatives-lifecycle,surprising-aeron-core/surprising-aeron-protocol,surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-client,surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks,surprising-price/surprising-price-api,surprising-price/surprising-price-consumer,surprising-price/surprising-price-provider,surprising-realtime/surprising-realtime-api,surprising-realtime/surprising-realtime-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway,surprising-maker -am -DskipTests package\n",
+    "validationCommand": [
+      "mvn",
+      "-B",
+      "-ntp",
+      "-pl",
+      "surprising-aeron-core,surprising-price,surprising-realtime,surprising-derivatives-lifecycle,surprising-aeron-core/surprising-aeron-protocol,surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-client,surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks,surprising-price/surprising-price-api,surprising-price/surprising-price-consumer,surprising-price/surprising-price-provider,surprising-realtime/surprising-realtime-api,surprising-realtime/surprising-realtime-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway,surprising-maker",
+      "-am",
+      "-DskipTests",
+      "validate"
+    ],
+    "exitCode": 0,
+    "validatedProjects": 23
+  },
+  "artifactVerification": {
+    "jarModules": [
+      {
+        "artifactId": "surprising-product-api",
+        "path": "surprising-product-api/target/surprising-product-api-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-aeron-protocol",
+        "path": "surprising-aeron-core/surprising-aeron-protocol/target/surprising-aeron-protocol-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-aeron-client",
+        "path": "surprising-aeron-core/surprising-aeron-client/target/surprising-aeron-client-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-instrument-api",
+        "path": "surprising-instrument-api/target/surprising-instrument-api-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-aeron-service",
+        "path": "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-aeron-tools",
+        "path": "surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-trading-api",
+        "path": "surprising-trading-api/target/surprising-trading-api-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-account-api",
+        "path": "surprising-account-api/target/surprising-account-api-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-price-api",
+        "path": "surprising-price/surprising-price-api/target/surprising-price-api-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-price-consumer",
+        "path": "surprising-price/surprising-price-consumer/target/surprising-price-consumer-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-maker",
+        "path": "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-realtime-api",
+        "path": "surprising-realtime/surprising-realtime-api/target/surprising-realtime-api-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-price-provider",
+        "path": "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-aeron-benchmarks",
+        "path": "surprising-aeron-core/surprising-aeron-benchmarks/target/surprising-aeron-benchmarks-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-derivatives-lifecycle-api",
+        "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/target/surprising-derivatives-lifecycle-api-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-derivatives-lifecycle-provider",
+        "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-realtime-provider",
+        "path": "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      },
+      {
+        "artifactId": "surprising-gateway",
+        "path": "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT.jar",
+        "parent": "surprising-parent"
+      }
+    ],
+    "applications": [
+      {
+        "artifactId": "surprising-aeron-service",
+        "path": "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+        "apiJarsMatchCurrentModules": []
+      },
+      {
+        "artifactId": "surprising-maker",
+        "path": "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar",
+        "apiJarsMatchCurrentModules": [
+          "surprising-account-api",
+          "surprising-trading-api",
+          "surprising-instrument-api"
+        ]
+      },
+      {
+        "artifactId": "surprising-price-provider",
+        "path": "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar",
+        "apiJarsMatchCurrentModules": [
+          "surprising-trading-api",
+          "surprising-instrument-api"
+        ]
+      },
+      {
+        "artifactId": "surprising-derivatives-lifecycle-provider",
+        "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar",
+        "apiJarsMatchCurrentModules": [
+          "surprising-account-api",
+          "surprising-trading-api",
+          "surprising-instrument-api"
+        ]
+      },
+      {
+        "artifactId": "surprising-realtime-provider",
+        "path": "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar",
+        "apiJarsMatchCurrentModules": [
+          "surprising-trading-api",
+          "surprising-instrument-api"
+        ]
+      },
+      {
+        "artifactId": "surprising-gateway",
+        "path": "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar",
+        "apiJarsMatchCurrentModules": [
+          "surprising-account-api",
+          "surprising-trading-api",
+          "surprising-instrument-api"
+        ]
+      }
+    ]
+  },
+  "sourceFilesByteIdentical": 1924,
+  "preservedExistingStagedChanges": [
+    "D\tAERON_PERPETUAL_BENCHMARK_ANALYSIS_REPORT.md",
+    "D\tAERON_TRADING_BENCHMARK_ANALYSIS_REPORT.md",
+    "D\tOWNER_RESPONSIBILITIES_AND_AERON_CAPABILITIES_ANALYSIS.md",
+    "D\tOWNER_RESPONSIBILITIES_AND_THROUGHPUT_ANALYSIS.md",
+    "D\tPERFORMANCE_VALIDATION.md",
+    "D\tSYSTEM_LEDGER_ARCHITECTURE_ANALYSIS.md",
+    "D\tTRADING_MAINLINE_ARCHITECTURE_AND_AERON_OPTIMIZATION_ANALYSIS.md"
+  ],
+  "preservedStagedPatchSha256": "c7684ef699b14f825f3f33102683f421c1fa5b7e0c8307ef3a0761aabfbbb3d2",
+  "scope": [
+    "三个 API 迁到根目录，源码和资源不变；README 随模块迁移，父 POM relativePath 与构建引用同步。",
+    "Core、Price、Realtime、Lifecycle 聚合 POM 只负责多模块组织；18 个 JAR 仍直接继承 surprising-parent。"
+  ],
+  "notRun": [
+    "本轮没有重复上一提交的全量 clean verify；三 API 的类/资源与迁移前逐项一致，20 个保留工程的有效构建配置在路径归一化后相同。",
+    "最终全仓 package 跳过测试执行；56 项 API 与共享依赖测试单独 clean verify 通过，无失败或跳过。",
+    "未启动真实用户/做市业务栈、wallet、原生设备或生产部署。"
+  ],
+  "logSha256": {
+    "api-tests": "886b8ebfc1241907f61ddfd3d0f642202b2021142d669506e8c87708573eb416",
+    "reactor-package": "ebad3ca633b837c9c45a7b8a95aeccb39b88ae8b46327e1bae96144ad32f4cc6",
+    "final-hierarchy-package": "ef9217878ebb0ebdecd033c92b29bb8a15b7a860fe5d9cb9a4eed6c57902ae4f"
+  },
+  "cleanup": {
+    "temporaryEvidenceRemoved": true,
+    "generatedReportsRemoved": true,
+    "businessServicesStarted": false,
+    "compiledArtifactsPreserved": true,
+    "removedReportFiles": 32
+  }
+}

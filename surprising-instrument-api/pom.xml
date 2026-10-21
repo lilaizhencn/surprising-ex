@@ -8,22 +8,17 @@
         <groupId>com.surprising</groupId>
         <artifactId>surprising-parent</artifactId>
         <version>1.0.0-SNAPSHOT</version>
-        <relativePath>../../surprising-parent/pom.xml</relativePath>
+        <relativePath>../surprising-parent/pom.xml</relativePath>
     </parent>
 
-    <artifactId>surprising-account-api</artifactId>
-    <name>surprising-account-api</name>
-    <description>Account RPC contracts and long-based balance/position models</description>
+    <artifactId>surprising-instrument-api</artifactId>
+    <name>surprising-instrument-api</name>
+    <description>Instrument RPC contracts and shared models</description>
 
     <dependencies>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-product-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-trading-api</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -37,6 +32,18 @@
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

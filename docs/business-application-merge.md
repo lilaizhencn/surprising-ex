@@ -1,15 +1,15 @@
 # 身份、订单、账户、合约合并
 
 当前 Maven 结构（2026-10-21）：账户、订单、合约 API 的中间聚合 POM 已移除，
-由根 POM 直接聚合现有 `surprising-*/surprising-*-api` 路径，并统一继承 `surprising-parent`。
+三个 API 模块已直接放到仓库根目录，由根 POM 聚合并统一继承 `surprising-parent`。
 三个 API 的 artifactId 和 Java 包名不变。K 线共享事件归入 `surprising-realtime-api`，
 market-data API 与聚合 POM 已移除；本页旧版本验证数字仅描述当时的合并结果。
 
-价格、realtime、衍生品生命周期与 Aeron Core 的中间聚合 POM 也已移除。
-根 POM 直接聚合全部 18 个 JAR 模块，统一继承 `surprising-parent`，共 20 个 Maven 工程。
-这些目录只保留源码分组；六类运行进程、包名、JAR 名称及部署路径保持不变。
-从仓库根目录使用实际子模块路径构建，详见
-[聚合层清理记录](validation/maven-aggregator-flatten-20261021.json)。
+价格、realtime、衍生品生命周期与 Aeron Core 包含多个子模块，保留各自聚合 POM，
+用于 Maven/IDE 分组。18 个 JAR 统一直接继承 `surprising-parent`，共 24 个 Maven 工程。
+六类运行进程、包名、JAR 名称保持不变；三个独立 API 的产物随目录一起移动到根目录。
+从仓库根目录使用实际模块路径构建，详见
+[目录整理记录](validation/api-directory-flatten-20261021.json)。
 
 ## 运行边界
 
@@ -138,7 +138,7 @@ MERGED_BUSINESS_IT_BASE_URL=http://127.0.0.1:59994 \
 MERGED_BUSINESS_IT_KAFKA=127.0.0.1:59092 \
 mvn -pl surprising-gateway test
 
-mvn -pl surprising-instrument/surprising-instrument-api,surprising-account/surprising-account-api,surprising-trading/surprising-trading-api test
+mvn -pl surprising-instrument-api,surprising-account-api,surprising-trading-api test
 mvn -pl surprising-price/surprising-price-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-realtime/surprising-realtime-provider,surprising-maker -am clean test
 
 PRODUCT_LINE=LINEAR_PERPETUAL RUN_ID=business-merge-review ACTION=dry-run \

@@ -1,7 +1,7 @@
 # Aeron 交易核心源码分组
 
-本目录不再保留中间聚合 POM。以下五个模块由仓库根 POM 直接聚合，
-继续直接继承 `surprising-parent`；artifactId、Java 包名和产物路径不变。
+本目录保留聚合 POM，供 Maven/IDE 把以下五个模块作为一组导航。
+子模块继续直接继承 `surprising-parent`；artifactId、Java 包名和产物路径不变。
 
 | 模块 | 职责 |
 | --- | --- |
@@ -18,5 +18,6 @@ mvn -pl surprising-aeron-core/surprising-aeron-service -am verify
 mvn -pl surprising-aeron-core/surprising-aeron-tools -am package
 ```
 
-不再从本目录执行 Maven，也不再使用 `-f surprising-aeron-core/pom.xml`。
+也可从仓库根目录执行 `scripts/build-incremental.sh :surprising-aeron-core`，
+展开聚合入口及相关依赖后构建。
 交易 Core 仍独立运行，六产品线、Account Lane、Ledger、撮合、资金和恢复边界保持不变。

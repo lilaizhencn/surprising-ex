@@ -1,7 +1,7 @@
-# surprising-trading
+# surprising-trading-api
 
-本目录只保留 `surprising-trading-api` 共享契约工程，由根 POM 直接聚合并继承
-`surprising-parent`；原中间聚合 POM 已移除。API 的 artifactId、源码路径和 Java 包名保持不变。
+本模块直接位于仓库根目录，由根 POM 聚合并继承 `surprising-parent`。
+原 `surprising-trading/surprising-trading-api` 的外层目录已移除，artifactId、Java 包名和 API 契约不变。
 
 本目录现在只构建共享 API。业务实现和测试已迁到 `../surprising-gateway/src/`，不再启动独立 provider。部署入口、内部调用和首期 U 本位永续范围见 [合并说明](../docs/business-application-merge.md)。
 
@@ -589,7 +589,7 @@ java -jar surprising-realtime/surprising-realtime-provider/target/surprising-rea
 ```bash
 mvn -pl surprising-gateway -am test
 mvn -pl surprising-realtime/surprising-realtime-provider -am test
-rg -n "BigDecimal" surprising-trading -g '*.java'
+rg -n "BigDecimal" surprising-trading-api -g '*.java'
 ```
 
 

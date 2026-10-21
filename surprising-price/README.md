@@ -3,8 +3,8 @@
 
 Surprising Exchange 合约指数价格和标记价格模块。
 
-本目录是源码分组，不再保留中间聚合 POM。三个子模块由仓库根 POM 直接聚合，
-统一继承 `surprising-parent`，artifactId、Java 包名和独立价格进程保持不变。
+本目录包含三个子模块，保留聚合 POM 供 Maven/IDE 分组。
+子模块统一直接继承 `surprising-parent`，artifactId、Java 包名和独立价格进程保持不变。
 构建、测试和增量构建命令均从仓库根目录执行。
 
 ## 模块
