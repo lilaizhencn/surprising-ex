@@ -1,4 +1,4 @@
-package com.surprising.gateway.provider.announcement;
+package com.surprising.gateway.provider.announcement.model;
 
 import java.time.Instant;
 import java.util.List;
@@ -62,4 +62,18 @@ public final class AnnouncementModels {
     public record AuditEntry(long auditId, long announcementId, String action, long adminUserId,
                              String adminUsername, String reason, String snapshot, Instant createdAt) {
     }
+    public record Content(String category, int priority, List<String> placements, List<String> productLines,
+                          List<String> platforms, Instant startsAt, Instant expiresAt, List<Translation> translations) {
+        public Content { placements=List.copyOf(placements);productLines=List.copyOf(productLines);
+            platforms=List.copyOf(platforms);translations=List.copyOf(translations); }
+    }
+    public record ClientFilter(String locale, String baseLocale, String productLine, String platform, String placement) { }
+    public record BaseRow(long id, String category, String status, int priority,
+                          Instant startsAt, Instant expiresAt, long version,
+                          long createdBy, long updatedBy, Instant createdAt, Instant updatedAt) { }
+    public record ClientRow(BaseRow base, String locale, String title, String summary, String body, Instant readAt) { }
+    public record AdminRows(int count, List<BaseRow> rows) { }
+    public record TranslationRow(long announcementId, Translation translation) { }
+    public record TargetRow(long announcementId, String type, String value) { }
+
 }

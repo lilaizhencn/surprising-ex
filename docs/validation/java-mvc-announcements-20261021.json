@@ -1,0 +1,518 @@
+{
+  "date": "2026-10-21",
+  "verified_at_utc": "2026-10-21T12:44:16.150012+00:00",
+  "scope": "公告按表持久化、Controller参数校验、业务聚合与审计/已读事务",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16; isolated PostgreSQL 18.4",
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=AnnouncementServiceTest,AnnouncementPostgresTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.announcement.AnnouncementServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.announcement.AnnouncementPostgresTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "ecaf0817295e358fca4846d68319523c23f4595054a00dfb17f5ac72ecc4f5bb",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=AnnouncementServiceTest,AnnouncementPostgresTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.announcement.AnnouncementServiceTest",
+          "tests": 3,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.announcement.AnnouncementPostgresTest",
+          "tests": 9,
+          "failures": 8,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "1b4d5b9c4f12fcc3af23a61fe78ab9e5dbf0ecb23a7186e7f7c541bb880a9deb",
+      "tests": 12,
+      "failures": 9,
+      "errors": 0,
+      "skipped": 0
+    },
+    "boundary": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=AnnouncementServiceTest,AnnouncementPostgresTest,AnnouncementControllerTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.announcement.AnnouncementServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.announcement.AnnouncementControllerTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.announcement.AnnouncementPostgresTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "fc912eaa26456eba3a53a081800a9ac46eca2b6775d5a023d9bd4e8e5a121069",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=C2c*PostgresTest,C2cMoneyTest,C2cAdminQueryControllerTest,C2cQueryValidationTest,C2cProfileValidationTest,C2cConfigurationValidationTest,C2cChatValidationTest,C2cCommandValidationTest,GatewayProductRoutesConfigurationTest,ProductBusinessConfigurationTest,AnnouncementServiceTest,AnnouncementPostgresTest,AnnouncementControllerTest,AdminAuditApprovalPostgresTest,GatewayProductionSecurityConfigurationTest,GatewayHttpConfigurationTest,GatewayProductRoutesConfigurationTest,GatewayRuntimeTest",
+        "clean",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.c2c.C2cOrderEventTransactionPostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cProfilesTransactionPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cOrdersPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AdminAuditApprovalPostgresTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminQueryPostgresTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.announcement.AnnouncementServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cConfigurationValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cCommandValidationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cFundsPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.GatewayHttpConfigurationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cSubmissionsPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cQueryValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdsPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatPersistencePostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.announcement.AnnouncementControllerTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cSubmissionBoundaryPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminQueryControllerTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAccessPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.GatewayRuntimeTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.ProductBusinessConfigurationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.announcement.AnnouncementPostgresTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cProfileValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cQueryPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cNotificationsPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cConfigurationTransactionPostgresTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cMoneyTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cReviewTransactionPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "a3d6a4a102da0c474ef6cc5ba88606f3a510887a9a2afc0a5246a6540d6d2305",
+      "tests": 193,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "assertions": [
+    "五个Repository各只写一张公告表；关联读取的筛选、语言选择、本人已读和分页目的已逐方法说明。",
+    "Controller完成格式/范围/规范化，Service聚合原生不可变Content与业务状态；业务异常由exception包的HTTP处理器映射。",
+    "真实Spring代理/数据库约束故障验证翻译、投放目标或必需审计失败时主表、子表、版本、已读记录一起回滚。",
+    "20条后台公告的计数/分页/翻译/目标共4次SQL，空页2次，无逐公告补查。",
+    "本人可见范围、语言优先级、未来/过期/其他产品排除、已读幂等及他人未读隔离验证通过。",
+    "主表共享锁覆盖全部已读的资格筛选和写入；真实并发证明编辑等待旧阅读提交后清空旧标记，避免旧标记重新出现。",
+    "编辑必须按同一版本检查状态和CAS保存；原审批请求元数据/原始字节与428要求保持。",
+    "修正后台空筛选SQL参数不能推断类型的问题，空状态/关键词的真实查询通过。"
+  ],
+  "repository_write_tables": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/repository/AnnouncementRepository.java": [
+      "gateway_announcements"
+    ],
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/repository/AnnouncementTranslationRepository.java": [
+      "gateway_announcement_translations"
+    ],
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/repository/AnnouncementTargetRepository.java": [
+      "gateway_announcement_targets"
+    ],
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/repository/AnnouncementAuditRepository.java": [
+      "gateway_announcement_audit"
+    ],
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/repository/AnnouncementReadRepository.java": [
+      "gateway_announcement_reads"
+    ]
+  },
+  "source_sha256": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/controller/AdminAnnouncementController.java": "8b5e6b0cf49844cbf901e5a5fc725a4b2eb64f837530ac1d8d3320d2004744f2",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/controller/AnnouncementParameters.java": "bd7b998018357379a1e0daab238d934f963ac12785359b1f7b0189b9c9ed37a2",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/controller/ClientAnnouncementController.java": "dcbae3728b0bf52658d8a53959a75d934d0f594624bd438e339eb3a01913bbcd",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/exception/AnnouncementExceptionHandler.java": "75f87705757cb1e8e5a3a02ea8f6a35e50067f75d9265887ddd88eabdc8d5966",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/exception/AnnouncementProblem.java": "7db6595e1cd46567f15b9a647829d39b491c1fd63a94ee3cfb4a1d220daa3e61",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/model/AnnouncementModels.java": "d1b4f61c3e3da0785b358541e822409a93f0ac009734eedd05119517e2e2f9e3",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/repository/AnnouncementAuditRepository.java": "29d281fbd92c293159839d69cc18587552ec744ccfaf4c804e1537cdf81c3a3f",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/repository/AnnouncementReadRepository.java": "e513dcde9b9f4854e25adcc9460770df11f7cfb4aa0945a739c9c34e1981e1e3",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/repository/AnnouncementRepository.java": "e70901aed04ac37048d458f2adca0c1cfc5ffddf7161ca228e3e07fb7b2a06ef",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/repository/AnnouncementTargetRepository.java": "f0ab277c372cdc93c1402df936467542c700c9ecba56911ddd00c69d23ba9bf9",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/repository/AnnouncementTranslationRepository.java": "0d78f2e549c3dbf5ef59c7a1d9e7d4dcc7ed71b36fcea962e6e14c381683b5c7",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/announcement/service/AnnouncementService.java": "1848ce75750de0c72ee5c30db1399f8fb895373af9947d23c668f99708051909",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/announcement/AnnouncementControllerTest.java": "3d04806ac7b1d19169f8380311ff32fd729aa131649cb226e92cd419cbda5120",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/announcement/AnnouncementPostgresTest.java": "8553a3358c8f55876256939c72725e3ab8ddd8db2044055bf6a70ec034a6dacc",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/announcement/AnnouncementServiceTest.java": "75a6496fa06f5f172de912f532d8e82cc87aae04e0ac83bb0d98e480e49079d2"
+  },
+  "not_run": [
+    "未启动六Core/Kafka/做市用户实栈；公告不修改交易、资金、持仓或Core协议。本批HTTP通过MockMvc，SQL/事务/并发使用真实PostgreSQL。",
+    "其余认证/托管/维护/投影多表Repository、其余HTTP/包归类、最终门禁及必要实栈仍待继续。"
+  ],
+  "cleanup": {
+    "postgres_stopped": true,
+    "owned_database_removed": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-mvc-announcement-pg-q4jk3ys6",
+    "owned_logs_and_summarized_reports_removed": [
+      "/tmp/surprising-mvc-announcement-boundary.log",
+      "/tmp/surprising-mvc-announcement-focused.log",
+      "/tmp/surprising-mvc-announcement-expanded.log",
+      "/tmp/surprising-mvc-announcement-negative.log",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cOrderEventTransactionPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cNotificationsPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cProfilesTransactionPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cOrdersPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.auth.AdminAuditApprovalPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.auth.AdminAuditApprovalPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cAdminQueryPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cQueryPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.announcement.AnnouncementServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cChatPersistencePostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cChatRealtimePostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cAttachmentsPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.product.ProductBusinessConfigurationTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.announcement.AnnouncementServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cSubmissionsPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cMeHttpPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cQueryValidationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cConfigurationValidationTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cCommandValidationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cAttachmentsPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.config.GatewayHttpConfigurationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cFundsPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.config.GatewayHttpConfigurationTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cSubmissionsPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cQueryValidationTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cAdsPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cAccessPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cAdminQueryPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cChatValidationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cConfigurationValidationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cMerchantBondPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cAdminHttpPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.controller.GatewayRuntimeTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cOrderEventTransactionPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cAdminQueryControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cSubmissionBoundaryPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cProfileValidationTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cHttpPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cChatPersistencePostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.announcement.AnnouncementControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cSubmissionBoundaryPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cChatPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cChatValidationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cAdminQueryControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cAdminHttpPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cAccessPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.controller.GatewayRuntimeTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.announcement.AnnouncementPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.product.ProductBusinessConfigurationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cReviewTransactionPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.announcement.AnnouncementPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cChatPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cHttpPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cProfileValidationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cMerchantBondPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cAdsPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cQueryPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cNotificationsPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cConfigurationTransactionPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cConfigurationTransactionPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cChatRealtimePostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cOrdersPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cMoneyTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.announcement.AnnouncementControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cFundsPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cCommandValidationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cMeHttpPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cMoneyTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.c2c.C2cProfilesTransactionPostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.c2c.C2cReviewTransactionPostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest.xml"
+    ],
+    "build_outputs_retained": true
+  }
+}

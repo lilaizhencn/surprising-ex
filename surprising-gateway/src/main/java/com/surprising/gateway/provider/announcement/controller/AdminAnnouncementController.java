@@ -1,9 +1,12 @@
-package com.surprising.gateway.provider.announcement;
+package com.surprising.gateway.provider.announcement.controller;
 
-import com.surprising.gateway.provider.announcement.AnnouncementModels.Announcement;
-import com.surprising.gateway.provider.announcement.AnnouncementModels.AdminPage;
-import com.surprising.gateway.provider.announcement.AnnouncementModels.AuditEntry;
-import com.surprising.gateway.provider.announcement.AnnouncementModels.SaveRequest;
+import com.surprising.gateway.provider.announcement.service.AnnouncementService;
+import com.surprising.gateway.provider.announcement.model.AnnouncementModels;
+
+import com.surprising.gateway.provider.announcement.model.AnnouncementModels.Announcement;
+import com.surprising.gateway.provider.announcement.model.AnnouncementModels.AdminPage;
+import com.surprising.gateway.provider.announcement.model.AnnouncementModels.AuditEntry;
+import com.surprising.gateway.provider.announcement.model.AnnouncementModels.SaveRequest;
 import com.surprising.gateway.provider.auth.AdminApprovalService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
@@ -41,26 +44,29 @@ public class AdminAnnouncementController {
                           @RequestParam(required = false) String query,
                           @RequestParam(defaultValue = "0") int offset,
                           @RequestParam(defaultValue = "50") int limit) {
-        return service.adminList(authorization, status, query, offset, limit);
+        AnnouncementParameters.page(offset,limit);
+        return service.adminList(authorization, AnnouncementParameters.status(status), AnnouncementParameters.optionalText(query), offset, limit);
     }
 
     @GetMapping("/{announcementId}")
     public Announcement get(@RequestHeader("Authorization") String authorization,
                             @PathVariable long announcementId) {
+        AnnouncementParameters.id(announcementId);
         return service.adminGet(authorization, announcementId);
     }
 
     @PostMapping
     public Announcement create(@RequestHeader("Authorization") String authorization,
                                @RequestBody SaveRequest request) {
-        return service.create(authorization, request);
+        return service.create(authorization, AnnouncementParameters.content(request,false));
     }
 
     @PutMapping("/{announcementId}")
     public Announcement update(@RequestHeader("Authorization") String authorization,
                                @PathVariable long announcementId,
                                @RequestBody SaveRequest request) {
-        return service.update(authorization, announcementId, request);
+        AnnouncementParameters.id(announcementId);
+        return service.update(authorization, announcementId, AnnouncementParameters.content(request,true),request.version());
     }
 
     @PostMapping("/{announcementId}/publish")
@@ -69,8 +75,11 @@ public class AdminAnnouncementController {
                                 @RequestBody byte[] body,
                                 HttpServletRequest httpRequest) {
         try {
-            return service.publish(authorization, announcementId,
-                    readBody(body, AnnouncementModels.PublishRequest.class), requestMetadata(httpRequest), body);
+            AnnouncementParameters.id(announcementId);
+            var request=readBody(body,AnnouncementModels.PublishRequest.class);
+            if(request==null)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"request body is required");
+            AnnouncementParameters.version(request.version());
+            return service.publish(authorization,announcementId,request.version(),AnnouncementParameters.reason(request.reason(),false),requestMetadata(httpRequest),body);
         } catch (AdminApprovalService.AdminApprovalRequiredException ex) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
         }
@@ -82,8 +91,11 @@ public class AdminAnnouncementController {
                                  @RequestBody byte[] body,
                                  HttpServletRequest httpRequest) {
         try {
-            return service.withdraw(authorization, announcementId,
-                    readBody(body, AnnouncementModels.WithdrawRequest.class), requestMetadata(httpRequest), body);
+            AnnouncementParameters.id(announcementId);
+            var request=readBody(body,AnnouncementModels.WithdrawRequest.class);
+            if(request==null)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"request body is required");
+            AnnouncementParameters.version(request.version());
+            return service.withdraw(authorization,announcementId,request.version(),AnnouncementParameters.reason(request.reason(),true),requestMetadata(httpRequest),body);
         } catch (AdminApprovalService.AdminApprovalRequiredException ex) {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
         }
@@ -92,6 +104,7 @@ public class AdminAnnouncementController {
     @GetMapping("/{announcementId}/audit")
     public List<AuditEntry> audit(@RequestHeader("Authorization") String authorization,
                                   @PathVariable long announcementId) {
+        AnnouncementParameters.id(announcementId);
         return service.audit(authorization, announcementId);
     }
 

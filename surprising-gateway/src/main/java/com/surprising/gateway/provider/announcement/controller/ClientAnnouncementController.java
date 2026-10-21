@@ -1,7 +1,9 @@
-package com.surprising.gateway.provider.announcement;
+package com.surprising.gateway.provider.announcement.controller;
 
-import com.surprising.gateway.provider.announcement.AnnouncementModels.Announcement;
-import com.surprising.gateway.provider.announcement.AnnouncementModels.ClientPage;
+import com.surprising.gateway.provider.announcement.service.AnnouncementService;
+
+import com.surprising.gateway.provider.announcement.model.AnnouncementModels.Announcement;
+import com.surprising.gateway.provider.announcement.model.AnnouncementModels.ClientPage;
 import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,7 +31,8 @@ public class ClientAnnouncementController {
                            @RequestParam(defaultValue = "CENTER") String placement,
                            @RequestParam(defaultValue = "0") int offset,
                            @RequestParam(defaultValue = "50") int limit) {
-        return service.clientList(authorization, locale, productLine, platform, placement, offset, limit);
+        AnnouncementParameters.page(offset,limit);
+        return service.clientList(authorization, AnnouncementParameters.filter(locale,productLine,platform,placement),offset,limit);
     }
 
     @GetMapping("/unread-count")
@@ -37,7 +40,7 @@ public class ClientAnnouncementController {
                            @RequestParam(defaultValue = "ALL") String productLine,
                            @RequestParam(defaultValue = "WEB") String platform,
                            @RequestParam(defaultValue = "CENTER") String placement) {
-        return service.unreadCount(authorization, productLine, platform, placement);
+        return service.unreadCount(authorization, AnnouncementParameters.filter("en-US",productLine,platform,placement));
     }
 
     @GetMapping("/{announcementId}")
@@ -47,7 +50,8 @@ public class ClientAnnouncementController {
                             @RequestParam(defaultValue = "ALL") String productLine,
                             @RequestParam(defaultValue = "WEB") String platform,
                             @RequestParam(defaultValue = "CENTER") String placement) {
-        return service.clientGet(authorization, announcementId, locale, productLine, platform, placement);
+        AnnouncementParameters.id(announcementId);
+        return service.clientGet(authorization, announcementId, AnnouncementParameters.filter(locale,productLine,platform,placement));
     }
 
     @PostMapping("/{announcementId}/read")
@@ -57,7 +61,8 @@ public class ClientAnnouncementController {
                                  @RequestParam(defaultValue = "ALL") String productLine,
                                  @RequestParam(defaultValue = "WEB") String platform,
                                  @RequestParam(defaultValue = "CENTER") String placement) {
-        return service.markRead(authorization, announcementId, locale, productLine, platform, placement);
+        AnnouncementParameters.id(announcementId);
+        return service.markRead(authorization, announcementId, AnnouncementParameters.filter(locale,productLine,platform,placement));
     }
 
     @PostMapping("/read-all")
@@ -65,6 +70,6 @@ public class ClientAnnouncementController {
                                             @RequestParam(defaultValue = "ALL") String productLine,
                                             @RequestParam(defaultValue = "WEB") String platform,
                                             @RequestParam(defaultValue = "CENTER") String placement) {
-        return Map.of("updated", service.markAllRead(authorization, productLine, platform, placement));
+        return Map.of("updated", service.markAllRead(authorization, AnnouncementParameters.filter("en-US",productLine,platform,placement)));
     }
 }
