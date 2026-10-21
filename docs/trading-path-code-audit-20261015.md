@@ -118,6 +118,8 @@
   - 同步更新测试黄金向量。
 - **验证**：`surprising-aeron-protocol` 240 项测试（含 `CommandFingerprintLeaseTest` 9 项）全部通过。
 
+**2026-10-21 复核校正**：此前 P4 对当前版本的完整性结论不成立。未升版更换哈希使两个既有规范向量与六个固定快照原资金请求失败。本轮恢复 canonical-v1 SHA-256，并保留每个串行生产者的 MessageDigest、头部和结果槽复用；未改写原协议向量或固定快照。局部 JMH 与完整回归结果见 [本轮进度与边界](product-completion-20261021.md)，此前倍数和“零分配”描述不能作为本轮性能结论。
+
 ### P5【已完成】彻底移除 `surprising-aeron-core` 全模块 `traceId` 字段与线上编码
 - **完成日期**：2026-10-16。按第一性原理与 KISS 原则，Aeron Cluster 内部已具备全链路确定性的天然追踪坐标（`commandId` 16B、`correlationId` 8B、`clusterLogPosition` / `coreSequence` 8B），字符串 `traceId` 在 Core 内部无任何业务消费方，仅造成每条命令多 38B 线上字节并写入 Raft 日志、每条命令在客户端与 Cluster 线程额外产生 `UUID.toString()` / UTF-8 编解码分配，因此从 `surprising-aeron-core` 全模块 100% 彻底移除：
 - **协议层 `surprising-aeron-protocol`**：

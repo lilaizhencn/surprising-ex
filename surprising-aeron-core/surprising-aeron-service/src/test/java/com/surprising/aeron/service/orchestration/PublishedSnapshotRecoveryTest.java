@@ -24,11 +24,19 @@ class PublishedSnapshotRecoveryTest {
             assertThat(FundsStateHash.compute(restored.snapshotTradingState())).isEqualTo(fundsHash);
             assertThat(restored.apply(duplicate).status()).isEqualTo(ResponseStatus.DUPLICATE);
             assertThat(restored.stateHash()).isEqualTo(hash);
+            byte[] changed = duplicate.payload();
+            changed[changed.length - 1] ^= 1;
+            var conflicting = new CoreMessage(duplicate.header(), changed);
+            assertThat(restored.apply(conflicting).resultCode()).isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
+            assertThat(restored.stateHash()).isEqualTo(hash);
+            assertThat(FundsStateHash.compute(restored.snapshotTradingState())).isEqualTo(fundsHash);
             // A second snapshot preserves the same financial state and command idempotency.
             try (var upgraded = TradingCoreRuntime.fromSnapshot(product, restored.snapshot())) {
                 assertThat(upgraded.stateHash()).isEqualTo(hash);
                 assertThat(FundsStateHash.compute(upgraded.snapshotTradingState())).isEqualTo(fundsHash);
                 assertThat(upgraded.apply(duplicate).status()).isEqualTo(ResponseStatus.DUPLICATE);
+                assertThat(upgraded.stateHash()).isEqualTo(hash);
+                assertThat(upgraded.apply(conflicting).resultCode()).isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
                 assertThat(upgraded.stateHash()).isEqualTo(hash);
             }
         }

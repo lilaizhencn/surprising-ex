@@ -1268,8 +1268,11 @@ class ClusterCommandPipelineTest {
             var context = state.pendingMatching.required(sequence);
             var result = CoreTestCompletion.awaitMatchingResult(state, sequence, TimeUnit.SECONDS.toNanos(5));
             assertThat(result).isNotNull();
-            state.completeMatching(sequence, result, timestamp, 0);
-            assertThat(CoreTestCompletion.completeMatchingSynchronously(state, sequence, timestamp, 0).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            // Completion can already publish the final receipt when its Lane is ready.
+            // Preserve that receipt instead of demanding a second result from a retired slot.
+            var receipt = state.completeMatching(sequence, result, timestamp, 0);
+            if (receipt == null) receipt = CoreTestCompletion.completeMatchingSynchronously(state, sequence, timestamp, 0);
+            assertThat(receipt.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             serial.apply(command);
             assertThat(live.hash()).isEqualTo(serial.hash());
             try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {

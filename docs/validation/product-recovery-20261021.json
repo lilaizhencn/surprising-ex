@@ -1,0 +1,917 @@
+{
+  "date": "2026-10-21",
+  "scope": "Six-product canonical financial identity, original request recovery and precise native price submission. No claim of full platform completion.",
+  "products": [
+    "SPOT",
+    "LINEAR_PERPETUAL",
+    "INVERSE_PERPETUAL",
+    "LINEAR_DELIVERY",
+    "INVERSE_DELIVERY",
+    "OPTION"
+  ],
+  "source": {
+    "backendBase": "4fb73ac9ebecfc3220753531e25b400cf87c0a06",
+    "webBase": "c460626bbc12c450965b9309a6ddc25ee25f08f8",
+    "clientBase": "3db57e64f41801219d26c8f81e57861e70bc785a",
+    "isolation": "Clean committed backend/client source plus this patch; pre-existing algorithm-order WIP excluded from isolated artifacts and preserved unstaged. Client additionally passes in the existing workspace.",
+    "java": "Amazon Corretto HotSpot 27.0.0",
+    "sourceSha256": {
+      "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CommandFingerprint.java": "3d94e06f4104dcacd8bd998bc9053ed0b954c83a9b6c69cd25a37d7debc2e58c",
+      "surprising-aeron-core/surprising-aeron-protocol/src/test/java/com/surprising/aeron/protocol/CommandFingerprintLeaseTest.java": "5f39727d8ca050e6478b76f6c4a93cbe48046f9f3e7ff652e175ac364d4659bd",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/PublishedSnapshotRecoveryTest.java": "179a79c5f1f0d6108213e2c46cba6cb9cc3d4168558fc3b09e82ac47945b961c",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreSelfTradePrefixTest.java": "3a26f9e56116fa04f6da5f03f33e5cdcc3bf285a1db0f949cb0ac257dc144ab6",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreMatchingStateTest.java": "20c951d19ccf2e5d6c8e59fec5a60ae4daad29d5a52dc6f078610dcc18282b57",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/ClusterCommandPipelineTest.java": "ca3eff70473192e19abbc41a907cefecd3533b4a9fd52ae3c8bd3524f1b9ccfa",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/protocol/CommandFingerprintBenchmark.java": "5da32a0e2993a6b742451267cd321a27e458826cf58cc37c130edc2d481783f0"
+    }
+  },
+  "backend": {
+    "command": "mvn -o -pl surprising-aeron-core/surprising-aeron-service -am test",
+    "fullReactor": {
+      "tests": 1886,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2,
+      "passed": 1884
+    },
+    "additionalEnabledCase": {
+      "command": "mvn -o -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=CoreOrderedOrderBatchTest#singleCancelFlushesMatchingPhaseStatisticsAndReleasesFunds -Dsurefire.failIfNoSpecifiedTests=false -Dsurprising.aeron.matching-phase-log-interval=1 test",
+      "tests": 1,
+      "passed": 1,
+      "skipped": 0
+    },
+    "distinctPassedIncludingEnabledCase": 1885,
+    "remainingConditionalSkip": "TradingCpuAffinityTest.linuxBindsEachRoleToTheRequestedCpuAndRestoresItsOriginalMask: Linux-only, current host macOS",
+    "classSummary": {
+      "com.surprising.aeron.client.AeronClientAgentTest": {
+        "passed": 23
+      },
+      "com.surprising.aeron.client.AeronClientCapacityTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.client.AeronClientPoolTest": {
+        "passed": 8
+      },
+      "com.surprising.aeron.client.AeronRealtimeTransportTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.client.AeronRequestLeaseTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.client.BorrowedMediaDriverTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.client.CoreCommandOutcomeTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.client.CoreQueryClassTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.client.RealtimeOutboxTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.client.SurprisingAeronClientConcurrencyTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.client.SurprisingAeronClientMediaDriverTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.client.SurprisingAeronClientThreadingModeTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.protocol.BorrowedResponseSlotTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.protocol.CommandFingerprintLeaseTest": {
+        "passed": 9
+      },
+      "com.surprising.aeron.protocol.CoreAlgoOrderCodecTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.protocol.CoreCancelAllAfterCodecTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.protocol.CoreCommandResultCodecTest": {
+        "passed": 5
+      },
+      "com.surprising.aeron.protocol.CoreInputEventCodecTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.protocol.CoreLaneMetricsCodecTest": {
+        "passed": 5
+      },
+      "com.surprising.aeron.protocol.CoreLiquidationBatchCodecTest": {
+        "passed": 8
+      },
+      "com.surprising.aeron.protocol.CoreLiquidationWorkCodecTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.protocol.CoreMaintenanceCodecTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.protocol.CoreMessageCodecTest": {
+        "passed": 10
+      },
+      "com.surprising.aeron.protocol.CoreOpenInterestCodecTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.protocol.CoreOrderPreflightCodecTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.protocol.CoreResponseTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.protocol.CoreResultCodeTest": {
+        "passed": 114
+      },
+      "com.surprising.aeron.protocol.CoreRiskQueryCodecTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.protocol.CoreRiskScanControlCodecTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.protocol.CoreSettlementProgressCodecTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.protocol.CoreStateQueryCodecTest": {
+        "passed": 14
+      },
+      "com.surprising.aeron.protocol.CoreTriggerOrderCodecTest": {
+        "passed": 5
+      },
+      "com.surprising.aeron.protocol.OrderDecoderSlotTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.protocol.OrderExecutionValueTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.protocol.ProductLineClusterLayoutTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.protocol.RealtimeFrameCodecTest": {
+        "passed": 5
+      },
+      "com.surprising.aeron.protocol.RealtimeWireCompatibilityTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.protocol.TradingCommandCodecTest": {
+        "passed": 23
+      },
+      "com.surprising.aeron.protocol.TradingOrderBatchCodecTest": {
+        "passed": 12
+      },
+      "com.surprising.aeron.protocol.WireCodeLookupTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.CoreBusinessRejectionCodeTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.SurprisingCoreApplicationTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.config.ClusterFatalErrorTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.config.SurprisingCoreApplicationIdleStrategyTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.service.config.SurprisingCoreApplicationThreadingModeTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.config.TradingCpuAffinityTest": {
+        "passed": 5,
+        "skipped": 1
+      },
+      "com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapterTest": {
+        "passed": 28
+      },
+      "com.surprising.aeron.service.orchestration.AsyncAccountBalanceCommandTest": {
+        "passed": 24
+      },
+      "com.surprising.aeron.service.orchestration.AsyncFundingCommandTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.orchestration.BatchDecisionCaptureTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.orchestration.BorrowedHeaderEgressTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.orchestration.ClusterCommandPipelineTest": {
+        "passed": 320
+      },
+      "com.surprising.aeron.service.orchestration.ClusterCommandWindowRoutingTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.orchestration.CommandSlotRingTest": {
+        "passed": 10
+      },
+      "com.surprising.aeron.service.orchestration.CommandSlotTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.orchestration.CommittedDeliveryReplayTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.orchestration.CommittedFundingReplayTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.orchestration.CommittedOptionExerciseReplayTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.orchestration.CommittedTradeReplayTest": {
+        "passed": 14
+      },
+      "com.surprising.aeron.service.orchestration.CoreAccountLaneQueryTest": {
+        "passed": 8
+      },
+      "com.surprising.aeron.service.orchestration.CoreActiveLaneIngressTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.orchestration.CoreAdmissionInputOwnershipTest": {
+        "passed": 11
+      },
+      "com.surprising.aeron.service.orchestration.CoreAlgoLaneQueryTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.orchestration.CoreAuditHashQueryTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.orchestration.CoreBusinessStateHashTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.orchestration.CoreCommandFingerprintTest": {
+        "passed": 8
+      },
+      "com.surprising.aeron.service.orchestration.CoreFinancialLedgerProductionTest": {
+        "passed": 5
+      },
+      "com.surprising.aeron.service.orchestration.CoreFundsIdempotencyTest": {
+        "passed": 5
+      },
+      "com.surprising.aeron.service.orchestration.CoreFundsLedgerIndexTest": {
+        "passed": 10
+      },
+      "com.surprising.aeron.service.orchestration.CoreLaneMetricsBoundaryTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.orchestration.CoreLedgerQueryTest": {
+        "passed": 8
+      },
+      "com.surprising.aeron.service.orchestration.CoreLifecycleWorkTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.orchestration.CoreLiquidationLaneCheckTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.orchestration.CoreMaintenanceTest": {
+        "passed": 17
+      },
+      "com.surprising.aeron.service.orchestration.CoreMatcherLedgerTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.service.orchestration.CoreMatchingStateTest": {
+        "passed": 51
+      },
+      "com.surprising.aeron.service.orchestration.CoreMessageFlyweightDecoderTest": {
+        "passed": 5
+      },
+      "com.surprising.aeron.service.orchestration.CoreNativeSnapshotProductLineTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.orchestration.CoreOptionPremiumFeeFundingTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.orchestration.CoreOrderedOrderBatchTest": {
+        "passed": 41,
+        "skipped": 1
+      },
+      "com.surprising.aeron.service.orchestration.CorePreflightLaneQueryTest": {
+        "passed": 9
+      },
+      "com.surprising.aeron.service.orchestration.CoreResultLedgerTest": {
+        "passed": 8
+      },
+      "com.surprising.aeron.service.orchestration.CoreRiskLaneQueryTest": {
+        "passed": 10
+      },
+      "com.surprising.aeron.service.orchestration.CoreRuntimeBalanceSurfaceTest": {
+        "passed": 8
+      },
+      "com.surprising.aeron.service.orchestration.CoreSelfTradePrefixTest": {
+        "passed": 42
+      },
+      "com.surprising.aeron.service.orchestration.CoreSpotAssetUnitsTest": {
+        "passed": 18
+      },
+      "com.surprising.aeron.service.orchestration.CoreTransferLaneLifecycleTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.orchestration.CoreUserRevisionTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.orchestration.CrossShardCancellationTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.orchestration.DeferredSessionResponsesTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.orchestration.FundsCommandIndexTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.orchestration.LaneReplacementResponseTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.service.orchestration.MatcherCommandPipelineTest": {
+        "passed": 8
+      },
+      "com.surprising.aeron.service.orchestration.MatcherPipelineGroupTest": {
+        "passed": 5
+      },
+      "com.surprising.aeron.service.orchestration.OrderBatchSlotReuseTest": {
+        "passed": 5
+      },
+      "com.surprising.aeron.service.orchestration.OrdinaryLifecycleOverlapTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.orchestration.OwnerCommandPipelineStateTest": {
+        "passed": 5
+      },
+      "com.surprising.aeron.service.orchestration.OwnerIdleStrategyTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.orchestration.OwnerIngressRingTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.orchestration.OwnerLogContextTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.orchestration.OwnerPositionRetirementTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.service.orchestration.OwnerSessionBoundaryTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.orchestration.PendingMatchingRingTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.orchestration.PrimitiveLongChangeSetTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.service.orchestration.ProductRecoveryLifecycleTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.orchestration.ProductionSourceBoundaryTest": {
+        "passed": 8
+      },
+      "com.surprising.aeron.service.orchestration.PublishedSnapshotRecoveryTest": {
+        "passed": 13
+      },
+      "com.surprising.aeron.service.orchestration.RealtimeTerminalEmissionTest": {
+        "passed": 12
+      },
+      "com.surprising.aeron.service.orchestration.ResponseArenaTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.orchestration.RiskBatchBudgetTest": {
+        "passed": 15
+      },
+      "com.surprising.aeron.service.orchestration.RuntimeCommitRecoveryTest": {
+        "passed": 18
+      },
+      "com.surprising.aeron.service.orchestration.SectionedCoreSnapshotCodecTest": {
+        "passed": 15
+      },
+      "com.surprising.aeron.service.orchestration.SharedProductLineSnapshotContractTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.orchestration.TerminalStateRetentionTest": {
+        "passed": 5
+      },
+      "com.surprising.aeron.service.orchestration.TerminalTombstoneStoreTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.orchestration.TradingCoreOwnerTest": {
+        "passed": 45
+      },
+      "com.surprising.aeron.service.orchestration.TradingOwnerInputReuseTest": {
+        "passed": 5
+      },
+      "com.surprising.aeron.service.orchestration.TradingOwnerLoopTimeoutConfigurationTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.service.orchestration.TradingRuntimeOwnershipTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.state.AccountLaneOwnershipTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.AccountLanePendingReservationTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.state.AdlPositionIndexTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.AdmissionSettlementFactTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.service.state.CaptureBufferReuseTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.state.CommittedIndexVisitTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.state.ConditionalOrderSchedulingIndexTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.state.ControlLaneDispatcherTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.ControlOrderMetadataLeaseTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.state.CoreContractMathTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.state.CoreDeliveryOptionFinancialMatrixTest": {
+        "passed": 29
+      },
+      "com.surprising.aeron.service.state.CoreFeePolicySnapshotCodecTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.state.CoreLifecycleStateTest": {
+        "passed": 20
+      },
+      "com.surprising.aeron.service.state.CoreOrderDecisionResolverTest": {
+        "passed": 8
+      },
+      "com.surprising.aeron.service.state.CorePerpetualFinancialMatrixTest": {
+        "passed": 18
+      },
+      "com.surprising.aeron.service.state.CoreProductLineArchitectureContractTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.CoreRiskStateTest": {
+        "passed": 18
+      },
+      "com.surprising.aeron.service.state.CoreTreasuryStateTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.state.CoreUserStateTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.state.CoreValueValidationTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.ExplicitLaneAccessTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.state.FeePolicyBookTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.state.FrozenMatcherInputTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.service.state.LaneAdmissionAggregateTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.LaneAdmissionReuseTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.LaneClientIdentitiesTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.state.LaneCloseCapacityTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.state.LaneEntityMembershipTest": {
+        "passed": 7
+      },
+      "com.surprising.aeron.service.state.LaneSequenceQueueTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.state.LaneTerminalSummaryTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.service.state.LaneTopologyTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.LedgerPositionPublicationTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.MatcherSettlementPlanTest": {
+        "passed": 16
+      },
+      "com.surprising.aeron.service.state.MatcherTreasurySettlementTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.state.MatchingNotificationProbeTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.OrderBatchSettlementWaitTest": {
+        "passed": 5
+      },
+      "com.surprising.aeron.service.state.OrderClientKeyIndexTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.state.OrderRuntimeTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.service.state.OrderSlotReuseTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.service.state.OwnerIndexChurnTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.state.OwnerIndexedChangesTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.ParallelRiskScanTest": {
+        "passed": 8
+      },
+      "com.surprising.aeron.service.state.PlaceLaneDecisionTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.state.PositionPublicationReuseTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.state.PositionUserIndexTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.PublishedPositionCountTest": {
+        "passed": 12
+      },
+      "com.surprising.aeron.service.state.ReadyLaneNotificationTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.state.ReplacementAdmissionEventTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.state.ReservationPublicationLeaseTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.state.ReservationRuntimeTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.state.RuntimeChangeBufferTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.RuntimeChangedIndexCommitTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.RuntimeDerivativeFillCalculatorTest": {
+        "passed": 8
+      },
+      "com.surprising.aeron.service.state.RuntimeDerivativeMatchProcessorTest": {
+        "passed": 8
+      },
+      "com.surprising.aeron.service.state.RuntimeExecutionScopeTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.state.RuntimeFundsAccumulatorTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.service.state.RuntimeIdentityRegistryTest": {
+        "passed": 14
+      },
+      "com.surprising.aeron.service.state.RuntimeIndexedChangeBufferTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.RuntimeLeverageLookupTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.state.RuntimePerpetualFundingProcessorTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.state.RuntimeRiskQueryServiceTest": {
+        "passed": 13
+      },
+      "com.surprising.aeron.service.state.RuntimeStateBusinessRulesTest": {
+        "passed": 36
+      },
+      "com.surprising.aeron.service.state.RuntimeStateQueryServiceTest": {
+        "passed": 3
+      },
+      "com.surprising.aeron.service.state.RuntimeStateTransitionsTest": {
+        "passed": 9
+      },
+      "com.surprising.aeron.service.state.RuntimeTreasuryDeltaTest": {
+        "passed": 15
+      },
+      "com.surprising.aeron.service.state.SettlementChangesReuseTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.SettlementLaneWorkerTest": {
+        "passed": 13
+      },
+      "com.surprising.aeron.service.state.StateMapSupportTest": {
+        "passed": 10
+      },
+      "com.surprising.aeron.service.state.SystemLedgerControlTest": {
+        "passed": 5
+      },
+      "com.surprising.aeron.service.state.SystemLedgerFundsValidationTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.state.SystemLedgerLaneTest": {
+        "passed": 9
+      },
+      "com.surprising.aeron.service.state.TerminalClientReleaseTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.state.TradingRuntimeStateTest": {
+        "passed": 62
+      },
+      "com.surprising.aeron.service.state.TradingStateSnapshotCodecTest": {
+        "passed": 6
+      },
+      "com.surprising.aeron.service.state.TransferLaneCapacityTest": {
+        "passed": 1
+      },
+      "com.surprising.aeron.service.state.TreasuryProgressOwnershipTest": {
+        "passed": 4
+      },
+      "com.surprising.aeron.service.state.TriggerOrderIndexTest": {
+        "passed": 8
+      },
+      "com.surprising.aeron.service.state.UserRevisionReuseTest": {
+        "passed": 18
+      },
+      "com.surprising.aeron.service.state.index.ActiveOrderIndexTest": {
+        "passed": 11
+      },
+      "com.surprising.aeron.service.state.snapshot.PublishedEmbeddedSnapshotTest": {
+        "passed": 2
+      },
+      "com.surprising.aeron.service.state.snapshot.SnapshotFieldEvolutionTest": {
+        "passed": 5
+      },
+      "com.surprising.instrument.api.InstrumentEventKeysTest": {
+        "passed": 2
+      },
+      "com.surprising.instrument.api.cache.InstrumentSnapshotSupportTest": {
+        "passed": 3
+      },
+      "com.surprising.instrument.api.math.PerpetualContractMathTest": {
+        "passed": 7
+      },
+      "com.surprising.instrument.api.model.ContractTypeProductLineTest": {
+        "passed": 2
+      },
+      "com.surprising.product.api.InstrumentIdsTest": {
+        "passed": 3
+      },
+      "com.surprising.product.api.ProductLineTest": {
+        "passed": 9
+      },
+      "com.surprising.product.api.ProductTopicNamesTest": {
+        "passed": 3
+      }
+    },
+    "fixedSnapshotAssertions": {
+      "products": 6,
+      "originalRetry": "DUPLICATE",
+      "changedPayloadSameIdentity": "IDEMPOTENCY_CONFLICT",
+      "fundsAndBusinessHashUnchanged": true,
+      "afterResnapshot": true,
+      "originalSnapshotAndCommandFilesUnchanged": true,
+      "originalProtocolGoldenVectorUnchanged": true
+    },
+    "redEvidence": {
+      "originalProtocolVectorFailures": 2,
+      "originalFixedSnapshotProductFailures": 6,
+      "reason": "Canonical-v1 had been changed from SHA-256 to FastHasher without changing its identity contract"
+    },
+    "testFixtureCorrections": "Three SPOT market fixtures now supply the protection bound already required by production. One asynchronous test retains the first returned final receipt instead of querying a retired slot. Clean HEAD reproduced those fixture failures. Production admission was not weakened."
+  },
+  "gateway": {
+    "command": "mvn -o -pl surprising-gateway -am -Dtest=TriggerOrderRequestServiceTest,TriggerOrderIdentityTest,LocalBusinessApiTest,GatewayProductSelectionTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "passed": 63,
+    "classes": [
+      {
+        "name": "com.surprising.trading.trigger.service.TriggerOrderIdentityTest",
+        "tests": "9",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "com.surprising.gateway.provider.product.GatewayProductSelectionTest",
+        "tests": "12",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "com.surprising.trading.trigger.service.TriggerOrderRequestServiceTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+        "tests": "34",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      }
+    ],
+    "routing": "Existing Gateway/realtime query paths and owner/product isolation; no new Core query, service, SQL or Kafka topic"
+  },
+  "web": {
+    "unitTestsPassed": 375,
+    "browserCasesPassed": 70,
+    "browserScope": "Real Chrome with production adapters/localStorage, explicitly controlled transport and synthetic receipts; no real Core, funds or full product-page acceptance",
+    "lint": "exit 0; 551 informational diagnostics",
+    "productionBuild": "exit 0; existing bundle-size warning"
+  },
+  "native": {
+    "isolatedTestsPassed": 447,
+    "workspaceTestsPassed": 447,
+    "conditionalSkipped": 11,
+    "skipReason": "Explicit live service fixtures/environment variables were not configured in this run",
+    "analyze": "No issues in both isolated source and workspace",
+    "realHttpContractCases": 6,
+    "httpScope": "Actual Dart HttpClient to a loopback controlled server, verifies exact 9007199254740993 integer price, product header and request identity; not Core acceptance",
+    "priceUiCases": 12,
+    "priceUiScope": "Six products at 320px in light/dark themes: exact BBO fill, plus/minus final decimal, invalid text preserved",
+    "additionalAssertions": [
+      "Declared quoteScaleUnits used for all products",
+      "Missing precision and off-tick input send no POST and create no pending intent",
+      "BigInt tick multiplication prevents int64 overflow in reference prices",
+      "All five derivatives retain TP/SL OCO widget coverage",
+      "Original request retained after unknown result, account/product identity preserved"
+    ],
+    "redEvidence": {
+      "precisionConversionFailuresBeforeFix": 15,
+      "priceUiDerivativeFailuresBeforeFix": 10,
+      "referenceOverflowFailuresBeforeFix": 6
+    }
+  },
+  "benchmark": {
+    "scope": "Component cost only; baseline has the wrong canonical identity and is not a semantically interchangeable optimization target",
+    "measurements": [
+      {
+        "implementation": "baseline",
+        "method": "leasedValue",
+        "payload": "BALANCE",
+        "nanosecondsPerOp": 78.4256360985402,
+        "bytesPerOp": 0.0004929596086580101,
+        "gcCount": 0.0
+      },
+      {
+        "implementation": "baseline",
+        "method": "leasedValue",
+        "payload": "MAX_BATCH",
+        "nanosecondsPerOp": 723.9010773239861,
+        "bytesPerOp": 0.004565987884153581,
+        "gcCount": 0.0
+      },
+      {
+        "implementation": "baseline",
+        "method": "ownedValue",
+        "payload": "BALANCE",
+        "nanosecondsPerOp": 43.572763214931264,
+        "bytesPerOp": 64.00027624183734,
+        "gcCount": 56.0
+      },
+      {
+        "implementation": "baseline",
+        "method": "ownedValue",
+        "payload": "MAX_BATCH",
+        "nanosecondsPerOp": 672.1000391786732,
+        "bytesPerOp": 64.00425958414162,
+        "gcCount": 3.0
+      },
+      {
+        "implementation": "canonical",
+        "method": "leasedValue",
+        "payload": "BALANCE",
+        "nanosecondsPerOp": 255.1507132445337,
+        "bytesPerOp": 0.0016031136056139383,
+        "gcCount": 0.0
+      },
+      {
+        "implementation": "canonical",
+        "method": "leasedValue",
+        "payload": "MAX_BATCH",
+        "nanosecondsPerOp": 3558.6793224991084,
+        "bytesPerOp": 0.022428372298373477,
+        "gcCount": 0.0
+      },
+      {
+        "implementation": "canonical",
+        "method": "ownedValue",
+        "payload": "BALANCE",
+        "nanosecondsPerOp": 217.6199771418791,
+        "bytesPerOp": 64.00138086117865,
+        "gcCount": 11.0
+      },
+      {
+        "implementation": "canonical",
+        "method": "ownedValue",
+        "payload": "MAX_BATCH",
+        "nanosecondsPerOp": 4366.10443966163,
+        "bytesPerOp": 64.0276737450766,
+        "gcCount": 1.0
+      }
+    ]
+  },
+  "packaging": {
+    "command": "mvn -o -pl surprising-gateway,surprising-aeron-core/surprising-aeron-service,surprising-realtime/surprising-realtime-provider -am -DskipTests package",
+    "status": "BUILD SUCCESS",
+    "artifactManifest": {
+      "date": "2026-10-21",
+      "baseCommit": "4fb73ac9ebecfc3220753531e25b400cf87c0a06",
+      "source": "Clean committed baseline plus canonical SHA-256 fingerprint and regression changes; unrelated algorithm-order WIP excluded",
+      "java": "Amazon Corretto HotSpot 27.0.0",
+      "serverReleased": false,
+      "apkInstalled": false,
+      "artifacts": [
+        {
+          "module": "core",
+          "path": "/tmp/surprising-product-recovery-verified-20261021/surprising-aeron-service.jar",
+          "bytes": 141972923,
+          "sha256": "de67d5611a0cb82d1e108d6b9d136daa7d80fc25fdd3aebdb03dacc3037d0a34"
+        },
+        {
+          "module": "gateway",
+          "path": "/tmp/surprising-product-recovery-verified-20261021/surprising-gateway-1.0.0-SNAPSHOT-exec.jar",
+          "bytes": 92323415,
+          "sha256": "07060c2186c198200e43a6f603113f633e795be665f9a5b141809d6145c59d02"
+        },
+        {
+          "module": "realtime",
+          "path": "/tmp/surprising-product-recovery-verified-20261021/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar",
+          "bytes": 188401545,
+          "sha256": "697bb46bcca842c253b9eee0da1c2bd950cf984ca9fe026ed5d71fd2553555ef"
+        }
+      ],
+      "sourceSha256": {
+        "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CommandFingerprint.java": "3d94e06f4104dcacd8bd998bc9053ed0b954c83a9b6c69cd25a37d7debc2e58c",
+        "surprising-aeron-core/surprising-aeron-protocol/src/test/java/com/surprising/aeron/protocol/CommandFingerprintLeaseTest.java": "5f39727d8ca050e6478b76f6c4a93cbe48046f9f3e7ff652e175ac364d4659bd",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/PublishedSnapshotRecoveryTest.java": "179a79c5f1f0d6108213e2c46cba6cb9cc3d4168558fc3b09e82ac47945b961c",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreSelfTradePrefixTest.java": "3a26f9e56116fa04f6da5f03f33e5cdcc3bf285a1db0f949cb0ac257dc144ab6",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/CoreMatchingStateTest.java": "20c951d19ccf2e5d6c8e59fec5a60ae4daad29d5a52dc6f078610dcc18282b57",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/ClusterCommandPipelineTest.java": "ca3eff70473192e19abbc41a907cefecd3533b4a9fd52ae3c8bd3524f1b9ccfa",
+        "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/protocol/CommandFingerprintBenchmark.java": "5da32a0e2993a6b742451267cd321a27e458826cf58cc37c130edc2d481783f0"
+      }
+    }
+  },
+  "upgradeBoundary": "Previously written incorrect FastHasher fingerprints cannot be safely guessed or rewritten without original commands. Before server data upgrade, rebuild canonical identity from original Archive on an isolated copy and verify funds. No dual-hash fallback or ledger deletion.",
+  "notClaimed": [
+    "Complete platform readiness",
+    "Standalone full six-product live service-stack acceptance this round",
+    "Android/iOS installation or native device acceptance this round",
+    "Real bank payments",
+    "Remote server release",
+    "Completion of unrelated algorithm-order WIP"
+  ],
+  "logSha256": {
+    "java-version.log": "826e1c2e01f738ef9768d8d55b43477211a3a5cfc1c1b13908bcefb76242f932",
+    "maven-version.log": "173932dd340e7efccbf708a82d4185b6aaf290bcfc7d02ed4f386b08809d61b6",
+    "snapshot-red.log": "740be55b501d8752649008f9ef6616d26cd1691591dc917f6b1ac730f55027a6",
+    "six-snapshot-red.log": "705992f34aa9bd6a5f910c2daa7b0fd6dbe6ce8e48834e100586a98c59e5adc2",
+    "core-full-final.log": "ff66855e32b81a593a9f8177640775f3929999fe5434099b6ac9af372b6ed084",
+    "core-targeted-final.log": "254ae272f340780c3e09ebb490135ded039ceaafca30e449b94d4a3e09257289",
+    "gateway-query-tests.log": "47656b1260cf023340e1c2de9d9180657d2be77afe6fc2f030aa909ac837408b",
+    "mixed-orders-baseline.log": "9f842f1ebd1a70a219ef95b9b2a3ce4fd3a06f51586cbcbb65cab7e39e86c5f7",
+    "matching-metrics-funds-final.log": "ea5cd0ecca478079d3dcef6662fe27bb5d2987215b0815806d1af334c9dd68fe",
+    "final-package.log": "2665644f1b16faf78390e56d9a818b74141b0f793644b59cdae52d961842f22b",
+    "fingerprint-baseline-final-jmh.log": "477a2a39e114f6954185d1d013b4e374f751c0893649974ec3316ce88a8e50f2",
+    "fingerprint-canonical-final-jmh.log": "8a433f70a43ce440e640f2fd68bbee246358f9adbeece43a875ef792f7314f0c",
+    "fingerprint-baseline-final-jmh.json": "4f2e54de85702ea9f971fc370474e3e3d4b2b0b33c5d3e9b0f3d56b84e01407a",
+    "fingerprint-canonical-final-jmh.json": "86b628caa41a7666fce6a2c82d7cf1dfc740597c4ef3ecf946d95b326e7739ad",
+    "backend-final-results.json": "f623a1a9e2c1752028156ecac87d462f61486c07152526a25553403528f7d56a",
+    "gateway-results.json": "c3c22b74c404f5b79b80ea7346c54a8e13a83afb91b4a8a3c6ca352a028da960",
+    "browser-request-recovery.json": "b9f0c33250b4ca3ced926e374ae7fa15a841aef584b63ee24574ad41093f5ca0",
+    "web-all-tests.log": "cce6122e76ffed14ae7c1844802dc6a386b08f63eca8c444d2c03722318b9a9f",
+    "web-lint.log": "5e74f63b2d5d01f01f39cd259951b59a1418cace907ee179454f0cc4b730ea35",
+    "web-build.log": "d415a122264d2478e2b75cb093003f718b4504bb7499cc3129b6d757b53edbe1",
+    "client-clean-analyze.log": "a6b8eb7885545136f3c775e0349b0a1dafdffc98edd984128792111f69252182",
+    "client-clean-tests.log": "a66b4eb6b9518ef17007ca7750a68aa3ad90efff67d66e39d09daabc440a84f4",
+    "client-workspace-analyze.log": "d9199b2b6c11692381420b59027d3064a767a12ad903476dacc3ec9df3c82063",
+    "client-workspace-tests.log": "6f349c229af6d37231374239e19ed3c0168b63f30ca84dbd70ea8740faed5476",
+    "client-final-red.log": "d5c85837f34269fea4eda67ec1de771188c17083f94c92572bfd336deaf683fc",
+    "client-price-red.log": "47db3ce611c03fa4eebedbe7ea13866350723ec3f775702b8b5d6420c807a873",
+    "client-price-ui-red.log": "56276f929b63293531005e5df1388b82e43b19f4838c2bf08024b8291b3942be",
+    "client-reference-overflow-red.log": "76de22926dcc223986563ffa67c79e84ecead4f1678cbbc8fbdefc3ab546207e",
+    "client-price-http-green.log": "9886dcec037f5d033f6f8214799e59a439107e543f718726a03acbc9150afce0",
+    "client-price-ui-green.log": "15b48b55b9fbcb57a8ec20ab89e494f85c0db0ec3ab103a6071b7956e1bef3e8"
+  },
+  "cleanup": {
+    "ownedVitePidsStopped": [
+      5430
+    ],
+    "port5173Listening": false,
+    "databasesCreated": 0,
+    "unrelatedServicesStopped": false,
+    "status": "completed",
+    "temporaryQaRootRemoved": true,
+    "rawLogsAndBuildsRemoved": true,
+    "sanitizedEvidenceRetainedInRepository": true,
+    "verifiedBackendArtifactsRetained": "/tmp/surprising-product-recovery-verified-20261021",
+    "remoteDeployment": false,
+    "apkInstallation": false
+  }
+}

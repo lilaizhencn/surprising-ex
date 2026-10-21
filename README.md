@@ -325,3 +325,7 @@ Web 最近订单更新曾在直接切换已登录账户时保留前一账户缓�
 ### 移动端资产与未启用产品（2026-10-20）
 
 `GatewayProductServices.disabled()` 只读取产品线数据库开关，`/api/v1/runtime` 增加 `disabledProductLines`。`AccountAssetsController` 在本人身份及产品归属检查后为未启用产品返回空余额列表（估值为零）；已启用产品沿用 realtime 查询，故障继续报错，不能按零隐藏。交易写入入口不变，查询禁止缓存。验证及当前测试服务器发布边界见 [验收记录](docs/validation/mobile-assets-disabled-products-20261020.json)。
+
+## 六产品线资金幂等与请求恢复（2026-10-21）
+
+本轮恢复未升版的 canonical-v1 指纹契约，补齐两端六产品原请求恢复及 Web 衍生品平仓恢复。功能、测试与既有错误指纹数据的升级边界见 [产品验收进度](docs/product-completion-20261021.md)。不据此宣布全部产品、页面或真机验收完成。

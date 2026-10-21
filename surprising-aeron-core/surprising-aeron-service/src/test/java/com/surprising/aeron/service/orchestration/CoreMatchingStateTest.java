@@ -306,10 +306,11 @@ class CoreMatchingStateTest {
             apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
                     place(101, CoreOrderSide.SELL, 100, 1, ReservationKind.SPOT_ASSET, "BTC", 1));
             CoreResponse receipt4 = apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
-                    place(202, CoreOrderSide.BUY, 0, 1, ReservationKind.SPOT_ASSET, "USDT", 100,
+                    place(202, CoreOrderSide.BUY, 100, 1, ReservationKind.SPOT_ASSET, "USDT", 100,
                             CoreOrderType.MARKET, CoreTimeInForce.IOC, 100, false));
 
-            assertThat(orderIn(receipt4, 202).priceTicks()).isZero();
+            // Spot logs the execution protection bound; MARKET/IOC still cannot rest.
+            assertThat(orderIn(receipt4, 202).priceTicks()).isEqualTo(100);
             assertThat(orderIn(receipt4, 202).status()).isEqualTo("FILLED");
             assertThat(state.tradingState().order(202)).isNull();
             assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();

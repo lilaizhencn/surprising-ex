@@ -58,7 +58,7 @@ class CoreSelfTradePrefixTest {
                             long id = 1000L + cycle * 100 + user * 10 + Integer.parseInt(symbol);
                             boolean market = user == 8 && marketTaker;
                             orders.add(new PlaceOrderCommand(id, symbol, user == 7 ? CoreOrderSide.SELL : CoreOrderSide.BUY,
-                                    market ? 0 : 100, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                                    market && line != ProductLine.SPOT ? 0 : 100, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                                     market ? CoreOrderType.MARKET : CoreOrderType.LIMIT,
                                     market ? CoreTimeInForce.IOC : CoreTimeInForce.GTC, false, "mixed-" + id));
                         }
