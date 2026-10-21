@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.auth.repository;
 
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 
 import com.surprising.gateway.provider.auth.model.SupportModels.CursorPage;
 import com.surprising.gateway.provider.auth.model.SupportModels.SupportTicket;
@@ -17,7 +18,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class SupportTicketRepository {
 
-    private static final int MAX_TICKET_LIMIT = 200;
     private static final AdminCursorPage.SortSpec TICKET_UPDATED_DESC =
             new AdminCursorPage.SortSpec("updatedAt", "updated_at", "ticket_id", true);
     private static final List<AdminCursorPage.SortSpec> TICKET_SORTS = List.of(
@@ -34,12 +34,13 @@ public class SupportTicketRepository {
 
     public CursorPage<SupportTicket> ticketsPage(Long userId,
                                                  String status,
-                                                 int limit,
-                                                 String cursor,
-                                                 String sort) {
-        int safeLimit = AdminCursorPage.limit(limit, MAX_TICKET_LIMIT);
-        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, TICKET_UPDATED_DESC, TICKET_SORTS);
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+                                                 AuthPageQuery pageQuery) {
+        int safeLimit = pageQuery.limit();
+        AdminCursorPage.SortSpec sortSpec = TICKET_SORTS.stream()
+                .filter(spec -> spec.field().equals(pageQuery.order().field())
+                        && spec.descending() == pageQuery.order().descending())
+                .findFirst().orElseThrow(() -> new IllegalStateException("unsupported native page order"));
+        AdminCursorPage.Cursor decodedCursor = pageQuery.after();
         List<Object> args = new ArrayList<>();
         args.add(userId);
         args.add(userId);
@@ -79,22 +80,17 @@ public class SupportTicketRepository {
                 createdByUserId, Timestamp.from(now), Timestamp.from(now));
     }
 
-    public SupportTicket updateStatus(long ticketId, String status, long adminUserId, Instant now) {
+    /** resolvedByUserId 为空时保留上一处理人；关闭时间按 Service 提供的事实写入或清空。 */
+    public SupportTicket updateStatus(long ticketId, String status, Long resolvedByUserId, Instant closedAt, Instant now) {
         return jdbcTemplate.queryForObject("""
                 UPDATE gateway_support_tickets
                    SET status = ?,
-                       resolved_by_user_id = CASE
-                           WHEN ? IN ('RESOLVED', 'CLOSED') THEN ?
-                           ELSE resolved_by_user_id
-                       END,
-                       closed_at = CASE
-                           WHEN ? = 'CLOSED' THEN CAST(? AS timestamptz)
-                           ELSE NULL::timestamptz
-                       END,
+                       resolved_by_user_id = COALESCE(?, resolved_by_user_id),
+                       closed_at = ?,
                        updated_at = ?
                  WHERE ticket_id = ?
                 RETURNING *
-                """, (rs, rowNum) -> toTicket(rs), status, status, adminUserId, status, Timestamp.from(now),
+                """, (rs, rowNum) -> toTicket(rs), status, resolvedByUserId, closedAt == null ? null : Timestamp.from(closedAt),
                 Timestamp.from(now), ticketId);
     }
 

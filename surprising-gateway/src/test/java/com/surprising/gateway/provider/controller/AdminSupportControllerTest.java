@@ -6,18 +6,22 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.surprising.gateway.provider.auth.model.SupportModels.CursorPage;
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
+import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.model.SupportModels.SupportComplianceSummary;
 import com.surprising.gateway.provider.auth.model.SupportModels.SupportOverview;
 import com.surprising.gateway.provider.auth.model.SupportModels.SupportTicket;
 import com.surprising.gateway.provider.auth.model.SupportModels.SupportTicketNote;
 import com.surprising.gateway.provider.auth.model.SupportModels.SupportUserSummary;
 import com.surprising.gateway.provider.auth.service.SupportTicketService;
-import com.surprising.gateway.provider.auth.service.SupportTicketService.TicketMutation;
+import com.surprising.gateway.provider.auth.model.SupportModels.TicketMutation;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class AdminSupportControllerTest {
+    private static final AdminCursorPage.Cursor CURSOR = new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"), 7L);
+    private static final String ENCODED = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString((CURSOR.timestamp() + "|7").getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
     @Test
     void overviewRequiresSupportPermissionAndReturnsReadOnlyUserContext() {
@@ -52,8 +56,8 @@ class AdminSupportControllerTest {
         SupportTicketNote note = new SupportTicketNote(701L, 501L, 9L, "NOTE", "INTERNAL",
                 "checking wallet tx", now);
         when(supportTicketService.adminCreateTicket(
-                "Bearer support", 1001L, "Withdrawal delayed", "withdrawal",
-                "high", 9L, "checking wallet tx"))
+                "Bearer support", 1001L, "Withdrawal delayed", "WITHDRAWAL",
+                "HIGH", 9L, "checking wallet tx"))
                 .thenReturn(new TicketMutation(ticket, List.of(note)));
         AdminSupportController controller = new AdminSupportController(supportTicketService);
 
@@ -64,8 +68,8 @@ class AdminSupportControllerTest {
         assertThat(response.ticket().ticketId()).isEqualTo(501L);
         assertThat(response.notes()).containsExactly(note);
         verify(supportTicketService).adminCreateTicket(
-                "Bearer support", 1001L, "Withdrawal delayed", "withdrawal",
-                "high", 9L, "checking wallet tx");
+                "Bearer support", 1001L, "Withdrawal delayed", "WITHDRAWAL",
+                "HIGH", 9L, "checking wallet tx");
     }
 
     @Test
@@ -75,13 +79,13 @@ class AdminSupportControllerTest {
         SupportTicket ticket = new SupportTicket(501L, 1001L, "OPEN", "HIGH", "WITHDRAWAL",
                 "Withdrawal delayed", 9L, 9L, null, now, now, null);
         when(supportTicketService.adminTicketsPage(
-                "Bearer support", 1001L, "OPEN", 50, "cursor", "updatedAt.asc"))
+                "Bearer support", 1001L, "OPEN", new AuthPageQuery(50, CURSOR, AuthPageQuery.Order.UPDATED_ASC)))
                 .thenReturn(new CursorPage<>(List.of(ticket), "next", true,
                         "updatedAt.asc", 50));
         AdminSupportController controller = new AdminSupportController(supportTicketService);
 
         var response = controller.tickets("Bearer support", 1001L, "OPEN", 50,
-                "cursor", "updatedAt.asc");
+                ENCODED, "updatedAt.asc");
 
         assertThat(response.tickets()).containsExactly(ticket);
         assertThat(response.nextCursor()).isEqualTo("next");
@@ -89,7 +93,7 @@ class AdminSupportControllerTest {
         assertThat(response.sort()).isEqualTo("updatedAt.asc");
         assertThat(response.limit()).isEqualTo(50);
         verify(supportTicketService).adminTicketsPage(
-                "Bearer support", 1001L, "OPEN", 50, "cursor", "updatedAt.asc");
+                "Bearer support", 1001L, "OPEN", new AuthPageQuery(50, CURSOR, AuthPageQuery.Order.UPDATED_ASC));
     }
 
     @Test
@@ -99,12 +103,12 @@ class AdminSupportControllerTest {
         SupportTicketNote note = new SupportTicketNote(701L, 501L, 9L, "NOTE", "INTERNAL",
                 "checking wallet tx", now);
         when(supportTicketService.adminNotesPage(
-                "Bearer support", 501L, 25, "cursor", "createdAt.desc"))
+                "Bearer support", 501L, new AuthPageQuery(25, CURSOR, AuthPageQuery.Order.CREATED_DESC)))
                 .thenReturn(new CursorPage<>(List.of(note), "next", true,
                         "createdAt.desc", 25));
         AdminSupportController controller = new AdminSupportController(supportTicketService);
 
-        var response = controller.notes("Bearer support", 501L, 25, "cursor", "createdAt.desc");
+        var response = controller.notes("Bearer support", 501L, 25, ENCODED, "createdAt.desc");
 
         assertThat(response.notes()).containsExactly(note);
         assertThat(response.nextCursor()).isEqualTo("next");
@@ -112,7 +116,7 @@ class AdminSupportControllerTest {
         assertThat(response.sort()).isEqualTo("createdAt.desc");
         assertThat(response.limit()).isEqualTo(25);
         verify(supportTicketService).adminNotesPage(
-                "Bearer support", 501L, 25, "cursor", "createdAt.desc");
+                "Bearer support", 501L, new AuthPageQuery(25, CURSOR, AuthPageQuery.Order.CREATED_DESC));
     }
 
 }

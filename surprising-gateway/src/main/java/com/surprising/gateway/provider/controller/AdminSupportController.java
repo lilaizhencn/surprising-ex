@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.controller;
 
+import com.surprising.gateway.provider.exception.SupportTicketNotFoundException;
+import com.surprising.gateway.provider.exception.SupportForbiddenException;
+import com.surprising.gateway.provider.exception.SupportUnauthorizedException;
 import com.surprising.gateway.provider.auth.model.SupportModels.SupportComplianceSummary;
 import com.surprising.gateway.provider.auth.model.SupportModels.SupportTicket;
 import com.surprising.gateway.provider.auth.model.SupportModels.SupportTicketNote;
@@ -53,7 +56,7 @@ public class AdminSupportController {
                                               @RequestParam(value = "sort", required = false) String sort) {
         return execute(() -> {
             var page = supportTicketService.adminTicketsPage(
-                    authorization, userId, status, limit, cursor, sort);
+                    authorization, userId, SupportRequestBinding.optionalStatus(status), SupportRequestBinding.tickets(limit, cursor, sort));
             return new SupportTicketQueryResponse(
                     page.items().size(), page.items(), page.nextCursor(),
                     page.hasMore(), page.sort(), page.limit());
@@ -72,11 +75,11 @@ public class AdminSupportController {
             var mutation = supportTicketService.adminCreateTicket(
                     authorization,
                     userId,
-                    body.title(),
-                    body.category(),
-                    body.priority(),
+                    SupportRequestBinding.requireText(body.title(), "title", 160),
+                    SupportRequestBinding.normalizeCode(body.category(), "GENERAL", "category"),
+                    SupportRequestBinding.normalizePriority(body.priority()),
                     body.assignedAdminUserId(),
-                    body.initialNote());
+                    SupportRequestBinding.initialNote(body.initialNote()));
             return new SupportTicketDetailResponse(
                     mutation.ticket(), mutation.notes().size(), mutation.notes());
         });
@@ -90,7 +93,7 @@ public class AdminSupportController {
                                             @RequestParam(value = "sort", required = false) String sort) {
         return execute(() -> {
             var page = supportTicketService.adminNotesPage(
-                    authorization, ticketId, limit, cursor, sort);
+                    authorization, ticketId, SupportRequestBinding.notes(limit, cursor, sort));
             return new SupportTicketNotesResponse(
                     page.items().size(), page.items(), page.nextCursor(),
                     page.hasMore(), page.sort(), page.limit());
@@ -105,7 +108,8 @@ public class AdminSupportController {
                 ? new SupportTicketNoteRequest(null, null, null)
                 : request;
         return execute(() -> supportTicketService.adminAddNote(
-                authorization, ticketId, body.noteType(), body.visibility(), body.body()));
+                authorization, ticketId, SupportRequestBinding.normalizeNoteType(body.noteType()),
+                SupportRequestBinding.normalizeVisibility(body.visibility()), SupportRequestBinding.requireText(body.body(), "body", 2000)));
     }
 
     @PostMapping("/tickets/{ticketId}/status")
@@ -118,7 +122,8 @@ public class AdminSupportController {
                 : request;
         return execute(() -> {
             var mutation = supportTicketService.adminUpdateStatus(
-                    authorization, ticketId, body.status(), body.reason());
+                    authorization, ticketId, SupportRequestBinding.normalizeTicketStatus(body.status()),
+                    SupportRequestBinding.requireText(body.reason(), "reason", 2000));
             return new SupportTicketDetailResponse(
                     mutation.ticket(), mutation.notes().size(), mutation.notes());
         });
@@ -127,11 +132,11 @@ public class AdminSupportController {
     private <T> T execute(Supplier<T> action) {
         try {
             return action.get();
-        } catch (SupportTicketService.SupportUnauthorizedException ex) {
+        } catch (SupportUnauthorizedException ex) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
-        } catch (SupportTicketService.SupportForbiddenException ex) {
+        } catch (SupportForbiddenException ex) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
-        } catch (SupportTicketService.SupportTicketNotFoundException ex) {
+        } catch (SupportTicketNotFoundException ex) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);

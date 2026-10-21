@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.auth.repository;
 
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 
 import com.surprising.gateway.provider.auth.model.SupportModels.CursorPage;
 import com.surprising.gateway.provider.auth.model.SupportModels.SupportTicketNote;
@@ -17,7 +18,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class SupportTicketNoteRepository {
 
-    private static final int MAX_NOTE_LIMIT = 500;
     private static final AdminCursorPage.SortSpec NOTE_CREATED_ASC =
             new AdminCursorPage.SortSpec("createdAt", "created_at", "note_id", false);
     private static final List<AdminCursorPage.SortSpec> NOTE_SORTS = List.of(
@@ -31,12 +31,13 @@ public class SupportTicketNoteRepository {
     }
 
     public CursorPage<SupportTicketNote> notesPage(long ticketId,
-                                                   int limit,
-                                                   String cursor,
-                                                   String sort) {
-        int safeLimit = AdminCursorPage.limit(limit, MAX_NOTE_LIMIT);
-        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, NOTE_CREATED_ASC, NOTE_SORTS);
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+                                                   AuthPageQuery pageQuery) {
+        int safeLimit = pageQuery.limit();
+        AdminCursorPage.SortSpec sortSpec = NOTE_SORTS.stream()
+                .filter(spec -> spec.field().equals(pageQuery.order().field())
+                        && spec.descending() == pageQuery.order().descending())
+                .findFirst().orElseThrow(() -> new IllegalStateException("unsupported native page order"));
+        AdminCursorPage.Cursor decodedCursor = pageQuery.after();
         List<Object> args = new ArrayList<>();
         args.add(ticketId);
         String sql = """

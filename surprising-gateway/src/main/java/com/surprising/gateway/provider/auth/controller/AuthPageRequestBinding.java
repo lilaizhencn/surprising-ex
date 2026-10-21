@@ -35,7 +35,7 @@ public final class AuthPageRequestBinding {
                 List.of(Order.UPDATED_DESC, Order.UPDATED_ASC, Order.CREATED_DESC, Order.CREATED_ASC));
     }
 
-    private static AuthPageQuery bind(int limit, String cursor, String sort, Order defaultOrder, List<Order> allowed) {
+    public static AuthPageQuery bind(int limit, String cursor, String sort, Order defaultOrder, List<Order> allowed) {
         String token = sort == null || sort.isBlank() ? defaultOrder.token() : sort.trim();
         Order order = allowed.stream().filter(value -> value.token().equals(token)).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("unsupported sort: " + sort));

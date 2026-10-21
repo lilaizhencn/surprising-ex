@@ -550,3 +550,5 @@ Binance APIKey请求由 `auth.controller.ApiKeyRequestBinding` 绑定原生 `Api
 后台审批创建由 `AdminApprovalRequestBinding` 校验并形成 `AdminApprovalCommand`。`AdminApprovalService` 决定有效期，并在事务内锁定审批行、校验双人身份/状态/完整请求再决策或单次消费；C2C资金裁决共用此入口。`AdminApprovalRepository`仅执行审批表SQL，不再裁决审批人、期限或请求匹配。
 
 审批Header通过 `AdminApprovalRequestBinding.reference` 在Controller绑定为 `AdminApprovalReference`，`AdminRequestMetadata`位于auth.model；原生审批失败位于provider.exception。引用记录精确Long与输入格式事实，普通审批开关/C2C强制双人审批仍归Service判断，不保留原始Header字符串。
+
+客服工单的参数和格式校验由 `provider.controller.SupportRequestBinding` 负责；工单列表正limit夹取100，备注夹取1..500、默认创建时间正序。`SupportTicketService`负责权限、工单和备注事务以及状态元数据，Repository只接受原生AuthPageQuery与待持久化字段。重新打开工单会清空关闭时间并保留上一处理人；共享结果归auth.model，原生失败归provider.exception。

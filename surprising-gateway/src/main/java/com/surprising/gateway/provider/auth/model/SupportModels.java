@@ -66,4 +66,6 @@ public final class SupportModels {
             SupportUserSummary user,
             SupportComplianceSummary compliance) {
     }
+    public record TicketMutation(SupportTicket ticket, List<SupportTicketNote> notes) {
+    }
 }

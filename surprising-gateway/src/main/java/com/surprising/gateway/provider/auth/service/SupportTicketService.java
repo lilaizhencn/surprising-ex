@@ -1,6 +1,11 @@
 package com.surprising.gateway.provider.auth.service;
 
 import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
+import com.surprising.gateway.provider.auth.model.SupportModels.TicketMutation;
+import com.surprising.gateway.provider.exception.SupportUnauthorizedException;
+import com.surprising.gateway.provider.exception.SupportForbiddenException;
+import com.surprising.gateway.provider.exception.SupportTicketNotFoundException;
 import com.surprising.gateway.provider.auth.model.ComplianceModels;
 import com.surprising.gateway.provider.auth.repository.SupportTicketNoteRepository;
 import com.surprising.gateway.provider.auth.repository.SupportTicketRepository;
@@ -14,7 +19,6 @@ import com.surprising.gateway.provider.auth.model.SupportModels.SupportUserSumma
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,9 +28,6 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class SupportTicketService {
-
-    private static final int DEFAULT_LIMIT = 25;
-    private static final int MAX_LIMIT = 100;
 
     private final SupportTicketRepository ticketRepository;
     private final SupportTicketNoteRepository noteRepository;
@@ -56,12 +57,9 @@ public class SupportTicketService {
     public CursorPage<SupportTicket> adminTicketsPage(String authorization,
                                                        Long userId,
                                                        String status,
-                                                       int limit,
-                                                       String cursor,
-                                                       String sort) {
+                                                       AuthPageQuery pageQuery) {
         supportPrincipal(authorization, "admin.support.read");
-        String normalizedStatus = status == null || status.isBlank() ? null : normalizeTicketStatus(status);
-        return ticketsPage(userId, normalizedStatus, boundLimit(limit), cursor, sort);
+        return ticketRepository.ticketsPage(userId, status, pageQuery);
     }
 
     @Transactional
@@ -74,27 +72,22 @@ public class SupportTicketService {
                                             String initialNote) {
         AuthModels.JwtPrincipal principal = supportPrincipal(authorization, "admin.support.write");
         adminUser(authorization, userId);
-        String normalizedInitialNote = initialNote == null || initialNote.isBlank()
-                ? null
-                : requireText(initialNote, "initialNote", 2000);
         return createTicket(
                 userId,
-                normalizePriority(priority),
-                normalizeCode(category, "GENERAL", "category"),
-                requireText(title, "title", 160),
+                priority,
+                category,
+                title,
                 assignedAdminUserId,
                 principal.userId(),
-                normalizedInitialNote,
+                initialNote,
                 Instant.now());
     }
 
     public CursorPage<SupportTicketNote> adminNotesPage(String authorization,
                                                         long ticketId,
-                                                        int limit,
-                                                        String cursor,
-                                                        String sort) {
+                                                        AuthPageQuery pageQuery) {
         supportPrincipal(authorization, "admin.support.read");
-        return notesPage(ticketId, Math.min(Math.max(limit, 1), 500), cursor, sort);
+        return noteRepository.notesPage(ticketId, pageQuery);
     }
 
     public SupportTicketNote adminAddNote(String authorization,
@@ -104,12 +97,12 @@ public class SupportTicketService {
                                           String body) {
         AuthModels.JwtPrincipal principal = supportPrincipal(authorization, "admin.support.write");
         try {
-            return addNote(
+            return noteRepository.addNote(
                     ticketId,
                     principal.userId(),
-                    normalizeNoteType(noteType),
-                    normalizeVisibility(visibility),
-                    requireText(body, "body", 2000),
+                    noteType,
+                    visibility,
+                    body,
                     Instant.now());
         } catch (EmptyResultDataAccessException ex) {
             throw new SupportTicketNotFoundException("support ticket not found", ex);
@@ -125,9 +118,9 @@ public class SupportTicketService {
         try {
             return updateStatus(
                     ticketId,
-                    normalizeTicketStatus(status),
+                    status,
                     principal.userId(),
-                    requireText(reason, "reason", 2000),
+                    reason,
                     Instant.now());
         } catch (EmptyResultDataAccessException ex) {
             throw new SupportTicketNotFoundException("support ticket not found", ex);
@@ -178,80 +171,6 @@ public class SupportTicketService {
                 maxAmlRiskScore);
     }
 
-    private int boundLimit(int limit) {
-        if (limit < 1) {
-            throw new IllegalArgumentException("limit must be positive");
-        }
-        return Math.min(limit, MAX_LIMIT);
-    }
-
-    private String normalizeTicketStatus(String status) {
-        String normalized = requireText(status, "status", 32).toUpperCase(Locale.ROOT);
-        if (!List.of("OPEN", "PENDING_USER", "PENDING_INTERNAL", "RESOLVED", "CLOSED").contains(normalized)) {
-            throw new IllegalArgumentException("invalid ticket status: " + status);
-        }
-        return normalized;
-    }
-
-    private String normalizePriority(String priority) {
-        String normalized = priority == null || priority.isBlank()
-                ? "MEDIUM"
-                : priority.trim().toUpperCase(Locale.ROOT);
-        if (!List.of("LOW", "MEDIUM", "HIGH", "URGENT").contains(normalized)) {
-            throw new IllegalArgumentException("invalid ticket priority: " + priority);
-        }
-        return normalized;
-    }
-
-    private String normalizeNoteType(String noteType) {
-        String normalized = noteType == null || noteType.isBlank()
-                ? "NOTE"
-                : noteType.trim().toUpperCase(Locale.ROOT);
-        if (!List.of("NOTE", "STATUS_CHANGE", "ESCALATION", "FOLLOW_UP").contains(normalized)) {
-            throw new IllegalArgumentException("invalid note type: " + noteType);
-        }
-        return normalized;
-    }
-
-    private String normalizeVisibility(String visibility) {
-        String normalized = visibility == null || visibility.isBlank()
-                ? "INTERNAL"
-                : visibility.trim().toUpperCase(Locale.ROOT);
-        if (!List.of("INTERNAL", "CUSTOMER").contains(normalized)) {
-            throw new IllegalArgumentException("invalid note visibility: " + visibility);
-        }
-        return normalized;
-    }
-
-    private String normalizeCode(String value, String fallback, String field) {
-        String normalized = value == null || value.isBlank()
-                ? fallback
-                : value.trim().toUpperCase(Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9_.:-]{2,64}")) {
-            throw new IllegalArgumentException("invalid " + field + ": " + value);
-        }
-        return normalized;
-    }
-
-    private String requireText(String value, String field, int maxLength) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(field + " is required");
-        }
-        String normalized = value.trim();
-        if (normalized.length() > maxLength) {
-            throw new IllegalArgumentException(field + " must be at most " + maxLength + " characters");
-        }
-        return normalized;
-    }
-
-    public CursorPage<SupportTicket> ticketsPage(Long userId,
-                                                 String status,
-                                                 int limit,
-                                                 String cursor,
-                                                 String sort) {
-        return ticketRepository.ticketsPage(userId, status, limit, cursor, sort);
-    }
-
     @Transactional
     public TicketMutation createTicket(long userId,
                                        String priority,
@@ -271,54 +190,18 @@ public class SupportTicketService {
         return new TicketMutation(ticket, List.copyOf(notes));
     }
 
-    public CursorPage<SupportTicketNote> notesPage(long ticketId,
-                                                   int limit,
-                                                   String cursor,
-                                                   String sort) {
-        return noteRepository.notesPage(ticketId, limit, cursor, sort);
-    }
-
-    public SupportTicketNote addNote(long ticketId,
-                                     long adminUserId,
-                                     String noteType,
-                                     String visibility,
-                                     String body,
-                                     Instant now) {
-        return noteRepository.addNote(ticketId, adminUserId, noteType, visibility, body, now);
-    }
-
     @Transactional
     public TicketMutation updateStatus(long ticketId,
                                        String status,
                                        long adminUserId,
                                        String reason,
                                        Instant now) {
-        SupportTicket ticket = ticketRepository.updateStatus(ticketId, status, adminUserId, now);
+        Long resolvedByUserId = List.of("RESOLVED", "CLOSED").contains(status) ? adminUserId : null;
+        Instant closedAt = "CLOSED".equals(status) ? now : null;
+        SupportTicket ticket = ticketRepository.updateStatus(ticketId, status, resolvedByUserId, closedAt, now);
         SupportTicketNote note = noteRepository.addNote(
                 ticketId, adminUserId, "STATUS_CHANGE", "INTERNAL", reason, now);
         return new TicketMutation(ticket, List.of(note));
     }
 
-    public record TicketMutation(
-            SupportTicket ticket,
-            List<SupportTicketNote> notes) {
-    }
-
-    public static class SupportUnauthorizedException extends RuntimeException {
-        public SupportUnauthorizedException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
-
-    public static class SupportForbiddenException extends RuntimeException {
-        public SupportForbiddenException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
-
-    public static class SupportTicketNotFoundException extends RuntimeException {
-        public SupportTicketNotFoundException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
 }
