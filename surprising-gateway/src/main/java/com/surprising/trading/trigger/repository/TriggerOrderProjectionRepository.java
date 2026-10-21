@@ -12,7 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 
-/** HTTP history reads only the realtime-owned committed trigger projection. */
+/** Reads realtime committed trigger facts with their documented initialization association. */
 @Repository
 public final class TriggerOrderProjectionRepository {
     private final JdbcTemplate jdbc;
@@ -22,12 +22,11 @@ public final class TriggerOrderProjectionRepository {
         if (product == null || triggerId <= 0 || userId != null && userId <= 0)
             throw new IllegalArgumentException("invalid trigger query identity");
         try {
-            requireInitialized(product);
             var args = new ArrayList<Object>(List.of(product.name(), triggerId));
             String user = userId == null ? "" : " AND user_id=?";
             if (userId != null) args.add(userId);
-            return jdbc.query("SELECT * FROM core_trigger_order_projection WHERE product_line=? AND trigger_order_id=?" + user,
-                    this::decode, args.toArray()).stream().findFirst();
+            return readAssociated(product, "SELECT * FROM core_trigger_order_projection WHERE product_line=? AND trigger_order_id=?" + user,
+                    "created_at_epoch_ms DESC,trigger_order_id DESC", this::decode, args.toArray()).stream().findFirst();
         } catch (DataAccessException unavailable) { throw unavailable(unavailable); }
     }
 
@@ -56,8 +55,7 @@ public final class TriggerOrderProjectionRepository {
         sql.append(" ORDER BY created_at_epoch_ms").append(direction).append(",trigger_order_id").append(direction).append(" LIMIT ?");
         args.add(limit + 1);
         try {
-            requireInitialized(product);
-            var values = jdbc.query(sql.toString(), this::decode, args.toArray());
+            var values = readAssociated(product, sql.toString(), "created_at_epoch_ms" + direction + ",trigger_order_id" + direction, this::decode, args.toArray());
             boolean more = values.size() > limit;
             var page = List.copyOf(more ? values.subList(0, limit) : values);
             var last = page.isEmpty() ? null : page.getLast();
@@ -65,12 +63,6 @@ public final class TriggerOrderProjectionRepository {
                     ("trigger-v1:" + scope + ':' + last.createdAtEpochMillis() + ':' + last.triggerOrderId()).getBytes(StandardCharsets.UTF_8));
             return new Page(page, next, more, ordering);
         } catch (DataAccessException unavailable) { throw unavailable(unavailable); }
-    }
-
-    private void requireInitialized(ProductLine product) {
-        if (!Integer.valueOf(1).equals(jdbc.queryForObject(
-                "SELECT count(*) FROM core_trigger_projection_initialization WHERE product_line=?", Integer.class, product.name())))
-            throw new ReadViewUnavailableException("TRIGGER_READ_VIEW_INITIALIZING");
     }
 
     private CoreTriggerOrderStateView decode(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
@@ -104,5 +96,26 @@ public final class TriggerOrderProjectionRepository {
     }
     private static ReadViewUnavailableException unavailable(Exception cause) {
         return new ReadViewUnavailableException("TRIGGER_READ_VIEW_UNAVAILABLE", cause);
+    }
+
+    /** 必要关联只读：core_trigger_projection_initialization按同产品确认本投影已完整初始化。
+     * 标记与数据必须由同一SQL快照读取，避免重建时把旧READY与新空数据混合；
+     * LEFT JOIN保留未就绪/已就绪但无数据的区别。仅关联完成性标记，不聚合业务或写其他表。 */
+    private <T> List<T> readAssociated(ProductLine product, String sql, String orderBy,
+            org.springframework.jdbc.core.RowMapper<T> mapper, Object... values) {
+        String associated = """
+                SELECT initialized.__projection_ready, projection_rows.*
+                  FROM (SELECT count(*)=1 AS __projection_ready FROM core_trigger_projection_initialization WHERE product_line=?) initialized
+                  LEFT JOIN LATERAL (%s) projection_rows ON initialized.__projection_ready
+                 ORDER BY %s
+                """.formatted(sql, orderBy);
+        Object[] arguments = new Object[values.length + 1];
+        arguments[0] = product.name();
+        System.arraycopy(values, 0, arguments, 1, values.length);
+        return jdbc.query(associated, (rs, row) -> {
+            if (!rs.getBoolean("__projection_ready")) throw new ReadViewUnavailableException("TRIGGER_READ_VIEW_INITIALIZING");
+            if (rs.getObject("trigger_order_id") == null) return null;
+            return mapper.mapRow(rs, row);
+        }, arguments).stream().filter(Objects::nonNull).toList();
     }
 }

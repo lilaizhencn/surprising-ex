@@ -26,8 +26,7 @@ public final class AlgoOrderProjectionRepository {
         }
         sql.append(" ORDER BY created_at_epoch_ms DESC,algo_order_id DESC LIMIT ?"); args.add(limit);
         try {
-            requireReady(product);
-            return jdbc.query(sql.toString(), this::decode, args.toArray());
+            return readAssociated(product, sql.toString(), "created_at_epoch_ms DESC,algo_order_id DESC", this::decode, args.toArray());
         } catch (DataAccessException unavailable) {
             throw new ReadViewUnavailableException("ALGO_READ_VIEW_UNAVAILABLE", unavailable);
         }
@@ -47,19 +46,12 @@ public final class AlgoOrderProjectionRepository {
     private CoreAlgoOrderView one(ProductLine product, long userId, String column, Object identity) {
         if (product == null || userId <= 0) throw new IllegalArgumentException("invalid algo owner");
         try {
-            requireReady(product);
-            var rows = jdbc.query("SELECT * FROM core_algo_order_projection WHERE product_line=? AND user_id=? AND "
-                    + column + "=?", this::decode, product.name(), userId, identity);
+            var rows = readAssociated(product, "SELECT * FROM core_algo_order_projection WHERE product_line=? AND user_id=? AND "
+                    + column + "=?", "created_at_epoch_ms DESC,algo_order_id DESC", this::decode, product.name(), userId, identity);
             return rows.isEmpty() ? null : rows.getFirst();
         } catch (DataAccessException unavailable) {
             throw new ReadViewUnavailableException("ALGO_READ_VIEW_UNAVAILABLE", unavailable);
         }
-    }
-
-    private void requireReady(ProductLine product) {
-        if (!Integer.valueOf(1).equals(jdbc.queryForObject(
-                "SELECT count(*) FROM core_algo_projection_initialization WHERE product_line=?", Integer.class, product.name())))
-            throw new ReadViewUnavailableException("ALGO_READ_VIEW_INITIALIZING");
     }
 
     private CoreAlgoOrderView decode(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
@@ -78,5 +70,26 @@ public final class AlgoOrderProjectionRepository {
         } catch (RuntimeException invalid) {
             throw new ReadViewUnavailableException("ALGO_READ_VIEW_INVALID", invalid);
         }
+    }
+
+    /** 必要关联只读：core_algo_projection_initialization按同产品确认本投影已完整初始化。
+     * 标记与数据必须由同一SQL快照读取，避免重建时把旧READY与新空数据混合；
+     * LEFT JOIN保留未就绪/已就绪但无数据的区别。仅关联完成性标记，不聚合业务或写其他表。 */
+    private <T> List<T> readAssociated(ProductLine product, String sql, String orderBy,
+            org.springframework.jdbc.core.RowMapper<T> mapper, Object... values) {
+        String associated = """
+                SELECT initialized.__projection_ready, projection_rows.*
+                  FROM (SELECT count(*)=1 AS __projection_ready FROM core_algo_projection_initialization WHERE product_line=?) initialized
+                  LEFT JOIN LATERAL (%s) projection_rows ON initialized.__projection_ready
+                 ORDER BY %s
+                """.formatted(sql, orderBy);
+        Object[] arguments = new Object[values.length + 1];
+        arguments[0] = product.name();
+        System.arraycopy(values, 0, arguments, 1, values.length);
+        return jdbc.query(associated, (rs, row) -> {
+            if (!rs.getBoolean("__projection_ready")) throw new ReadViewUnavailableException("ALGO_READ_VIEW_INITIALIZING");
+            if (rs.getObject("algo_order_id") == null) return null;
+            return mapper.mapRow(rs, row);
+        }, arguments).stream().filter(Objects::nonNull).toList();
     }
 }

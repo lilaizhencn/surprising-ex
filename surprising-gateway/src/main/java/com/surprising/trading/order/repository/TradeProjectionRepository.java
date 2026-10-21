@@ -55,9 +55,7 @@ public final class TradeProjectionRepository {
         sql.append(" ORDER BY occurred_at_epoch_ms DESC,export_sequence DESC,execution_index DESC,liquidity_role DESC LIMIT ?");
         args.add(limit + 1);
         try {
-            if (!Integer.valueOf(1).equals(jdbc.queryForObject("SELECT count(*) FROM core_execution_projection_initialization WHERE product_line=?", Integer.class, product.name())))
-                throw new ReadViewUnavailableException("TRADE_READ_VIEW_INITIALIZING");
-            var values = jdbc.query(sql.toString(), (rs, row) -> {
+            var values = readAssociated(product, sql.toString(), "occurred_at_epoch_ms DESC,export_sequence DESC,execution_index DESC,liquidity_role DESC", (rs, row) -> {
                 try {
                     var fill = new TradeFillResponse(rs.getString("trade_id"), product, rs.getString("instrument_id"),
                             rs.getLong("order_id"), OrderSide.valueOf(rs.getString("side")), PositionSide.valueOf(rs.getString("position_side")),
@@ -131,9 +129,7 @@ public final class TradeProjectionRepository {
         sql.append(" ORDER BY occurred_at_epoch_ms").append(direction).append(",export_sequence").append(direction)
                 .append(",execution_index").append(direction).append(" LIMIT ?"); args.add(limit + 1);
         try {
-            if (!Integer.valueOf(1).equals(jdbc.queryForObject("SELECT count(*) FROM core_execution_projection_initialization WHERE product_line=?", Integer.class, product.name())))
-                throw new ReadViewUnavailableException("TRADE_READ_VIEW_INITIALIZING");
-            var values = jdbc.query(sql.toString(), (rs, row) -> {
+            var values = readAssociated(product, sql.toString(), "occurred_at_epoch_ms" + direction + ",export_sequence" + direction + ",execution_index" + direction, (rs, row) -> {
                 try {
                     var value = new AdminTradeResponse(rs.getString("trade_id"), product, rs.getString("instrument_id"),
                             OrderSide.valueOf(rs.getString("taker_side")), PositionSide.valueOf(rs.getString("taker_position_side")),
@@ -174,5 +170,26 @@ public final class TradeProjectionRepository {
     private static String digest(String value) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
         catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+    }
+
+    /** 必要关联只读：core_execution_projection_initialization按同产品确认本投影已完整初始化。
+     * 标记与数据必须由同一SQL快照读取，避免重建时把旧READY与新空数据混合；
+     * LEFT JOIN保留未就绪/已就绪但无数据的区别。仅关联完成性标记，不聚合业务或写其他表。 */
+    private <T> List<T> readAssociated(ProductLine product, String sql, String orderBy,
+            org.springframework.jdbc.core.RowMapper<T> mapper, Object... values) {
+        String associated = """
+                SELECT initialized.__projection_ready, projection_rows.*
+                  FROM (SELECT count(*)=1 AS __projection_ready FROM core_execution_projection_initialization WHERE product_line=?) initialized
+                  LEFT JOIN LATERAL (%s) projection_rows ON initialized.__projection_ready
+                 ORDER BY %s
+                """.formatted(sql, orderBy);
+        Object[] arguments = new Object[values.length + 1];
+        arguments[0] = product.name();
+        System.arraycopy(values, 0, arguments, 1, values.length);
+        return jdbc.query(associated, (rs, row) -> {
+            if (!rs.getBoolean("__projection_ready")) throw new ReadViewUnavailableException("TRADE_READ_VIEW_INITIALIZING");
+            if (rs.getObject("trade_id") == null) return null;
+            return mapper.mapRow(rs, row);
+        }, arguments).stream().filter(Objects::nonNull).toList();
     }
 }
