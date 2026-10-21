@@ -59,6 +59,7 @@ public class SupportTicketService {
         return ticketsPage(userId, normalizedStatus, boundLimit(limit), cursor, sort);
     }
 
+    @Transactional
     public TicketMutation adminCreateTicket(String authorization,
                                             long userId,
                                             String title,
@@ -110,6 +111,7 @@ public class SupportTicketService {
         }
     }
 
+    @Transactional
     public TicketMutation adminUpdateStatus(String authorization,
                                             long ticketId,
                                             String status,

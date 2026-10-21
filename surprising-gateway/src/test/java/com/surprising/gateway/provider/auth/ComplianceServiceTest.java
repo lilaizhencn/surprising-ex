@@ -4,6 +4,7 @@ import com.surprising.gateway.provider.auth.ComplianceModels.AmlCase;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTag;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.service.KycDocumentService;
+import com.surprising.gateway.provider.service.SecurityNotificationService;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.never;
 
 class ComplianceServiceTest {
 
@@ -26,13 +30,45 @@ class ComplianceServiceTest {
     private final KycDocumentService kycDocumentService = mock();
     private final AdminAuditRepository adminAuditRepository = mock();
     private final AuthPersistenceService authPersistence = mock();
-    private final EmailMessageSender emailMessageSender = mock();
+    private final SecurityNotificationService notifications = mock();
     private final KycProviderRegistry kycProviders = mock();
 
     private final ComplianceService service = new ComplianceService(
             userProjectionRepository, kycRepository, riskTagRepository, amlCaseRepository,
             authService, approvalService, kycDocumentService, adminAuditRepository,
-            authPersistence, emailMessageSender, kycProviders, mock(CountryRepository.class));
+            authPersistence, notifications, kycProviders, mock(CountryRepository.class));
+
+    @Test
+    void adminDocumentCannotBeReturnedWhenRequiredAuditFails() {
+        var administrator = new AuthModels.JwtPrincipal(7, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60));
+        var document = new ComplianceModels.KycDocument(
+                9, 42, "PASSPORT", "passport.png", "image/png", 3, "sha", "SUBMITTED", Instant.now(), null);
+        when(authService.requireAdminPermission("Bearer admin", "admin.compliance.read")).thenReturn(administrator);
+        when(kycDocumentService.requireForAdmin(42, 9)).thenReturn(document);
+        when(kycDocumentService.read(document)).thenReturn(new byte[]{1, 2, 3});
+        var failure = new org.springframework.dao.DataAccessResourceFailureException("audit database unavailable");
+        doThrow(failure).when(adminAuditRepository).recordRequired(any());
+
+        assertThatThrownBy(() -> service.adminKycDocument("Bearer admin", 42, 9)).isSameAs(failure);
+        verify(adminAuditRepository).recordRequired(any());
+        verify(adminAuditRepository, never()).record(any());
+    }
+
+    @Test
+    void documentReadFailureKeepsItsCauseWhenFailureAuditAlsoFails() {
+        var administrator = new AuthModels.JwtPrincipal(7, "admin", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(60));
+        var document = new ComplianceModels.KycDocument(
+                9, 42, "PASSPORT", "passport.png", "image/png", 3, "sha", "SUBMITTED", Instant.now(), null);
+        when(authService.requireAdminPermission("Bearer admin", "admin.compliance.read")).thenReturn(administrator);
+        when(kycDocumentService.requireForAdmin(42, 9)).thenReturn(document);
+        var readFailure = new IllegalStateException("document integrity failed");
+        var auditFailure = new org.springframework.dao.DataAccessResourceFailureException("audit database unavailable");
+        when(kycDocumentService.read(document)).thenThrow(readFailure);
+        doThrow(auditFailure).when(adminAuditRepository).recordRequired(any());
+
+        assertThatThrownBy(() -> service.adminKycDocument("Bearer admin", 42, 9))
+                .isSameAs(readFailure).satisfies(failure -> assertThat(failure.getSuppressed()).containsExactly(auditFailure));
+    }
 
     @Test
     void blocksWithdrawalForHighOrCriticalActiveRiskTag() {

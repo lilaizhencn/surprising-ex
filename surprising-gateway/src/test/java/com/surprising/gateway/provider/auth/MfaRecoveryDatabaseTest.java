@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -8,6 +9,8 @@ import com.surprising.gateway.provider.auth.ComplianceModels.KycDocument;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.KycDocumentService;
+import com.surprising.gateway.provider.service.SecurityNotificationService;
+import com.surprising.gateway.provider.repository.SecurityEmailNotificationRepository;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Timestamp;
@@ -23,6 +26,11 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 @EnabledIfEnvironmentVariable(named = "LOGIN_TEST_JDBC_URL", matches = ".+")
 class MfaRecoveryDatabaseTest {
@@ -33,6 +41,10 @@ class MfaRecoveryDatabaseTest {
     private String schema;
     private MfaRecoveryService service;
     private GatewayUserMfaRepository mfa;
+    private DriverManagerDataSource dataSource;
+    private AnnotationConfigApplicationContext context;
+    private SecurityNotificationService notifications;
+    private AdminAuditRepository audit;
     private final EmailCapture email = new EmailCapture();
     private final AtomicReference<String> smsCode = new AtomicReference<>();
     private final AtomicReference<String> smsDestination = new AtomicReference<>();
@@ -45,7 +57,7 @@ class MfaRecoveryDatabaseTest {
         admin = new JdbcTemplate(new DriverManagerDataSource(url, user, password));
         schema = "mfa_recovery_test_" + UUID.randomUUID().toString().replace("-", "");
         admin.execute("CREATE SCHEMA " + schema);
-        var dataSource = new DriverManagerDataSource(
+        dataSource = new DriverManagerDataSource(
                 url + (url.contains("?") ? "&" : "?") + "currentSchema=" + schema, user, password);
         jdbc = new JdbcTemplate(dataSource);
         jdbc.execute("""
@@ -83,6 +95,14 @@ class MfaRecoveryDatabaseTest {
                 .split(";")) {
             if (!statement.isBlank()) jdbc.execute(statement);
         }
+        String init = Files.readString(Path.of("../init.sql"));
+        int auditStart = init.indexOf("CREATE TABLE IF NOT EXISTS gateway_admin_operation_logs (");
+        jdbc.execute(init.substring(auditStart, init.indexOf("\n);", auditStart) + 3));
+        for (String statement : Files.readString(Path.of("../deployment/migrations/20261021-security-notification-outbox.sql")).split(";")) {
+            if (!statement.isBlank()) jdbc.execute(statement);
+        }
+        audit = new AdminAuditRepository(jdbc);
+        notifications = new SecurityNotificationService(new SecurityEmailNotificationRepository(jdbc), email);
         Instant now = Instant.now();
         jdbc.update("INSERT INTO gateway_users(user_id, username, email, phone, password_hash, status, created_at, updated_at)"
                 + " VALUES (?, ?, ?, ?, ?, ?, ?, ?)", USER_ID, "recover-user", "recover@example.test",
@@ -129,12 +149,13 @@ class MfaRecoveryDatabaseTest {
             smsDestination.set(phone);
             smsCode.set(code);
         });
-        service = new MfaRecoveryService(users, new GatewayAuthChallengeRepository(jdbc), verification,
-                new MfaRecoveryRepository(jdbc), kyc, documents, passwords, properties, email, smsProvider);
+        service = transactional(new MfaRecoveryService(users, new GatewayAuthChallengeRepository(jdbc), verification,
+                new MfaRecoveryRepository(jdbc), kyc, documents, passwords, properties, email, smsProvider, audit, notifications));
     }
 
     @AfterEach
     void cleanUp() {
+        if (context != null) context.close();
         if (admin != null && schema != null) admin.execute("DROP SCHEMA " + schema + " CASCADE");
     }
 
@@ -153,12 +174,15 @@ class MfaRecoveryDatabaseTest {
                 .contains(request.requestId());
         assertThat(mfa.find(USER_ID).orElseThrow().enabled()).isTrue();
 
-        assertThat(service.decide(request.requestId(), ADMIN_ID, true,
-                "identity review passed", now).status()).isEqualTo("APPROVED");
+        assertThat(service.decide(request.requestId(), administrator(), true,
+                "identity review passed", "test", "127.0.0.1", now).status()).isEqualTo("APPROVED");
         assertThat(mfa.find(USER_ID).orElseThrow().enabled()).isFalse();
         assertThat(mfa.find(USER_ID).orElseThrow().verifiedAt()).isNull();
         assertThat(jdbc.queryForObject("SELECT withdrawal_restricted_until > ? FROM gateway_users WHERE user_id = ?",
                 Boolean.class, Timestamp.from(now), USER_ID)).isTrue();
+        assertThat(email.subjects).doesNotContain("Surprising authenticator recovery update");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_admin_operation_logs", Integer.class)).isEqualTo(1);
+        notifications.deliverDue();
         assertThat(email.subjects).contains("Surprising authenticator recovery update");
     }
 
@@ -176,11 +200,47 @@ class MfaRecoveryDatabaseTest {
         var request = service.submit(USER_ID, new MfaRecoveryService.RecoverySubmission(
                 challenge.challengeId(), "test-password", smsCode.get(), "The device was replaced"), now);
         assertThat(request.status()).isEqualTo("PENDING");
-        assertThat(service.decide(request.requestId(), ADMIN_ID, false,
-                "documents need clarification", now).status()).isEqualTo("REJECTED");
+        assertThat(service.decide(request.requestId(), administrator(), false,
+                "documents need clarification", "test", "127.0.0.1", now).status()).isEqualTo("REJECTED");
         assertThat(mfa.find(USER_ID).orElseThrow().enabled()).isTrue();
         assertThat(jdbc.queryForObject("SELECT withdrawal_restricted_until FROM gateway_users WHERE user_id = ?",
                 Timestamp.class, USER_ID)).isNull();
+    }
+
+    @Test
+    void requiredAuditFailureRollsBackReviewMfaAndWithdrawalHold() {
+        Instant now = Instant.now();
+        var pending = new MfaRecoveryRepository(jdbc).create(USER_ID, "lost authenticator", now);
+        jdbc.execute("ALTER TABLE gateway_admin_operation_logs ADD CONSTRAINT reject_audit CHECK (service <> 'gateway')");
+
+        assertThatThrownBy(() -> service.decide(pending.requestId(), administrator(), true,
+                "identity review passed", "test", "127.0.0.1", now))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+
+        assertDecisionRolledBack();
+    }
+
+    @Test
+    void notificationIntentFailureRollsBackReviewAndRequiredAudit() {
+        Instant now = Instant.now();
+        var pending = new MfaRecoveryRepository(jdbc).create(USER_ID, "lost authenticator", now);
+        jdbc.execute("ALTER TABLE gateway_security_email_notifications ADD CONSTRAINT reject_notification CHECK (subject <> 'Surprising authenticator recovery update')");
+
+        assertThatThrownBy(() -> service.decide(pending.requestId(), administrator(), true,
+                "identity review passed", "test", "127.0.0.1", now))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+
+        assertDecisionRolledBack();
+    }
+
+    private void assertDecisionRolledBack() {
+        assertThat(new MfaRecoveryRepository(jdbc).latestForUser(USER_ID).status()).isEqualTo("PENDING");
+        assertThat(mfa.find(USER_ID).orElseThrow().enabled()).isTrue();
+        assertThat(jdbc.queryForObject("SELECT withdrawal_restricted_until FROM gateway_users WHERE user_id=?",
+                Timestamp.class, USER_ID)).isNull();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_admin_operation_logs", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_security_email_notifications", Integer.class)).isZero();
+        assertThat(email.subjects).doesNotContain("Surprising authenticator recovery update");
     }
 
     private void whenPhoneOnly() {
@@ -215,9 +275,27 @@ class MfaRecoveryDatabaseTest {
             smsDestination.set(phone);
             smsCode.set(code);
         });
-        service = new MfaRecoveryService(users, new GatewayAuthChallengeRepository(jdbc), verification,
-                new MfaRecoveryRepository(jdbc), kyc, documents, passwords, properties, email, smsProvider);
+        service = transactional(new MfaRecoveryService(users, new GatewayAuthChallengeRepository(jdbc), verification,
+                new MfaRecoveryRepository(jdbc), kyc, documents, passwords, properties, email, smsProvider, audit, notifications));
     }
+
+    private AuthModels.JwtPrincipal administrator() {
+        return new AuthModels.JwtPrincipal(ADMIN_ID, "reviewer", "NORMAL", List.of("ADMIN"), Instant.now().plusSeconds(3600));
+    }
+
+    private MfaRecoveryService transactional(MfaRecoveryService target) {
+        if (context != null) context.close();
+        context = new AnnotationConfigApplicationContext();
+        context.register(Transactions.class);
+        context.registerBean(PlatformTransactionManager.class, () -> new DataSourceTransactionManager(dataSource));
+        context.registerBean(MfaRecoveryService.class, () -> target);
+        context.refresh();
+        return context.getBean(MfaRecoveryService.class);
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableTransactionManagement
+    static class Transactions { }
 
     private static final class EmailCapture implements EmailMessageSender {
         private final AtomicReference<String> recipient = new AtomicReference<>();

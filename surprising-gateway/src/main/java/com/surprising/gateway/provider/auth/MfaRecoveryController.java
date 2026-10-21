@@ -20,10 +20,9 @@ import org.springframework.web.server.ResponseStatusException;
 public class MfaRecoveryController {
     private final AuthService auth;
     private final MfaRecoveryService recovery;
-    private final AdminAuditRepository audit;
 
-    public MfaRecoveryController(AuthService auth, MfaRecoveryService recovery, AdminAuditRepository audit) {
-        this.auth = auth; this.recovery = recovery; this.audit = audit;
+    public MfaRecoveryController(AuthService auth, MfaRecoveryService recovery) {
+        this.auth = auth; this.recovery = recovery;
     }
 
     @PostMapping("/api/v1/security/mfa/recovery/challenge")
@@ -70,11 +69,8 @@ public class MfaRecoveryController {
             HttpServletRequest servletRequest) {
         try {
             AuthModels.JwtPrincipal admin = auth.requireAdminPermission(bearer, "admin.compliance.write");
-            var result = recovery.decide(requestId, admin.userId(), request.approved(), request.reason(), Instant.now());
-            audit.record(new AdminAuditRepository.AdminOperationRecord(admin.userId(), admin.username(), admin.roles(),
-                    "gateway", "POST", "/api/v1/admin/compliance/mfa-recovery/" + requestId + "/decision",
-                    null, null, null, 200, null, true, null, servletRequest.getHeader("User-Agent"), servletRequest.getRemoteAddr(), Instant.now()));
-            return result;
+            return recovery.decide(requestId, admin, request.approved(), request.reason(),
+                    servletRequest.getHeader("User-Agent"), servletRequest.getRemoteAddr(), Instant.now());
         } catch (IllegalArgumentException ex) { throw badRequest(ex); }
         catch (IllegalStateException ex) { throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex); }
     }

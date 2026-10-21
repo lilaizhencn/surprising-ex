@@ -14,6 +14,7 @@ import com.surprising.gateway.provider.auth.ComplianceModels.RiskTag;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTagCreateRequest;
 import com.surprising.gateway.provider.auth.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.service.KycDocumentService;
+import com.surprising.gateway.provider.service.SecurityNotificationService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
@@ -36,7 +37,7 @@ public class ComplianceService {
     private final KycDocumentService kycDocumentService;
     private final AdminAuditRepository adminAuditRepository;
     private final AuthPersistenceService authPersistence;
-    private final EmailMessageSender emailMessageSender;
+    private final SecurityNotificationService notifications;
     private final KycProviderRegistry kycProviders;
     private final CountryRepository countries;
 
@@ -49,7 +50,7 @@ public class ComplianceService {
                              KycDocumentService kycDocumentService,
                              AdminAuditRepository adminAuditRepository,
                              AuthPersistenceService authPersistence,
-                             EmailMessageSender emailMessageSender,
+                             SecurityNotificationService notifications,
                              KycProviderRegistry kycProviders, CountryRepository countries) {
         this.userProjectionRepository = userProjectionRepository;
         this.kycRepository = kycRepository;
@@ -60,7 +61,7 @@ public class ComplianceService {
         this.kycDocumentService = kycDocumentService;
         this.adminAuditRepository = adminAuditRepository;
         this.authPersistence = authPersistence;
-        this.emailMessageSender = emailMessageSender;
+        this.notifications = notifications;
         this.kycProviders = kycProviders;
         this.countries = countries;
     }
@@ -114,6 +115,7 @@ public class ComplianceService {
         return amlCasesPage(userId, status, limit, cursor, sort);
     }
 
+    @Transactional
     public KycProfile adminUpsertKyc(String authorization,
                                      long userId,
                                      KycUpdateRequest request,
@@ -179,14 +181,19 @@ public class ComplianceService {
         AuthModels.JwtPrincipal principal = authService.requireAdminPermission(
                 authorization, "admin.compliance.read");
         KycDocument document = kycDocumentService.requireForAdmin(userId, documentId);
+        final KycDocumentContent content;
         try {
-            KycDocumentContent content = new KycDocumentContent(document, kycDocumentService.read(document));
-            recordDocumentAccess(principal, userId, documentId, true, null);
-            return content;
+            content = new KycDocumentContent(document, kycDocumentService.read(document));
         } catch (RuntimeException ex) {
-            recordDocumentAccess(principal, userId, documentId, false, ex.getMessage());
+            try {
+                recordDocumentAccess(principal, userId, documentId, false, ex.getClass().getSimpleName());
+            } catch (RuntimeException auditFailure) {
+                ex.addSuppressed(auditFailure);
+            }
             throw ex;
         }
+        recordDocumentAccess(principal, userId, documentId, true, null);
+        return content;
     }
 
     @Transactional
@@ -247,7 +254,7 @@ public class ComplianceService {
         }
         KycProfile updated = kycRepository.applyProviderResult(userId, provider, result.status(),
                 result.rejectionReason(), Instant.now());
-        notifyKycTransition(previous, updated);
+        if (!kycProviders.simulationEnabled()) enqueueKycTransition(previous, updated);
         return updated;
     }
 
@@ -269,19 +276,14 @@ public class ComplianceService {
         String status = switch (decision) { case "APPROVED" -> "VERIFIED"; case "REJECTED" -> "REJECTED"; default -> "PENDING"; };
         String reason = "REJECTED".equals(status) ? "Simulated provider rejection" : null;
         KycProfile updated = kycRepository.applyProviderResult(userId, selected, status, reason, Instant.now());
-        notifyKycTransition(previous, updated);
         return updated;
     }
 
-    private void notifyKycTransition(KycProfile previous, KycProfile updated) {
-        if (kycProviders.simulationEnabled()) return;
+    private void enqueueKycTransition(KycProfile previous, KycProfile updated) {
         if (previous != null && "PENDING".equals(previous.status())
                 && List.of("VERIFIED", "REJECTED").contains(updated.status())) {
             authPersistence.user(updated.userId()).map(AuthenticatedUser::email).filter(email -> email != null && !email.isBlank())
-                    .ifPresent(email -> { try { emailMessageSender.send(email, "Surprising identity verification update",
-                            "Your identity verification has been " + updated.status().toLowerCase(Locale.ROOT)
-                                    + (updated.rejectionReason() == null ? "." : ": " + updated.rejectionReason())); }
-                        catch (RuntimeException ignored) { } });
+                    .ifPresent(email -> notifications.kycResult(updated, email));
         }
     }
 
@@ -343,24 +345,11 @@ public class ComplianceService {
         return userProjectionRepository.usersPage(userId, kycStatus, tagCode, limit, cursor, sort);
     }
 
+    @Transactional
     public KycProfile upsertKyc(long userId, long adminUserId, KycUpdateRequest request, Instant now) {
         KycProfile previous = kycRepository.find(userId);
         KycProfile updated = kycRepository.upsert(userId, adminUserId, request, now);
-        if (previous != null && "PENDING".equals(previous.status())
-                && List.of("VERIFIED", "REJECTED").contains(updated.status())) {
-            authPersistence.user(userId).map(AuthenticatedUser::email)
-                    .filter(email -> email != null && !email.isBlank())
-                    .ifPresent(email -> {
-                        try {
-                            emailMessageSender.send(email, "Surprising identity verification update",
-                                    "Your identity verification has been " + updated.status().toLowerCase(Locale.ROOT)
-                                            + (updated.rejectionReason() == null ? "."
-                                            : ". Reason: " + updated.rejectionReason()));
-                        } catch (RuntimeException ignored) {
-                            // KYC review state is durable even if the notification provider is unavailable.
-                        }
-                    });
-        }
+        enqueueKycTransition(previous, updated);
         return updated;
     }
 
@@ -394,7 +383,7 @@ public class ComplianceService {
                                       long documentId,
                                       boolean success,
                                       String errorMessage) {
-        adminAuditRepository.record(new AdminAuditRepository.AdminOperationRecord(
+        adminAuditRepository.recordRequired(new AdminAuditRepository.AdminOperationRecord(
                 principal.userId(), principal.username(), principal.roles(), "gateway", "GET",
                 "/api/v1/admin/compliance/users/" + userId + "/kyc/documents/" + documentId,
                 null, null, null, success ? 200 : 500, null, success, errorMessage, null, null, Instant.now()));

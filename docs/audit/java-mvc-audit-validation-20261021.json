@@ -1,0 +1,51 @@
+{
+  "audit_date": "2026-10-21",
+  "verified_at_utc": "2026-10-21T08:14:45.266355+00:00",
+  "head_reference": "1f3e1ec95",
+  "mode": "static audit only; no Java build, Maven tests or live services",
+  "source_snapshot": {
+    "java_files": 1860,
+    "main": 1279,
+    "test": 581,
+    "sha256": "952c5048b58fab0d10d1054e91bc5477f92e2efcf6637f081f2802173001ef55"
+  },
+  "findings": {
+    "confirmed_rule_hits": 234,
+    "confirmed_files": 172,
+    "cross_table_read_review_hits": 14,
+    "repository_rows": 83,
+    "checked_local_links": 78,
+    "finding_source_drift": []
+  },
+  "source_changes_after_snapshot": [
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingCoreRuntime.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/commit/CommitPublication.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/change/RuntimeReservationChangeBuffer.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/ledger/SystemLedgerCommand.java",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/order/ReservationRuntime.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/TradingCoreOwnerTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/pipeline/LaneReplacementResponseTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/pipeline/OrderBatchSlotReuseTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/query/CoreAccountLaneQueryTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/query/CoreLedgerQueryTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/result/CoreResultLedgerTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/retention/CoreFundsIdempotencyTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/orchestration/retention/CoreFundsLedgerIndexTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/TradingRuntimeStateTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/admission/ReplacementAdmissionEventTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/settlement/SettlementChangesReuseTest.java",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/state/settlement/UserRevisionReuseTest.java"
+  ],
+  "limitations": [
+    "Core source and tests were concurrently edited; inventory records a source snapshot.",
+    "One Tree-sitter grammar limitation on AeronClientPool record patterns was manually reviewed.",
+    "SQL table mapping uses known schema tables and static SQL literals; dynamic SQL and non-SQL stores are not declared clean."
+  ],
+  "artifacts": {
+    "docs/java-mvc-audit-20261021.md": "1ab0c06bf07ad51671849cead1240441e8413a5ebbbe6b193e8eadfb227acc02",
+    "docs/audit/java-mvc-findings-20261021.csv": "8612fd5956a260656f342d046cf687f9ce03fb6dfe0007996da77314e75b94a0",
+    "docs/audit/java-repository-tables-20261021.csv": "7a91d315ebfca404f8c85a44c4d3cebed40188f77687550535d54983c60d4ea3",
+    "docs/audit/java-source-inventory-20261021.csv": "e62e50284da3c2f4d70f096f16dcf8b34add6bde276c7aa67753ffea5b33c347"
+  },
+  "verification_result": "passed for artifact consistency, links, line bounds, rule counts and finding source fingerprints"
+}

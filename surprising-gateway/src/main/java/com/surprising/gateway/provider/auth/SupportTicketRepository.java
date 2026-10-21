@@ -86,8 +86,8 @@ public class SupportTicketRepository {
                            ELSE resolved_by_user_id
                        END,
                        closed_at = CASE
-                           WHEN ? = 'CLOSED' THEN ?
-                           ELSE NULL
+                           WHEN ? = 'CLOSED' THEN CAST(? AS timestamptz)
+                           ELSE NULL::timestamptz
                        END,
                        updated_at = ?
                  WHERE ticket_id = ?

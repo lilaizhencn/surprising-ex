@@ -9,6 +9,7 @@ import com.surprising.gateway.provider.auth.ComplianceModels.KycDocument;
 import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.KycDocumentService;
+import com.surprising.gateway.provider.service.SecurityNotificationService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -34,9 +35,11 @@ class MfaRecoveryServiceTest {
     private final GatewayProperties properties = new GatewayProperties();
     private final CapturingEmail email = new CapturingEmail();
     private final ObjectProvider<SmsMessageSender> smsProvider = mock(ObjectProvider.class);
+    private final AdminAuditRepository audit = mock();
+    private final SecurityNotificationService notifications = mock();
     private final MfaRecoveryService service = new MfaRecoveryService(
             users, challenges, loginVerification, recovery, kyc, documents, passwords,
-            properties, email, smsProvider);
+            properties, email, smsProvider, audit, notifications);
 
     @BeforeEach
     void setUp() {
@@ -83,12 +86,16 @@ class MfaRecoveryServiceTest {
                 901, USER_ID, "APPROVED", "I lost my phone", NOW, 8L, NOW,
                 "identity documents checked", NOW);
         when(recovery.decide(901, 8, true, "identity documents checked", NOW)).thenReturn(approved);
-        var result = service.decide(901, 8, true, "identity documents checked", NOW);
+        var result = service.decide(901, administrator(), true, "identity documents checked", "test", "127.0.0.1", NOW);
 
         assertThat(result.status()).isEqualTo("APPROVED");
         verify(users).disableMfa(USER_ID, NOW);
         verify(users).recordSecurityChange(USER_ID, NOW);
-        assertThat(email.subjects).contains("Surprising authenticator recovery update");
+        verify(notifications).mfaRecoveryDecision(approved, "user@example.test");
+        verify(audit).recordRequired(argThat(operation -> operation.adminUserId() == 8
+                && operation.requestPath().equals("/api/v1/admin/compliance/mfa-recovery/901/decision")
+                && operation.success()));
+        assertThat(email.subjects).doesNotContain("Surprising authenticator recovery update");
     }
 
     @Test
@@ -123,10 +130,11 @@ class MfaRecoveryServiceTest {
                 902, USER_ID, "REJECTED", "device was reset", NOW, 8L, NOW,
                 "documents need clarification", NOW);
         when(recovery.decide(902, 8, false, "documents need clarification", NOW)).thenReturn(rejected);
-        assertThat(service.decide(902, 8, false, "documents need clarification", NOW).status())
+        assertThat(service.decide(902, administrator(), false, "documents need clarification", "test", "127.0.0.1", NOW).status())
                 .isEqualTo("REJECTED");
         verify(users, never()).disableMfa(anyLong(), any());
         verify(users, never()).recordSecurityChange(anyLong(), any());
+        verify(notifications).mfaRecoveryDecision(rejected, "user@example.test");
     }
 
     @Test
@@ -156,6 +164,10 @@ class MfaRecoveryServiceTest {
                 anyString(), eq(NOW.plusSeconds(300)), eq("127.0.0.1"), eq(NOW))).thenReturn(challenge);
         when(challenges.consume(eq(challenge.challengeId()), eq(USER_ID), eq(NOW))).thenReturn(true);
         return challenge;
+    }
+
+    private AuthModels.JwtPrincipal administrator() {
+        return new AuthModels.JwtPrincipal(8, "reviewer", "NORMAL", List.of("ADMIN"), NOW.plusSeconds(3600));
     }
 
     private GatewayAuthChallengeRepository.Challenge challengeWithCode(String code, String channel)

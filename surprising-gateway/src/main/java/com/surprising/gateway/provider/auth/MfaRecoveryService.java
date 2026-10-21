@@ -2,6 +2,7 @@ package com.surprising.gateway.provider.auth;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.KycDocumentService;
+import com.surprising.gateway.provider.service.SecurityNotificationService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -26,6 +27,8 @@ public class MfaRecoveryService {
     private final GatewayProperties properties;
     private final EmailMessageSender email;
     private final ObjectProvider<SmsMessageSender> sms;
+    private final AdminAuditRepository audit;
+    private final SecurityNotificationService notifications;
     private final SecureRandom random = new SecureRandom();
 
     public MfaRecoveryService(AuthPersistenceService users, GatewayAuthChallengeRepository challenges,
@@ -33,11 +36,14 @@ public class MfaRecoveryService {
                               MfaRecoveryRepository recovery, ComplianceKycRepository kyc,
                               KycDocumentService documents, PasswordHasher passwords,
                               GatewayProperties properties, EmailMessageSender email,
-                              ObjectProvider<SmsMessageSender> sms) {
+                              ObjectProvider<SmsMessageSender> sms, AdminAuditRepository audit,
+                              SecurityNotificationService notifications) {
         this.users = users; this.challenges = challenges; this.loginVerification = loginVerification;
         this.recovery = recovery;
         this.kyc = kyc; this.documents = documents; this.passwords = passwords;
         this.properties = properties; this.email = email; this.sms = sms;
+        this.audit = audit;
+        this.notifications = notifications;
     }
 
     @Transactional
@@ -119,27 +125,22 @@ public class MfaRecoveryService {
     public List<MfaRecoveryRepository.RecoveryRequest> pending() { return recovery.pending(); }
 
     @Transactional
-    public MfaRecoveryRepository.RecoveryRequest decide(long requestId, long adminUserId,
-                                                        boolean approved, String reason, Instant now) {
-        MfaRecoveryRepository.RecoveryRequest request = recovery.decide(requestId, adminUserId,
+    public MfaRecoveryRepository.RecoveryRequest decide(long requestId, AuthModels.JwtPrincipal administrator,
+                                                        boolean approved, String reason,
+                                                        String userAgent, String ipAddress, Instant now) {
+        MfaRecoveryRepository.RecoveryRequest request = recovery.decide(requestId, administrator.userId(),
                 approved, reason, now);
         if (approved) {
             users.disableMfa(request.userId(), now);
             users.recordSecurityChange(request.userId(), now);
         }
+        audit.recordRequired(new AdminAuditRepository.AdminOperationRecord(
+                administrator.userId(), administrator.username(), administrator.roles(),
+                "gateway", "POST", "/api/v1/admin/compliance/mfa-recovery/" + requestId + "/decision",
+                null, null, null, 200, null, true, null, userAgent, ipAddress, now));
         users.user(request.userId()).map(AuthModels.AuthenticatedUser::email)
                 .filter(address -> address != null && !address.isBlank())
-                .ifPresent(address -> {
-                    try {
-                        email.send(address, "Surprising authenticator recovery update",
-                                approved ? "Your identity verification passed. The previous authenticator was removed. "
-                                        + "Withdrawals will be available after the 24-hour security hold."
-                                        : "Your authenticator recovery request was not approved. "
-                                        + (reason == null ? "" : "Reason: " + reason));
-                    } catch (RuntimeException ignored) {
-                        // The durable review decision must survive a temporary email delivery failure.
-                    }
-                });
+                .ifPresent(address -> notifications.mfaRecoveryDecision(request, address));
         return request;
     }
 
