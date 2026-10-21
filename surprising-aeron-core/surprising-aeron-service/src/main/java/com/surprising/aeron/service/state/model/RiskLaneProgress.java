@@ -1,19 +1,33 @@
 package com.surprising.aeron.service.state.model;
 
-/** 单个账户 Lane 的可恢复风险游标；列表下标就是 Lane 编号，由 owner 在任务完成后提交。 */
+/**
+ * 单个账户 Lane 可跨页继续的风险估值游标及累计值，外层列表下标就是 Lane 编号；Owner 收到账户任务完成后提交它。
+ * @param lastUserId 本轮最后一个已经处理完的用户，后续从它之后继续
+ * @param complete 本轮是否已遍历该 Lane 的账户风险，完成时不能残留正在估值用户
+ * @param userId 正在分片估值的原用户，零表示没有未完成用户
+ * @param phase 估值阶段：零累计持仓风险，一累计逐仓委托冻结，二写入全仓风险
+ * @param positionCursor 最后处理的持仓键，空白或空引用统一为短横线
+ * @param reservationCursor 最后处理的原预留订单号，零表示尚未开始遍历
+ * @param unrealizedPnlUnits 累计的风险权益变化，期货用未实现盈亏，期权用持仓市值
+ * @param maintenanceMarginUnits 已累计的维持保证金，单位为结算资产最小单位
+ * @param isolatedMarginUnits 已累计的逐仓持仓保证金，需从全仓共享资金中扣除
+ * @param isolatedReservationUnits 已累计的逐仓委托冻结资金，需从全仓共享资金中扣除
+ * @param userRevision 当前分片累计结果对应的非负账户修订
+ * @param marketRevision 当前分片累计结果对应的非负全局行情修订
+ */
 public record RiskLaneProgress(
-        /** 已完成的用户，下一次从其后继续。 */ long lastUserId,
-        /** 本轮价格扫描是否已遍历该 Lane。 */ boolean complete,
-        /** 正在分片估值的用户；零表示尚未开始下一用户。 */ long userId,
-        /** 0：累计持仓风险；1：累计委托保证金；2：写入全仓风险。 */ int phase,
-        /** 当前阶段最后处理的持仓键。 */ String positionCursor,
-        /** 最后处理的冻结委托编号。 */ long reservationCursor,
-        /** 已累计的未实现权益变化。 */ long unrealizedPnlUnits,
-        /** 已累计的维持保证金。 */ long maintenanceMarginUnits,
-        /** 已累计的逐仓持仓保证金。 */ long isolatedMarginUnits,
-        /** 已累计的逐仓委托冻结资金。 */ long isolatedReservationUnits,
-        /** 当前累计值对应的账户修订号。 */ long userRevision,
-        /** 当前累计值对应的全局行情修订号。 */ long marketRevision) {
+        long lastUserId,
+        boolean complete,
+        long userId,
+        int phase,
+        String positionCursor,
+        long reservationCursor,
+        long unrealizedPnlUnits,
+        long maintenanceMarginUnits,
+        long isolatedMarginUnits,
+        long isolatedReservationUnits,
+        long userRevision,
+        long marketRevision) {
     /**
      * 创建尚未附带用户和市场修订号的 Lane 风险游标，这两个修订号都从 0 开始。
      * @param lastUserId 本轮最后一个已经处理完的用户编号，后续从它之后继续
