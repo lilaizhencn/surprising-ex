@@ -1,6 +1,7 @@
 package com.surprising.funding.provider.repository;
 
 import com.surprising.funding.api.utils.AdminCursorPage;
+import com.surprising.funding.provider.model.FundingPageQuery;
 import com.surprising.funding.api.model.FundingPaymentResponse;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.trading.api.model.MarginMode;
@@ -24,22 +25,15 @@ public class FundingPaymentRepository {
 
     public AdminCursorPage.CursorPage<FundingPaymentResponse> corePage(long userId,
                                                                        String instrumentId,
-                                                                       int limit,
-                                                                       String cursor,
-                                                                       String sort) {
-        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : instrumentId.trim().toUpperCase();
-        int safeLimit = AdminCursorPage.limit(limit, 1000);
-        AdminCursorPage.SortSpec desc =
-                new AdminCursorPage.SortSpec("createdAt", "occurred_at_epoch_ms", "payment_id", true);
-        AdminCursorPage.SortSpec asc =
-                new AdminCursorPage.SortSpec("createdAt", "occurred_at_epoch_ms", "payment_id", false);
-        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, desc, List.of(desc, asc));
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+                                                                       FundingPageQuery query) {
+        int safeLimit = query.limit();
+        var sortSpec = new AdminCursorPage.SortSpec("createdAt", "occurred_at_epoch_ms", "payment_id", query.descending());
+        var decodedCursor = query.cursor();
         List<Object> args = new ArrayList<>();
         args.add(properties.getKafka().getProductLine().name());
         args.add(userId);
-        args.add(normalizedSymbol);
-        args.add(normalizedSymbol);
+        args.add(instrumentId);
+        args.add(instrumentId);
         if (decodedCursor != null) {
             args.add(decodedCursor.timestamp().toEpochMilli());
             args.add(decodedCursor.timestamp().toEpochMilli());

@@ -1,6 +1,7 @@
 package com.surprising.funding.provider.repository;
 
 import com.surprising.funding.api.utils.AdminCursorPage;
+import com.surprising.funding.provider.model.FundingPageQuery;
 import com.surprising.funding.api.model.FundingRateHistoryResponse;
 import com.surprising.funding.provider.config.FundingProperties;
 import java.util.ArrayList;
@@ -24,12 +25,10 @@ public class FundingRateRepository {
      * 同产品/合约/结算身份且费率一致时才关联funding_settlement_rates补充预测组成。
      * 无冻结记录或费率不匹配时保留NULL，不能把预测冒充已结算事实；筛选与游标分页在同一SQL内完成。 */
     public AdminCursorPage.CursorPage<FundingRateHistoryResponse> historyPage(String instrumentId,
-            int limit, String cursor, String sort) {
-        int safeLimit = AdminCursorPage.limit(limit, 1000);
-        var desc = new AdminCursorPage.SortSpec("eventTime", "event_time", "sequence", true);
-        var asc = new AdminCursorPage.SortSpec("eventTime", "event_time", "sequence", false);
-        var sortSpec = AdminCursorPage.parseSort(sort, desc, List.of(desc, asc));
-        var decoded = AdminCursorPage.decodeCursor(cursor);
+            FundingPageQuery query) {
+        int safeLimit = query.limit();
+        var sortSpec = new AdminCursorPage.SortSpec("eventTime", "event_time", "sequence", query.descending());
+        var decoded = query.cursor();
         var args = new ArrayList<Object>();
         args.add(properties.getKafka().getProductLine().name());
         args.add(instrumentId);

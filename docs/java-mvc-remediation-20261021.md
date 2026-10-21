@@ -134,3 +134,5 @@
 - 持续复核补充 [五处职责发现](audit/java-mvc-additional-findings-20261022.csv)：C2C Service协议输入、做市Service/Store格式校验、资金费和合约Repository游标绑定；按补充清单逐项整改。完整目标包括补充发现，不能仅以原248条关闭数量作为完成依据。
 
 - 参数职责1将做市公共设置的Bean Validation、ID/URL/JSON/时长和请求元数据校验移至现有Controller；Service保留产品线/业务数量约束及保存后安装，策略Store不再接受未使用的管理员/原因参数。定向32项、完整模块干净构建153项通过无跳过；22项负例捕获20处入口放行失败，恢复后绿色。关闭补充ADD-002、003；见 [做市参数职责验证](validation/java-mvc-maker-validation-20261022.json)。所属日志/已汇总报告已清理，其余全范围问题及最终实栈继续。
+
+- 参数职责2将历史资金费与支付分页的limit、排序、游标、用户/合约输入归FundingController；Service/Repository接收FundingPageQuery原生条件，SQL列映射仍由Repository持有，SQL原文不变。定向41项、完整生命周期干净构建111项通过无跳过；21项负例捕获14项预期失败，恢复后绿色。关闭补充ADD-004和本批复核ADD-006；见 [资金费查询入口验证](validation/java-mvc-funding-query-20261022.json)。真实PostgreSQL验证产品/用户/合约隔离、同时间戳双方向翻页和超过JS精确范围的long ID；所属数据库/日志/报告已清理，其余职责和最终实栈继续。

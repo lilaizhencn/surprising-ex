@@ -1,6 +1,8 @@
 package com.surprising.funding.provider.controller;
 
 import com.surprising.funding.api.FundingApiPaths;
+import com.surprising.funding.api.utils.AdminCursorPage;
+import com.surprising.funding.provider.model.FundingPageQuery;
 import com.surprising.funding.api.model.FundingPaymentQueryResponse;
 import com.surprising.funding.api.model.FundingRateQueryResponse;
 import com.surprising.funding.api.model.FundingRateResponse;
@@ -39,7 +41,11 @@ public class FundingController {
     @GetMapping("/rates/history")
     public FundingRateQueryResponse rateHistory(@RequestParam String instrumentId,
                                                 @RequestParam(defaultValue = "100") int limit) {
-        return fundingService.rateHistory(instrumentId, limit);
+        try {
+            return fundingService.rateHistory(instrumentId(instrumentId), pageQuery(limit, null, null, "eventTime"));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
     }
 
     @GetMapping("/settlements/latest")
@@ -58,7 +64,9 @@ public class FundingController {
                                                 @RequestParam(required = false) String cursor,
                                                 @RequestParam(required = false) String sort) {
         try {
-            return fundingService.payments(userId, instrumentId, limit, cursor, sort);
+            if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+            String id = instrumentId == null || instrumentId.isBlank() ? null : instrumentId(instrumentId);
+            return fundingService.payments(userId, id, pageQuery(limit, cursor, sort, "createdAt"));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -78,7 +86,7 @@ public class FundingController {
             @RequestParam(required = false) String cursor,
             @RequestParam(required = false) String sort) {
         try {
-            return fundingService.rateHistory(instrumentId, limit, cursor, sort);
+            return fundingService.rateHistory(instrumentId(instrumentId), pageQuery(limit, cursor, sort, "eventTime"));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -98,11 +106,7 @@ public class FundingController {
             @RequestParam(defaultValue = "100") int limit,
             @RequestParam(required = false) String cursor,
             @RequestParam(required = false) String sort) {
-        try {
-            return fundingService.payments(userId, instrumentId, limit, cursor, sort);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
+        return payments(userId, instrumentId, limit, cursor, sort);
     }
 
     @GetMapping("/admin/runtime-config")
@@ -155,6 +159,22 @@ public class FundingController {
             Integer maxPagesPerRun,
             Integer reconcileBatchSize,
             Long expectedVersion, Long maxMarkAgeMs, Long maxRateAgeMs, Long leaseDurationMs, String reason) {
+    }
+
+    private static FundingPageQuery pageQuery(int limit, String cursor, String sort, String field) {
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1, 1000]");
+        String token = sort == null || sort.isBlank() ? field + ".desc" : sort.trim();
+        if (!token.equals(field + ".asc") && !token.equals(field + ".desc"))
+            throw new IllegalArgumentException("unsupported sort: " + sort);
+        return new FundingPageQuery(limit, token.endsWith(".desc"), AdminCursorPage.decodeCursor(cursor));
+    }
+
+    private static String instrumentId(String value) {
+        if (value == null || value.isBlank()) throw new IllegalArgumentException("instrumentId is required");
+        String normalized = value.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(normalized))
+            throw new IllegalArgumentException("invalid instrumentId: " + value);
+        return normalized;
     }
 
     private void requireAdmin(String adminUserId) {

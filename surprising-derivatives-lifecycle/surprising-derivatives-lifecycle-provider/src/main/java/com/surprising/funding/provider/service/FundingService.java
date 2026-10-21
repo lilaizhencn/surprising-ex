@@ -23,6 +23,7 @@ import com.surprising.funding.provider.repository.FundingSettlementRateRepositor
 import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.funding.provider.model.CoreFundingSettlement;
+import com.surprising.funding.provider.model.FundingPageQuery;
 import com.surprising.funding.provider.repository.FundingSettlementProjectionRepository;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -218,13 +219,8 @@ public class FundingService {
         return latestFundingRateCache.requireFresh(normalizeSymbol(instrumentId));
     }
 
-    public FundingRateQueryResponse rateHistory(String instrumentId, int limit) {
-        return rateHistory(instrumentId, limit, null, null);
-    }
-
-    public FundingRateQueryResponse rateHistory(String instrumentId, int limit, String cursor, String sort) {
-        int capped = normalizeLimit(limit);
-        var page = rateRepository.historyPage(normalizeSymbol(instrumentId), capped, cursor, sort);
+    public FundingRateQueryResponse rateHistory(String instrumentId, FundingPageQuery query) {
+        var page = rateRepository.historyPage(instrumentId, query);
         return new FundingRateQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
@@ -234,15 +230,8 @@ public class FundingService {
                 .orElseThrow(() -> new java.util.NoSuchElementException("funding settlement not found for instrumentId: " + instrumentId));
     }
 
-    public FundingPaymentQueryResponse payments(long userId, String instrumentId, int limit) {
-        return payments(userId, instrumentId, limit, null, null);
-    }
-
-    public FundingPaymentQueryResponse payments(long userId, String instrumentId, int limit, String cursor, String sort) {
-        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
-        int capped = normalizeLimit(limit);
-        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
-        var page = paymentRepository.corePage(userId, normalizedSymbol, capped, cursor, sort);
+    public FundingPaymentQueryResponse payments(long userId, String instrumentId, FundingPageQuery query) {
+        var page = paymentRepository.corePage(userId, instrumentId, query);
         return new FundingPaymentQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
@@ -271,11 +260,6 @@ public class FundingService {
         static SettlementCycle disabled() {
             return new SettlementCycle(false, 0, 0, 0, 0);
         }
-    }
-
-    private int normalizeLimit(int limit) {
-        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1, 1000]");
-        return limit;
     }
 
     private String resolveNodeId(String configured) {

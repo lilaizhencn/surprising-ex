@@ -151,3 +151,5 @@ FundingSettlementProjectionRepository只读确定性提交的结算投影。Fund
 ADL、保险、强平、风险和资金费的AdminCursorPage工具归对应api.utils；API源文件位置与package统一，分页游标和排序行为保持。验证见 [工具归包记录](../docs/validation/java-mvc-utils-packages-20261021.json)。
 
 DerivativesInstrumentSnapshotInitializer归derivatives.lifecycle.service；初始化仍只安装当前生命周期产品，快照Bean名称与产品限定保持。验证见 [其余归包记录](../docs/validation/java-mvc-remaining-packages-20261021.json)。
+
+资金费历史与支付分页由 `funding.provider.controller.FundingController` 校验请求并解析原生 `FundingPageQuery`；Service保持结果聚合，Repository选择固定SQL列和产品隔离条件。历史费率仍以已提交APPLIED结算为权威，冻结费率仅在完整身份与费率匹配时补充组成，关联用途在Repository方法注释说明。
