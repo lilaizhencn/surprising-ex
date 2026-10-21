@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
+import com.surprising.gateway.provider.auth.model.UserQueryFilter;
+
 import com.surprising.gateway.provider.auth.repository.GatewayLoginLogRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayPermissionRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepository;
@@ -61,12 +64,12 @@ class AuthPersistenceServiceTest {
         List<UserRecord> users = List.of(
                 new UserRecord(1L, "admin", "admin@example.com", "NORMAL", now),
                 new UserRecord(2L, "alice", "alice@example.com", "NORMAL", now));
-        when(userRepository.find(null, null, 100)).thenReturn(users);
+        when(userRepository.find(new UserQueryFilter(null,null,null),100)).thenReturn(users);
         when(userRoleRepository.findRoleIdsByUserIds(List.of(1L, 2L))).thenReturn(Map.of(1L, List.of(10L)));
         when(roleRepository.findByIds(java.util.Set.of(10L))).thenReturn(Map.of(
                 10L, new RoleRecord(10L, "ADMIN", "Admin", now)));
 
-        var result = service.users(null, null, 100);
+        var result = service.users(new UserQueryFilter(null,null,null),100);
 
         assertThat(result.get(0).roles()).containsExactly("ADMIN");
         assertThat(result.get(1).roles()).containsExactly("USER");

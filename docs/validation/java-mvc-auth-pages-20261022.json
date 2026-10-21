@@ -1,0 +1,571 @@
+{
+  "verified_at_utc": "2026-10-21T20:37:28.255622+00:00",
+  "toolchain": "Corretto HotSpot JDK27; Maven3.9.16",
+  "stages": {
+    "compile-focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=AuthServiceTest,AuthPersistenceServiceTest,ComplianceServiceTest,UserSecurityControllerTest,AdminAuditApprovalPostgresTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [],
+      "log_sha256": "1c5c39247b54928a3328fb1e30fd48b2d97dca17b5c18a65066f809ddda78558",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "focused-ready": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=AuthServiceTest,AuthPersistenceServiceTest,ComplianceServiceTest,UserSecurityControllerTest,AdminAuditApprovalPostgresTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [],
+      "log_sha256": "a03d62a42dac35c4c538a199a25193de0b827727ef6066d0d3b9052bf42d7580",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "focused-adapted": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=AuthServiceTest,AuthPersistenceServiceTest,ComplianceServiceTest,UserSecurityControllerTest,AdminComplianceControllerTest,AdminAuditApprovalPostgresTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [],
+      "log_sha256": "c8892afc6619f0ba32db533ad2e2027d2a809732363e7268bf086cbea8671175",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "boundary": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=AuthPagePostgresTest,AuthServiceTest,AuthPersistenceServiceTest,ComplianceServiceTest,UserSecurityControllerTest,AdminComplianceControllerTest,AdminAuditApprovalPostgresTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.auth.AdminAuditApprovalPostgresTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthPersistenceServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AdminComplianceControllerTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthPagePostgresTest",
+          "tests": 27,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.UserSecurityControllerTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.ComplianceServiceTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthServiceTest",
+          "tests": 23,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "c4577bbc6dd81f4cb3d4d75a45db0a22c15e260984056268442fdc6c07798215",
+      "tests": 76,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "boundary-polished": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=AuthPagePostgresTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthPagePostgresTest",
+          "tests": 27,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "9a435a095606edc02b173d29c0a38ff18905497feca3c8eee72b3143abb2dd9f",
+      "tests": 27,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative-identity": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=AuthPagePostgresTest#ownSessionsIgnoreForgedUserAndKeepIdentityScope",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthPagePostgresTest",
+          "tests": 1,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "358b97eb3de4d270c4223901be4f914a74b70beb7878ef90f44ab8007000a8f3",
+      "tests": 1,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded-clean": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=com.surprising.gateway.provider.auth.*Test,KycDocumentServiceTest,KycUploadBoundaryTest,GatewayProxyControllerTest,C2cAdminHttpPostgresTest",
+        "clean",
+        "install"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.auth.MfaRecoveryServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.LoginVerificationSettingsControllerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.TelegramOidcClientTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.LoginVerificationServiceTest",
+          "tests": 27,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.KycEvidenceReferenceTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.ClientIpResolverTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AdminAuditApprovalPostgresTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.TelegramLoginControllerTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthPersistenceServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.ExternalKycProviderTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.SensitiveActionVerificationServiceTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AdminComplianceControllerTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthPagePostgresTest",
+          "tests": 27,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.UserSecurityControllerTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.ComplianceServiceTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.TelegramLoginServiceTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.UserSecurityServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.ComplianceValidationTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthServiceTest",
+          "tests": 23,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.UserCardControllerTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuthTableBoundariesPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.GatewayApiKeyServiceTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.KycApplicationValidationTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.ApiKeyHttpBoundaryTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.KycProviderDatabaseTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.EmailVerificationServiceTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AuditLogPagePostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.MfaRecoveryDatabaseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.KycDocumentServiceTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.TelegramLoginDatabaseTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.KycProviderConcurrencyPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.LoginVerificationDatabaseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.GatewayUserMfaRepositoryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.PrimaryAuthenticationDatabaseTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.AdminCursorPageTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.PasswordResetServiceTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.TotpServiceTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.GatewayProxyControllerTest",
+          "tests": 39,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.auth.GatewayApiKeyAuthenticationIpTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "34e766c93a1886f0186f0745487d6d668cf51df39eb1be317b973b14d799073f",
+      "tests": 299,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "sql": [
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/AdminApprovalRepository.java",
+      "all_sql_text_blocks_equal": true,
+      "raw_http_paging_in_repository": false
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/ComplianceAmlCaseRepository.java",
+      "all_sql_text_blocks_equal": true,
+      "raw_http_paging_in_repository": false
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/ComplianceRiskTagRepository.java",
+      "all_sql_text_blocks_equal": true,
+      "raw_http_paging_in_repository": false
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/ComplianceUserProjectionRepository.java",
+      "all_sql_text_blocks_equal": true,
+      "raw_http_paging_in_repository": false
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/GatewayRefreshSessionRepository.java",
+      "all_sql_text_blocks_equal": true,
+      "raw_http_paging_in_repository": false
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/GatewayUserRepository.java",
+      "all_sql_text_blocks_equal": true,
+      "raw_http_paging_in_repository": false
+    }
+  ],
+  "retained_business_bodies": [
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/AdminApprovalRepository.java",
+      "method": "create",
+      "count": 1,
+      "bodies_equal": true
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/AdminApprovalRepository.java",
+      "method": "approve",
+      "count": 1,
+      "bodies_equal": true
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/AdminApprovalRepository.java",
+      "method": "reject",
+      "count": 1,
+      "bodies_equal": true
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/AdminApprovalRepository.java",
+      "method": "consumeApproved",
+      "count": 1,
+      "bodies_equal": true
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/AdminApprovalRepository.java",
+      "method": "requireForUpdate",
+      "count": 1,
+      "bodies_equal": true
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/AdminApprovalRepository.java",
+      "method": "requirePending",
+      "count": 1,
+      "bodies_equal": true
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/AdminApprovalRepository.java",
+      "method": "updateDecision",
+      "count": 1,
+      "bodies_equal": true
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/service/AuthPersistenceService.java",
+      "method": "attachRoles",
+      "count": 1,
+      "bodies_equal": true
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/service/AuthService.java",
+      "method": "authenticateBearer",
+      "count": 1,
+      "bodies_equal": true
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/service/AuthService.java",
+      "method": "authenticateAdminBearer",
+      "count": 1,
+      "bodies_equal": true
+    },
+    {
+      "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/service/AuthService.java",
+      "method": "requireAdminPermission",
+      "count": 2,
+      "bodies_equal": true
+    }
+  ],
+  "negative_control": "本人会话过滤临时置空：1项实际测试按预期失败（应2条，实际读到他人会话共3条），finally逐字节恢复，最终clean install通过。",
+  "initial_compile_only_failures": "三次旧测试签名/私有测试辅助方法编译失败，均0执行，不计测试证据；已适配后回归。",
+  "scope": "六种列表只读边界；PG独立临时实例，无wallet、Core或真实六产品线部署。",
+  "remaining": "7个Repository分页、10项输入深扫、审批Repository状态/输入规则ADD-099、公开嵌套类型职责和真实六产品线资金验收继续。",
+  "cleanup": "所属PG停止删除；已汇总本批日志与Gateway Surefire报告清理，保留构建产物。"
+}

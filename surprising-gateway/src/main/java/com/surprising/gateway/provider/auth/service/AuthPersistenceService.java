@@ -10,6 +10,8 @@ import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRoleRepository;
 
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
+import com.surprising.gateway.provider.auth.model.UserQueryFilter;
 import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminPermissionResponse;
@@ -112,16 +114,13 @@ public class AuthPersistenceService {
         userRoleRepository.add(userId, roleRepository.requireByCode("USER").roleId(), now);
     }
 
-    public List<AuthenticatedUser> users(String query, String status, int limit) {
-        return attachRoles(userRepository.find(query, status, limit));
+    public List<AuthenticatedUser> users(UserQueryFilter filter, int limit) {
+        return attachRoles(userRepository.find(filter, limit));
     }
 
-    public AdminCursorPage.CursorPage<AuthenticatedUser> usersPage(String query,
-                                                                   String status,
-                                                                   int limit,
-                                                                   String cursor,
-                                                                   String sort) {
-        AdminCursorPage.CursorPage<UserRecord> page = userRepository.findPage(query, status, limit, cursor, sort);
+    public AdminCursorPage.CursorPage<AuthenticatedUser> usersPage(UserQueryFilter filter,
+                                                                   AuthPageQuery pageQuery) {
+        AdminCursorPage.CursorPage<UserRecord> page = userRepository.findPage(filter, pageQuery);
         return new AdminCursorPage.CursorPage<>(
                 attachRoles(page.items()),
                 page.nextCursor(),
@@ -258,10 +257,8 @@ public class AuthPersistenceService {
 
     public AdminCursorPage.CursorPage<AdminRefreshSessionResponse> refreshSessionsPage(Long userId,
                                                                                       Boolean active,
-                                                                                      int limit,
-                                                                                      String cursor,
-                                                                                      String sort) {
-        return refreshSessionRepository.findPage(userId, active, limit, cursor, sort);
+                                                                                      AuthPageQuery pageQuery) {
+        return refreshSessionRepository.findPage(userId, active, pageQuery);
     }
 
     public int revokeRefreshSessionForAdmin(long sessionId, Instant now) {

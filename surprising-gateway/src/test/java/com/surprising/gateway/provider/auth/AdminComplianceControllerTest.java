@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
 import com.surprising.gateway.provider.auth.controller.AdminComplianceController;
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
@@ -23,6 +24,8 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import tools.jackson.databind.ObjectMapper;
 
 class AdminComplianceControllerTest {
+    private static final AdminCursorPage.Cursor CURSOR = new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"), 7L);
+    private static final String ENCODED_CURSOR = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString((CURSOR.timestamp() + "|" + CURSOR.id()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
     @Test
     void usersRequiresComplianceReadPermission() {
@@ -30,13 +33,13 @@ class AdminComplianceControllerTest {
         ComplianceUserSummary user = new ComplianceUserSummary(
                 42L, "alice", "NORMAL", "STANDARD", "VERIFIED", "SG", 1, 0, Instant.now());
         when(service.adminUsersPage(
-                "Bearer admin", null, "VERIFIED", null, 100, "cursor", "updatedAt.asc"))
+                "Bearer admin", null, "VERIFIED", null, new AuthPageQuery(100, CURSOR, AuthPageQuery.Order.UPDATED_ASC)))
                 .thenReturn(new AdminCursorPage.CursorPage<>(List.of(user), "next", true,
                         "updatedAt.asc", 100));
         AdminComplianceController controller = controller(service);
 
         var response = controller.users("Bearer admin", null, "VERIFIED", null, 100,
-                "cursor", "updatedAt.asc");
+                ENCODED_CURSOR, "updatedAt.asc");
 
         assertThat(response.count()).isEqualTo(1);
         assertThat(response.nextCursor()).isEqualTo("next");
@@ -44,7 +47,7 @@ class AdminComplianceControllerTest {
         assertThat(response.sort()).isEqualTo("updatedAt.asc");
         assertThat(response.limit()).isEqualTo(100);
         verify(service).adminUsersPage(
-                "Bearer admin", null, "VERIFIED", null, 100, "cursor", "updatedAt.asc");
+                "Bearer admin", null, "VERIFIED", null, new AuthPageQuery(100, CURSOR, AuthPageQuery.Order.UPDATED_ASC));
     }
 
     @Test
@@ -54,13 +57,13 @@ class AdminComplianceControllerTest {
         RiskTag tag = new RiskTag(11L, 42L, "HIGH_RISK", "HIGH", "ACTIVE", "MANUAL",
                 "review", 7L, null, now, null, now);
         when(service.adminRiskTagsPage(
-                "Bearer admin", 42L, "ACTIVE", 50, "cursor", "updatedAt.desc"))
+                "Bearer admin", 42L, "ACTIVE", new AuthPageQuery(50, CURSOR, AuthPageQuery.Order.UPDATED_DESC)))
                 .thenReturn(new AdminCursorPage.CursorPage<>(List.of(tag), "next", true,
                         "updatedAt.desc", 50));
         AdminComplianceController controller = controller(service);
 
         var response = controller.riskTags("Bearer admin", 42L, "ACTIVE", 50,
-                "cursor", "updatedAt.desc");
+                ENCODED_CURSOR, "updatedAt.desc");
 
         assertThat(response.tags()).containsExactly(tag);
         assertThat(response.nextCursor()).isEqualTo("next");
@@ -68,7 +71,7 @@ class AdminComplianceControllerTest {
         assertThat(response.sort()).isEqualTo("updatedAt.desc");
         assertThat(response.limit()).isEqualTo(50);
         verify(service).adminRiskTagsPage(
-                "Bearer admin", 42L, "ACTIVE", 50, "cursor", "updatedAt.desc");
+                "Bearer admin", 42L, "ACTIVE", new AuthPageQuery(50, CURSOR, AuthPageQuery.Order.UPDATED_DESC));
     }
 
     @Test
@@ -78,13 +81,13 @@ class AdminComplianceControllerTest {
         AmlCase amlCase = new AmlCase(21L, 42L, "REVIEWING", 75, "MANUAL",
                 "case summary", null, 7L, null, null, null, now, now);
         when(service.adminAmlCasesPage(
-                "Bearer admin", 42L, "REVIEWING", 50, "cursor", "createdAt.asc"))
+                "Bearer admin", 42L, "REVIEWING", new AuthPageQuery(50, CURSOR, AuthPageQuery.Order.CREATED_ASC)))
                 .thenReturn(new AdminCursorPage.CursorPage<>(List.of(amlCase), "next", true,
                         "createdAt.asc", 50));
         AdminComplianceController controller = controller(service);
 
         var response = controller.amlCases("Bearer admin", 42L, "REVIEWING", 50,
-                "cursor", "createdAt.asc");
+                ENCODED_CURSOR, "createdAt.asc");
 
         assertThat(response.cases()).containsExactly(amlCase);
         assertThat(response.nextCursor()).isEqualTo("next");
@@ -92,7 +95,7 @@ class AdminComplianceControllerTest {
         assertThat(response.sort()).isEqualTo("createdAt.asc");
         assertThat(response.limit()).isEqualTo(50);
         verify(service).adminAmlCasesPage(
-                "Bearer admin", 42L, "REVIEWING", 50, "cursor", "createdAt.asc");
+                "Bearer admin", 42L, "REVIEWING", new AuthPageQuery(50, CURSOR, AuthPageQuery.Order.CREATED_ASC));
     }
 
     @Test

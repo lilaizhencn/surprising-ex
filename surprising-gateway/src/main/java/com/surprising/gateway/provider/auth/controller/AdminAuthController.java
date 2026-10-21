@@ -58,7 +58,8 @@ public class AdminAuthController {
                                         @RequestParam(value = "cursor", required = false) String cursor,
                                         @RequestParam(value = "sort", required = false) String sort) {
         try {
-            return authService.adminUsers(authorization, query, status, limit, cursor, sort);
+            return authService.adminUsers(authorization, AuthPageRequestBinding.userFilter(query, status),
+                    AuthPageRequestBinding.created(limit, cursor, sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -87,7 +88,9 @@ public class AdminAuthController {
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "sort", required = false) String sort) {
         try {
-            return authService.adminRefreshSessions(authorization, userId, active, limit, cursor, sort);
+            AuthPageRequestBinding.sessionUser(userId);
+            return authService.adminRefreshSessions(authorization, userId, active,
+                    AuthPageRequestBinding.created(limit, cursor, sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -105,7 +108,9 @@ public class AdminAuthController {
             @RequestParam(value = "sort", required = false) String sort) {
         try {
             authService.adminUser(authorization, userId);
-            return authService.adminRefreshSessions(authorization, userId, active, limit, cursor, sort);
+            AuthPageRequestBinding.sessionUser(userId);
+            return authService.adminRefreshSessions(authorization, userId, active,
+                    AuthPageRequestBinding.created(limit, cursor, sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -184,7 +189,7 @@ public class AdminAuthController {
                                            @RequestParam(value = "sort", required = false) String sort) {
         try {
             return authService.loginLogs(authorization, userId, AuditLogRequestBinding.result(result),
-                    AuditLogRequestBinding.page(limit,cursor,sort));
+                    AuditLogRequestBinding.page(limit, cursor, sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -204,7 +209,7 @@ public class AdminAuthController {
         try {
             var page = adminApprovalService.operationLogs(
                     authorization, adminUserId, AuditLogRequestBinding.service(service),
-                    AuditLogRequestBinding.method(method), success, AuditLogRequestBinding.page(limit,cursor,sort));
+                    AuditLogRequestBinding.method(method), success, AuditLogRequestBinding.page(limit, cursor, sort));
             return new AdminOperationLogQueryResponse(page.items().size(), page.items(),
                     page.nextCursor(), page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {
@@ -287,7 +292,8 @@ public class AdminAuthController {
                                                 @RequestParam(value = "sort", required = false) String sort) {
         try {
             var page = adminApprovalService.approvals(
-                    authorization, status, requesterUserId, approverUserId, service, limit, cursor, sort);
+                    authorization, AuthPageRequestBinding.approvalStatus(status), requesterUserId, approverUserId,
+                    AuthPageRequestBinding.approvalService(service), AuthPageRequestBinding.requested(limit, cursor, sort));
             return new AdminApprovalQueryResponse(page.items().size(), page.items(),
                     page.nextCursor(), page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {

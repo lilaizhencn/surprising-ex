@@ -1,6 +1,8 @@
 package com.surprising.gateway.provider.auth.repository;
 
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
+import com.surprising.gateway.provider.auth.model.UserQueryFilter;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -18,7 +20,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class GatewayUserRepository {
 
-    private static final int MAX_QUERY_LIMIT = 500;
     private static final AdminCursorPage.SortSpec CREATED_AT_DESC =
             new AdminCursorPage.SortSpec("createdAt", "created_at", "user_id", true);
     private static final List<AdminCursorPage.SortSpec> SORTS = List.of(
@@ -102,10 +103,10 @@ public class GatewayUserRepository {
                 (row, n) -> row.getLong(1), userId).isEmpty();
     }
 
-    public List<UserRecord> find(String query, String status, int limit) {
-        String normalizedQuery = normalizeLikeQuery(query);
-        String normalizedStatus = normalizeStatusFilter(status);
-        int safeLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
+    public List<UserRecord> find(UserQueryFilter filter, int limit) {
+        String normalizedQuery = likeParameter(filter.term());
+        String normalizedStatus = filter.status();
+        int safeLimit = limit;
         return jdbcTemplate.query("""
                 SELECT user_id, username, email, phone, status, created_at, display_name
                   FROM gateway_users
@@ -114,24 +115,23 @@ public class GatewayUserRepository {
                 ORDER BY created_at DESC, user_id DESC
                 LIMIT ?
                 """, (rs, rowNum) -> toUserRecord(rs),
-                normalizedQuery, normalizedQuery, exactIdQuery(query), normalizedQuery, normalizedQuery,
+                normalizedQuery, normalizedQuery, filter.exactUserIdText(), normalizedQuery, normalizedQuery,
                 normalizedStatus, normalizedStatus, safeLimit);
     }
 
-    public AdminCursorPage.CursorPage<UserRecord> findPage(String query,
-                                                            String status,
-                                                            int limit,
-                                                            String cursor,
-                                                            String sort) {
-        String normalizedQuery = normalizeLikeQuery(query);
-        String normalizedStatus = normalizeStatusFilter(status);
-        int safeLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
-        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, CREATED_AT_DESC, SORTS);
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+    public AdminCursorPage.CursorPage<UserRecord> findPage(UserQueryFilter filter,
+                                                            AuthPageQuery pageQuery) {
+        String normalizedQuery = likeParameter(filter.term());
+        String normalizedStatus = filter.status();
+        int safeLimit = pageQuery.limit();
+        AdminCursorPage.SortSpec sortSpec = SORTS.stream()
+                .filter(spec -> spec.field().equals(pageQuery.order().field()) && spec.descending() == pageQuery.order().descending())
+                .findFirst().orElseThrow(() -> new IllegalStateException("unsupported native page order"));
+        AdminCursorPage.Cursor decodedCursor = pageQuery.after();
         List<Object> args = new ArrayList<>();
         args.add(normalizedQuery);
         args.add(normalizedQuery);
-        args.add(exactIdQuery(query));
+        args.add(filter.exactUserIdText());
         args.add(normalizedQuery);
         args.add(normalizedQuery);
         args.add(normalizedStatus);
@@ -212,26 +212,8 @@ public class GatewayUserRepository {
                 rs.getTimestamp("created_at").toInstant());
     }
 
-    private String normalizeLikeQuery(String query) {
-        if (query == null || query.isBlank()) {
-            return null;
-        }
-        String trimmed = query.trim().toLowerCase(Locale.ROOT);
-        if (trimmed.length() > 64) {
-            trimmed = trimmed.substring(0, 64);
-        }
-        return "%" + trimmed.replace("%", "\\%").replace("_", "\\_") + "%";
-    }
-
-    private String exactIdQuery(String query) {
-        if (query == null || !query.trim().matches("\\d{1,19}")) {
-            return null;
-        }
-        return query.trim();
-    }
-
-    private String normalizeStatusFilter(String status) {
-        return status == null || status.isBlank() ? null : normalizeStatus(status);
+    private String likeParameter(String term) {
+        return term == null ? null : "%" + term.replace("%", "\\%").replace("_", "\\_") + "%";
     }
 
     private String normalizeStatus(String status) {

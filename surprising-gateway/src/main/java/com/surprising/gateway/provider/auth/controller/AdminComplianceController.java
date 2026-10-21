@@ -4,6 +4,7 @@ import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.gateway.provider.auth.utils.ComplianceValidation;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCase;
@@ -60,7 +61,9 @@ public class AdminComplianceController {
         try {
             AdminCursorPage.CursorPage<ComplianceUserSummary> page =
                     complianceService.adminUsersPage(
-                            authorization, userId, kycStatus, tagCode, limit, cursor, sort);
+                            authorization, userId, ComplianceValidation.nullableUpper(kycStatus),
+                            ComplianceValidation.nullableTag(tagCode),
+                            AuthPageRequestBinding.complianceUsers(limit, cursor, sort));
             return new ComplianceUserQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                     page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {
@@ -98,7 +101,8 @@ public class AdminComplianceController {
         try {
             AdminCursorPage.CursorPage<RiskTag> page =
                     complianceService.adminRiskTagsPage(
-                            authorization, userId, status, limit, cursor, sort);
+                            authorization, userId, ComplianceValidation.nullableUpper(status),
+                            AuthPageRequestBinding.riskTags(limit, cursor, sort));
             return new RiskTagQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                     page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {
@@ -118,7 +122,8 @@ public class AdminComplianceController {
         try {
             AdminCursorPage.CursorPage<AmlCase> page =
                     complianceService.adminAmlCasesPage(
-                            authorization, userId, status, limit, cursor, sort);
+                            authorization, userId, ComplianceValidation.nullableUpper(status),
+                            AuthPageRequestBinding.amlCases(limit, cursor, sort));
             return new AmlCaseQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                     page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {

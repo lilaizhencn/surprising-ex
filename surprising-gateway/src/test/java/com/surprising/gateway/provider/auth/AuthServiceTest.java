@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
+import com.surprising.gateway.provider.auth.model.UserQueryFilter;
+
 import com.surprising.gateway.provider.auth.controller.AuthClientMetadataBinding;
 import com.surprising.gateway.provider.config.GatewayProperties;
 
@@ -94,9 +97,10 @@ class AuthServiceTest {
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
         AdminRefreshSessionResponse session = new AdminRefreshSessionResponse(
                 88L, 42L, true, now.plusSeconds(3600), null, "ua", "127.0.0.1", now, now);
-        when(repository.refreshSessions(42L, true, 100)).thenReturn(List.of(session));
+        when(repository.refreshSessionsPage(42L, true, new AuthPageQuery(100,null,AuthPageQuery.Order.CREATED_DESC)))
+                .thenReturn(new AdminCursorPage.CursorPage<>(List.of(session),null,false,"createdAt.desc",100));
 
-        var response = service.adminRefreshSessions("Bearer admin-token", 42L, true, 100);
+        var response = service.adminRefreshSessions("Bearer admin-token", 42L, true, new AuthPageQuery(100,null,AuthPageQuery.Order.CREATED_DESC));
 
         assertThat(response.count()).isEqualTo(1);
         assertThat(response.sessions()).containsExactly(session);
@@ -110,19 +114,18 @@ class AuthServiceTest {
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
         AdminRefreshSessionResponse session = new AdminRefreshSessionResponse(
                 88L, 42L, true, now.plusSeconds(3600), null, "ua", "127.0.0.1", now, now);
-        when(repository.refreshSessionsPage(42L, true, 25, "cursor", "createdAt.asc"))
+        when(repository.refreshSessionsPage(42L, true, new AuthPageQuery(25,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC)))
                 .thenReturn(new AdminCursorPage.CursorPage<>(List.of(session), "next", true,
                         "createdAt.asc", 25));
 
-        var response = service.adminRefreshSessions("Bearer admin-token", 42L, true, 25,
-                "cursor", "createdAt.asc");
+        var response = service.adminRefreshSessions("Bearer admin-token", 42L, true, new AuthPageQuery(25,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC));
 
         assertThat(response.sessions()).containsExactly(session);
         assertThat(response.nextCursor()).isEqualTo("next");
         assertThat(response.hasMore()).isTrue();
         assertThat(response.sort()).isEqualTo("createdAt.asc");
         assertThat(response.limit()).isEqualTo(25);
-        verify(repository).refreshSessionsPage(42L, true, 25, "cursor", "createdAt.asc");
+        verify(repository).refreshSessionsPage(42L, true, new AuthPageQuery(25,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC));
     }
 
     @Test
@@ -132,19 +135,18 @@ class AuthServiceTest {
                 .thenReturn(new JwtPrincipal(7L, "admin", "UNKNOWN", List.of("ADMIN"), now.plusSeconds(60)));
         when(repository.user(7L)).thenReturn(Optional.of(admin(now)));
         AuthenticatedUser user = new AuthenticatedUser(42L, "user", null, "NORMAL", List.of("USER"), now);
-        when(repository.usersPage("user", "NORMAL", 50, "cursor", "createdAt.asc"))
+        when(repository.usersPage(new UserQueryFilter("user",null,"NORMAL"), new AuthPageQuery(50,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC)))
                 .thenReturn(new AdminCursorPage.CursorPage<>(List.of(user), "next", true,
                         "createdAt.asc", 50));
 
-        var response = service.adminUsers("Bearer admin-token", "user", "NORMAL", 50,
-                "cursor", "createdAt.asc");
+        var response = service.adminUsers("Bearer admin-token", new UserQueryFilter("user",null,"NORMAL"), new AuthPageQuery(50,new AdminCursorPage.Cursor(Instant.parse("2026-07-02T00:00:00Z"),7L),AuthPageQuery.Order.CREATED_ASC));
 
         assertThat(response.users()).containsExactly(user);
         assertThat(response.nextCursor()).isEqualTo("next");
         assertThat(response.hasMore()).isTrue();
         assertThat(response.sort()).isEqualTo("createdAt.asc");
         assertThat(response.limit()).isEqualTo(50);
-        verify(repository).usersPage("user", "NORMAL", 50, "cursor", "createdAt.asc");
+        verify(repository).usersPage(new UserQueryFilter("user", null, "NORMAL"), new AuthPageQuery(50, new AdminCursorPage.Cursor(now, 7L), AuthPageQuery.Order.CREATED_ASC));
     }
 
     @Test

@@ -13,6 +13,7 @@ import com.surprising.gateway.provider.auth.repository.CountryRepository;
 import com.surprising.gateway.provider.auth.utils.ComplianceValidation;
 
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 
 import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCase;
 import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCaseCreateRequest;
@@ -89,11 +90,9 @@ public class ComplianceService {
             Long userId,
             String kycStatus,
             String tagCode,
-            int limit,
-            String cursor,
-            String sort) {
+            AuthPageQuery pageQuery) {
         authService.requireAdminPermission(authorization, "admin.compliance.read");
-        return usersPage(userId, kycStatus, tagCode, limit, cursor, sort);
+        return usersPage(userId, kycStatus, tagCode, pageQuery);
     }
 
     public String approvalHeaderName() {
@@ -115,22 +114,18 @@ public class ComplianceService {
             String authorization,
             Long userId,
             String status,
-            int limit,
-            String cursor,
-            String sort) {
+            AuthPageQuery pageQuery) {
         authService.requireAdminPermission(authorization, "admin.compliance.read");
-        return riskTagsPage(userId, status, limit, cursor, sort);
+        return riskTagsPage(userId, status, pageQuery);
     }
 
     public AdminCursorPage.CursorPage<AmlCase> adminAmlCasesPage(
             String authorization,
             Long userId,
             String status,
-            int limit,
-            String cursor,
-            String sort) {
+            AuthPageQuery pageQuery) {
         authService.requireAdminPermission(authorization, "admin.compliance.read");
-        return amlCasesPage(userId, status, limit, cursor, sort);
+        return amlCasesPage(userId, status, pageQuery);
     }
 
     @Transactional
@@ -355,10 +350,8 @@ public class ComplianceService {
     public AdminCursorPage.CursorPage<ComplianceUserSummary> usersPage(Long userId,
                                                                        String kycStatus,
                                                                        String tagCode,
-                                                                       int limit,
-                                                                       String cursor,
-                                                                       String sort) {
-        return userProjectionRepository.usersPage(userId, kycStatus, tagCode, limit, cursor, sort);
+                                                                       AuthPageQuery pageQuery) {
+        return userProjectionRepository.usersPage(userId, kycStatus, tagCode, pageQuery);
     }
 
     @Transactional
@@ -411,10 +404,8 @@ public class ComplianceService {
 
     public AdminCursorPage.CursorPage<RiskTag> riskTagsPage(Long userId,
                                                             String status,
-                                                            int limit,
-                                                            String cursor,
-                                                            String sort) {
-        return riskTagRepository.findPage(userId, status, limit, cursor, sort);
+                                                            AuthPageQuery pageQuery) {
+        return riskTagRepository.findPage(userId, status, pageQuery);
     }
 
     public RiskTag createRiskTag(long userId,
@@ -434,10 +425,8 @@ public class ComplianceService {
 
     public AdminCursorPage.CursorPage<AmlCase> amlCasesPage(Long userId,
                                                             String status,
-                                                            int limit,
-                                                            String cursor,
-                                                            String sort) {
-        return amlCaseRepository.findPage(userId, status, limit, cursor, sort);
+                                                            AuthPageQuery pageQuery) {
+        return amlCaseRepository.findPage(userId, status, pageQuery);
     }
 
     public AmlCase createAmlCase(long userId,

@@ -3,6 +3,7 @@ package com.surprising.gateway.provider.auth.repository;
 import com.surprising.gateway.provider.auth.utils.ComplianceValidation;
 
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 
 import com.surprising.gateway.provider.auth.model.ComplianceModels.RiskTag;
 import com.surprising.gateway.provider.auth.model.ComplianceModels.RiskTagCreateRequest;
@@ -20,7 +21,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class ComplianceRiskTagRepository {
 
-    private static final int MAX_QUERY_LIMIT = 500;
     private static final AdminCursorPage.SortSpec CREATED_DESC =
             new AdminCursorPage.SortSpec("createdAt", "created_at", "tag_id", true);
     private static final List<AdminCursorPage.SortSpec> SORTS = List.of(
@@ -36,23 +36,22 @@ public class ComplianceRiskTagRepository {
     }
 
     public List<RiskTag> find(Long userId, String status, int limit) {
-        return findPage(userId, status, limit, null, null).items();
+        return findPage(userId, status, new AuthPageQuery(limit, null, AuthPageQuery.Order.CREATED_DESC)).items();
     }
 
     public AdminCursorPage.CursorPage<RiskTag> findPage(Long userId,
                                                         String status,
-                                                        int limit,
-                                                        String cursor,
-                                                        String sort) {
-        String normalizedStatus = ComplianceValidation.nullableUpper(status);
-        int safeLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
-        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, CREATED_DESC, SORTS);
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+                                                        AuthPageQuery pageQuery) {
+        int safeLimit = pageQuery.limit();
+        AdminCursorPage.SortSpec sortSpec = SORTS.stream()
+                .filter(spec -> spec.field().equals(pageQuery.order().field()) && spec.descending() == pageQuery.order().descending())
+                .findFirst().orElseThrow(() -> new IllegalStateException("unsupported native page order"));
+        AdminCursorPage.Cursor decodedCursor = pageQuery.after();
         List<Object> args = new ArrayList<>();
         args.add(userId);
         args.add(userId);
-        args.add(normalizedStatus);
-        args.add(normalizedStatus);
+        args.add(status);
+        args.add(status);
         String sql = """
                 SELECT tag_id, user_id, tag_code, severity, status, source, reason,
                        created_by_user_id, resolved_by_user_id, created_at, resolved_at, updated_at

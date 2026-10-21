@@ -255,7 +255,7 @@ public class UserSecurityController {
         try {
             long userId = principal(authorization).userId();
             var page = persistence.loginLogPage(userId, AuditLogRequestBinding.result(result),
-                    AuditLogRequestBinding.page(limit,cursor,sort));
+                    AuditLogRequestBinding.page(limit, cursor, sort));
             return new LoginLogQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                     page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {
@@ -268,7 +268,8 @@ public class UserSecurityController {
                                                           int limit,
                                                           String cursor,
                                                           String sort) {
-        var page = persistence.refreshSessionsPage(userId, active, limit, cursor, sort);
+        AuthPageRequestBinding.sessionUser(userId);
+        var page = persistence.refreshSessionsPage(userId, active, AuthPageRequestBinding.created(limit, cursor, sort));
         return new AdminRefreshSessionQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }

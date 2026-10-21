@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth.service;
 
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
+import com.surprising.gateway.provider.auth.model.UserQueryFilter;
 import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
 
 import com.surprising.gateway.provider.auth.model.AuthModels;
@@ -247,20 +249,11 @@ public class AuthService {
         throw new IllegalStateException("admin permission required: " + normalizedPermission);
     }
 
-    public AdminUserQueryResponse adminUsers(String authorizationHeader, String query, String status, int limit) {
-        authenticateAdminBearer(authorizationHeader);
-        var users = repository.users(query, status, limit);
-        return new AdminUserQueryResponse(users.size(), users);
-    }
 
-    public AdminUserQueryResponse adminUsers(String authorizationHeader,
-                                             String query,
-                                             String status,
-                                             int limit,
-                                             String cursor,
-                                             String sort) {
+    public AdminUserQueryResponse adminUsers(String authorizationHeader, UserQueryFilter filter,
+                                             AuthPageQuery pageQuery) {
         authenticateAdminBearer(authorizationHeader);
-        var page = repository.usersPage(query, status, limit, cursor, sort);
+        var page = repository.usersPage(filter, pageQuery);
         return new AdminUserQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
@@ -270,23 +263,13 @@ public class AuthService {
         return repository.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
     }
 
-    public AdminRefreshSessionQueryResponse adminRefreshSessions(String authorizationHeader,
-                                                                 Long userId,
-                                                                 Boolean active,
-                                                                 int limit) {
-        authenticateAdminBearer(authorizationHeader);
-        var sessions = repository.refreshSessions(userId, active, limit);
-        return new AdminRefreshSessionQueryResponse(sessions.size(), sessions);
-    }
 
     public AdminRefreshSessionQueryResponse adminRefreshSessions(String authorizationHeader,
                                                                  Long userId,
                                                                  Boolean active,
-                                                                 int limit,
-                                                                 String cursor,
-                                                                 String sort) {
+                                                                 AuthPageQuery pageQuery) {
         authenticateAdminBearer(authorizationHeader);
-        var page = repository.refreshSessionsPage(userId, active, limit, cursor, sort);
+        var page = repository.refreshSessionsPage(userId, active, pageQuery);
         return new AdminRefreshSessionQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }

@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
+import com.surprising.gateway.provider.auth.model.UserQueryFilter;
+
 import com.surprising.gateway.provider.auth.controller.UserSecurityController;
 import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
@@ -137,7 +140,7 @@ class UserSecurityControllerTest {
                 .thenReturn(new JwtPrincipal(42L, "user", "ACTIVE", List.of("USER"), now.plusSeconds(60)));
         AdminRefreshSessionResponse session = new AdminRefreshSessionResponse(
                 7L, 42L, true, now.plusSeconds(3600), null, "browser", "127.0.0.1", now, now);
-        when(persistence.refreshSessionsPage(42L, true, 25, null, null))
+        when(persistence.refreshSessionsPage(42L, true, new AuthPageQuery(25,null,AuthPageQuery.Order.CREATED_DESC)))
                 .thenReturn(new AdminCursorPage.CursorPage<>(List.of(session), null, false,
                         "createdAt.desc", 25));
 

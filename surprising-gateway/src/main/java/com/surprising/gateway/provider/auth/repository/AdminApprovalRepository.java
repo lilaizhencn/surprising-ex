@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.auth.repository;
 
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalCreateRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalResponse;
@@ -128,35 +129,32 @@ public class AdminApprovalRepository {
                                                  Long approverUserId,
                                                  String service,
                                                  int limit) {
-        return approvalPage(status, requesterUserId, approverUserId, service, limit, null, null).items();
+        return approvalPage(status, requesterUserId, approverUserId, service, new AuthPageQuery(limit, null, AuthPageQuery.Order.REQUESTED_DESC)).items();
     }
 
     public AdminCursorPage.CursorPage<AdminApprovalResponse> approvalPage(String status,
                                                                           Long requesterUserId,
                                                                           Long approverUserId,
                                                                           String service,
-                                                                          int limit,
-                                                                          String cursor,
-                                                                          String sort) {
-        String normalizedStatus = normalizeStatusFilter(status);
-        String normalizedService = service == null || service.isBlank() ? null : normalizeService(service);
-        int safeLimit = AdminCursorPage.limit(limit, 500);
+                                                                          AuthPageQuery pageQuery) {
+        int safeLimit = pageQuery.limit();
         AdminCursorPage.SortSpec requestedAtDesc = new AdminCursorPage.SortSpec(
                 "requestedAt", "requested_at", "approval_id", true);
         AdminCursorPage.SortSpec requestedAtAsc = new AdminCursorPage.SortSpec(
                 "requestedAt", "requested_at", "approval_id", false);
-        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(
-                sort, requestedAtDesc, List.of(requestedAtDesc, requestedAtAsc));
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        AdminCursorPage.SortSpec sortSpec = List.of(requestedAtDesc, requestedAtAsc).stream()
+                .filter(spec -> spec.field().equals(pageQuery.order().field()) && spec.descending() == pageQuery.order().descending())
+                .findFirst().orElseThrow(() -> new IllegalStateException("unsupported native page order"));
+        AdminCursorPage.Cursor decodedCursor = pageQuery.after();
         List<Object> args = new ArrayList<>();
-        args.add(normalizedStatus);
-        args.add(normalizedStatus);
+        args.add(status);
+        args.add(status);
         args.add(requesterUserId);
         args.add(requesterUserId);
         args.add(approverUserId);
         args.add(approverUserId);
-        args.add(normalizedService);
-        args.add(normalizedService);
+        args.add(service);
+        args.add(service);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(safeLimit + 1);
         List<AdminApprovalResponse> rows = jdbcTemplate.query("""
@@ -299,17 +297,6 @@ public class AdminApprovalRepository {
         String normalized = reason == null ? "" : reason.trim();
         if (normalized.isBlank() || normalized.length() > 1000) {
             throw new IllegalArgumentException("approval reason is required");
-        }
-        return normalized;
-    }
-
-    private String normalizeStatusFilter(String status) {
-        if (status == null || status.isBlank()) {
-            return null;
-        }
-        String normalized = status.trim().toUpperCase(Locale.ROOT);
-        if (!List.of("PENDING", "APPROVED", "REJECTED", "CONSUMED").contains(normalized)) {
-            throw new IllegalArgumentException("invalid approval status");
         }
         return normalized;
     }

@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
+import com.surprising.gateway.provider.auth.model.UserQueryFilter;
+
 import com.surprising.gateway.provider.auth.repository.AdminApprovalRepository;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 
@@ -69,7 +72,7 @@ class AdminAuditApprovalPostgresTest {
             assertThat(consumed.consumedAt()).isEqualTo(now);
             assertThatThrownBy(() -> transactions.execute(tx -> approvals.consumeApproved(created.approvalId(), 101,
                     "account", "POST", path, null, hash, now))).hasMessageContaining("not approved");
-            assertThat(approvals.approvals("CONSUMED", 101L, 102L, "account", 10)).containsExactly(consumed);
+            assertThat(approvals.approvalPage("CONSUMED",101L,102L,"account",new AuthPageQuery(10,null,AuthPageQuery.Order.REQUESTED_DESC)).items()).containsExactly(consumed);
 
             audits.recordRequired(new AdminOperationRecord(101L, "requester", List.of("ADMIN"), "account", "POST",
                     path, "referenceId=adjustment-1", "LINEAR_PERPETUAL", hash, 200, 7L, true, null,

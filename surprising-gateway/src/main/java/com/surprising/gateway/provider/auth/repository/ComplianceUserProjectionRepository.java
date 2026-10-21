@@ -3,6 +3,7 @@ package com.surprising.gateway.provider.auth.repository;
 import com.surprising.gateway.provider.auth.utils.ComplianceValidation;
 
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 
 import com.surprising.gateway.provider.auth.model.ComplianceModels.ComplianceUserSummary;
 import java.util.ArrayList;
@@ -20,7 +21,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class ComplianceUserProjectionRepository {
 
-    private static final int MAX_QUERY_LIMIT = 500;
     private static final AdminCursorPage.SortSpec UPDATED_DESC =
             new AdminCursorPage.SortSpec("updatedAt", "updated_at", "user_id", true);
     private static final List<AdminCursorPage.SortSpec> SORTS = List.of(
@@ -36,21 +36,19 @@ public class ComplianceUserProjectionRepository {
     public AdminCursorPage.CursorPage<ComplianceUserSummary> usersPage(Long userId,
                                                                        String kycStatus,
                                                                        String tagCode,
-                                                                       int limit,
-                                                                       String cursor,
-                                                                       String sort) {
-        String normalizedKycStatus = ComplianceValidation.nullableUpper(kycStatus);
-        String normalizedTagCode = ComplianceValidation.nullableTag(tagCode);
-        int safeLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
-        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, UPDATED_DESC, SORTS);
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+                                                                       AuthPageQuery pageQuery) {
+        int safeLimit = pageQuery.limit();
+        AdminCursorPage.SortSpec sortSpec = SORTS.stream()
+                .filter(spec -> spec.field().equals(pageQuery.order().field()) && spec.descending() == pageQuery.order().descending())
+                .findFirst().orElseThrow(() -> new IllegalStateException("unsupported native page order"));
+        AdminCursorPage.Cursor decodedCursor = pageQuery.after();
         List<Object> args = new ArrayList<>();
         args.add(userId);
         args.add(userId);
-        args.add(normalizedKycStatus);
-        args.add(normalizedKycStatus);
-        args.add(normalizedTagCode);
-        args.add(normalizedTagCode);
+        args.add(kycStatus);
+        args.add(kycStatus);
+        args.add(tagCode);
+        args.add(tagCode);
         String sql = """
                 SELECT *
                   FROM (
