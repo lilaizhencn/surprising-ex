@@ -76,4 +76,14 @@ public class C2cMerchantRepository {
                         r.getLong("bond_scale"), r.getTimestamp("created_at").toInstant()),
                 status, status, userId, userId, count, offset);
     }
+    public void apply(long userId,String application) {
+        jdbc.update("INSERT INTO c2c_merchants(user_id,application_text) VALUES(?,?)",userId,application);
+    }
+    public void reapply(long userId,String application) {
+        jdbc.update("""
+                UPDATE c2c_merchants SET status='PENDING',application_text=?,review_reason=NULL,reviewed_by=NULL,reviewed_at=NULL,
+                    revision=revision+1,updated_at=now() WHERE user_id=?
+                """,application,userId);
+    }
+
 }

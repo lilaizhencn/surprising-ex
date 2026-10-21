@@ -32,4 +32,8 @@ public class C2cSecurityGrantRepository {
                 ON CONFLICT(user_id,token_hash) DO UPDATE SET expires_at=EXCLUDED.expires_at
                 """, userId, tokenHash, Timestamp.from(expiresAt));
     }
+    public void deleteByUser(long userId) {
+        jdbc.update("DELETE FROM c2c_security_grants WHERE user_id=?",userId);
+    }
+
 }

@@ -86,6 +86,15 @@ final class C2cDatabaseFixture implements AutoCloseable {
                 new C2cAppealRepository(jdbc),submissions);
     }
 
+    static C2cProfiles profiles(JdbcTemplate jdbc,C2cAccess access,ComplianceService compliance,GatewayUserRepository users,
+                                C2cOrdersRepository orders,C2cMarketService markets,ObjectMapper json) {
+        return new C2cProfiles(access,compliance,users,orders,markets,new com.surprising.gateway.c2c.repository.C2cProfileRepository(jdbc),
+                new com.surprising.gateway.c2c.repository.C2cSecurityGrantRepository(jdbc),new C2cMerchantRepository(jdbc),
+                new com.surprising.gateway.c2c.repository.C2cQuickReplyRepository(jdbc),new C2cRelationRepository(jdbc),
+                new com.surprising.gateway.c2c.repository.C2cReportRepository(jdbc),new com.surprising.gateway.c2c.repository.C2cPriceAlertRepository(jdbc),
+                new com.surprising.gateway.c2c.repository.C2cNotificationRepository(jdbc,json),new C2cFundsRepository(jdbc));
+    }
+
     static C2cPaymentAccounts payments(JdbcTemplate jdbc, TotpService secrets,
                                        ObjectMapper json,
                                        ComplianceService compliance) {

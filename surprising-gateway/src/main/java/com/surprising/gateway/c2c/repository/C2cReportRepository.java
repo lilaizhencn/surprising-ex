@@ -37,4 +37,17 @@ public class C2cReportRepository {
                         r.getString("status"), r.getString("review_reason"), r.getTimestamp("created_at").toInstant()),
                 status, status, userId, userId, userId, count, offset);
     }
+    public long recentCount(long userId) {
+        return jdbc.queryForObject("SELECT count(*) FROM c2c_reports WHERE user_id=? AND created_at>now()-interval '24 hours'",Long.class,userId);
+    }
+    public void insert(UUID id,long userId,long target,UUID orderId,String reason) {
+        jdbc.update("INSERT INTO c2c_reports(report_id,user_id,target_user_id,order_id,reason) VALUES(?,?,?,?,?)",id,userId,target,orderId,reason);
+    }
+    public List<Report> byUser(long userId,int count,int offset) {
+        return jdbc.query("SELECT * FROM c2c_reports WHERE user_id=? ORDER BY created_at DESC,report_id DESC LIMIT ? OFFSET ?",
+                (r,n)->new Report(r.getObject("report_id",UUID.class),r.getLong("user_id"),r.getLong("target_user_id"),
+                        r.getObject("order_id",UUID.class),r.getString("reason"),r.getString("status"),
+                        r.getString("review_reason"),r.getTimestamp("created_at").toInstant()),userId,count,offset);
+    }
+
 }

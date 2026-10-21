@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c.repository;
 
+import com.surprising.gateway.c2c.model.C2cProfileRows.PriceAlert;
+import java.math.BigDecimal;
 import com.surprising.gateway.c2c.model.C2cPriceAlertTrigger;
 import java.util.Collections;
 import java.util.List;
@@ -40,4 +42,28 @@ public class C2cPriceAlertRepository {
         return jdbc.update("UPDATE c2c_price_alerts SET enabled=false,triggered_at=now(),revision=revision+1 WHERE enabled AND alert_id IN ("
                 + String.join(",", Collections.nCopies(ids.size(), "?")) + ")", ids.toArray());
     }
+    public List<PriceAlert> byUser(long userId) {
+        return jdbc.query("SELECT * FROM c2c_price_alerts WHERE user_id=? ORDER BY created_at DESC,alert_id LIMIT 100",
+                (r,n)->new PriceAlert(r.getObject("alert_id",UUID.class),r.getObject("market_id",UUID.class),r.getString("side"),
+                        r.getBigDecimal("target_price"),r.getBoolean("enabled"),r.getLong("revision"),
+                        r.getTimestamp("triggered_at")==null?null:r.getTimestamp("triggered_at").toInstant()),userId);
+    }
+    public long enabledCountExcept(long userId,UUID id) {
+        return jdbc.queryForObject("SELECT count(*) FROM c2c_price_alerts WHERE user_id=? AND enabled AND (CAST(? AS uuid) IS NULL OR alert_id<>?)",
+                Long.class,userId,id,id);
+    }
+    public void insert(UUID id,long userId,UUID market,String side,BigDecimal target,boolean enabled) {
+        jdbc.update("INSERT INTO c2c_price_alerts(alert_id,user_id,market_id,side,target_price,enabled) VALUES(?,?,?,?,?,?)",
+                id,userId,market,side,target,enabled);
+    }
+    public int replace(UUID id,long userId,long revision,UUID market,String side,BigDecimal target,boolean enabled) {
+        return jdbc.update("""
+                UPDATE c2c_price_alerts SET market_id=?,side=?,target_price=?,enabled=?,triggered_at=NULL,revision=revision+1
+                WHERE alert_id=? AND user_id=? AND revision=?
+                """,market,side,target,enabled,id,userId,revision);
+    }
+    public void delete(long userId,UUID id) {
+        jdbc.update("DELETE FROM c2c_price_alerts WHERE user_id=? AND alert_id=?",userId,id);
+    }
+
 }

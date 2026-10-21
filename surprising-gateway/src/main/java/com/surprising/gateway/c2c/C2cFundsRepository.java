@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cProfileRows.Escrow;
 import com.surprising.gateway.c2c.model.C2cAdminRows.FundIntent;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -105,4 +106,22 @@ public class C2cFundsRepository {
             return value == 0 ? 1 : value;
         } catch (java.security.NoSuchAlgorithmException ex) { throw new IllegalStateException(ex); }
     }
+    /**
+     * 资金意图是托管统计根；按owner_type关联唯一广告/订单/质押仅确定原资产所有者，资产只提供权威精度。
+     * 只读已持久意图并按币种聚合，不创建SQL余额、不调用Core；未确认或结算拒绝由Service明确展示未知。
+     */
+    public List<Escrow> escrowByOwner(long userId) {
+        return jdbc.query("""
+                SELECT f.asset,a.scale_units,
+                    COALESCE(sum(CASE WHEN f.status='APPLIED' AND f.purpose IN ('AD_RESERVE','ORDER_RESERVE','MERCHANT_BOND') THEN f.amount_units::numeric
+                        WHEN f.status='APPLIED' THEN -f.amount_units::numeric ELSE 0 END),0) AS held,
+                    count(*) FILTER(WHERE f.status NOT IN ('APPLIED','REJECTED')) AS pending,
+                    count(*) FILTER(WHERE f.status='REJECTED' AND f.purpose NOT IN ('AD_RESERVE','ORDER_RESERVE','MERCHANT_BOND')) AS failed
+                FROM c2c_fund_intents f LEFT JOIN c2c_ads ad ON f.owner_type='AD' AND f.owner_id=ad.ad_id
+                LEFT JOIN c2c_orders o ON f.owner_type='ORDER' AND f.owner_id=o.order_id
+                LEFT JOIN c2c_merchant_bonds b ON f.owner_type='MERCHANT' AND f.owner_id=b.bond_id JOIN assets a ON a.asset=f.asset
+                WHERE COALESCE(ad.maker_user_id,o.seller_user_id,b.user_id)=? GROUP BY f.asset,a.scale_units
+                """,(r,n)->new Escrow(r.getString("asset"),r.getLong("scale_units"),r.getBigDecimal("held"),r.getLong("pending"),r.getLong("failed")),userId);
+    }
+
 }

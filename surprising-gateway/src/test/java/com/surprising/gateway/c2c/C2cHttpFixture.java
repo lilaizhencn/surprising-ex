@@ -121,7 +121,7 @@ final class C2cHttpFixture implements AutoCloseable {
             context.registerBean(C2cSubmissions.class,()->new C2cSubmissions(jdbc));
             context.registerBean(C2cFundsRepository.class,()->new C2cFundsRepository(jdbc));
             context.registerBean(C2cNotificationService.class,()->new C2cNotificationService(new C2cPriceAlertRepository(jdbc),
-                    new C2cNotificationRepository(jdbc),new C2cSecurityGrantRepository(jdbc),new C2cQuoteRepository(jdbc)));
+                    new C2cNotificationRepository(jdbc,json),new C2cSecurityGrantRepository(jdbc),new C2cQuoteRepository(jdbc)));
             context.registerBean(C2cPaymentAccounts.class,()->C2cDatabaseFixture.payments(jdbc,new TotpService(properties),json,compliance));
             context.registerBean(C2cAccess.class,()->new C2cAccess(auth,compliance,security,new C2cProfileRepository(jdbc),new C2cSecurityGrantRepository(jdbc),new GatewayUserRepository(jdbc),db.transactions.getTransactionManager(),bean(C2cMarketService.class),products));
             context.registerBean(C2cAds.class,()->C2cDatabaseFixture.ads(jdbc,bean(C2cAdsRepository.class),bean(C2cMarketService.class),bean(C2cPaymentAccounts.class),
@@ -133,7 +133,7 @@ final class C2cHttpFixture implements AutoCloseable {
                     bean(C2cMarketService.class),bean(C2cPaymentAccounts.class),json,bean(C2cSubmissions.class)));
             context.registerBean(C2cQuickQuoteService.class,()->new C2cQuickQuoteService(bean(C2cQueryService.class),
                     bean(C2cMarketService.class),bean(C2cAccess.class),bean(C2cOrders.class)));
-            context.registerBean(C2cProfiles.class,()->new C2cProfiles(jdbc,bean(C2cAccess.class),compliance,new GatewayUserRepository(jdbc),
+            context.registerBean(C2cProfiles.class,()->C2cDatabaseFixture.profiles(jdbc,bean(C2cAccess.class),compliance,new GatewayUserRepository(jdbc),
                     bean(C2cOrdersRepository.class),bean(C2cMarketService.class),json));
             context.registerBean(AdminAuditRepository.class,()->new AdminAuditRepository(jdbc));
             context.registerBean(AdminApprovalRepository.class,()->new AdminApprovalRepository(jdbc));

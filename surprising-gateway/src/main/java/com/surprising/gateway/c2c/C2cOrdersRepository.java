@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cProfileRows.OrderStats;
 import com.surprising.gateway.c2c.model.C2cOrder;
 import com.surprising.gateway.c2c.model.C2cUserOrderFilter;
 import com.surprising.gateway.c2c.model.C2cOrderPlacement;
@@ -136,4 +137,14 @@ public class C2cOrdersRepository {
     private static Instant instant(java.sql.ResultSet r,String field) throws java.sql.SQLException {
         var value=r.getTimestamp(field);return value==null?null:value.toInstant();
     }
+    public OrderStats userStats(long userId) {
+        return jdbc.queryForObject("""
+                SELECT count(*) FILTER(WHERE status='COMPLETED') AS completed,
+                    count(*) FILTER(WHERE status IN ('CANCELED','EXPIRED')) AS canceled,
+                    count(*) FILTER(WHERE status NOT IN ('COMPLETED','CANCELED','EXPIRED','FAILED')) AS ongoing,
+                    count(*) FILTER(WHERE status='APPEALED') AS appealed
+                FROM c2c_orders WHERE buyer_user_id=? OR seller_user_id=?
+                """,(r,n)->new OrderStats(r.getLong("completed"),r.getLong("canceled"),r.getLong("ongoing"),r.getLong("appealed")),userId,userId);
+    }
+
 }
