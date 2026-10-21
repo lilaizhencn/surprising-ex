@@ -38,7 +38,7 @@ public class GatewayUserRepository {
             return jdbcTemplate.queryForObject("""
                     INSERT INTO gateway_users (username, email, phone, password_hash, status, created_at, updated_at)
                     VALUES (?, ?, ?, ?, 'NORMAL', ?, ?)
-                    RETURNING user_id, username, email, phone, status, created_at
+                    RETURNING user_id, username, email, phone, status, created_at, display_name
                     """, (rs, rowNum) -> toUserRecord(rs),
                     username, email, phone, passwordHash, Timestamp.from(now), Timestamp.from(now));
         } catch (DuplicateKeyException ex) {
@@ -88,7 +88,7 @@ public class GatewayUserRepository {
 
     public Optional<UserRecord> find(long userId) {
         return jdbcTemplate.query("""
-                SELECT user_id, username, email, phone, status, created_at
+                SELECT user_id, username, email, phone, status, created_at, display_name
                   FROM gateway_users
                  WHERE user_id = ?
                 """, (rs, rowNum) -> toUserRecord(rs), userId).stream().findFirst();
@@ -99,7 +99,7 @@ public class GatewayUserRepository {
         String normalizedStatus = normalizeStatusFilter(status);
         int safeLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
         return jdbcTemplate.query("""
-                SELECT user_id, username, email, phone, status, created_at
+                SELECT user_id, username, email, phone, status, created_at, display_name
                   FROM gateway_users
                  WHERE (CAST(? AS text) IS NULL OR username LIKE ? OR CAST(user_id AS TEXT) = ? OR lower(email) LIKE ? OR phone LIKE ?)
                    AND (CAST(? AS text) IS NULL OR status = ?)
@@ -129,7 +129,7 @@ public class GatewayUserRepository {
         args.add(normalizedStatus);
         args.add(normalizedStatus);
         String sql = """
-                SELECT user_id, username, email, phone, status, created_at
+                SELECT user_id, username, email, phone, status, created_at, display_name
                   FROM gateway_users
                  WHERE (CAST(? AS text) IS NULL OR username LIKE ? OR CAST(user_id AS TEXT) = ? OR lower(email) LIKE ? OR phone LIKE ?)
                    AND (CAST(? AS text) IS NULL OR status = ?)
@@ -151,7 +151,7 @@ public class GatewayUserRepository {
                    SET status = ?,
                        updated_at = ?
                  WHERE user_id = ?
-                RETURNING user_id, username, email, phone, status, created_at
+                RETURNING user_id, username, email, phone, status, created_at, display_name
                 """, (rs, rowNum) -> toUserRecord(rs), normalizeStatus(status),
                 Timestamp.from(now), userId).stream().findFirst();
     }
@@ -190,7 +190,7 @@ public class GatewayUserRepository {
                 rs.getString("email"),
                 rs.getString("phone"),
                 rs.getString("status"),
-                rs.getTimestamp("created_at").toInstant());
+                rs.getTimestamp("created_at").toInstant(), rs.getString("display_name"));
     }
 
     private UserCredential toCredential(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -243,7 +243,12 @@ public class GatewayUserRepository {
             String email,
             String phone,
             String status,
-            Instant createdAt) {
+            Instant createdAt,
+            String displayName) {
+        public UserRecord(long userId, String username, String email, String phone,
+                          String status, Instant createdAt) {
+            this(userId, username, email, phone, status, createdAt, null);
+        }
         public UserRecord(long userId, String username, String email, String status, Instant createdAt) {
             this(userId, username, email, null, status, createdAt);
         }

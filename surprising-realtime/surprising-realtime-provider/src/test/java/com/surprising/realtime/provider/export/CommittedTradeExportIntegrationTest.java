@@ -40,6 +40,11 @@ class CommittedTradeExportIntegrationTest {
         var statistics=org.mockito.Mockito.mock(CommittedTradingStatistics.class);
         org.mockito.Mockito.when(statistics.initialized(org.mockito.ArgumentMatchers.any())).thenReturn(true);
         org.mockito.Mockito.when(orders.statistics()).thenReturn(statistics);
+        var portfolio = org.mockito.Mockito.mock(CommittedPortfolioHistory.class);
+        org.mockito.Mockito.when(portfolio.initialized(org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        org.mockito.Mockito.when(portfolio.start(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong()))
+                .thenReturn(new CommittedPortfolioHistory.Start(0, 0));
+        org.mockito.Mockito.when(orders.portfolio()).thenReturn(portfolio);
     }
 
     @Test

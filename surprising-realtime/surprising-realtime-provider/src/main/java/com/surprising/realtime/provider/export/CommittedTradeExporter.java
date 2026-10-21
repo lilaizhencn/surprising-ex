@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.orchestration.CommittedTradeReplay;
 import com.surprising.product.api.ProductLine;
+import com.surprising.realtime.api.PortfolioIncomePeriod;
 
 import io.aeron.*;
 import io.aeron.archive.client.AeronArchive;
@@ -16,6 +17,7 @@ import org.apache.kafka.clients.producer.*;
 
 import java.nio.channels.FileChannel;
 import java.nio.file.*;
+import java.time.Clock;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -23,18 +25,25 @@ import java.util.concurrent.locks.LockSupport;
 /** Single-threaded committed Archive replay; all replay state belongs to the calling export worker. */
 @Slf4j
 final class CommittedTradeExporter {
-    enum ExportMode { LIVE, FUNDING_REPAIR, COMMAND_RESULT_REPAIR, DELIVERY_REPAIR, EXECUTION_REPAIR, STATISTICS_REPAIR }
+    enum ExportMode { LIVE, FUNDING_REPAIR, COMMAND_RESULT_REPAIR, DELIVERY_REPAIR, EXECUTION_REPAIR, STATISTICS_REPAIR, PORTFOLIO_REPAIR }
     private final TradeExportProperties config;
     private final ProductLine product;
     private final String bootstrapServers;
     private final CommittedOrderProjectionRepository orders;
+    private final Clock clock;
 
     CommittedTradeExporter(TradeExportProperties config, ProductLine product, String bootstrapServers,
             CommittedOrderProjectionRepository orders) {
+        this(config, product, bootstrapServers, orders, Clock.systemUTC());
+    }
+
+    CommittedTradeExporter(TradeExportProperties config, ProductLine product, String bootstrapServers,
+            CommittedOrderProjectionRepository orders, Clock clock) {
         this.config = config;
         this.product = product;
         this.bootstrapServers = bootstrapServers;
         this.orders = orders;
+        this.clock = Objects.requireNonNull(clock);
     }
 
     void run(java.util.concurrent.atomic.AtomicBoolean running, java.util.function.Consumer<Boolean> connected, long stopAfter) throws Exception {
@@ -63,6 +72,33 @@ final class CommittedTradeExporter {
                 || !config.checkpoint().getFileName().toString().endsWith(".delivery-repair"))
             throw new IllegalArgumentException("delivery repair requires a delivery product, finite end and separate .delivery-repair checkpoint");
         run(new java.util.concurrent.atomic.AtomicBoolean(true), ready -> {}, stopAfter, ExportMode.DELIVERY_REPAIR);
+    }
+
+    /** Financial history rebuild uses its own finite checkpoint, without Kafka or order writes. */
+    void repairPortfolio(long stopAfter) throws Exception {
+        if (stopAfter <= 0 || stopAfter == Long.MAX_VALUE
+                || !config.checkpoint().getFileName().toString().endsWith(".portfolio-repair"))
+            throw new IllegalArgumentException("portfolio repair requires a finite end and separate .portfolio-repair checkpoint");
+        run(new java.util.concurrent.atomic.AtomicBoolean(true), ready -> {}, stopAfter, ExportMode.PORTFOLIO_REPAIR);
+        if (TradeExportCheckpoint.read(config.checkpoint(), product).logPosition() < stopAfter)
+            throw new IllegalStateException("portfolio reconstruction incomplete");
+    }
+
+    private void initializePortfolio(TradeExportCheckpoint checkpoint, java.util.concurrent.atomic.AtomicBoolean running) throws Exception {
+        if (orders.portfolio().initialized(product)) return;
+        Path repair = config.checkpoint().toAbsolutePath().resolveSibling(config.checkpoint().getFileName() + ".portfolio-repair");
+        if (checkpoint.logPosition() > 0) {
+            var repairConfig = new TradeExportProperties(config.clusterDirectory(), config.aeronDirectory(), config.archiveControlChannel(),
+                    repair, config.clusterId(), config.kafkaConfig(), config.checkpointInterval(), config.retryInterval());
+            new CommittedTradeExporter(repairConfig, product, null, orders, clock).run(running, ready -> {}, checkpoint.logPosition(), ExportMode.PORTFOLIO_REPAIR);
+            if (TradeExportCheckpoint.read(repair, product).logPosition() < checkpoint.logPosition())
+                throw new IllegalStateException("portfolio reconstruction incomplete");
+        }
+        if (!running.get() || Thread.currentThread().isInterrupted()) throw new IllegalStateException("portfolio initialization stopped");
+        orders.portfolio().certifyGenesis(product);
+        Files.deleteIfExists(repair);
+        Files.deleteIfExists(repair.resolveSibling(repair.getFileName() + ".lock"));
+        Files.deleteIfExists(repair.resolveSibling(repair.getFileName() + ".next"));
     }
 
     private void initializeExecutions(TradeExportCheckpoint checkpoint, java.util.concurrent.atomic.AtomicBoolean running) throws Exception {
@@ -110,6 +146,24 @@ final class CommittedTradeExporter {
         return true;
     }
 
+    private void publishPortfolioCutoffs(CommittedTradeReplay replay, ExportBatch batch,
+                                         long position, long nextCommandTimestamp, long coveredFrom) {
+        long now = clock.millis();
+        long opening = PortfolioIncomePeriod.dayStart(now);
+        long minute = PortfolioIncomePeriod.minuteStart(now);
+        boolean published = false;
+        // Opening comes first, so a coincident minute is retained as the daily baseline.
+        for (long cutoff : new long[]{opening, Math.max(opening, minute - 60_000), minute}) {
+            if (replay.clusterTimestamp() >= cutoff || nextCommandTimestamp < cutoff
+                    || orders.portfolio().contains(product, cutoff)) continue;
+            batch.flush(replay.exportSequence());
+            var snapshot = replay.portfolioSnapshot(cutoff, PortfolioIncomePeriod.MAXIMUM_MARK_AGE_MILLIS);
+            orders.portfolio().publish(snapshot, position, replay.exportSequence(), coveredFrom, cutoff == opening);
+            published = true;
+        }
+        if (published) orders.portfolio().prune(product, opening, minute);
+    }
+
     private void run(java.util.concurrent.atomic.AtomicBoolean running,
             java.util.function.Consumer<Boolean> connected, long stopAfter, ExportMode mode) throws Exception {
         Path checkpointPath = config.checkpoint().toAbsolutePath();
@@ -117,7 +171,8 @@ final class CommittedTradeExporter {
                 || checkpointPath.getFileName().toString().endsWith(".funding-repair")
                 || checkpointPath.getFileName().toString().endsWith(".delivery-repair")
                 || checkpointPath.getFileName().toString().endsWith(".execution-repair")
-                || checkpointPath.getFileName().toString().endsWith(".statistics-repair")))
+                || checkpointPath.getFileName().toString().endsWith(".statistics-repair")
+                || checkpointPath.getFileName().toString().endsWith(".portfolio-repair")))
             throw new IllegalArgumentException("live exporter cannot use a repair checkpoint");
         Files.createDirectories(checkpointPath.getParent());
         int clusterId = config.clusterId() == null
@@ -163,6 +218,7 @@ final class CommittedTradeExporter {
             TradeExportCheckpoint checkpoint = TradeExportCheckpoint.read(checkpointPath, product);
             if (mode == ExportMode.LIVE) initializeExecutions(checkpoint, running);
             if (mode == ExportMode.LIVE) initializeStatistics(checkpoint, running);
+            if (mode == ExportMode.LIVE) initializePortfolio(checkpoint, running);
             try (var replay = new CommittedTradeReplay(product, checkpoint.snapshot());
                     var sink =
                             mode != ExportMode.LIVE ? null : new ReliableTradeKafkaSink(
@@ -187,6 +243,8 @@ final class CommittedTradeExporter {
                 boolean[] initialStatisticsPublished={false};
                 long[] nextCheckpoint = {System.nanoTime() + checkpointInterval};
                 var batch = new ExportBatch(product, orders, sink, mode);
+                long portfolioCoveredFrom = mode == ExportMode.LIVE
+                        ? orders.portfolio().start(product, checkpoint.logPosition(), replay.clusterTimestamp()).timestamp() : 0;
                 long[] delivered = {checkpoint.logPosition()};
                 boolean[] partialMessage = {false};
                 var messageHeader = new MessageHeaderDecoder();
@@ -201,6 +259,8 @@ final class CommittedTradeExporter {
                         if (bodyLength <= 0) throw new IllegalArgumentException("empty archived Core command");
                         byte[] bytes = new byte[bodyLength];
                         buffer.getBytes(bodyOffset, bytes);
+                        if (mode == ExportMode.LIVE || mode == ExportMode.PORTFOLIO_REPAIR)
+                            publishPortfolioCutoffs(replay, batch, delivered[0], sessionHeader.timestamp(), portfolioCoveredFrom);
                         var changes = replay.apply(bytes, sessionHeader.timestamp(), header.position());
                         if (replay.fundingPage() != null && (mode == ExportMode.LIVE || mode == ExportMode.FUNDING_REPAIR)) {
                             // Flush earlier commands, then atomically persist this exact funding
@@ -214,7 +274,7 @@ final class CommittedTradeExporter {
                             orders.persistDelivery(replay.deliveryPage());
                         }
                         batch.add(changes,
-                                replay.commandResult(), replay.exportSequence(), System.nanoTime(), replay.algoChanges());
+                                replay.commandResult(), replay.exportSequence(), System.nanoTime(), replay.algoChanges(), replay.balanceFlow());
                     }
                     delivered[0] = header.position();
                     if (System.nanoTime() >= nextCheckpoint[0]) {
@@ -355,6 +415,7 @@ final class CommittedTradeExporter {
         private final ArrayList<RealtimeFrame> orderChanges = new ArrayList<>();
         private final ArrayList<CommittedTradeReplay.CommittedCommandResult> commandResults = new ArrayList<>();
         private final ArrayList<com.surprising.aeron.protocol.CoreAlgoOrderView> algoChanges = new ArrayList<>();
+        private final ArrayList<CommittedTradeReplay.CommittedBalanceFlow> balanceFlows = new ArrayList<>();
         private int messages;
         private long startedAt, flushedSequence = -1;
         private long maxDelayNanos = MAX_DELAY_NANOS;
@@ -382,8 +443,15 @@ final class CommittedTradeExporter {
 
         void add(List<RealtimeFrame> changes, CommittedTradeReplay.CommittedCommandResult commandResult,
                  long sequence, long now, List<com.surprising.aeron.protocol.CoreAlgoOrderView> algos) {
+            add(changes, commandResult, sequence, now, algos, null);
+        }
+
+        void add(List<RealtimeFrame> changes, CommittedTradeReplay.CommittedCommandResult commandResult,
+                 long sequence, long now, List<com.surprising.aeron.protocol.CoreAlgoOrderView> algos,
+                 CommittedTradeReplay.CommittedBalanceFlow balanceFlow) {
             if (mode == ExportMode.FUNDING_REPAIR || mode == ExportMode.DELIVERY_REPAIR) return;
             if (mode == ExportMode.LIVE) algoChanges.addAll(algos);
+            if ((mode == ExportMode.LIVE || mode == ExportMode.PORTFOLIO_REPAIR) && balanceFlow != null) balanceFlows.add(balanceFlow);
             if (messages++ == 0) startedAt = now;
             if (commandResult != null && mode != ExportMode.EXECUTION_REPAIR) commandResults.add(commandResult);
             for (var change : mode == ExportMode.LIVE || mode == ExportMode.EXECUTION_REPAIR ? changes : List.<RealtimeFrame>of()) {
@@ -405,18 +473,21 @@ final class CommittedTradeExporter {
 
         void flush(long sequence) {
             if (mode == ExportMode.FUNDING_REPAIR || mode == ExportMode.DELIVERY_REPAIR) return;
-            if (sequence != flushedSequence || !orderChanges.isEmpty() || !trades.isEmpty() || !commandResults.isEmpty() || !algoChanges.isEmpty()) {
+            if (sequence != flushedSequence || !orderChanges.isEmpty() || !trades.isEmpty() || !commandResults.isEmpty() || !algoChanges.isEmpty() || !balanceFlows.isEmpty()) {
                 if (mode == ExportMode.COMMAND_RESULT_REPAIR) orders.repairCommandResults(product, commandResults);
                 else if (mode == ExportMode.EXECUTION_REPAIR) orders.repairExecutions(product, orderChanges);
                 else if (mode == ExportMode.STATISTICS_REPAIR) orders.statistics().repair(product,commandResults);
+                else if (mode == ExportMode.PORTFOLIO_REPAIR) orders.portfolio().persist(balanceFlows);
                 else {
                     orders.persist(product, orderChanges, commandResults, sequence, algoChanges);
+                    if (!balanceFlows.isEmpty()) orders.portfolio().persist(balanceFlows);
                     sink.publish(trades);
                 }
                 // Neither the checkpoint nor this marker advances when either sink fails.
                 flushedSequence = sequence;
             }
             algoChanges.clear();
+            balanceFlows.clear();
             orderChanges.clear();
             commandResults.clear();
             trades.clear();

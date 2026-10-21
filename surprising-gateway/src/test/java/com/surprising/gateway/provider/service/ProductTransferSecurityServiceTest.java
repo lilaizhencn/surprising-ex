@@ -11,8 +11,11 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.gateway.provider.auth.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.config.GatewayProperties;
+import com.surprising.asset.repository.AssetRepository;
+import com.surprising.asset.model.AssetConfiguration.Asset;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
@@ -20,6 +23,7 @@ import tools.jackson.databind.ObjectMapper;
 class ProductTransferSecurityServiceTest {
 
     private final WithdrawalValuationClient valuationClient = mock(WithdrawalValuationClient.class);
+    private final AssetRepository assets = mock(AssetRepository.class);
     private final SensitiveActionVerificationService verificationService =
             mock(SensitiveActionVerificationService.class);
 
@@ -59,8 +63,43 @@ class ProductTransferSecurityServiceTest {
     }
 
     private ProductTransferSecurityService service() {
+        scale(100_000_000L);
         return new ProductTransferSecurityService(new GatewayProperties(), valuationClient,
-                verificationService, new ObjectMapper());
+                verificationService, assets, new ObjectMapper());
+    }
+
+    @Test
+    void sixDecimalAssetAtLargeTransferThresholdCannotBypassVerification() {
+        var service = service();
+        scale(1_000_000L);
+        when(valuationClient.toUsdt("USDT", new BigDecimal("10000"))).thenReturn(new BigDecimal("10000"));
+        assertThatThrownBy(() -> service.requireIfNeeded(42L, body(10_000_000_000L), null, null, Instant.now()))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("large transfer security verification is required");
+        verify(verificationService).verify(eq(42L), eq("LARGE_TRANSFER"), eq(null), eq(null), any());
+    }
+
+    @Test
+    void eighteenDecimalAssetDoesNotUseAnEightDecimalValuation() {
+        var service = service();
+        scale(1_000_000_000_000_000_000L);
+        when(valuationClient.toUsdt("USDT", new BigDecimal("0.0000000001"))).thenReturn(new BigDecimal("0.0000000001"));
+        service.requireIfNeeded(42L, body(100_000_000L), null, null, Instant.now());
+        verify(verificationService, never()).verify(anyLong(), any(), any(), any(), any());
+    }
+
+    @Test
+    void unknownAssetIsRejectedBeforeValuationOrVerification() {
+        var service = service();
+        when(assets.byAccountingCode("USDT")).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.requireIfNeeded(42L, body(100L), null, null, Instant.now()))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("asset is not supported");
+        org.mockito.Mockito.verifyNoInteractions(valuationClient, verificationService);
+    }
+
+    private void scale(long units) {
+        when(assets.byAccountingCode("USDT")).thenReturn(Optional.of(
+                new Asset(1, "USDT", "Tether", "", units, true, true, 1L, Instant.EPOCH)));
     }
 
     private byte[] body(long amountUnits) {

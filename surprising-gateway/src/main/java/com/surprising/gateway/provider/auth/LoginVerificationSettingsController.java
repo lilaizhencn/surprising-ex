@@ -28,17 +28,26 @@ public class LoginVerificationSettingsController {
         return verification.settings(auth.authenticateBearer(bearer).userId());
     }
 
+    @GetMapping("/authentication")
+    public ResponseEntity<LoginVerificationService.PrimaryAuthentication> authentication(
+            @RequestHeader("Authorization") String bearer) {
+        var principal = auth.authenticateBearer(bearer);
+        return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore())
+                .body(verification.primaryAuthentication(principal.userId(), Instant.now(),
+                        auth.primaryAuthenticatedAt(principal)));
+    }
+
     @PostMapping("/{method}/verify-password")
     public void verifyPassword(
             @RequestHeader("Authorization") String bearer,
             @PathVariable String method,
             @Valid @RequestBody PasswordVerificationRequest request) {
-        verification.verifySettingPassword(
-                auth.authenticateBearer(bearer).userId(), method, request.currentPassword());
+        var principal = auth.authenticateBearer(bearer);
+        verification.verifySettingPassword(principal.userId(), method, request.currentPassword(),
+                Instant.now(), auth.primaryAuthenticatedAt(principal));
     }
 
     public record PasswordVerificationRequest(
-            @jakarta.validation.constraints.NotBlank
             @jakarta.validation.constraints.Size(max = 128) String currentPassword) {}
 
     @PostMapping("/{method}/bind")
@@ -46,8 +55,9 @@ public class LoginVerificationSettingsController {
             @RequestHeader("Authorization") String bearer,
             @PathVariable String method,
             @Valid @RequestBody LoginVerificationService.SettingRequest request) {
-        return verification.beginBinding(
-                auth.authenticateBearer(bearer).userId(), method, request, Instant.now());
+        var principal = auth.authenticateBearer(bearer);
+        return verification.beginBinding(principal.userId(), method, request, Instant.now(),
+                auth.primaryAuthenticatedAt(principal));
     }
 
     @PostMapping("/{method}/resend")
@@ -64,8 +74,9 @@ public class LoginVerificationSettingsController {
             @RequestHeader("Authorization") String bearer,
             @PathVariable String method,
             @Valid @RequestBody LoginVerificationService.SettingConfirmation request) {
-        verification.confirmBinding(
-                auth.authenticateBearer(bearer).userId(), method, request, Instant.now());
+        var principal = auth.authenticateBearer(bearer);
+        verification.confirmBinding(principal.userId(), method, request, Instant.now(),
+                auth.primaryAuthenticatedAt(principal));
     }
 
     @ExceptionHandler(LoginVerificationService.VerificationFailure.class)

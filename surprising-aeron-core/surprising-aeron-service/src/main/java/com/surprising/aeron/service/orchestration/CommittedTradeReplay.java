@@ -16,6 +16,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
     private CommittedFundingPage fundingPage;
     private CommittedDeliveryPage deliveryPage;
     private CommittedCommandResult commandResult;
+    private CommittedBalanceFlow balanceFlow;
     // Read-model routing only, owned by this separate replay worker. Active child IDs locate
     // their parent when a fill/cancel changes progress without changing the parent revision.
     private final Map<Long, Long> algoByChild = new HashMap<>();
@@ -38,11 +39,15 @@ public final class CommittedTradeReplay implements AutoCloseable {
         fundingPage = null;
         deliveryPage = null;
         commandResult = null;
+        balanceFlow = null;
         fundingResult = null;
         CoreMessage command = CoreMessageCodec.decode(bytes);
         if (command.header().productLine() != state.productLine())
             throw new IllegalArgumentException("cross-product replay message");
         if (command.header().kind() == WireMessageKind.QUERY) return List.of();
+        var balanceTarget = balanceFlowTarget(command);
+        var beforeBalance = balanceTarget == null ? null
+                : balanceUnits(balanceTarget.userId(), balanceTarget.asset());
         var delivery = deliveryCommand(command);
         var deliveryBalances = delivery == null ? List.<BeforeDeliveryBalance>of() : deliveryBalances(delivery, timestamp, logPosition);
         long dropped = outbox.droppedBatches(), failures = capture.failures();
@@ -126,6 +131,15 @@ public final class CommittedTradeReplay implements AutoCloseable {
                         command.header().commandId(), command.header().messageType(), clientOrderId, instrumentId,
                         status, code, applied, logPosition, timestamp, cancelResults);
             }
+            if (balanceTarget != null && commandResult != null
+                    && commandResult.status() == ResponseStatus.APPLIED) {
+                var delta = balanceUnits(balanceTarget.userId(), balanceTarget.asset())
+                        .subtract(beforeBalance);
+                // Retried retained APPLIED receipts have no new cash change.
+                if (delta.signum() != 0) balanceFlow = new CommittedBalanceFlow(state.productLine(),
+                        balanceTarget.userId(), command.header().commandId(), balanceTarget.asset(), delta.toString(),
+                        logPosition, timestamp, balanceTarget.transfer());
+            }
             if (fundingResult != null) {
                 if (response.commandStatus() != ResponseStatus.APPLIED)
                     throw new IllegalStateException("funding payments without an applied committed command");
@@ -165,6 +179,77 @@ public final class CommittedTradeReplay implements AutoCloseable {
     }
 
     public List<CoreAlgoOrderView> algoChanges() { return algoChanges; }
+
+    public CommittedBalanceFlow balanceFlow() { return balanceFlow; }
+
+    public long clusterTimestamp() { return state.currentClusterTimestamp(); }
+
+    private BalanceFlowTarget balanceFlowTarget(CoreMessage command) {
+        long user = command.header().userId();
+        if (user <= 0) return null;
+        try {
+            return switch (command.header().messageType()) {
+                case ADJUST_BALANCE -> new BalanceFlowTarget(user,
+                        com.surprising.aeron.service.state.model.AssetBalance.normalizeAsset(
+                                TradingCommandCodec.decodeBalanceAdjustment(command.payloadUnsafe()).asset()), null);
+                case TRANSFER_OUT, TRANSFER_IN -> {
+                    var transfer = TradingCommandCodec.decodeTransferFunds(command.payloadUnsafe(), user);
+                    long owner = command.header().messageType() == CoreMessageType.TRANSFER_OUT
+                            ? transfer.sourceUserId() : transfer.targetUserId();
+                    yield owner == user ? new BalanceFlowTarget(user, transfer.asset(), transfer) : null;
+                }
+                default -> null;
+            };
+        } catch (IllegalArgumentException malformed) {
+            // The authoritative command path still records the rejection.
+            return null;
+        }
+    }
+
+    private java.math.BigInteger balanceUnits(long user, String asset) {
+        Integer id = state.identities().findAssetId(asset);
+        if (id == null) return java.math.BigInteger.ZERO;
+        var runtime = state.runtimeState();
+        boolean needsAccess = runtime.accountLanesStarted() && !runtime.ownerLaneAccess();
+        boolean acquired = false;
+        try {
+            if (needsAccess) {
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (!runtime.tryAcquireOwnerLaneAccess()) {
+                    if (System.nanoTime() >= deadline)
+                        throw new IllegalStateException("committed balance read timeout; checkpoint must not advance");
+                    java.util.concurrent.locks.LockSupport.parkNanos(1_000L);
+                }
+                acquired = true;
+            }
+            // Read one balance under the existing owner fence. USER_STATE_QUERY
+            // has a 4096-entity limit and must not block cash history for large users.
+            var balance = runtime.balance(user, id);
+            return balance == null ? java.math.BigInteger.ZERO
+                    : java.math.BigInteger.valueOf(balance.availableUnits())
+                            .add(java.math.BigInteger.valueOf(balance.lockedUnits()));
+        } finally {
+            if (acquired) runtime.releaseOwnerLaneAccess();
+        }
+    }
+
+    private record BalanceFlowTarget(long userId, String asset, TransferFundsCommand transfer) {}
+
+    /** Actual net cash movement; transfer metadata distinguishes internal moves from receipts to other users. */
+    public record CommittedBalanceFlow(ProductLine product, long userId, UUID commandId, String asset,
+                                       String amountUnits, long clusterPosition, long occurredAt,
+                                       TransferFundsCommand transfer) {}
+
+    /** Cold, explicit financial query; never invoked from apply or the live trading callback. */
+    public CommittedPortfolioSnapshot portfolioSnapshot(long asOf, long maximumMarkAgeMillis) {
+        var pendingUsers = new HashSet<Long>();
+        state.pendingTransfers().values().forEach(transfer -> {
+            pendingUsers.add(transfer.command().sourceUserId());
+            pendingUsers.add(transfer.command().targetUserId());
+        });
+        return CommittedPortfolioSnapshot.capture(state.tradingState(), state.currentClusterTimestamp(),
+                asOf, maximumMarkAgeMillis, pendingUsers);
+    }
 
     /** Only the committed replay copy is queried; this never calls a running Core. */
     public void forEachRetainedAlgo(java.util.function.Consumer<CoreAlgoOrderView> consumer) {

@@ -1,5 +1,7 @@
 # Surprising EX
 
+大额划转验证由 `ProductTransferSecurityService` 按 `assets.scale_units` 把最小单位换算为币种数量后估值，不假定所有币种为 8 位精度。`ProductTransferSecurityServiceTest` 覆盖 6/8/18 位精度、阈值边界及未知币种拒绝；与代理、划转协调器联合 58 项测试通过（HotSpot JDK 27）。
+
 C2C 首轮服务端功能位于 [Gateway c2c 包](surprising-gateway/src/main/java/com/surprising/gateway/c2c/README.md)，部署及业务默认关闭。复用现货 Core 资金、realtime 查询、既有身份认证、审批和审计；新增 SQL 只持有广告、订单、库存分配和不可变资金意图。已验证真实托管/放币/退款、超时及双人申诉裁决、原请求恢复与 Gateway 崩溃续办，18 个资金核对阶段差额 0。Web、Flutter、管理端 C2C 页面和消息/私有凭证仍在开发，未发布服务器；测试范围、协议旧向量已知失败及清理状态见 [验证记录](docs/validation/c2c-foundation-20261020.json)。
 
 ## Project overview
@@ -329,3 +331,8 @@ Web 最近订单更新曾在直接切换已登录账户时保留前一账户缓�
 ## 六产品线资金幂等与请求恢复（2026-10-21）
 
 本轮恢复未升版的 canonical-v1 指纹契约，补齐两端六产品原请求恢复及 Web 衍生品平仓恢复。功能、测试与既有错误指纹数据的升级边界见 [产品验收进度](docs/product-completion-20261021.md)。不据此宣布全部产品、页面或真机验收完成。
+
+
+### 移动端完整权益与今日收益
+
+首页和资产页通过本人认证的 `/api/v1/portfolio/income` 读取已提交 Archive 分析投影。六产品使用共同分钟切点，期初和外部本金按历史实际价格估值，避免充值或内部划转变成收益；缺失/过期显示未知。该分析不替代可用余额或交易资金事实源。需配套迁移、realtime/gateway/client，详见 [权益与收益口径、恢复及发布](docs/portfolio-income.md)。

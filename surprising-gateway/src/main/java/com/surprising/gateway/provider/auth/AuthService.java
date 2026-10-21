@@ -121,6 +121,20 @@ public class AuthService {
         return authResponse(user, httpRequest, now);
     }
 
+    /** Called only after a server-validated Telegram identity has been consumed. */
+    @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
+    public AuthModels.LoginResult loginTelegram(long userId, HttpServletRequest request) {
+        Instant now = Instant.now();
+        var user = repository.user(userId).orElseThrow();
+        if ("FROZEN".equals(user.status())) throw new IllegalStateException("user is not active");
+        requireAccessAllowed(userId, deviceId(request), ipAddress(request));
+        var credential = repository.credential(userId).orElseThrow();
+        var challenge = loginVerification.begin(userId, credential.passwordHash(), now);
+        if (challenge != null) return challenge;
+        repository.loginLog(userId, "SUCCESS", "TELEGRAM_LOGIN", userAgent(request), ipAddress(request), now);
+        return authResponse(user, request, now);
+    }
+
     @Transactional
     public AuthResponse refresh(RefreshRequest request, HttpServletRequest httpRequest) {
         Instant now = Instant.now();
@@ -142,7 +156,7 @@ public class AuthService {
         if ("FROZEN".equals(user.status())) {
             throw new IllegalStateException("user is not active");
         }
-        return authResponse(user, httpRequest, now);
+        return authResponse(user, httpRequest, now, false, session.authenticatedAt());
     }
 
     @Transactional
@@ -203,6 +217,12 @@ public class AuthService {
             throw new IllegalStateException("admin role required");
         }
         return principal;
+    }
+
+    /** Only a verified active bearer principal can select this server-side session fact. */
+    public Instant primaryAuthenticatedAt(JwtPrincipal principal) {
+        return repository.primaryAuthenticatedAt(principal.userId(), principal.sessionId(), Instant.now())
+                .orElse(null);
     }
 
     public JwtPrincipal requireAdminPermission(String authorizationHeader, String permissionCode) {
@@ -456,12 +476,17 @@ public class AuthService {
                                       HttpServletRequest request,
                                       Instant now,
                                       boolean requiresEmailVerification) {
+        return authResponse(user, request, now, requiresEmailVerification, now);
+    }
+
+    private AuthResponse authResponse(AuthenticatedUser user, HttpServletRequest request, Instant now,
+                                      boolean requiresEmailVerification, Instant authenticatedAt) {
         String refreshToken = newRefreshToken();
         Instant refreshExpiresAt = now.plus(properties.getSecurity().getRefreshTokenTtl());
         String deviceId = deviceId(request);
         requireAccessAllowed(user.userId(), deviceId, ipAddress(request));
         long sessionId = repository.saveRefreshSession(user.userId(), hashRefreshToken(refreshToken), refreshExpiresAt,
-                userAgent(request), ipAddress(request), deviceId, now);
+                userAgent(request), ipAddress(request), deviceId, now, authenticatedAt);
         String accessToken = sessionId > 0
                 ? jwtTokenService.createAccessToken(user.userId(), user.username(), user.roles(), sessionId, now)
                 : jwtTokenService.createAccessToken(user.userId(), user.username(), user.roles(), now);

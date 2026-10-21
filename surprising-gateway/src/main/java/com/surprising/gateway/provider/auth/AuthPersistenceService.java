@@ -214,6 +214,16 @@ public class AuthPersistenceService {
         return refreshSessionRepository.active(userId, sessionId, now);
     }
 
+    public long saveRefreshSession(long userId, String tokenHash, Instant expiresAt,
+                                   String userAgent, String ipAddress, String deviceId,
+                                   Instant now, Instant authenticatedAt) {
+        return refreshSessionRepository.save(userId, tokenHash, expiresAt, userAgent, ipAddress, deviceId, now, authenticatedAt);
+    }
+
+    public Optional<Instant> primaryAuthenticatedAt(long userId, long sessionId, Instant now) {
+        return refreshSessionRepository.authenticatedAt(userId, sessionId, now);
+    }
+
     public Optional<GatewayRefreshSessionRepository.RefreshSession> refreshSession(String tokenHash) {
         return refreshSessionRepository.find(tokenHash);
     }
@@ -326,7 +336,7 @@ public class AuthPersistenceService {
                 user.email(),
                 user.status(),
                 roles,
-                user.createdAt());
+                user.createdAt(), user.displayName());
     }
 
     private List<String> normalizeRoleCodes(List<String> roleCodes) {

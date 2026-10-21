@@ -76,6 +76,88 @@ class LoginVerificationServiceTest {
         verify(users, never()).upsertMfaSecret(anyLong(), anyString(), any());
     }
 
+    void passwordless() {
+        when(users.credential(1)).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(
+                1, null, null, null, null, "NORMAL", now)));
+    }
+
+    @Test
+    void passwordlessPrimaryCheckRequiresRecentCompletedAuthentication() {
+        passwordless();
+        assertThatThrownBy(() -> service.verifySettingPassword(1, "EMAIL", null))
+                .hasMessage("LOGIN_RECENT_AUTHENTICATION_REQUIRED");
+        for (Instant invalid : List.of(now.minusSeconds(300), now.minusSeconds(3600), now.plusSeconds(1))) {
+            assertThatThrownBy(() -> service.verifySettingPassword(1, "EMAIL", null, now, invalid))
+                    .hasMessage("LOGIN_RECENT_AUTHENTICATION_REQUIRED");
+        }
+        service.verifySettingPassword(1, "EMAIL", null, now, now.minusSeconds(299));
+        verifyNoInteractions(db, email, sms, passwordHasher);
+    }
+
+    @Test
+    void aRecentSessionNeverReplacesAnExistingPassword() {
+        assertThatThrownBy(() -> service.verifySettingPassword(1, "EMAIL", null, now, now))
+                .hasMessage("LOGIN_PASSWORD_INVALID");
+        assertThat(service.primaryAuthentication(1, now, now).passwordRequired()).isTrue();
+    }
+
+    @Test
+    void passwordlessBindingStillVerifiesTheNewContactCodeAndRechecksPrimaryExpiry() {
+        passwordless();
+        properties.getSecurity().setSimulatedVerificationCodesEnabled(true);
+        var stored = new java.util.concurrent.atomic.AtomicReference<LoginVerificationRepository.Challenge>();
+        when(db.issue(anyLong(), anyString(), anyString(), anyString(), anyString(),
+                nullable(String.class), nullable(String.class), nullable(String.class), anyBoolean(), any()))
+                .thenAnswer(inv -> {
+                    stored.set(new LoginVerificationRepository.Challenge(1, inv.getArgument(1), inv.getArgument(2),
+                            inv.getArgument(3), inv.getArgument(4), inv.getArgument(5), inv.getArgument(6),
+                            inv.getArgument(7), now.plusSeconds(300), false, 0, true));
+                    return true;
+                });
+        when(db.find(anyString())).thenAnswer(inv -> Optional.of(stored.get()));
+        var binding = service.beginBinding(1, "EMAIL",
+                new LoginVerificationService.SettingRequest(null, "new@example.test", true), now, now);
+        assertThat(binding.challenge().methods()).extracting(LoginVerificationService.Method::type).containsExactly("EMAIL");
+        var wrong = new LoginVerificationService.SettingConfirmation(null,
+                new LoginVerificationService.VerifyRequest(binding.challenge().challengeToken(), "000000", null, null));
+        assertThatThrownBy(() -> service.confirmBinding(1, "EMAIL", wrong, now, now))
+                .hasMessage("LOGIN_VERIFICATION_INVALID");
+        var correct = new LoginVerificationService.SettingConfirmation(null,
+                new LoginVerificationService.VerifyRequest(binding.challenge().challengeToken(), "123456", null, null));
+        assertThatThrownBy(() -> service.confirmBinding(1, "EMAIL", correct, now.plusSeconds(300), now))
+                .hasMessage("LOGIN_CHALLENGE_EXPIRED");
+        assertThatThrownBy(() -> service.confirmBinding(1, "EMAIL", correct, now, now.minusSeconds(300)))
+                .hasMessage("LOGIN_RECENT_AUTHENTICATION_REQUIRED");
+        verify(db, never()).saveFactor(anyLong(), anyString(), anyString(), anyBoolean(), any());
+        service.confirmBinding(1, "EMAIL", correct, now, now);
+        verify(db).saveFactor(1, "EMAIL", "new@example.test", true, now);
+        verify(db).consume(stored.get().tokenHash());
+    }
+
+    @Test
+    void expiredPrimaryProofCannotIssueContactOrTotpChallenges() {
+        passwordless();
+        for (String method : List.of("EMAIL", "PHONE", "TOTP")) {
+            assertThatThrownBy(() -> service.beginBinding(1, method,
+                    new LoginVerificationService.SettingRequest(null, "new@example.test", true),
+                    now, now.minusSeconds(300))).hasMessage("LOGIN_RECENT_AUTHENTICATION_REQUIRED");
+        }
+        verify(db, never()).issue(anyLong(), anyString(), anyString(), anyString(), anyString(),
+                any(), any(), any(), anyBoolean(), any());
+        verify(users, never()).upsertMfaSecret(anyLong(), anyString(), any());
+    }
+
+    @Test
+    void passwordlessTotpStillRequiresAnExistingVerifiedContact() {
+        passwordless();
+        assertThatThrownBy(() -> service.beginBinding(1, "TOTP",
+                new LoginVerificationService.SettingRequest(null, null, true), now, now))
+                .hasMessage("LOGIN_CONTACT_MISSING");
+        verify(db, never()).issue(anyLong(), anyString(), anyString(), anyString(), anyString(),
+                any(), any(), any(), anyBoolean(), any());
+        verify(users, never()).upsertMfaSecret(anyLong(), anyString(), any());
+    }
+
     @Test
     void passwordStepRejectsIncorrectPasswordBeforeIssuingAnyCode() {
         assertThatThrownBy(() -> service.verifySettingPassword(1, "EMAIL", "wrong"))
