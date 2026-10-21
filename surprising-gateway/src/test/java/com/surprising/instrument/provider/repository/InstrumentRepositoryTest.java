@@ -18,6 +18,8 @@ import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.api.model.OptionExerciseStyle;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
+import com.surprising.instrument.provider.model.InstrumentPageQuery;
+import static com.surprising.instrument.provider.model.InstrumentPageQuery.Sort.*;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -41,7 +43,7 @@ class InstrumentRepositoryTest {
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn((List) rows);
 
         InstrumentRepository.InstrumentPage page =
-                repository.listPage(ProductLine.LINEAR_PERPETUAL, null, InstrumentStatus.TRADING, 2, null, "updatedAt.desc");
+                repository.listPage(ProductLine.LINEAR_PERPETUAL, null, InstrumentStatus.TRADING, new InstrumentPageQuery(2, UPDATED_AT_DESC, null));
 
         assertThat(page.instruments()).extracting(InstrumentResponse::symbol)
                 .containsExactly("ETH-USDT", "BTC-USDT");
@@ -63,7 +65,7 @@ class InstrumentRepositoryTest {
     void currentListCanFilterByProductLine() {
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(List.of());
 
-        repository.listPage(ProductLine.OPTION, null, null, 10, null, "symbol.asc");
+        repository.listPage(ProductLine.OPTION, null, null, new InstrumentPageQuery(10, SYMBOL_ASC, null));
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
@@ -72,13 +74,17 @@ class InstrumentRepositoryTest {
         assertThat(args.getValue()).containsExactly("VANILLA_OPTION", 11);
     }
 
-    @Test
-    void listPageRejectsUnsupportedSort() {
-        assertThatThrownBy(() -> repository.listPage(
-                ProductLine.LINEAR_DELIVERY,
-                null, null, 10, null, "status.desc"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("unsupported sort");
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    @Test void timestampCursorUsesNativeTimeAndSymbolTieBreaker() {
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(List.of());
+        var time = Instant.parse("2026-01-01T00:00:00.123456Z");
+        repository.listPage(ProductLine.LINEAR_DELIVERY, null, null,
+                new InstrumentPageQuery(10, UPDATED_AT_ASC, new InstrumentPageQuery.Cursor("BTC-USDT", time)));
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
+        assertThat(sql.getValue()).contains("i.updated_at > ?", "i.symbol > ?", "ORDER BY i.updated_at ASC, i.symbol ASC");
+        assertThat(args.getValue()).containsExactly("LINEAR_DELIVERY", Timestamp.from(time), Timestamp.from(time), "BTC-USDT", 11);
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

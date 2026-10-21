@@ -9,6 +9,8 @@ import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.api.model.OptionExerciseStyle;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
+import com.surprising.instrument.provider.model.InstrumentPageQuery;
+import com.surprising.instrument.provider.model.InstrumentPageQuery.Cursor;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -49,16 +51,6 @@ public class InstrumentRepository {
             """;
 
     private static final int MAX_PAGE_LIMIT = 1000;
-    private static final InstrumentSort INSTRUMENT_SYMBOL_ASC =
-            new InstrumentSort("symbol.asc", "symbol", "i.symbol", false);
-    private static final List<InstrumentSort> INSTRUMENT_SORTS = List.of(
-            INSTRUMENT_SYMBOL_ASC,
-            new InstrumentSort("symbol.desc", "symbol", "i.symbol", true),
-            new InstrumentSort("updatedAt.desc", "updatedAt", "i.updated_at", true),
-            new InstrumentSort("updatedAt.asc", "updatedAt", "i.updated_at", false),
-            new InstrumentSort("createdAt.desc", "createdAt", "i.created_at", true),
-            new InstrumentSort("createdAt.asc", "createdAt", "i.created_at", false));
-
     private final JdbcTemplate jdbcTemplate;
 
     public InstrumentRepository(JdbcTemplate jdbcTemplate) {
@@ -152,12 +144,10 @@ public class InstrumentRepository {
     public InstrumentPage listPage(ProductLine productLine,
                                    InstrumentType type,
                                    InstrumentStatus status,
-                                   int limit,
-                                   String cursor,
-                                   String sort) {
-        int safeLimit = limit(limit);
-        InstrumentSort sortSpec = parseInstrumentSort(sort);
-        InstrumentCursor decodedCursor = decodeInstrumentCursor(cursor);
+                                   InstrumentPageQuery query) {
+        int safeLimit = query.limit();
+        InstrumentSort sortSpec = sqlSort(query.sort());
+        Cursor decodedCursor = query.cursor();
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
                 SELECT i.*, (SELECT a.asset FROM assets a WHERE a.asset_id=i.base_asset_id) AS base_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.quote_asset_id) AS quote_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.settle_asset_id) AS settle_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.contract_value_asset_id) AS contract_value_asset
@@ -301,15 +291,13 @@ public class InstrumentRepository {
         return Math.max(1, Math.min(value, MAX_PAGE_LIMIT));
     }
 
-    private InstrumentSort parseInstrumentSort(String value) {
-        if (value == null || value.isBlank()) {
-            return INSTRUMENT_SYMBOL_ASC;
-        }
-        String normalized = value.trim();
-        return INSTRUMENT_SORTS.stream()
-                .filter(item -> item.token().equals(normalized))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("unsupported sort: " + value));
+    private InstrumentSort sqlSort(InstrumentPageQuery.Sort sort) {
+        String column = switch (sort) {
+            case SYMBOL_ASC, SYMBOL_DESC -> "i.symbol";
+            case UPDATED_AT_ASC, UPDATED_AT_DESC -> "i.updated_at";
+            case CREATED_AT_ASC, CREATED_AT_DESC -> "i.created_at";
+        };
+        return new InstrumentSort(sort.token(), sort.field(), column, sort.descending());
     }
 
     private String listSeekCondition(InstrumentSort sort) {
@@ -321,35 +309,15 @@ public class InstrumentRepository {
                 + sort.column() + " = ? AND i.symbol " + operator + " ?))";
     }
 
-    private void addInstrumentCursorArgs(List<Object> args, InstrumentCursor cursor, InstrumentSort sort) {
+    private void addInstrumentCursorArgs(List<Object> args, Cursor cursor, InstrumentSort sort) {
         if (sort.symbolSort()) {
             args.add(cursor.symbol());
             return;
         }
-        try {
-            Timestamp timestamp = Timestamp.from(Instant.parse(cursor.sortValue()));
-            args.add(timestamp);
-            args.add(timestamp);
-            args.add(cursor.symbol());
-        } catch (IllegalArgumentException ex) {
-            throw new IllegalArgumentException("invalid cursor", ex);
-        }
-    }
-
-    private InstrumentCursor decodeInstrumentCursor(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            String decoded = new String(Base64.getUrlDecoder().decode(value.trim()), StandardCharsets.UTF_8);
-            int split = decoded.lastIndexOf('|');
-            if (split <= 0 || split == decoded.length() - 1) {
-                throw new IllegalArgumentException("invalid cursor");
-            }
-            return new InstrumentCursor(decoded.substring(0, split), decoded.substring(split + 1));
-        } catch (IllegalArgumentException ex) {
-            throw new IllegalArgumentException("invalid cursor", ex);
-        }
+        Timestamp timestamp = Timestamp.from(cursor.timestamp());
+        args.add(timestamp);
+        args.add(timestamp);
+        args.add(cursor.symbol());
     }
 
     private String encodeInstrumentCursor(InstrumentResponse response, InstrumentSort sort) {
@@ -441,6 +409,4 @@ public class InstrumentRepository {
     }
 
 
-    private record InstrumentCursor(String sortValue, String symbol) {
-    }
 }

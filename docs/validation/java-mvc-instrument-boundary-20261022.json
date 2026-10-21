@@ -1,0 +1,320 @@
+{
+  "verified_at_utc": "2026-10-21T16:51:59.364707+00:00",
+  "scope": "合约本地请求Controller、目录业务聚合与原生分页/异常",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16",
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=InstrumentRequestControllerTest,InstrumentRequestControllerBoundaryTest,InstrumentRepositoryTest,InstrumentServiceTest,LocalBusinessApiTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.instrument.provider.controller.InstrumentRequestControllerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.controller.InstrumentRequestControllerBoundaryTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.repository.InstrumentRepositoryTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 35,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.service.InstrumentServiceTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "ad6dbe2e4968f1645dddc23bb776546ce305d9f05d875d03654c196c4228b2f7",
+      "tests": 70,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=InstrumentRequestControllerTest,InstrumentRequestControllerBoundaryTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.instrument.provider.controller.InstrumentRequestControllerTest",
+          "tests": 8,
+          "failures": 8,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.controller.InstrumentRequestControllerBoundaryTest",
+          "tests": 10,
+          "failures": 9,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "0693d552cadb6865eab48a50eeee135e9653a1b75f93588af134d30eef3481b8",
+      "tests": 18,
+      "failures": 17,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=Instrument*Test,MarketSummary*Test,LocalBusinessApiTest,GatewayProductRoutesConfigurationTest,GatewayProductSettingsIntegrationTest,GatewayProductSelectionTest,ProductBusinessConfigurationTest,MultiProductGatewayHttpIntegrationTest,ProductCommandMediaDriverTest",
+        "clean",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.instrument.provider.repository.MarketSummaryPostgresTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.service.InstrumentOutboxPublisherTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.InstrumentCoreSyncServiceTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.InstrumentInitializationConfigurationTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.GatewayProductSelectionTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.controller.InstrumentRequestControllerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.service.InstrumentStorageServiceTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.service.InstrumentLifecycleServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.InstrumentSnapshotRuleLookupTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.service.InstrumentIdentityCacheTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.config.InstrumentKafkaConfigurationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.controller.InstrumentRequestControllerBoundaryTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.ProductCommandMediaDriverTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.InstrumentSnapshotInitializerTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.GatewayProductSettingsIntegrationTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.ProductBusinessConfigurationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.repository.InstrumentSingleTableRepositoryTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.service.InstrumentValidatorTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.repository.InstrumentLifecycleDrainPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.InstrumentOrderDrainServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.service.InstrumentCurrentConfigurationIntegrationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.repository.InstrumentRepositoryTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.service.MarketSummaryServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.service.InstrumentCurrentCacheTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 35,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.MultiProductGatewayHttpIntegrationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 3
+        },
+        {
+          "class": "com.surprising.instrument.provider.service.InstrumentServiceTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "2f9a4854b7ee2fccc746474b4e53ead8b672fd5b2a1884fbd8902f8b9cc9dc6a",
+      "tests": 182,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 3
+    }
+  },
+  "source_proof": "InstrumentRepository的全部SQL text block相同，删除原始分页参数解析；Service没有ResponseStatusException，HTTP本地路由保留。",
+  "initial_failures": "首轮70项中两项仍断言旧IllegalStateException类型；改为精确领域异常后定向通过。",
+  "negative_control": "撤去Controller分页绑定、409映射和Service可见性限制；18项捕获17失败，finally逐字节恢复后clean test绿色。",
+  "new_abstractions": {
+    "InstrumentPageQuery": "真实Controller→Service→Repository边界的类型化排序和时间/符号游标，SQL列不出Repository。",
+    "InstrumentCatalog": "真实合约/行情业务聚合结果，响应字段展平留Controller，不维护额外状态。",
+    "InstrumentOperationException": "合约查询缺失和业务冲突的原生失败；内部状态损坏不再误映射404。"
+  },
+  "unverified": [
+    "MultiProductGatewayHttpIntegrationTest的3项需要隔离Gateway和六条真实Core，MULTI_PRODUCT_GATEWAY_IT_BASE_URL未配置，本轮如实跳过，最终实栈继续。",
+    "合约Validator混合格式与领域规则已登记ADD-007待后续整改。"
+  ],
+  "cleanup": {
+    "owned_postgres": "已停止并删除本批独占PostgreSQL根目录",
+    "logs_reports": "本批日志和已汇总Gateway报告已清理，构建产物保留"
+  }
+}

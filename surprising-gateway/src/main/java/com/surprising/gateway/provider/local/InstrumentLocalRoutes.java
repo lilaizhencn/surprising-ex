@@ -3,7 +3,7 @@ package com.surprising.gateway.provider.local;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
-import com.surprising.instrument.provider.service.InstrumentRequestService;
+import com.surprising.instrument.provider.controller.InstrumentRequestController;
 import com.surprising.product.api.ProductLine;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -24,11 +24,11 @@ public final class InstrumentLocalRoutes {
     private static final PathPattern INSTRUMENT_CONTROLLER_UPDATESTATUS = PathPatternParser.defaultInstance.parse("/api/v1/instruments/admin/{instrumentId}/status");
     private static final PathPattern INSTRUMENT_CONTROLLER_CLOSEFORSETTLEMENT = PathPatternParser.defaultInstance.parse("/api/v1/instruments/admin/{instrumentId}/settlement");
 
-    private final InstrumentRequestService instrumentRequests;
+    private final InstrumentRequestController instrumentRequests;
     private final com.surprising.trading.order.controller.OrderBusinessSettingsController orderSettings;
     private static final PathPattern ORDER_SETTINGS = PathPatternParser.defaultInstance.parse("/api/v1/instruments/admin/order-settings");
 
-    public InstrumentLocalRoutes(InstrumentRequestService instrumentRequests, com.surprising.trading.order.controller.OrderBusinessSettingsController orderSettings) {
+    public InstrumentLocalRoutes(InstrumentRequestController instrumentRequests, com.surprising.trading.order.controller.OrderBusinessSettingsController orderSettings) {
         this.orderSettings=orderSettings;
         this.instrumentRequests = instrumentRequests;
     }

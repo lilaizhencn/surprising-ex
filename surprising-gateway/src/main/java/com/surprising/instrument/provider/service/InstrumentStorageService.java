@@ -4,6 +4,7 @@ import com.surprising.asset.repository.AssetRepository;
 import com.surprising.instrument.api.model.*;
 import com.surprising.instrument.provider.repository.*;
 import com.surprising.product.api.ProductLine;
+import com.surprising.instrument.provider.model.InstrumentPageQuery;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -155,11 +156,11 @@ public class InstrumentStorageService {
     public List<InstrumentResponse> list(ProductLine line,InstrumentType type,InstrumentStatus status) {
         return enrich(instrumentRepository.list(line,type,status));
     }
-    public InstrumentRepository.InstrumentPage listPage(InstrumentType type,InstrumentStatus status,int limit,String cursor,String sort) {
-        return listPage(null,type,status,limit,cursor,sort);
+    public InstrumentRepository.InstrumentPage listPage(InstrumentType type,InstrumentStatus status,InstrumentPageQuery query) {
+        return listPage(null,type,status,query);
     }
-    public InstrumentRepository.InstrumentPage listPage(ProductLine line,InstrumentType type,InstrumentStatus status,int limit,String cursor,String sort) {
-        return enrich(instrumentRepository.listPage(line,type,status,limit,cursor,sort));
+    public InstrumentRepository.InstrumentPage listPage(ProductLine line,InstrumentType type,InstrumentStatus status,InstrumentPageQuery query) {
+        return enrich(instrumentRepository.listPage(line,type,status,query));
     }
     public List<InstrumentResponse> expiringContractsDue(Instant now,int limit) {
         return enrich(instrumentRepository.expiringContractsDue(null,now,limit));

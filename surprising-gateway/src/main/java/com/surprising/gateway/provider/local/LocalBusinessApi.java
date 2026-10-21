@@ -58,7 +58,7 @@ public final class LocalBusinessApi {
         return accountProperties.getKafka().getProductLine();
     }
 
-    public static LocalBusinessApi shared(com.surprising.instrument.provider.service.InstrumentRequestService instruments,
+    public static LocalBusinessApi shared(com.surprising.instrument.provider.controller.InstrumentRequestController instruments,
                                          ObjectMapper mapper, Validator validator,
                                          com.surprising.websocket.provider.service.SubscriptionRegistry websocket) {
         return new LocalBusinessApi(null, null, new InstrumentLocalRoutes(instruments, null), mapper, validator,

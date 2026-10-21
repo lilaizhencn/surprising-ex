@@ -60,7 +60,7 @@ class InstrumentServiceTest {
         when(storageService.latest(1, ProductLine.LINEAR_PERPETUAL))
                 .thenReturn(Optional.of(linearPerpetual("BTC-USDT", 2L, 10_000_000L)));
         InstrumentService service = new InstrumentService(storageService, mock(InstrumentValidator.class),
-                new InstrumentProperties(), outboxService);
+                new InstrumentProperties(), outboxService, mock(MarketSummaryService.class));
         InstrumentResponse instrument = option("BTC-USDT-260327-50000-C", InstrumentStatus.CLOSED);
 
         service.publishProductLifecycleEvent(instrument, 0L, 71_000_000L);
@@ -83,7 +83,7 @@ class InstrumentServiceTest {
         when(storage.latest(1, ProductLine.LINEAR_PERPETUAL))
                 .thenReturn(Optional.of(linearPerpetual("BTC-USDT", 2L, 1_000_000L)));
         var service = new InstrumentService(storage, mock(InstrumentValidator.class),
-                new InstrumentProperties(), outbox);
+                new InstrumentProperties(), outbox, mock(MarketSummaryService.class));
         var instrument = option("BTC-USDT-CALL", InstrumentStatus.CLOSED);
         service.publishProductLifecycleEvent(instrument, 0L, 71_000_000_000L);
         var event = ArgumentCaptor.forClass(Object.class);
@@ -131,7 +131,7 @@ class InstrumentServiceTest {
 
 
         assertThatThrownBy(() -> service.latest(1, ProductLine.LINEAR_PERPETUAL))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(com.surprising.instrument.provider.exception.InstrumentOperationException.class)
                 .hasMessageContaining("instrument not found for productLine");
     }
 
@@ -156,7 +156,7 @@ class InstrumentServiceTest {
 
         assertThatThrownBy(() -> service.closeForSettlement(1, ProductLine.LINEAR_DELIVERY,
                 100_000L, 0L))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(com.surprising.instrument.provider.exception.InstrumentOperationException.class)
                 .hasMessageContaining("必须先进入 SETTLING");
         verify(storageService, org.mockito.Mockito.never()).save(any(), any(), any(), any(), any());
     }
@@ -169,7 +169,7 @@ class InstrumentServiceTest {
         var request = request(result, result.priceTickUnits());
         when(storage.save(eq(result.symbol()), eq(request), eq("admin-1"), eq("maintenance"), any()))
                 .thenReturn(result);
-        var service = new InstrumentService(storage, mock(InstrumentValidator.class), new InstrumentProperties(), outbox);
+        var service = new InstrumentService(storage, mock(InstrumentValidator.class), new InstrumentProperties(), outbox, mock(MarketSummaryService.class));
         assertThat(service.upsert(request, "admin-1", "maintenance")).isEqualTo(result);
         verify(outbox).enqueue(eq("INSTRUMENT"), eq(4L), eq("surprising.instrument.events.v1"),
                 eq("LINEAR_PERPETUAL:1"), eq("UPSERTED"), any(Object.class), any(Instant.class));
@@ -181,10 +181,10 @@ class InstrumentServiceTest {
         var outbox = mock(InstrumentOutboxService.class);
         var current = linearPerpetual("BTC-USDT", 4L, 10_000_000L);
         when(storage.latest(1, ProductLine.LINEAR_PERPETUAL)).thenReturn(Optional.of(current));
-        var service = new InstrumentService(storage, mock(InstrumentValidator.class), new InstrumentProperties(), outbox);
+        var service = new InstrumentService(storage, mock(InstrumentValidator.class), new InstrumentProperties(), outbox, mock(MarketSummaryService.class));
         assertThatThrownBy(() -> service.edit(request(current, current.priceTickUnits()), "1", "change fee", 3L))
-                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
-                .hasMessageContaining("409");
+                .isInstanceOf(com.surprising.instrument.provider.exception.InstrumentOperationException.class)
+                .hasMessageContaining("合约配置已更新");
         verify(storage).lockForUpdate(1, ProductLine.LINEAR_PERPETUAL);
         org.mockito.Mockito.verifyNoInteractions(outbox);
         verify(storage, org.mockito.Mockito.never()).save(any(), any(), any(), any(), any());
@@ -198,7 +198,7 @@ class InstrumentServiceTest {
         var request = request(current, current.priceTickUnits());
         when(storage.latest(1, ProductLine.LINEAR_PERPETUAL)).thenReturn(Optional.of(current));
         when(storage.save(eq(current.symbol()), eq(request), eq("1"), eq("change fee"), any())).thenReturn(current);
-        var service = new InstrumentService(storage, mock(InstrumentValidator.class), new InstrumentProperties(), outbox);
+        var service = new InstrumentService(storage, mock(InstrumentValidator.class), new InstrumentProperties(), outbox, mock(MarketSummaryService.class));
         assertThat(service.edit(request, "1", "change fee", 4L)).isEqualTo(current);
         var order = org.mockito.Mockito.inOrder(storage);
         order.verify(storage).lockForUpdate(1, ProductLine.LINEAR_PERPETUAL);
@@ -208,12 +208,12 @@ class InstrumentServiceTest {
 
     private InstrumentService service(InstrumentOutboxService outboxService, InstrumentProperties properties) {
         return new InstrumentService(mock(InstrumentStorageService.class), mock(InstrumentValidator.class),
-                properties, outboxService);
+                properties, outboxService, mock(MarketSummaryService.class));
     }
 
     private InstrumentService service(InstrumentStorageService storageService) {
         return new InstrumentService(storageService, mock(InstrumentValidator.class),
-                new InstrumentProperties(), mock(InstrumentOutboxService.class));
+                new InstrumentProperties(), mock(InstrumentOutboxService.class), mock(MarketSummaryService.class));
     }
 
     private InstrumentResponse delivery(String symbol, InstrumentStatus status) {

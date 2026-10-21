@@ -13,6 +13,10 @@ import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.instrument.provider.config.InstrumentProperties;
 import com.surprising.product.api.ProductLine;
+import com.surprising.instrument.provider.model.InstrumentPageQuery;
+import com.surprising.instrument.provider.model.InstrumentCatalog;
+import com.surprising.instrument.provider.exception.InstrumentOperationException;
+import static com.surprising.instrument.provider.exception.InstrumentOperationException.Reason.*;
 import com.surprising.product.api.utils.ProductTopicNames;
 import java.nio.charset.StandardCharsets;
 import java.math.BigInteger;
@@ -32,30 +36,55 @@ public class InstrumentService {
     private final InstrumentValidator instrumentValidator;
     private final InstrumentProperties properties;
     private final InstrumentOutboxService outboxService;
+    private final MarketSummaryService marketSummaries;
 
     public InstrumentService(InstrumentStorageService storageService,
                              InstrumentValidator instrumentValidator,
                              InstrumentProperties properties,
-                             InstrumentOutboxService outboxService) {
+                             InstrumentOutboxService outboxService, MarketSummaryService marketSummaries) {
         this.storageService = storageService;
         this.instrumentValidator = instrumentValidator;
         this.properties = properties;
         this.outboxService = outboxService;
+        this.marketSummaries = marketSummaries;
     }
 
     @Transactional(readOnly = true)
     public InstrumentResponse defaultInstrument(ProductLine line) {
-        return storageService.firstTrading(line).orElseThrow(() -> new IllegalStateException("no trading instrument in product line: " + line));
+        return storageService.firstTrading(line).orElseThrow(() -> new InstrumentOperationException(NOT_FOUND, "no trading instrument in product line: " + line));
     }
 
     public InstrumentResponse latest(int instrumentId, ProductLine productLine) {
         if (instrumentId <= 0 || productLine == null) throw new IllegalArgumentException("productLine and positive instrumentId are required");
         var value = storageService.latest(instrumentId, productLine)
-                .orElseThrow(() -> new IllegalStateException("instrument not found for productLine: " + productLine + ":" + instrumentId));
+                .orElseThrow(() -> new InstrumentOperationException(NOT_FOUND, "instrument not found for productLine: " + productLine + ":" + instrumentId));
         if (value.contractType().productLine() != productLine || value.instrumentId() != instrumentId) {
             throw new IllegalStateException("instrument product current mismatch");
         }
         return value;
+    }
+
+    public InstrumentResponse publicLatest(int instrumentId, ProductLine productLine) {
+        var result = latest(instrumentId, productLine);
+        if (!publiclyVisible(result) && !(result.contractType().productLine().isDeliveryProduct()
+                && result.status() == InstrumentStatus.CLOSED))
+            throw new InstrumentOperationException(NOT_FOUND, "instrument is not listed");
+        return result;
+    }
+
+    public InstrumentCatalog publicCatalog(ProductLine line, InstrumentType type, InstrumentStatus status, boolean includeSummary) {
+        var visible = storageService.list(line, type, status).stream().filter(InstrumentService::publiclyVisible).toList();
+        var response = new InstrumentQueryResponse(visible.size(), visible);
+        var summaries = includeSummary ? marketSummaries.summaries(
+                visible.stream().map(InstrumentResponse::instrumentId).distinct().toList(), Instant.now())
+                : java.util.Map.<Integer, com.surprising.instrument.provider.model.MarketSummaryRows.Summary>of();
+        return new InstrumentCatalog(response, summaries);
+    }
+
+    // 结算中的交割合约可供持仓和减仓定位；开仓权限仍由交易校验控制。
+    private static boolean publiclyVisible(InstrumentResponse instrument) {
+        return instrument.status().visible() || (instrument.contractType().productLine().isDeliveryProduct()
+                && instrument.status() == InstrumentStatus.SETTLING);
     }
 
     public com.surprising.instrument.api.model.InstrumentTradeEncoding tradeEncoding(ProductLine line,int instrumentId,long id) { return storageService.tradeEncoding(line,instrumentId,id); }
@@ -90,8 +119,8 @@ public class InstrumentService {
                 snapshotChecksum(productLine, rows, assetScales), rows, assetScales);
     }
 
-    public InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status, int limit, String cursor, String sort) {
-        var page = storageService.listPage(type, status, limit, cursor, sort);
+    public InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status, InstrumentPageQuery query) {
+        var page = storageService.listPage(type, status, query);
         return new InstrumentQueryResponse(page.instruments().size(), page.instruments(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
@@ -99,10 +128,8 @@ public class InstrumentService {
     public InstrumentQueryResponse list(ProductLine productLine,
                                         InstrumentType type,
                                         InstrumentStatus status,
-                                        int limit,
-                                        String cursor,
-                                        String sort) {
-        var page = storageService.listPage(productLine, type, status, limit, cursor, sort);
+                                        InstrumentPageQuery query) {
+        var page = storageService.listPage(productLine, type, status, query);
         return new InstrumentQueryResponse(page.instruments().size(), page.instruments(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
@@ -125,7 +152,6 @@ public class InstrumentService {
     /** Admin edits hold the row lock until the new configuration and audit are committed. */
     @Transactional
     public InstrumentResponse edit(InstrumentUpsertRequest request, String operator, String reason, long expectedChangeId) {
-        requireAudit(operator, reason);
         instrumentValidator.validate(request);
         requireEditVersion(request.instrumentId(), request.contractType().productLine(), expectedChangeId);
         return upsert(request, InstrumentEventType.UPSERTED, operator, reason);
@@ -134,14 +160,8 @@ public class InstrumentService {
     @Transactional
     public InstrumentResponse editStatus(int instrumentId, ProductLine line, InstrumentStatus status,
                                          String operator, String reason, long expectedChangeId) {
-        requireAudit(operator, reason);
         requireEditVersion(instrumentId, line, expectedChangeId);
         return updateStatus(instrumentId, line, status, operator, reason);
-    }
-
-    private void requireAudit(String operator, String reason) {
-        if (operator == null || operator.isBlank() || reason == null || reason.isBlank() || reason.length() > 1000)
-            throw new IllegalArgumentException("administrator and change reason (1-1000 characters) are required");
     }
 
     private void requireEditVersion(Integer instrumentId, ProductLine line, long expectedChangeId) {
@@ -151,8 +171,7 @@ public class InstrumentService {
         }
         storageService.lockForUpdate(instrumentId, line);
         if (expectedChangeId <= 0 || latest(instrumentId, line).lastChangeId() != expectedChangeId)
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.CONFLICT,
+            throw new InstrumentOperationException(CONFLICT,
                     "合约配置已更新，请重新加载后检查修改；本次修改未保存");
     }
 
@@ -282,7 +301,7 @@ public class InstrumentService {
             return current;
         }
         if (current.status() != InstrumentStatus.SETTLING) {
-            throw new IllegalStateException("合约必须先进入 SETTLING 才能确认结算: " + current.symbol());
+            throw new InstrumentOperationException(CONFLICT, "合约必须先进入 SETTLING 才能确认结算: " + current.symbol());
         }
         InstrumentResponse closed = updateStatus(instrumentId, productLine, InstrumentStatus.CLOSED,operator,reason);
         publishProductLifecycleEvent(closed, settlementPriceTicks, underlyingSettlementPriceUnits);
@@ -304,7 +323,7 @@ public class InstrumentService {
         if (underlying.instrumentType() == InstrumentType.OPTION
                 || underlying.priceTickUnits() <= 0L
                 || underlying.settleAssetId() != option.settleAssetId()) {
-            throw new IllegalStateException("期权标的合约规格不可用于现金结算: " + option.underlyingInstrumentId());
+            throw new InstrumentOperationException(CONFLICT, "期权标的合约规格不可用于现金结算: " + option.underlyingInstrumentId());
         }
         BigInteger underlyingPrice = BigInteger.valueOf(underlyingSettlementPriceUnits);
         BigInteger strike = BigInteger.valueOf(option.strikePriceUnits());

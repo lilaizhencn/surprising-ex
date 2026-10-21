@@ -136,3 +136,5 @@
 - 参数职责1将做市公共设置的Bean Validation、ID/URL/JSON/时长和请求元数据校验移至现有Controller；Service保留产品线/业务数量约束及保存后安装，策略Store不再接受未使用的管理员/原因参数。定向32项、完整模块干净构建153项通过无跳过；22项负例捕获20处入口放行失败，恢复后绿色。关闭补充ADD-002、003；见 [做市参数职责验证](validation/java-mvc-maker-validation-20261022.json)。所属日志/已汇总报告已清理，其余全范围问题及最终实栈继续。
 
 - 参数职责2将历史资金费与支付分页的limit、排序、游标、用户/合约输入归FundingController；Service/Repository接收FundingPageQuery原生条件，SQL列映射仍由Repository持有，SQL原文不变。定向41项、完整生命周期干净构建111项通过无跳过；21项负例捕获14项预期失败，恢复后绿色。关闭补充ADD-004和本批复核ADD-006；见 [资金费查询入口验证](validation/java-mvc-funding-query-20261022.json)。真实PostgreSQL验证产品/用户/合约隔离、同时间戳双方向翻页和超过JS精确范围的long ID；所属数据库/日志/报告已清理，其余职责和最终实栈继续。
+
+- HTTP/参数职责3将合约本地请求组件归controller，Service聚合目录可见性与真实行情，原生分页条件经Controller绑定，Repository只选固定SQL列。版本/可见性/结算冲突由原生异常经Controller映射；保留行锁、事务和Outbox。定向70项通过，扩大182项中179通过、3项六Core外部HTTP环境未启动跳过；18项负例捕获17项预期失败。关闭MVC-009、202和补充ADD-005；见 [合约入口验证](validation/java-mvc-instrument-boundary-20261022.json)。复核追加ADD-007格式/业务配置校验混合职责待整改；所属数据库/日志/报告已清理，最终实栈及其余问题继续。

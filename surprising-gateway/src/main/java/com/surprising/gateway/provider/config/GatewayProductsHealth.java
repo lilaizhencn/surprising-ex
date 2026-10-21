@@ -33,7 +33,7 @@ public class GatewayProductsHealth {
     }
     @Bean
     com.surprising.gateway.provider.local.LocalBusinessApi sharedBusinessApi(
-            com.surprising.instrument.provider.service.InstrumentRequestService instruments,
+            com.surprising.instrument.provider.controller.InstrumentRequestController instruments,
             tools.jackson.databind.ObjectMapper mapper, jakarta.validation.Validator validator,
             com.surprising.websocket.provider.service.SubscriptionRegistry websocket) {
         return com.surprising.gateway.provider.local.LocalBusinessApi.shared(instruments, mapper, validator, websocket);

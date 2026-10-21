@@ -488,3 +488,5 @@ KYC/OIDC/邮件的协议接入不与业务聚合混放。LoginVerificationModels
 [认证归包验证](../docs/validation/java-mvc-auth-packages-20261021.json)包含433项实际回归与未测范围。
 
 实时状态入口归websocket.provider.controller，条件单历史持久化归trading.trigger.repository；保留原路由和用户/产品筛选。验证见 [其余归包记录](../docs/validation/java-mvc-remaining-packages-20261021.json)。
+
+合约目录本地分发仍由 `gateway.provider.local.InstrumentLocalRoutes` 调用 `instrument.provider.controller.InstrumentRequestController`，不新增内部HTTP路由。Controller解析产品选择、分页及HTTP异常；`InstrumentService.publicCatalog/publicLatest` 负责公开可见性和行情聚合。Repository接收原生 `InstrumentPageQuery`，SQL列只在Repository映射；合约编辑仍在原事务中持行锁检查版本并写配置/Outbox。

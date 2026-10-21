@@ -1,4 +1,4 @@
-package com.surprising.instrument.provider.service;
+package com.surprising.instrument.provider.controller;
 
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
@@ -8,6 +8,8 @@ import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
 import com.surprising.instrument.provider.service.InstrumentService;
+import com.surprising.instrument.provider.model.InstrumentPageQuery;
+import com.surprising.instrument.provider.exception.InstrumentOperationException;
 import com.surprising.product.api.ProductLine;
 import java.util.Locale;
 import java.util.LinkedHashMap;
@@ -15,36 +17,30 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 /**
- * 共享原始 HTTP 与网关入口的请求校验、业务编排和结果转换；不持有 HTTP 路由。
+ * 网关本地协议的参数绑定、响应转换和HTTP异常映射；路由仍由InstrumentLocalRoutes分发。
  */
-@Service()
-public class InstrumentRequestService {
+@Component
+public class InstrumentRequestController {
 
     private final InstrumentService instrumentService;
-    private final MarketSummaryService marketSummaries;
     private final ObjectMapper objectMapper;
 
-    public InstrumentRequestService(InstrumentService instrumentService,
-                                    MarketSummaryService marketSummaries,
+    public InstrumentRequestController(InstrumentService instrumentService,
                                     ObjectMapper objectMapper) {
         this.instrumentService = instrumentService;
-        this.marketSummaries = marketSummaries;
         this.objectMapper = objectMapper;
     }
 
     public InstrumentResponse latest(int instrumentId, String productLineHeader, String productLineValue) {
         try {
-            var result = instrumentService.latest(instrumentId, requiredProductLine(productLineValue, productLineHeader));
-            if (!publiclyVisible(result) && !(result.contractType().productLine().isDeliveryProduct()
-                    && result.status() == InstrumentStatus.CLOSED)) throw new IllegalStateException("instrument is not listed");
-            return result;
+            return instrumentService.publicLatest(instrumentId, requiredProductLine(productLineValue, productLineHeader));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
+        } catch (InstrumentOperationException ex) {
+            throw httpError(ex);
         }
     }
 
@@ -55,16 +51,9 @@ public class InstrumentRequestService {
             return instrumentService.defaultInstrument(line);
         } catch (IllegalArgumentException error) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, error.getMessage(), error);
-        } catch (IllegalStateException error) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
+        } catch (InstrumentOperationException error) {
+            throw httpError(error);
         }
-    }
-
-    // 结算中的交割合约仍需供持仓查询、直接减仓及撤单定位；开仓权限由交易校验控制。
-    private static boolean publiclyVisible(InstrumentResponse instrument) {
-        return instrument.status().visible()
-                || (instrument.contractType().productLine().isDeliveryProduct()
-                    && instrument.status() == InstrumentStatus.SETTLING);
     }
 
     public Map<String, String> assetScales() {
@@ -74,13 +63,10 @@ public class InstrumentRequestService {
     public Object list(InstrumentType type, InstrumentStatus status, String productLineHeader,
                        String productLineValue, boolean includeMarketSummary, boolean includeTrend) {
         try {
-            var all = instrumentService.list(productLine(productLineValue, productLineHeader), type, status);
-            var visible = all.instruments().stream().filter(InstrumentRequestService::publiclyVisible).toList();
-            var instruments = new InstrumentQueryResponse(visible.size(), visible);
+            var catalog = instrumentService.publicCatalog(productLine(productLineValue, productLineHeader), type, status, includeMarketSummary);
+            var instruments = catalog.instruments();
             if (!includeMarketSummary) return instruments;
-            var summaries = marketSummaries.summaries(
-                    instruments.instruments().stream().map(InstrumentResponse::instrumentId).distinct().toList(),
-                    java.time.Instant.now());
+            var summaries = catalog.summaries();
             List<Map<String, Object>> items = instruments.instruments().stream().map(instrument -> {
                 Map<String, Object> item = objectMapper.convertValue(instrument, new TypeReference<LinkedHashMap<String, Object>>() {});
                 var summary = summaries.get(instrument.instrumentId());
@@ -113,14 +99,14 @@ public class InstrumentRequestService {
             return instrumentService.latest(instrumentId, requiredProductLine(productLineValue, productLineHeader));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
+        } catch (InstrumentOperationException ex) {
+            throw httpError(ex);
         }
     }
 
     public InstrumentQueryResponse adminList(InstrumentType type, InstrumentStatus status, int limit, String cursor, String sort, String productLineHeader, String productLineValue) {
         try {
-            return instrumentService.list(productLine(productLineValue, productLineHeader), type, status, limit, cursor, sort);
+            return instrumentService.list(productLine(productLineValue, productLineHeader), type, status, pageQuery(limit, cursor, sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -132,7 +118,10 @@ public class InstrumentRequestService {
 
     public InstrumentResponse edit(InstrumentUpsertRequest request, String operator, String reason, long expectedChangeId) {
         try {
+            requireAudit(operator, reason);
             return instrumentService.edit(request, operator, reason, expectedChangeId);
+        } catch (InstrumentOperationException conflict) {
+            throw httpError(conflict);
         } catch (IllegalArgumentException error) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, error.getMessage(), error);
         }
@@ -141,8 +130,11 @@ public class InstrumentRequestService {
     public InstrumentResponse editStatus(int instrumentId, InstrumentStatus status, String header, String query,
                                          String operator, String reason, long expectedChangeId) {
         try {
+            requireAudit(operator, reason);
             return instrumentService.editStatus(instrumentId, requiredProductLine(query, header), status,
                     operator, reason, expectedChangeId);
+        } catch (InstrumentOperationException conflict) {
+            throw httpError(conflict);
         } catch (IllegalArgumentException error) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, error.getMessage(), error);
         }
@@ -150,6 +142,7 @@ public class InstrumentRequestService {
 
     public InstrumentResponse upsert(InstrumentUpsertRequest request, String operator, String reason) {
         try {
+            requireAudit(operator, reason);
             return instrumentService.upsert(request, operator, reason);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
@@ -158,16 +151,18 @@ public class InstrumentRequestService {
 
     public InstrumentResponse updateStatus(int instrumentId, InstrumentStatus status, String productLineHeader, String productLineValue, String operator, String reason) {
         try {
+            requireAudit(operator, reason);
             return instrumentService.updateStatus(instrumentId, requiredProductLine(productLineValue, productLineHeader), status, operator, reason);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
+        } catch (InstrumentOperationException ex) {
+            throw httpError(ex);
         }
     }
 
     public InstrumentResponse closeForSettlement(int instrumentId, String productLineHeader, String productLineValue, long settlementPriceTicks, long underlyingSettlementPriceUnits, String operator, String reason) {
         try {
+            requireAudit(operator, reason);
             ProductLine productLine = productLine(productLineValue, productLineHeader);
             if (productLine == null) {
                 throw new IllegalArgumentException("settlement productLine is required");
@@ -175,9 +170,38 @@ public class InstrumentRequestService {
             return instrumentService.closeForSettlement(instrumentId, productLine, settlementPriceTicks, underlyingSettlementPriceUnits, operator, reason);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        } catch (InstrumentOperationException ex) {
+            throw httpError(ex);
         }
+    }
+
+    private void requireAudit(String operator, String reason) {
+        if (operator == null || operator.isBlank() || reason == null || reason.isBlank() || reason.length() > 1000)
+            throw new IllegalArgumentException("administrator and change reason (1-1000 characters) are required");
+    }
+
+    private static ResponseStatusException httpError(InstrumentOperationException error) {
+        return new ResponseStatusException(switch (error.reason()) {
+            case NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case CONFLICT -> HttpStatus.CONFLICT;
+        }, error.getMessage(), error);
+    }
+
+    private static InstrumentPageQuery pageQuery(int limit, String cursor, String sort) {
+        String token = sort == null || sort.isBlank() ? "symbol.asc" : sort.trim();
+        var order = java.util.Arrays.stream(InstrumentPageQuery.Sort.values()).filter(value -> value.token().equals(token))
+                .findFirst().orElseThrow(() -> new IllegalArgumentException("unsupported sort: " + sort));
+        InstrumentPageQuery.Cursor decoded = null;
+        if (cursor != null && !cursor.isBlank()) {
+            try {
+                String raw = new String(java.util.Base64.getUrlDecoder().decode(cursor.trim()), java.nio.charset.StandardCharsets.UTF_8);
+                int split = raw.lastIndexOf('|');
+                if (split <= 0 || split == raw.length() - 1) throw new IllegalArgumentException("invalid cursor");
+                var timestamp = order.symbolSort() ? null : java.time.Instant.parse(raw.substring(0, split));
+                decoded = new InstrumentPageQuery.Cursor(raw.substring(split + 1), timestamp);
+            } catch (RuntimeException invalid) { throw new IllegalArgumentException("invalid cursor", invalid); }
+        }
+        return new InstrumentPageQuery(Math.max(1, Math.min(limit, 1000)), order, decoded);
     }
 
     private ProductLine requiredProductLine(String queryValue, String headerValue) {
