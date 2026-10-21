@@ -502,3 +502,5 @@ C2C后台的原始请求头、method/path/query、User-Agent和IP由 `c2c.contro
 算法单、成交及条件单Repository各读取一个实际业务投影；必要的初始化标记按同产品在同一条SQL中关联，用途已在 `readAssociated` 注释说明。未初始化返回原生不可用，健康空数据返回空页；标记和数据共享SQL快照，不分两次读取，排序在外层明确保持。原始请求绑定的剩余问题仍列于补充整改清单。
 
 交易统计的 `TradingMetricsRepository` 只读取 `core_trading_statistics_snapshot` 并返回 `StoredTradingMetrics` 原生行。`TradingMetricsService` 校验版本、产品、位置、窗口、时间和计数后截取榜单；Controller校验请求范围。响应保留 `committed-trading-v1` 的完整JSON字段及大整数节点，未知统计字段不会被DTO转换丢弃，也不转double。
+
+算法单查询的请求身份、分页、永久合约ID和客户端请求号由 `OrderRequestController` 校验/规范化；`AlgoOrderProjectionRepository` 接收原生查询条件，继续负责持久化父单事实的身份、进度一致性和必要初始化关联。

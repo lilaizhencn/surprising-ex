@@ -207,6 +207,8 @@ public class OrderRequestController {
 
     public AlgoOrderResponse getAlgo(long userId, long algoOrderId) {
         try {
+            if (algoOrderId <= 0) throw new IllegalArgumentException("algoOrderId must be positive");
+            if (userId <= 0) throw new IllegalArgumentException("invalid algo owner");
             return algoOrderService.get(userId, algoOrderId);
         } catch (java.util.NoSuchElementException missing) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, missing.getMessage(), missing);
@@ -219,6 +221,10 @@ public class OrderRequestController {
 
     public ResponseEntity<com.surprising.trading.api.model.AlgoOrderSubmissionResponse> algoSubmission(long userId, String clientKey) {
         try {
+            if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+            if (clientKey == null || clientKey.isBlank() || clientKey.trim().length() > 64)
+                throw new IllegalArgumentException("clientAlgoOrderId is required and must be at most 64 characters");
+            clientKey = clientKey.trim();
             var result = algoOrderService.submission(userId, clientKey);
             return ResponseEntity.status("TERMINAL".equals(result.outcome()) ? HttpStatus.OK : HttpStatus.ACCEPTED)
                     .cacheControl(org.springframework.http.CacheControl.noStore()).body(result);
@@ -231,6 +237,10 @@ public class OrderRequestController {
 
     public AlgoOrderQueryResponse openAlgoOrders(long userId, String instrumentId, int limit) {
         try {
+            if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+            if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1, 1000]");
+            instrumentId = instrumentId == null || instrumentId.isBlank() ? null : instrumentId;
+            if (instrumentId != null) com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
             return algoOrderService.openOrders(userId, instrumentId, limit);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);

@@ -65,10 +65,5 @@ class AlgoOrderProjectionPostgresTest {
         jdbc.execute("DROP TABLE core_algo_order_projection");
         assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,7,null,10)).isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class).hasMessageContaining("ALGO_READ_VIEW_UNAVAILABLE");
     }
-    @Test void invalidIdentityAndLimitsAreRejectedBeforeReadingStorage() {
-        assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,0,null,10)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,7,null,0)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,7,null,1001)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(()->projection.openOrders(ProductLine.SPOT,7,"BTC-USDT",10)).isInstanceOf(IllegalArgumentException.class);
-    }
+
 }

@@ -16,12 +16,9 @@ public final class AlgoOrderProjectionRepository {
     public AlgoOrderProjectionRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
     public List<CoreAlgoOrderView> openOrders(ProductLine product, long userId, String instrumentId, int limit) {
-        if (product == null || userId <= 0 || limit < 1 || limit > 1000)
-            throw new IllegalArgumentException("invalid algo query");
         var args = new ArrayList<Object>(List.of(product.name(), userId));
         var sql = new StringBuilder("SELECT * FROM core_algo_order_projection WHERE product_line=? AND user_id=? AND status_code IN (0,1,2)");
-        if (instrumentId != null && !instrumentId.isBlank()) {
-            com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
+        if (instrumentId != null) {
             sql.append(" AND instrument_id=?"); args.add(instrumentId);
         }
         sql.append(" ORDER BY created_at_epoch_ms DESC,algo_order_id DESC LIMIT ?"); args.add(limit);
@@ -33,18 +30,14 @@ public final class AlgoOrderProjectionRepository {
     }
 
     public CoreAlgoOrderView byId(ProductLine product, long userId, long id) {
-        if (id <= 0) throw new IllegalArgumentException("algoOrderId must be positive");
         return one(product, userId, "algo_order_id", id);
     }
 
     public CoreAlgoOrderView byClient(ProductLine product, long userId, String key) {
-        if (key == null || key.isBlank() || key.length() > 64)
-            throw new IllegalArgumentException("clientAlgoOrderId is required and must be at most 64 characters");
         return one(product, userId, "client_algo_order_id", key);
     }
 
     private CoreAlgoOrderView one(ProductLine product, long userId, String column, Object identity) {
-        if (product == null || userId <= 0) throw new IllegalArgumentException("invalid algo owner");
         try {
             var rows = readAssociated(product, "SELECT * FROM core_algo_order_projection WHERE product_line=? AND user_id=? AND "
                     + column + "=?", "created_at_epoch_ms DESC,algo_order_id DESC", this::decode, product.name(), userId, identity);
