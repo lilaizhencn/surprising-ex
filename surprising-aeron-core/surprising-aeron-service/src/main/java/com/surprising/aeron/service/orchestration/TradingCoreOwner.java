@@ -24,64 +24,73 @@ import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 import static com.surprising.aeron.service.orchestration.egress.ClusterServiceEgress.NO_SESSION_ID;
 
 /**
- * 交易 Owner：按确定性边界推进交易，未完成命令与响应跨推进轮次保留。
- *
- * <p>该类不实现 {@link ClusteredService}。Aeron 回调、会话和网络出口由
- * {@link com.surprising.aeron.service.cluster.AeronTradingClusterService} 持有；Owner 只接收已复制的不可变命令、
- * 推进交易状态并产生终态交接。</p>
+ * 启动步骤 8、交易步骤 1 和 5：在 Owner 线程推进复制命令，并把完成结果交给响应出口。它持有当前产品线运行时和命令生命周期；FUSED 沿输入环队首执行，PIPELINED 使用有界命令窗口。Cluster 会话、网络发送和真正的线程启动由外层承担。
  */
 public final class TradingCoreOwner {
 
+    /** Owner 生命周期与故障诊断日志，不参与业务状态计算。 */
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TradingCoreOwner.class);
 
-    /** 交易 Owner 的运行日志；仅记录生命周期和诊断信息，不进入交易状态计算。 */
-
-    /** 快照阶段的最长等待时间；交易命令本身使用命令流水线的截止时间。 */
+    /** 快照和显式完成前缀使用的秒数预算，JVM 配置默认 300 秒。 */
     private static final long SNAPSHOT_TIMEOUT_SECONDS = Long.getLong(
             "surprising.aeron.snapshot-timeout-seconds", 300L);
 
-    /** 复制日志命令的执行阶段、依赖等待和提交边界的唯一状态持有者。 */
+    /** Owner 独占的命令阶段、依赖等待、控制槽和有序提交状态。 */
     private final OwnerCommandPipelineState commandPipeline;
-    /** A fused command keeps this decoded slot until its terminal response is handed off. */
+    /** 仅 FUSED 使用的复用解码槽，终态交接前保留；PIPELINED 为 null。 */
     private final com.surprising.aeron.service.command.order.DecodedMatchingCommand fusedDecoder;
-    /** Cluster→Owner 唯一线程交接队列；Owner 直接 peek/推进，控制命令保持队首。 */
+    /** Cluster 到 Owner 的唯一单生产者、单消费者输入环。 */
     private final OwnerIngressRing ingress = new OwnerIngressRing();
+    /** 每轮输入推进预算，类加载时读取并校验，默认 64 条。 */
     private static final int INPUT_BATCH_SIZE = configuredInputBatchSize();
 
-    /** 已提交响应的交接边界，不参与业务状态计算。 */
+    /** 已提交响应的交接出口，不执行交易状态变化。 */
     private final ResponseSink responseSink;
-    /** 实时盘口和快照的独立传输边界，不阻塞撮合主流程。 */
+    /** 实时帧及读取请求的传输边界，网络由独立资源处理。 */
     private final TradingRealtimeBoundary realtimeBoundary;
 
-    /** 已提交响应的显式出口交接函数。 */
+    /**
+     * 交易终态的出口契约，隔离 Owner 的业务推进与 Cluster 回调线程的网络发送。
+     */
     public @FunctionalInterface
     interface ResponseSink {
-        /** 接收已提交的只读响应；异步出口须保留 Header 租约直到编码完成。 */
+        /**
+         * 接收已完成响应、目标会话及提交序号；异步出口保留响应头租约至编码结束。
+         * @param sessionId 响应目标会话 ID；无会话命令使用 NO_SESSION_ID
+         * @param header 本命令的请求或响应头，调用边界内保持租约有效
+         * @param response 要交出或归还的终态响应及其缓冲租约
+         * @param committedSequence 响应对应的已提交 Core 序号
+         */
         void offer(long sessionId, CoreMessageHeader header, CoreResponse response, long committedSequence);
     }
 
-    /** 所属产品线；它决定命令、账户、撮合器和快照的隔离边界。 */
+    /** 本 Owner 唯一产品线，决定账户、规则、Matcher 和恢复隔离。 */
     private final ProductLine productLine;
-    /** 当前产品线的权威交易运行时；Owner 只在自己的线程访问它。 */
+    /** 当前权威交易运行时，由 Owner 线程访问，未启动或退出后为 null。 */
     private TradingCoreRuntime state;
-    /** Owner 线程可见的角色、日志时间和日志位置；不提供任何 Aeron 会话或发布器访问。 */
+    /** 外层交接的角色、复制时间及日志位置，不含网络发送能力。 */
     private OwnerLogContext logContext;
-    /** 集群等待策略，所有者是当前 Owner 线程。 */
+    /** 等待业务完成及快照分片时使用的等待策略。 */
     private IdleStrategy idleStrategy;
-    /** Aeron 回调可能重入背景工作，使用该标记保护交易推进边界。 */
+    /** 保护推进期间的背景工作重入，结束推进后复位。 */
     private boolean processingLogCallback;
 
-    /** 交易执行策略模式：FUSED（单线程极速就地执行）或 PIPELINED（流水线多线程执行）。 */
+    /** 构造时固定的执行模式；FUSED 内联 Matcher 和账户工作，账本仍有独立所有权。 */
     private final TradingExecutionMode executionMode;
 
-    /** Matcher 完成通知使用的统一回调，最终结果回到命令流水线状态。 */
+    /** 把撮合终态交回当前控制命令的固定回调。 */
     private final TradingCoreRuntime.MatchingCommitHandler matchingCommitHandler;
 
-    /** 检查命令截止时间的分频掩码（每 1024 次自旋调用一次系统时钟）。 */
+    /** 以 1023 掩码把命令时钟检查分频为每 1024 次一次。 */
     private static final int DEADLINE_CHECK_MASK = 0x3FF;
-    /** 命令截止时间检查分频计数器，仅在 Owner 线程内无锁自增。 */
+    /** 仅 Owner 自增的分频计数器，线程中断检查不受此分频影响。 */
     private int deadlineCheckCounter;
 
+    /**
+     * 校验产品线和响应出口，固定本实例的执行模式，并准备该模式需要的流水线和复用解码槽；此时不启动交易工作线程。
+     * @param productLine 必须明确指定的所属产品线
+     * @param responseSink 必须存在的已提交响应出口
+     */
     public TradingCoreOwner(ProductLine productLine, ResponseSink responseSink) {
         if (productLine == null) {
             throw new IllegalArgumentException("product line is required");
@@ -90,6 +99,7 @@ public final class TradingCoreOwner {
         this.responseSink = java.util.Objects.requireNonNull(responseSink, "response sink");
         this.realtimeBoundary = new TradingRealtimeBoundary(productLine);
         this.executionMode = TradingExecutionMode.configured();
+        // 当前执行模式是否需要独立命令窗口
         boolean pipelined = executionMode == TradingExecutionMode.PIPELINED;
         commandPipeline = new OwnerCommandPipelineState(pipelined);
         matchingCommitHandler = commandPipeline::completeControlMatching;
@@ -98,9 +108,8 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * 启动 Owner 的集群边界和交易运行时。
-     *
-     * <p>这里只初始化运行时资源，不执行任何业务命令；业务命令必须来自已复制的 Cluster 日志。</p>
+     * 启动步骤 8：接入复制日志上下文；没有运行时则新建，清空命令阶段与解码槽，接入等待策略并启动可选实时边界。工作资源由外层随后激活。
+     * @param logContext Owner 可用的复制日志元数据及等待策略
      */
     public void start(OwnerLogContext logContext) {
         this.logContext = logContext;
@@ -113,26 +122,39 @@ public final class TradingCoreOwner {
         realtimeBoundary.start(logContext.role, logContext.position, state);
     }
 
+    /**
+     * 返回 Cluster 与 Owner 共用的原输入环；调用方遵守单生产者、单消费者约定。
+     */
     public OwnerIngressRing ingress() { return ingress; }
 
+    /**
+     * 读取 JVM 的每轮输入预算，默认 64，允许 1 至 256；空白、非数字或越界配置包装成带属性名的配置异常。
+     */
     private static int configuredInputBatchSize() {
+        // 每轮输入预算的 JVM 属性名
         String property = "surprising.aeron.owner-input-batch-size";
         try {
+            // 解析后的输入条数，随后校验范围
             int value = Integer.parseInt(System.getProperty(property, "64").trim());
             if (value < 1 || value > 256) throw new IllegalArgumentException();
             return value;
-        } catch (RuntimeException failure) {
+        } catch (/* 当前读取或推进失败的异常，附带上下文后继续抛出 */ RuntimeException failure) {
             throw new IllegalArgumentException(property + " must be an integer in [1,256]", failure);
         }
     }
 
-    /** 保留实际输入环队首的准备结果；进入窗口或边界任务后释放临时解码。 */
+    /**
+     * 只为当前业务队首保留一次解码准备；没有业务队首时释放此前缓存，避免拿上一条输入解释下一条命令。
+     */
     private void retainPendingPreparation() {
+        // 当前输入环借出的队首条目，取走或释放后不能继续访问
         var next = ingress.first();
         commandPipeline.retainPendingPreparation(next == null ? null : next.command());
     }
 
-    /** 在 Owner 线程中绑定运行时并推进一轮命令状态。 */
+    /**
+     * 绑定当前 Owner，进入异步命令作用域后按执行模式推进；退出作用域后提交输入环已消费字节，不把未完成命令的租约提前释放。
+     */
     private void progressCommands() {
         state.bindOwner();
         state.runtimeState.enterAsynchronousCommandScope();
@@ -149,16 +171,15 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * FUSED executes the ingress head without an in-flight window or dependency indexes.
-     * The existing control continuation retains this same ingress entry until matching,
-     * queries and commit publication have finished; yielding must never lose a terminal reply.
+     * FUSED 主流程：每轮按预算推进队首。先接续控制工作，再取得必要账户访问权、记录原日志元数据并执行；终态未交接前保留原输入，不建立流水命令窗口。
      */
     private void progressFusedCommands() {
-        for (int completed = 0; completed < INPUT_BATCH_SIZE; completed++) {
+        for (/* 本轮 FUSED 已尝试推进的循环计数，受输入预算限制 */ int completed = 0; completed < INPUT_BATCH_SIZE; completed++) {
             if (commandPipeline.hasActiveControl()) {
                 if (!pollControl()) return;
                 continue;
             }
+            // 当前输入环借出的队首条目，取走或释放后不能继续访问
             var next = ingress.first();
             if (next == null || next.action() != null) return;
             logContext.timestamp = next.timestamp();
@@ -169,6 +190,7 @@ public final class TradingCoreOwner {
             commandPipeline.beginControl(next);
             beginCapture(next.position(), next.timestamp(), next.command().header());
             commandPipeline.startProgressDeadline();
+            // 当前队首是否属于撮合命令，用来登记需要等待的撮合序号
             boolean matching = TradingCoreRuntime.isMatchingCommand(next.command().header().messageType());
             commandPipeline.controlResponse(state.applyDecodedCommand(next.command(), next.timestamp(),
                     next.position(), matching ? fusedDecoder : null, false, next.fingerprint()));
@@ -179,8 +201,11 @@ public final class TradingCoreOwner {
         }
     }
 
-    /** 按“阶段一：批量排空已完成队首；阶段二：批量准入无依赖命令”的业务顺序执行流水线。 */
+    /**
+     * PIPELINED 主流程：先收集队首完成，再按容量、冲突前缀及重试栅栏接纳输入。控制命令保留队首；独立撮合命令把输入租约交给窗口，按原日志顺序提交。
+     */
     private void progressCommandsInScope() {
+        // 当前 Owner 持有的流水命令窗口
         ClusterCommandWindow window = commandPipeline.commandWindow();
 
         // 阶段一：批量排空与退休已就绪的队首命令，释放窗口容量
@@ -197,6 +222,7 @@ public final class TradingCoreOwner {
         // 阶段二：紧凑批量填充 Ingress 命令，最大化流水线并发吞吐
         int admittedInputs = 0;
         while (admittedInputs < INPUT_BATCH_SIZE && window.size() < window.capacity() && !commandPipeline.hasActiveControl()) {
+            // 当前输入环借出的队首条目，取走或释放后不能继续访问
             var next = ingress.first();
             if (next == null || next.action() != null) break;
             if (commandPipeline.isIngressBlocked(next.command())) break;
@@ -206,9 +232,12 @@ public final class TradingCoreOwner {
             if (!next.ownerObserved()) {
                 next.ownerObserved(true);
             }
+            // 本条是否可以进入独立撮合窗口
             boolean eligible = state.prepareClusterPipelineScope(next.command(), window);
+            // 当前 UUID 是否对应尚未完成的已登记撮合命令
             boolean retry = eligible && !state.pendingMatching.isEmpty()
                     && state.matchingSequence(next.command().header().commandIdMsb(), next.command().header().commandIdLsb()) != 0;
+            // 当前命令必须等待的窗口前缀长度，零表示该栅栏已解除
             int prefix = !eligible || retry ? window.size() : window.conflictingPrefixSize();
             if (prefix != 0 && window.size() != 0) {
                 if (!commandPipeline.hasCommittingHead()) {
@@ -239,6 +268,7 @@ public final class TradingCoreOwner {
                 commandPipeline.controlResponse(state.applyDecodedCommand(next.command(), next.timestamp(), next.position(),
                         window.decodedIfPresent(next.command()), false, next.fingerprint()));
                 commandPipeline.recordControlProgress();
+                // 当前控制输入是否属于撮合命令，用来登记需要等待的撮合序号
                 boolean matching = TradingCoreRuntime.isMatchingCommand(next.command().header().messageType());
                 commandPipeline.rememberMatchingResponseSequence(matching ? state.matchingSequence(
                         next.command().header().commandIdMsb(), next.command().header().commandIdLsb()) : 0L);
@@ -246,11 +276,15 @@ public final class TradingCoreOwner {
                 break;
             }
             if (window.size() == 0) state.assertClusterCallbackComplete();
+            // 接收当前命令及其输入租约的新窗口槽
             var entry = window.add(next.sessionId(), next.command(), next.timestamp(), next.position());
+            // 移除输入条目前先保存的请求指纹，供幂等检查使用
             var fingerprint = next.fingerprint();
-            ingress.remove(); // The window now owns this command and its decoder lease.
+            ingress.remove(); // 命令及其解码租约已交给窗口，原输入条目可以释放。
+            // 本次运行时执行或查询得到的结果，可能尚待提交
             CoreResponse result = state.applyDecodedCommand(entry.request, entry.timestamp, entry.position,
                     window.decoded(entry.request), true, fingerprint);
+            // 本命令需要等待的撮合 Core 序号；无需撮合时为零
             long sequence = result != null && result.resultCode() == TradingCoreRuntime.matchingPendingCode()
                     ? result.committedCoreSequence() : 0;
             window.bindSequence(entry, sequence);
@@ -264,42 +298,63 @@ public final class TradingCoreOwner {
         }
     }
 
-    /** 在命令开始改变业务状态前建立实时事件捕获边界。未启用行情时快速短路。 */
+    /**
+     * 仅在实时边界启用时，按本命令原日志位置、业务时间和头部开启变更捕获。
+     * @param position 本命令原复制日志位置
+     * @param timestamp 本命令原业务时间，不用系统时钟替代
+     * @param header 本命令的请求或响应头，调用边界内保持租约有效
+     */
     private void beginCapture(long position, long timestamp, CoreMessageHeader header) {
         if (realtimeBoundary.enabled()) {
             realtimeBoundary.beginCapture(state, position, timestamp, header);
         }
     }
 
-    /** 每条命令有固定提交边界，不能让各副本的线程完成速度改变推送分组。 */
+    /**
+     * 把窗口当前提交头登记为提交阶段，并恢复该命令的实时捕获元数据及等待截止时间；此时不表示已经提交成功。
+     */
     private void beginCommandCommit() {
         commandPipeline.beginHeadCommit();
+        // 当前正在提交的窗口队首，名称不表示窗口尾部
         var last = commandPipeline.committingHead();
         beginCapture(last.position, last.timestamp, last.request.header());
         commandPipeline.startProgressDeadline();
     }
 
-    /** 公共推进按需执行；每条队首仍独立完成捕获、发布、响应和退休。 */
+    /**
+     * 以一条提交预算尝试推进窗口队首，返回本轮是否真正退休了一条命令。
+     * @param advanceMatching 是否显式推进撮合与财务进度；批次首轮仍会进行必要探测
+     */
     private boolean pollCommandCommit(boolean advanceMatching) {
         return pollCommandCommitBatch(advanceMatching, 1) > 0;
     }
 
-    /** 批量推进已就绪的队首命令提交；减少滑动窗口反压阻塞。 */
+    /**
+     * 按预算逐个检查窗口提交头；可提前派发财务后缀，但终态仍按队首顺序交出。等 Matcher、账户及账本条件满足后提交实时变化、交响应并释放窗口阶段。
+     * @param advanceMatching 是否显式推进撮合与财务进度；批次首轮仍会进行必要探测
+     * @param maxBatch 本轮最多退休的窗口命令数
+     */
     private int pollCommandCommitBatch(boolean advanceMatching, int maxBatch) {
+        // 本轮真正交出终态并退休的窗口条数
         int committedCount = 0;
+        // 当前 Owner 持有的流水命令窗口
         ClusterCommandWindow window = commandPipeline.commandWindow();
         while (committedCount < maxBatch) {
             if (!commandPipeline.hasCommittingHead()) {
                 if (window.size() == 0) break;
                 beginCommandCommit();
             }
+            // 当前正在提交的窗口队首，名称不表示窗口尾部
             var last = commandPipeline.committingHead();
+            // 允许提前派发财务的最远撮合序号，不放宽终态提交顺序
             long dispatchThrough = Math.max(last.sequence, window.lastMatchingSequence());
+            // 本次队首检查是否还需要刷新撮合和财务进度
             boolean adv = advanceMatching || committedCount == 0;
             if (!adv && last.sequence != 0) {
                 adv = !state.commits.matchingCommitReady(state.pendingMatching.get(last.sequence));
             }
             if (last.sequence != 0) {
+                // 已满足提交条件的撮合终态，空表示本轮继续等待
                 CoreResponse terminalResponse = state.commits.commitReadyMatchingHead(
                         last.timestamp, last.position, last.sequence, dispatchThrough, adv);
                 if (terminalResponse == null) {
@@ -324,9 +379,13 @@ public final class TradingCoreOwner {
         return committedCount;
     }
 
-    /** 推进单条控制命令的异步子任务、查询结果和终态提交。 */
+    /**
+     * 推进唯一控制命令：等待直接控制续步、衍生撮合和盘口查询；条件齐备后提交实时帧及响应，释放账户访问权、输入和解码租约。暂未完成时保留原阶段。
+     */
     private boolean pollControl() {
+        // 当前唯一控制输入及其租约
         OwnerIngressRing.Entry activeControl = commandPipeline.activeControl();
+        // 控制输入保存的原请求
         var request = activeControl.command();
         if (state.directCommand.active()) {
             commandPipeline.controlResponse(state.directCommand.poll(state));
@@ -342,8 +401,10 @@ public final class TradingCoreOwner {
             commandPipeline.controlResponse(commandPipeline.matchingResponse());
         }
         if (state.bookQueries.hasPendingQueries()) {
+            // 该请求 UUID 对应的盘口查询序号
             long querySequence = state.bookQueries.querySequence(request.header().commandId());
             if (querySequence != 0) {
+                // 本次运行时执行或查询得到的结果，可能尚待提交
                 CoreResponse result = state.bookQueries.takeQueryResult(querySequence);
                 if (result == null) { checkProgressDeadline(); return false; }
                 commandPipeline.controlResponse(result);
@@ -367,7 +428,9 @@ public final class TradingCoreOwner {
         return true;
     }
 
-    /** 检查异步命令是否被中断或超过允许的等待时间。采用分频采样减少高频系统时钟调用。 */
+    /**
+     * 每次检查线程中断，每 1024 次检查一次命令截止时间；首轮也检查时钟。超时作为推进故障抛出，并附带当前等待诊断。
+     */
     private void checkProgressDeadline() {
         if (Thread.currentThread().isInterrupted()) {
             throw new IllegalStateException("asynchronous command progress interrupted: "
@@ -380,12 +443,19 @@ public final class TradingCoreOwner {
         }
     }
 
-    /** Capture the existing Owner and worker state only when progress has already failed. */
+    /**
+     * 拼出当前窗口、控制命令、Matcher、账户与完成队列的诊断信息，供卡住或超时定位；它是运行观测，不是可恢复的业务快照。
+     */
     String stalledCommandDiagnostics() {
+        // 当前 Owner 持有的流水命令窗口
         var window = commandPipeline.commandWindow();
+        // 当前窗口提交头，空表示窗口没有在途命令
         var head = window == null || window.size() == 0 ? null : window.get(0);
+        // 当前待撮合队列的队首，用于故障诊断
         var pending = state.pendingMatching.head();
+        // 当前输入环队首的诊断引用
         var ingressHead = ingress.first();
+        // 当前控制输入的诊断引用
         var control = commandPipeline.activeControl();
         return "window=" + (window == null ? 0 : window.size())
                 + " ingress=" + ingress.size()
@@ -406,7 +476,10 @@ public final class TradingCoreOwner {
                 + " drainWork=" + state.matchingProgress.hasDrainWork();
     }
 
-    /** 仅框架快照边界需要等待：快照不能遗漏已经复制但尚未完成的业务。 */
+    /**
+     * 完成当前边界之前的业务输入、控制命令和流水窗口；遇到输入环的动作边界即停止，不越过该边界处理后面的命令。
+     * @param deadline 单调纳秒时钟上的等待截止时间
+     */
     private void finishSnapshotPrefix(long deadline) {
         while (hasCommandIngress() || commandPipeline.hasActiveControl()
                 || (executionMode != TradingExecutionMode.FUSED && commandPipeline.commandWindow().size() != 0)) {
@@ -415,7 +488,9 @@ public final class TradingCoreOwner {
         }
     }
 
-    /** 已复制但尚未返回终态的命令及日志推进边界数量，用于运行积压观测。 */
+    /**
+     * 返回输入环和流水窗口中的待处理条目数；FUSED 只计输入环。动作边界也在输入环内，因此它是积压指标，不是精确的未回包业务数。
+     */
     public int pendingCommandCount() {
         return executionMode == TradingExecutionMode.FUSED
                 ? ingress.size()
@@ -423,16 +498,11 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * Owner 在调用完整推进器前的廉价门禁。
-     *
-     * <p>在途窗口本身不是工作：队首等待 Matcher/Lane 时再次调用
-     * {@link #pollCommands()} 只会重复探测同一个未就绪前缀。新的、尚未判定为该前缀
-     * 阻塞的入站命令仍需要一次推进；完成通知或 Owner 本地可推进状态则由 Runtime
-     * 提供其余唤醒来源。</p>
+     * Owner 推进门禁：FUSED 看业务队首；PIPELINED 看可接纳输入、完成通知或本地可推进工作。窗口非空本身不代表再次调用就能产生进展。
      */
-    /** 判断 Owner 是否存在可以产生实际进展的入站命令或完成通知。 */
     public boolean ownerWorkAvailable() {
         if (executionMode == TradingExecutionMode.FUSED) {
+            // 当前输入环借出的队首条目，取走或释放后不能继续访问
             var next = ingress.first();
             return next != null && next.action() == null;
         }
@@ -443,40 +513,56 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * 已被当前队首依赖挡住的入站命令不能把 Owner 重新拉入完整推进循环；队首完成后
-     * {@link #ownerCompletionAvailable()} 或 Runtime 的本地进展门禁会再次放行。
+     * 判断业务队首是否有窗口容量，且未被已记住的冲突前缀挡住；动作边界交给外层线程循环处理。
      */
     private boolean pendingIngressReady() {
+        // 当前输入环借出的队首条目，取走或释放后不能继续访问
         var next = ingress.first();
         if (next == null || next.action() != null) return false;
+        // 当前 Owner 持有的流水命令窗口
         ClusterCommandWindow window = commandPipeline.commandWindow();
         if (window.size() == window.capacity()) return false;
         return !commandPipeline.isIngressBlocked(next.command());
     }
 
-    /** 边界任务只等待其前面的命令，不能把自身或之后的输入纳入等待条件。 */
+    /**
+     * 只判断输入环队首是不是业务命令；空环和框架动作边界都返回假。
+     */
     private boolean hasCommandIngress() {
+        // 当前输入环借出的队首条目，取走或释放后不能继续访问
         var next = ingress.first();
         return next != null && next.action() == null;
     }
 
-    /** 返回当前撮合命令窗口大小，供兼容测试和运行诊断使用。 */
+    /**
+     * 返回流水窗口当前条数；FUSED 没有这个窗口，直接返回零。
+     */
     int commandWindowSize() {
         return executionMode == TradingExecutionMode.FUSED ? 0 : commandPipeline.commandWindow().size();
     }
 
-    /** 返回撮合命令窗口峰值，供兼容测试和运行诊断使用。 */
+    /**
+     * 返回命令流水线记录的窗口积压高水位，用于观测容量压力。
+     */
     public int commandWindowHighWaterMark() { return commandPipeline.commandWindowHighWaterMark(); }
 
-    /** 返回 Owner 持有的撮合命令窗口，供同包测试检查提交边界。 */
+    /**
+     * 借出命令流水线的窗口引用，供既有编排和测试查看；不复制也不转移所有权。
+     */
     ClusterCommandWindow commandWindow() { return commandPipeline.commandWindow(); }
 
-    /** 返回实时请求队列，供兼容测试和独立回放工具注入请求。 */
+    /**
+     * 借出实时边界的有界快照请求队列，由 Owner 在既有边界内消费。
+     */
     public ManyToOneConcurrentArrayQueue<RealtimeFrame> snapshotRequests() {
         return realtimeBoundary.requests();
     }
 
-    /** 在异步命令等待期间让出 Owner 线程，同时执行中断和超时保护。 */
+    /**
+     * 等待推进时先检查中断和显式截止时间，再调用当前等待策略；失败附带诊断，不把技术超时伪装成业务拒绝。
+     * @param work 上一轮实际工作量，供等待策略决定是否退避
+     * @param deadline 单调纳秒时钟上的等待截止时间
+     */
     private void idleCommand(int work, long deadline) {
         if (Thread.currentThread().isInterrupted() || System.nanoTime() >= deadline) {
             // 这是运行时故障，不是复制的业务拒绝，也不能转换成延迟完成。
@@ -486,28 +572,44 @@ public final class TradingCoreOwner {
         idleStrategy.idle(work);
     }
 
-    /** 使用默认超时时间捕获一致性快照。 */
+    /**
+     * 按默认快照等待期限捕获快照，并把分块结果合成一个字节数组。
+     * @param snapshotId 本次快照身份，交给既有快照生命周期
+     */
     byte[] captureSnapshot(long snapshotId) {
         return captureSnapshot(snapshotId, snapshotDeadline());
     }
 
-    /** 在指定截止时间内捕获一致性快照。 */
+    /**
+     * 按指定纳秒截止时间捕获分块快照，再合成完整字节数组。
+     * @param snapshotId 本次快照身份，交给既有快照生命周期
+     * @param deadlineNanos 单调纳秒时钟上的显式快照截止时间
+     */
     byte[] captureSnapshot(long snapshotId, long deadlineNanos) {
         return captureSnapshotSections(snapshotId, deadlineNanos).toByteArray();
     }
 
-    /** 捕获分段快照，生产 Aeron 出口直接逐段发布，避免再合并一份完整 byte[]。 */
+    /**
+     * 按默认快照等待期限返回分块结果，避免必须先合成整个快照。
+     * @param snapshotId 本次快照身份，交给既有快照生命周期
+     */
     SectionedCoreSnapshotCodec.SectionedSnapshot captureSnapshotSections(long snapshotId) {
         return captureSnapshotSections(snapshotId, snapshotDeadline());
     }
 
-    /** 计算快照屏障截止时间。 */
+    /**
+     * 将快照秒数配置换算成当前单调时钟上的截止时间；加法溢出直接报错，本方法不额外校验配置正负范围。
+     */
     private long snapshotDeadline() {
         return Math.addExact(System.nanoTime(),
                 java.util.concurrent.TimeUnit.SECONDS.toNanos(SNAPSHOT_TIMEOUT_SECONDS));
     }
 
-    /** 先排空已复制命令，再轮询交易运行时的快照屏障。 */
+    /**
+     * 快照主流程：保护重入、完成前缀、确认回调干净并启动快照；持续收集分块，等待或失败由快照生命周期判断，最后解除推进标记。
+     * @param snapshotId 本次快照身份，交给既有快照生命周期
+     * @param deadlineNanos 单调纳秒时钟上的显式快照截止时间
+     */
     private SectionedCoreSnapshotCodec.SectionedSnapshot captureSnapshotSections(
             long snapshotId, long deadlineNanos) {
         try {
@@ -517,6 +619,7 @@ public final class TradingCoreOwner {
             state.snapshots.beginSnapshot(snapshotId, deadlineNanos);
             idleStrategy.reset();
             while (true) {
+                // 已准备好的分块快照，空表示需要继续收集
                 SectionedCoreSnapshotCodec.SectionedSnapshot snapshot = state.snapshots.pollSnapshotSections(
                         logContext == null ? 0 : logContext.timestamp,
                         logContext == null ? 0 : logContext.position,
@@ -529,13 +632,19 @@ public final class TradingCoreOwner {
         }
     }
 
-    /** 处理集群角色切换，清理不能跨 Leader 任期继续发送的出口状态。 */
+    /**
+     * 更新实时边界的角色并记录日志；外层负责更新 Owner 日志上下文和先前命令的完成边界。
+     * @param newRole 复制日志边界确定的新 Cluster 角色
+     */
     void roleChange(Cluster.Role newRole) {
         realtimeBoundary.roleChange(newRole);
         log.info("Aeron core role-change productLine={} role={}", productLine, newRole);
     }
 
-    /** 推进不属于交易命令主流程的实时读取工作。 */
+    /**
+     * 只有当前不在日志推进中、没有待处理条目且实时功能启用时，才处理后台实时读取。
+     * @param nowNs 用于超时和调度观测的当前单调纳秒时间
+     */
     public int pollBackgroundWork(long nowNs) {
         if (processingLogCallback || pendingCommandCount() != 0 || !realtimeBoundary.enabled()) {
             return 0;
@@ -543,12 +652,17 @@ public final class TradingCoreOwner {
         return progressRealtimeReads(nowNs);
     }
 
-    /** 从实时请求队列取出一个请求，并在已提交位置上生成快照或盘口。 */
+    /**
+     * 用复制日志的业务时间和本轮单调时钟推进实时读取；不生成新的交易裁决。
+     * @param nowNs 用于超时和调度观测的当前单调纳秒时间
+     */
     private int progressRealtimeReads(long nowNs) {
         return realtimeBoundary.poll(state, logContext.timestamp, nowNs);
     }
 
-    /** 输出命令流水线诊断并释放 Owner、实时出口和交易运行时资源。 */
+    /**
+     * 记录摘要并关闭实时边界，然后关闭交易运行时；运行时关闭完成或抛错后清命令容器和输入租约。仍被工作线程借用的解码输入必须等运行时关闭后再释放。
+     */
     public void terminate() {
         log.info("Aeron core command-window productLine={} {}",
                 productLine, commandPipeline.terminationSummary());
@@ -557,7 +671,7 @@ public final class TradingCoreOwner {
         try {
             if (state != null) state.close();
         } finally {
-            // Borrowed decoded input must outlive the Matcher/Lane workers during shutdown.
+            // 关闭时先结束 Matcher 和账户工作线程，再释放它们仍可能借用的解码输入。
             commandPipeline.clearCommandContainers();
             if (fusedDecoder != null) fusedDecoder.clearCommandSlot();
             ingress.discard();
@@ -565,52 +679,69 @@ public final class TradingCoreOwner {
         }
     }
 
-    /** 会话打开后尝试推进之前积压的命令。 */
+    /**
+     * 会话打开时推进已有命令；运行时异常包装为 Agent 终止异常，最终解除日志推进标记。
+     */
     public void sessionOpened() {
         processingLogCallback = true;
         try {
             progressCommands();
-        } catch (RuntimeException failure) {
+        } catch (/* 当前读取或推进失败的异常，附带上下文后继续抛出 */ RuntimeException failure) {
             throw new org.agrona.concurrent.AgentTerminationException(failure);
         } finally { processingLogCallback = false; }
     }
 
-    /** 会话关闭后继续推进交易状态；未发送响应由集群出口清理。 */
+    /**
+     * 会话关闭时推进已有日志工作；本方法不使用传入 ID 清理网络会话，网络出口由外层处理。
+     * @param sessionId 响应目标会话 ID；无会话命令使用 NO_SESSION_ID
+     */
     void sessionClosed(long sessionId) {
         drainFromLogEvent();
     }
 
-    /** 从集群回调边界触发一次 Owner 命令推进。 */
+    /**
+     * 把会话等日志事件统一交给命令推进入口，不维护第二条业务执行路径。
+     */
     private void drainFromLogEvent() { pollCommands(); }
 
-    /** 只能由持有交易状态的 Owner 线程调用；不属于 Aeron 的背景回调。 */
+    /**
+     * 把同一个轻量完成通知接入运行时与 Matcher，工作线程发布完成后可唤醒 Owner。
+     * @param signal 工作线程发布完成后调用的轻量通知
+     */
     void ownerCompletionSignal(Runnable signal) {
         state.runtimeState.ownerCompletionSignal(signal);
         state.matcherPipeline.completionSignal(signal);
     }
 
-    /** 启动尚未收到首条日志时 journal 未激活；休眠探测只能读完成队列，不能执行运行期健康门禁。 */
+    /**
+     * 只探测现有 Matcher 通知、撮合完成和 Lane 回执；运行时尚未建立时返回假，不在门禁里强制检查尚未激活的资源。
+     */
     boolean ownerCompletionAvailable() {
         return state != null && (state.runtimeState.hasMatchingNotifications()
                 || state.matcherPipeline.hasMatchingCompletions()
                 || state.hasCompletedLaneCommit());
     }
 
-    /** 在 Owner 线程上收集完成通知、提交命令并推进实时读取。 */
+    /**
+     * 单轮推进入口：比较命令进度和派发修订，空闲时兼顾实时读取；返回是否有进展及实时工作量，不能当作本轮完成命令数。故障统一传给 Agent，最终保留队首解码缓存。
+     */
     public int pollCommands() {
+        // 本轮推进前的命令生命周期进度号
         long before = commandPipeline.commandProgress();
+        // 本轮推进前的撮合派发修订号
         long matchingBefore = state.pendingMatching.dispatchRevision();
         processingLogCallback = true;
         try {
             progressCommands();
+            // 本轮空闲阶段处理的实时读取数量
             int realtimeWork = pendingCommandCount() == 0 && realtimeBoundary.enabled()
                     ? progressRealtimeReads(System.nanoTime()) : 0;
             return (before != commandPipeline.commandProgress()
                     || matchingBefore != state.pendingMatching.dispatchRevision() ? 1 : 0)
                     + realtimeWork;
-        } catch (org.agrona.concurrent.AgentTerminationException fatal) {
+        } catch (/* 已是 Agent 终止异常的故障，保留原类型继续抛出 */ org.agrona.concurrent.AgentTerminationException fatal) {
             throw fatal;
-        } catch (RuntimeException failure) {
+        } catch (/* 当前读取或推进失败的异常，附带上下文后继续抛出 */ RuntimeException failure) {
             throw new org.agrona.concurrent.AgentTerminationException(failure);
         } finally {
             if (executionMode != TradingExecutionMode.FUSED) {
@@ -620,42 +751,66 @@ public final class TradingCoreOwner {
         }
     }
 
-    /** 角色切换和快照等控制边界先完成其前面的已复制命令。 */
+    /**
+     * 使用默认快照期限完成当前动作边界之前的命令，供角色切换、快照及退出边界复用。
+     */
     public void finishCommands() { finishSnapshotPrefix(snapshotDeadline()); }
 
-    /** 返回当前产品线的权威交易运行时。 */
+    /**
+     * 取得已启动运行时；尚未启动则明确报错。引用仍归 Owner，不提供跨线程账户读取权限。
+     */
     public TradingCoreRuntime state() {
         if (state == null) throw new IllegalStateException("clustered service is not started");
         return state;
     }
 
+    /**
+     * 返回当前可空运行时，供生命周期和测试区分尚未启动或已释放的状态。
+     */
     TradingCoreRuntime currentStateOrNull() {
         return state;
     }
 
-    /** 绑定外部创建的实时输出，供兼容测试和独立回放工具使用。 */
+    /**
+     * 把已有实时 outbox 及可空变更捕获器交给实时边界，不另建交易状态。
+     * @param outbox 接入的实时输出队列，沿用既有所有权
+     * @param capture 可空实时变更捕获器
+     */
     public void attachRealtime(RealtimeOutbox outbox,
                         RealtimeStateCapture capture) {
         realtimeBoundary.attach(outbox, capture, state);
     }
 
-    /** 释放已经交给网络出口或因会话关闭而丢弃的响应对象。 */
+    /**
+     * 运行时仍在时归还响应缓冲租约；已关闭或尚未启动时不再访问运行时池。
+     * @param response 要交出或归还的终态响应及其缓冲租约
+     */
     public void releaseResponse(CoreResponse response) {
         if (state != null) state.releaseResponse(response);
     }
 
-    /** 从 Aeron 快照片段恢复交易运行时。 */
+    /**
+     * 从分片来源读取到流结束，将字节交给恢复缓冲，完整解码后替换当前运行时；空轮询调用等待策略，本循环没有另设读取超时。
+     * @param snapshotSource 能够轮询快照片段的输入来源
+     * @param endOfStream 判定快照输入已经结束的函数
+     */
     void loadSnapshot(SnapshotFragmentSource snapshotSource, BooleanSupplier endOfStream) {
+        // 逐片收集并最终解码快照的恢复缓冲
         SectionedCoreSnapshotCodec.RecoveryBuffer recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
         while (!endOfStream.getAsBoolean()) {
+            // 本轮实际读取的快照片段数
             int fragments = snapshotSource.poll(
-                    (buffer, offset, length, header) -> recovery.accept(buffer, offset, length), 10);
+                    (/* 当前快照片段所在的原输入缓冲 */ buffer, /* 片段在输入缓冲中的起始字节偏移 */ offset, /* 当前片段的有效字节数 */ length, /* 快照片段附带的 Aeron 头，恢复字节收集不读取该值 */ header) -> recovery.accept(buffer, offset, length), 10);
             idleStrategy.idle(fragments);
         }
         replaceState(recovery.decode(productLine));
     }
 
-    /** 在累积 Aeron 快照片段前校验共享的快照大小上限。 */
+    /**
+     * 检查已有长度和新增片段均非负，且相加不超过 Java 数组上限；用减法检查避免整数相加先溢出。
+     * @param currentLength 缓冲中已有的快照字节数
+     * @param fragmentLength 将要追加的片段字节数
+     */
     public static void ensureSnapshotCapacity(int currentLength, int fragmentLength) {
         if (currentLength < 0 || fragmentLength < 0
                 || currentLength > SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES - fragmentLength) {
@@ -663,44 +818,75 @@ public final class TradingCoreOwner {
         }
     }
 
-    /** 从完整快照字节恢复交易运行时。 */
+    /**
+     * 从完整快照字节恢复指定产品线的候选运行时，再通过统一替换入口接入。
+     * @param snapshot 完整快照的编码字节
+     */
     void restoreSnapshot(byte[] snapshot) {
         replaceState(TradingCoreRuntime.fromSnapshot(productLine, snapshot));
     }
 
-    /** 恢复已按 Aeron fragment 接收和校验的分段快照，不再物化完整输入副本。 */
+    /**
+     * 要求恢复缓冲非空，解码候选运行时后交给统一替换入口。
+     * @param recovery 已收齐片段的恢复缓冲
+     */
     void restoreSnapshot(SectionedCoreSnapshotCodec.RecoveryBuffer recovery) {
         if (recovery == null) throw new IllegalArgumentException("snapshot recovery is null");
         replaceState(recovery.decode(productLine));
     }
 
-    /** 替换交易运行时，并重新绑定实时捕获器。 */
+    /**
+     * 先关闭旧运行时，再接入恢复结果并重新绑定实时状态；旧运行时关闭失败时不会先把新对象设为当前状态。
+     * @param restored 已解码的候选运行时
+     */
     private void replaceState(TradingCoreRuntime restored) {
         state.close();
         state = restored;
         realtimeBoundary.rebindState(state);
     }
 
-    /** 提供快照片段读取能力，避免 Owner 依赖具体的 Aeron Image 类型。 */
+    /**
+     * 快照分片读取契约，让恢复入口复用实际分片来源，无须持有 Cluster 或会话。
+     */
     @FunctionalInterface
     interface SnapshotFragmentSource {
-        /** 读取最多指定数量的快照片段，并把片段交给回调。 */
+        /**
+         * 按片段预算轮询快照来源并调用接收器，返回本轮实际交出的片段数。
+         * @param fragmentHandler 接收每个快照片段的回调
+         * @param fragmentLimit 本轮最多处理的片段数
+         */
         int poll(FragmentHandler fragmentHandler, int fragmentLimit);
     }
 
-    /** 将已经提交的命令响应交给响应出口，不在交易 Owner 中编码网络协议。 */
+    /**
+     * 用运行时当前已提交 Core 序号，把原请求和终态交给统一响应出口。
+     * @param sessionId 响应目标会话 ID；无会话命令使用 NO_SESSION_ID
+     * @param request 产生该响应的原请求或请求头
+     * @param response 要交出或归还的终态响应及其缓冲租约
+     */
     private void offerResponse(long sessionId, CoreMessage request, CoreResponse response) {
         publishResponse(responseSink, sessionId, request, response, state.committedCoreSequence());
     }
 
-    /** 发布响应辅助方法，供内部及测试/基准环境直接调用。 */
+    /**
+     * 从请求借出对应类型的响应头并交给出口；异步出口要保留头部和响应租约直到编码完成，本方法不做网络发送。
+     * @param sink 要接收头部和响应租约的出口
+     * @param sessionId 响应目标会话 ID；无会话命令使用 NO_SESSION_ID
+     * @param request 产生该响应的原请求或请求头
+     * @param response 要交出或归还的终态响应及其缓冲租约
+     * @param committedSequence 响应对应的已提交 Core 序号
+     */
     public static void publishResponse(ResponseSink sink, long sessionId, CoreMessage request,
                                 CoreResponse response, long committedSequence) {
+        // 按响应消息类型从原请求借出的响应头，异步编码前不能归还
         CoreMessageHeader header = request.responseHeader(responseType(request.header()));
         sink.offer(sessionId, header, response, committedSequence);
     }
 
-    /** 按请求类型计算协议层的响应消息类型。 */
+    /**
+     * 把查询请求映射到对应查询结果类型，其余查询使用状态哈希结果类型，普通命令使用 COMMAND_RESULT。
+     * @param requestHeader 需要决定响应类型的请求头
+     */
     static CoreMessageType responseType(CoreMessageHeader requestHeader) {
         return switch (requestHeader.messageType()) {
             case USER_STATE_QUERY -> CoreMessageType.USER_STATE_RESULT;
