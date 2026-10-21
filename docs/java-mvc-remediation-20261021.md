@@ -186,3 +186,5 @@
 - 鉴权元数据按Controller→AuthClientMetadata→原生Service交接。AuthClientMetadataBinding沿用可信代理、User-Agent300/IP80限制及规范UUID；Bearer仅通过CurrentAuthClient原生端口查询既有Spring上下文IP，不新增线程状态或设备校验。该接口隔离全局权限入口对Servlet的真实依赖，不能直接在Service读取HTTP。定向70、扩大245项干净构建无跳过，包含实际IP封禁、可信/非可信代理、设备格式、MFA与PostgreSQL身份/会话轮换。移除Bearer封禁判断的反证1项预期失败，恢复后扩大测试通过。初始数据库夹具使用任意设备名，改为生产要求的规范UUID后验证原有事务。关闭ADD-058..060，见 [鉴权元数据验证](validation/java-mvc-auth-metadata-20261022.json)。API Key、格式校验深扫、共享模型及最终实栈继续。
 
 - APIKey鉴权Servlet请求绑定、时间戳/窗口格式和原始签名载荷组装移ApiKeyRequestBinding，纯编码归ApiSignatureFormats；Service保留账号密钥/IP/权限/有效时间/验签及使用记录。封禁IP原生失败在Controller仍映射403/-1000。定向20、边界29项无跳过；移除Query+Body拼接反证2项全部预期失败。恢复后Gateway全模块干净构建1476项，20项环境条件跳过，无失败错误，25项独立PostgreSQL提现对账实际运行；外部R2与多产品网关实栈3个测试类未运行。关闭ADD-061、062，见 [API Key边界验证](validation/java-mvc-api-key-boundary-20261022.json)。复扫2128Java/1495main/0语法错误，Service HTTP、Controller直持Repository、Scheduled错误归包及Kafka错误归包四项为0；格式/分页深扫和嵌套共享模型仍需继续，不能据此宣称全量关闭。
+
+- 深扫继续发现19个Repository的原始分页/游标解析及11处其他入口格式/原生业务HTTP依赖；新增ADD-063..092待整改，不能由原248/追加62项已验证推断全项目完成。全源码快照2128Java/1495main及方法级Repository SQL清单、只读可复现工具已入档，见 [深度复扫报告](java-mvc-deep-audit-20261022.md)。公开嵌套类型仅列候选，需要实际跨层调用复核。

@@ -1,0 +1,22 @@
+{
+  "snapshot_utc": "2026-10-21T19:51:33.766650+00:00",
+  "java_files": 2128,
+  "main_files": 1495,
+  "syntax_errors": 0,
+  "structural_checks": {
+    "service_http_references": 0,
+    "controller_repository_fields": 0,
+    "scheduled_outside_task": 0,
+    "kafka_outside_consumer": 0
+  },
+  "confirmed_pending_pagination_repositories": 19,
+  "additional_confirmed_pending_ids": "ADD-063..092",
+  "nested_service_type_candidates": 38,
+  "repository_method_rows": 505,
+  "limitations": [
+    "AST解析不等于全模块类型检查；文件SHA用于确认扫描快照。",
+    "SQL提取基于Java字符串字面量并以init.sql/迁移已知表过滤；动态SQL/字段常量仍需源码复核，不能声称完成SQL语义证明。",
+    "嵌套公开record/enum和异常仅为候选；Core actor状态/快照/协议及Service内部数据不可机械视为MVC违规。",
+    "真实六产品线网关/Core/做市/资金和外部R2/浏览器验收仍待进行。"
+  ]
+}
