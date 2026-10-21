@@ -9,74 +9,118 @@ import java.nio.ByteOrder;
 import java.util.*;
 import org.junit.jupiter.api.Test;
 
+/**
+ * 验证字段编号快照的演进规则：字段重排和未知可选字段不影响状态，必填缺失、错误内容、过高读取需求及损坏记录必须拒绝；历史新增可选成交价字段缺失时明确取零。覆盖这些代表性结构，不启动运行时或 Cluster。
+ */
 class SnapshotFieldEvolutionTest {
+    /**
+     * 对空永续状态快照反转根字段顺序并添加未知字段九百，要求恢复值及业务哈希与原状态相同。
+     */
     @Test
     void reorderingAndAddingFieldsDoesNotChangeRestoredState() {
+        // 当前字段演进用例要编码并在变换后恢复的原业务状态。
         var state = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        // 当前编码器生成的带版本头快照字节。
         byte[] encoded = TradingStateSnapshotCodec.encode(state);
+        // 去掉版本头后拆出的完整字段片段列表，后续重排、移除或添加。
         var fields = split(Arrays.copyOfRange(encoded, 4, encoded.length));
         Collections.reverse(fields);
         fields.add(new SnapshotFields.Writer().text(900, "future optional business metadata").encode());
+        // 局部字段结构改变后的记录或带头快照字节。
         byte[] changed = joinWithVersion(fields);
         assertThat(TradingStateSnapshotCodec.decode(changed, state.productLine())).isEqualTo(state);
         assertThat(TradingStateSnapshotCodec.decode(changed, state.productLine()).businessStateHash())
                 .isEqualTo(state.businessStateHash());
     }
 
+    /**
+     * 分别移除必填字段二、把字段二改成长度错误的文本内容，两种情况都要求按快照字段错误拒绝。
+     */
     @Test
     void criticalFieldCannotDisappearOrChangeType() {
+        // 当前字段演进用例要编码并在变换后恢复的原业务状态。
         var state = TradingCoreState.empty(ProductLine.SPOT);
+        // 当前编码器生成的带版本头快照字节。
         byte[] encoded = TradingStateSnapshotCodec.encode(state);
-        for (boolean wrongType : new boolean[]{false, true}) {
+        for (boolean /* 当前循环是否把必填字段替换成错误文本；false 时只删除字段。 */ wrongType : new boolean[]{false, true}) {
+            // 去掉版本头后拆出的完整字段片段列表，后续重排、移除或添加。
             var fields = split(Arrays.copyOfRange(encoded, 4, encoded.length));
-            fields.removeIf(field -> id(field) == 2);
+            fields.removeIf(/* 当前检查或复制的一条完整字段字节，包含编号与长度头。 */ field -> id(field) == 2);
             if (wrongType) fields.add(new SnapshotFields.Writer().text(2, "not a revision").encode());
             assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(joinWithVersion(fields), state.productLine()))
                     .isInstanceOf(ProtocolException.class).hasMessageContaining("snapshot field");
         }
     }
 
+    /**
+     * 把根字段十二的最低读取需求改为五，要求解码器明确按读取版本不足拒绝。
+     */
     @Test
     void incompatibleBusinessRequirementsAreNotSilentlyIgnored() {
+        // 当前编码器生成的带版本头快照字节。
         byte[] encoded = TradingStateSnapshotCodec.encode(TradingCoreState.empty(ProductLine.SPOT));
+        // 去掉版本头后拆出的完整字段片段列表，后续重排、移除或添加。
         var fields = split(Arrays.copyOfRange(encoded, 4, encoded.length));
-        fields.removeIf(field -> id(field) == 12);
+        fields.removeIf(/* 当前检查或复制的一条完整字段字节，包含编号与长度头。 */ field -> id(field) == 12);
         fields.add(new SnapshotFields.Writer().number(12, 5).encode());
         assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(joinWithVersion(fields), ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("requires reader version");
     }
 
+    /**
+     * 构造最近成交价为零的标记价状态，逐层移除其字段七，再要求恢复值、最近成交价零默认及业务哈希全部保持一致。
+     */
     @Test
     void missingNewOptionalFieldUsesExplicitHistoricalDefault() {
+        // 用于提供空用户、订单、币对和财库的基础现货状态。
         var empty = TradingCoreState.empty(ProductLine.SPOT);
+        // 本用例固定最近成交价为零的币对标记价记录。
         var mark = new com.surprising.aeron.service.state.model.CoreMarkPriceState("1", 100, 0, 0, 1, 1000, 0);
+        // 仅含这条标记价、没有其他风险记录的状态。
         var risk = new com.surprising.aeron.service.state.model.CoreRiskState(Map.of("1", mark), Map.of(), Map.of(), Map.of(), 1);
+        // 当前字段演进用例要编码并在变换后恢复的原业务状态。
         var state = new TradingCoreState(empty.productLine(), 0, empty.users(), empty.orders(),
                 empty.instruments(), risk, empty.treasuryState());
+        // 当前编码器生成的带版本头快照字节。
         byte[] encoded = TradingStateSnapshotCodec.encode(state);
-        // Root.risk -> risk.marks -> map.entries -> entry.value -> mark.lastPriceTicks (field 7).
+        // 依次进入根风险、标记价表、映射条目、条目值，最终移除标记价最近成交价字段七。
+        // 局部字段结构改变后的记录或带头快照字节。
         byte[] changed = replace(Arrays.copyOfRange(encoded, 4, encoded.length), 6,
-                r -> replace(r, 1, marks -> replace(marks, 1, entries -> {
+                /* 根风险字段的内容记录，下一层要进入标记价表。 */ r -> replace(r, 1, /* 标记价 Map 记录，下一层要进入条目列表字段。 */ marks -> replace(marks, 1, /* 当前仅含一个标记价映射条目的列表字节，前面带条目长度。 */ entries -> {
+                    // 按小端读取唯一标记价列表条目的字节视图。
                     var input = ByteBuffer.wrap(entries).order(ByteOrder.LITTLE_ENDIAN);
+                    // 当前测试条目声明的字节长度，或截断循环保留的字节数。
                     int length = input.getInt();
                     assertThat(input.remaining()).isEqualTo(length);
+                    // 复制出的单个标记价 Map 条目记录，内含键和值字段。
                     byte[] entry = new byte[length]; input.get(entry);
-                    byte[] updated = replace(entry, 2, m -> replace(m, 7, ignored -> null));
+                    // 移除标记价最近成交价字段后重建的 Map 条目字节。
+                    byte[] updated = replace(entry, 2, /* 单条标记价业务记录内容，本次只移除字段七。 */ m -> replace(m, 7, /* 被移除的最近成交价字段旧内容，回调不读取而直接返回 null。 */ ignored -> null));
                     return ByteBuffer.allocate(4 + updated.length).order(ByteOrder.LITTLE_ENDIAN)
                             .putInt(updated.length).put(updated).array();
                 })));
+        // 从缺少新可选字段的变换快照解码出的业务状态。
         var restored = TradingStateSnapshotCodec.decode(joinWithVersion(split(changed)), ProductLine.SPOT);
         assertThat(restored).isEqualTo(state);
         assertThat(restored.riskState().markPrices().get("1").lastPriceTicks()).isZero();
         assertThat(restored.businessStateHash()).isEqualTo(state.businessStateHash());
     }
 
+    /**
+     * 在一条字段记录里查找指定编号，对内容执行测试变换；返回空则移除该字段，否则重新写头和内容，最后断言目标确实存在。
+     * @param record 待修改的一条字段记录，不含外层版本头
+     * @param fieldId 要修改或删除的目标字段编号
+     * @param update 对目标字段内容的测试变换函数，返回 null 表示删除
+     */
     private static byte[] replace(byte[] record, int fieldId, java.util.function.UnaryOperator<byte[]> update) {
+        // 本次测试重建字段记录的输出缓冲。
         var output = new java.io.ByteArrayOutputStream();
+        // 是否在遍历中找到目标编号，结束时必须为真以避免测试改错位置。
         boolean found = false;
-        for (byte[] field : split(record)) {
+        for (byte[] /* 当前检查或复制的一条完整字段字节，包含编号与长度头。 */ field : split(record)) {
             if (id(field) != fieldId) { output.writeBytes(field); continue; }
             found = true;
+            // 目标字段变换后的内容，空值表示删除整个字段。
             byte[] value = update.apply(Arrays.copyOfRange(field, 8, field.length));
             if (value != null) output.writeBytes(new SnapshotFields.Writer().bytes(fieldId, value).encode());
         }
@@ -84,34 +128,58 @@ class SnapshotFieldEvolutionTest {
         return output.toByteArray();
     }
 
+    /**
+     * 分别验证重复字段、各种非空截断长度、非法 UTF-8 字节被拒绝，以及 long 转 int 溢出仍抛 ArithmeticException。
+     */
     @Test
     void duplicateFieldsTruncationMalformedTextAndOverflowAreRejected() {
+        // 测试生成的编号一、数值四十二的完整字段，后续用来重复或截断。
         byte[] field = new SnapshotFields.Writer().number(1, 42).encode();
+        // 把相同编号一字段连续写两次的非法记录。
         byte[] duplicate = ByteBuffer.allocate(field.length * 2).put(field).put(field).array();
         assertThatThrownBy(() -> new SnapshotFields.Reader(duplicate)).isInstanceOf(ProtocolException.class);
-        for (int length = 1; length < field.length; length++) {
+        for (/* 当前测试条目声明的字节长度，或截断循环保留的字节数。 */ int length = 1; length < field.length; length++) {
+            // 只保留当前循环指定长度的不完整字段字节。
             byte[] truncated = Arrays.copyOf(field, length);
             assertThatThrownBy(() -> new SnapshotFields.Reader(truncated)).isInstanceOf(ProtocolException.class);
         }
+        // 字段内容为非法 UTF-8 字节的读取器，构造可成功但文本读取必须失败。
         var invalid = new SnapshotFields.Reader(new SnapshotFields.Writer().bytes(1, new byte[]{(byte) 0xff}).encode());
         assertThatThrownBy(() -> invalid.text(1)).isInstanceOf(ProtocolException.class);
+        // 字段值为 Long.MAX_VALUE 的读取器，用来核对转 int 的精确溢出检查。
         var overflow = new SnapshotFields.Reader(new SnapshotFields.Writer().number(1, Long.MAX_VALUE).encode());
         assertThatThrownBy(() -> overflow.integer(1)).isInstanceOf(ArithmeticException.class);
     }
 
+    /**
+     * 读取完整测试字段头的第一个小端整数，作为字段编号；不执行生产边界校验。
+     * @param field 包含编号、长度和内容的完整单字段字节
+     */
     private static int id(byte[] field) { return ByteBuffer.wrap(field).order(ByteOrder.LITTLE_ENDIAN).getInt(); }
+    /**
+     * 按每项编号及长度头切出完整字段字节，用于重排和局部替换；依赖测试输入本身格式完整，不是生产记录校验器。
+     * @param encoded 要按字段头拆分的完整记录
+     */
     private static List<byte[]> split(byte[] encoded) {
+        // 拆分记录或拼接新版本头时使用的小端字节缓冲。
         var buffer = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
+        // 去掉版本头后拆出的完整字段片段列表，后续重排、移除或添加。
         List<byte[]> fields = new ArrayList<>();
         while (buffer.hasRemaining()) {
-            int start = buffer.position(); buffer.getInt(); int length = buffer.getInt();
+            // 当前字段头开始的位置，用于复制该字段完整字节。
+            int start = buffer.position(); buffer.getInt(); /* 当前测试条目声明的字节长度，或截断循环保留的字节数。 */ int length = buffer.getInt();
             buffer.position(buffer.position() + length);
             fields.add(Arrays.copyOfRange(encoded, start, buffer.position()));
         }
         return fields;
     }
+    /**
+     * 按列表当前顺序拼接完整字段，并加固定版本三十七头；只供当前格式测试使用，不自动推导或升级版本。
+     * @param fields 需要按当前顺序拼回快照的完整单字段字节列表
+     */
     private static byte[] joinWithVersion(List<byte[]> fields) {
-        var buffer = ByteBuffer.allocate(4 + fields.stream().mapToInt(a -> a.length).sum()).order(ByteOrder.LITTLE_ENDIAN);
+        // 拆分记录或拼接新版本头时使用的小端字节缓冲。
+        var buffer = ByteBuffer.allocate(4 + fields.stream().mapToInt(/* 参与计算拼接总长度的一段完整字段字节。 */ a -> a.length).sum()).order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(37); fields.forEach(buffer::put); return buffer.array();
     }
 }
