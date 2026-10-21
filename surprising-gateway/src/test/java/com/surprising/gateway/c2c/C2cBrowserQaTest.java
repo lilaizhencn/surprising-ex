@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.websocket.provider.handler.ClientWebSocketHandler;
+
 import com.surprising.gateway.c2c.controller.C2cAdminChatController;
 import com.surprising.gateway.c2c.controller.C2cAdminController;
 import com.surprising.gateway.c2c.controller.C2cChatController;

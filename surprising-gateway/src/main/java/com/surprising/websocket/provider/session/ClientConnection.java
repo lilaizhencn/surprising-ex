@@ -1,4 +1,4 @@
-package com.surprising.websocket.provider.service;
+package com.surprising.websocket.provider.session;
 
 import lombok.extern.slf4j.Slf4j;
 import java.io.IOException;

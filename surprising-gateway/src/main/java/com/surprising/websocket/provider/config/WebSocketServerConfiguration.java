@@ -1,7 +1,7 @@
 package com.surprising.websocket.provider.config;
 
 import com.surprising.websocket.api.WebSocketApiPaths;
-import com.surprising.websocket.provider.service.ClientWebSocketHandler;
+import com.surprising.websocket.provider.handler.ClientWebSocketHandler;
 import java.util.List;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;

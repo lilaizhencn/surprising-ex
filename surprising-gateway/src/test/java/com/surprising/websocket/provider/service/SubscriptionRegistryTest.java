@@ -1,5 +1,7 @@
 package com.surprising.websocket.provider.service;
 
+import com.surprising.websocket.provider.session.ClientConnection;
+
 import com.surprising.websocket.provider.model.ChannelMetric;
 import com.surprising.websocket.provider.model.TimedPayload;
 

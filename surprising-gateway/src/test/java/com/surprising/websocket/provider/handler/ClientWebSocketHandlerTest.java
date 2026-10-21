@@ -1,4 +1,8 @@
-package com.surprising.websocket.provider.service;
+package com.surprising.websocket.provider.handler;
+
+import com.surprising.websocket.provider.service.WebSocketJwtAuthenticator;
+import com.surprising.websocket.provider.service.SubscriptionRegistry;
+import com.surprising.websocket.provider.session.ClientConnection;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;

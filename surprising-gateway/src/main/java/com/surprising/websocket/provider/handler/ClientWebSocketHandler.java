@@ -1,4 +1,9 @@
-package com.surprising.websocket.provider.service;
+package com.surprising.websocket.provider.handler;
+
+import com.surprising.websocket.provider.service.RealtimeWebSocketBridge;
+import com.surprising.websocket.provider.service.WebSocketJwtAuthenticator;
+import com.surprising.websocket.provider.service.SubscriptionRegistry;
+import com.surprising.websocket.provider.session.ClientConnection;
 
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsClientCommand;

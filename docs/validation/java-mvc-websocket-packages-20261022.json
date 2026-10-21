@@ -1,0 +1,279 @@
+{
+  "verified_at_utc": "2026-10-21T19:26:56.284172+00:00",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16",
+  "scope": "具体WebSocket handler/session与业务Service职责归包",
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=ClientConnectionTest,ClientWebSocketHandlerTest,SubscriptionRegistryTest,PrivateUserTopicRouterIntegrationTest,KafkaFanoutConsumerTest,KafkaFanoutConsumerTopicTest,C2cWebSocketPostgresTest,ReadViewHttpErrorsTest,LocalBusinessApiTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.websocket.provider.handler.ClientWebSocketHandlerTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.service.KafkaFanoutConsumerTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.ReadViewHttpErrorsTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.service.SubscriptionRegistryTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.service.KafkaFanoutConsumerTopicTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 36,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "60021684a842612ea9b54504558266ea58d4959f0d4c444247b7a67ba103bcd5",
+      "tests": 75,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=*WebSocket*Test,*Connection*Test,*Router*Test,*Fanout*Test,SubscriptionRegistryTest,DepthUpdateTest,ProductBusinessConfigurationTest,LocalBusinessApiTest,ConstructorInjectionContextTest,C2c*Http*Test",
+        "clean",
+        "install"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.websocket.provider.service.ClientConnectionIsolationTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.config.WebSocketPropertiesTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.handler.ClientWebSocketHandlerTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.service.KafkaFanoutConsumerTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.service.DepthUpdateTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cHttpBoundaryTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.ConstructorInjectionContextTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.account.provider.service.ExpiringContractSettlementFanoutServiceTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.config.WebSocketKafkaConfigurationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.service.SubscriptionRegistryTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.ProductBusinessConfigurationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.service.KafkaFanoutConsumerTopicTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.config.WebSocketServerConfigurationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 36,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.websocket.provider.config.WebSocketApplicationYamlTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "5f9765c3fdc9b67f34c43f5449b8b1cf2b2a2b627b654f74c75b6ee0102d0aaa",
+      "tests": 143,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "source_proof": [
+    {
+      "original": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/websocket/C2cChatRealtime.java",
+      "current": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/websocket/C2cChatRealtime.java",
+      "complete_body_equal_after_namespace_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/main/java/com/surprising/websocket/provider/config/WebSocketServerConfiguration.java",
+      "current": "surprising-gateway/src/main/java/com/surprising/websocket/provider/config/WebSocketServerConfiguration.java",
+      "complete_body_equal_after_namespace_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/ClientConnection.java",
+      "current": "surprising-gateway/src/main/java/com/surprising/websocket/provider/session/ClientConnection.java",
+      "complete_body_equal_after_namespace_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/ClientWebSocketHandler.java",
+      "current": "surprising-gateway/src/main/java/com/surprising/websocket/provider/handler/ClientWebSocketHandler.java",
+      "complete_body_equal_after_namespace_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/SubscriptionRegistry.java",
+      "current": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/SubscriptionRegistry.java",
+      "complete_body_equal_after_namespace_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cChatRealtimePostgresTest.java",
+      "current": "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cChatRealtimePostgresTest.java",
+      "complete_body_equal_after_namespace_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cBrowserQaTest.java",
+      "current": "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cBrowserQaTest.java",
+      "complete_body_equal_after_namespace_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/SubscriptionRegistryTest.java",
+      "current": "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/SubscriptionRegistryTest.java",
+      "complete_body_equal_after_namespace_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/ClientConnectionIsolationTest.java",
+      "current": "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/ClientConnectionIsolationTest.java",
+      "complete_body_equal_after_namespace_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/SubscriptionRegistryMetricsTest.java",
+      "current": "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/SubscriptionRegistryMetricsTest.java",
+      "complete_body_equal_after_namespace_normalization": true
+    },
+    {
+      "original": "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/ClientWebSocketHandlerTest.java",
+      "current": "surprising-gateway/src/test/java/com/surprising/websocket/provider/handler/ClientWebSocketHandlerTest.java",
+      "complete_body_equal_after_namespace_normalization": true
+    }
+  ],
+  "new_abstractions": [],
+  "preserved": [
+    "全部11个原文件完整体归一相同，没有修改发送队列/锁、timeout watcher、writer和关闭码。",
+    "会话鉴权、用户身份、C2C/实时可选装配、订阅权限、消息格式与产品选择不变。",
+    "订阅/缓存仍由原SubscriptionRegistry唯一持有；未新增状态或接口。",
+    "Handler测试随真实协议组件归包以保留protected/包内装配可见性；不为测试扩大生产API。"
+  ],
+  "unverified": "其余HTTP接入职责及完整复扫/门禁、最终真实网关/六集群/做市/资金验收仍未完成。",
+  "cleanup": {
+    "owned_postgres": "已停止并删除",
+    "owned_logs_reports": "本批日志和已汇总Gateway报告已清理，构建产物保留"
+  }
+}

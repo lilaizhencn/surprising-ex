@@ -5,7 +5,7 @@ import com.surprising.gateway.c2c.service.C2cAccess;
 import com.surprising.gateway.c2c.service.C2cConversations;
 import com.surprising.gateway.c2c.service.C2cMessages;
 
-import com.surprising.websocket.provider.service.ClientConnection;
+import com.surprising.websocket.provider.session.ClientConnection;
 import com.surprising.gateway.c2c.model.C2cChatViews;
 import com.surprising.gateway.c2c.utils.C2cChatCursors;
 import jakarta.annotation.PreDestroy;

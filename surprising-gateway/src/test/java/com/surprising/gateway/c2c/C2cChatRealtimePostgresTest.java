@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.websocket.provider.session.ClientConnection;
+
 import com.surprising.gateway.c2c.exception.C2cProblem;
 import com.surprising.gateway.c2c.service.C2cAccess;
 import com.surprising.gateway.c2c.service.C2cConversations;
@@ -21,7 +23,7 @@ import org.springframework.web.socket.*;
 class C2cChatRealtimePostgresTest {
     private C2cHttpFixture fixture;
     private C2cChatRealtime socket;
-    private final java.util.Map<String,com.surprising.websocket.provider.service.ClientConnection> wires=new java.util.HashMap<>();
+    private final java.util.Map<String,com.surprising.websocket.provider.session.ClientConnection> wires=new java.util.HashMap<>();
     private final List<String> frames=new CopyOnWriteArrayList<>();
     @BeforeEach void setup() throws Exception {
         fixture=new C2cHttpFixture();fixture.db.jdbc.update("UPDATE c2c_profiles SET receive_strangers=true");
@@ -33,7 +35,7 @@ class C2cChatRealtimePostgresTest {
         when(session.getUri()).thenReturn(URI.create("ws://127.0.0.1/ws/v1"));
         var headers=new HttpHeaders();headers.set("X-User-Id","9");when(session.getHandshakeHeaders()).thenReturn(headers);
         doAnswer(call->{frames.add(((TextMessage)call.getArgument(0)).getPayload());return null;}).when(session).sendMessage(any());
-        var wire=new com.surprising.websocket.provider.service.ClientConnection(session,null,4,java.time.Duration.ofSeconds(2));
+        var wire=new com.surprising.websocket.provider.session.ClientConnection(session,null,4,java.time.Duration.ofSeconds(2));
         wires.put(suffix,wire);return session;
     }
     private void command(WebSocketSession session,Map<String,?> command) {

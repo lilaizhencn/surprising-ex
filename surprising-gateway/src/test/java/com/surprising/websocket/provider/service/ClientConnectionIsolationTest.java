@@ -1,5 +1,7 @@
 package com.surprising.websocket.provider.service;
 
+import com.surprising.websocket.provider.session.ClientConnection;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
