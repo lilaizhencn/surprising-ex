@@ -84,6 +84,20 @@ flowchart LR
 内部 `MATCHING_PENDING`、队列入队成功和 Matcher 执行完成均不能单独作为客户端交易终态。
 业务拒单保留拒绝结果；需要回滚时只回滚该命令拥有的变化；无法核对的执行故障由故障与恢复边界处理。
 
+### 下单步骤 2–3：准入与撮合怎样交接
+
+先顺着下面的方法读主流程，再进入账户或 Matcher 的实现。PIPELINED 下这些工作可以重叠，
+表中顺序表示依赖关系；“派发准入”不等于资金预留已经成功。
+
+| 阅读步骤 | 类与方法 | 输入、交接与结束条件 |
+| --- | --- | --- |
+| 2.1 决定现在做还是延后 | [`MatchingCommandAdmission.beginMatching / deferMatching`](src/main/java/com/surprising/aeron/service/orchestration/trade/MatchingCommandAdmission.java) | 有尚未结束的批次且不允许独立准入时，保存原序号、解码输入、来源与日志时间，之后再做业务准入 |
+| 2.2 检查并派发准入 | `MatchingCommandAdmission.prepareMatching` → `dispatchPlaceAdmission` / `dispatchReplacementAdmission` | 检查身份、归属、产品规则和生命周期冲突；账户工作由所属 Lane 执行。已知业务错误按当前命令边界拒绝或回滚，不能跨其他在途账户命令回滚 |
+| 2.3 登记在途命令 | `prepareMatching` → `CoreMatchingFlow.putPendingMatching` | 把解码输入及准入事件放入 `CommandSlot`，固定分片及原业务时间；释放 Owner 事实作用域和账户访问权，再交出撮合输入 |
+| 3.1 交给 Matcher | [`CoreMatchingFlow.submitMatching / submitMatchingInCommandScope`](src/main/java/com/surprising/aeron/service/orchestration/trade/CoreMatchingFlow.java) | 按分片提交顺序派发；普通 PLACE 可先把带准入门闩的任务交出，账户准入成功后 Matcher 才能执行 |
+| 3.2 推进异步工作 | [`MatchingPipelineProgress.progressPlaceBatchAdmissions / submitDeferredMatchingAfterBatch`](src/main/java/com/surprising/aeron/service/orchestration/trade/MatchingPipelineProgress.java) | Owner 消费就绪提示并重试可推进项；准入事件和命令槽仍保存事实，就绪位只用于调度 |
+| 3.3 收据与提交头释放 | `CoreMatchingFlow.collectPlaceAdmissionIfReady` → `MatchingPipelineProgress.submissionCompleted` | Owner 收据收齐与 Matcher 消费是两个条件，均满足后才归还准入事件；释放分片提交头只允许后继继续，不表示当前订单已到终态 |
+
 ### 下单步骤 4：撮合事实、账户与账本
 
 `state.settlement` 中的类按下面顺序阅读。这里细分的是原有结算职责，
@@ -127,6 +141,29 @@ FUSED 还可在账本队列为空且事实就绪时，通过 `SystemLedgerLane.t
 因此，Lane 可以在其他 Lane 尚未入队时开始工作，Owner 此时仍不能回收事件。
 准入拒绝的普通下单沿已登记路由交出无成交回执，不执行正常成交资金计算；
 前置撤单已经成功、随后新单被拒绝时，成功的撤单仍须结算，不能视为整条命令没有变化。
+
+### 下单步骤 5：证据、财务完成与终态
+
+从 [`OrderedCommitCoordinator.commitReadyMatchingHead / commitReadyMatching`](src/main/java/com/surprising/aeron/service/orchestration/trade/commit/OrderedCommitCoordinator.java)
+进入。它们只尝试推进已就绪队首；`awaitFirst` 只多探测一次，不阻塞 Owner 等待工作线程。
+
+| 阅读步骤 | 方法 | 必须看清的边界 |
+| --- | --- | --- |
+| 5.1 提前派发资金 | `advanceMatchingProgress` → `dispatchReadyMatcherFinancialSettlements` | 按独立账本 FIFO 把已有资金事实提前交 Ledger；邮箱满就保留原游标重试。顺序批次还能产生后续子项时，不提前释放该命令的资金游标 |
+| 5.2 检查队首能否推进 | `matchingCommitReady` → `financialHeadReady` | 收普通下单准入，再核对当前事件、批次账户工作及财务条件；返回真表示可以尝试提交，后续控制工作仍可能需要挂起 |
+| 5.3 核对撮合证据 | `completeMatching` → `validateMatchingEvidence` | Core 序号与命令 UUID 必须匹配，结果所属逻辑分片的 Matcher 序号必须严格递增；当前代码不要求序号恰好加一 |
+| 5.4 收集账户变化 | `completeDispatchedMatcherSettlement` / `finishAppliedMatching` | 普通交易收集已执行的结算事实及 Lane 完成位；强平和到期控制还会接续各自既有账户业务。所有必要回执未齐则保留原槽，下轮继续 |
+| 5.5 发布并退休 | `finishTerminalMatching` → `storeTerminalResponse` | 完成发布和资金守恒核对，保存幂等终态及响应租约，再回收结算事件、移除待项并结束事实作用域；随后才恢复后继批次 |
+
+[`CommitPublication`](src/main/java/com/surprising/aeron/service/orchestration/trade/commit/CommitPublication.java)
+负责发布批次、派生索引和独立发布序号。`abort` / `suspend` 只清发布标记，账户回滚由原业务入口负责。
+拒单也可能已占用 Matcher 证据序号；`completeRejectedMatching` 等生产者结束并核对进度后才回收槽，
+防止较晚回执写入下一代命令。无法协调的 Matcher 前缀或账户故障进入恢复边界，不能当作普通无变化拒单。
+
+余额、划转、风控、资金费、触发单等直接控制命令使用公共
+[`DirectCommandSlot`](src/main/java/com/surprising/aeron/service/orchestration/trade/DirectCommandSlot.java)，
+不占订单簿完成队列；它保存一个命令的账户、账本或回滚续步，由 `poll` 推进至运行时收尾。
+这个槽被多条业务共用，因此保留在交易编排包，不归入下单某一步。
 
 ## 撤单、触发单、风控与强平
 
