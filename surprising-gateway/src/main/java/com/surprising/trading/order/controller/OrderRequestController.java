@@ -60,8 +60,16 @@ public class OrderRequestController {
     public ResponseEntity<com.surprising.trading.api.model.TradeFillQueryResponse> ownFills(long userId, String instrumentId,
             Long orderId, Long startTime, Long endTime, int limit, String cursor) {
         try {
+            if (userId <= 0 || orderId != null && orderId <= 0 || limit < 1 || limit > 1000
+                    || startTime != null && startTime <= 0 || endTime != null && endTime <= 0
+                    || startTime != null && endTime != null && startTime > endTime)
+                throw new IllegalArgumentException("invalid private fill query");
+            instrumentId = instrumentId == null || instrumentId.isBlank() ? null : instrumentId.trim().toUpperCase(java.util.Locale.ROOT);
+            if (instrumentId != null) com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
+            var after = cursor == null || cursor.isBlank() ? null : com.surprising.trading.order.utils.TradeReadCursors.fill(cursor,
+                    com.surprising.trading.order.utils.TradeReadCursors.fillScope(orderService.currentProductLine(), userId, instrumentId, orderId, startTime, endTime));
             return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore())
-                    .body(orderService.ownFills(userId, instrumentId, orderId, startTime, endTime, limit, cursor));
+                    .body(orderService.ownFills(userId, instrumentId, orderId, startTime, endTime, limit, after));
         } catch (IllegalArgumentException invalid) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
         }

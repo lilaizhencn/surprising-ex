@@ -38,7 +38,7 @@ class ProjectionReadAssociationPostgresTest {
                 ()->assertThat(algo.byId(line,7,99)).isNull(),
                 ()->assertThat(algo.byClient(line,7,"unseen")).isNull(),
                 ()->assertThat(trades.ownFills(line,7,null,null,null,null,10,null).trades()).isEmpty(),
-                ()->assertThat(trades.search(line,null,null,null,10,null,null).trades()).isEmpty(),
+                ()->assertThat(trades.search(line,null,null,null,10,null,false).trades()).isEmpty(),
                 ()->assertThat(triggers.get(line,7L,99)).isEmpty(),
                 ()->assertThat(triggers.search(line,null,null,null,null,10,null,null).orders()).isEmpty());
         for(var read:reads) {

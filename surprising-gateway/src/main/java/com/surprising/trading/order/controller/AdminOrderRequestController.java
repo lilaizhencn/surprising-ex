@@ -51,7 +51,18 @@ public class AdminOrderRequestController {
             String productLineValue, Long userId, String instrumentId, Long orderId, int limit, String cursor, String sort) {
         requireAdmin(adminUserId);
         try {
-            return orderService.adminTrades(userId, instrumentId, orderId, limit, cursor, sort, productLine(productLineValue, productLineHeader));
+            if (userId != null && userId <= 0 || orderId != null && orderId <= 0 || limit < 1 || limit > 1000)
+                throw new IllegalArgumentException("invalid trade query");
+            instrumentId = instrumentId == null || instrumentId.isBlank() ? null : instrumentId.trim().toUpperCase(java.util.Locale.ROOT);
+            if (instrumentId != null) com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
+            String ordering = sort == null || sort.isBlank() ? "eventTime.desc" : sort.trim();
+            if (!java.util.Set.of("eventTime.asc", "eventTime.desc").contains(ordering)) throw new IllegalArgumentException("invalid trade sort");
+            boolean ascending = ordering.endsWith("asc");
+            ProductLine requested = productLine(productLineValue, productLineHeader);
+            ProductLine effective = requested == null ? orderService.currentProductLine() : requested;
+            var after = cursor == null || cursor.isBlank() ? null : com.surprising.trading.order.utils.TradeReadCursors.execution(cursor,
+                    com.surprising.trading.order.utils.TradeReadCursors.executionScope(effective,userId,instrumentId,orderId,ascending));
+            return orderService.adminTrades(userId, instrumentId, orderId, limit, after, ascending, requested);
         } catch (IllegalArgumentException invalid) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
         }

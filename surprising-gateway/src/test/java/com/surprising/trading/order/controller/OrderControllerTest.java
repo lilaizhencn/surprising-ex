@@ -26,6 +26,27 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.server.ResponseStatusException;
 
 class OrderControllerTest {
+    @Test void fillQueryBindsExactCursorCoordinatesAndRejectsInvalidInputsBeforeBusinessRead() {
+        var service=mock(OrderService.class);
+        var requests=new OrderRequestController(service,null,null);
+        var line=com.surprising.product.api.ProductLine.OPTION;
+        when(service.currentProductLine()).thenReturn(line);
+        var after=new com.surprising.trading.order.model.TradeReadCursor.Fill(9007199254740993L,Long.MAX_VALUE,Integer.MAX_VALUE,"MAKER");
+        String scope=com.surprising.trading.order.utils.TradeReadCursors.fillScope(line,7,"604",Long.MAX_VALUE,1L,Long.MAX_VALUE);
+        String cursor=com.surprising.trading.order.utils.TradeReadCursors.encode(scope,after);
+        requests.ownFills(7," 604 ",Long.MAX_VALUE,1L,Long.MAX_VALUE,10,cursor);
+        org.mockito.Mockito.verify(service).ownFills(7,"604",Long.MAX_VALUE,1L,Long.MAX_VALUE,10,after);
+        org.mockito.Mockito.clearInvocations(service);
+        for (String bad:List.of("garbage",cursor+"!")) {
+            assertThatThrownBy(()->requests.ownFills(7,"604",Long.MAX_VALUE,1L,Long.MAX_VALUE,10,bad))
+                    .isInstanceOfSatisfying(ResponseStatusException.class, failure->assertThat(failure.getStatusCode().value()).isEqualTo(400));
+        }
+        assertThatThrownBy(()->requests.ownFills(7,null,null,2L,1L,10,null)).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(()->requests.ownFills(0,null,null,null,null,10,null)).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(()->requests.ownFills(7,"BTC-USDT",null,null,null,10,null)).isInstanceOf(ResponseStatusException.class);
+        org.mockito.Mockito.verify(service,org.mockito.Mockito.never()).ownFills(org.mockito.ArgumentMatchers.anyLong(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.anyInt(),org.mockito.ArgumentMatchers.any());
+    }
+
     @Test void malformedAlgoQueriesAreRejectedBeforeAnyBusinessCall() {
         var algo=mock(AlgoOrderService.class);
         var requests=new OrderRequestController(mock(OrderService.class),algo,mock(CancelAllAfterService.class));

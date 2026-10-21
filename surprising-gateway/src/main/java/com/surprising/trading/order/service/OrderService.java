@@ -62,20 +62,20 @@ public class OrderService {
     private final com.surprising.trading.order.repository.TradeProjectionRepository tradeProjection;
 
     public com.surprising.trading.api.model.TradeFillQueryResponse ownFills(long userId, String instrumentId,
-            Long orderId, Long startTime, Long endTime, int limit, String cursor) {
+            Long orderId, Long startTime, Long endTime, int limit, com.surprising.trading.order.model.TradeReadCursor.Fill cursor) {
         if (tradeProjection == null) throw new ReadViewUnavailableException("TRADE_READ_VIEW_UNAVAILABLE");
         String instrument = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
         return tradeProjection.ownFills(currentProductLine(), userId, instrument, orderId, startTime, endTime, limit, cursor);
     }
 
     public com.surprising.trading.api.model.AdminTradeQueryResponse adminTrades(Long userId, String instrumentId,
-            Long orderId, int limit, String cursor, String sort, ProductLine requestedProduct) {
+            Long orderId, int limit, com.surprising.trading.order.model.TradeReadCursor.Execution cursor, boolean ascending, ProductLine requestedProduct) {
         ProductLine product = currentProductLine();
         if (requestedProduct != null && requestedProduct != product)
             throw new IllegalArgumentException("product line does not match provider");
         if (tradeProjection == null) throw new ReadViewUnavailableException("TRADE_READ_VIEW_UNAVAILABLE");
         String instrument = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
-        return tradeProjection.search(product, userId, instrument, orderId, limit, cursor, sort);
+        return tradeProjection.search(product, userId, instrument, orderId, limit, cursor, ascending);
     }
     private final com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
 
@@ -961,7 +961,7 @@ public class OrderService {
         }
     }
 
-    private ProductLine currentProductLine() {
+    public ProductLine currentProductLine() {
         return properties.getKafka().getProductLine();
     }
 

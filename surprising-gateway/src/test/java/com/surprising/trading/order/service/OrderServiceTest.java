@@ -76,8 +76,9 @@ class OrderServiceTest {
         var trades = org.mockito.Mockito.mock(com.surprising.trading.order.repository.TradeProjectionRepository.class);
         var service = service(line, aeronOrders, realtimeQueries, trades);
         var page = new com.surprising.trading.api.model.TradeFillQueryResponse(1001, line, 0, List.of(), null, false, "eventTime.desc", 10);
-        when(trades.ownFills(line, 1001, "1", 91L, 1000L, 2000L, 10, "cursor")).thenReturn(page);
-        assertThat(service.ownFills(1001, " 1 ", 91L, 1000L, 2000L, 10, "cursor")).isSameAs(page);
+        var cursor = new com.surprising.trading.order.model.TradeReadCursor.Fill(1500L, Long.MAX_VALUE, 1, "MAKER");
+        when(trades.ownFills(line, 1001, "1", 91L, 1000L, 2000L, 10, cursor)).thenReturn(page);
+        assertThat(service.ownFills(1001, " 1 ", 91L, 1000L, 2000L, 10, cursor)).isSameAs(page);
         verifyNoInteractions(aeronOrders, projection, realtimeQueries);
     }
     @ParameterizedTest @EnumSource(ProductLine.class)
