@@ -13,6 +13,7 @@ import com.surprising.gateway.provider.auth.ComplianceModels.KycProviderInfo;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTag;
 import com.surprising.gateway.provider.auth.ComplianceModels.RiskTagCreateRequest;
 import com.surprising.gateway.provider.auth.AuthModels.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.repository.KycProviderEventRepository;
 import com.surprising.gateway.provider.service.KycDocumentService;
 import com.surprising.gateway.provider.service.SecurityNotificationService;
 import java.time.Instant;
@@ -30,6 +31,7 @@ public class ComplianceService {
 
     private final ComplianceUserProjectionRepository userProjectionRepository;
     private final ComplianceKycRepository kycRepository;
+    private final KycProviderEventRepository providerEvents;
     private final ComplianceRiskTagRepository riskTagRepository;
     private final ComplianceAmlCaseRepository amlCaseRepository;
     private final AuthService authService;
@@ -43,6 +45,7 @@ public class ComplianceService {
 
     public ComplianceService(ComplianceUserProjectionRepository userProjectionRepository,
                              ComplianceKycRepository kycRepository,
+                             KycProviderEventRepository providerEvents,
                              ComplianceRiskTagRepository riskTagRepository,
                              ComplianceAmlCaseRepository amlCaseRepository,
                              AuthService authService,
@@ -54,6 +57,7 @@ public class ComplianceService {
                              KycProviderRegistry kycProviders, CountryRepository countries) {
         this.userProjectionRepository = userProjectionRepository;
         this.kycRepository = kycRepository;
+        this.providerEvents = providerEvents;
         this.riskTagRepository = riskTagRepository;
         this.amlCaseRepository = amlCaseRepository;
         this.authService = authService;
@@ -241,13 +245,15 @@ public class ComplianceService {
 
     @Transactional
     public KycProfile applyProviderCallback(String provider, Map<String, String> headers, byte[] body) {
+        provider = ComplianceValidation.provider(provider);
         KycProvider.KycProviderResult result = kycProviders.verifyCallback(provider, headers, body)
                 .orElseThrow(() -> new IllegalArgumentException("KYC callback could not be verified"));
         Long userId;
         try { userId = Long.valueOf(result.externalUserId()); }
         catch (RuntimeException ex) { throw new IllegalArgumentException("KYC callback user reference is invalid", ex); }
-        if (!kycRepository.recordProviderEvent(provider, result.eventKey(), Instant.now())) return kycRepository.find(userId);
-        KycProfile previous = kycRepository.find(userId);
+        if (result.eventKey() == null || result.eventKey().isBlank()) throw new IllegalArgumentException("provider event key is required");
+        if (!providerEvents.record(provider, result.eventKey(), Instant.now())) return kycRepository.find(userId);
+        KycProfile previous = kycRepository.findForUpdate(userId);
         if (previous == null || !provider.equalsIgnoreCase(previous.provider())
                 || (result.providerReference() != null && !result.providerReference().equals(previous.providerReference()))) {
             throw new IllegalArgumentException("KYC callback does not match the current verification session");
@@ -268,11 +274,13 @@ public class ComplianceService {
         if (previous == null || !selected.equalsIgnoreCase(previous.provider()) || !"PENDING".equals(previous.status())) {
             throw new IllegalStateException("there is no pending simulated KYC session");
         }
-        if (!kycRepository.recordProviderEvent(selected,
+        if (!providerEvents.record(selected,
                 "SIMULATION:" + userId + ":" + java.util.Objects.toString(previous.providerReference(), "manual")
                         + ":" + previous.updatedAt().toEpochMilli(), Instant.now())) {
             throw new IllegalStateException("the simulated KYC result was already submitted");
         }
+        KycProfile locked = kycRepository.findForUpdate(userId);
+        if (!java.util.Objects.equals(previous, locked)) throw new IllegalStateException("the KYC session changed before its result was saved");
         String status = switch (decision) { case "APPROVED" -> "VERIFIED"; case "REJECTED" -> "REJECTED"; default -> "PENDING"; };
         String reason = "REJECTED".equals(status) ? "Simulated provider rejection" : null;
         KycProfile updated = kycRepository.applyProviderResult(userId, selected, status, reason, Instant.now());

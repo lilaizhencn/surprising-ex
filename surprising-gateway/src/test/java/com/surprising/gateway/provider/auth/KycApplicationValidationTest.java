@@ -17,7 +17,7 @@ class KycApplicationValidationTest {
     final ComplianceKycRepository profiles = mock();
     final KycProviderRegistry providers = mock();
     final KycDocumentService documents = mock();
-    final ComplianceService service = new ComplianceService(mock(), profiles, mock(), mock(), auth,
+    final ComplianceService service = new ComplianceService(mock(), profiles, mock(), mock(), mock(), auth,
             mock(), documents, mock(), mock(), mock(), providers, countries);
     final LocalDate today = LocalDate.now(ZoneOffset.UTC);
 

@@ -24,7 +24,7 @@ public class ComplianceKycRepository {
 
     public ComplianceKycRepository(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
-        this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+        this.objectMapper = java.util.Objects.requireNonNull(objectMapper,"KYC JSON mapper is required");
     }
 
     public KycProfile upsert(long userId, long adminUserId, KycUpdateRequest request, Instant now) {
@@ -111,13 +111,19 @@ public class ComplianceKycRepository {
                 """, (rs, rowNum) -> toProfile(rs), userId).stream().findFirst().orElse(null);
     }
 
-    public boolean recordProviderEvent(String provider, String eventKey, Instant now) {
-        if (eventKey == null || eventKey.isBlank()) throw new IllegalArgumentException("provider event key is required");
-        return jdbcTemplate.update("""
-                INSERT INTO gateway_kyc_provider_events (provider, event_key, received_at)
-                VALUES (?, ?, ?) ON CONFLICT (provider, event_key) DO NOTHING
-                """, ComplianceValidation.provider(provider), eventKey, Timestamp.from(now)) == 1;
+    /** 调用方事务持有当前资料行，回调资格校验与状态更新不能跨越新的申请会话。 */
+    public KycProfile findForUpdate(long userId) {
+        return jdbcTemplate.query("""
+                SELECT user_id, kyc_level, status, country, document_type, provider, provider_reference,
+                       reviewed_by_user_id, reviewed_at, rejection_reason, expires_at, created_at, updated_at,
+                       applicant_type, submitted_documents::text, face_verification_status
+                  FROM gateway_user_kyc_profiles
+                 WHERE user_id = ? FOR UPDATE
+                """, (rs, rowNum) -> toProfile(rs), userId).stream().findFirst().orElse(null);
     }
+
+
+
 
     public KycProfile applyProviderResult(long userId, String provider, String status, String rejectionReason, Instant now) {
         String normalizedStatus = ComplianceValidation.kycStatus(status);

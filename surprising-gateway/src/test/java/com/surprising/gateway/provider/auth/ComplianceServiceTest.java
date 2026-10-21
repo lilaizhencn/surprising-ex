@@ -23,6 +23,7 @@ class ComplianceServiceTest {
 
     private final ComplianceUserProjectionRepository userProjectionRepository = mock();
     private final ComplianceKycRepository kycRepository = mock();
+    private final com.surprising.gateway.provider.auth.repository.KycProviderEventRepository providerEvents = mock();
     private final ComplianceRiskTagRepository riskTagRepository = mock();
     private final ComplianceAmlCaseRepository amlCaseRepository = mock();
     private final AuthService authService = mock();
@@ -34,7 +35,7 @@ class ComplianceServiceTest {
     private final KycProviderRegistry kycProviders = mock();
 
     private final ComplianceService service = new ComplianceService(
-            userProjectionRepository, kycRepository, riskTagRepository, amlCaseRepository,
+            userProjectionRepository, kycRepository, providerEvents, riskTagRepository, amlCaseRepository,
             authService, approvalService, kycDocumentService, adminAuditRepository,
             authPersistence, notifications, kycProviders, mock(CountryRepository.class));
 
@@ -128,7 +129,8 @@ class ComplianceServiceTest {
         when(kycProviders.simulationEnabled()).thenReturn(true);
         when(kycProviders.selectedProvider()).thenReturn("SUMSUB");
         when(kycRepository.find(42)).thenReturn(pending);
-        when(kycRepository.recordProviderEvent(org.mockito.ArgumentMatchers.eq("SUMSUB"),
+        when(kycRepository.findForUpdate(42)).thenReturn(pending);
+        when(providerEvents.record(org.mockito.ArgumentMatchers.eq("SUMSUB"),
                 org.mockito.ArgumentMatchers.startsWith("SIMULATION:"), org.mockito.ArgumentMatchers.any())).thenReturn(true);
         when(kycRepository.applyProviderResult(org.mockito.ArgumentMatchers.eq(42L),
                 org.mockito.ArgumentMatchers.eq("SUMSUB"), org.mockito.ArgumentMatchers.eq("VERIFIED"),
@@ -161,7 +163,8 @@ class ComplianceServiceTest {
         when(kycProviders.simulationEnabled()).thenReturn(true);
         when(kycProviders.selectedProvider()).thenReturn("SUMSUB");
         when(kycRepository.find(42)).thenReturn(pending);
-        when(kycRepository.recordProviderEvent(org.mockito.ArgumentMatchers.eq("SUMSUB"),
+        when(kycRepository.findForUpdate(42)).thenReturn(pending);
+        when(providerEvents.record(org.mockito.ArgumentMatchers.eq("SUMSUB"),
                 org.mockito.ArgumentMatchers.startsWith("SIMULATION:"), org.mockito.ArgumentMatchers.any())).thenReturn(false);
 
         assertThatThrownBy(() -> service.completeKycSimulation("Bearer user-token", "MANUAL_REVIEW"))

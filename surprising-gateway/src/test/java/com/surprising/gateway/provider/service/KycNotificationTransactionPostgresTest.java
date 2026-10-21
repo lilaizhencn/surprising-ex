@@ -85,7 +85,7 @@ class KycNotificationTransactionPostgresTest {
         var providers = mock(KycProviderRegistry.class);
         when(providers.verifyCallback(eq("SELF"), any(), any()))
                 .thenReturn(Optional.of(new KycProvider.KycProviderResult(null, "42", "event-1", "VERIFIED", null)));
-        var target = new ComplianceService(mock(), profiles, mock(), mock(), mock(AuthService.class),
+        var target = new ComplianceService(mock(), profiles, new com.surprising.gateway.provider.auth.repository.KycProviderEventRepository(jdbc), mock(), mock(), mock(AuthService.class),
                 approvals, mock(KycDocumentService.class), mock(AdminAuditRepository.class), users,
                 notifications, providers, mock());
         context = new AnnotationConfigApplicationContext();

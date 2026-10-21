@@ -61,8 +61,8 @@ class KycProviderDatabaseTest {
                         "applicant-1", null, "PENDING", java.util.List.of()), "[]", now);
         assertThat(submitted.status()).isEqualTo("PENDING");
         assertThat(submitted.provider()).isEqualTo("SUMSUB");
-        assertThat(repository.recordProviderEvent("SUMSUB", "event-1", now)).isTrue();
-        assertThat(repository.recordProviderEvent("SUMSUB", "event-1", now)).isFalse();
+        assertThat(new com.surprising.gateway.provider.auth.repository.KycProviderEventRepository(jdbc).record("SUMSUB", "event-1", now)).isTrue();
+        assertThat(new com.surprising.gateway.provider.auth.repository.KycProviderEventRepository(jdbc).record("SUMSUB", "event-1", now)).isFalse();
         var verified = repository.applyProviderResult(1L, "SUMSUB", "VERIFIED", null, now.plusSeconds(1));
         assertThat(verified.status()).isEqualTo("VERIFIED");
         assertThat(verified.faceVerificationStatus()).isEqualTo("VERIFIED");
