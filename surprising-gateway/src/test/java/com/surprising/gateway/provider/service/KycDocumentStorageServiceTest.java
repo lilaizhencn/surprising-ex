@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.storage.KycDocumentStorageService;
+import com.surprising.gateway.provider.exception.KycDocumentStorageException;
 import static org.assertj.core.api.Assertions.*;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.file.*;

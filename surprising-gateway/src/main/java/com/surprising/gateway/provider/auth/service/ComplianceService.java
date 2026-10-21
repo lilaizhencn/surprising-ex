@@ -172,12 +172,6 @@ public class ComplianceService {
         return kycProviders.refreshSession(profile.provider(), userId, profile.providerReference());
     }
 
-    public KycDocument uploadUserKycDocument(String authorization, String documentType,
-                                             org.springframework.web.multipart.MultipartFile file) {
-        long userId = authService.authenticateBearer(authorization).userId();
-        return kycDocumentService.upload(userId, documentType, file);
-    }
-
     public List<KycDocument> userKycDocuments(String authorization) {
         long userId = authService.authenticateBearer(authorization).userId();
         return kycDocumentService.findForUser(userId);

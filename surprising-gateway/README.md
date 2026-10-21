@@ -530,3 +530,5 @@ WebSocket具体接入处理器位于 `websocket.provider.handler.ClientWebSocket
 托管钱包请求与提现法币估值适配位于 `provider.client.CustodyWalletClient` 和 `provider.client.WithdrawalValuationClient`；提现、对账及划转安全判断仍由原Service聚合。
 
 后台系统Service只做授权、路由去重与健康汇总；`provider.client.SystemHealthClient`负责本地Actuator及远端HTTP健康探测，响应模型归 `provider.model`。
+
+KYC文档上传在 `auth.controller.UserComplianceController` 完成鉴权、Multipart绑定和文件格式校验，传入原生 `model.KycDocumentUpload`；`KycDocumentService`协调摘要、文件写入、元数据落库及失败清理。实际存储分别位于 `provider.storage.KycDocumentStorageService` 和 `c2c.storage.C2cR2Storage`；对象路径和签名验证仍在存储边界。

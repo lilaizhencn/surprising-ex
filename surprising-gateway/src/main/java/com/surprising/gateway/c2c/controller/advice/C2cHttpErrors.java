@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c.controller.advice;
 
+import com.surprising.gateway.provider.exception.KycDocumentStorageException;
 import com.surprising.gateway.c2c.exception.C2cProblem;
 
 import jakarta.servlet.http.HttpServletResponse;
@@ -47,7 +48,7 @@ public class C2cHttpErrors {
     public ResponseEntity<?> storage(DataAccessException failure) {
         return error(HttpStatus.SERVICE_UNAVAILABLE, "C2C_STORAGE_UNAVAILABLE", "C2C 数据暂不可用，请查询原请求，勿重复提交");
     }
-    @ExceptionHandler(com.surprising.gateway.provider.service.KycDocumentStorageException.class)
+    @ExceptionHandler(com.surprising.gateway.provider.exception.KycDocumentStorageException.class)
     public ResponseEntity<?> attachmentStorage(RuntimeException failure) {
         return error(HttpStatus.SERVICE_UNAVAILABLE,"C2C_ATTACHMENT_UNAVAILABLE","文件存储暂不可用，请使用原上传请求查询或重试");
     }
@@ -67,7 +68,7 @@ public class C2cHttpErrors {
         };
         if (failure instanceof com.surprising.realtime.api.exception.ReadViewUnavailableException) return HttpStatus.SERVICE_UNAVAILABLE;
         if (failure instanceof DataIntegrityViolationException) return HttpStatus.CONFLICT;
-        if (failure instanceof DataAccessException || failure instanceof com.surprising.gateway.provider.service.KycDocumentStorageException)
+        if (failure instanceof DataAccessException || failure instanceof com.surprising.gateway.provider.exception.KycDocumentStorageException)
             return HttpStatus.SERVICE_UNAVAILABLE;
         if (failure instanceof org.springframework.web.multipart.MaxUploadSizeExceededException) return HttpStatus.PAYLOAD_TOO_LARGE;
         if (failure instanceof IllegalArgumentException || failure instanceof ArithmeticException || failure instanceof HttpMessageNotReadableException)

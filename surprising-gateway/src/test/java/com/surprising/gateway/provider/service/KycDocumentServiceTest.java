@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.storage.KycDocumentStorageService;
+import com.surprising.gateway.provider.exception.KycDocumentNotFoundException;
+import com.surprising.gateway.provider.exception.KycDocumentStorageUnavailableException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -12,6 +15,10 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
 import com.surprising.gateway.provider.auth.repository.KycDocumentRepository;
+import com.surprising.gateway.provider.auth.controller.UserComplianceController;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.ComplianceService;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,7 +43,7 @@ class KycDocumentServiceTest {
                 .thenReturn(new KycDocument(10L, 7L, "PASSPORT", "passport.pdf", "application/pdf",
                         pdf.length, sha256(pdf), "UPLOADED", Instant.now(), null));
 
-        KycDocument document = service.upload(7L, "PASSPORT",
+        KycDocument document = controller(service, properties).uploadKycDocument("Bearer user", "PASSPORT",
                 new MockMultipartFile("file", "passport.pdf", "application/pdf", pdf));
 
         assertThat(document.documentType()).isEqualTo("PASSPORT");
@@ -53,9 +60,9 @@ class KycDocumentServiceTest {
         KycDocumentService service = new KycDocumentService(
                 repository, new KycDocumentStorageService(properties), properties, new ObjectMapper());
 
-        assertThatThrownBy(() -> service.upload(7L, "PASSPORT",
+        assertThatThrownBy(() -> controller(service, properties).uploadKycDocument("Bearer user", "PASSPORT",
                 new MockMultipartFile("file", "passport.png", "image/png", "%PDF-1.7".getBytes())))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
                 .hasMessageContaining("content type");
 
         verify(repository, never()).insert(anyLong(), anyString(), anyString(), anyString(), anyLong(), anyString(), anyString(), any());
@@ -151,6 +158,13 @@ class KycDocumentServiceTest {
         assertThatThrownBy(() -> service.requireSubmissionDocuments(7L, List.of(10L), type)).hasMessageContaining(type + "_BACK");
         when(repository.findOwnedForSubmission(7L, ids)).thenReturn(List.of(document(10L, type + "_FRONT"), document(11L, "ADDRESS_PROOF")));
         assertThatThrownBy(() -> service.requireSubmissionDocuments(7L, ids, type)).hasMessageContaining(type + "_BACK");
+    }
+
+    private UserComplianceController controller(KycDocumentService documents, GatewayProperties properties) {
+        var auth = mock(AuthService.class);
+        when(auth.authenticateBearer("Bearer user")).thenReturn(
+                new JwtPrincipal(7L, "user", "NORMAL", List.of(), Instant.now().plusSeconds(60)));
+        return new UserComplianceController(mock(ComplianceService.class), auth, documents, properties);
     }
 
     private KycDocument document(long id, String type) {

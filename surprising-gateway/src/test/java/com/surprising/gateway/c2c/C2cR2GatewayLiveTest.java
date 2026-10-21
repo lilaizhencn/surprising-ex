@@ -7,7 +7,7 @@ import com.surprising.gateway.c2c.service.C2cAccess;
 import com.surprising.gateway.c2c.service.C2cConversations;
 import com.surprising.gateway.c2c.service.C2cMessages;
 import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
-import com.surprising.gateway.c2c.service.C2cR2Storage;
+import com.surprising.gateway.c2c.storage.C2cR2Storage;
 
 import com.surprising.gateway.c2c.config.C2cR2Properties;
 

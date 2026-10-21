@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c.service;
 
+import com.surprising.gateway.c2c.storage.C2cR2Storage;
 import com.surprising.gateway.c2c.exception.C2cProblem;
 import com.surprising.gateway.c2c.repository.C2cOrdersRepository;
 
@@ -11,7 +12,7 @@ import com.surprising.gateway.c2c.repository.C2cAttachmentRepository;
 import com.surprising.gateway.c2c.repository.C2cMessageRepository;
 import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
-import com.surprising.gateway.provider.service.KycDocumentStorageException;
+import com.surprising.gateway.provider.exception.KycDocumentStorageException;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.*;

@@ -1,5 +1,11 @@
 package com.surprising.gateway.provider.auth.controller;
 
+import static com.surprising.gateway.provider.utils.KycDocumentFormats.*;
+
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.config.GatewayProperties;
+import com.surprising.gateway.provider.service.KycDocumentService;
+import com.surprising.gateway.provider.model.KycDocumentUpload;
 import com.surprising.gateway.provider.auth.client.KycProvider;
 import com.surprising.gateway.provider.auth.repository.CountryRepository;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
@@ -10,9 +16,9 @@ import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
 import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionResponse;
 import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSimulationRequest;
 import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProviderInfo;
-import com.surprising.gateway.provider.service.KycDocumentNotFoundException;
-import com.surprising.gateway.provider.service.KycDocumentStorageException;
-import com.surprising.gateway.provider.service.KycDocumentStorageUnavailableException;
+import com.surprising.gateway.provider.exception.KycDocumentNotFoundException;
+import com.surprising.gateway.provider.exception.KycDocumentStorageException;
+import com.surprising.gateway.provider.exception.KycDocumentStorageUnavailableException;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpHeaders;
@@ -37,8 +43,16 @@ public class UserComplianceController {
 
     private final ComplianceService complianceService;
 
-    public UserComplianceController(ComplianceService complianceService) {
+    private final AuthService authService;
+    private final KycDocumentService documents;
+    private final GatewayProperties properties;
+
+    public UserComplianceController(ComplianceService complianceService, AuthService authService,
+                                    KycDocumentService documents, GatewayProperties properties) {
         this.complianceService = complianceService;
+        this.authService = authService;
+        this.documents = documents;
+        this.properties = properties;
     }
 
     @GetMapping("/countries")
@@ -118,7 +132,24 @@ public class UserComplianceController {
                                          @RequestParam("documentType") String documentType,
                                          @RequestPart("file") MultipartFile file) {
         try {
-            return complianceService.uploadUserKycDocument(authorization, documentType, file);
+            long userId = authService.authenticateBearer(authorization).userId();
+            String type = normalizeDocumentType(documentType);
+            if (file == null || file.isEmpty()) throw new IllegalArgumentException("KYC document file is required");
+            byte[] content;
+            try { content = file.getBytes(); }
+            catch (java.io.IOException ex) { throw new IllegalArgumentException("KYC document file cannot be read", ex); }
+            if (content.length == 0 || content.length > properties.getKycDocuments().getMaxFileSizeBytes()) {
+                throw new IllegalArgumentException("KYC document file size is invalid");
+            }
+            String contentType = detectedContentType(content);
+            String declared = normalizeContentType(file.getContentType());
+            if (declared != null && !"application/octet-stream".equals(declared) && !contentType.equals(declared)) {
+                throw new IllegalArgumentException("KYC document content type does not match file content");
+            }
+            String extension = extension(contentType);
+            var upload = new KycDocumentUpload(type, content, contentType,
+                    safeFilename(file.getOriginalFilename(), extension), extension);
+            return documents.upload(userId, upload);
         } catch (KycDocumentStorageUnavailableException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (KycDocumentStorageException ex) {

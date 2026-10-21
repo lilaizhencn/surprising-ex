@@ -180,3 +180,5 @@
 - 外部适配归包将CustodyWalletClient、WithdrawalValuationClient和RestReferenceMarketProvider移到client；提现/对账/划转业务仍由原Service聚合，签名、精度、连接与缓存保持。18个原文件完整体在包/导入/构件注解归一后相等。JDK27干净构建：Maker153、Gateway109项无跳过，包含25项独立PostgreSQL提现对账；未启动wallet。关闭ADD-048..050，见 [外部适配验证](validation/java-mvc-client-packages-20261022.json)。所属数据库、日志与汇总报告清理；其余HTTP耦合、完整复扫/门禁及最终实栈验收仍继续。
 
 - HTTP边界复扫将后台健康实际探测移SystemHealthClient，将法币HTTP请求与提供方JSON解析移FiatRateClient；原Service仍负责授权/去重/汇总及精确汇率业务。四个系统响应归model、两个原生失败归exception，无新业务状态/接口。价格144、网关77项干净构建通过无跳过；真实本地HTTP覆盖精度、反向汇率与错误响应不落账。移除HTTP状态检查的反证3项中1项按预期失败，恢复后重跑价格全模块144通过。汇率saveRateAndInverse之后全部原始源码字节一致。关闭ADD-051..053，见 [外部探测边界验证](validation/java-mvc-outbound-20261022.json)。KYC/鉴权HTTP耦合、完整复扫/门禁及最终实栈继续。
+
+- KYC上传按鉴权→Controller文件格式绑定→原生Service协调摘要/存储/落账执行，删除ComplianceService上传透传。KYC/C2C具体存储归storage，三个失败归exception。五个归包类型完整体归一相同，store/persist/cleanup块逐字节保持。定向37、扩大214项无跳过；实际Multipart覆盖PDF/JPEG/PNG、伪造用户头、MIME伪装、大小限制、鉴权先于文件读取、落库失败清理。移除MIME比对的反证3项中1项预期失败，恢复后干净构建通过。初始测试错误引用filename已改为原有originalFilename，HTTP契约未改。关闭ADD-054..057，见 [KYC上传边界验证](validation/java-mvc-kyc-boundary-20261022.json)。外部R2与浏览器需外部依赖的测试未启动；鉴权HTTP耦合、嵌套共享模型复核及最终实栈继续。

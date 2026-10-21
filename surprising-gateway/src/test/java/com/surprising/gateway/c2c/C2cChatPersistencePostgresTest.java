@@ -6,7 +6,7 @@ import com.surprising.gateway.c2c.service.C2cAttachments;
 import com.surprising.gateway.c2c.service.C2cConversations;
 import com.surprising.gateway.c2c.service.C2cMessages;
 import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
-import com.surprising.gateway.c2c.service.C2cR2Storage;
+import com.surprising.gateway.c2c.storage.C2cR2Storage;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.verifyNoInteractions;

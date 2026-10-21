@@ -1,5 +1,7 @@
-package com.surprising.gateway.provider.service;
+package com.surprising.gateway.provider.storage;
 
+import com.surprising.gateway.provider.exception.KycDocumentStorageException;
+import com.surprising.gateway.provider.exception.KycDocumentStorageUnavailableException;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.io.IOException;
 import java.net.URI;
@@ -19,9 +21,9 @@ import java.util.Locale;
 import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
-@Service
+@Component
 public class KycDocumentStorageService {
 
     private static final DateTimeFormatter AWS_DATE = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'")

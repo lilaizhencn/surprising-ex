@@ -1,18 +1,18 @@
-package com.surprising.gateway.c2c.service;
+package com.surprising.gateway.c2c.storage;
 
 import com.surprising.gateway.c2c.exception.C2cProblem;
 
 import com.surprising.gateway.c2c.config.C2cR2Properties;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.service.KycDocumentStorageException;
-import com.surprising.gateway.provider.service.KycDocumentStorageService;
-import com.surprising.gateway.provider.service.KycDocumentStorageUnavailableException;
+import com.surprising.gateway.provider.exception.KycDocumentStorageException;
+import com.surprising.gateway.provider.storage.KycDocumentStorageService;
+import com.surprising.gateway.provider.exception.KycDocumentStorageUnavailableException;
 import java.net.URI;
 import java.time.*;
 import java.util.*;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import software.amazon.awssdk.auth.credentials.*;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
@@ -22,7 +22,7 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 /** 迁用 social R2 的 SDK 配置和预签名上传；桶和路径由服务端固定，交易对象不可覆盖。 */
-@Service
+@Component
 @EnableConfigurationProperties(C2cR2Properties.class)
 public class C2cR2Storage implements AutoCloseable {
     private final C2cR2Properties properties;

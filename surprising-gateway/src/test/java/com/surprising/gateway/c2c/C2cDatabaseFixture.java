@@ -15,7 +15,7 @@ import com.surprising.gateway.c2c.service.C2cMessages;
 import com.surprising.gateway.c2c.service.C2cOrders;
 import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
 import com.surprising.gateway.c2c.service.C2cProfiles;
-import com.surprising.gateway.c2c.service.C2cR2Storage;
+import com.surprising.gateway.c2c.storage.C2cR2Storage;
 
 import com.surprising.gateway.c2c.repository.C2cAppealRepository;
 import com.surprising.gateway.c2c.repository.C2cAttachmentRepository;
