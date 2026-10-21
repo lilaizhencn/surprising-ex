@@ -1,0 +1,187 @@
+{
+  "date": "2026-10-21",
+  "verified_at_utc": "2026-10-21T14:57:50.808639+00:00",
+  "scope": "账户收益截止前缀、资金流水与现货价格的职责和同快照读取",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16; isolated PostgreSQL 18.4",
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=PortfolioIncomeServicePostgresTest,PortfolioIncomeControllerTest,DailyIncomeCalculatorTest",
+        "clean",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.service.DailyIncomeCalculatorTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.PortfolioIncomeServicePostgresTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.PortfolioIncomeControllerTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "0ddbef5ffdb4f94004e5c9d86b81a8989bd3d6c839242c77b36b886a57f6949d",
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=PortfolioIncomeServicePostgresTest#splitReadersKeepTheSameRepeatableReadSnapshotAcrossConcurrentBackfill",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.service.PortfolioIncomeServicePostgresTest",
+          "tests": 1,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "9e6126c5b960583f4f1bf7190671c91b8ccfe54559808dbb12143c6414f1be7a",
+      "tests": 1,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=PortfolioIncomeServicePostgresTest,PortfolioIncomeControllerTest,DailyIncomeCalculatorTest,ProductAccountAccessTest,AccountAssetsControllerTest,ConstructorInjectionContextTest",
+        "clean",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.service.ProductAccountAccessTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.DailyIncomeCalculatorTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.PortfolioIncomeServicePostgresTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.service.ConstructorInjectionContextTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.AccountAssetsControllerTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.PortfolioIncomeControllerTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "bb64026c450151e6da6db359a13db839cfe6d3788638a5c6e46752ff08485b7c",
+      "tests": 47,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "assertions": [
+    "现金流Repository只访问core_portfolio_cash_flow；截止与价格Repository分别对必要关联读取明确用途、字段来源和前缀约束。",
+    "收益、内部划转对账、价格新鲜度及估值仍归Service；原生数据库行归model。没有新增权威余额或跨请求缓存。",
+    "保留Service REPEATABLE_READ只读事务，分表后仍使用同一DataSource事务快照；真实Spring代理与PostgreSQL并发历史补录验证跨查询一致性。",
+    "负例仅将隔离级别降为READ_COMMITTED，测试准确捕获原本零收益被误报为-20；源码在finally恢复，最终干净构建通过。",
+    "六产品、跨用户C2C、完整前缀、未知精度、历史价格与资金流水归属仍由既有数据库测试验证。"
+  ],
+  "repository_table_footprints": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/PortfolioIncomeCutoffRepository.java": [
+      "core_portfolio_cutoff",
+      "core_portfolio_equity"
+    ],
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/PortfolioIncomeFlowRepository.java": [
+      "core_portfolio_cash_flow"
+    ],
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/PortfolioIncomeSpotPriceRepository.java": [
+      "assets",
+      "core_execution_projection",
+      "core_execution_projection_initialization",
+      "core_projection_watermark",
+      "instruments"
+    ]
+  },
+  "source_sha256": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/model/PortfolioIncomeRows.java": "77f8e63c86caad15a396ab0b3ab7e232fc606d45e280f010d5d5a5f2c58d1f70",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/PortfolioIncomeCutoffRepository.java": "cb00c4361ec635cb0664fb02c4641f0a38513ac3b0e27bd94736aa762fd7d54d",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/PortfolioIncomeFlowRepository.java": "89fa5c86e4d9f50c582882b3e4d74ebdb274e5a5508e9f01dfe6e32a3d0a4c3d",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/PortfolioIncomeSpotPriceRepository.java": "c8874c90c2a979056e4d1be7d0c75febd6170aa057a06f08e0024f499ef931f6",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/PortfolioIncomeService.java": "29dd78ae83bfa00f05b0d3bd9d4188950c29963c4118a2ff5e7fc889233c9f23",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/PortfolioIncomeServicePostgresTest.java": "ef8eeded8e97050329e509ed72dd48aa8c937b490e7f2382768fa40d7db90080"
+  },
+  "not_run": [
+    "未启动外部API/做市/Core资金实栈，本批只调整已提交历史读取；最终实栈和其余全范围整改继续。"
+  ],
+  "cleanup": {
+    "postgres_stopped": true,
+    "owned_database_removed": "/tmp/surprising-mvc-portfolio-readers-pg-20tykqh3",
+    "owned_logs_and_summarized_reports_removed": [
+      "/tmp/surprising-mvc-portfolio-readers-negative.log",
+      "/tmp/surprising-mvc-portfolio-readers-focused.log",
+      "/tmp/surprising-mvc-portfolio-readers-expanded.log",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.ProductAccountAccessTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.DailyIncomeCalculatorTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.PortfolioIncomeServicePostgresTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.service.ConstructorInjectionContextTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.controller.AccountAssetsControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.controller.PortfolioIncomeControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.ProductAccountAccessTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.controller.AccountAssetsControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.controller.PortfolioIncomeControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.PortfolioIncomeServicePostgresTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.ConstructorInjectionContextTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.service.DailyIncomeCalculatorTest.txt"
+    ],
+    "build_outputs_retained": true
+  }
+}

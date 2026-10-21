@@ -457,3 +457,10 @@ GatewayProxyService、OrderService与TriggerOrderService的依赖统一由唯一
 产品选择、本地路由、当前查询视图及历史投影依赖以final字段持有；不使用后续反射填充或
 省略依赖的生产便捷构造器。六产品Spring接线和查询不回Core的验证见
 [网关注入验证](../docs/validation/java-mvc-injection-gateway-20261021.json)。
+
+账户收益由PortfolioIncomeService在同一REPEATABLE_READ只读事务内聚合。
+PortfolioIncomeFlowRepository只读资金流；PortfolioIncomeCutoffRepository关联截止前缀与用户权益，
+完整前缀内缺少用户行才能证明零。PortfolioIncomeSpotPriceRepository关联已提交现货成交、
+合约/资产单位与覆盖水位认证，限制同产品、历史时窗和提交前缀；价格时窗及收益估值归Service。
+三类原生行归provider.model.PortfolioIncomeRows。并发补录与六产品历史读取验证见
+[收益读取验证](../docs/validation/java-mvc-portfolio-readers-20261021.json)。

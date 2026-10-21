@@ -2,8 +2,20 @@ package com.surprising.gateway.provider.service;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import com.surprising.gateway.provider.repository.PortfolioIncomeRepository;
+import com.surprising.gateway.provider.repository.PortfolioIncomeCutoffRepository;
+import com.surprising.gateway.provider.repository.PortfolioIncomeFlowRepository;
+import com.surprising.gateway.provider.repository.PortfolioIncomeSpotPriceRepository;
 import com.surprising.asset.repository.AssetRepository;
+import com.surprising.gateway.provider.model.PortfolioIncomeRows.Cut;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import org.springframework.aop.support.AopUtils;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.PortfolioIncomePeriod;
 import java.math.BigDecimal;
@@ -53,10 +65,62 @@ class PortfolioIncomeServicePostgresTest {
             cut(product, OPEN, 100, 10, true);
             cut(product, CURRENT, 300, 30, false);
         }
-        service = new PortfolioIncomeService(new PortfolioIncomeRepository(jdbc), new AssetRepository(jdbc), Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+        service = new PortfolioIncomeService(new PortfolioIncomeCutoffRepository(jdbc), new PortfolioIncomeFlowRepository(jdbc), new PortfolioIncomeSpotPriceRepository(jdbc), new AssetRepository(jdbc), Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
     }
 
     @AfterEach void clean() { if (jdbc != null) jdbc.execute("DROP SCHEMA " + schema + " CASCADE"); }
+
+    @Test
+    void splitReadersKeepTheSameRepeatableReadSnapshotAcrossConcurrentBackfill() throws Exception {
+        equity(ProductLine.SPOT, OPEN, 7, "USDT", "100000000");
+        equity(ProductLine.SPOT, CURRENT, 7, "USDT", "100000000");
+        var cutRead = new CountDownLatch(1);
+        var continueReading = new CountDownLatch(1);
+        var cuts = new PortfolioIncomeCutoffRepository(jdbc) {
+            @Override
+            public java.util.List<Cut> cuts(
+                    long user, long opening, long oldest, long newest) {
+                var rows = super.cuts(user, opening, oldest, newest);
+                cutRead.countDown();
+                try {
+                    if (!continueReading.await(5, TimeUnit.SECONDS))
+                        throw new IllegalStateException("portfolio reader test timeout");
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(interrupted);
+                }
+                return rows;
+            }
+        };
+        try (var context = new AnnotationConfigApplicationContext();
+             var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            context.register(PortfolioReadTransactions.class);
+            context.registerBean(PlatformTransactionManager.class,
+                    () -> new DataSourceTransactionManager(jdbc.getDataSource()));
+            context.registerBean(PortfolioIncomeService.class, () -> new PortfolioIncomeService(cuts,
+                    new PortfolioIncomeFlowRepository(jdbc), new PortfolioIncomeSpotPriceRepository(jdbc),
+                    new AssetRepository(jdbc), Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC)));
+            context.refresh();
+            var reader = context.getBean(PortfolioIncomeService.class);
+            assertTrue(AopUtils.isAopProxy(reader));
+            var future = executor.submit(() -> reader.income(7));
+            try {
+                assertTrue(cutRead.await(5, TimeUnit.SECONDS));
+                // A concurrent historical backfill must become visible only to the next snapshot.
+                flow(ProductLine.SPOT, 7, 201, OPEN + 1000, "USDT", "20000000", null, null, null, 0, 0);
+            } finally {
+                continueReading.countDown();
+            }
+            var income = future.get(10, TimeUnit.SECONDS).groups().get("overview");
+            assertTrue(income.available());
+            assertEquals("0", income.amountUsdt());
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM core_portfolio_cash_flow", Integer.class));
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableTransactionManagement(proxyTargetClass = true)
+    static class PortfolioReadTransactions { }
 
     @Test void depositsArePrincipalAndFeesAndFundingRemainIncome() {
         equity(ProductLine.SPOT, OPEN, 7, "USDT", "100000000");

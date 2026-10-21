@@ -1,8 +1,11 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.repository.PortfolioIncomeRepository;
-import com.surprising.gateway.provider.repository.PortfolioIncomeRepository.Cut;
-import com.surprising.gateway.provider.repository.PortfolioIncomeRepository.Flow;
+import com.surprising.gateway.provider.repository.PortfolioIncomeCutoffRepository;
+import com.surprising.gateway.provider.repository.PortfolioIncomeFlowRepository;
+import com.surprising.gateway.provider.repository.PortfolioIncomeSpotPriceRepository;
+import com.surprising.gateway.provider.model.PortfolioIncomeRows.Price;
+import com.surprising.gateway.provider.model.PortfolioIncomeRows.Cut;
+import com.surprising.gateway.provider.model.PortfolioIncomeRows.Flow;
 import com.surprising.asset.repository.AssetRepository;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.PortfolioIncomePeriod;
@@ -19,17 +22,23 @@ import org.springframework.transaction.annotation.Transactional;
 /** Marked portfolio performance; histories and prices share one repeatable-read database snapshot. */
 @Service
 public class PortfolioIncomeService {
-    private final PortfolioIncomeRepository repository;
+    private final PortfolioIncomeCutoffRepository cutoffs;
+    private final PortfolioIncomeFlowRepository flows;
+    private final PortfolioIncomeSpotPriceRepository prices;
     private final AssetRepository assets;
     private final Clock clock;
 
     @Autowired
-    public PortfolioIncomeService(PortfolioIncomeRepository repository, AssetRepository assets) {
-        this(repository, assets, Clock.systemUTC());
+    public PortfolioIncomeService(PortfolioIncomeCutoffRepository cutoffs, PortfolioIncomeFlowRepository flows,
+                                  PortfolioIncomeSpotPriceRepository prices, AssetRepository assets) {
+        this(cutoffs, flows, prices, assets, Clock.systemUTC());
     }
 
-    PortfolioIncomeService(PortfolioIncomeRepository repository, AssetRepository assets, Clock clock) {
-        this.repository = repository;
+    PortfolioIncomeService(PortfolioIncomeCutoffRepository cutoffs, PortfolioIncomeFlowRepository flows,
+                           PortfolioIncomeSpotPriceRepository prices, AssetRepository assets, Clock clock) {
+        this.cutoffs = cutoffs;
+        this.flows = flows;
+        this.prices = prices;
         this.assets = assets;
         this.clock = clock;
     }
@@ -39,9 +48,9 @@ public class PortfolioIncomeService {
         if (userId <= 0) throw new IllegalArgumentException("portfolio owner is required");
         long now = clock.millis(), opening = PortfolioIncomePeriod.dayStart(now);
         var cuts = new EnumMap<ProductLine, NavigableMap<Long, Cut>>(ProductLine.class);
-        for (var cut : repository.cuts(userId, opening, Math.max(opening, now - 120_000), PortfolioIncomePeriod.minuteStart(now)))
+        for (var cut : cutoffs.cuts(userId, opening, Math.max(opening, now - 120_000), PortfolioIncomePeriod.minuteStart(now)))
             cuts.computeIfAbsent(cut.product(), ignored -> new TreeMap<>()).put(cut.time(), cut);
-        var data = new Data(userId, opening, now, cuts, repository.flows(userId, opening), assets.findAll(), new HashMap<>());
+        var data = new Data(userId, opening, now, cuts, flows.flows(userId, opening), assets.findAll(), new HashMap<>());
         var groups = new LinkedHashMap<String, Income>();
         groups.put("overview", group(EnumSet.allOf(ProductLine.class), data));
         groups.put("funding", group(EnumSet.of(ProductLine.SPOT), data));
@@ -138,13 +147,18 @@ public class PortfolioIncomeService {
         else {
             var spot = cut(data, ProductLine.SPOT, cutoff);
             var key = new RateKey(asset, priceTime, spot == null ? -1 : spot.position());
-            rate = data.rates().computeIfAbsent(key, ignored -> repository.spotPrice(asset, priceTime, spot).flatMap(price -> {
+            rate = data.rates().computeIfAbsent(key, ignored -> spotPrice(asset, priceTime, spot).flatMap(price -> {
                 if (!validScale(price.quoteScaleUnits())) return Optional.empty();
                 return Optional.of(BigDecimal.valueOf(price.ticks()).multiply(BigDecimal.valueOf(price.tickUnits()))
                         .divide(BigDecimal.valueOf(price.quoteScaleUnits())));
             })).orElse(null);
         }
         return rate == null ? null : new BigDecimal(units).divide(BigDecimal.valueOf(scale)).multiply(rate);
+    }
+
+    private Optional<Price> spotPrice(String asset, long time, Cut spotCut) {
+        if (spotCut == null || spotCut.product() != ProductLine.SPOT) return Optional.empty();
+        return prices.spotPrice(asset, time - PortfolioIncomePeriod.MAXIMUM_MARK_AGE_MILLIS, time, spotCut);
     }
 
     private static boolean validScale(Long scale) {
