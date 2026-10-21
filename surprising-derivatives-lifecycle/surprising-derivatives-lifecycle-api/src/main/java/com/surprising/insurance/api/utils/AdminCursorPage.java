@@ -1,4 +1,4 @@
-package com.surprising.account.api.model;
+package com.surprising.insurance.api.utils;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;

@@ -1,5 +1,7 @@
 package com.surprising.realtime.provider.export;
 
+import com.surprising.product.api.utils.ProductTopicNames;
+
 import com.surprising.realtime.provider.export.config.TradeExportProperties;
 import com.surprising.realtime.provider.export.service.CommittedAlgoProjectionService;
 import com.surprising.realtime.provider.export.service.CommittedPortfolioHistoryService;

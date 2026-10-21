@@ -1,4 +1,4 @@
-package com.surprising.product.api;
+package com.surprising.product.api.utils;
 
 /** Canonical decimal representation of the database-assigned permanent instrument ID. */
 public final class InstrumentIds {

@@ -356,3 +356,5 @@ Web 最近订单更新曾在直接切换已登录账户时保留前一账户缓�
 ### 移动端完整权益与今日收益
 
 首页和资产页通过本人认证的 `/api/v1/portfolio/income` 读取已提交 Archive 分析投影。六产品使用共同分钟切点，期初和外部本金按历史实际价格估值，避免充值或内部划转变成收益；缺失/过期显示未知。该分析不替代可用余额或交易资金事实源。需配套迁移、realtime/gateway/client，详见 [权益与收益口径、恢复及发布](docs/portfolio-income.md)。
+
+共享工具按所属领域归utils：product.api.utils提供InstrumentIds和ProductTopicNames，instrument.api.utils提供InstrumentSnapshotSupport；各领域AdminCursorPage及C2cMoney也归对应utils。游标编码、产品Topic值、ID范围和快照事件契约保持。验证见 [工具归包记录](docs/validation/java-mvc-utils-packages-20261021.json)。

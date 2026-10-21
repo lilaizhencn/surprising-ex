@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+
 import com.surprising.gateway.provider.auth.AuthModels.AdminPermissionResponse;
 import com.surprising.gateway.provider.auth.AuthModels.AdminRefreshSessionResponse;
 import com.surprising.gateway.provider.auth.AuthModels.AdminRoleResponse;

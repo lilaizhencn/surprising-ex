@@ -38,7 +38,7 @@ public final class ValkeySnapshotRequests {
     }
 
     public void renewBook(ProductLine product, String instrumentId, long expiresAt) {
-        if (!com.surprising.product.api.InstrumentIds.valid(instrumentId))
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(instrumentId))
             throw new IllegalArgumentException("invalid book instrumentId");
         redis.opsForZSet().add("rt:books:" + product.name(), instrumentId, expiresAt);
     }

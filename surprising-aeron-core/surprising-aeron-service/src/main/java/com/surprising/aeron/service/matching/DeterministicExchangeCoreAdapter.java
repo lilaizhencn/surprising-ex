@@ -1341,7 +1341,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private int permanentInstrumentId(String instrumentId) {
-        return com.surprising.product.api.InstrumentIds.parse(instrumentId);
+        return com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
     }
 
     private int reserveSymbolId(String instrumentId) {

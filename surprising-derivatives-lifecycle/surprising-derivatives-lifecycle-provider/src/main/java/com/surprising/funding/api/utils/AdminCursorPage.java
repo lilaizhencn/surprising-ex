@@ -1,4 +1,4 @@
-package com.surprising.liquidation.api.model;
+package com.surprising.funding.api.utils;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;

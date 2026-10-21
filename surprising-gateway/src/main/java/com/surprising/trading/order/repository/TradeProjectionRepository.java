@@ -24,7 +24,7 @@ public final class TradeProjectionRepository {
                 || startTime != null && startTime <= 0 || endTime != null && endTime <= 0
                 || startTime != null && endTime != null && startTime > endTime)
             throw new IllegalArgumentException("invalid private fill query");
-        if (instrumentId != null && !com.surprising.product.api.InstrumentIds.valid(instrumentId))
+        if (instrumentId != null && !com.surprising.product.api.utils.InstrumentIds.valid(instrumentId))
             throw new IllegalArgumentException("invalid instrumentId");
         String scope = digest(product.name() + '|' + userId + '|' + instrumentId + '|' + orderId + '|' + startTime + '|' + endTime);
         String[] after = cursor == null || cursor.isBlank() ? null : decodeFillCursor(cursor, scope);
@@ -66,7 +66,7 @@ public final class TradeProjectionRepository {
                             rs.getLong("fee_rate_ppm"), Instant.ofEpochMilli(rs.getLong("occurred_at_epoch_ms")));
                     long sequence = rs.getLong("export_sequence"); int index = rs.getInt("execution_index");
                     if (fill.tradeId() == null || !fill.tradeId().startsWith(product.name() + ":")
-                            || !com.surprising.product.api.InstrumentIds.valid(fill.instrumentId()) || fill.orderId() <= 0
+                            || !com.surprising.product.api.utils.InstrumentIds.valid(fill.instrumentId()) || fill.orderId() <= 0
                             || fill.priceTicks() <= 0 || fill.quantitySteps() <= 0 || fill.feeRatePpm() < -1_000_000
                             || fill.feeRatePpm() > 1_000_000 || fill.eventTime().toEpochMilli() <= 0 || sequence <= 0 || index < 0)
                         throw new IllegalStateException("invalid committed private fill");
@@ -105,7 +105,7 @@ public final class TradeProjectionRepository {
             Long orderId, int limit, String cursor, String sort) {
         if (product == null || userId != null && userId <= 0 || orderId != null && orderId <= 0 || limit < 1 || limit > 1000)
             throw new IllegalArgumentException("invalid trade query");
-        if (instrumentId != null && !com.surprising.product.api.InstrumentIds.valid(instrumentId))
+        if (instrumentId != null && !com.surprising.product.api.utils.InstrumentIds.valid(instrumentId))
             throw new IllegalArgumentException("invalid instrumentId");
         String ordering = sort == null || sort.isBlank() ? "eventTime.desc" : sort.trim();
         if (!Set.of("eventTime.asc", "eventTime.desc").contains(ordering)) throw new IllegalArgumentException("invalid trade sort");

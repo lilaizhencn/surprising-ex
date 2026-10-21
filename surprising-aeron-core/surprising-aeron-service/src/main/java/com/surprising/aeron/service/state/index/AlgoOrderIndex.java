@@ -10,7 +10,7 @@ import java.util.NavigableSet;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
-import com.surprising.product.api.InstrumentIds;
+import com.surprising.product.api.utils.InstrumentIds;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import java.util.TreeSet;
 

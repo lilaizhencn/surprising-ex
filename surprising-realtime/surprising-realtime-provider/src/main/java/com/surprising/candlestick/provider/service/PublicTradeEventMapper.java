@@ -97,7 +97,7 @@ public class PublicTradeEventMapper {
         if (snapshotCache == null || !snapshotCache.initialized(productLine)) {
             throw new IllegalStateException("K 线合约 JVM 快照尚未就绪");
         }
-        var instrument = snapshotCache.current(productLine, com.surprising.product.api.InstrumentIds.parse(instrumentId))
+        var instrument = snapshotCache.current(productLine, com.surprising.product.api.utils.InstrumentIds.parse(instrumentId))
                 .orElseThrow(() -> new IllegalArgumentException("committed trade encoding unavailable: " + instrumentId));
         long baseScaleUnits = snapshotCache.scale(productLine, instrument.baseAsset())
                 .orElseThrow(() -> new IllegalArgumentException("asset scale not found for " + instrument.baseAsset()));

@@ -1,4 +1,4 @@
-package com.surprising.gateway.provider.auth;
+package com.surprising.risk.api.utils;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
@@ -13,11 +13,11 @@ public final class AdminCursorPage {
     private AdminCursorPage() {
     }
 
-    static int limit(int value, int maxLimit) {
+    public static int limit(int value, int maxLimit) {
         return Math.max(1, Math.min(value, maxLimit));
     }
 
-    static SortSpec parseSort(String value, SortSpec defaultSort, List<SortSpec> allowed) {
+    public static SortSpec parseSort(String value, SortSpec defaultSort, List<SortSpec> allowed) {
         if (value == null || value.isBlank()) {
             return defaultSort;
         }
@@ -28,35 +28,35 @@ public final class AdminCursorPage {
                 .orElseThrow(() -> new IllegalArgumentException("unsupported sort: " + value));
     }
 
-    static Cursor decodeCursor(String value) {
+    public static Cursor decodeCursor(String value) {
         if (value == null || value.isBlank()) {
             return null;
         }
         try {
             String decoded = new String(Base64.getUrlDecoder().decode(value.trim()), StandardCharsets.UTF_8);
-            int split = decoded.lastIndexOf('|');
-            if (split > 0 && split < decoded.length() - 1) {
-                Instant timestamp = Instant.parse(decoded.substring(0, split));
-                long id = Long.parseLong(decoded.substring(split + 1));
-                return new Cursor(timestamp, id);
+            int split = decoded.indexOf(':');
+            if (split <= 0 || split == decoded.length() - 1) {
+                throw new IllegalArgumentException("invalid cursor");
             }
-            throw new IllegalArgumentException("invalid cursor");
+            long epochMillis = Long.parseLong(decoded.substring(0, split));
+            long id = Long.parseLong(decoded.substring(split + 1));
+            return new Cursor(Instant.ofEpochMilli(epochMillis), id);
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException("invalid cursor", ex);
         }
     }
 
-    static String seekCondition(SortSpec sort) {
+    public static String seekCondition(SortSpec sort) {
         String operator = sort.descending() ? "<" : ">";
         return " AND (" + sort.column() + " " + operator + " ? OR ("
                 + sort.column() + " = ? AND " + sort.idColumn() + " " + operator + " ?))";
     }
 
-    static String seekCondition(SortSpec sort, Cursor cursor) {
+    public static String seekCondition(SortSpec sort, Cursor cursor) {
         return cursor == null ? "" : seekCondition(sort);
     }
 
-    static void addCursorArgs(List<Object> args, Cursor cursor) {
+    public static void addCursorArgs(List<Object> args, Cursor cursor) {
         if (cursor == null) {
             return;
         }
@@ -66,11 +66,11 @@ public final class AdminCursorPage {
         args.add(cursor.id());
     }
 
-    static <T> CursorPage<T> page(List<T> fetchedRows,
-                                  int limit,
-                                  SortSpec sort,
-                                  Function<T, Instant> timestampExtractor,
-                                  ToLongFunction<T> idExtractor) {
+    public static <T> CursorPage<T> page(List<T> fetchedRows,
+                                         int limit,
+                                         SortSpec sort,
+                                         Function<T, Instant> timestampExtractor,
+                                         ToLongFunction<T> idExtractor) {
         boolean hasMore = fetchedRows.size() > limit;
         List<T> rows = hasMore ? List.copyOf(fetchedRows.subList(0, limit)) : List.copyOf(fetchedRows);
         String nextCursor = null;
@@ -85,21 +85,21 @@ public final class AdminCursorPage {
         if (timestamp == null) {
             throw new IllegalArgumentException("cursor timestamp is required");
         }
-        String raw = timestamp + "|" + id;
+        String raw = timestamp.toEpochMilli() + ":" + id;
         return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 
-    record SortSpec(String field, String column, String idColumn, boolean descending) {
-        String token() {
+    public record SortSpec(String field, String column, String idColumn, boolean descending) {
+        public String token() {
             return field + "." + (descending ? "desc" : "asc");
         }
 
-        String directionSql() {
+        public String directionSql() {
             return descending ? "DESC" : "ASC";
         }
     }
 
-    record Cursor(Instant timestamp, long id) {
+    public record Cursor(Instant timestamp, long id) {
     }
 
     public record CursorPage<T>(List<T> items, String nextCursor, boolean hasMore, String sort, int limit) {

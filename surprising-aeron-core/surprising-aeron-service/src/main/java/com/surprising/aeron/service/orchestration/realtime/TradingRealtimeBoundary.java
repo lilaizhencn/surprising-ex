@@ -80,7 +80,7 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
                 && frame.kind() == RealtimeFrame.Kind.SNAPSHOT_REQUEST;
         boolean bookRequest = frame.userId() == 0
                 && frame.kind() == RealtimeFrame.Kind.BOOK_REQUEST
-                && com.surprising.product.api.InstrumentIds.valid(frame.instrumentId());
+                && com.surprising.product.api.utils.InstrumentIds.valid(frame.instrumentId());
         if (frame.productLine() == productLine && frame.snapshotId() > 0 && frame.payloadLength() == 0
                 && frame.ordinal() == 0 && frame.sequence() == 0 && (snapshotRequest || bookRequest)) {
             requests.offer(frame);

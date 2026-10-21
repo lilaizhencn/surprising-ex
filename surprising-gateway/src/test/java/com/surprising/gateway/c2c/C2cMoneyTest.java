@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.utils.C2cMoney;
+
 import static org.assertj.core.api.Assertions.*;
 
 import com.surprising.gateway.c2c.model.C2cOrderStatus;

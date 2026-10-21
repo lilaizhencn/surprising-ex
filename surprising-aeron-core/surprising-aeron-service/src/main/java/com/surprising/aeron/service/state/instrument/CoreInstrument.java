@@ -77,7 +77,7 @@ public final class CoreInstrument {
             InstrumentStatus instrumentStatus, boolean marketOrderEnabled, boolean postOnlyEnabled,
             boolean reduceOnlyEnabled, int supportedOrderTypeMask, int supportedTimeInForceMask,
             long quantityStepUnits, CoreOrderProtection orderProtection) {
-        this.instrumentIdValue = com.surprising.product.api.InstrumentIds.parse(instrumentId);
+        this.instrumentIdValue = com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
         this.instrumentId = instrumentId;
         this.configuration = new Configuration(Objects.requireNonNull(contractType, "contractType"),
                 AssetBalance.normalizeAsset(baseAsset), AssetBalance.normalizeAsset(quoteAsset),
@@ -118,7 +118,7 @@ public final class CoreInstrument {
 
     private CoreInstrument(String instrumentId, Configuration configuration, CoreInstrumentMaintenance maintenance) {
         this.instrumentId = instrumentId;
-        this.instrumentIdValue = com.surprising.product.api.InstrumentIds.parse(instrumentId);
+        this.instrumentIdValue = com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
         this.configuration = configuration;
         this.maintenance = maintenance;
     }

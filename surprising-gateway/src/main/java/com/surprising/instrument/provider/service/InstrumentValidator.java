@@ -119,7 +119,7 @@ public class InstrumentValidator {
         if (request.underlyingInstrumentId() == null || request.underlyingInstrumentId().isBlank()) {
             throw new IllegalArgumentException("option instruments require underlyingInstrumentId");
         }
-        com.surprising.product.api.InstrumentIds.parse(request.underlyingInstrumentId());
+        com.surprising.product.api.utils.InstrumentIds.parse(request.underlyingInstrumentId());
         if (request.underlyingProductLine() == null || request.underlyingProductLine() == com.surprising.product.api.ProductLine.OPTION) {
             throw new IllegalArgumentException("option underlying requires an explicit non-option product line");
         }

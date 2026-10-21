@@ -1,5 +1,7 @@
 package com.surprising.trading.api.model;
 
+import com.surprising.trading.api.utils.AdminCursorPage;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

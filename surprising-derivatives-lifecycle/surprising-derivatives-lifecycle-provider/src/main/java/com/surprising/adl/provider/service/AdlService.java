@@ -1,6 +1,6 @@
 package com.surprising.adl.provider.service;
 
-import com.surprising.adl.api.model.AdminCursorPage;
+import com.surprising.adl.api.utils.AdminCursorPage;
 import com.surprising.adl.api.model.AdlEventQueryResponse;
 import com.surprising.adl.api.model.AdlEventResponse;
 import com.surprising.adl.api.model.AdlQueuePositionResponse;

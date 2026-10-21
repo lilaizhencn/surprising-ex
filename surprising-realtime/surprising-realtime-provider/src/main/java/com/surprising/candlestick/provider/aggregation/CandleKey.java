@@ -32,7 +32,7 @@ public record CandleKey(String instrumentId, CandlePeriod period, Instant openTi
             throw new IllegalArgumentException("instrumentId is required");
         }
         String normalized = instrumentId.trim().toUpperCase(Locale.ROOT);
-        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(normalized)) {
             throw new IllegalArgumentException("Invalid instrumentId: " + instrumentId);
         }
         return normalized;

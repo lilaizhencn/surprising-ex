@@ -41,7 +41,7 @@ public class MarkPriceQueryService {
     }
 
     private String normalizeSymbol(String instrumentId) {
-        if (instrumentId == null || !com.surprising.product.api.InstrumentIds.valid(instrumentId)) {
+        if (instrumentId == null || !com.surprising.product.api.utils.InstrumentIds.valid(instrumentId)) {
             throw new IllegalArgumentException("invalid instrumentId");
         }
         return instrumentId;

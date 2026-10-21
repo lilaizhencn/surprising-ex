@@ -14,7 +14,7 @@ public record InstrumentLifecycleDrainEvent(
     public static final int CURRENT_SCHEMA_VERSION = 1;
 
     public InstrumentLifecycleDrainEvent {
-        com.surprising.product.api.InstrumentIds.parse(instrumentId);
+        com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
         if (schemaVersion != CURRENT_SCHEMA_VERSION) {
             throw new IllegalArgumentException("不支持的生命周期清理事件版本: " + schemaVersion);
         }

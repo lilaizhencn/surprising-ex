@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+
 import com.surprising.gateway.provider.auth.AuthModels.AdminApprovalCreateRequest;
 import com.surprising.gateway.provider.auth.AuthModels.AdminApprovalResponse;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;

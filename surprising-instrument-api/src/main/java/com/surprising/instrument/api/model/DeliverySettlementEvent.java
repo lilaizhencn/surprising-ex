@@ -15,7 +15,7 @@ public record DeliverySettlementEvent(
         InstrumentResponse instrument) {
 
     public DeliverySettlementEvent {
-        com.surprising.product.api.InstrumentIds.parse(instrumentId);
+        com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
         if (instrumentId == null || instrumentId.isBlank() || changeId <= 0L || settlementPriceTicks <= 0L
                 || contractType == null || !contractType.isDelivery() || status != InstrumentStatus.CLOSED
                 || settlementMethod != ContractSettlementMethod.CASH || eventTime == null) {

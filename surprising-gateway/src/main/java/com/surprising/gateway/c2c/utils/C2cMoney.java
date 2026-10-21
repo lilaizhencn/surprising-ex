@@ -1,4 +1,4 @@
-package com.surprising.gateway.c2c;
+package com.surprising.gateway.c2c.utils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

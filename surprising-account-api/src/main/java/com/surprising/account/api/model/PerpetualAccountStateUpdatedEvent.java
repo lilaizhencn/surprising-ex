@@ -165,7 +165,7 @@ public record PerpetualAccountStateUpdatedEvent(
 
     private static String normalizeSymbol(String value) {
         String normalized = requireText(value, "instrumentId");
-        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(normalized)) {
             throw new IllegalArgumentException("invalid instrumentId: " + value);
         }
         return normalized;

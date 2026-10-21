@@ -78,7 +78,7 @@ public class InstrumentCoreSyncService {
 
     public SyncState state(String instrumentId, ProductLine requestedLine) {
         if (requestedLine!=line) throw new IllegalArgumentException("product line mismatch");
-        var instrument = cache.current(line, com.surprising.product.api.InstrumentIds.parse(instrumentId)).orElse(null);
+        var instrument = cache.current(line, com.surprising.product.api.utils.InstrumentIds.parse(instrumentId)).orElse(null);
         if (instrument == null) throw new IllegalArgumentException("instrument not found in configuration cache");
         var attempt=attempts.get(Integer.toString(instrument.instrumentId()));
         RegisterInstrumentCommand configuration;

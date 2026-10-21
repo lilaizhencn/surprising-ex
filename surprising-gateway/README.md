@@ -473,3 +473,5 @@ MarketSummaryRepository只批量提供已关闭K线与真实期初收盘价，�
 C2C运行配置与R2属性归c2c.config；产品业务容器配置归gateway.config，产品属性和健康Bean归provider.config。三个HTTP Filter归provider.interceptor，保留拦截顺序、缓存正文限制及权限/IP语义。验证见 [配置拦截归包记录](../docs/validation/java-mvc-infra-packages-20261021.json)。
 
 C2C续办聚合归c2c.service.C2cSettlement，定时线程入口归c2c.task.C2cSettlementTask并保留专用调度器；合约同步、持仓推送和实时租约分别由trading.order.task及websocket.provider.task触发原Service。验证见 [定时职责记录](../docs/validation/java-mvc-task-boundaries-20261021.json)。
+
+分页工具归account.api.utils、trading.api.utils和gateway.provider.auth.utils；金额工具归c2c.utils.C2cMoney。Repository仍只接收原有数据访问参数；Controller参数绑定的剩余整改另行跟踪。验证见 [工具归包记录](../docs/validation/java-mvc-utils-packages-20261021.json)。

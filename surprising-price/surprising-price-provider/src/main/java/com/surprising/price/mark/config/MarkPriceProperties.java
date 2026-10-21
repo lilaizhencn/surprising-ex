@@ -4,7 +4,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductTopicNames;
+import com.surprising.product.api.utils.ProductTopicNames;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.math.BigDecimal;

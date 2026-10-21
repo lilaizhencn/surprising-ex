@@ -115,7 +115,7 @@ class RecentTradeQueryServiceTest {
         assertThat(config.get(ConsumerConfig.ISOLATION_LEVEL_CONFIG)).isEqualTo("read_committed");
         assertThat(config).doesNotContainKey(ConsumerConfig.GROUP_ID_CONFIG);
         assertThat(config.get(ConsumerConfig.CLIENT_ID_CONFIG)).isEqualTo("recent-trades-query-" + product);
-        assertThat(properties.getKafka().getTradeTopic()).isEqualTo(com.surprising.product.api.ProductTopicNames.of(product).matchTradesTopic());
+        assertThat(properties.getKafka().getTradeTopic()).isEqualTo(com.surprising.product.api.utils.ProductTopicNames.of(product).matchTradesTopic());
     }
 
     @Test void invalidInputsDoNotCreateKafkaClients() {

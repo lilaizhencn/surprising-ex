@@ -1,22 +1,23 @@
-package com.surprising.marketmaker.provider.repository;
+package com.surprising.gateway.provider.auth.utils;
 
 import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 
-final class AdminCursorPage {
+public final class AdminCursorPage {
 
     private AdminCursorPage() {
     }
 
-    static int limit(int value, int maxLimit) {
+    public static int limit(int value, int maxLimit) {
         return Math.max(1, Math.min(value, maxLimit));
     }
 
-    static SortSpec parseSort(String value, SortSpec defaultSort, List<SortSpec> allowed) {
+    public static SortSpec parseSort(String value, SortSpec defaultSort, List<SortSpec> allowed) {
         if (value == null || value.isBlank()) {
             return defaultSort;
         }
@@ -27,25 +28,45 @@ final class AdminCursorPage {
                 .orElseThrow(() -> new IllegalArgumentException("unsupported sort: " + value));
     }
 
-    static Cursor decodeCursor(String value) {
+    public static Cursor decodeCursor(String value) {
         if (value == null || value.isBlank()) {
             return null;
         }
         try {
             String decoded = new String(Base64.getUrlDecoder().decode(value.trim()), StandardCharsets.UTF_8);
             int split = decoded.lastIndexOf('|');
-            if (split <= 0 || split == decoded.length() - 1) {
-                throw new IllegalArgumentException("invalid cursor");
+            if (split > 0 && split < decoded.length() - 1) {
+                Instant timestamp = Instant.parse(decoded.substring(0, split));
+                long id = Long.parseLong(decoded.substring(split + 1));
+                return new Cursor(timestamp, id);
             }
-            Instant timestamp = Instant.parse(decoded.substring(0, split));
-            long id = Long.parseLong(decoded.substring(split + 1));
-            return new Cursor(timestamp, id);
+            throw new IllegalArgumentException("invalid cursor");
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException("invalid cursor", ex);
         }
     }
 
-    static <T> CursorPage<T> page(List<T> fetchedRows,
+    public static String seekCondition(SortSpec sort) {
+        String operator = sort.descending() ? "<" : ">";
+        return " AND (" + sort.column() + " " + operator + " ? OR ("
+                + sort.column() + " = ? AND " + sort.idColumn() + " " + operator + " ?))";
+    }
+
+    public static String seekCondition(SortSpec sort, Cursor cursor) {
+        return cursor == null ? "" : seekCondition(sort);
+    }
+
+    public static void addCursorArgs(List<Object> args, Cursor cursor) {
+        if (cursor == null) {
+            return;
+        }
+        Timestamp time = Timestamp.from(cursor.timestamp());
+        args.add(time);
+        args.add(time);
+        args.add(cursor.id());
+    }
+
+    public static <T> CursorPage<T> page(List<T> fetchedRows,
                                   int limit,
                                   SortSpec sort,
                                   Function<T, Instant> timestampExtractor,
@@ -68,16 +89,19 @@ final class AdminCursorPage {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 
-    record SortSpec(String field, boolean descending) {
-        String token() {
+    public record SortSpec(String field, String column, String idColumn, boolean descending) {
+        public String token() {
             return field + "." + (descending ? "desc" : "asc");
         }
 
+        public String directionSql() {
+            return descending ? "DESC" : "ASC";
+        }
     }
 
-    record Cursor(Instant timestamp, long id) {
+    public record Cursor(Instant timestamp, long id) {
     }
 
-    record CursorPage<T>(List<T> items, String nextCursor, boolean hasMore, String sort, int limit) {
+    public record CursorPage<T>(List<T> items, String nextCursor, boolean hasMore, String sort, int limit) {
     }
 }

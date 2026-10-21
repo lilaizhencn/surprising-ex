@@ -1,4 +1,6 @@
-package com.surprising.product.api;
+package com.surprising.product.api.utils;
+
+import com.surprising.product.api.ProductLine;
 
 public record ProductTopicNames(ProductLine productLine, String namespace) {
 

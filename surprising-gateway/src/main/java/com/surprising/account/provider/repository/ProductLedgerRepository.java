@@ -1,7 +1,7 @@
 package com.surprising.account.provider.repository;
 
 import com.surprising.account.api.model.AccountType;
-import com.surprising.account.api.model.AdminCursorPage;
+import com.surprising.account.api.utils.AdminCursorPage;
 import com.surprising.account.api.model.ProductLedgerEntryResponse;
 import java.util.ArrayList;
 import java.util.List;

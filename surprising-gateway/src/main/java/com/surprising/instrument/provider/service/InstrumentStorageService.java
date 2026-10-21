@@ -71,7 +71,7 @@ public class InstrumentStorageService {
             }
         }
         if (request.instrumentType() == com.surprising.instrument.api.model.InstrumentType.OPTION) {
-            var underlying = instrumentRepository.current(com.surprising.product.api.InstrumentIds.parse(request.underlyingInstrumentId()), request.underlyingProductLine())
+            var underlying = instrumentRepository.current(com.surprising.product.api.utils.InstrumentIds.parse(request.underlyingInstrumentId()), request.underlyingProductLine())
                     .orElseThrow(() -> new IllegalArgumentException("underlying instrument not found in product line"));
             if (underlying.instrumentType() == com.surprising.instrument.api.model.InstrumentType.OPTION
                     || underlying.settleAssetId() != request.settleAssetId()) {

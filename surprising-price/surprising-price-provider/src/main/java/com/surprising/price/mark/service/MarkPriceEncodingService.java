@@ -35,7 +35,7 @@ public class MarkPriceEncodingService {
         if (snapshotCache == null || !snapshotCache.initialized(properties.getKafka().getProductLine())) {
             throw new IllegalStateException("标记价格合约 JVM 快照尚未就绪");
         }
-        var instrument = snapshotCache.current(properties.getKafka().getProductLine(), com.surprising.product.api.InstrumentIds.parse(instrumentId))
+        var instrument = snapshotCache.current(properties.getKafka().getProductLine(), com.surprising.product.api.utils.InstrumentIds.parse(instrumentId))
                 .orElseThrow(() -> notFound(instrumentId));
         return encoding(instrument);
     }
@@ -44,10 +44,10 @@ public class MarkPriceEncodingService {
         if (snapshotCache == null || !snapshotCache.initialized(properties.getKafka().getProductLine())) {
             throw new IllegalStateException("标记价格合约 JVM 快照尚未就绪");
         }
-        var instrument = snapshotCache.current(properties.getKafka().getProductLine(), com.surprising.product.api.InstrumentIds.parse(instrumentId), instrumentChangeId).orElse(null);
+        var instrument = snapshotCache.current(properties.getKafka().getProductLine(), com.surprising.product.api.utils.InstrumentIds.parse(instrumentId), instrumentChangeId).orElse(null);
         if (instrument==null) {
             if (instrumentRpc==null) throw notFound(instrumentId,instrumentChangeId);
-            var units=instrumentRpc.tradeEncoding(properties.getKafka().getProductLine(),com.surprising.product.api.InstrumentIds.parse(instrumentId),instrumentChangeId);
+            var units=instrumentRpc.tradeEncoding(properties.getKafka().getProductLine(),com.surprising.product.api.utils.InstrumentIds.parse(instrumentId),instrumentChangeId);
             return new MarkPriceEncoding(instrumentChangeId,units.quoteScaleUnits(),units.priceTickUnits(),units.baseScaleUnits(),units.quantityStepUnits());
         }
         return encoding(instrument);

@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+
 import lombok.extern.slf4j.Slf4j;
 import com.surprising.gateway.provider.auth.AuthModels.AdminOperationLogResponse;
 import java.sql.ResultSet;

@@ -1,4 +1,6 @@
-package com.surprising.instrument.api.cache;
+package com.surprising.instrument.api.utils;
+
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 
 import com.surprising.instrument.api.InstrumentEventKeys;
 import com.surprising.instrument.api.client.InstrumentRpcApi;

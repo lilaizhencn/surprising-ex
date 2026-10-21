@@ -3301,7 +3301,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public CoreInstrument instrument(String instrumentId) {
-        return instrument(com.surprising.product.api.InstrumentIds.parse(instrumentId));
+        return instrument(com.surprising.product.api.utils.InstrumentIds.parse(instrumentId));
     }
 
     public CoreInstrument instrument(int instrumentId) {
@@ -3311,7 +3311,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public CoreInstrument instrument(AccountLaneState lane, String instrumentId) {
         lane.assertOwner();
-        return instruments.get(com.surprising.product.api.InstrumentIds.parse(instrumentId));
+        return instruments.get(com.surprising.product.api.utils.InstrumentIds.parse(instrumentId));
     }
 
     public void registerInstrument(CoreInstrument instrument) {

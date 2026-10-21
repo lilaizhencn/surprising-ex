@@ -145,7 +145,7 @@ public final class CoreOrderDecisionResolver {
      */
     public static Context context(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                   long userId, String instrumentId, long clusterTimestamp) {
-        return context(runtime, identities, userId, com.surprising.product.api.InstrumentIds.parse(instrumentId), clusterTimestamp);
+        return context(runtime, identities, userId, com.surprising.product.api.utils.InstrumentIds.parse(instrumentId), clusterTimestamp);
     }
 
     /**

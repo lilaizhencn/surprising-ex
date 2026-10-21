@@ -1,5 +1,7 @@
 package com.surprising.instrument.api.cache;
 
+import com.surprising.instrument.api.utils.InstrumentSnapshotSupport;
+
 import com.surprising.instrument.api.client.InstrumentRpcApi;
 import com.surprising.product.api.ProductLine;
 import jakarta.annotation.PostConstruct;

@@ -29,7 +29,7 @@ public class InstrumentSnapshotRuleLookup implements InstrumentRuleLookup {
         if (!snapshotCache.initialized(productLine)) {
             throw new IllegalStateException("下单合约 JVM 快照尚未就绪");
         }
-        return snapshotCache.current(productLine, com.surprising.product.api.InstrumentIds.parse(instrumentId)).map(this::toRule);
+        return snapshotCache.current(productLine, com.surprising.product.api.utils.InstrumentIds.parse(instrumentId)).map(this::toRule);
     }
 
     private InstrumentRule toRule(InstrumentResponse value) {

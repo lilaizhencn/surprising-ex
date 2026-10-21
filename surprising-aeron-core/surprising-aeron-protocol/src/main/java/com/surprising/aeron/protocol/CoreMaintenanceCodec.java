@@ -50,7 +50,7 @@ public final class CoreMaintenanceCodec {
         } catch (java.nio.BufferUnderflowException e) { throw new IllegalArgumentException("truncated maintenance page",e); }
     }
     private static String instrumentId(String value) {
-        com.surprising.product.api.InstrumentIds.parse(value); return value;
+        com.surprising.product.api.utils.InstrumentIds.parse(value); return value;
     }
     private static ByteBuffer buffer(int size) { return ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN); }
     private static ByteBuffer read(byte[] bytes) { if (bytes == null || bytes.length > 512) throw new IllegalArgumentException("invalid maintenance payload"); return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN); }

@@ -1,5 +1,7 @@
 package com.surprising.product.api;
 
+import com.surprising.product.api.utils.ProductTopicNames;
+
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

@@ -193,7 +193,7 @@ public class MarketMakerService {
                 || !instrumentSnapshotCache.initialized(productLine)) {
             throw new IllegalStateException("做市合约 JVM 快照尚未就绪: " + productLine);
         }
-        return instrumentSnapshotCache.current(productLine, com.surprising.product.api.InstrumentIds.parse(instrumentId))
+        return instrumentSnapshotCache.current(productLine, com.surprising.product.api.utils.InstrumentIds.parse(instrumentId))
                 .orElseThrow(() -> new IllegalStateException("合约快照中不存在品种: " + productLine + "/" + instrumentId));
     }
 
@@ -1741,7 +1741,7 @@ public class MarketMakerService {
 
     private String normalizeSymbol(String value) {
         String normalized = normalizeRequired(value, "instrumentId");
-        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(normalized)) {
             throw new IllegalArgumentException("invalid instrumentId: " + value);
         }
         return normalized;

@@ -342,7 +342,7 @@ public final class CoreQueryService {
         var requested = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeQuery(message.payloadUnsafe());
         // 币对筛选的永久整数编号，空币对条件用 0 表示不限定。
         int requestedInstrument = requested.instrumentId().isEmpty() ? 0
-                : com.surprising.product.api.InstrumentIds.parse(requested.instrumentId());
+                : com.surprising.product.api.utils.InstrumentIds.parse(requested.instrumentId());
         // 规范化后的排他编号游标，协议的 0 转成 Long.MAX_VALUE 作为首页起点。
         long before = requested.beforeTriggerOrderId() == 0 ? Long.MAX_VALUE : requested.beforeTriggerOrderId();
         // 按过期时间、状态、用户或币对选择的触发索引遍历来源，后面继续核对组合条件。

@@ -1,6 +1,6 @@
 package com.surprising.insurance.provider.repository;
 
-import com.surprising.insurance.api.model.AdminCursorPage;
+import com.surprising.insurance.api.utils.AdminCursorPage;
 import com.surprising.insurance.api.model.InsuranceFundLedgerResponse;
 import com.surprising.insurance.provider.model.InsuranceLedgerReference;
 import java.sql.Timestamp;

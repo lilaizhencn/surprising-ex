@@ -53,7 +53,7 @@ public record CoreMatchingOrder(long orderId, int instrumentId, CoreOrderSide si
      */
     public CoreMatchingOrder(long orderId, String instrumentId, CoreOrderSide side, CoreOrderType orderType,
             CoreTimeInForce timeInForce, long matchingPriceTicks, long quantitySteps, long maxSlippagePpm) {
-        this(orderId, com.surprising.product.api.InstrumentIds.parse(instrumentId), side, orderType,
+        this(orderId, com.surprising.product.api.utils.InstrumentIds.parse(instrumentId), side, orderType,
                 timeInForce, matchingPriceTicks, quantitySteps, maxSlippagePpm);
     }
 

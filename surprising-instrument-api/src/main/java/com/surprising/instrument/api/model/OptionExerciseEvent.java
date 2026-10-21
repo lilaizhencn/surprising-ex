@@ -20,8 +20,8 @@ public record OptionExerciseEvent(
         InstrumentResponse instrument) {
 
     public OptionExerciseEvent {
-        com.surprising.product.api.InstrumentIds.parse(instrumentId);
-        com.surprising.product.api.InstrumentIds.parse(underlyingInstrumentId);
+        com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
+        com.surprising.product.api.utils.InstrumentIds.parse(underlyingInstrumentId);
         if (underlyingProductLine == null || underlyingProductLine == com.surprising.product.api.ProductLine.OPTION) throw new IllegalArgumentException("invalid underlying product line");
         if (instrumentId == null || instrumentId.isBlank() || changeId <= 0L || underlyingInstrumentId == null
                 || underlyingInstrumentId.isBlank() || strikePriceUnits <= 0L || underlyingSettlementPriceUnits <= 0L

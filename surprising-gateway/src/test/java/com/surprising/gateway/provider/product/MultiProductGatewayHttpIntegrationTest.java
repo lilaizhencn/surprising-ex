@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.*;
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductTopicNames;
+import com.surprising.product.api.utils.ProductTopicNames;
 import java.net.URI;
 import java.net.http.*;
 import java.time.*;

@@ -239,7 +239,7 @@ public final class OrderReservation {
      * @param value 需要校验的永久币对编号文本
      */
     public static String requireInstrumentId(String value) {
-        com.surprising.product.api.InstrumentIds.parse(value);
+        com.surprising.product.api.utils.InstrumentIds.parse(value);
         return value;
     }
 }

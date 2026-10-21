@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.utils.C2cMoney;
+
 import com.surprising.gateway.c2c.model.C2cAd;
 import com.surprising.gateway.c2c.model.C2cMarket;
 import com.surprising.gateway.c2c.model.C2cOrder;

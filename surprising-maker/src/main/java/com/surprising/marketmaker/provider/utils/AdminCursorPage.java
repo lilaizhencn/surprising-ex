@@ -1,7 +1,6 @@
-package com.surprising.risk.api.model;
+package com.surprising.marketmaker.provider.utils;
 
 import java.nio.charset.StandardCharsets;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
@@ -34,43 +33,23 @@ public final class AdminCursorPage {
         }
         try {
             String decoded = new String(Base64.getUrlDecoder().decode(value.trim()), StandardCharsets.UTF_8);
-            int split = decoded.indexOf(':');
+            int split = decoded.lastIndexOf('|');
             if (split <= 0 || split == decoded.length() - 1) {
                 throw new IllegalArgumentException("invalid cursor");
             }
-            long epochMillis = Long.parseLong(decoded.substring(0, split));
+            Instant timestamp = Instant.parse(decoded.substring(0, split));
             long id = Long.parseLong(decoded.substring(split + 1));
-            return new Cursor(Instant.ofEpochMilli(epochMillis), id);
+            return new Cursor(timestamp, id);
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException("invalid cursor", ex);
         }
     }
 
-    public static String seekCondition(SortSpec sort) {
-        String operator = sort.descending() ? "<" : ">";
-        return " AND (" + sort.column() + " " + operator + " ? OR ("
-                + sort.column() + " = ? AND " + sort.idColumn() + " " + operator + " ?))";
-    }
-
-    public static String seekCondition(SortSpec sort, Cursor cursor) {
-        return cursor == null ? "" : seekCondition(sort);
-    }
-
-    public static void addCursorArgs(List<Object> args, Cursor cursor) {
-        if (cursor == null) {
-            return;
-        }
-        Timestamp time = Timestamp.from(cursor.timestamp());
-        args.add(time);
-        args.add(time);
-        args.add(cursor.id());
-    }
-
     public static <T> CursorPage<T> page(List<T> fetchedRows,
-                                         int limit,
-                                         SortSpec sort,
-                                         Function<T, Instant> timestampExtractor,
-                                         ToLongFunction<T> idExtractor) {
+                                  int limit,
+                                  SortSpec sort,
+                                  Function<T, Instant> timestampExtractor,
+                                  ToLongFunction<T> idExtractor) {
         boolean hasMore = fetchedRows.size() > limit;
         List<T> rows = hasMore ? List.copyOf(fetchedRows.subList(0, limit)) : List.copyOf(fetchedRows);
         String nextCursor = null;
@@ -85,18 +64,15 @@ public final class AdminCursorPage {
         if (timestamp == null) {
             throw new IllegalArgumentException("cursor timestamp is required");
         }
-        String raw = timestamp.toEpochMilli() + ":" + id;
+        String raw = timestamp + "|" + id;
         return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 
-    public record SortSpec(String field, String column, String idColumn, boolean descending) {
+    public record SortSpec(String field, boolean descending) {
         public String token() {
             return field + "." + (descending ? "desc" : "asc");
         }
 
-        public String directionSql() {
-            return descending ? "DESC" : "ASC";
-        }
     }
 
     public record Cursor(Instant timestamp, long id) {

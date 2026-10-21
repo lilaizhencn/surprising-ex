@@ -4,7 +4,7 @@ import com.surprising.marketmaker.provider.config.MarketMakerProperties;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.consumer.MarkPriceUpdateListener;
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductTopicNames;
+import com.surprising.product.api.utils.ProductTopicNames;
 import com.surprising.trading.api.model.PublicTradeEvent;
 import java.time.Duration;
 import java.util.List;

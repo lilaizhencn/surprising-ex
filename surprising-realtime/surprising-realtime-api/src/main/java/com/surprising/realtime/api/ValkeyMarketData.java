@@ -4,7 +4,7 @@ import com.surprising.aeron.protocol.CoreOrderBookView;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.protocol.RealtimeFrameCodec;
-import com.surprising.product.api.InstrumentIds;
+import com.surprising.product.api.utils.InstrumentIds;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
 import java.util.Base64;

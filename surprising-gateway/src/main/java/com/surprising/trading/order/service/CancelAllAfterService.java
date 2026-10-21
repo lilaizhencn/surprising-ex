@@ -102,7 +102,7 @@ public class CancelAllAfterService {
             return "*";
         }
         String normalized = instrumentId.trim().toUpperCase(Locale.ROOT);
-        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(normalized)) {
             throw new IllegalArgumentException("instrumentId format is invalid");
         }
         return normalized;

@@ -67,7 +67,7 @@ public record SubscriptionTopic(
         if (!channel.isPublicChannel() && WILDCARD.equals(normalized)) {
             return WILDCARD;
         }
-        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(normalized)) {
             throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
         return normalized;

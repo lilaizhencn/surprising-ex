@@ -100,7 +100,7 @@ public final class TriggerOrderCommands {
         }
 
         PendingTriggerScan prepare(String instrumentId, RiskScanRuntime scan, int remaining) {
-            this.instrumentId = com.surprising.product.api.InstrumentIds.parse(instrumentId);
+            this.instrumentId = com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
             this.scan = scan;
             this.remaining = remaining;
             long msb = ((long) owner.productLine().ordinal() << 48)

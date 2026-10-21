@@ -5,7 +5,7 @@ import com.surprising.aeron.service.command.ImmutableLongArrayList;
 
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 
-import com.surprising.product.api.InstrumentIds;
+import com.surprising.product.api.utils.InstrumentIds;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectAVLTreeMap;

@@ -82,7 +82,7 @@ public class InstrumentRepository {
                 request.fundingIntervalHours(), request.interestRatePpm(), request.fundingRateCapPpm(),
                 request.fundingRateFloorPpm(), request.impactNotionalUnits(), request.minValidIndexSources(),
                 timestampOrNull(request.expiryTime()), timestampOrNull(request.deliveryTime()),
-                request.underlyingInstrumentId() == null ? null : com.surprising.product.api.InstrumentIds.parse(request.underlyingInstrumentId()), enumName(request.underlyingProductLine()), request.strikePriceUnits(),
+                request.underlyingInstrumentId() == null ? null : com.surprising.product.api.utils.InstrumentIds.parse(request.underlyingInstrumentId()), enumName(request.underlyingProductLine()), request.strikePriceUnits(),
                 enumName(request.optionType()), enumName(request.optionExerciseStyle()),
                 enumName(request.settlementMethod()),
                 request.status().name(), Timestamp.from(effectiveTime), Timestamp.from(now), Timestamp.from(now));

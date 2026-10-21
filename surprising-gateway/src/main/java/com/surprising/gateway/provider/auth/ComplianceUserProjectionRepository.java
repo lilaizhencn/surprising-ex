@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+
 import com.surprising.gateway.provider.auth.ComplianceModels.ComplianceUserSummary;
 import java.util.ArrayList;
 import java.util.List;

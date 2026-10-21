@@ -22,7 +22,7 @@ public record MarketMakerStrategyDefinition(String strategyId, ProductLine produ
                 || instrumentIds.stream().anyMatch(id -> id == null || !id.matches("[1-9][0-9]{0,9}"))
                 || instrumentIds.stream().distinct().count() != instrumentIds.size())
             throw new IllegalArgumentException("instrumentIds requires 1-64 unique permanent instrument IDs");
-        instrumentIds.forEach(com.surprising.product.api.InstrumentIds::parse);
+        instrumentIds.forEach(com.surprising.product.api.utils.InstrumentIds::parse);
         accountIds = List.copyOf(accountIds);
         instrumentIds = List.copyOf(instrumentIds);
         if (baseQuantitySteps <= 0 || spreadTicks < 0 || levelSpacingTicks < 0 || maxInventorySteps < 0

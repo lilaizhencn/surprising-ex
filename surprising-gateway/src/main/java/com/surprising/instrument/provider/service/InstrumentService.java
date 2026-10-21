@@ -13,7 +13,7 @@ import com.surprising.instrument.api.model.DeliverySettlementEvent;
 import com.surprising.instrument.api.model.OptionExerciseEvent;
 import com.surprising.instrument.provider.config.InstrumentProperties;
 import com.surprising.product.api.ProductLine;
-import com.surprising.product.api.ProductTopicNames;
+import com.surprising.product.api.utils.ProductTopicNames;
 import java.nio.charset.StandardCharsets;
 import java.math.BigInteger;
 import java.security.MessageDigest;
@@ -300,7 +300,7 @@ public class InstrumentService {
                 || option.optionType() == null) {
             throw new IllegalArgumentException("期权行权缺少完整标的结算信息");
         }
-        InstrumentResponse underlying = latest(com.surprising.product.api.InstrumentIds.parse(option.underlyingInstrumentId()), option.underlyingProductLine());
+        InstrumentResponse underlying = latest(com.surprising.product.api.utils.InstrumentIds.parse(option.underlyingInstrumentId()), option.underlyingProductLine());
         if (underlying.instrumentType() == InstrumentType.OPTION
                 || underlying.priceTickUnits() <= 0L
                 || underlying.settleAssetId() != option.settleAssetId()) {

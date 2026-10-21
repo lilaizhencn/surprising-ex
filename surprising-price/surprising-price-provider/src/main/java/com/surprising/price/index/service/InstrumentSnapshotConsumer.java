@@ -1,8 +1,8 @@
 package com.surprising.price.index.service;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
-import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
-import com.surprising.product.api.ProductTopicNames;
+import com.surprising.instrument.api.utils.InstrumentSnapshotSupport;
+import com.surprising.product.api.utils.ProductTopicNames;
 import com.surprising.price.index.config.IndexPriceProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Qualifier;

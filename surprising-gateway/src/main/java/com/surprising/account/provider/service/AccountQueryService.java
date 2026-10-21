@@ -2,7 +2,7 @@ package com.surprising.account.provider.service;
 
 import com.surprising.account.api.model.AccountLedgerEntryResponse;
 import com.surprising.account.api.model.AdminBalanceAdjustmentRecord;
-import com.surprising.account.api.model.AdminCursorPage;
+import com.surprising.account.api.utils.AdminCursorPage;
 import com.surprising.account.api.model.ProductLedgerEntryResponse;
 import com.surprising.account.api.model.ProductTransferRecordResponse;
 import com.surprising.account.api.model.AccountType;

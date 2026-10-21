@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;

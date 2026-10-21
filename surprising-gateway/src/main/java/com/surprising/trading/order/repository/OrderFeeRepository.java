@@ -1,6 +1,6 @@
 package com.surprising.trading.order.repository;
 
-import com.surprising.trading.api.model.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.trading.api.model.FeeScheduleQueryResponse;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleSourceType;
@@ -241,7 +241,7 @@ public class OrderFeeRepository {
         if (instrumentId == null || instrumentId.isBlank()) {
             return;
         }
-        if (!com.surprising.product.api.InstrumentIds.valid(instrumentId.trim().toUpperCase())) {
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(instrumentId.trim().toUpperCase())) {
             throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
     }

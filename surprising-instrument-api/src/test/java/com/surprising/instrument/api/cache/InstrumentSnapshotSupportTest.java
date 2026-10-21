@@ -1,5 +1,7 @@
 package com.surprising.instrument.api.cache;
 
+import com.surprising.instrument.api.utils.InstrumentSnapshotSupport;
+
 import com.surprising.instrument.api.model.ContractSettlementMethod;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentEvent;

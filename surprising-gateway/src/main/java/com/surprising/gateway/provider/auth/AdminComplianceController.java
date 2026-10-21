@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+
 import com.surprising.gateway.provider.auth.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.ComplianceModels.AmlCase;
 import com.surprising.gateway.provider.auth.ComplianceModels.AmlCaseCreateRequest;

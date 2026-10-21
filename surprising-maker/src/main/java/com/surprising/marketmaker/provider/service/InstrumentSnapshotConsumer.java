@@ -1,9 +1,9 @@
 package com.surprising.marketmaker.provider.service;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
-import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
+import com.surprising.instrument.api.utils.InstrumentSnapshotSupport;
 import com.surprising.marketmaker.provider.config.MarketMakerProperties;
-import com.surprising.product.api.ProductTopicNames;
+import com.surprising.product.api.utils.ProductTopicNames;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;

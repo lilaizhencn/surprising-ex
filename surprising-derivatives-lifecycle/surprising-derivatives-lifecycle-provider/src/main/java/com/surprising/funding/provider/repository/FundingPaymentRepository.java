@@ -1,6 +1,6 @@
 package com.surprising.funding.provider.repository;
 
-import com.surprising.funding.api.model.AdminCursorPage;
+import com.surprising.funding.api.utils.AdminCursorPage;
 import com.surprising.funding.api.model.FundingPaymentResponse;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.trading.api.model.MarginMode;

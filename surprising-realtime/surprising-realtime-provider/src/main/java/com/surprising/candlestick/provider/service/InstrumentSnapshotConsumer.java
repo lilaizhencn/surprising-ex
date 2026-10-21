@@ -2,8 +2,8 @@ package com.surprising.candlestick.provider.service;
 
 import com.surprising.candlestick.provider.config.CandlestickProperties;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
-import com.surprising.instrument.api.cache.InstrumentSnapshotSupport;
-import com.surprising.product.api.ProductTopicNames;
+import com.surprising.instrument.api.utils.InstrumentSnapshotSupport;
+import com.surprising.product.api.utils.ProductTopicNames;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;

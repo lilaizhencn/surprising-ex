@@ -49,7 +49,7 @@ public class IndexPriceController {
     }
 
     private String normalizeSymbol(String instrumentId) {
-        if (instrumentId == null || !com.surprising.product.api.InstrumentIds.valid(instrumentId)) {
+        if (instrumentId == null || !com.surprising.product.api.utils.InstrumentIds.valid(instrumentId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid instrumentId");
         }
         return instrumentId;

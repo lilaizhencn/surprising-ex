@@ -1,6 +1,6 @@
 package com.surprising.trading.api.model;
 
-import com.surprising.product.api.InstrumentIds;
+import com.surprising.product.api.utils.InstrumentIds;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 

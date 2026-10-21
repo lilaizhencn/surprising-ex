@@ -34,7 +34,7 @@ public class MarketMakerBusinessSettingsService {
                 || settings.trade().getMaxQuantitySteps() < settings.trade().getMinQuantitySteps())
             throw new IllegalArgumentException("maximum quantity must not be below minimum quantity");
         for (var source : settings.referenceMarket().getSources()) {
-            com.surprising.product.api.InstrumentIds.parse(source.getInstrumentId());
+            com.surprising.product.api.utils.InstrumentIds.parse(source.getInstrumentId());
             requireUrl(source.getUrl(), false);
             var restParsers = java.util.Set.of("BINANCE_DEPTH", "BINANCE_FUTURES_DEPTH", "OKX_BOOKS", "OKX_BOOKS_FULL", "BYBIT_ORDERBOOK", "BYBIT_V5_ORDERBOOK");
             if (!restParsers.contains(source.getParser().toUpperCase(java.util.Locale.ROOT)))

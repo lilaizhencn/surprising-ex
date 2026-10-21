@@ -68,7 +68,7 @@ public class RecentTradeQueryService {
     }
 
     public List<RecentTrade> recent(String instrumentId, int limit) {
-        if (instrumentId == null || !com.surprising.product.api.InstrumentIds.valid(instrumentId))
+        if (instrumentId == null || !com.surprising.product.api.utils.InstrumentIds.valid(instrumentId))
             throw new IllegalArgumentException("invalid instrumentId");
         if (limit < 1 || limit > 50) throw new IllegalArgumentException("limit must be in [1,50]");
         String normalized = instrumentId.toUpperCase(java.util.Locale.ROOT);

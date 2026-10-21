@@ -129,7 +129,7 @@ public class LeverageService {
             throw new IllegalArgumentException("instrumentId is required");
         }
         String normalized = instrumentId.trim().toUpperCase();
-        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(normalized)) {
             throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
         return normalized;

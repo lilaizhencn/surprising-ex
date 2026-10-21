@@ -65,7 +65,7 @@ public record RegisterInstrumentCommand(
 
     public RegisterInstrumentCommand {
         java.util.Objects.requireNonNull(orderProtection, "orderProtection");
-        com.surprising.product.api.InstrumentIds.parse(instrumentId);
+        com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
         if (instrumentId == null || instrumentId.isBlank() || contractTypeCode < 0
                 || baseAsset == null || baseAsset.isBlank() || quoteAsset == null || quoteAsset.isBlank()
                 || settleAsset == null || settleAsset.isBlank() || notionalMultiplierUnits <= 0

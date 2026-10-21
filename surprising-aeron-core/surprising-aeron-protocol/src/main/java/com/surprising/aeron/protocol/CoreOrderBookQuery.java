@@ -6,7 +6,7 @@ public record CoreOrderBookQuery(String instrumentId, int depth) {
     public static final int MAX_DEPTH = 100;
 
     public CoreOrderBookQuery {
-        com.surprising.product.api.InstrumentIds.parse(instrumentId);
+        com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
         if (depth == 0) depth = DEFAULT_DEPTH;
         if (depth < 1 || depth > MAX_DEPTH) {
             throw new IllegalArgumentException("invalid book depth");
@@ -14,6 +14,6 @@ public record CoreOrderBookQuery(String instrumentId, int depth) {
     }
 
     static boolean validSymbol(String value) {
-        return com.surprising.product.api.InstrumentIds.valid(value);
+        return com.surprising.product.api.utils.InstrumentIds.valid(value);
     }
 }

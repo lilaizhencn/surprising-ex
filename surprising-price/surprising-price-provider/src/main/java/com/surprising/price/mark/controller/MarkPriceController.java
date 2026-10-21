@@ -36,7 +36,7 @@ public class MarkPriceController {
 
     @GetMapping(PriceApiPaths.MARK_BASE_PATH + "/inputs")
     public com.surprising.price.mark.service.MarkPriceService.MarketInputs inputs(@RequestParam("instrumentId") String instrumentId) {
-        if (!com.surprising.product.api.InstrumentIds.valid(instrumentId))
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(instrumentId))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid instrumentId");
         return prices.inputs(instrumentId);
     }

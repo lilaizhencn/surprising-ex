@@ -428,7 +428,7 @@ public class AlgoOrderService {
             throw new IllegalArgumentException("instrumentId is required");
         }
         String normalized = instrumentId.trim().toUpperCase(Locale.ROOT);
-        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) {
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(normalized)) {
             throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         }
         return normalized;

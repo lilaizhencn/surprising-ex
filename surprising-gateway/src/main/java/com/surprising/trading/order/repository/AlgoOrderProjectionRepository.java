@@ -22,7 +22,7 @@ public final class AlgoOrderProjectionRepository {
         var args = new ArrayList<Object>(List.of(product.name(), userId));
         var sql = new StringBuilder("SELECT * FROM core_algo_order_projection WHERE product_line=? AND user_id=? AND status_code IN (0,1,2)");
         if (instrumentId != null && !instrumentId.isBlank()) {
-            com.surprising.product.api.InstrumentIds.parse(instrumentId);
+            com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
             sql.append(" AND instrument_id=?"); args.add(instrumentId);
         }
         sql.append(" ORDER BY created_at_epoch_ms DESC,algo_order_id DESC LIMIT ?"); args.add(limit);

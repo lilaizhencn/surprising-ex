@@ -535,7 +535,7 @@ public class GatewayProperties implements EnvironmentAware {
         public String backendInstrumentId(String symbol, com.surprising.product.api.ProductLine line) {
             String key = line.name() + ":" + symbol.trim().toUpperCase(java.util.Locale.ROOT);
             String id = symbolAliases.get(key);
-            if (!com.surprising.product.api.InstrumentIds.valid(id)) {
+            if (!com.surprising.product.api.utils.InstrumentIds.valid(id)) {
                 throw new IllegalArgumentException("permanent instrument ID alias is not configured: " + key);
             }
             return id;

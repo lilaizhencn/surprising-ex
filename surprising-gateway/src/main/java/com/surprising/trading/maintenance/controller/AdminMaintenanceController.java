@@ -34,7 +34,7 @@ public class AdminMaintenanceController {
     }
 
     public MaintenanceService.Preview preview(String instrumentId, long userId, long afterUserId) {
-        if (!com.surprising.product.api.InstrumentIds.valid(instrumentId)) badRequest("explicit instrument_id is required");
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(instrumentId)) badRequest("explicit instrument_id is required");
         nonnegative(userId, "invalid user cursor");
         nonnegative(afterUserId, "invalid user cursor");
         return service.preview(instrumentId, userId, afterUserId);
@@ -52,7 +52,7 @@ public class AdminMaintenanceController {
 
     public MaintenanceTask create(String admin, MaintenanceRequest request) {
         if (request == null || request.requestId() == null || request.mode() == null
-                || request.instrumentId() == null || !com.surprising.product.api.InstrumentIds.valid(request.instrumentId())
+                || request.instrumentId() == null || !com.surprising.product.api.utils.InstrumentIds.valid(request.instrumentId())
                 || request.reason() == null || request.reason().isBlank() || request.reason().length() > 1024) {
             badRequest("requestId, explicit instrument_id, mode and maintenance reason are required");
         }

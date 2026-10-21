@@ -26,7 +26,7 @@ public class InstrumentLifecycleDrainRepository {
                     product_line = EXCLUDED.product_line,
                     ready_at = GREATEST(instrument_lifecycle_drain_acks.ready_at, EXCLUDED.ready_at),
                     updated_at = EXCLUDED.updated_at
-                """, com.surprising.product.api.InstrumentIds.parse(event.instrumentId()), event.instrumentChangeId(), event.productLine().name(),
+                """, com.surprising.product.api.utils.InstrumentIds.parse(event.instrumentId()), event.instrumentChangeId(), event.productLine().name(),
                 event.component().name(), Timestamp.from(event.readyAt()), Timestamp.from(now));
         if (rows != 1) {
             throw new IllegalStateException("生命周期清理确认写入失败: "
@@ -42,7 +42,7 @@ public class InstrumentLifecycleDrainRepository {
                    AND instrument_id = ?
                    AND instrument_change_id = ?
                    AND component = 'ORDER'
-                """, Integer.class, productLine.name(), com.surprising.product.api.InstrumentIds.parse(instrumentId), instrumentChangeId);
+                """, Integer.class, productLine.name(), com.surprising.product.api.utils.InstrumentIds.parse(instrumentId), instrumentChangeId);
         // 订单终态、预占释放和成交结算已由同一个交易 Core 提交；当前只有 ORDER 发布者。
         // 旧 ACCOUNT 账户 reducer 不再存在，其历史确认不能替代当前版本的 Core 订单确认。
         return count != null && count == 1;

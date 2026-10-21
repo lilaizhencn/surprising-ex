@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.utils.C2cMoney;
+
 import java.util.*;
 import java.text.Normalizer;
 import com.surprising.gateway.c2c.model.C2cOfferFilter;

@@ -549,7 +549,7 @@ public class TriggerOrderService {
     private String normalizeSymbol(String instrumentId) {
         if (instrumentId == null || instrumentId.isBlank()) throw new IllegalArgumentException("instrumentId is required");
         String normalized = instrumentId.trim().toUpperCase();
-        if (!com.surprising.product.api.InstrumentIds.valid(normalized)) throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(normalized)) throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
         return normalized;
     }
 

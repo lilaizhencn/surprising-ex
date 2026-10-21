@@ -1,5 +1,7 @@
 package com.surprising.product.api;
 
+import com.surprising.product.api.utils.InstrumentIds;
+
 import static org.assertj.core.api.Assertions.*;
 import org.junit.jupiter.api.Test;
 

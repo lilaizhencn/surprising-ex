@@ -258,7 +258,7 @@ lane.clientIdentities().clear();
     }
 
     public int symbolId(String instrumentId) {
-        return symbolId(com.surprising.product.api.InstrumentIds.parse(instrumentId));
+        return symbolId(com.surprising.product.api.utils.InstrumentIds.parse(instrumentId));
     }
 
     public int symbolId(int instrumentId) {
@@ -274,7 +274,7 @@ lane.clientIdentities().clear();
     }
 
     public Integer findSymbolId(String instrumentId) {
-        int id = findSymbolIdValue(com.surprising.product.api.InstrumentIds.parse(instrumentId));
+        int id = findSymbolIdValue(com.surprising.product.api.utils.InstrumentIds.parse(instrumentId));
         return id < 0 ? null : id;
     }
 
@@ -816,7 +816,7 @@ lane.clientIdentities().exportTo(clientKeys);
             registry.assets = storeIdentity(registry.assets, id, name);
         });
         snapshot.symbolIds().forEach((name, id) -> {
-            registry.symbolIds.put(com.surprising.product.api.InstrumentIds.parse(name), id);
+            registry.symbolIds.put(com.surprising.product.api.utils.InstrumentIds.parse(name), id);
             registry.symbols = storeIdentity(registry.symbols, id, name);
         });
         snapshot.clientKeys().forEach((identity, key) -> {

@@ -31,7 +31,7 @@ public class MatchingMarketDataService {
     }
 
     public OrderBookSnapshotResponse orderBookSnapshot(String instrumentId, int depth) {
-        com.surprising.product.api.InstrumentIds.parse(instrumentId);
+        com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
         if (depth == 0) depth = 30;
         if (depth < 1 || depth > 100) throw new IllegalArgumentException("invalid book depth");
         int availableDepth = Math.min(depth, 50);
