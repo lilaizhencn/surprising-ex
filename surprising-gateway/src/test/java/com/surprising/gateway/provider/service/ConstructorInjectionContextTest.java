@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.service;
 
+
 import com.surprising.gateway.provider.controller.GatewayProxyController;
 
 import static org.assertj.core.api.Assertions.assertThat;

@@ -1,5 +1,10 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.model.ProductTransferCommand;
+import com.surprising.gateway.provider.model.ProductTransferResult;
+import com.surprising.gateway.provider.model.ProductTransferStatus;
+import com.surprising.gateway.provider.model.ProductTransferWireRequest;
+
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.product.api.ProductLine;
@@ -15,7 +20,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import tools.jackson.databind.ObjectMapper;
 
 @Service
 public final class ProductTransferCoordinator {
@@ -96,26 +100,6 @@ public final class ProductTransferCoordinator {
         return processed;
     }
 
-    public ProductTransferResult transferJson(long userId, byte[] body, String suppliedIdempotencyKey,
-                                               ObjectMapper objectMapper) {
-        if (body == null || body.length == 0) {
-            throw new IllegalArgumentException("transfer request body is required");
-        }
-        try {
-            ProductTransferWireRequest request = objectMapper.readValue(body, ProductTransferWireRequest.class);
-            String key = suppliedIdempotencyKey == null || suppliedIdempotencyKey.isBlank()
-                    ? request.referenceId() : suppliedIdempotencyKey;
-            return transfer(new ProductTransferCommand(userId, key, request.sourceAccountType(),
-                    request.targetAccountType(), request.asset(), request.amountUnits(), request.referenceId(),
-                    request.reason(), request.recipientUserId() == null ? userId : request.recipientUserId()));
-        } catch (RuntimeException exception) {
-            if (exception instanceof IllegalArgumentException) {
-                throw exception;
-            }
-            throw new IllegalArgumentException("transfer request body is invalid", exception);
-        }
-    }
-
     private ProductTransferResult forward(ProductTransferOperationRequest operation,
                                           ProductTransferCommand command,
                                           Instant startedAt) {
@@ -135,8 +119,8 @@ public final class ProductTransferCoordinator {
     }
 
     private ProductTransferOperationRequest operation(ProductTransferCommand command) {
-        AccountType source = accountType(command.sourceAccountType());
-        AccountType target = accountType(command.targetAccountType());
+        AccountType source = command.sourceAccountType();
+        AccountType target = command.targetAccountType();
         ProductLine sourceLine = productLine(source);
         ProductLine targetLine = productLine(target);
         if (sourceLine == targetLine && command.userId() == command.recipientUserId()) throw new IllegalArgumentException("source and target are the same account");
@@ -148,7 +132,7 @@ public final class ProductTransferCoordinator {
 
     private ProductTransferCommand command(ProductTransferOperationRequest operation) {
         return new ProductTransferCommand(operation.userId(), Long.toString(operation.transferId()),
-                operation.sourceAccountType().name(), operation.targetAccountType().name(), operation.asset(),
+                operation.sourceAccountType(), operation.targetAccountType(), operation.asset(),
                 operation.amountUnits(), operation.referenceId(), operation.reason(), operation.recipientUserId());
     }
 
@@ -169,14 +153,6 @@ public final class ProductTransferCoordinator {
         }
     }
 
-    private AccountType accountType(String value) {
-        try {
-            return AccountType.valueOf(value.trim().toUpperCase(Locale.ROOT));
-        } catch (RuntimeException exception) {
-            throw new IllegalArgumentException("unsupported account type: " + value, exception);
-        }
-    }
-
     private String providerAccountType(AccountType accountType) {
         return accountType == AccountType.FUNDING ? AccountType.SPOT.name() : accountType.name();
     }
@@ -186,18 +162,10 @@ public final class ProductTransferCoordinator {
                 .orElseThrow(() -> new IllegalArgumentException("unsupported account type: " + accountType));
     }
 
+    /** 原生资金命令仍必须满足身份和正金额不变量；HTTP表示格式由Controller负责。 */
     private void validate(ProductTransferCommand command) {
-        if (command == null || command.userId() <= 0 || command.recipientUserId() <= 0) throw new IllegalArgumentException("userId is required");
-        if (command.idempotencyKey() == null
-                || !command.idempotencyKey().trim().matches("[A-Za-z0-9._:-]{1,128}")) {
-            throw new IllegalArgumentException("idempotency key must be 1-128 safe characters");
-        }
-        if (command.asset() == null || !command.asset().trim().matches("[A-Za-z0-9]{1,20}")) {
-            throw new IllegalArgumentException("asset is invalid");
-        }
-        if (command.amountUnits() <= 0 || command.referenceId() == null
-                || command.referenceId().isBlank() || command.referenceId().trim().length() > 128) {
-            throw new IllegalArgumentException("amount and referenceId are invalid");
-        }
+        if (command == null || command.userId() <= 0 || command.recipientUserId() <= 0)
+            throw new IllegalArgumentException("userId is required");
+        if (command.amountUnits() <= 0) throw new IllegalArgumentException("amount must be positive");
     }
 }

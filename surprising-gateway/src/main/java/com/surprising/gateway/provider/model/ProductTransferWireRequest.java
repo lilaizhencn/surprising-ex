@@ -1,10 +1,10 @@
-package com.surprising.gateway.provider.service;
+package com.surprising.gateway.provider.model;
 
 public record ProductTransferWireRequest(
         String sourceAccountType,
         String targetAccountType,
         String asset,
-        long amountUnits,
+        java.math.BigDecimal amountUnits,
         String referenceId,
         String reason,
         Long recipientUserId) {

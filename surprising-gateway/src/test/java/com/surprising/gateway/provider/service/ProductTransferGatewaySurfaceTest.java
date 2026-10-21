@@ -1,5 +1,10 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.model.ProductTransferCommand;
+import com.surprising.gateway.provider.model.ProductTransferResult;
+import com.surprising.gateway.provider.model.ProductTransferStatus;
+
+
 import com.surprising.gateway.provider.controller.GatewayProxyController;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -81,6 +86,105 @@ class ProductTransferGatewaySurfaceTest {
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().is(
                         reason==com.surprising.gateway.provider.exception.ProductTransferSecurityException.Reason.VALUATION_UNAVAILABLE?503:428));
         org.mockito.Mockito.verifyNoInteractions(coordinator);
+    }
+
+
+    @Test void authenticationPrecedesBodyBindingAndCannotReachSecurityOrFunds() {
+        var coordinator=mock(ProductTransferCoordinator.class);
+        var security=mock(ProductTransferSecurityService.class);
+        var auth=userAuthService();
+        var controller=controller(coordinator,security,auth);
+        var request=new MockHttpServletRequest("POST","/api/v1/gateway/account/transfers");
+        org.assertj.core.api.Assertions.assertThatThrownBy(()->controller.proxy("account",HttpMethod.POST,request,"malformed".getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,
+                        failure->assertThat(failure.getStatusCode().value()).isEqualTo(401));
+        org.mockito.Mockito.verifyNoInteractions(auth,security,coordinator);
+    }
+
+    @Test void exactAmountAndAuthenticatedIdentityAreBoundInTheOriginalSecurityOrder() {
+        var coordinator=mock(ProductTransferCoordinator.class);
+        var security=mock(ProductTransferSecurityService.class);
+        var auth=userAuthService();
+        when(coordinator.transfer(org.mockito.ArgumentMatchers.any())).thenAnswer(call->ProductTransferResult.from(99,
+                call.getArgument(0),ProductTransferStatus.COMPLETED,null,null,Instant.now()));
+        var request=transferRequest();
+        request.addHeader("Idempotency-Key","header-key");
+        request.addHeader("X-Security-Email-Code","123456");
+        request.addHeader("X-Security-TOTP-Code","654321");
+        byte[] body=("{\"sourceAccountType\":\" funding \",\"targetAccountType\":\"USDT_PERPETUAL\",\"asset\":\"USDT\","
+                +"\"amountUnits\":9223372036854775807,\"referenceId\":\"original-reference\",\"recipientUserId\":9007199254740993}").getBytes(StandardCharsets.UTF_8);
+        var response=controller(coordinator,security,auth).proxy("account",HttpMethod.POST,request,body);
+        var order=org.mockito.Mockito.inOrder(auth,security,coordinator);
+        order.verify(auth).authenticateBearer("Bearer user");
+        order.verify(security).requireIfNeeded(org.mockito.ArgumentMatchers.eq(42L),
+                org.mockito.ArgumentMatchers.eq(new com.surprising.gateway.provider.model.ProductTransferAmount("USDT",Long.MAX_VALUE)),
+                org.mockito.ArgumentMatchers.eq("123456"),org.mockito.ArgumentMatchers.eq("654321"),org.mockito.ArgumentMatchers.any());
+        var command=org.mockito.ArgumentCaptor.forClass(ProductTransferCommand.class);
+        order.verify(coordinator).transfer(command.capture());
+        assertThat(command.getValue()).isEqualTo(new ProductTransferCommand(42,"header-key",
+                com.surprising.account.api.model.AccountType.FUNDING,com.surprising.account.api.model.AccountType.USDT_PERPETUAL,
+                "USDT",Long.MAX_VALUE,"original-reference",null,9007199254740993L));
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(new String(response.getBody(),StandardCharsets.UTF_8)).contains("9223372036854775807","9007199254740993","FUNDING");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("invalidTransferFields")
+    void invalidWireFieldsNeverReachFunds(String field,String value) {
+        var json=new ObjectMapper();
+        var payload=(tools.jackson.databind.node.ObjectNode)json.readTree("""
+                {"sourceAccountType":"FUNDING","targetAccountType":"USDT_PERPETUAL","asset":"USDT","amountUnits":100,"referenceId":"original"}
+                """);
+        payload.set(field,json.readTree(value));
+        var coordinator=mock(ProductTransferCoordinator.class);
+        var controller=controller(coordinator,mock(ProductTransferSecurityService.class),userAuthService());
+        org.assertj.core.api.Assertions.assertThatThrownBy(()->controller.proxy("account",HttpMethod.POST,transferRequest(),json.writeValueAsBytes(payload)))
+                .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,
+                        failure->assertThat(failure.getStatusCode().value()).isEqualTo(400));
+        org.mockito.Mockito.verifyNoInteractions(coordinator);
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> invalidTransferFields() {
+        return java.util.stream.Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of("amountUnits","0"),
+                org.junit.jupiter.params.provider.Arguments.of("amountUnits","-1"),
+                org.junit.jupiter.params.provider.Arguments.of("amountUnits","1.5"),
+                org.junit.jupiter.params.provider.Arguments.of("amountUnits","9223372036854775806.0"),
+                org.junit.jupiter.params.provider.Arguments.of("amountUnits","\"1.5\""),
+                org.junit.jupiter.params.provider.Arguments.of("amountUnits","9223372036854775808"),
+                org.junit.jupiter.params.provider.Arguments.of("amountUnits","null"),
+                org.junit.jupiter.params.provider.Arguments.of("asset","\"\""),
+                org.junit.jupiter.params.provider.Arguments.of("asset","\"bad!?\""),
+                org.junit.jupiter.params.provider.Arguments.of("recipientUserId","0"),
+                org.junit.jupiter.params.provider.Arguments.of("referenceId","\"\""),
+                org.junit.jupiter.params.provider.Arguments.of("referenceId","\"unsafe/key\""),
+                org.junit.jupiter.params.provider.Arguments.of("sourceAccountType","\"UNKNOWN\""));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"null","broken","[]"})
+    void malformedBodyNeverReachesSecurityOrFunds(String body) {
+        var coordinator=mock(ProductTransferCoordinator.class);
+        var security=mock(ProductTransferSecurityService.class);
+        var controller=controller(coordinator,security,userAuthService());
+        org.assertj.core.api.Assertions.assertThatThrownBy(()->controller.proxy("account",HttpMethod.POST,transferRequest(),body.getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,
+                        failure->assertThat(failure.getStatusCode().value()).isEqualTo(400));
+        org.mockito.Mockito.verifyNoInteractions(security,coordinator);
+    }
+
+    private MockHttpServletRequest transferRequest() {
+        var request=new MockHttpServletRequest("POST","/api/v1/gateway/account/transfers");
+        request.addHeader("Authorization","Bearer user");
+        return request;
+    }
+
+    private GatewayProxyController controller(ProductTransferCoordinator coordinator,ProductTransferSecurityService security,AuthService auth) {
+        var products=mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
+        var local=mock(com.surprising.gateway.provider.local.LocalBusinessApi.class);
+        var json=new ObjectMapper();
+        return new GatewayProxyController(properties(),new RestTemplate(),auth,null,json,coordinator,security,
+                products,local,new com.surprising.gateway.provider.product.GatewayProductSelection(products,json));
     }
 
     private GatewayProperties properties() {

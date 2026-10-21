@@ -1,5 +1,9 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.model.ProductTransferCommand;
+import com.surprising.gateway.provider.model.ProductTransferResult;
+import com.surprising.gateway.provider.model.ProductTransferStatus;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -92,10 +96,10 @@ class ProductTransferCoordinatorTest {
         ProductTransferCoordinator coordinator = new ProductTransferCoordinator(accountClient);
 
         ProductTransferResult first = coordinator.transfer(new ProductTransferCommand(
-                42L, "transfer-007", "FUNDING", "USDT_PERPETUAL",
+                42L, "transfer-007", com.surprising.account.api.model.AccountType.FUNDING, com.surprising.account.api.model.AccountType.USDT_PERPETUAL,
                 "USDT", 10L, "same-reference", "test"));
         ProductTransferResult second = coordinator.transfer(new ProductTransferCommand(
-                42L, "transfer-008", "FUNDING", "USDT_PERPETUAL",
+                42L, "transfer-008", com.surprising.account.api.model.AccountType.FUNDING, com.surprising.account.api.model.AccountType.USDT_PERPETUAL,
                 "USDT", 10L, "same-reference", "test"));
 
         assertThat(first.transferId()).isNotEqualTo(second.transferId());
@@ -157,7 +161,7 @@ class ProductTransferCoordinatorTest {
                 new com.surprising.gateway.provider.auth.repository.GatewayUserRepository.UserRecord(
                         43, "recipient", "recipient@example.test", "NORMAL", java.time.Instant.now())));
         var coordinator = new ProductTransferCoordinator(client, users);
-        var command = new ProductTransferCommand(42, "to-user", "SPOT", "SPOT", "USDT", 10,
+        var command = new ProductTransferCommand(42, "to-user", com.surprising.account.api.model.AccountType.SPOT, com.surprising.account.api.model.AccountType.SPOT, "USDT", 10,
                 "to-user", "", 43);
         assertThat(coordinator.transfer(command).status()).isEqualTo(ProductTransferStatus.COMPLETED);
         assertThat(client.calls()).allSatisfy(call -> {
@@ -174,7 +178,7 @@ class ProductTransferCoordinatorTest {
                 new com.surprising.gateway.provider.auth.repository.GatewayUserRepository.UserRecord(
                         42, "sender", "sender@example.test", "NORMAL", java.time.Instant.now())));
         var coordinator = new ProductTransferCoordinator(client, users);
-        assertThatThrownBy(() -> coordinator.transfer(new ProductTransferCommand(42, "invalid-user", "SPOT", "SPOT",
+        assertThatThrownBy(() -> coordinator.transfer(new ProductTransferCommand(42, "invalid-user", com.surprising.account.api.model.AccountType.SPOT, com.surprising.account.api.model.AccountType.SPOT,
                 "USDT", 10, "r", "", 43))).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("recipient");
         assertThat(client.calls()).isEmpty();
@@ -188,14 +192,14 @@ class ProductTransferCoordinatorTest {
                 new com.surprising.gateway.provider.auth.repository.GatewayUserRepository.UserRecord(
                         42, "sender", "sender@example.test", "WITHDRAW_DISABLED", java.time.Instant.now())));
         var coordinator = new ProductTransferCoordinator(client, users);
-        assertThatThrownBy(() -> coordinator.transfer(new ProductTransferCommand(42, "blocked-user", "SPOT", "SPOT",
+        assertThatThrownBy(() -> coordinator.transfer(new ProductTransferCommand(42, "blocked-user", com.surprising.account.api.model.AccountType.SPOT, com.surprising.account.api.model.AccountType.SPOT,
                 "USDT", 10, "r", "", 43))).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("transfers are disabled");
         assertThat(client.calls()).isEmpty();
     }
 
     private ProductTransferCommand command(String key, String source, String target, long amount) {
-        return new ProductTransferCommand(42L, key, source, target, "USDT", amount, key, "test transfer");
+        return new ProductTransferCommand(42L, key, com.surprising.account.api.model.AccountType.valueOf(source), com.surprising.account.api.model.AccountType.valueOf(target), "USDT", amount, key, "test transfer");
     }
 
     private static final class RecordingProductAccountClient implements ProductAccountClient {

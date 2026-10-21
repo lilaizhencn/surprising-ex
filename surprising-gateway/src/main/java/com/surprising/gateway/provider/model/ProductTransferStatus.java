@@ -1,4 +1,4 @@
-package com.surprising.gateway.provider.service;
+package com.surprising.gateway.provider.model;
 
 public enum ProductTransferStatus {
     PENDING,

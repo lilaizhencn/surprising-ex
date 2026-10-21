@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.product;
 
+import com.surprising.gateway.provider.model.ProductTransferCommand;
+import com.surprising.gateway.provider.model.ProductTransferStatus;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import com.surprising.account.api.model.*;
@@ -70,7 +73,7 @@ class MultiProductMoneyIntegrationTest {
             assertThat(total(cores)).isEqualTo(initial-500);
             custody.adjustBalance(42,"USDT",500,"withdrawal-one-refund","refund");
             assertThat(total(cores)).isEqualTo(initial);
-            var excessive = new ProductTransferCommand(42,"overspend","SPOT","USDT_PERPETUAL","USDT",Long.MAX_VALUE,"overspend","test");
+            var excessive = new ProductTransferCommand(42,"overspend",AccountType.SPOT,AccountType.USDT_PERPETUAL,"USDT",Long.MAX_VALUE,"overspend","test");
             assertThat(transfers.transfer(excessive).status()).isEqualTo(ProductTransferStatus.FAILED);
             assertThat(total(cores)).isEqualTo(initial);
         } finally {
@@ -80,7 +83,7 @@ class MultiProductMoneyIntegrationTest {
         }
     }
     private ProductTransferCommand transfer(ProductLine source, ProductLine target, String key) {
-        return new ProductTransferCommand(42,key,source.accountTypeCode(),target.accountTypeCode(),"USDT",1000,key,"allocation");
+        return new ProductTransferCommand(42,key,AccountType.valueOf(source.accountTypeCode()),AccountType.valueOf(target.accountTypeCode()),"USDT",1000,key,"allocation");
     }
     private long total(Map<ProductLine,Core> cores) { return cores.values().stream().mapToLong(Core::balance).sum(); }
     private static final class Core implements AutoCloseable {

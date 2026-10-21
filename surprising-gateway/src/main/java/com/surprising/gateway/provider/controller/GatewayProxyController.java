@@ -1,9 +1,13 @@
 package com.surprising.gateway.provider.controller;
 
+import com.surprising.gateway.provider.model.ProductTransferCommand;
+import com.surprising.gateway.provider.model.ProductTransferWireRequest;
+
+
 import com.surprising.gateway.provider.service.ProductTransferCoordinator;
 import com.surprising.gateway.provider.service.ProductTransferSecurityService;
-import com.surprising.gateway.provider.service.ProductTransferResult;
-import com.surprising.gateway.provider.service.ProductTransferStatus;
+import com.surprising.gateway.provider.model.ProductTransferResult;
+import com.surprising.gateway.provider.model.ProductTransferStatus;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,6 +18,7 @@ import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.product.api.ProductLine;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
+import java.math.BigDecimal;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
@@ -177,13 +182,15 @@ public class GatewayProxyController {
                     "product transfer coordinator is not configured");
         }
         try {
+            var input = transferRequest(body);
+            var amount = transferAmount(input);
             if (productTransferSecurityService != null) {
-                productTransferSecurityService.requireIfNeeded(Long.parseLong(identity.userId()), body,
+                productTransferSecurityService.requireIfNeeded(Long.parseLong(identity.userId()), amount,
                         request.getHeader("X-Security-Email-Code"),
                         request.getHeader("X-Security-TOTP-Code"), Instant.now());
             }
-            ProductTransferResult result = productTransferCoordinator.transferJson(
-                    Long.parseLong(identity.userId()), body, request.getHeader("Idempotency-Key"), objectMapper);
+            ProductTransferResult result = productTransferCoordinator.transfer(transferCommand(
+                    Long.parseLong(identity.userId()),input,amount,request.getHeader("Idempotency-Key")));
             HttpStatus status = result.status() == ProductTransferStatus.COMPLETED
                     ? HttpStatus.OK
                     : result.status().terminal() ? HttpStatus.CONFLICT : HttpStatus.SERVICE_UNAVAILABLE;
@@ -197,6 +204,48 @@ public class GatewayProxyController {
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
+    }
+
+    private ProductTransferWireRequest transferRequest(byte[] body) {
+        if (body == null || body.length == 0) throw new IllegalArgumentException("transfer request body is required");
+        try {
+            var input = objectMapper.readValue(body,ProductTransferWireRequest.class);
+            if (input == null) throw new IllegalArgumentException("transfer request body is invalid");
+            return input;
+        } catch (JacksonException invalid) {
+            throw new IllegalArgumentException("transfer request body is invalid",invalid);
+        }
+    }
+
+    private com.surprising.gateway.provider.model.ProductTransferAmount transferAmount(ProductTransferWireRequest input) {
+        String asset = input.asset() == null ? "" : input.asset().trim().toUpperCase(Locale.ROOT);
+        if (asset.isBlank()) throw new IllegalArgumentException("transfer asset is required");
+        BigDecimal units = input.amountUnits();
+        if (units == null || units.signum() <= 0 || units.scale() > 0)
+            throw new IllegalArgumentException("transfer amountUnits must be a positive integer");
+        if (!asset.matches("[A-Z0-9]{1,20}")) throw new IllegalArgumentException("asset is invalid");
+        try {
+            return new com.surprising.gateway.provider.model.ProductTransferAmount(asset,units.longValueExact());
+        } catch (ArithmeticException invalid) {
+            throw new IllegalArgumentException("transfer amount is invalid",invalid);
+        }
+    }
+
+    private ProductTransferCommand transferCommand(long userId, ProductTransferWireRequest request, com.surprising.gateway.provider.model.ProductTransferAmount amount, String suppliedKey) {
+        String key = suppliedKey == null || suppliedKey.isBlank() ? request.referenceId() : suppliedKey;
+        if (userId <= 0 || request.recipientUserId() != null && request.recipientUserId() <= 0)
+            throw new IllegalArgumentException("userId is required");
+        if (key == null || !key.trim().matches("[A-Za-z0-9._:-]{1,128}"))
+            throw new IllegalArgumentException("idempotency key must be 1-128 safe characters");
+        if (request.referenceId() == null || request.referenceId().isBlank() || request.referenceId().trim().length() > 128)
+            throw new IllegalArgumentException("amount and referenceId are invalid");
+        return new ProductTransferCommand(userId,key,transferAccountType(request.sourceAccountType()),transferAccountType(request.targetAccountType()),
+                request.asset(),amount.amountUnits(),request.referenceId(),request.reason(),request.recipientUserId() == null ? userId : request.recipientUserId());
+    }
+
+    private com.surprising.account.api.model.AccountType transferAccountType(String value) {
+        try { return com.surprising.account.api.model.AccountType.valueOf(value.trim().toUpperCase(Locale.ROOT)); }
+        catch (RuntimeException invalid) { throw new IllegalArgumentException("unsupported account type: " + value,invalid); }
     }
 
     private ResponseEntity<byte[]> exchange(String service, URI target,
