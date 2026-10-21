@@ -6,14 +6,12 @@ import com.surprising.price.api.model.ExchangeRateConvertResponse;
 import com.surprising.price.api.model.ExchangeRateQueryResponse;
 import com.surprising.price.api.model.ExchangeRateResponse;
 import com.surprising.price.index.client.ExternalSpotPriceClient;
+import com.surprising.price.index.client.FiatRateClient;
+import com.surprising.price.index.model.FiatRateSnapshot;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.index.repository.ExchangeRateRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -21,8 +19,6 @@ import java.util.Locale;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 
 @Service
 @Slf4j
@@ -33,32 +29,19 @@ public class ExchangeRateService {
     private final ExchangeRateRepository exchangeRateRepository;
     private final ExchangeRateSnapshotCache snapshotCache;
     private final ExternalSpotPriceClient externalSpotPriceClient;
-    private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
-
-    public ExchangeRateService(IndexPriceProperties properties,
-                               ExchangeRateRepository exchangeRateRepository,
-                               ExternalSpotPriceClient externalSpotPriceClient,
-                               ObjectMapper objectMapper) {
-        this(properties, exchangeRateRepository, externalSpotPriceClient, objectMapper,
-                new ExchangeRateSnapshotCache());
-    }
+    private final FiatRateClient fiatRateClient;
 
     @org.springframework.beans.factory.annotation.Autowired
     public ExchangeRateService(IndexPriceProperties properties,
                                ExchangeRateRepository exchangeRateRepository,
                                ExternalSpotPriceClient externalSpotPriceClient,
-                               ObjectMapper objectMapper,
+                               FiatRateClient fiatRateClient,
                                ExchangeRateSnapshotCache snapshotCache) {
         this.properties = properties;
         this.exchangeRateRepository = exchangeRateRepository;
         this.snapshotCache = snapshotCache;
         this.externalSpotPriceClient = externalSpotPriceClient;
-        this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(properties.getHttp().getConnectTimeout())
-                .proxy(properties.getHttp().proxySelector())
-                .build();
+        this.fiatRateClient = fiatRateClient;
     }
 
     /** 启动时一次性恢复当前汇率，恢复完成前所有换算请求均失败关闭。 */
@@ -79,18 +62,7 @@ public class ExchangeRateService {
         }
         String baseCurrency = normalizeCurrency(fiat.getBaseCurrency());
         try {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(fiat.getBaseUrl() + fiat.getPath()
-                            .replace("{base}", baseCurrency)))
-                    .timeout(properties.getHttp().getRequestTimeout())
-                    .header("User-Agent", properties.getHttp().getUserAgent())
-                    .GET()
-                    .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IllegalStateException("fiat rate http status " + response.statusCode());
-            }
-            JsonNode root = objectMapper.readTree(response.body());
-            saveOpenExchangeRateApiRates(baseCurrency, fiat, root);
+            saveOpenExchangeRateApiRates(baseCurrency, fiat, fiatRateClient.fetch(baseCurrency, fiat));
         } catch (Exception ex) {
             log.warn("Failed to refresh fiat exchange rates provider={} base={}: {}",
                     fiat.getProvider(), baseCurrency, ex.getMessage());
@@ -157,21 +129,16 @@ public class ExchangeRateService {
         return convertWithRate(amount, rate, from, to, first.route() + "->" + to, rateTime);
     }
 
-    private void saveOpenExchangeRateApiRates(String baseCurrency, IndexPriceProperties.Fiat fiat, JsonNode root) {
-        if (!"success".equalsIgnoreCase(root.path("result").asString())) {
-            throw new IllegalStateException("fiat provider result=" + root.path("result").asString());
-        }
-        String provider = root.path("provider").asString(fiat.getProvider());
-        Instant rateTime = root.hasNonNull("time_last_update_unix")
-                ? Instant.ofEpochSecond(root.path("time_last_update_unix").asLong())
-                : Instant.now();
+    private void saveOpenExchangeRateApiRates(String baseCurrency, IndexPriceProperties.Fiat fiat, FiatRateSnapshot snapshot) {
+        String provider = snapshot.provider();
+        Instant rateTime = snapshot.rateTime();
         Instant updatedAt = Instant.now();
         saveRateAndInverse(baseCurrency, baseCurrency, BigDecimal.ONE, provider, rateTime, updatedAt);
         for (String quote : fiat.getQuoteCurrencies()) {
             String quoteCurrency = normalizeCurrency(quote);
-            JsonNode value = root.path("rates").path(quoteCurrency);
-            if (!value.isMissingNode() && !value.isNull() && !value.asString().isBlank()) {
-                BigDecimal rate = new BigDecimal(value.asString());
+            String value = snapshot.rates().get(quoteCurrency);
+            if (value != null) {
+                BigDecimal rate = new BigDecimal(value);
                 if (rate.signum() > 0) {
                     saveRateAndInverse(baseCurrency, quoteCurrency, rate, provider, rateTime, updatedAt);
                 }

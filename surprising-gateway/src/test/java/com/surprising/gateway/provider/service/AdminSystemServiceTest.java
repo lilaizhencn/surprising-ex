@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.client.SystemHealthClient;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.net.URI;
 import java.time.Instant;
@@ -24,7 +25,7 @@ class AdminSystemServiceTest {
     void routesExposeAdminAndPublicRoutesWithoutSecrets() {
         GatewayProperties properties = properties();
         AdminSystemService service = new AdminSystemService(
-                adminAuthService(), properties, new RestTemplate(), mock(org.springframework.boot.health.actuate.endpoint.HealthEndpoint.class));
+                adminAuthService(), properties, new SystemHealthClient(new RestTemplate(), mock(org.springframework.boot.health.actuate.endpoint.HealthEndpoint.class)));
 
         var response = service.routes("Bearer admin");
 
@@ -39,7 +40,7 @@ class AdminSystemServiceTest {
         GatewayProperties properties = properties();
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
         AdminSystemService service = new AdminSystemService(
-                adminAuthService(), properties, restTemplate, mock(org.springframework.boot.health.actuate.endpoint.HealthEndpoint.class));
+                adminAuthService(), properties, new SystemHealthClient(restTemplate, mock(org.springframework.boot.health.actuate.endpoint.HealthEndpoint.class)));
 
         var response = service.health("Bearer admin", false);
 
@@ -66,7 +67,7 @@ class AdminSystemServiceTest {
         var health = mock(org.springframework.boot.health.actuate.endpoint.IndicatedHealthDescriptor.class);
         when(health.getStatus()).thenReturn(new org.springframework.boot.health.contributor.Status(status));
         when(endpoint.health()).thenReturn(health);
-        var service = new AdminSystemService(adminAuthService(), properties, http, endpoint);
+        var service = new AdminSystemService(adminAuthService(), properties, new SystemHealthClient(http, endpoint));
 
         var result = service.health("Bearer admin", true);
 
@@ -95,7 +96,7 @@ class AdminSystemServiceTest {
                             "local:", "/api/v1/admin/accounts", true)));
                     return properties;
                 })
-                .withUserConfiguration(AdminSystemService.class)
+                .withUserConfiguration(AdminSystemService.class, SystemHealthClient.class)
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     var result = context.getBean(AdminSystemService.class).health("Bearer admin", false);

@@ -528,3 +528,5 @@ Core订单/杠杆终态拒绝通过 `trading.order.exception.OrderCommandRejecte
 WebSocket具体接入处理器位于 `websocket.provider.handler.ClientWebSocketHandler`，连接/有界发送队列/超时监视位于 `websocket.provider.session.ClientConnection`；SubscriptionRegistry等Service继续拥有订阅与业务路由状态。权限、协议字段、慢连接背压、关闭码和线程生命周期保持。
 
 托管钱包请求与提现法币估值适配位于 `provider.client.CustodyWalletClient` 和 `provider.client.WithdrawalValuationClient`；提现、对账及划转安全判断仍由原Service聚合。
+
+后台系统Service只做授权、路由去重与健康汇总；`provider.client.SystemHealthClient`负责本地Actuator及远端HTTP健康探测，响应模型归 `provider.model`。

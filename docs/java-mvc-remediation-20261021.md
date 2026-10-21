@@ -178,3 +178,5 @@
 - 复扫归包3将实际WebSocket处理器与连接实例分别归handler和session；订阅/缓存/路由聚合仍归原Service，连接队列与两条虚拟线程仍由同一ClientConnection实例拥有。对应Handler测试归同包以保持原protected与可选装配方法，无扩大可见性。11个原文件完整体在包/导入/类型限定归一后相等。定向75项、扩大干净构建143项通过无跳过，旧class清理。关闭ADD-046、047；见 [WebSocket职责归包验证](validation/java-mvc-websocket-packages-20261022.json)。所属数据库/日志/报告清理，其余HTTP接入、全范围复扫/门禁和最终实栈继续。
 
 - 外部适配归包将CustodyWalletClient、WithdrawalValuationClient和RestReferenceMarketProvider移到client；提现/对账/划转业务仍由原Service聚合，签名、精度、连接与缓存保持。18个原文件完整体在包/导入/构件注解归一后相等。JDK27干净构建：Maker153、Gateway109项无跳过，包含25项独立PostgreSQL提现对账；未启动wallet。关闭ADD-048..050，见 [外部适配验证](validation/java-mvc-client-packages-20261022.json)。所属数据库、日志与汇总报告清理；其余HTTP耦合、完整复扫/门禁及最终实栈验收仍继续。
+
+- HTTP边界复扫将后台健康实际探测移SystemHealthClient，将法币HTTP请求与提供方JSON解析移FiatRateClient；原Service仍负责授权/去重/汇总及精确汇率业务。四个系统响应归model、两个原生失败归exception，无新业务状态/接口。价格144、网关77项干净构建通过无跳过；真实本地HTTP覆盖精度、反向汇率与错误响应不落账。移除HTTP状态检查的反证3项中1项按预期失败，恢复后重跑价格全模块144通过。汇率saveRateAndInverse之后全部原始源码字节一致。关闭ADD-051..053，见 [外部探测边界验证](validation/java-mvc-outbound-20261022.json)。KYC/鉴权HTTP耦合、完整复扫/门禁及最终实栈继续。

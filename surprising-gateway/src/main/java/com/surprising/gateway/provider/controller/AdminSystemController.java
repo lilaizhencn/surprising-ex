@@ -1,8 +1,10 @@
 package com.surprising.gateway.provider.controller;
 
+import com.surprising.gateway.provider.exception.AdminSystemForbiddenException;
+import com.surprising.gateway.provider.exception.AdminSystemUnauthorizedException;
 import com.surprising.gateway.provider.service.AdminSystemService;
-import com.surprising.gateway.provider.service.AdminSystemService.SystemHealthResponse;
-import com.surprising.gateway.provider.service.AdminSystemService.SystemRoutesResponse;
+import com.surprising.gateway.provider.model.SystemHealthResponse;
+import com.surprising.gateway.provider.model.SystemRoutesResponse;
 import java.util.function.Supplier;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -41,9 +43,9 @@ public class AdminSystemController {
     private <T> T execute(Supplier<T> action) {
         try {
             return action.get();
-        } catch (AdminSystemService.AdminSystemUnauthorizedException ex) {
+        } catch (AdminSystemUnauthorizedException ex) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
-        } catch (AdminSystemService.AdminSystemForbiddenException ex) {
+        } catch (AdminSystemForbiddenException ex) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, ex.getMessage(), ex);
         }
     }

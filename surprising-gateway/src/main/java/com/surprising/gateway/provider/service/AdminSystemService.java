@@ -1,23 +1,21 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.client.SystemHealthClient;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.config.GatewayProperties.BackendRoute;
-import java.net.URI;
-import java.time.Duration;
+import com.surprising.gateway.provider.model.RouteResponse;
+import com.surprising.gateway.provider.model.SystemRoutesResponse;
+import com.surprising.gateway.provider.model.SystemHealthItem;
+import com.surprising.gateway.provider.model.SystemHealthResponse;
+import com.surprising.gateway.provider.exception.AdminSystemUnauthorizedException;
+import com.surprising.gateway.provider.exception.AdminSystemForbiddenException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.ResourceAccessException;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
 
 /**
  * 执行后台系统路由汇总和服务健康探测。
@@ -27,17 +25,14 @@ public class AdminSystemService {
 
     private final AuthService authService;
     private final GatewayProperties properties;
-    private final RestTemplate restTemplate;
-    private final org.springframework.boot.health.actuate.endpoint.HealthEndpoint healthEndpoint;
+    private final SystemHealthClient healthClient;
 
     public AdminSystemService(AuthService authService,
                               GatewayProperties properties,
-                              RestTemplate restTemplate,
-                              org.springframework.boot.health.actuate.endpoint.HealthEndpoint healthEndpoint) {
+                              SystemHealthClient healthClient) {
         this.authService = authService;
         this.properties = properties;
-        this.restTemplate = restTemplate;
-        this.healthEndpoint = healthEndpoint;
+        this.healthClient = healthClient;
     }
 
     public SystemRoutesResponse routes(String authorization) {
@@ -56,7 +51,7 @@ public class AdminSystemService {
             properties.getRoutes().forEach((service, route) -> addTarget(targets, "public", service, route));
         }
         List<SystemHealthItem> items = targets.values().stream()
-                .map(this::probe)
+                .map(target -> healthClient.probe(target.routeType(), target.service(), target.route(), target.baseUrl()))
                 .toList();
         long up = items.stream().filter(item -> "UP".equals(item.status())).count();
         long down = items.stream().filter(item -> "DOWN".equals(item.status())).count();
@@ -97,76 +92,11 @@ public class AdminSystemService {
         targets.putIfAbsent(key, new HealthTarget(routeType, service, route, baseUrl));
     }
 
-    private SystemHealthItem probe(HealthTarget target) {
-        URI healthUri = URI.create(target.baseUrl() + "/actuator/health");
-        Instant startedAt = Instant.now();
-        try {
-            if ("local:".equals(target.baseUrl())) {
-                String status = healthEndpoint.health().getStatus().getCode();
-                return new SystemHealthItem(target.routeType(), target.service(), target.baseUrl(),
-                        healthUri.toString(), target.route().getTargetPrefix(), target.route().isPrivateRoute(),
-                        false, status, null, Duration.between(startedAt, Instant.now()).toMillis(), null, null);
-            }
-            HttpHeaders headers = new HttpHeaders();
-            if (target.route().hasBasicAuth()) {
-                headers.setBasicAuth(target.route().getBasicAuthUsername(), target.route().getBasicAuthPassword());
-            }
-            ResponseEntity<String> response = restTemplate.exchange(
-                    healthUri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
-            long latencyMs = Duration.between(startedAt, Instant.now()).toMillis();
-            String status = response.getStatusCode().is2xxSuccessful() ? "UP" : "DOWN";
-            return new SystemHealthItem(
-                    target.routeType(),
-                    target.service(),
-                    target.baseUrl(),
-                    healthUri.toString(),
-                    target.route().getTargetPrefix(),
-                    target.route().isPrivateRoute(),
-                    target.route().hasBasicAuth(),
-                    status,
-                    response.getStatusCode().value(),
-                    latencyMs,
-                    truncate(response.getBody(), 2000),
-                    null);
-        } catch (ResourceAccessException ex) {
-            return failed(target, healthUri, startedAt, "DOWN", "backend health request timed out");
-        } catch (RestClientException | IllegalArgumentException ex) {
-            return failed(target, healthUri, startedAt, "DOWN", ex.getMessage());
-        }
-    }
-
-    private SystemHealthItem failed(HealthTarget target,
-                                    URI healthUri,
-                                    Instant startedAt,
-                                    String status,
-                                    String error) {
-        return new SystemHealthItem(
-                target.routeType(),
-                target.service(),
-                target.baseUrl(),
-                healthUri.toString(),
-                target.route().getTargetPrefix(),
-                target.route().isPrivateRoute(),
-                target.route().hasBasicAuth(),
-                status,
-                null,
-                Duration.between(startedAt, Instant.now()).toMillis(),
-                null,
-                truncate(error, 1000));
-    }
-
     private static String trimTrailingSlash(String value) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("backend baseUrl is required");
         }
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
-    }
-
-    private static String truncate(String value, int maxLength) {
-        if (value == null || value.length() <= maxLength) {
-            return value;
-        }
-        return value.substring(0, maxLength);
     }
 
     private record HealthTarget(
@@ -176,54 +106,11 @@ public class AdminSystemService {
             String baseUrl) {
     }
 
-    public record RouteResponse(
-            String routeType,
-            String service,
-            String baseUrl,
-            String targetPrefix,
-            boolean privateRoute,
-            boolean basicAuthConfigured) {
-    }
 
-    public record SystemRoutesResponse(
-            Instant generatedAt,
-            List<RouteResponse> publicRoutes,
-            List<RouteResponse> adminRoutes) {
-    }
 
-    public record SystemHealthItem(
-            String routeType,
-            String service,
-            String baseUrl,
-            String healthUrl,
-            String targetPrefix,
-            boolean privateRoute,
-            boolean basicAuthConfigured,
-            String status,
-            Integer httpStatus,
-            long latencyMs,
-            String responseBody,
-            String error) {
-    }
 
-    public record SystemHealthResponse(
-            Instant generatedAt,
-            int count,
-            long up,
-            long down,
-            long unknown,
-            List<SystemHealthItem> services) {
-    }
 
-    public static class AdminSystemUnauthorizedException extends RuntimeException {
-        public AdminSystemUnauthorizedException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
 
-    public static class AdminSystemForbiddenException extends RuntimeException {
-        public AdminSystemForbiddenException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
+
+
 }
