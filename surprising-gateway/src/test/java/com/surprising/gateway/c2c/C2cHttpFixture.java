@@ -1,6 +1,7 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.service.C2cQueryService;
+import com.surprising.gateway.c2c.service.C2cSubmissionService;
 import com.surprising.gateway.c2c.service.C2cQuickQuoteService;
 
 import static org.mockito.ArgumentMatchers.*;
@@ -122,15 +123,17 @@ final class C2cHttpFixture implements AutoCloseable {
             context.registerBean(C2cFundsRepository.class,()->new C2cFundsRepository(jdbc));
             context.registerBean(C2cNotificationService.class,()->new C2cNotificationService(new C2cPriceAlertRepository(jdbc),
                     new C2cNotificationRepository(jdbc,json),new C2cSecurityGrantRepository(jdbc),new C2cQuoteRepository(jdbc)));
-            context.registerBean(C2cPaymentAccounts.class,()->C2cDatabaseFixture.payments(jdbc,new TotpService(properties),json,compliance));
+            context.registerBean(C2cPaymentAccounts.class,()->C2cDatabaseFixture.payments(jdbc,new TotpService(properties),json,compliance,bean(C2cAccess.class)));
             context.registerBean(C2cAccess.class,()->new C2cAccess(auth,compliance,security,new C2cProfileRepository(jdbc),new C2cSecurityGrantRepository(jdbc),new GatewayUserRepository(jdbc),db.transactions.getTransactionManager(),bean(C2cMarketService.class),products));
             context.registerBean(C2cAds.class,()->C2cDatabaseFixture.ads(jdbc,bean(C2cAdsRepository.class),bean(C2cMarketService.class),bean(C2cPaymentAccounts.class),
-                    bean(C2cAccess.class),bean(C2cFundsRepository.class),json,bean(C2cSubmissions.class)));
+                    bean(C2cAccess.class),bean(C2cFundsRepository.class),bean(C2cSubmissions.class)));
             context.registerBean(C2cOrders.class,()->C2cDatabaseFixture.orders(jdbc,bean(C2cOrdersRepository.class),bean(C2cAdsRepository.class),bean(C2cMarketService.class),
                     bean(C2cPaymentAccounts.class),bean(C2cAccess.class),bean(C2cFundsRepository.class),bean(C2cSubmissions.class),json));
             context.registerBean(C2cFunds.class,()->new C2cFunds(bean(C2cFundsRepository.class),core,bean(C2cMarketService.class)));
             context.registerBean(C2cQueryService.class,()->C2cDatabaseFixture.queries(jdbc,bean(C2cAdsRepository.class),bean(C2cOrdersRepository.class),
                     bean(C2cMarketService.class),bean(C2cPaymentAccounts.class),json,bean(C2cSubmissions.class)));
+            context.registerBean(C2cSubmissionService.class,()->new C2cSubmissionService(bean(C2cSubmissions.class),
+                    bean(C2cAds.class),bean(C2cOrders.class),bean(C2cAccess.class),bean(C2cQueryService.class)));
             context.registerBean(C2cQuickQuoteService.class,()->new C2cQuickQuoteService(bean(C2cQueryService.class),
                     bean(C2cMarketService.class),bean(C2cAccess.class),bean(C2cOrders.class)));
             context.registerBean(C2cProfiles.class,()->C2cDatabaseFixture.profiles(jdbc,bean(C2cAccess.class),compliance,new GatewayUserRepository(jdbc),
@@ -162,7 +165,7 @@ final class C2cHttpFixture implements AutoCloseable {
             makerAccount=bean(C2cPaymentAccounts.class).save(11,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Maker","qa-maker-account","",null)).id();
             takerAccount=bean(C2cPaymentAccounts.class).save(12,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Taker","qa-taker-account","",null)).id();
             jdbc.update("UPDATE c2c_payment_accounts SET status='APPROVED'");
-            var controller=new C2cController(bean(C2cAccess.class),bean(C2cAds.class),bean(C2cOrders.class),bean(C2cSubmissions.class),
+            var controller=new C2cController(bean(C2cAccess.class),bean(C2cAds.class),bean(C2cOrders.class),bean(C2cSubmissionService.class),
                     bean(C2cQueryService.class),bean(C2cQuickQuoteService.class),bean(C2cPaymentAccounts.class),json);
             mvc=MockMvcBuilders.standaloneSetup(controller,new C2cMerchantController(bean(C2cMerchantBonds.class),bean(C2cAccess.class),bean(C2cAdminAccess.class),json),new C2cStatusController(true,bean(C2cMarketService.class),products),
                     new C2cMeController(bean(C2cAccess.class),bean(C2cProfiles.class)),
@@ -193,8 +196,8 @@ final class C2cHttpFixture implements AutoCloseable {
         if(body!=null) request.content(json.writeValueAsBytes(body));
         return mvc.perform(request).andReturn();
     }
-    C2cAds.Publish payload(String side) {
-        return new C2cAds.Publish(marketId,side,"6.65","10","1","10000",List.of("ALIPAY"),
+    C2cController.Publish payload(String side) {
+        return new C2cController.Publish(marketId,side,"6.65","10","1","10000",List.of("ALIPAY"),
                 side.equals("SELL")?List.of(makerAccount):List.of(),900,"Synthetic merchant terms",0);
     }
     UUID publish(String side) throws Exception {

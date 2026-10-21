@@ -44,7 +44,7 @@ class C2cAdsPostgresTest {
                 VALUES(?,11,'CNY','ALIPAY','fixture ciphertext','****0000','APPROVED')
                 """,paymentId);
         rows=new C2cAdsRepository(jdbc);intents=new C2cFundsRepository(jdbc);access=mock(C2cAccess.class);
-        ads=C2cDatabaseFixture.ads(jdbc,rows,C2cDatabaseFixture.markets(jdbc),C2cDatabaseFixture.payments(jdbc,null,null,null),access,intents,new ObjectMapper(),new C2cSubmissions(jdbc));
+        ads=C2cDatabaseFixture.ads(jdbc,rows,C2cDatabaseFixture.markets(jdbc),C2cDatabaseFixture.payments(jdbc,null,null,null,access),access,intents,new C2cSubmissions(jdbc));
         var accounts=mock(ProductAccountClient.class);
         var applied=new ProductAccountAdjustment(ProductAccountAdjustment.Status.APPLIED,null);
         when(accounts.transferOut(any(),any())).thenReturn(applied);
@@ -53,10 +53,10 @@ class C2cAdsPostgresTest {
         funds=new C2cFunds(intents,accounts,C2cDatabaseFixture.markets(jdbc));
     }
     @AfterEach void cleanup() {if(db!=null)db.close();}
-    private C2cAds.Publish request() {return new C2cAds.Publish(marketId,"SELL","6.65","10","1","10000",List.of("ALIPAY"),List.of(paymentId),900,"QA terms",0);}
+    private C2cController.Publish request() {return new C2cController.Publish(marketId,"SELL","6.65","10","1","10000",List.of("ALIPAY"),List.of(paymentId),900,"QA terms",0);}
     private C2cAd publish() {
         new C2cSubmissions(db.jdbc).admit(owner.userId(),"original-ad-request-0001","AD_PUBLISH",C2cDigests.sha256(new ObjectMapper().writeValueAsString(request())));
-        return db.transaction(()->ads.publish(owner,"Bearer fixture","original-ad-request-0001",request(),"123456",""));}
+        return db.transaction(()->ads.publish(owner,"Bearer fixture","original-ad-request-0001",C2cDigests.sha256(new ObjectMapper().writeValueAsString(request())),C2cController.publishParameters(request()),"123456",""));}
     private C2cAd active() {
         var ad=publish();var intent=db.jdbc.queryForObject("SELECT intent_id FROM c2c_fund_intents WHERE owner_id=?",UUID.class,ad.id());
         funds.resume(intent);db.transaction(()->{ads.finishFunding(ad.id());return null;});return rows.get(ad.id(),false);
@@ -105,8 +105,8 @@ class C2cAdsPostgresTest {
         var ad=active();
         var other=new JwtPrincipal(12,"other","NORMAL",List.of(),Instant.now().plusSeconds(60));
         assertThatThrownBy(()->db.transaction(()->ads.status(other,"Bearer other",ad.id(),ad.revision(),"CLOSE","",""))).isInstanceOf(IllegalStateException.class);
-        var changed=new C2cAds.Publish(marketId,"SELL","6.65","11","1","10000",List.of("ALIPAY"),List.of(paymentId),900,"QA terms",0);
-        assertThatThrownBy(()->db.transaction(()->ads.publish(owner,"Bearer fixture","original-ad-request-0001",changed,"",""))).isInstanceOf(IllegalStateException.class);
+        var changed=new C2cController.Publish(marketId,"SELL","6.65","11","1","10000",List.of("ALIPAY"),List.of(paymentId),900,"QA terms",0);
+        assertThatThrownBy(()->db.transaction(()->ads.publish(owner,"Bearer fixture","original-ad-request-0001",C2cDigests.sha256(new ObjectMapper().writeValueAsString(changed)),C2cController.publishParameters(changed),"",""))).isInstanceOf(IllegalStateException.class);
         assertThat(db.jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents",Integer.class)).isOne();
         assertThat(rows.get(ad.id(),false).status()).isEqualTo("ACTIVE");
     }

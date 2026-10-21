@@ -51,13 +51,13 @@ class C2cOrdersPostgresTest {
         jdbc.update("INSERT INTO c2c_merchants(user_id,status,application_text) VALUES(11,'APPROVED','QA')");
         db.seedMerchantBond(11);
         var properties=new GatewayProperties();properties.getSecurity().setMfaSecretEncryptionKey("c2c-fixture-encryption-key-not-for-deployment");
-        payments=C2cDatabaseFixture.payments(jdbc,new TotpService(properties),json,null);
+        access=mock(C2cAccess.class);payments=C2cDatabaseFixture.payments(jdbc,new TotpService(properties),json,null,access);
         makerAccount=payments.save(11,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Seller","qa-seller-account","",null)).id();
         sellerAccount=payments.save(12,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Taker","qa-taker-account","",null)).id();
         jdbc.update("UPDATE c2c_payment_accounts SET status='APPROVED'");
         adRows=new C2cAdsRepository(jdbc);orderRows=new C2cOrdersRepository(jdbc);intents=new C2cFundsRepository(jdbc);
-        requests=new C2cSubmissions(jdbc);access=mock(C2cAccess.class);var markets=C2cDatabaseFixture.markets(jdbc);
-        ads=C2cDatabaseFixture.ads(jdbc,adRows,markets,payments,access,intents,json,requests);
+        requests=new C2cSubmissions(jdbc);var markets=C2cDatabaseFixture.markets(jdbc);
+        ads=C2cDatabaseFixture.ads(jdbc,adRows,markets,payments,access,intents,requests);
         orders=C2cDatabaseFixture.orders(jdbc,orderRows,adRows,markets,payments,access,intents,requests,json);
         core=mock(ProductAccountClient.class);var applied=new ProductAccountAdjustment(ProductAccountAdjustment.Status.APPLIED,null);
         when(core.transferOut(any(),any())).thenReturn(applied);when(core.transferIn(any(),any())).thenReturn(applied);when(core.completeTransfer(any(),any())).thenReturn(applied);
@@ -65,9 +65,9 @@ class C2cOrdersPostgresTest {
     }
     @AfterEach void cleanup(){if(db!=null)db.close();}
     private C2cAd ad(String side) {
-        var body=new C2cAds.Publish(marketId,side,"6.65","10","1","10000",List.of("ALIPAY"),side.equals("SELL")?List.of(makerAccount):List.of(),900,"Original terms",0);
+        var body=new C2cController.Publish(marketId,side,"6.65","10","1","10000",List.of("ALIPAY"),side.equals("SELL")?List.of(makerAccount):List.of(),900,"Original terms",0);
         String key="qa-ad-"+UUID.randomUUID();requests.admit(11,key,"AD_PUBLISH",C2cDigests.sha256(json.writeValueAsString(body)));
-        var value=db.transaction(()->ads.publish(user(11),"Bearer fixture",key,body,"123456",""));
+        var value=db.transaction(()->ads.publish(user(11),"Bearer fixture",key,C2cDigests.sha256(json.writeValueAsString(body)),C2cController.publishParameters(body),"123456",""));
         settle();return adRows.get(value.id(),false);
     }
     private C2cQuote quote(C2cAd ad,long actor,String quantity) {

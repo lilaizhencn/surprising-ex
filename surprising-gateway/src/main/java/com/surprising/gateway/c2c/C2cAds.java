@@ -1,25 +1,21 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.model.C2cAd;
+import com.surprising.gateway.c2c.model.C2cAdPublish;
 import com.surprising.gateway.c2c.model.C2cMarket;
 import com.surprising.gateway.c2c.repository.C2cMerchantRepository;
 import com.surprising.gateway.c2c.repository.C2cPaymentMethodRepository;
 import com.surprising.gateway.c2c.service.C2cMarketService;
-import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.GatewayUserRepository;
 import java.math.BigDecimal;
 import java.util.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.ObjectMapper;
 
 /** 广告从真实托管到账后开始接受订单；关闭只释放尚未被订单分配的库存。 */
 @Service
 public class C2cAds {
-    record Publish(UUID marketId,String side,String price,String quantity,String minFiat,String maxFiat,
-                   List<String> methodCodes,List<UUID> paymentAccountIds,int paymentWindowSeconds,
-                   String terms,int minCompleted) { }
     private final C2cAdsRepository ads;
     private final C2cMarketService markets;
     private final C2cPaymentAccounts payments;
@@ -29,22 +25,15 @@ public class C2cAds {
     private final GatewayUserRepository users;
     private final C2cMerchantRepository merchants;
     private final C2cPaymentMethodRepository paymentMethods;
-    private final ObjectMapper json;
     public C2cAds(C2cAdsRepository ads, C2cMarketService markets, C2cPaymentAccounts payments, C2cAccess access,
-                  C2cFundsRepository funds, ObjectMapper json, C2cSubmissions submissions,
+                  C2cFundsRepository funds, C2cSubmissions submissions,
                   GatewayUserRepository users, C2cMerchantRepository merchants, C2cPaymentMethodRepository paymentMethods) {
         this.ads=ads; this.markets=markets; this.payments=payments; this.access=access; this.funds=funds;
-        this.json=json; this.submissions=submissions; this.users=users; this.merchants=merchants; this.paymentMethods=paymentMethods;
+        this.submissions=submissions; this.users=users; this.merchants=merchants; this.paymentMethods=paymentMethods;
     }
 
     @Transactional
-    C2cAd publish(JwtPrincipal user,String authorization,String key,Publish request,String email,String totp) {
-        requireKey(key);
-        if(request==null) throw new IllegalArgumentException("广告资料不完整");
-        if((request.methodCodes()!=null && request.methodCodes().stream().anyMatch(Objects::isNull))
-                || (request.paymentAccountIds()!=null && request.paymentAccountIds().stream().anyMatch(Objects::isNull)))
-            throw new IllegalArgumentException("收付款方式不完整");
-        String hash=C2cDigests.sha256(json.writeValueAsString(request));
+    public C2cAd publish(JwtPrincipal user,String authorization,String key,String hash,C2cAdPublish request,String email,String totp) {
         var receipt=submissions.begin(user.userId(),key,"AD_PUBLISH",hash);
         if(receipt.status().equals("SUCCEEDED")) {
             var accepted = ads.get(receipt.resultId(),false);
@@ -61,35 +50,30 @@ public class C2cAds {
         access.requireTrading(user,market);
         requireMerchant(user.userId());
         validateTerms(market,request.price(),request.minFiat(),request.maxFiat(),request.terms(),request.minCompleted());
-        if(request.side()==null || !List.of("BUY","SELL").contains(request.side())) throw new IllegalArgumentException("广告方向无效");
-        long units=C2cMoney.quantityUnits(request.quantity(),market.assetScale());
-        BigDecimal price=C2cMoney.decimal(request.price());
-        if(C2cMoney.fiatAmount(units,price,market.assetScale(),market.fiatDecimals()).compareTo(C2cMoney.decimal(request.minFiat()))<0)
+        long units=C2cMoney.quantityUnits(request.quantity().toPlainString(),market.assetScale());
+        BigDecimal price=request.price();
+        if(C2cMoney.fiatAmount(units,price,market.assetScale(),market.fiatDecimals()).compareTo(request.minFiat())<0)
             throw new IllegalArgumentException("广告库存小于最低交易限额");
         int window=request.paymentWindowSeconds();
-        if(window<60 || window>market.paymentWindowSeconds()) throw new IllegalArgumentException("付款窗口超过市场允许范围");
-        var methods=request.methodCodes()==null?List.<String>of():request.methodCodes().stream().distinct().sorted().toList();
-        var accounts=request.paymentAccountIds()==null?List.<UUID>of():request.paymentAccountIds().stream().distinct().sorted().toList();
-        if(methods.isEmpty() || methods.size()>8 || methods.stream().anyMatch(m->!m.matches("[A-Z][A-Z0-9_]{0,31}")))
-            throw new IllegalArgumentException("请选择收付款方式");
+        if(window>market.paymentWindowSeconds()) throw new IllegalArgumentException("付款窗口超过市场允许范围");
+        var methods=request.methodCodes();var accounts=request.paymentAccountIds();
         for(String method:methods) if(paymentMethods.available(method,market.fiat()).isEmpty())
             throw new IllegalArgumentException("收付款方式尚未开放");
-        if(request.side().equals("SELL")) {
+        if(request.side()==C2cAdPublish.Side.SELL) {
             var actual=new HashSet<String>();
-            if(accounts.isEmpty() || accounts.size()>8) throw new IllegalArgumentException("请选择已审核的收款账号");
             for(UUID id:accounts) {
                 var account=payments.get(user.userId(),id,true);
                 if(!market.fiat().equals(account.fiat())) throw new IllegalArgumentException("收款账号法币不匹配");
                 actual.add(account.method());
             }
             if(!actual.equals(new HashSet<>(methods))) throw new IllegalArgumentException("收款账号与广告方式不匹配");
-        } else if(!accounts.isEmpty()) throw new IllegalArgumentException("买入广告由出售方选择本人收款账号");
+        }
         UUID adId=UUID.randomUUID();
-        String initialStatus=request.side().equals("SELL")?"RESERVING":"ACTIVE";
-        var ad=ads.create(adId,user.userId(),market.id(),request.side(),price,units,
-                C2cMoney.decimal(request.minFiat()),C2cMoney.decimal(request.maxFiat()),methods,accounts,window,
-                request.terms()==null?"":request.terms().trim(),request.minCompleted(),initialStatus);
-        if(request.side().equals("SELL")) {
+        String initialStatus=request.side()==C2cAdPublish.Side.SELL?"RESERVING":"ACTIVE";
+        var ad=ads.create(adId,user.userId(),market.id(),request.side().name(),price,units,
+                request.minFiat(),request.maxFiat(),methods,accounts,window,
+                request.terms(),request.minCompleted(),initialStatus);
+        if(request.side()==C2cAdPublish.Side.SELL) {
             access.verifyFunds(user,authorization,email,totp);
             funds.createOrGet("AD",ad.id(),"AD_RESERVE",user.userId(),configuration.escrowUserId(),market.asset(),units);
         }
@@ -145,7 +129,7 @@ public class C2cAds {
     private void requirePublishable(C2cAd ad) {
         markets.requireOpen();var market=markets.market(ad.marketId(),true);
         access.requireCounterparty(ad.makerUserId(),market);requireMerchant(ad.makerUserId());
-        validateTerms(market,ad.price().toPlainString(),ad.minFiat().toPlainString(),ad.maxFiat().toPlainString(),ad.terms(),ad.minCompleted());
+        validateTerms(market,ad.price(),ad.minFiat(),ad.maxFiat(),ad.terms(),ad.minCompleted());
         if(ad.paymentWindowSeconds()>market.paymentWindowSeconds()) throw new IllegalStateException("付款窗口已变更，请关闭后按新规则发布");
         if(ad.side().equals("SELL")) for(UUID account:ad.accounts()) payments.get(ad.makerUserId(),account,true);
     }
@@ -155,7 +139,7 @@ public class C2cAds {
         var ad=ads.get(id,true);requireOwner(user,ad);
         if(ad.revision()!=revision || !List.of("ACTIVE","PAUSED").contains(ad.status())) throw new IllegalStateException("广告已变更或资金尚在处理中");
         var market=markets.market(ad.marketId(),true);access.requireTrading(user,market);requireMerchant(user.userId());
-        validateTerms(market,price,min,max,terms,minCompleted);
+        validateTerms(market,C2cMoney.decimal(price),C2cMoney.decimal(min),C2cMoney.decimal(max),terms,minCompleted);
         ads.edit(ad,C2cMoney.decimal(price),C2cMoney.decimal(min),C2cMoney.decimal(max),terms==null?"":terms.trim(),minCompleted);
         return ads.get(id,false);
     }
@@ -179,7 +163,7 @@ public class C2cAds {
                     var current=markets.market(ad.marketId(),true);
                     access.requireCounterparty(ad.makerUserId(),current);
                     markets.requireMerchantBond(ad.makerUserId());
-                    validateTerms(current,ad.price().toPlainString(),ad.minFiat().toPlainString(),ad.maxFiat().toPlainString(),ad.terms(),ad.minCompleted());
+                    validateTerms(current,ad.price(),ad.minFiat(),ad.maxFiat(),ad.terms(),ad.minCompleted());
                     marketReady=ad.paymentWindowSeconds()<=current.paymentWindowSeconds();
                 } catch(IllegalArgumentException | IllegalStateException unavailable) {marketReady=false;}
                 ads.setStatus(id,approved && paymentReady && marketReady && markets.configuration().enabled()?"ACTIVE":"PAUSED");
@@ -195,11 +179,7 @@ public class C2cAds {
     private static void requireOwner(JwtPrincipal user,C2cAd ad) {
         if(user.userId()!=ad.makerUserId()) throw new IllegalStateException("只能管理本人广告");
     }
-    static void requireKey(String key) {
-        if(key==null || !key.matches("[A-Za-z0-9_-]{16,80}")) throw new IllegalArgumentException("请提供稳定的原请求标识");
-    }
-    private static void validateTerms(C2cMarket market,String price,String min,String max,String terms,int minCompleted) {
-        var p=C2cMoney.decimal(price);var low=C2cMoney.decimal(min);var high=C2cMoney.decimal(max);
+    private static void validateTerms(C2cMarket market,BigDecimal p,BigDecimal low,BigDecimal high,String terms,int minCompleted) {
         if(p.compareTo(market.minPrice())<0 || p.compareTo(market.maxPrice())>0 || p.scale()>18
                 || low.compareTo(market.minFiat())<0 || high.compareTo(market.maxFiat())>0 || low.compareTo(high)>0
                 || low.stripTrailingZeros().scale()>market.fiatDecimals() || high.stripTrailingZeros().scale()>market.fiatDecimals()

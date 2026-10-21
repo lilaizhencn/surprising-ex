@@ -76,8 +76,7 @@ public class C2cOrders {
     }
 
     @Transactional
-    C2cOrder create(JwtPrincipal user,String authorization,String key,UUID quoteId,String email,String totp) {
-        C2cAds.requireKey(key);
+    public C2cOrder create(JwtPrincipal user,String authorization,String key,UUID quoteId,String email,String totp) {
         if(quoteId==null) throw new IllegalArgumentException("请选择有效报价");
         String hash=C2cDigests.sha256(quoteId.toString());
         var receipt=submissions.begin(user.userId(),key,"ORDER_CREATE",hash);

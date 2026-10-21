@@ -27,9 +27,11 @@ public class C2cPaymentAccounts {
     private final TotpService secrets;
     private final ObjectMapper json;
     private final ComplianceService compliance;
+    private final C2cAccess access;
     public C2cPaymentAccounts(C2cPaymentAccountRepository accounts, C2cPaymentMethodRepository methods,
                               C2cAdsRepository ads, C2cAttachmentRepository attachments,
-                              TotpService secrets, ObjectMapper json, ComplianceService compliance) {
+                              TotpService secrets, ObjectMapper json, ComplianceService compliance,C2cAccess access) {
+        this.access=access;
         this.accounts=accounts; this.methods=methods; this.ads=ads; this.attachments=attachments;
         this.secrets=secrets; this.json=json; this.compliance=compliance;
     }
@@ -45,6 +47,15 @@ public class C2cPaymentAccounts {
             if (methods.available(account.method(),account.fiat()).isEmpty()) throw new IllegalStateException("收款方式当前不可用");
         }
         return account;
+    }
+
+    @Transactional
+    C2cPaymentAccount saveVerified(JwtPrincipal user,UUID id,long revision,String fiat,String method,Details details,String email,String totp) {
+        access.verifySettings(user,email,totp);return save(user.userId(),id,revision,fiat,method,details);
+    }
+    @Transactional
+    void disableVerified(JwtPrincipal user,UUID id,long revision,String email,String totp) {
+        access.verifySettings(user,email,totp);disable(user.userId(),id,revision);
     }
 
     @Transactional
@@ -109,10 +120,6 @@ public class C2cPaymentAccounts {
     }
 
     private void validateDetails(long userId,String fiat,String method,Details details) {
-        if(userId<=0 || fiat==null || !fiat.matches("[A-Z]{3,8}") || method==null || details==null
-                || details.holderName()==null || details.holderName().trim().length()<2 || details.holderName().length()>80
-                || details.accountNumber()==null || details.accountNumber().trim().length()<3 || details.accountNumber().length()>128
-                || (details.bankName()!=null && details.bankName().length()>120)) throw new IllegalArgumentException("收款资料不完整");
         var methodPolicy=methods.available(method,fiat).orElseThrow(()->new IllegalArgumentException("该币种收款方式尚未开放"));
         if(methodPolicy.requiresBankName() && (details.bankName()==null || details.bankName().isBlank()
                 || !details.accountNumber().trim().matches("[0-9]{8,40}"))) throw new IllegalArgumentException("请填写正确的银行名称和卡号");

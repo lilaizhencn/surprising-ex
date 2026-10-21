@@ -1,10 +1,12 @@
 package com.surprising.gateway.c2c;
 
 import com.surprising.gateway.c2c.model.C2cOfferFilter;
+import com.surprising.gateway.c2c.model.C2cAdPublish;
 import com.surprising.gateway.c2c.model.C2cUserOrderFilter;
 import com.surprising.gateway.c2c.model.C2cQuickQuoteSpec;
 import com.surprising.gateway.c2c.service.C2cQueryService;
 import com.surprising.gateway.c2c.service.C2cQuickQuoteService;
+import com.surprising.gateway.c2c.service.C2cSubmissionService;
 import com.surprising.gateway.c2c.utils.C2cDigests;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import java.util.*;
@@ -17,7 +19,9 @@ import tools.jackson.databind.ObjectMapper;
 @RequestMapping("/api/v1/c2c")
 @ConditionalOnProperty(name="surprising.c2c.enabled",havingValue="true")
 public class C2cController {
-    public record PublishRequest(String requestKey, C2cAds.Publish payload, C2cVerification verification) { }
+    public record Publish(UUID marketId,String side,String price,String quantity,String minFiat,String maxFiat,
+                           List<String> methodCodes,List<UUID> paymentAccountIds,int paymentWindowSeconds,String terms,int minCompleted) { }
+    public record PublishRequest(String requestKey, Publish payload, C2cVerification verification) { }
     public record OrderRequest(String requestKey, UUID quoteId, C2cVerification verification) { }
     public record SubmissionIdentity(String kind,String requestHash) { }
     public record QuoteRequest(UUID adId,String amountType,String amount,UUID paymentAccountId) { }
@@ -32,13 +36,13 @@ public class C2cController {
     private final C2cAccess access;
     private final C2cAds ads;
     private final C2cOrders orders;
-    private final C2cSubmissions submissions;
+    private final C2cSubmissionService submissions;
     private final C2cQueryService queries;
     private final C2cQuickQuoteService quickQuotes;
     private final C2cPaymentAccounts payments;
     private final ObjectMapper json;
 
-    public C2cController(C2cAccess access,C2cAds ads,C2cOrders orders,C2cSubmissions submissions,
+    public C2cController(C2cAccess access,C2cAds ads,C2cOrders orders,C2cSubmissionService submissions,
                          C2cQueryService queries,C2cQuickQuoteService quickQuotes,C2cPaymentAccounts payments,ObjectMapper json) {
         this.access=access;this.ads=ads;this.orders=orders;this.submissions=submissions;this.queries=queries;
         this.quickQuotes=quickQuotes;this.payments=payments;this.json=json;
@@ -86,19 +90,14 @@ public class C2cController {
     public Map<String,Object> publish(@RequestHeader(value="Authorization",required=false) String authorization,
                                      @RequestBody PublishRequest request) {
         var user=access.user(authorization);
+        requireKey(request.requestKey());
         if(request.payload()==null) throw new IllegalArgumentException("广告资料不完整");
         String hash=C2cDigests.sha256(json.writeValueAsString(request.payload()));
-        var receipt=submissions.admit(user.userId(),request.requestKey(),"AD_PUBLISH",hash);
-        if(receipt.status().equals("PROCESSING")) {
-            try {
-                access.requireNewTrading();
-                var codes=C2cVerification.orEmpty(request.verification());
-                ads.publish(user,authorization,request.requestKey(),request.payload(),codes.emailCode(),codes.totpCode());
-            } catch (IllegalArgumentException | IllegalStateException | ArithmeticException failure) {
-                rejectValidation(user,request.requestKey(),"AD_PUBLISH",hash,failure);throw failure;
-            }
-        }
-        return receipt(user,request.requestKey(),"AD_PUBLISH",hash);
+        C2cAdPublish payload;
+        try {payload=publishParameters(request.payload());}
+        catch(IllegalArgumentException | ArithmeticException invalid) {return submissions.rejectInput(user.userId(),request.requestKey(),"AD_PUBLISH",hash,invalid);}
+        var codes=C2cVerification.orEmpty(request.verification());
+        return submissions.publish(user,authorization,request.requestKey(),hash,payload,codes.emailCode(),codes.totpCode());
     }
 
     @PostMapping("/ads/{id}/status")
@@ -144,18 +143,11 @@ public class C2cController {
     public Map<String,Object> create(@RequestHeader(value="Authorization",required=false) String authorization,
                                     @RequestBody OrderRequest request) {
         var user=access.user(authorization);
+        requireKey(request.requestKey());
         if(request.quoteId()==null) throw new IllegalArgumentException("请选择有效报价");
         String hash=C2cDigests.sha256(request.quoteId().toString());
-        var receipt=submissions.admit(user.userId(),request.requestKey(),"ORDER_CREATE",hash);
-        if(receipt.status().equals("PROCESSING")) {
-            try {
-                access.requireNewTrading();var codes=C2cVerification.orEmpty(request.verification());
-                orders.create(user,authorization,request.requestKey(),request.quoteId(),codes.emailCode(),codes.totpCode());
-            } catch (IllegalArgumentException | IllegalStateException | ArithmeticException failure) {
-                rejectValidation(user,request.requestKey(),"ORDER_CREATE",hash,failure);throw failure;
-            }
-        }
-        return receipt(user,request.requestKey(),"ORDER_CREATE",hash);
+        var codes=C2cVerification.orEmpty(request.verification());
+        return submissions.create(user,authorization,request.requestKey(),request.quoteId(),hash,codes.emailCode(),codes.totpCode());
     }
     @GetMapping("/orders")
     public Map<String,Object> orders(@RequestHeader(value="Authorization",required=false) String authorization,
@@ -197,13 +189,13 @@ public class C2cController {
     @GetMapping("/submissions/{key}")
     public Map<String,Object> submission(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable String key,@RequestParam String kind,@RequestParam String requestHash) {
-        return receipt(access.user(authorization),key,kind,requestHash);
+        var user=access.user(authorization);requireIdentity(key,kind,requestHash);return receipt(user,key,kind,requestHash);
     }
     @PostMapping("/submissions/{key}/stop")
     public Map<String,Object> stop(@RequestHeader(value="Authorization",required=false) String authorization,
                                   @PathVariable String key,@RequestBody SubmissionIdentity request) {
-        var user=access.user(authorization);submissions.stop(user.userId(),key,request.kind(),request.requestHash());
-        return receipt(user,key,request.kind(),request.requestHash());
+        var user=access.user(authorization);requireIdentity(key,request.kind(),request.requestHash());
+        return submissions.stop(user.userId(),key,request.kind(),request.requestHash());
     }
 
     @GetMapping("/payment-accounts")
@@ -219,18 +211,54 @@ public class C2cController {
     @PostMapping("/payment-accounts")
     public Map<String,Object> savePaymentAccount(@RequestHeader(value="Authorization",required=false) String authorization,
                                                 @RequestBody PaymentSave request) {
-        var user=access.user(authorization);var codes=C2cVerification.orEmpty(request.verification());
-        access.verifySettings(user,codes.emailCode(),codes.totpCode());
-        return C2cViews.paymentAccount(payments.save(user.userId(),request.accountId(),revisionAllowZero(request.revision()),
-                request.fiat(),request.methodCode(),request.details()));
+        var user=access.user(authorization);validatePayment(request);
+        var codes=C2cVerification.orEmpty(request.verification());
+        return C2cViews.paymentAccount(payments.saveVerified(user,request.accountId(),revisionAllowZero(request.revision()),
+                request.fiat(),request.methodCode(),request.details(),codes.emailCode(),codes.totpCode()));
     }
     @PostMapping("/payment-accounts/{id}/disable")
     public Map<String,Object> disablePaymentAccount(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable UUID id,@RequestBody PaymentDisable request) {
-        var user=access.user(authorization);var codes=C2cVerification.orEmpty(request.verification());access.verifySettings(user,codes.emailCode(),codes.totpCode());
-        payments.disable(user.userId(),id,revision(request.revision()));return Map.of("disabled",true);
+        var user=access.user(authorization);var codes=C2cVerification.orEmpty(request.verification());
+        payments.disableVerified(user,id,revision(request.revision()),codes.emailCode(),codes.totpCode());return Map.of("disabled",true);
     }
 
+    static C2cAdPublish publishParameters(Publish request) {
+        if(request.marketId()==null) throw new IllegalArgumentException("请选择交易市场");
+        var side=choice(C2cAdPublish.Side.class,request.side(),"广告方向无效");
+        var price=C2cMoney.decimal(request.price());var quantity=C2cMoney.decimal(request.quantity());
+        var low=C2cMoney.decimal(request.minFiat());var high=C2cMoney.decimal(request.maxFiat());
+        if(price.scale()>18 || low.compareTo(high)>0 || request.minCompleted()<0 || request.minCompleted()>1000000
+                || (request.terms()!=null && request.terms().length()>2000) || request.paymentWindowSeconds()<60 || request.paymentWindowSeconds()>3600)
+            throw new IllegalArgumentException("广告价格、限额或交易条件无效");
+        if((request.methodCodes()!=null && request.methodCodes().stream().anyMatch(Objects::isNull))
+                || (request.paymentAccountIds()!=null && request.paymentAccountIds().stream().anyMatch(Objects::isNull)))
+            throw new IllegalArgumentException("收付款方式不完整");
+        var methods=request.methodCodes()==null?List.<String>of():request.methodCodes().stream().distinct().sorted().toList();
+        var accounts=request.paymentAccountIds()==null?List.<UUID>of():request.paymentAccountIds().stream().distinct().sorted().toList();
+        if(methods.isEmpty() || methods.size()>8 || methods.stream().anyMatch(value -> !value.matches("[A-Z][A-Z0-9_]{0,31}")))
+            throw new IllegalArgumentException("请选择收付款方式");
+        if(side==C2cAdPublish.Side.SELL && (accounts.isEmpty() || accounts.size()>8)) throw new IllegalArgumentException("请选择已审核的收款账号");
+        if(side==C2cAdPublish.Side.BUY && !accounts.isEmpty()) throw new IllegalArgumentException("买入广告由出售方选择本人收款账号");
+        return new C2cAdPublish(request.marketId(),side,price,quantity,low,high,methods,accounts,request.paymentWindowSeconds(),
+                request.terms()==null?"":request.terms().trim(),request.minCompleted());
+    }
+    private static void validatePayment(PaymentSave request) {
+        var details=request.details();
+        if(request.fiat()==null || !request.fiat().matches("[A-Z]{3,8}") || request.methodCode()==null
+                || !request.methodCode().matches("[A-Z][A-Z0-9_]{0,31}") || details==null
+                || details.holderName()==null || details.holderName().trim().length()<2 || details.holderName().length()>80
+                || details.accountNumber()==null || details.accountNumber().trim().length()<3 || details.accountNumber().length()>128
+                || (details.bankName()!=null && details.bankName().length()>120)) throw new IllegalArgumentException("收款资料不完整");
+    }
+    private static void requireKey(String key) {
+        if(key==null || !key.matches("[A-Za-z0-9_-]{16,80}")) throw new IllegalArgumentException("请提供稳定的原请求标识");
+    }
+    private static void requireIdentity(String key,String kind,String hash) {
+        requireKey(key);
+        if(kind==null || !List.of("AD_PUBLISH","ORDER_CREATE").contains(kind) || hash==null || !hash.matches("[a-f0-9]{64}"))
+            throw new IllegalArgumentException("原请求身份无效");
+    }
     private Map<String,Object> receipt(JwtPrincipal user,String key,String kind,String hash) {
         return queries.submission(user.userId(),key,kind,hash);
     }
@@ -246,11 +274,6 @@ public class C2cController {
     }
     private static void requirePage(int limit,int offset) {
         if(limit<1 || limit>100 || offset<0 || offset>10000) throw new IllegalArgumentException("分页数量无效");
-    }
-    private void rejectValidation(JwtPrincipal user,String key,String kind,String hash,RuntimeException failure) {
-        if(failure instanceof C2cProblem problem && problem.status.is5xxServerError()) return;
-        submissions.reject(user.userId(),key,kind,hash,"VALIDATION_REJECTED",
-                failure instanceof ArithmeticException?"金额或数量超出精度、范围限制":failure.getMessage());
     }
     static long revision(String value) {
         long revision=revisionAllowZero(value);

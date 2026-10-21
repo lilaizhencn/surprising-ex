@@ -1,0 +1,409 @@
+{
+  "date": "2026-10-21",
+  "verified_at_utc": "2026-10-21T11:51:52.818518+00:00",
+  "scope": "C2C发布/下单接收及拒绝聚合、收款设置验证与事务、Controller原生广告参数",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16; isolated PostgreSQL 18.4",
+  "stages": {
+    "focused": {
+      "tests": 34,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdsPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cOrderEventTransactionPostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cOrdersPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cQueryPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cQueryValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cReviewTransactionPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=C2cHttpPostgresTest,C2cAdsPostgresTest,C2cOrdersPostgresTest,C2cOrderEventTransactionPostgresTest,C2cReviewTransactionPostgresTest,C2cQueryPostgresTest,C2cQueryValidationTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "log_sha256": "4aea6b45b01a4e7e431b1f11298c2ba75a2ff830280aefc216d15d7d34a36c18"
+    },
+    "boundary": {
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.c2c.C2cCommandValidationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cSubmissionBoundaryPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=C2cSubmissionBoundaryPostgresTest,C2cCommandValidationTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "log_sha256": "861ddb1e88057275322dc83a42d5d5f9efa55962f165f74b4e9368d67b782a25"
+    },
+    "red": {
+      "tests": 13,
+      "failures": 5,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.c2c.C2cCommandValidationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cReviewTransactionPostgresTest",
+          "tests": 4,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cSubmissionBoundaryPostgresTest",
+          "tests": 7,
+          "failures": 4,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=C2cSubmissionBoundaryPostgresTest,C2cCommandValidationTest,C2cReviewTransactionPostgresTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "log_sha256": "80b378bc711cdbb72b2b81261b7668542786daaba47b83f82c8bad86e1f7bca9"
+    },
+    "green": {
+      "tests": 159,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.c2c.C2cAccessPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminQueryControllerTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdminQueryPostgresTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAdsPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatPersistencePostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatPostgresTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cChatValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cCommandValidationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cConfigurationTransactionPostgresTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cConfigurationValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cFundsPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cMoneyTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cNotificationsPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cOrderEventTransactionPostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cOrdersPostgresTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cProfileValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cProfilesTransactionPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cQueryPostgresTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cQueryValidationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cReviewTransactionPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cSubmissionBoundaryPostgresTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.c2c.C2cSubmissionsPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.ProductBusinessConfigurationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "clean",
+        "-Dtest=C2c*PostgresTest,C2cMoneyTest,C2cAdminQueryControllerTest,C2cQueryValidationTest,C2cProfileValidationTest,C2cConfigurationValidationTest,C2cChatValidationTest,C2cCommandValidationTest,GatewayProductRoutesConfigurationTest,ProductBusinessConfigurationTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "log_sha256": "1e8730e2f9ba1ee0d0e8d81ebe6429c466f53524446fd3869ef7c40645f203fa"
+    }
+  },
+  "behavior_evidence": [
+    "提交Service明确NOT_SUPPORTED，先经Repository代理独立接收，再进入Ads/Orders实际业务事务；业务失败后原拒绝单独提交",
+    "调用方外层事务回滚，已接受广告/原资金意图、订单/事件、明确停止回执仍保留；原接收状态不随父调用丢失",
+    "Controller校验广告格式/列表/参数组合并构建C2cAdPublish，Service按权威市场检查资格、精度、限额和托管；业务层不再反序列化或哈希HTTP广告对象",
+    "原请求摘要仍按原始HTTP字段计算；格式错误保留VALIDATION_REJECTED，已停止的无效原负载只返回原REQUEST_STOPPED，原键不能换正文",
+    "可重试接入不可用保留PROCESSING，恢复后同一键只创建原广告及一条资金意图，不发送Core",
+    "收款安全设置验证与保存/停用由PaymentAccounts聚合，实际入口有事务；失败验证消费继续由Access独立提交，账号故障撤销先前广告暂停",
+    "请求键、类型/hash、收款基本格式由Controller处理；Repository不再引用广告Service做输入格式校验，null类型也按参数错误拒绝",
+    "五项事务负例捕获三个父回滚抹掉原接收结果，以及保存/停用失败造成已暂停广告；finally恢复后干净构建扩大回归通过"
+  ],
+  "source_sha256": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAds.java": "1eb392509a89f850957c5c5678416b73973a88be9d587949ed5c9729ed925bd1",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cController.java": "63fa90fac97ce75cdecc0f7f5fe0225be8bfdbba58c545f70261f42d72fb5924",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cOrders.java": "2f4ed9d5f2770438304333406d6accd5f9eaf7d10566a3b12099fe668633a086",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cPaymentAccounts.java": "2d0529a9d3edd111e1134d81175e3b99a2e74987700c15805bad5871f20355ca",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cProblem.java": "de4aaeb928eb05ad9787d7d9fc74a7400e49977e8552ffbc14e34e285764419f",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cSubmissions.java": "0463fe71047539888d80442ab18ec3f13da2510ebc9145c26ae60e22aef7e4ef",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/model/C2cAdPublish.java": "28acea8379af560163249fa46abf704a1e0cb0296209a6e5bf8e18a30171a553",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cSubmissionService.java": "367c08d0b0ae099e29fbcc2fe0ec02f993b4308d2353ae4aff181c2485720daf",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAdsPostgresTest.java": "9daf1ee68d56134938a26d63734f89367ca942c7bdb4cb28090c68d6ba4f3180",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cBrowserQaTest.java": "b01f5ec76fb00aefe534fb8fd37028334c8792025b1766a3eb84094c3719aa84",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cCommandValidationTest.java": "d43adf5712d391b33bff0e73759dcd9d7b4806e77c716f736adc4177a5a8c42e",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cDatabaseFixture.java": "233d78ab75340e261507216c3bfc6c04e623e6c1bebb117868e3349265e2a814",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cHttpFixture.java": "99b7ec44acaa89b17379e50272920700e742e8b61b73d4f2e0d7f34b7f4541a3",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cOrdersPostgresTest.java": "cef603f621c8f27bfb302ba4878f30c79148542c51a2af1ec72065796747cc79",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cSubmissionBoundaryPostgresTest.java": "3eae613f5cf8e317030a1270bd33b0ef81352de762527bf1b9e9f826d7572b60"
+  },
+  "not_run": [
+    "真实Core/六产品线资金守恒：本批不改库存/金额/指令算法，数据库覆盖原额托管、退款、幂等和事务；真实资金/恢复验证仍在全范围收尾。",
+    "真实R2/wallet：本批未修改外部IO。"
+  ],
+  "disk_free_during_tests": "239 GiB",
+  "cleanup": {
+    "postgres_root": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-mvc-c2c-entries-pg-3j9hnzer",
+    "status": "已停止所属PostgreSQL，删除所属数据/日志及已汇总JUnit报告；源码和构建产物保留。",
+    "removed_reports": 60,
+    "cleaned_at_utc": "2026-10-21T11:51:56.935443+00:00"
+  }
+}

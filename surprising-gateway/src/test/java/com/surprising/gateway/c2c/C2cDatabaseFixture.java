@@ -66,8 +66,8 @@ final class C2cDatabaseFixture implements AutoCloseable {
         jdbc.execute("ALTER TABLE "+table+" ALTER COLUMN "+column+" SET DEFAULT nextval('"+table+"_qa_sequence')");
     }
     static C2cAds ads(JdbcTemplate jdbc, C2cAdsRepository rows, C2cMarketService markets, C2cPaymentAccounts payments,
-                      C2cAccess access, C2cFundsRepository funds, ObjectMapper json, C2cSubmissions submissions) {
-        return new C2cAds(rows,markets,payments,access,funds,json,submissions,new GatewayUserRepository(jdbc),
+                      C2cAccess access, C2cFundsRepository funds, C2cSubmissions submissions) {
+        return new C2cAds(rows,markets,payments,access,funds,submissions,new GatewayUserRepository(jdbc),
                 new C2cMerchantRepository(jdbc),new C2cPaymentMethodRepository(jdbc));
     }
 
@@ -128,10 +128,10 @@ final class C2cDatabaseFixture implements AutoCloseable {
 
     static C2cPaymentAccounts payments(JdbcTemplate jdbc, TotpService secrets,
                                        ObjectMapper json,
-                                       ComplianceService compliance) {
+                                       ComplianceService compliance,C2cAccess access) {
         return new C2cPaymentAccounts(new C2cPaymentAccountRepository(jdbc),
                 new C2cPaymentMethodRepository(jdbc),new C2cAdsRepository(jdbc),
-                new C2cAttachmentRepository(jdbc),secrets,json,compliance);
+                new C2cAttachmentRepository(jdbc),secrets,json,compliance,access);
     }
 
     static C2cMarketService markets(JdbcTemplate jdbc) {

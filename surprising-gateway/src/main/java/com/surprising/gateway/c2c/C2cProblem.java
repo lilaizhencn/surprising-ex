@@ -13,6 +13,8 @@ public final class C2cProblem extends IllegalStateException {
         this.code = code;
     }
 
+    public boolean retryable() {return status.is5xxServerError();}
+
     public static C2cProblem forbidden(String message) {
         return new C2cProblem(HttpStatus.FORBIDDEN, "C2C_FORBIDDEN", message);
     }

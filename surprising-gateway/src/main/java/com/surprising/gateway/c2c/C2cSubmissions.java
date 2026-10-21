@@ -13,8 +13,7 @@ public class C2cSubmissions {
     public C2cSubmissions(JdbcTemplate jdbc) {this.jdbc=jdbc;}
 
     @Transactional
-    Submission admit(long userId,String key,String kind,String hash) {
-        validate(key,kind,hash);
+    public Submission admit(long userId,String key,String kind,String hash) {
         jdbc.update("""
                 INSERT INTO c2c_submissions(user_id,request_key,kind,request_hash) VALUES(?,?,?,?)
                 ON CONFLICT(user_id,request_key) DO NOTHING
@@ -28,7 +27,6 @@ public class C2cSubmissions {
     }
 
     public Submission lookup(long userId,String key,String kind,String hash) {
-        validate(key,kind,hash);
         return matching(get(userId,key,false),kind,hash);
     }
 
@@ -48,7 +46,7 @@ public class C2cSubmissions {
     }
 
     @Transactional
-    void reject(long userId,String key,String kind,String hash,String code,String message) {
+    public void reject(long userId,String key,String kind,String hash,String code,String message) {
         var row=matching(get(userId,key,true),kind,hash);
         if(row==null || !row.status().equals("PROCESSING")) return;
         if(code==null || !code.matches("[A-Z][A-Z0-9_]{0,79}")) throw new IllegalArgumentException("拒绝原因无效");
@@ -60,8 +58,7 @@ public class C2cSubmissions {
     }
 
     @Transactional
-    Submission stop(long userId,String key,String kind,String hash) {
-        validate(key,kind,hash);
+    public Submission stop(long userId,String key,String kind,String hash) {
         jdbc.update("""
                 INSERT INTO c2c_submissions(user_id,request_key,kind,request_hash,status,error_code,error_message)
                 VALUES(?,?,?,?,'REJECTED','REQUEST_STOPPED','原请求已停止，未重新提交')
@@ -91,11 +88,6 @@ public class C2cSubmissions {
                 """,limit);
     }
 
-    private static void validate(String key,String kind,String hash) {
-        C2cAds.requireKey(key);
-        if(!List.of("AD_PUBLISH","ORDER_CREATE").contains(kind) || hash==null || !hash.matches("[a-f0-9]{64}"))
-            throw new IllegalArgumentException("原请求身份无效");
-    }
     private static Submission matching(Submission row,String kind,String hash) {
         if(row!=null && (!row.kind().equals(kind) || !row.hash().equals(hash))) throw new IllegalStateException("原请求内容不匹配");
         return row;
