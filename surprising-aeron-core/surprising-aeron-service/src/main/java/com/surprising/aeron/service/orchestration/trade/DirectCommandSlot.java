@@ -21,8 +21,8 @@ import com.surprising.aeron.service.state.lifecycle.RuntimePerpetualFundingProce
 import com.surprising.aeron.service.state.order.RuntimeAlgoOrderStateTransitions;
 import com.surprising.aeron.service.state.order.RuntimeTriggerOrderStateTransitions;
 import com.surprising.aeron.service.state.risk.RiskScanCoordinator;
-import com.surprising.aeron.service.state.risk.RuntimeAdlExecution;
-import com.surprising.aeron.service.state.risk.RuntimeLiquidationResolution;
+import com.surprising.aeron.service.state.adl.RuntimeAdlExecution;
+import com.surprising.aeron.service.state.liquidation.RuntimeLiquidationResolution;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntFunction;

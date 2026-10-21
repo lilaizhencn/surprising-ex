@@ -1,5 +1,6 @@
-package com.surprising.aeron.service.state.risk;
+package com.surprising.aeron.service.state.liquidation;
 
+import com.surprising.aeron.service.state.risk.LiquidationRuntime;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.TradingCoreState;
@@ -13,6 +14,8 @@ import com.surprising.aeron.service.state.ledger.TreasuryRuntime;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 
 /**
+ * 强平步骤 7：由后续 RESOLVE_LIQUIDATION 命令确认结果，按决议补亏或完成。
+ *
  * 强平执行后的保险基金补亏与完成判定。先由账户 Lane 捕获同资产保险索赔事实，账本按确定顺序校验分配并扣保险余额和亏空，再交源账户 Lane 发布强平新状态；真正 ADL 走单独的减仓流程。
  */
 public final class RuntimeLiquidationResolution {

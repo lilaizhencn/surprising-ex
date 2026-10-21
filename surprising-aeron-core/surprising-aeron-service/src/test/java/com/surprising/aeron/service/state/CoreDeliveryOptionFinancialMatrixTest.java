@@ -40,7 +40,7 @@ import com.surprising.aeron.service.state.query.*;
 import com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService;
 import com.surprising.aeron.service.state.query.RuntimeRiskQueryService;
 import com.surprising.aeron.service.state.risk.LiquidationRuntime;
-import com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor;
+import com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor;
 import com.surprising.aeron.service.state.snapshot.*;
 import com.surprising.aeron.service.state.snapshot.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.snapshot.RuntimeStateProjector;

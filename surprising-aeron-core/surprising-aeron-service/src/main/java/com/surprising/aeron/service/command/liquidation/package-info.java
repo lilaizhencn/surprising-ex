@@ -1,19 +1,18 @@
 /**
- * 强平链路的阅读顺序；风控生成计划后，执行由新的复制命令推进。
+ * 强平命令的账户执行与结果确认入口，步骤对应 README“强平、保险基金与 ADL”。
  *
  * <ol>
- *   <li>MatchingCommandAdmission / CoreMatchingFlow 接收 EXECUTE_LIQUIDATION 或批量命令，
- *       检查计划状态、价格序号、价格、游标及持仓。</li>
- *   <li>Matcher 分页撤销受影响订单，跨分片时由 CrossShardCancellationCoordinator
- *       保持原顺序；未完成时只提交撤单进度，等待后续命令。</li>
- *   <li>{@link com.surprising.aeron.service.command.liquidation.LiquidationCommands}
- *       将完成撤单的执行交给 state.risk.RuntimeDerivativeLiquidationProcessor，
- *       在所属账户处理持仓与资金，收集账本完成后提交。</li>
- *   <li>后续 RESOLVE_LIQUIDATION 经 RuntimeLiquidationResolution 确认结果；
- *       保险基金和 ADL 按业务需要各自提交独立命令。</li>
+ *   <li>步骤 2–4：MatchingCommandAdmission 与 CoreMatchingFlow 校验并完成 Matcher 分页撤单。</li>
+ *   <li>步骤 5–6：{@link com.surprising.aeron.service.command.liquidation.LiquidationCommands}
+ *       的 executeLiquidationRuntime 或 advanceLiquidationCancellationRuntime 是同步入口；
+ *       异步执行由命令槽及提交编排持有 state.liquidation 的续步，处理最终执行或仅推进撤单游标。</li>
+ *   <li>步骤 7：后续命令由 executeResolveLiquidation 交给 RuntimeLiquidationResolution；
+ *       异步完成进度保存在 DirectCommandSlot。</li>
  * </ol>
  *
- * <p>分页推进不等于强平结束。过期估值、游标冲突和已结束计划仍按既有规则处理，
- * 不能因请求重试重复扣减资金或持仓；公共风险状态留在 state.risk，不复制进本包。</p>
+ * <p>此包不持有账户或账本权威状态，沿用所属 Lane 与 Ledger 的执行边界。
+ * 跨分片撤单由 CrossShardCancellationCoordinator 保持原顺序；分页推进不等于强平结束。
+ * 过期估值、游标冲突及已结束计划按既有规则处理，重试不能重复扣减资金或持仓。
+ * 强平执行提交不等于保险补亏或 ADL 已经完成。</p>
  */
 package com.surprising.aeron.service.command.liquidation;

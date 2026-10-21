@@ -285,9 +285,11 @@ flowchart TD
     J --> K[按业务需要后续提交保险 / EXECUTE_ADL 命令]
 ```
 
-执行入口为 `MatchingCommandAdmission` / `CoreMatchingFlow`；跨分片撤单经 `CrossShardCancellationCoordinator` 保持既有顺序。账户入口为 [`LiquidationCommands`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/liquidation/LiquidationCommands.java) → [`RuntimeDerivativeLiquidationProcessor`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/risk/RuntimeDerivativeLiquidationProcessor.java)；确认经 `executeResolveLiquidation` → `RuntimeLiquidationResolution`。
+执行入口为 `MatchingCommandAdmission` / `CoreMatchingFlow`；跨分片撤单经 `CrossShardCancellationCoordinator` 保持既有顺序。账户入口为 [`LiquidationCommands`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/liquidation/LiquidationCommands.java) → [`RuntimeDerivativeLiquidationProcessor`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/liquidation/RuntimeDerivativeLiquidationProcessor.java)；确认经 `executeResolveLiquidation` → [`RuntimeLiquidationResolution`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/liquidation/RuntimeLiquidationResolution.java)。
 
-保险变更经 `InsuranceFundCommands` / `RuntimeInsuranceFundStateTransitions`；ADL 经 [`AdlCommands`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/adl/AdlCommands.java) / `RuntimeAdlExecution`。它们是独立复制命令，不是每次强平无条件自动执行的步骤。过期标记价、游标冲突和已结束计划按既有规则拒绝或跳过，不能重复扣减持仓。
+保险变更经 `InsuranceFundCommands` / `RuntimeInsuranceFundStateTransitions`；ADL 经 [`AdlCommands`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/adl/AdlCommands.java) / [`RuntimeAdlExecution`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/adl/RuntimeAdlExecution.java)。它们是独立复制命令，不是每次强平无条件自动执行的步骤。过期标记价、游标冲突和已结束计划按既有规则拒绝或跳过，不能重复扣减持仓。
+
+按业务边界找源码：`state.risk` 负责估值和生成计划，`state.liquidation` 负责执行与结果确认，`state.adl` 负责自动减仓。它们共用 `state.risk.LiquidationRuntime` 这份强平记录，并继续通过原有账户 Lane 和 System Ledger 写入权威状态；分包不复制记录或新建处理阶段。各包的 `package-info.java` 按本文步骤列出类和方法，在 IDE 中也能顺着读。
 
 ### 资金费、交割与期权到期
 
@@ -368,10 +370,13 @@ sequenceDiagram
 | 交易 5：有序提交 | `orchestration.trade.commit`、`orchestration.result` | `OrderedCommitCoordinator`、`CommitPublication`、`CommandResultLedger` |
 | 交易 6：输出 | `orchestration.egress`、`orchestration.realtime`、`state.realtime` | `ClusterServiceEgress`、`TradingRealtimeBoundary`、`RealtimeStateCapture` |
 | 特有业务 | `command.risk` / `liquidation` / `trigger` / `funding` / `settlement` 等 | 各业务 `*Commands`；复用既有执行边界 |
+| 风控：估值与计划 | `state.risk` | `RuntimeDerivativeRiskProcessor` → `RiskScanCoordinator` → `RiskLaneProcessor`；共用的风险与强平记录仍在此包 |
+| 强平：执行与结果确认 | `state.liquidation` | `RuntimeDerivativeLiquidationProcessor.ExecutionCheck` → 撤单完成 → `ExecutionWork` / `BatchFinancialWork`；后续命令进入 `RuntimeLiquidationResolution` |
+| ADL：自动减仓 | `state.adl` | `RuntimeAdlExecution.AdlWork`：源账户校验 → 目标账户减仓 → 源强平补亏 → 账本完成 |
 | 产品差异 | `business.spot` / `linear` / `inverse` / `option` | 六套产品规则和资金计算 |
 | 公共状态与恢复 | `state.model` / `index` / `identity` / `snapshot`，`orchestration.snapshot` / `retention` / `replay` | 模型、索引、协议、恢复和查询不强制步骤编号 |
 
-本次把原 `orchestration.pipeline` 的 13 个类整理到 `orchestration.trade`，原 `orchestration.commit` 移入 `orchestration.trade.commit`；启动资源类从 `config` 移入 `bootstrap`。同包测试、基准及调用方一起迁移。
+已有整理把原 `orchestration.pipeline` 的 13 个类归入 `orchestration.trade`，原 `orchestration.commit` 归入 `orchestration.trade.commit`；启动资源类从 `config` 移入 `bootstrap`。本轮继续把强平执行、强平结果确认和 ADL 执行从 `state.risk` 分别移入 `state.liquidation`、`state.adl`，同步全部调用方；共享模型、扫描逻辑和状态所有者保持原归属。
 
 准入、撮合推进与批量类共享同一组包内槽位和生命周期操作，因此保留在一个交易编排包，避免为步骤目录扩大访问权限。`CommandSlot`、`PendingMatchingRing`、`ClusterCommandWindow` 是公共在途设施；`DirectCommandSlot` 还承载风控/触发控制，不能只归下单某一步。
 
@@ -423,3 +428,35 @@ java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-
 Service 的 2 项条件跳过分别是 Linux CPU 亲和性测试（当前为 macOS）及要求 `surprising.aeron.matching-phase-log-interval=1` 的日志模式测试。网关维护数据库集成未运行：没有 `MAINTENANCE_TEST_JDBC_URL`。本轮未运行 HTTP/API 做市端到端、正式 JMH/JFR、长稳或三成员故障切换，因此不提供新的容量、延迟或性能提升结论。
 
 清理状态：验证摘要已归档本节；本轮独立 Core 均已停止，隔离验证目录、辅助脚本、临时日志及确认属于本轮的 Surefire 报告已清理。保留构建 JAR/classes 供运行和复核，没有启动 wallet，也没有遗留本轮 JFR、堆转储或常驻集群。
+
+### 风险业务包整理验证（2026-10-21）
+
+本轮在已有启动及交易包结构上，分离 `state.risk`、`state.liquidation`、`state.adl` 的业务职责，
+同步 13 个 Java 文件的包名或引用，并更新 7 个包说明。共享模型、字段、方法体、访问权限、
+协议、快照和资金算法保持一致；没有新增业务类、线程、队列或提交阶段。
+Service README 的早期优化记录折叠保留，当前导航与历史迁移进度分开阅读。
+
+环境：`master`，Amazon Corretto HotSpot JDK 27，Maven 3.9.16，macOS；构建前及运行中磁盘可用空间至少 239 GiB。
+
+```bash
+mvn -B -pl surprising-aeron-core/surprising-aeron-service -am clean test
+mvn -B -pl surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks \
+  -am -DskipTests package
+```
+
+| 本轮检查 | 实际结果 |
+| --- | --- |
+| Service 完整测试 | 1557 项，1555 passed、0 failures、0 errors、2 skipped；完整命令退出码 0 |
+| 同轮依赖测试 | Product 15、Protocol 250、Client 66、Instrument 14，均为 0 failures、0 errors、0 skipped |
+| 源码等价 | 13 个迁移或引用文件（8 个生产、5 个测试）经 Java AST 比较，除命名空间和注释外代码 token 相同；7 个包说明没有增加类型或成员 |
+| 下游编译与打包 | Tools、Benchmarks 及依赖共 15 个 Reactor 模块成功，命令退出码 0；此命令使用 `-DskipTests`，只计编译和打包 |
+| JAR 与导航 | Service、Tools、Benchmarks 三个运行 JAR 均含三个类的新包路径，旧包类及其内部类为 0；两份 README 的 113 个本地链接有效，差异空白检查通过 |
+
+两项跳过分别为 macOS 上的 Linux 原生 CPU 绑定，以及要求配置
+`surprising.aeron.matching-phase-log-interval` 的日志模式用例。
+完整 Service 测试包含六产品线、FUSED/PIPELINED 管线、强平/保险/ADL 资金、幂等和快照恢复回归。
+本次为包归属整理，未改变资金计算或运行策略；未另行运行 HTTP/API 做市端到端、长稳、
+三成员故障切换或正式 JMH/JFR，不提供新的性能结论。
+
+清理状态：测试 JVM 已退出，未启动独立常驻集群或 wallet；本轮临时构建日志和已归档摘要的
+Surefire 报告已清理。保留 classes/JAR 及活动注释审计所需的紧凑校验数据，没有生成 JFR 或堆转储。

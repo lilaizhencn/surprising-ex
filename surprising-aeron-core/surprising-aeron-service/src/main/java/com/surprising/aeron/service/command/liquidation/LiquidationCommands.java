@@ -5,8 +5,8 @@ import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor;
-import com.surprising.aeron.service.state.risk.RuntimeLiquidationResolution;
+import com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor;
+import com.surprising.aeron.service.state.liquidation.RuntimeLiquidationResolution;
 import java.util.Collection;
 
 /**

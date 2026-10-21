@@ -6,13 +6,13 @@ import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.order.RuntimeTestStateTransitions;
-import com.surprising.aeron.service.state.risk.RuntimeAdlExecution;
-import com.surprising.aeron.service.state.risk.RuntimeLiquidationResolution;
+import com.surprising.aeron.service.state.adl.RuntimeAdlExecution;
+import com.surprising.aeron.service.state.liquidation.RuntimeLiquidationResolution;
 import com.surprising.aeron.service.state.snapshot.RuntimeStateProjector;
 import java.util.Collection;
 import java.util.List;
 
-import static com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.*;
+import static com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.*;
 
 /**
  * 强平、保险补亏和 ADL 一致性测试的独立运行时辅助器，先投影业务状态，再调用对应真实账户及账本步骤，返回结果供测试比对。

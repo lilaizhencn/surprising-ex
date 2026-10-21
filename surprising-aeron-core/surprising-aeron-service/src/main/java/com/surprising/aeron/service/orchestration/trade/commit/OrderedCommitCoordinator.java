@@ -349,7 +349,7 @@ public final class OrderedCommitCoordinator {
                         var progress = new CoreLiquidationProgressView(nextCursor == 0, nextCursor,
                                 chunk.orders().size());
                         if (owner.runtimeState().systemLedgerStarted() || owner.runtimeState().asynchronousCommands()) {
-                            var work = com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor
+                            var work = com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor
                                      .beginExecution(pending.liquidationWork(), command, orders, nextCursor,
                                             owner.runtimeState(), owner.identities());
                             pending.liquidationWork(work);
@@ -660,7 +660,7 @@ public final class OrderedCommitCoordinator {
             int index, applied, pendingCount, obsolete, processedOrders;
             int remaining = batch.maxCancelOrders();
             java.util.function.BooleanSupplier accountWork;
-            List<com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.ExecutionRequest>
+            List<com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionRequest>
                     executionRequests;
             RiskScanCoordinator riskWork;
             long beforeRiskRevision;
@@ -713,7 +713,7 @@ public final class OrderedCommitCoordinator {
                     }
                     if (nextCursor == 0) applied++; else pendingCount++;
                     if (owner.runtimeState().systemLedgerStarted() || owner.runtimeState().asynchronousCommands()) {
-                        executionRequests.add(new com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor
+                        executionRequests.add(new com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor
                                 .ExecutionRequest(single, orders, nextCursor));
                         continue;
                     }
@@ -722,7 +722,7 @@ public final class OrderedCommitCoordinator {
                 }
                 if (!executionRequests.isEmpty()) {
                     if (owner.runtimeState().systemLedgerStarted() || owner.runtimeState().asynchronousCommands()) {
-                        accountWork = com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor
+                        accountWork = com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor
                                 .beginExecutionBatch(executionRequests, owner.runtimeState(), owner.identities());
                         executionRequests = new ArrayList<>();
                         return false;

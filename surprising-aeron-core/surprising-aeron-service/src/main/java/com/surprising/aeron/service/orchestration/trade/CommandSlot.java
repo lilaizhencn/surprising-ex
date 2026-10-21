@@ -20,7 +20,7 @@ import com.surprising.aeron.service.state.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.ledger.RuntimeFundsAccumulator;
 import com.surprising.aeron.service.state.ledger.RuntimeFundsDelta;
 import com.surprising.aeron.service.state.order.OrderRuntime;
-import com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor;
+import com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor;
 import com.surprising.aeron.service.state.settlement.MatcherSettlementEvent;
 import java.util.List;
 import java.util.Objects;
@@ -254,20 +254,20 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
         controlWork = settlementControl;
     }
 
-    public com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.ExecutionCheck liquidationCheck() {
+    public com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionCheck liquidationCheck() {
         return liquidation.check();
     }
 
-    public com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.ExecutionWork liquidationWork() {
+    public com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork liquidationWork() {
         return liquidation.reusableWork();
     }
 
-    public void liquidationWork(com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.ExecutionWork work) {
+    public void liquidationWork(com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork work) {
         liquidation.reusableWork(work);
     }
 
     public void deferLiquidationExecutionControl(OrderedCommitCoordinator coordinator,
-            com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.ExecutionWork work,
+            com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork work,
             com.surprising.aeron.protocol.CoreLiquidationProgressView progress) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
         liquidationExecutionControl.prepare(coordinator, work, progress);
@@ -1069,11 +1069,11 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
     /** Owner-confined callback shared by all asynchronous liquidation execution polls. */
     private final class LiquidationExecutionContinuation implements java.util.function.BooleanSupplier {
         private OrderedCommitCoordinator coordinator;
-        private com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.ExecutionWork work;
+        private com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork work;
         private com.surprising.aeron.protocol.CoreLiquidationProgressView progress;
 
         void prepare(OrderedCommitCoordinator coordinator,
-                com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.ExecutionWork work,
+                com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork work,
                 com.surprising.aeron.protocol.CoreLiquidationProgressView progress) {
             this.coordinator = Objects.requireNonNull(coordinator);
             this.work = Objects.requireNonNull(work);
@@ -1310,20 +1310,20 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
      * 下沉上下文：强平（LIQUIDATION）专有生命周期状态。
      */
     static final class LiquidationSlotContext {
-        private com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableWork;
-        private com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.ExecutionCheck check;
+        private com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableWork;
+        private com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionCheck check;
 
-        com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.ExecutionCheck check() {
+        com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionCheck check() {
             if (check == null)
-                check = new com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.ExecutionCheck();
+                check = new com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionCheck();
             return check;
         }
 
-        com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableWork() {
+        com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableWork() {
             return reusableWork;
         }
 
-        void reusableWork(com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.ExecutionWork work) {
+        void reusableWork(com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork work) {
             this.reusableWork = Objects.requireNonNull(work);
         }
 

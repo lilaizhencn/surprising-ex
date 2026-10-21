@@ -128,7 +128,10 @@ flowchart TD
 | `state.position` / `state.index` | 持仓、平仓容量及持仓/OI/ADL 等派生索引 |
 | `state.settlement` | Matcher 事实向 Account Lane 的派发、应用及完成回执 |
 | `state.ledger` | Treasury、保险基金及 `SystemLedgerLane` 财务应用 |
-| `state.risk` / `state.lifecycle` | 风险扫描、强平、ADL；资金费、交割和行权状态推进 |
+| `state.risk` | 风险估值、扫描与强平计划；`RuntimeDerivativeRiskProcessor`、`RiskScanCoordinator`、`RiskLaneProcessor`，以及共用的风险与强平记录 |
+| `state.liquidation` | 强平执行与结果确认；`RuntimeDerivativeLiquidationProcessor`、`RuntimeLiquidationResolution` |
+| `state.adl` | 自动减仓；`RuntimeAdlExecution`，复用源强平记录、账户与账本 |
+| `state.lifecycle` | 资金费、交割和行权状态推进 |
 | `state.change` | 命令变更缓冲、`LaneCommitDelta` 与发布交接 |
 | `state.snapshot` | 状态物化、投影、Lane 快照及哈希 |
 | `state.identity` / `state.fee` / `state.instrument` | 运行时身份字典、费率策略及币对状态推进 |
@@ -146,6 +149,22 @@ flowchart TD
 `state.settlement` 交给所属账户 Lane → `state.ledger` 应用财务事实 →
 `trade.commit` 按序提交 → `result` / `egress` 交出响应。失败仍由既有回滚和故障传播处理。
 
+风控、强平和 ADL 按独立命令分包，类注释和包注释中的编号只对应各自流程：
+
+| 业务 / 步骤 | 按顺序阅读的源码 | 本步完成的含义 |
+| --- | --- | --- |
+| 风控 1–3：价格与预算 | `command.risk.RiskCommands.executeApplyMarkPrice` / `executeContinueRiskScan` | 写入价格及扫描进度，校验续扫开关和预算 |
+| 风控 4–7：估值与计划 | `state.risk.RiskScanCoordinator.poll` → `RiskLaneProcessor` | 所属 Lane 估值，Owner 确定性分配编号，再由 Lane 写入 `PLANNED` 记录并提交 |
+| 强平 2–4：输入、校验与撤单 | `trade.MatchingCommandAdmission` → [`RuntimeDerivativeLiquidationProcessor.ExecutionCheck`](src/main/java/com/surprising/aeron/service/state/liquidation/RuntimeDerivativeLiquidationProcessor.java) → `trade.CoreMatchingFlow` | 步骤 1 为风控计划；此处核对价格、状态及游标，Matcher 完成分页撤单后才能推进账户执行 |
+| 强平 5–6：账户与账本 | 同类的 `ExecutionWork` / `BatchFinancialWork` → `trade.commit.OrderedCommitCoordinator` | 所属 Lane 更新持仓与余额，Ledger 应用财务差额，两边完成才提交 |
+| 强平 7：后续确认命令 | `command.liquidation.LiquidationCommands.executeResolveLiquidation` → [`RuntimeLiquidationResolution.ResolutionWork`](src/main/java/com/surprising/aeron/service/state/liquidation/RuntimeLiquidationResolution.java) | 捕获索赔、账本分配并补亏、源 Lane 更新记录；执行提交与亏空解决分别确认 |
+| ADL 1–4：后续减仓命令 | `command.adl.AdlCommands` → [`RuntimeAdlExecution.AdlWork`](src/main/java/com/surprising/aeron/service/state/adl/RuntimeAdlExecution.java) | 源强平校验 → 目标账户减仓 → 源记录补亏 → Ledger 完成；同 Lane 时复用已有账户回调 |
+
+`state.risk.LiquidationRuntime` 被扫描、强平、保险和 ADL 共用，保留为一份记录；
+`state.ledger` 继续拥有系统资金，`state.account` 继续拥有用户状态。
+这次分包只明确业务入口，不增加权威状态、队列或线程，也不扩大已有方法的访问权限。
+各业务包的 `package-info.java` 提供同样的有序类导航，避免为 IDE 排序把编号写进类名。
+
 不再把 `trade` 按 `pack1`、`pack2` 拆开：准入、撮合推进和批量命令共享包内槽位及生命周期操作，
 机械拆包会扩大访问权限；`CommandSlot`、`PendingMatchingRing`、`DirectCommandSlot` 等也被多条业务共用。
 新增职责仍先放入对应业务包，不为凑步骤增加透传类，不把步骤编号写进业务状态或协议。
@@ -158,7 +177,14 @@ flowchart TD
 历史包整理的验证命令、模块结果、条件跳过项及清理记录见
 [验证记录](../../docs/validation/aeron-service-packages-20261021.json)。
 交易包及启动包后续迁移的记录见 [Aeron 总 README 的验证记录](../README.md#本轮验证记录2026-10-21)。
-这些是对应改动时的验证证据；当前导航修订仅修改文档和注释，不据此宣称重新运行了交易或恢复测试。
+这些是对应改动时的验证证据；本轮结果见
+[风险业务包整理验证](../README.md#风险业务包整理验证2026-10-21)。
+
+<details>
+<summary>历史优化与验证记录（展开查看，日期以各节为准）</summary>
+
+以下保留各次修改当时的实现与验收范围。当前启动、线程和包结构以本文前半部分及
+[Aeron 总 README](../README.md) 为准；例如下文早期“账本尚未启用”的描述属于当时的迁移进度。
 
 # 保证金写入简化（2026-10-18）
 
@@ -665,3 +691,5 @@ surprising:
 这些均为原 Owner 持有的派生索引，只随已提交 Lane 回执增删；权威订单和账户状态仍由原 Lane 持有，快照恢复时重建索引。没有新增线程、事件阶段、逐命令状态副本或第二份权威字典。协议/恢复模型及组合业务键仍有对象和文本表示，本次不声称全链路零对象。按用户要求只执行功能回归，不运行压测、JMH 或 JFR，也不据此声称吞吐或 P99 改善。
 
 功能验证：核心 FUSED/PIPELINED 各 232 项通过；补充的最新代码就绪提交、回放/资金核对、网关及实时路由共 55 项通过。首次宽回归发现的测试等待条件缺口、修正过程和未测范围均记录于 [核心原生索引验证](../../docs/validation/core-native-indices-20261018.json)。本轮未运行压测。
+
+</details>

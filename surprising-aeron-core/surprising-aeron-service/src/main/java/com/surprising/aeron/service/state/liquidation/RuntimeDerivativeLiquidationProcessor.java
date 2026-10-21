@@ -1,5 +1,8 @@
-package com.surprising.aeron.service.state.risk;
+package com.surprising.aeron.service.state.liquidation;
 
+import com.surprising.aeron.service.state.risk.LiquidationRuntime;
+import com.surprising.aeron.service.state.risk.CoreRiskPolicy;
+import com.surprising.aeron.service.state.risk.RiskSnapshotRuntime;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
@@ -27,6 +30,8 @@ import java.util.Collection;
 import java.util.List;
 
 /**
+ * 强平步骤 3–6：校验执行条件，等待 Matcher 撤单，再完成账户和账本交接。
+ *
  * 衍生品强平的账户执行与账本交接。前置检查由所属 Lane 确认持仓仍需强平，随后在该 Lane 应用已撤订单回执、解冻并平仓；收付、实收强平费及未覆盖亏空形成差额交唯一账本，Owner 等两边完成后提交修订号。
  */
 public final class RuntimeDerivativeLiquidationProcessor {
