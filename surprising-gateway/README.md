@@ -500,3 +500,5 @@ C2C后台的原始请求头、method/path/query、User-Agent和IP由 `c2c.contro
 划转安全Service的估值不可用/需要验证以原生 `ProductTransferSecurityException` 表示，网关协议入口维持503/428并阻止资金协调器调用。算法单已提交视图中不存在时由Service返回原生NoSuchElementException，订单请求Controller映射404；未就绪仍使用读视图不可用契约，不回退Core或命令存储。
 
 算法单、成交及条件单Repository各读取一个实际业务投影；必要的初始化标记按同产品在同一条SQL中关联，用途已在 `readAssociated` 注释说明。未初始化返回原生不可用，健康空数据返回空页；标记和数据共享SQL快照，不分两次读取，排序在外层明确保持。原始请求绑定的剩余问题仍列于补充整改清单。
+
+交易统计的 `TradingMetricsRepository` 只读取 `core_trading_statistics_snapshot` 并返回 `StoredTradingMetrics` 原生行。`TradingMetricsService` 校验版本、产品、位置、窗口、时间和计数后截取榜单；Controller校验请求范围。响应保留 `committed-trading-v1` 的完整JSON字段及大整数节点，未知统计字段不会被DTO转换丢弃，也不转double。

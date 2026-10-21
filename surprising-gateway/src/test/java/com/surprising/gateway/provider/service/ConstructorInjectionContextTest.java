@@ -16,7 +16,7 @@ import com.surprising.realtime.api.ValkeyUserQueries;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
 import com.surprising.trading.order.repository.TradeProjectionRepository;
-import com.surprising.trading.order.repository.TradingMetricsRepository;
+import com.surprising.trading.order.service.TradingMetricsService;
 import com.surprising.trading.order.service.AeronOrderCommandService;
 import com.surprising.trading.order.service.OrderPlacementStateService;
 import com.surprising.trading.order.service.OrderService;
@@ -67,7 +67,7 @@ class ConstructorInjectionContextTest {
                     ProductTransferCoordinator.class, ProductTransferSecurityService.class, RestTemplate.class,
                     com.surprising.instrument.provider.service.InstrumentService.class,
                     OrderValidator.class, OrderPlacementStateService.class, AeronOrderCommandService.class,
-                    AeronOrderProjectionRepository.class, MatchingMarketDataService.class, TradingMetricsRepository.class,
+                    AeronOrderProjectionRepository.class, MatchingMarketDataService.class, TradingMetricsService.class,
                     TradeProjectionRepository.class, ValkeyUserQueries.class, TriggerOrderAeronGateway.class,
                     TriggerOrderProjectionRepository.class)) {
                 registerMock(context, type);
@@ -75,8 +75,8 @@ class ConstructorInjectionContextTest {
             context.register(GatewayProxyService.class, GatewayProductSelection.class, OrderService.class, TriggerOrderService.class);
             context.refresh();
 
-            var metrics = context.getBean(TradingMetricsRepository.class);
-            Map<String, Object> snapshot = Map.of("productLine", product.name());
+            var metrics = context.getBean(TradingMetricsService.class);
+            var snapshot = new ObjectMapper().createObjectNode().put("productLine", product.name());
             when(metrics.require(product, 60, 20)).thenReturn(snapshot);
             assertThat(context.getBean(OrderService.class).tradingMetrics(60, 20, product)).isSameAs(snapshot);
 

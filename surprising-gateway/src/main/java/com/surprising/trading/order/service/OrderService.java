@@ -51,9 +51,9 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class OrderService {
-    private final com.surprising.trading.order.repository.TradingMetricsRepository tradingMetrics;
+    private final com.surprising.trading.order.service.TradingMetricsService tradingMetrics;
 
-    public java.util.Map<String,Object> tradingMetrics(int window,int limit,ProductLine requestedProduct) {
+    public tools.jackson.databind.node.ObjectNode tradingMetrics(int window,int limit,ProductLine requestedProduct) {
         var product=currentProductLine();
         if(requestedProduct!=null&&requestedProduct!=product)throw new IllegalArgumentException("product line does not match provider");
         if(tradingMetrics==null)throw new ReadViewUnavailableException("TRADING_METRICS_UNAVAILABLE");
@@ -93,7 +93,7 @@ public class OrderService {
     public OrderService(TradingOrderProperties properties, OrderValidator orderValidator,
                         OrderPlacementStateService placementStateService, AeronOrderCommandService aeronOrders,
                         AeronOrderProjectionRepository aeronOrderProjection, com.surprising.trading.matching.service.MatchingMarketDataService bboOrderBook,
-                        com.surprising.trading.order.repository.TradingMetricsRepository tradingMetrics,
+                        com.surprising.trading.order.service.TradingMetricsService tradingMetrics,
                         com.surprising.trading.order.repository.TradeProjectionRepository tradeProjection,
                         com.surprising.realtime.api.ValkeyUserQueries realtimeQueries) {
         this.tradingMetrics = tradingMetrics;

@@ -19,9 +19,13 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class AdminOrderRequestController {
-    public java.util.Map<String,Object> metrics(String adminUserId,String productHeader,String productValue,int window,int limit) {
+    public tools.jackson.databind.node.ObjectNode metrics(String adminUserId,String productHeader,String productValue,int window,int limit) {
         requireAdmin(adminUserId);
-        try { return orderService.tradingMetrics(window,limit,productLine(productValue,productHeader)); }
+        try {
+            if (!java.util.Set.of(60,360,1440,10080).contains(window) || limit < 1 || limit > 100)
+                throw new IllegalArgumentException("statistics window must be 60,360,1440,10080 and limit in [1,100]");
+            return orderService.tradingMetrics(window,limit,productLine(productValue,productHeader));
+        }
         catch(IllegalArgumentException invalid) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST,invalid.getMessage(),invalid); }
     }
 

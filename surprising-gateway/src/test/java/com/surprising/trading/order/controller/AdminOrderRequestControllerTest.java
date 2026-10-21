@@ -37,4 +37,14 @@ class AdminOrderRequestControllerTest {
             assertThat(response.getReason()).contains("PROJECTION_RESPONSE_TOO_LARGE", continuation);
         });
     }
+    @org.junit.jupiter.api.Test void invalidStatisticsWindowAndLimitNeverReachBusinessService() {
+        var orders=org.mockito.Mockito.mock(com.surprising.trading.order.service.OrderService.class);
+        var requests=new AdminOrderRequestController(orders);
+        for(int[] values:new int[][]{{120,20},{60,0},{60,101}}) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(()->requests.metrics("1",null,"SPOT",values[0],values[1]))
+                    .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,
+                            failure->org.assertj.core.api.Assertions.assertThat(failure.getStatusCode().value()).isEqualTo(400));
+        }
+        org.mockito.Mockito.verifyNoInteractions(orders);
+    }
 }
