@@ -464,3 +464,8 @@ PortfolioIncomeFlowRepository只读资金流；PortfolioIncomeCutoffRepository�
 合约/资产单位与覆盖水位认证，限制同产品、历史时窗和提交前缀；价格时窗及收益估值归Service。
 三类原生行归provider.model.PortfolioIncomeRows。并发补录与六产品历史读取验证见
 [收益读取验证](../docs/validation/java-mvc-portfolio-readers-20261021.json)。
+
+公共行情由MarketSummaryService聚合24小时涨跌幅、高低、成交量和最多32点趋势。
+MarketSummaryRepository只批量提供已关闭K线与真实期初收盘价，并以instruments认证ID唯一产品归属；
+跨产品重复ID不展示无产品键K线摘要。合约Repository关联assets只补充四类资产名称，写入与锁仍仅归合约表。
+[行情读取验证](../docs/validation/java-mvc-market-readers-20261021.json)记录数据库边界与负例。

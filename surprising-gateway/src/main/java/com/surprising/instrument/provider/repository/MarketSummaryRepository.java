@@ -1,35 +1,31 @@
 package com.surprising.instrument.provider.repository;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
+import com.surprising.instrument.provider.model.MarketSummaryRows.Sample;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** Reads one bounded 24-hour market snapshot for the public instrument list. */
+/** 必要关联只读例外：candlestick_candles提供已关闭1m样本；instruments仅认证instrumentId唯一产品归属。
+ * 目前K线键不包含产品线，因此跨产品重复ID不能展示摘要。一次SQL批量读取期初真实收盘价与时窗样本，
+ * 不逐合约补读；Service定义24小时时窗并计算涨跌幅、成交量及趋势。 */
 @Repository
 public class MarketSummaryRepository {
-    private static final int TREND_POINTS = 32;
-
     private final NamedParameterJdbcTemplate jdbc;
 
     public MarketSummaryRepository(NamedParameterJdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
 
-    public Map<Integer, Summary> summaries(List<Integer> instrumentIds, Instant now) {
-        if (instrumentIds.isEmpty()) return Map.of();
+    public List<Sample> samples(List<Integer> instrumentIds, Instant since, Instant until) {
+        if (instrumentIds.isEmpty()) return List.of();
         var arguments = new MapSqlParameterSource()
                 .addValue("ids", instrumentIds.stream().map(String::valueOf).toList())
-                .addValue("since", Timestamp.from(now.minusSeconds(86_400)))
-                .addValue("until", Timestamp.from(now));
-        var rows = jdbc.query("""
+                .addValue("since", Timestamp.from(since))
+                .addValue("until", Timestamp.from(until));
+        return jdbc.query("""
                 WITH eligible AS (
                     SELECT i.instrument_id::text AS instrument_id
                       FROM instruments i WHERE i.instrument_id::text IN (:ids)
@@ -58,43 +54,5 @@ public class MarketSummaryRepository {
                 rs.getBigDecimal("open_price"), rs.getBigDecimal("high_price"),
                 rs.getBigDecimal("low_price"), rs.getBigDecimal("close_price"),
                 rs.getBigDecimal("base_volume"), rs.getBigDecimal("quote_volume")));
-        Map<Integer, List<Sample>> grouped = new HashMap<>();
-        for (Sample row : rows) grouped.computeIfAbsent(row.instrumentId(), ignored -> new ArrayList<>()).add(row);
-        Map<Integer, Summary> result = new HashMap<>();
-        grouped.forEach((instrumentId, samples) -> result.put(instrumentId, summarize(samples)));
-        return result;
     }
-
-    static Summary summarize(List<Sample> rows) {
-        BigDecimal open = rows.getFirst().open();
-        BigDecimal close = rows.getLast().close();
-        BigDecimal high = open;
-        BigDecimal low = open;
-        BigDecimal volume = BigDecimal.ZERO;
-        BigDecimal quoteVolume = BigDecimal.ZERO;
-        for (Sample row : rows) {
-            high = high.max(row.high());
-            low = low.min(row.low());
-            volume = volume.add(row.volume());
-            quoteVolume = quoteVolume.add(row.quoteVolume());
-        }
-        List<BigDecimal> trend = new ArrayList<>(Math.min(rows.size(), TREND_POINTS));
-        int count = Math.min(rows.size(), TREND_POINTS);
-        for (int i = 0; i < count; i++) {
-            int index = count == 1 ? 0 : i * (rows.size() - 1) / (count - 1);
-            trend.add(rows.get(index).close());
-        }
-        // With no executions in the window, both endpoints remain the last real close.
-        if (trend.size() == 1) trend.add(trend.getFirst());
-        BigDecimal change = close.subtract(open).multiply(BigDecimal.valueOf(100))
-                .divide(open, 6, RoundingMode.HALF_UP);
-        return new Summary(close, change, high, low, volume, quoteVolume, List.copyOf(trend));
-    }
-
-    record Sample(int instrumentId, BigDecimal open, BigDecimal high, BigDecimal low,
-                  BigDecimal close, BigDecimal volume, BigDecimal quoteVolume) {}
-
-    public record Summary(BigDecimal lastPrice, BigDecimal change24h, BigDecimal high24h,
-                          BigDecimal low24h, BigDecimal volume24h, BigDecimal quoteVolume24h,
-                          List<BigDecimal> trend) {}
 }

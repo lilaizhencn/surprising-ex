@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 import com.surprising.instrument.api.model.*;
-import com.surprising.instrument.provider.repository.MarketSummaryRepository;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -17,7 +16,7 @@ import tools.jackson.databind.json.JsonMapper;
 class InstrumentRequestServiceTest {
     private final InstrumentService instruments = mock(InstrumentService.class);
     private final InstrumentRequestService requests = new InstrumentRequestService(instruments,
-            mock(MarketSummaryRepository.class), JsonMapper.builder().findAndAddModules().build());
+            mock(MarketSummaryService.class), JsonMapper.builder().findAndAddModules().build());
 
     @ParameterizedTest
     @EnumSource(value=ContractType.class, names={"LINEAR_DELIVERY","INVERSE_DELIVERY","VANILLA_OPTION"})

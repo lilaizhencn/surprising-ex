@@ -1,4 +1,6 @@
-package com.surprising.instrument.provider.repository;
+package com.surprising.instrument.provider.service;
+
+import com.surprising.instrument.provider.model.MarketSummaryRows.Sample;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -6,18 +8,18 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import org.junit.jupiter.api.Test;
 
-class MarketSummaryRepositoryTest {
+class MarketSummaryServiceTest {
     @Test
     void summarizesRollingPricesAndBoundsTrendPayload() {
-        var candles = new ArrayList<MarketSummaryRepository.Sample>();
+        var candles = new ArrayList<Sample>();
         for (int i = 0; i < 100; i++) {
             var price = BigDecimal.valueOf(100 + i);
-            candles.add(new MarketSummaryRepository.Sample(7, price, price.add(BigDecimal.ONE),
+            candles.add(new Sample(7, price, price.add(BigDecimal.ONE),
                     price.subtract(BigDecimal.ONE), price, BigDecimal.valueOf(2),
                     BigDecimal.valueOf(200 + i)));
         }
 
-        var summary = MarketSummaryRepository.summarize(candles);
+        var summary = MarketSummaryService.summarize(candles);
 
         assertThat(summary.lastPrice()).isEqualByComparingTo("199");
         assertThat(summary.change24h()).isEqualByComparingTo("99");
@@ -33,8 +35,8 @@ class MarketSummaryRepositoryTest {
     @Test
     void quietDayKeepsRealCloseAndZeroVolume() {
         var price = new BigDecimal("86256.8");
-        var summary = MarketSummaryRepository.summarize(java.util.List.of(
-                new MarketSummaryRepository.Sample(604, price, price, price, price, BigDecimal.ZERO, BigDecimal.ZERO)));
+        var summary = MarketSummaryService.summarize(java.util.List.of(
+                new Sample(604, price, price, price, price, BigDecimal.ZERO, BigDecimal.ZERO)));
         assertThat(summary.lastPrice()).isEqualByComparingTo(price);
         assertThat(summary.change24h()).isZero();
         assertThat(summary.volume24h()).isZero();
@@ -46,9 +48,9 @@ class MarketSummaryRepositoryTest {
     void firstTradeAfterQuietPeriodUsesOpeningCloseButOnlyNewTradeVolume() {
         var prior = new BigDecimal("100");
         var current = new BigDecimal("105");
-        var summary = MarketSummaryRepository.summarize(java.util.List.of(
-                new MarketSummaryRepository.Sample(604, prior, prior, prior, prior, BigDecimal.ZERO, BigDecimal.ZERO),
-                new MarketSummaryRepository.Sample(604, current, current, current, current, BigDecimal.TWO, new BigDecimal("210"))));
+        var summary = MarketSummaryService.summarize(java.util.List.of(
+                new Sample(604, prior, prior, prior, prior, BigDecimal.ZERO, BigDecimal.ZERO),
+                new Sample(604, current, current, current, current, BigDecimal.TWO, new BigDecimal("210"))));
         assertThat(summary.change24h()).isEqualByComparingTo("5");
         assertThat(summary.volume24h()).isEqualByComparingTo("2");
         assertThat(summary.quoteVolume24h()).isEqualByComparingTo("210");

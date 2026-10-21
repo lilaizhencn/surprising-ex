@@ -7,7 +7,6 @@ import com.surprising.instrument.api.model.InstrumentResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.instrument.api.model.InstrumentUpsertRequest;
-import com.surprising.instrument.provider.repository.MarketSummaryRepository;
 import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.product.api.ProductLine;
 import java.util.Locale;
@@ -25,11 +24,11 @@ import org.springframework.stereotype.Service;
 public class InstrumentRequestService {
 
     private final InstrumentService instrumentService;
-    private final MarketSummaryRepository marketSummaries;
+    private final MarketSummaryService marketSummaries;
     private final ObjectMapper objectMapper;
 
     public InstrumentRequestService(InstrumentService instrumentService,
-                                    MarketSummaryRepository marketSummaries,
+                                    MarketSummaryService marketSummaries,
                                     ObjectMapper objectMapper) {
         this.instrumentService = instrumentService;
         this.marketSummaries = marketSummaries;

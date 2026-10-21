@@ -21,7 +21,10 @@ import java.util.function.Function;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** 只负责 {@code instruments} 表。 */
+/** 写入和锁仅访问instruments表。
+ * 必要关联只读例外：current/list/page以同一SQL的assets标量子查询补充基础、报价、结算和合约面值资产名称；
+ * 资产属性不参与合约资格判断，不扩展结果行数，游标分页仍按主表instrumentId和排序键确定。
+ * 不写assets，不逐合约补读，也不跨产品替代同名instrumentId。 */
 @Repository
 public class InstrumentRepository {
 
