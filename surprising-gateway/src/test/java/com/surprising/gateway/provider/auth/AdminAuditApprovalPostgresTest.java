@@ -74,7 +74,8 @@ class AdminAuditApprovalPostgresTest {
             audits.recordRequired(new AdminOperationRecord(101L, "requester", List.of("ADMIN"), "account", "POST",
                     path, "referenceId=adjustment-1", "LINEAR_PERPETUAL", hash, 200, 7L, true, null,
                     "qa", "127.0.0.1", now));
-            var row = audits.operationLogs(101L, "account", "POST", true, 10).getFirst();
+            var row = audits.operationLogPage(101L, "account", "POST", true,
+                    new com.surprising.gateway.provider.auth.model.CreatedAtPageQuery(10,null,true)).items().getFirst();
             assertThat(row.requestBodySha256()).isEqualTo(hash);
             assertThat(row.queryString()).isEqualTo("referenceId=adjustment-1");
             assertThat(row.adminRoles()).containsExactly("ADMIN");

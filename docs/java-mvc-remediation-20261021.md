@@ -192,3 +192,5 @@
 - 产品就绪失败改为原生ProductUnavailableException，原生资金聚合不再获得ResponseStatusException；普通HTTP入口由Advice、代理/签名及Handler选中之前由实际入口映射404。C2C过去泛型Runtime处理会把此类失败变500，现明确返回404/PRODUCT_NOT_ENABLED且失败审计状态一致；实际PG质押测试确认无新增质押/资金意图和Core调用。六产品线真实Controller/内部Mapping覆盖就绪消失、原生资金失败与不错误展示零余额。定向85、边界修正后51、Mapping18、扩大干净构建374项均无跳过通过；HTTP状态反证12项全部预期失败，恢复后扩大通过。初次边界测试中两处夹具预期（原异常类型、已有种子质押行）已修正；产品行为不据夹具伪造通过。关闭ADD-083，见 [产品就绪边界验证](validation/java-mvc-product-unavailable-20261022.json)。其余29项深扫问题、公开嵌套模型与最终实栈继续。
 
 - 五个顶层原生异常（账户拒绝、超时、快照未就绪、陈旧资金费、陈旧指数价）归各模块exception，保持继承关系、错误码/载荷、超时UNKNOWN语义及事实完整性。19个原文件完整体归一相同。Price144、Lifecycle111项干净构建无跳过，Gateway扩大360项、2项环境条件跳过，无失败；25项PG提现对账已实跑。清除旧class，未启动wallet；关闭ADD-093..097，见 [异常归包验证](validation/java-mvc-exception-packages-20261022.json)。其余29项深扫输入/分页问题及公开嵌套类型仍继续。
+
+- 登录日志和管理操作日志分页：三个HTTP入口绑定result/service/method与创建时间分页，CreatedAtPageQuery只携带limit、原生Instant/long坐标及方向，不含SQL列名。Service保留身份/权限；两个Repository不再解释原始limit/sort/cursor。原始SQL文本块保持。定向75、实际PG边界8、奇数大long游标定向2、扩大干净构建188项无跳过；去除本人过滤反证2项中1项预期失败，恢复后扩大通过。无效ISO游标现统一在入口400，避免泄漏到持久化异常。关闭ADD-071、075，见 [审计分页验证](validation/java-mvc-audit-pages-20261022.json)。仍有17个Repository原始分页入口及其他10项深扫问题、公开嵌套类型和最终实栈未完成。

@@ -4,6 +4,7 @@ import com.surprising.gateway.provider.auth.repository.AdminApprovalRepository;
 import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalCreateRequest;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalResponse;
@@ -43,11 +44,9 @@ public class AdminApprovalService {
             String service,
             String method,
             Boolean success,
-            int limit,
-            String cursor,
-            String sort) {
+            CreatedAtPageQuery query) {
         authService.authenticateAdminBearer(authorization);
-        return auditRepository.operationLogPage(adminUserId, service, method, success, limit, cursor, sort);
+        return auditRepository.operationLogPage(adminUserId, service, method, success, query);
     }
 
     public AdminApprovalResponse create(String authorization, AdminApprovalCreateRequest request) {

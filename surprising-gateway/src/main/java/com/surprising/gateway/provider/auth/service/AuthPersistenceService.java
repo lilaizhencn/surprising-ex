@@ -10,6 +10,7 @@ import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRoleRepository;
 
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminPermissionResponse;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminRefreshSessionResponse;
@@ -144,12 +145,8 @@ public class AuthPersistenceService {
         userRoleRepository.replace(userId, roleIds, now);
     }
 
-    public AdminCursorPage.CursorPage<LoginLogResponse> loginLogPage(Long userId,
-                                                                     String result,
-                                                                     int limit,
-                                                                     String cursor,
-                                                                     String sort) {
-        return loginLogRepository.findPage(userId, result, limit, cursor, sort);
+    public AdminCursorPage.CursorPage<LoginLogResponse> loginLogPage(Long userId, String result, CreatedAtPageQuery query) {
+        return loginLogRepository.findPage(userId, result, query);
     }
 
     public List<AdminRoleResponse> roleSummaries() {

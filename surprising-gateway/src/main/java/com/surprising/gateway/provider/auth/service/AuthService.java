@@ -7,6 +7,7 @@ import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepo
 import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;
 import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import com.surprising.gateway.provider.auth.model.AuthClientMetadata;
+import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
 import com.surprising.gateway.provider.auth.port.CurrentAuthClient;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.AuthResponse;
@@ -349,18 +350,9 @@ public class AuthService {
         return repository.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
     }
 
-    public LoginLogQueryResponse loginLogs(String authorizationHeader, Long userId, String result, int limit) {
-        return loginLogs(authorizationHeader, userId, result, limit, null, null);
-    }
-
-    public LoginLogQueryResponse loginLogs(String authorizationHeader,
-                                           Long userId,
-                                           String result,
-                                           int limit,
-                                           String cursor,
-                                           String sort) {
+    public LoginLogQueryResponse loginLogs(String authorizationHeader, Long userId, String result, CreatedAtPageQuery query) {
         authenticateAdminBearer(authorizationHeader);
-        var page = repository.loginLogPage(userId, result, limit, cursor, sort);
+        var page = repository.loginLogPage(userId, result, query);
         return new LoginLogQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }

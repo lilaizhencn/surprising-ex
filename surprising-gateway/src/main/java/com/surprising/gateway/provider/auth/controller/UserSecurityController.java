@@ -254,7 +254,8 @@ public class UserSecurityController {
             @RequestParam(value = "sort", required = false) String sort) {
         try {
             long userId = principal(authorization).userId();
-            var page = persistence.loginLogPage(userId, result, limit, cursor, sort);
+            var page = persistence.loginLogPage(userId, AuditLogRequestBinding.result(result),
+                    AuditLogRequestBinding.page(limit,cursor,sort));
             return new LoginLogQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                     page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {

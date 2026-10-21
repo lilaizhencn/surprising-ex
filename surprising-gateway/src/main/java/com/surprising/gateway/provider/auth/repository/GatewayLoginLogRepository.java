@@ -1,6 +1,7 @@
 package com.surprising.gateway.provider.auth.repository;
 
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
 
 import com.surprising.gateway.provider.auth.model.AuthModels.LoginLogResponse;
 import java.sql.Timestamp;
@@ -24,25 +25,16 @@ public class GatewayLoginLogRepository {
 
     public AdminCursorPage.CursorPage<LoginLogResponse> findPage(Long userId,
                                                                  String result,
-                                                                 int limit,
-                                                                 String cursor,
-                                                                 String sort) {
-        String normalizedResult = result == null || result.isBlank()
-                ? null
-                : result.trim().toUpperCase();
-        int safeLimit = AdminCursorPage.limit(limit, 500);
-        AdminCursorPage.SortSpec createdAtDesc =
-                new AdminCursorPage.SortSpec("createdAt", "created_at", "login_id", true);
-        AdminCursorPage.SortSpec createdAtAsc =
-                new AdminCursorPage.SortSpec("createdAt", "created_at", "login_id", false);
-        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(
-                sort, createdAtDesc, List.of(createdAtDesc, createdAtAsc));
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+                                                                 CreatedAtPageQuery query) {
+        int safeLimit = query.limit();
+        AdminCursorPage.SortSpec sortSpec = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", "login_id", query.descending());
+        AdminCursorPage.Cursor decodedCursor = query.after();
         List<Object> args = new ArrayList<>();
         args.add(userId);
         args.add(userId);
-        args.add(normalizedResult);
-        args.add(normalizedResult);
+        args.add(result);
+        args.add(result);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(safeLimit + 1);
         List<LoginLogResponse> rows = jdbcTemplate.query("""

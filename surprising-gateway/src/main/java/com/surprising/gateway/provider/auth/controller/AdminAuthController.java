@@ -183,7 +183,8 @@ public class AdminAuthController {
                                            @RequestParam(value = "cursor", required = false) String cursor,
                                            @RequestParam(value = "sort", required = false) String sort) {
         try {
-            return authService.loginLogs(authorization, userId, result, limit, cursor, sort);
+            return authService.loginLogs(authorization, userId, AuditLogRequestBinding.result(result),
+                    AuditLogRequestBinding.page(limit,cursor,sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -202,7 +203,8 @@ public class AdminAuthController {
                                                         @RequestParam(value = "sort", required = false) String sort) {
         try {
             var page = adminApprovalService.operationLogs(
-                    authorization, adminUserId, service, method, success, limit, cursor, sort);
+                    authorization, adminUserId, AuditLogRequestBinding.service(service),
+                    AuditLogRequestBinding.method(method), success, AuditLogRequestBinding.page(limit,cursor,sort));
             return new AdminOperationLogQueryResponse(page.items().size(), page.items(),
                     page.nextCursor(), page.hasMore(), page.sort(), page.limit());
         } catch (IllegalArgumentException ex) {

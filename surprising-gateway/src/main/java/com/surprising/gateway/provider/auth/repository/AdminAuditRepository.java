@@ -3,6 +3,7 @@ package com.surprising.gateway.provider.auth.repository;
 import com.surprising.gateway.provider.auth.model.AdminOperationRecord;
 
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
 
 import lombok.extern.slf4j.Slf4j;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminOperationLogResponse;
@@ -67,38 +68,22 @@ public class AdminAuditRepository {
                 Timestamp.from(record.createdAt() == null ? Instant.now() : record.createdAt()));
     }
 
-    public List<AdminOperationLogResponse> operationLogs(Long adminUserId,
-                                                         String service,
-                                                         String method,
-                                                         Boolean success,
-                                                         int limit) {
-        return operationLogPage(adminUserId, service, method, success, limit, null, null).items();
-    }
-
     public AdminCursorPage.CursorPage<AdminOperationLogResponse> operationLogPage(Long adminUserId,
                                                                                   String service,
                                                                                   String method,
                                                                                   Boolean success,
-                                                                                  int limit,
-                                                                                  String cursor,
-                                                                                  String sort) {
-        String normalizedService = nullableLower(service);
-        String normalizedMethod = nullableUpper(method);
-        int safeLimit = AdminCursorPage.limit(limit, 500);
-        AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
-                "createdAt", "created_at", "operation_id", true);
-        AdminCursorPage.SortSpec createdAtAsc = new AdminCursorPage.SortSpec(
-                "createdAt", "created_at", "operation_id", false);
-        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(
-                sort, createdAtDesc, List.of(createdAtDesc, createdAtAsc));
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+                                                                                  CreatedAtPageQuery query) {
+        int safeLimit = query.limit();
+        AdminCursorPage.SortSpec sortSpec = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", "operation_id", query.descending());
+        AdminCursorPage.Cursor decodedCursor = query.after();
         List<Object> args = new ArrayList<>();
         args.add(adminUserId);
         args.add(adminUserId);
-        args.add(normalizedService);
-        args.add(normalizedService);
-        args.add(normalizedMethod);
-        args.add(normalizedMethod);
+        args.add(service);
+        args.add(service);
+        args.add(method);
+        args.add(method);
         args.add(success);
         args.add(success);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
