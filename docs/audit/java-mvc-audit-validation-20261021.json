@@ -43,9 +43,10 @@
   ],
   "artifacts": {
     "docs/java-mvc-audit-20261021.md": "1ab0c06bf07ad51671849cead1240441e8413a5ebbbe6b193e8eadfb227acc02",
-    "docs/audit/java-mvc-findings-20261021.csv": "8612fd5956a260656f342d046cf687f9ce03fb6dfe0007996da77314e75b94a0",
-    "docs/audit/java-repository-tables-20261021.csv": "7a91d315ebfca404f8c85a44c4d3cebed40188f77687550535d54983c60d4ea3",
-    "docs/audit/java-source-inventory-20261021.csv": "e62e50284da3c2f4d70f096f16dcf8b34add6bde276c7aa67753ffea5b33c347"
+    "docs/audit/java-mvc-findings-20261021.csv": "89b467c1c9ac84b7bffc41c1b7a57ee641435fb7c1792fb02eef06a391f829ea",
+    "docs/audit/java-repository-tables-20261021.csv": "cba62c7eb198e3a5dd915f2476ca8c8aece6a044b788992cddf095c1632d2576",
+    "docs/audit/java-source-inventory-20261021.csv": "6ba9227c0b218ee2f75f6b8aa05e2d95b6502a62cd7d90b543ebeeb85307186f"
   },
-  "verification_result": "passed for artifact consistency, links, line bounds, rule counts and finding source fingerprints"
+  "verification_result": "passed for artifact consistency, links, line bounds, rule counts and finding source fingerprints",
+  "artifact_normalization": "CSV files use LF line endings so checked-out Git contents retain the verified artifact hashes."
 }

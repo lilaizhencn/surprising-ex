@@ -272,10 +272,6 @@ public class AuthPersistenceService {
         return refreshSessionRepository.revokeActiveForIp(userId, ipAddress, now);
     }
 
-    public List<GatewayRefreshSessionRepository.DeviceView> devices(long userId) {
-        return refreshSessionRepository.devices(userId);
-    }
-
     public Optional<String> deviceIdForSession(long userId, long sessionId) {
         return refreshSessionRepository.deviceIdForSession(userId, sessionId);
     }

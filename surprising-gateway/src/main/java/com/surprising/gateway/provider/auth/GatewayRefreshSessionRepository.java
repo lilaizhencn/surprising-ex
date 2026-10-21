@@ -216,7 +216,7 @@ public class GatewayRefreshSessionRepository {
                 """, Timestamp.from(now), Timestamp.from(now), userId, ipAddress, Timestamp.from(now));
     }
 
-    public List<DeviceView> devices(long userId) {
+    public List<DeviceView> devices(long userId, int limit, int offset) {
         return jdbcTemplate.query("""
                 WITH ranked AS (
                     SELECT session_id, device_id, user_agent, ip_address, created_at,
@@ -227,10 +227,10 @@ public class GatewayRefreshSessionRepository {
                       FROM gateway_refresh_sessions WHERE user_id = ?
                 )
                 SELECT session_id, device_id, user_agent, ip_address, created_at, active
-                  FROM ranked WHERE rank = 1 ORDER BY created_at DESC
+                  FROM ranked WHERE rank = 1 ORDER BY created_at DESC,session_id DESC LIMIT ? OFFSET ?
                 """, (rs, rowNum) -> new DeviceView(rs.getLong("session_id"), rs.getString("device_id"),
                 rs.getString("user_agent"), rs.getString("ip_address"),
-                rs.getTimestamp("created_at").toInstant(), rs.getBoolean("active")), userId);
+                rs.getTimestamp("created_at").toInstant(), rs.getBoolean("active")), userId, limit, offset);
     }
 
     public Optional<String> deviceIdForSession(long userId, long sessionId) {

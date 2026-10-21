@@ -78,6 +78,18 @@ public class GatewayLoginLogRepository {
                 """, userId <= 0 ? null : userId, result, reason, userAgent, ipAddress, Timestamp.from(now));
     }
 
+    public List<KnownIp> knownIps(long userId, int limit, int offset) {
+        return jdbcTemplate.query("""
+                SELECT ip_address,count(*) AS login_count,max(created_at) AS last_seen
+                FROM gateway_login_logs
+                WHERE user_id=? AND ip_address IS NOT NULL AND ip_address<>''
+                GROUP BY ip_address ORDER BY last_seen DESC,ip_address LIMIT ? OFFSET ?
+                """, (row, index) -> new KnownIp(row.getString("ip_address"), row.getLong("login_count"),
+                        row.getTimestamp("last_seen").toInstant()), userId, limit, offset);
+    }
+
+    public record KnownIp(String ipAddress, long loginCount, Instant lastSeen) { }
+
     private Long nullableLong(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
         long value = rs.getLong(column);
         return rs.wasNull() ? null : value;

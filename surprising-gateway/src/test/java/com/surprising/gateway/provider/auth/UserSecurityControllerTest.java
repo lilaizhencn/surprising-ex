@@ -4,17 +4,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
 import com.surprising.gateway.provider.auth.AuthModels.AdminRefreshSessionResponse;
-import com.surprising.gateway.provider.auth.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.mock.web.MockHttpServletRequest;
+import com.surprising.gateway.provider.model.UserDeviceStatus;
+import com.surprising.gateway.provider.service.UserAccessService;
 
 class UserSecurityControllerTest {
 
@@ -24,29 +31,28 @@ class UserSecurityControllerTest {
     private final SensitiveActionVerificationService verificationService =
             mock(SensitiveActionVerificationService.class);
     private final AuthPersistenceService persistence = mock(AuthPersistenceService.class);
-    private final GatewayUserAccessBlockRepository accessBlocks = mock(GatewayUserAccessBlockRepository.class);
+    private final UserAccessService access = mock(UserAccessService.class);
     private final UserSecurityController controller = new UserSecurityController(
             authService, securityService, loginVerification, verificationService, persistence,
-            accessBlocks, new com.surprising.gateway.provider.config.GatewayProperties());
+            access, new com.surprising.gateway.provider.config.GatewayProperties());
 
     @Test
-    void devicesShowCurrentAndBlockedStatusFromAccountOwnedHistory() {
+    void devicePagePassesTheAuthenticatedIdentityAndPageToBusinessService() {
         Instant now = Instant.now();
         String current = "153a20c8-d24f-4952-b378-5409de885ab5";
         String other = "fe7b9fee-479b-4986-a1da-4fa0db57aa8b";
-        when(authService.authenticateBearer("Bearer token")).thenReturn(
-                new JwtPrincipal(42L, "user", "ACTIVE", List.of("USER"), now.plusSeconds(60), 77L));
-        when(persistence.deviceIdForSession(42L, 77L)).thenReturn(java.util.Optional.of(current));
-        when(persistence.devices(42L)).thenReturn(List.of(
-                new GatewayRefreshSessionRepository.DeviceView(77L, current, "browser", "127.0.0.1", now, true),
-                new GatewayRefreshSessionRepository.DeviceView(88L, other, "phone", "127.0.0.2", now, false)));
-        when(accessBlocks.blocked(42L, "DEVICE", other)).thenReturn(true);
+        var principal = new JwtPrincipal(42L, "user", "ACTIVE", List.of("USER"), now.plusSeconds(60), 77L);
+        when(authService.authenticateBearer("Bearer token")).thenReturn(principal);
+        when(access.devices(principal, 25, 10)).thenReturn(List.of(
+                new UserDeviceStatus(77L, current, "browser", "127.0.0.1", now, true, true, false),
+                new UserDeviceStatus(88L, other, "phone", "127.0.0.2", now, false, false, true)));
 
-        var response = controller.devices("Bearer token");
+        var response = controller.devices("Bearer token", 25, 10);
 
         assertThat(response).hasSize(2);
         assertThat(response.get(0).current()).isTrue();
         assertThat(response.get(1).blocked()).isTrue();
+        verify(access).devices(principal, 25, 10);
     }
 
     @Test
@@ -55,14 +61,12 @@ class UserSecurityControllerTest {
         String current = "153a20c8-d24f-4952-b378-5409de885ab5";
         when(authService.authenticateBearer("Bearer token")).thenReturn(
                 new JwtPrincipal(42L, "user", "ACTIVE", List.of("USER"), now.plusSeconds(60), 77L));
-        when(persistence.deviceIdForSession(42L, 77L)).thenReturn(java.util.Optional.of(current));
+        doThrow(new IllegalArgumentException("cannot block the current device"))
+                .when(access).blockDevice(any(), eq(current), eq("123456"), eq(""));
 
         assertThatThrownBy(() -> controller.blockDevice("Bearer token", current,
                 new UserSecurityController.AccessChangeRequest("123456", "")))
                 .isInstanceOf(ResponseStatusException.class).hasMessageContaining("400 BAD_REQUEST");
-        verify(accessBlocks, never()).block(org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -72,10 +76,48 @@ class UserSecurityControllerTest {
                 new JwtPrincipal(42L, "user", "ACTIVE", List.of("USER"), now.plusSeconds(60)));
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setRemoteAddr("127.0.0.1");
+        doThrow(new IllegalArgumentException("cannot block the current IP"))
+                .when(access).blockIp(42, "127.0.0.1", "127.0.0.1", "123456", "");
 
         assertThatThrownBy(() -> controller.blockIp("Bearer token",
                 new UserSecurityController.IpAccessChangeRequest("127.0.0.1", "123456", ""), request))
                 .isInstanceOf(ResponseStatusException.class).hasMessageContaining("400 BAD_REQUEST");
+    }
+
+    @Test
+    void rejectsInvalidAccessPageAtControllerBoundary() {
+        assertThatThrownBy(() -> controller.devices("Bearer token", 501, 0))
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("400 BAD_REQUEST");
+        assertThatThrownBy(() -> controller.ips("Bearer token", 100, -1))
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("400 BAD_REQUEST");
+        verifyNoInteractions(access);
+    }
+
+    @Test
+    void deviceHttpContractKeepsListFieldsAndAppliesDefaultPagination() throws Exception {
+        Instant now = Instant.now();
+        var principal = new JwtPrincipal(42, "user", "NORMAL", List.of("USER"), now.plusSeconds(60), 77L);
+        when(authService.authenticateBearer("Bearer token")).thenReturn(principal);
+        when(access.devices(principal, 100, 0)).thenReturn(List.of(
+                new UserDeviceStatus(77, "153a20c8-d24f-4952-b378-5409de885ab5", "browser", "127.0.0.1", now, true, true, false)));
+        var http = standaloneSetup(controller).build();
+
+        http.perform(get("/api/v1/security/devices")
+                        .header("Authorization", "Bearer token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].sessionId").value(77))
+                .andExpect(jsonPath("$[0].current").value(true))
+                .andExpect(jsonPath("$[0].blocked").value(false));
+        verify(access).devices(principal, 100, 0);
+    }
+
+    @Test
+    void ipHttpContractRejectsOutOfRangePaginationBeforeBusinessQueries() throws Exception {
+        var http = standaloneSetup(controller).build();
+        http.perform(get("/api/v1/security/ips")
+                        .header("Authorization", "Bearer token").param("limit", "0"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(access);
     }
 
     @Test

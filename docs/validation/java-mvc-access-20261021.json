@@ -1,0 +1,356 @@
+{
+  "date": "2026-10-21",
+  "verified_at_utc": "2026-10-21T09:02:13.236743+00:00",
+  "scope": "用户设备/IP分页、本人访问限制与会话撤销聚合、密码和验证场景事务",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16; isolated PostgreSQL 18.4",
+  "stages": {
+    "green": {
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.UserSecurityServiceTest"
+        },
+        {
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.UserSecurityControllerTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.SensitiveActionVerificationServiceTest"
+        },
+        {
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.service.UserAccessPostgresTest"
+        }
+      ],
+      "log_sha256": "9a65312420ec4e41adc47a850d16efa088398f32c96816b9566f25af05bd88c6",
+      "exit_code": 0,
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=UserAccessPostgresTest,UserSecurityControllerTest,UserSecurityServiceTest,SensitiveActionVerificationServiceTest",
+        "test"
+      ]
+    },
+    "broad": {
+      "tests": 201,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.config.GatewayProductionSecurityConfigurationTest"
+        },
+        {
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.ExternalKycProviderTest"
+        },
+        {
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.TelegramLoginServiceTest"
+        },
+        {
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.KycApplicationValidationTest"
+        },
+        {
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.EmailVerificationServiceTest"
+        },
+        {
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.AdminAuditApprovalPostgresTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.MfaRecoveryDatabaseTest"
+        },
+        {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.AuthPersistenceServiceTest"
+        },
+        {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.UserSecurityServiceTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.AdminComplianceControllerTest"
+        },
+        {
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.PrimaryAuthenticationDatabaseTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.LoginVerificationDatabaseTest"
+        },
+        {
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.UserSecurityControllerTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.SensitiveActionVerificationServiceTest"
+        },
+        {
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.GatewayUserMfaRepositoryTest"
+        },
+        {
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.TelegramLoginDatabaseTest"
+        },
+        {
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.TelegramOidcClientTest"
+        },
+        {
+          "tests": 22,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.AuthServiceTest"
+        },
+        {
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.ComplianceServiceTest"
+        },
+        {
+          "tests": 27,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.LoginVerificationServiceTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.ComplianceValidationTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.KycEvidenceReferenceTest"
+        },
+        {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.LoginVerificationSettingsControllerTest"
+        },
+        {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.GatewayApiKeyAuthenticationIpTest"
+        },
+        {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.MfaRecoveryServiceTest"
+        },
+        {
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.KycProviderDatabaseTest"
+        },
+        {
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.auth.TelegramLoginControllerTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.controller.AdminSupportControllerTest"
+        },
+        {
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.service.ProductTransferSecurityServiceTest"
+        },
+        {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.service.KycNotificationTransactionPostgresTest"
+        },
+        {
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.service.UserAccessPostgresTest"
+        },
+        {
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.service.KycDocumentServiceTest"
+        },
+        {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.service.SupportTicketTransactionPostgresTest"
+        },
+        {
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.service.SecurityNotificationPostgresTest"
+        },
+        {
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.service.KycDocumentStorageServiceTest"
+        }
+      ],
+      "log_sha256": "97a1857d402537d37eed1ff42d06434c5579fd53913d7b62f030e024aa0dc488",
+      "exit_code": 0,
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=*Auth*Test,*Compliance*Test,*Kyc*Test,*Mfa*Test,*Support*Test,*Security*Test,*Verification*Test,*Telegram*Test,UserAccessPostgresTest,AdminAuditApprovalPostgresTest",
+        "test"
+      ]
+    }
+  },
+  "red_regression": {
+    "tests": 8,
+    "failures": 2,
+    "errors": 0,
+    "skipped": 0,
+    "exit_code": 1,
+    "description": "临时将六个安全聚合入口改为默认事务回滚；两项真实数据库测试检测到拒绝操作后失败验证次数被回滚为0。finally恢复noRollbackFor配置。",
+    "log_sha256": "63d2230ac4bdecfc1c3e0a1d0da31754619f42c47c71239aaa475983b781a21b"
+  },
+  "behavior_evidence": [
+    "设备查询有界分页最多3条SQL（当前设备、当前页、批量限制）；全null设备页最多2条SQL",
+    "IP查询有界分页2条SQL；其他用户记录不可见",
+    "会话撤销SQL失败时封禁及验证码消费一起回滚，同一验证码可在修复数据库故障后重试",
+    "错误验证码尝试计数提交；未完成验证不修改访问限制、密码和场景",
+    "同一设备全部本人活跃会话撤销，其他用户不受影响；解封不恢复已撤销会话",
+    "不同IPv6文本表示的当前IP均拒绝自封禁",
+    "HTTP默认limit100/offset0，保留JSON数组与原字段；范围1..500、0..10000在Controller校验"
+  ],
+  "not_run": [
+    "真实Core及交易资金守恒（本批仅认证安全状态，无撮合/资金/产品协议变动）",
+    "外部邮件投递（验证码与通知用测试发送器）"
+  ],
+  "source_sha256": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/AuthPersistenceService.java": "6ba0cc548804a3f61b578d7a1b1b7bfb8d2cc605ede92a3d0672fdc85653ff1c",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/GatewayLoginLogRepository.java": "e43aa2bfeb7bf7c328f8c4c77737b1ed3d946909ecd82ff6bb9f1cdf2644983f",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/GatewayRefreshSessionRepository.java": "c6d529e8d80e357e22efda57f3495bed412788549c8d3ef1a2032553adfa70f5",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/GatewayUserAccessBlockRepository.java": "052c73a64cc8635f4000a707bb1a658b627fa869067cff698007596a6d45dbb0",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/UserSecurityController.java": "952b4b3296ccccb606e666fbdfda267d8fc188e7b4724049cd9b6d1286fcffb9",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/exception/SecurityVerificationRequiredException.java": "60d62190ce893a0dabc5eff84354afd0b6380d39f963cae63d8ef8f3c8c2e802",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/model/UserDeviceStatus.java": "b648bee4c052d1a5843b520b33a4dc4161425b5fe9ac176e06958d47f7f1de8b",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/model/UserIpStatus.java": "71478c297775363e335ba1bda4fe83a3f840325cfe3fdbebf85620a831f5e146",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/UserAccessService.java": "2c7b3b85f7a491387c5fb62e4e92588d98263e5e894a5c9b2ac582d1e7ce88c2",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/UserSecurityControllerTest.java": "8d0c6715661cff307202a58efa69ac10d3e4f80e740e901f38d71e720762b8c0",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/service/UserAccessPostgresTest.java": "bf162384e62a099ab930401187945178dbce0951e02a50e9bc998b238a01562c"
+  },
+  "cleanup": {
+    "postgres_root": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-mvc-access-pg-e_lof1va",
+    "status": "已停止本轮独立PostgreSQL并删除所属数据、日志及已汇总JUnit报告；源码和构建产物保留。",
+    "removed_reports": 70,
+    "cleaned_at_utc": "2026-10-21T09:02:42.152318+00:00"
+  }
+}

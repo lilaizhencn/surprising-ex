@@ -3,10 +3,13 @@ package com.surprising.gateway.provider.auth;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** Persistent account-owned login and request restrictions. */
+/** 只访问 gateway_user_access_blocks，保存账号所有者的设备/IP 访问限制。 */
 @Repository
 public class GatewayUserAccessBlockRepository {
 
@@ -48,16 +51,18 @@ public class GatewayUserAccessBlockRepository {
                 rs.getTimestamp("created_at").toInstant()), userId, type);
     }
 
-    public List<KnownIp> knownIps(long userId) {
-        return jdbc.query("""
-                SELECT ip_address, count(*) AS login_count, max(created_at) AS last_seen
-                  FROM gateway_login_logs
-                 WHERE user_id = ? AND ip_address IS NOT NULL AND ip_address <> ''
-                 GROUP BY ip_address ORDER BY last_seen DESC
-                """, (rs, rowNum) -> new KnownIp(rs.getString("ip_address"),
-                rs.getLong("login_count"), rs.getTimestamp("last_seen").toInstant()), userId);
+    public Set<String> activeValues(long userId, String type, List<String> values) {
+        if (values.isEmpty()) return Set.of();
+        String placeholders = String.join(",", java.util.Collections.nCopies(values.size(), "?"));
+        var arguments = new ArrayList<Object>();
+        arguments.add(userId);
+        arguments.add(type);
+        arguments.addAll(values);
+        return new HashSet<>(jdbc.queryForList("""
+                SELECT block_value FROM gateway_user_access_blocks
+                WHERE user_id=? AND block_type=? AND revoked_at IS NULL AND block_value IN (
+                """ + placeholders + ")", String.class, arguments.toArray()));
     }
 
     public record BlockedAccess(String value, Instant createdAt) {}
-    public record KnownIp(String ipAddress, long loginCount, Instant lastSeen) {}
 }

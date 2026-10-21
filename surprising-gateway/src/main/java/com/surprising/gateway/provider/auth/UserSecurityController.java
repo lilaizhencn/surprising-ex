@@ -10,6 +10,10 @@ import com.surprising.gateway.provider.auth.AuthModels.SensitiveChallengeRequest
 import com.surprising.gateway.provider.auth.AuthModels.SensitiveChallengeVerificationRequest;
 import com.surprising.gateway.provider.auth.AuthModels.UserSecuritySceneUpdateRequest;
 import jakarta.validation.Valid;
+import com.surprising.gateway.provider.exception.SecurityVerificationRequiredException;
+import com.surprising.gateway.provider.model.UserDeviceStatus;
+import com.surprising.gateway.provider.model.UserIpStatus;
+import com.surprising.gateway.provider.service.UserAccessService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,7 +25,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -35,7 +38,7 @@ public class UserSecurityController {
     private final LoginVerificationService loginVerification;
     private final SensitiveActionVerificationService verificationService;
     private final AuthPersistenceService persistence;
-    private final GatewayUserAccessBlockRepository accessBlocks;
+    private final UserAccessService access;
     private final ClientIpResolver clientIpResolver;
 
     public UserSecurityController(AuthService authService,
@@ -43,14 +46,14 @@ public class UserSecurityController {
                                   LoginVerificationService loginVerification,
                                   SensitiveActionVerificationService verificationService,
                                   AuthPersistenceService persistence,
-                                  GatewayUserAccessBlockRepository accessBlocks,
+                                  UserAccessService access,
                                   com.surprising.gateway.provider.config.GatewayProperties properties) {
         this.authService = authService;
         this.securityService = securityService;
         this.loginVerification = loginVerification;
         this.verificationService = verificationService;
         this.persistence = persistence;
-        this.accessBlocks = accessBlocks;
+        this.access = access;
         this.clientIpResolver = new ClientIpResolver(properties);
     }
 
@@ -104,18 +107,9 @@ public class UserSecurityController {
     @PostMapping("/password")
     public void changePassword(@RequestHeader("Authorization") String authorization,
                                @Valid @RequestBody ChangePasswordRequest request) {
-        try {
-            long userId = principal(authorization).userId();
-            securityService.requireCurrentPassword(userId, request.currentPassword());
-            if (!verificationService.verify(userId, "CHANGE_PASSWORD", request.emailCode(),
-                    request.totpCode(), java.time.Instant.now())) {
-                throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
-                        "security verification is required or invalid");
-            }
-            securityService.updatePassword(userId, request.newPassword());
-        } catch (IllegalArgumentException ex) {
-            throw badRequest(ex);
-        }
+        long userId = principal(authorization).userId();
+        mapAccessFailure(() -> access.changePassword(userId, request.currentPassword(), request.newPassword(),
+                request.emailCode(), request.totpCode()));
     }
 
     @GetMapping("/scenes")
@@ -131,12 +125,9 @@ public class UserSecurityController {
             @Valid @RequestBody UserSecuritySceneUpdateRequest request) {
         try {
             long userId = principal(authorization).userId();
-            if (!verificationService.verify(userId, "SECURITY_SETTINGS", request.emailCode(),
-                    request.totpCode(), java.time.Instant.now())) {
-                throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
-                        "security verification is required or invalid");
-            }
-            return securityService.updateScene(userId, sceneCode, request.enabled(), request.totpCode());
+            return access.updateScene(userId, sceneCode, request.enabled(), request.emailCode(), request.totpCode());
+        } catch (SecurityVerificationRequiredException ex) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw badRequest(ex);
         }
@@ -158,81 +149,60 @@ public class UserSecurityController {
     }
 
     @GetMapping("/devices")
-    public List<DeviceStatus> devices(@RequestHeader("Authorization") String authorization) {
-        var principal = principal(authorization);
-        String currentDeviceId = persistence.deviceIdForSession(principal.userId(), principal.sessionId()).orElse(null);
-        return persistence.devices(principal.userId()).stream().map(device -> new DeviceStatus(
-                device.sessionId(), device.deviceId(), device.userAgent(), device.ipAddress(),
-                device.lastSeen(), device.active(), device.deviceId() == null
-                        ? device.sessionId() == principal.sessionId()
-                        : device.deviceId().equals(currentDeviceId),
-                accessBlocks.blocked(principal.userId(), "DEVICE", device.deviceId()))).toList();
+    public List<UserDeviceStatus> devices(@RequestHeader("Authorization") String authorization,
+                                          @RequestParam(defaultValue="100") int limit,
+                                          @RequestParam(defaultValue="0") int offset) {
+        requireAccessPage(limit, offset);
+        return access.devices(principal(authorization), limit, offset);
     }
 
     @PostMapping("/devices/{deviceId}/revoke")
     public AuthModels.AdminSessionRevokeResponse revokeDevice(
             @RequestHeader("Authorization") String authorization, @PathVariable String deviceId) {
         long userId = principal(authorization).userId();
-        Instant now = Instant.now();
-        int revoked = persistence.revokeDeviceSessions(userId, normalizedDeviceId(deviceId), now);
-        return new AuthModels.AdminSessionRevokeResponse(revoked, now);
+        return access.revokeDevice(userId, normalizedDeviceId(deviceId));
     }
 
     @PostMapping("/devices/{deviceId}/block")
-    @Transactional
     public void blockDevice(@RequestHeader("Authorization") String authorization,
                             @PathVariable String deviceId, @RequestBody AccessChangeRequest request) {
         var principal = principal(authorization);
         String normalized = normalizedDeviceId(deviceId);
-        if (normalized.equals(persistence.deviceIdForSession(principal.userId(), principal.sessionId()).orElse(null))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "cannot block the current device");
-        }
-        requireSecurity(principal.userId(), request);
-        Instant now = Instant.now();
-        accessBlocks.block(principal.userId(), "DEVICE", normalized, now);
-        persistence.revokeDeviceSessions(principal.userId(), normalized, now);
+        mapAccessFailure(() -> access.blockDevice(principal, normalized, request.emailCode(), request.totpCode()));
     }
 
     @PostMapping("/devices/{deviceId}/unblock")
-    @Transactional
     public void unblockDevice(@RequestHeader("Authorization") String authorization,
                               @PathVariable String deviceId, @RequestBody AccessChangeRequest request) {
         long userId = principal(authorization).userId();
-        requireSecurity(userId, request);
-        accessBlocks.unblock(userId, "DEVICE", normalizedDeviceId(deviceId), Instant.now());
+        String normalized = normalizedDeviceId(deviceId);
+        mapAccessFailure(() -> access.unblockDevice(userId, normalized, request.emailCode(), request.totpCode()));
     }
 
     @GetMapping("/ips")
-    public List<IpStatus> ips(@RequestHeader("Authorization") String authorization) {
-        long userId = principal(authorization).userId();
-        return accessBlocks.knownIps(userId).stream().map(ip -> new IpStatus(
-                ip.ipAddress(), ip.loginCount(), ip.lastSeen(),
-                accessBlocks.blocked(userId, "IP", ip.ipAddress()))).toList();
+    public List<UserIpStatus> ips(@RequestHeader("Authorization") String authorization,
+                                  @RequestParam(defaultValue="100") int limit,
+                                  @RequestParam(defaultValue="0") int offset) {
+        requireAccessPage(limit, offset);
+        return access.ips(principal(authorization).userId(), limit, offset);
     }
 
     @PostMapping("/ips/block")
-    @Transactional
     public void blockIp(@RequestHeader("Authorization") String authorization,
                         @RequestBody IpAccessChangeRequest request,
                         jakarta.servlet.http.HttpServletRequest httpRequest) {
         long userId = principal(authorization).userId();
         String ip = normalizedIp(request.ipAddress());
-        if (ip.equals(clientIpResolver.resolve(httpRequest))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "cannot block the current IP");
-        }
-        requireSecurity(userId, new AccessChangeRequest(request.emailCode(), request.totpCode()));
-        Instant now = Instant.now();
-        accessBlocks.block(userId, "IP", ip, now);
-        persistence.revokeIpSessions(userId, ip, now);
+        String currentIp = clientIpResolver.resolve(httpRequest);
+        mapAccessFailure(() -> access.blockIp(userId, ip, currentIp, request.emailCode(), request.totpCode()));
     }
 
     @PostMapping("/ips/unblock")
-    @Transactional
     public void unblockIp(@RequestHeader("Authorization") String authorization,
                           @RequestBody IpAccessChangeRequest request) {
         long userId = principal(authorization).userId();
-        requireSecurity(userId, new AccessChangeRequest(request.emailCode(), request.totpCode()));
-        accessBlocks.unblock(userId, "IP", normalizedIp(request.ipAddress()), Instant.now());
+        String ip = normalizedIp(request.ipAddress());
+        mapAccessFailure(() -> access.unblockIp(userId, ip, request.emailCode(), request.totpCode()));
     }
 
     @PostMapping("/sessions/{sessionId}/revoke")
@@ -329,12 +299,16 @@ public class UserSecurityController {
         }
     }
 
-    private void requireSecurity(long userId, AccessChangeRequest request) {
-        if (request == null || !verificationService.verify(userId, "SECURITY_SETTINGS",
-                request.emailCode(), request.totpCode(), Instant.now())) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED,
-                    "security verification is required or invalid");
-        }
+    private void mapAccessFailure(Runnable action) {
+        try { action.run(); }
+        catch (SecurityVerificationRequiredException ex) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_REQUIRED, ex.getMessage(), ex);
+        } catch (IllegalArgumentException ex) { throw badRequest(ex); }
+    }
+
+    private void requireAccessPage(int limit, int offset) {
+        if (limit < 1 || limit > 500 || offset < 0 || offset > 10000)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "limit must be 1-500 and offset 0-10000");
     }
 
     private String normalizedDeviceId(String deviceId) {
@@ -361,10 +335,6 @@ public class UserSecurityController {
     public record MfaChangeConfirmation(@jakarta.validation.constraints.Size(max = 128) String currentPassword,
                                         @Valid @jakarta.validation.constraints.NotNull
                                         LoginVerificationService.VerifyRequest codes) {}
-    public record DeviceStatus(long sessionId, String deviceId, String userAgent, String ipAddress,
-                               Instant lastSeen, boolean active, boolean current, boolean blocked) {}
-    public record IpStatus(String ipAddress, long loginCount, Instant lastSeen, boolean blocked) {}
-
     @org.springframework.web.bind.annotation.ExceptionHandler(LoginVerificationService.VerificationFailure.class)
     public org.springframework.http.ResponseEntity<java.util.Map<String, String>> mfaFailure(
             LoginVerificationService.VerificationFailure ex) {
