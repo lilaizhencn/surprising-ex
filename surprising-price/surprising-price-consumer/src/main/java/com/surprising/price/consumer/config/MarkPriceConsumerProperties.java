@@ -1,4 +1,4 @@
-package com.surprising.price.consumer;
+package com.surprising.price.consumer.config;
 
 import lombok.Getter;
 import lombok.Setter;

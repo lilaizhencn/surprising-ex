@@ -1,5 +1,7 @@
 package com.surprising.realtime.provider;
 
+import com.surprising.realtime.provider.config.RealtimeRouterProperties;
+
 import com.surprising.aeron.client.*;
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;

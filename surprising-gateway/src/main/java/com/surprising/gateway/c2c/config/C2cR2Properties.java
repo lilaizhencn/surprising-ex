@@ -1,4 +1,4 @@
-package com.surprising.gateway.c2c;
+package com.surprising.gateway.c2c.config;
 
 import lombok.Getter;
 import lombok.Setter;

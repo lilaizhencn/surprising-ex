@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.config.C2cR2Properties;
+
 import com.surprising.gateway.c2c.service.C2cQueryService;
 import com.surprising.gateway.c2c.service.C2cSubmissionService;
 import com.surprising.gateway.c2c.service.C2cQuickQuoteService;

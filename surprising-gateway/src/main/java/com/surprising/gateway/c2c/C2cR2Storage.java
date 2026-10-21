@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.config.C2cR2Properties;
+
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.KycDocumentStorageException;
 import com.surprising.gateway.provider.service.KycDocumentStorageService;

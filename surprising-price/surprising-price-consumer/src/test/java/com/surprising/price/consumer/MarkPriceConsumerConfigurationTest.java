@@ -1,5 +1,8 @@
 package com.surprising.price.consumer;
 
+import com.surprising.price.consumer.config.MarkPriceConsumerConfiguration;
+import com.surprising.price.consumer.config.MarkPriceConsumerProperties;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;

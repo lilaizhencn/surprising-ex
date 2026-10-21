@@ -1,4 +1,4 @@
-package com.surprising.gateway.provider.config;
+package com.surprising.gateway.provider.interceptor;
 
 import com.surprising.gateway.provider.auth.AuthService;
 import jakarta.servlet.FilterChain;

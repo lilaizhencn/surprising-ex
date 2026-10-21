@@ -1,4 +1,4 @@
-package com.surprising.gateway.provider.product;
+package com.surprising.gateway.provider.config;
 
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;

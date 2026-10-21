@@ -1,5 +1,8 @@
 package com.surprising.derivatives.lifecycle;
 
+import com.surprising.derivatives.lifecycle.config.FundingConfiguration;
+import com.surprising.derivatives.lifecycle.config.LifecycleInfrastructureConfiguration;
+
 import com.surprising.derivatives.lifecycle.service.LifecycleBusinessSettingsService;
 import com.surprising.derivatives.lifecycle.model.LifecycleBusinessSettings;
 import static org.assertj.core.api.Assertions.*;

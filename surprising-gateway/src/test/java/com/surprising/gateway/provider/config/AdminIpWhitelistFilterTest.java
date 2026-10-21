@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.config;
 
+import com.surprising.gateway.provider.interceptor.AdminIpWhitelistFilter;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 import jakarta.servlet.ServletException;

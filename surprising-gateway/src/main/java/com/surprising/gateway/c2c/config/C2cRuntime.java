@@ -1,4 +1,4 @@
-package com.surprising.gateway.c2c;
+package com.surprising.gateway.c2c.config;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;

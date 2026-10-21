@@ -4,9 +4,9 @@ import lombok.extern.slf4j.Slf4j;
 
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.mark.config.MarkPriceProperties;
-import com.surprising.price.consumer.MarkPriceConsumerConfiguration;
+import com.surprising.price.consumer.config.MarkPriceConsumerConfiguration;
 import com.surprising.price.consumer.MarkPriceKafkaConsumer;
-import com.surprising.price.consumer.MarkPriceConsumerProperties;
+import com.surprising.price.consumer.config.MarkPriceConsumerProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;

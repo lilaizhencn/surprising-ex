@@ -16,7 +16,7 @@ class MarketMakerApplicationYamlTest {
         new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yml"))
                 .forEach(env.getPropertySources()::addLast);
         var binder = org.springframework.boot.context.properties.bind.Binder.get(env);
-        var type = org.springframework.boot.context.properties.bind.Bindable.of(com.surprising.price.consumer.MarkPriceConsumerProperties.class);
+        var type = org.springframework.boot.context.properties.bind.Bindable.of(com.surprising.price.consumer.config.MarkPriceConsumerProperties.class);
         assertThat(binder.bind("surprising.price.consumer", type).get().getConcurrency()).isEqualTo(1);
         overrides.put("PRICE_CONSUMER_CONCURRENCY", "4");
         assertThat(binder.bind("surprising.price.consumer", type).get().getConcurrency()).isEqualTo(4);

@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.product;
 
+import com.surprising.gateway.provider.interceptor.ProductRequestBodyFilter;
+
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.handler.AbstractHandlerMapping;
@@ -14,7 +16,7 @@ public final class ProductInternalHandlerMapping extends AbstractHandlerMapping 
         this.selection = selection;
         setOrder(-1);
     }
-    static boolean isProductEndpoint(String path) {
+    public static boolean isProductEndpoint(String path) {
         return path.startsWith("/api/v1/accounts/") || path.startsWith("/api/v1/trading/")
                 || path.equals("/api/v1/trading/orders") || path.startsWith("/internal/v1/accounts/")
                 || path.startsWith("/internal/v1/trading/");

@@ -469,3 +469,5 @@ PortfolioIncomeFlowRepository只读资金流；PortfolioIncomeCutoffRepository�
 MarketSummaryRepository只批量提供已关闭K线与真实期初收盘价，并以instruments认证ID唯一产品归属；
 跨产品重复ID不展示无产品键K线摘要。合约Repository关联assets只补充四类资产名称，写入与锁仍仅归合约表。
 [行情读取验证](../docs/validation/java-mvc-market-readers-20261021.json)记录数据库边界与负例。
+
+C2C运行配置与R2属性归c2c.config；产品业务容器配置归gateway.config，产品属性和健康Bean归provider.config。三个HTTP Filter归provider.interceptor，保留拦截顺序、缓存正文限制及权限/IP语义。验证见 [配置拦截归包记录](../docs/validation/java-mvc-infra-packages-20261021.json)。

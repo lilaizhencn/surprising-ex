@@ -39,7 +39,7 @@ import com.surprising.marketmaker.provider.repository.MarketMakerStrategyOverrid
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.price.consumer.LatestMarkPriceCache;
-import com.surprising.price.consumer.MarkPriceConsumerProperties;
+import com.surprising.price.consumer.config.MarkPriceConsumerProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AmendOrderBatchResponse;
 import com.surprising.trading.api.model.AmendOrderRequest;

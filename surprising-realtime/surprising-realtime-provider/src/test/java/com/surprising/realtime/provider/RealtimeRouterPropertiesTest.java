@@ -1,5 +1,7 @@
 package com.surprising.realtime.provider;
 
+import com.surprising.realtime.provider.config.RealtimeRouterProperties;
+
 import static org.assertj.core.api.Assertions.*;
 
 import com.surprising.product.api.ProductLine;

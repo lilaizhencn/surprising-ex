@@ -1,4 +1,4 @@
-package com.surprising.derivatives.lifecycle;
+package com.surprising.derivatives.lifecycle.config;
 
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.risk.provider.config.RiskProperties;

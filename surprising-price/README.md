@@ -356,3 +356,5 @@ HotSpot JDK 27，基线 `292e4e04` 与当前代码使用相同 ThreadPoolTaskSch
 
 指数与标记价格Service的运行依赖统一由构造器传入；可选的实时发布器及标记价格Core发布器
 通过ObjectProvider在发布时获取。测试显式构造同样依赖，保留发布顺序、产品线身份和组件缺席时的部署行为。
+
+价格消费库的MarkPriceConsumerConfiguration与MarkPriceConsumerProperties统一归consumer.config；Bean名、产品Topic、配置前缀和分区分配规则保持。验证见 [配置拦截归包记录](../docs/validation/java-mvc-infra-packages-20261021.json)。

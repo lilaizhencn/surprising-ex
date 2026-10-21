@@ -2,7 +2,7 @@ package com.surprising.price;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.surprising.price.consumer.MarkPriceConsumerProperties;
+import com.surprising.price.consumer.config.MarkPriceConsumerProperties;
 import com.surprising.price.index.config.IndexPriceProperties;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import java.time.Duration;

@@ -1,4 +1,4 @@
-package com.surprising.derivatives.lifecycle;
+package com.surprising.derivatives.lifecycle.config;
 
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import org.springframework.context.annotation.Bean;

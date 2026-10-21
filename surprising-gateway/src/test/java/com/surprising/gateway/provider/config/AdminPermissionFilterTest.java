@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.config;
 
+import com.surprising.gateway.provider.interceptor.AdminPermissionFilter;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;

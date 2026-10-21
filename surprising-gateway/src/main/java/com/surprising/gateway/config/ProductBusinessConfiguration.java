@@ -1,4 +1,4 @@
-package com.surprising.gateway.product;
+package com.surprising.gateway.config;
 
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.aeron.client.SurprisingAeronClient;

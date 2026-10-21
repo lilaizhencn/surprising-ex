@@ -1,4 +1,6 @@
-package com.surprising.gateway.provider.product;
+package com.surprising.gateway.provider.config;
+
+import com.surprising.gateway.provider.product.GatewayProductServices;
 
 import com.surprising.gateway.provider.service.GatewayProductSettings;
 import com.surprising.account.provider.service.AccountAeronGateway;

@@ -1,4 +1,4 @@
-package com.surprising.price.consumer;
+package com.surprising.price.consumer.config;
 
 import java.util.HashMap;
 import java.util.Map;

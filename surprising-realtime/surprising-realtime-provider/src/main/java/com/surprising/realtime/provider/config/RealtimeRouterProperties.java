@@ -1,4 +1,4 @@
-package com.surprising.realtime.provider;
+package com.surprising.realtime.provider.config;
 
 import com.surprising.product.api.ProductLine;
 

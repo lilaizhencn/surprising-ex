@@ -22,7 +22,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         classes = {com.surprising.websocket.provider.service.KafkaFanoutConsumer.class,
                 com.surprising.websocket.provider.config.WebSocketKafkaConfiguration.class}))
 @EnableConfigurationProperties({GatewayProperties.class, WebSocketProperties.class,
-        com.surprising.gateway.provider.product.GatewayProductsProperties.class,
+        com.surprising.gateway.provider.config.GatewayProductsProperties.class,
         com.surprising.instrument.provider.config.InstrumentProperties.class})
 @EnableKafka
 @EnableScheduling

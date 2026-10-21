@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.product;
 
+import com.surprising.gateway.provider.config.GatewayProductsProperties;
+
 import static org.assertj.core.api.Assertions.*;
 import com.surprising.product.api.ProductLine;
 import java.nio.charset.StandardCharsets;

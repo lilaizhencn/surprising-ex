@@ -606,3 +606,5 @@ LINEAR_DELIVERY <cluster-directory> <aeron-directory> <archive-control-channel> 
 关闭导出时不创建这些持久化组件。原生投影行归model，回执事实比较归utils，
 `TradeExportProperties` 归config。验证见
 [提交投影分层验证](../docs/validation/java-mvc-projection-20261021.json)。
+
+RealtimeRouterProperties统一归provider.config；路由器配置键、默认参数和产品控制通道绑定保持。验证见 [配置拦截归包记录](../docs/validation/java-mvc-infra-packages-20261021.json)。

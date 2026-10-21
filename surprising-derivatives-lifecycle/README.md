@@ -145,3 +145,5 @@ risk、funding、保险和 ADL 继续读同一份缓存，产品线校验、事�
 FundingSettlementProjectionRepository只读确定性提交的结算投影。FundingService检查标记价新鲜度和结算身份，
 冻结首选率后再驱动原确定性Core分页；FundingRateRepository的历史关联仅在完整身份与费率匹配时补充组成，
 未知组成保持NULL。验证见 [资金费表职责验证](../docs/validation/java-mvc-funding-tables-20261021.json)。
+
+生命周期基础设施、调度器、合约快照与资金费配置统一归derivatives.lifecycle.config；保留两个永续产品才装配资金费的条件和原调度器名称。验证见 [配置拦截归包记录](../docs/validation/java-mvc-infra-packages-20261021.json)。

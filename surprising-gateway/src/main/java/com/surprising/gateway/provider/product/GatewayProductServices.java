@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.product;
 
+import com.surprising.gateway.provider.config.GatewayProductsProperties;
+
 import com.surprising.gateway.provider.model.GatewayProductSetting;
 import com.surprising.gateway.provider.service.GatewayProductSettings;
 import com.surprising.gateway.provider.local.*;
@@ -61,7 +63,7 @@ public final class GatewayProductServices implements AutoCloseable {
             child.getEnvironment().getPropertySources().addFirst(new MapPropertySource(
                     "gateway-product-" + product, productProperties(product)));
             org.springframework.boot.context.properties.source.ConfigurationPropertySources.attach(child.getEnvironment());
-            child.register(com.surprising.gateway.product.ProductBusinessConfiguration.class, LocalBusinessApi.class,
+            child.register(com.surprising.gateway.config.ProductBusinessConfiguration.class, LocalBusinessApi.class,
                     TradingLocalRoutes.class, AccountLocalRoutes.class, InstrumentLocalRoutes.class);
             child.refresh();
             var mapping = new RequestMappingHandlerMapping();

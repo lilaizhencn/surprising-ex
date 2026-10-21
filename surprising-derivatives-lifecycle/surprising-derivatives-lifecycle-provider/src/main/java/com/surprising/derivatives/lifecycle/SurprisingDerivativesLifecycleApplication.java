@@ -1,5 +1,7 @@
 package com.surprising.derivatives.lifecycle;
 
+import com.surprising.derivatives.lifecycle.config.FundingConfiguration;
+
 import com.surprising.adl.provider.config.AdlProperties;
 import com.surprising.insurance.provider.config.InsuranceProperties;
 import com.surprising.liquidation.provider.config.LiquidationProperties;

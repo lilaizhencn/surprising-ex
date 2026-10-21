@@ -1,5 +1,7 @@
 package com.surprising.price.consumer;
 
+import com.surprising.price.consumer.config.MarkPriceConsumerProperties;
+
 import lombok.extern.slf4j.Slf4j;
 
 import com.surprising.price.api.model.MarkPricePublishedEvent;

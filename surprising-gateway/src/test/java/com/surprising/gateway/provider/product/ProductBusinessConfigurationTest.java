@@ -35,7 +35,7 @@ class ProductBusinessConfigurationTest {
                         "surprising.websocket.kafka.product-line",line.name())));
                 ConfigurationPropertySources.attach(child.getEnvironment());
                 child.registerBean("surprising.websocket-com.surprising.websocket.provider.config.WebSocketProperties", com.surprising.websocket.provider.config.WebSocketProperties.class,
-                        () -> new com.surprising.gateway.product.ProductBusinessConfiguration().webSocketProperties(child.getEnvironment()));
+                        () -> new com.surprising.gateway.config.ProductBusinessConfiguration().webSocketProperties(child.getEnvironment()));
                 child.register(Properties.class,OrderInfrastructureConfiguration.class);child.refresh();
                 assertThat(child.getBean(com.surprising.websocket.provider.config.WebSocketProperties.class).getKafka().getProductLine()).isEqualTo(line);
                 assertThat(child.getBean(AccountProperties.class).getKafka().getProductLine()).isEqualTo(line);

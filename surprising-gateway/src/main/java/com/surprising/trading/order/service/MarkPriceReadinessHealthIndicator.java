@@ -1,7 +1,7 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.price.consumer.LatestMarkPriceCache;
-import com.surprising.price.consumer.MarkPriceConsumerProperties;
+import com.surprising.price.consumer.config.MarkPriceConsumerProperties;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import org.springframework.boot.health.contributor.Health;

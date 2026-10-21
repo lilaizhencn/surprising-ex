@@ -1,4 +1,6 @@
-package com.surprising.gateway.provider.product;
+package com.surprising.gateway.provider.interceptor;
+
+import com.surprising.gateway.provider.product.ProductInternalHandlerMapping;
 
 import jakarta.servlet.*;
 import jakarta.servlet.http.*;
@@ -13,7 +15,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
 public final class ProductRequestBodyFilter extends OncePerRequestFilter {
-    static final String BODY = ProductRequestBodyFilter.class.getName() + ".body";
+    public static final String BODY = ProductRequestBodyFilter.class.getName() + ".body";
     private static final int MAX_BYTES = 4 * 1024 * 1024;
     @Override protected boolean shouldNotFilter(HttpServletRequest request) {
         return !ProductInternalHandlerMapping.isProductEndpoint(request.getRequestURI())

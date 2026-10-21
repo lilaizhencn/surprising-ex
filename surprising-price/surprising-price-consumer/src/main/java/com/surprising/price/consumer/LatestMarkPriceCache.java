@@ -1,5 +1,7 @@
 package com.surprising.price.consumer;
 
+import com.surprising.price.consumer.config.MarkPriceConsumerProperties;
+
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PriceStatus;
 import java.time.Clock;

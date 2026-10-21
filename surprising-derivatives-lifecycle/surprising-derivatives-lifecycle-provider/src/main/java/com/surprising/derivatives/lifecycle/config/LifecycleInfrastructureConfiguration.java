@@ -1,4 +1,4 @@
-package com.surprising.derivatives.lifecycle;
+package com.surprising.derivatives.lifecycle.config;
 
 import com.surprising.adl.provider.config.AdlProperties;
 import com.surprising.insurance.provider.config.InsuranceProperties;
