@@ -2,8 +2,8 @@ package com.surprising.asset.controller;
 
 import com.surprising.asset.model.AssetConfiguration.*;
 import com.surprising.asset.service.AssetConfigurationService;
-import com.surprising.gateway.provider.auth.AuthService;
-import com.surprising.gateway.provider.auth.AdminApprovalService;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import jakarta.servlet.http.HttpServletRequest;
 import tools.jackson.databind.ObjectMapper;
 import java.util.List;

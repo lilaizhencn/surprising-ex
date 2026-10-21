@@ -1,0 +1,285 @@
+package com.surprising.gateway.provider.auth.repository;
+
+import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+
+import com.surprising.gateway.provider.auth.model.AuthModels.AdminRefreshSessionResponse;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+/**
+ * 只负责 {@code gateway_refresh_sessions} 表。
+ */
+@Repository
+public class GatewayRefreshSessionRepository {
+
+    private static final int MAX_QUERY_LIMIT = 500;
+    private static final AdminCursorPage.SortSpec CREATED_DESC =
+            new AdminCursorPage.SortSpec("createdAt", "created_at", "session_id", true);
+    private static final List<AdminCursorPage.SortSpec> SORTS = List.of(
+            CREATED_DESC,
+            new AdminCursorPage.SortSpec("createdAt", "created_at", "session_id", false));
+
+    private final JdbcTemplate jdbcTemplate;
+
+    public GatewayRefreshSessionRepository(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    public long save(long userId,
+                     String tokenHash,
+                     Instant expiresAt,
+                     String userAgent,
+                     String ipAddress,
+                     String deviceId,
+                     Instant now) {
+        return save(userId, tokenHash, expiresAt, userAgent, ipAddress, deviceId, now, now);
+    }
+
+    public long save(long userId, String tokenHash, Instant expiresAt, String userAgent,
+                     String ipAddress, String deviceId, Instant now, Instant authenticatedAt) {
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO gateway_refresh_sessions (
+                    user_id, token_hash, expires_at, user_agent, ip_address, device_id, created_at, updated_at, authenticated_at
+                ) VALUES (?, ?, ?, ?, ?, CAST(? AS uuid), ?, ?, ?)
+                RETURNING session_id
+                """, Long.class, userId, tokenHash, Timestamp.from(expiresAt), userAgent, ipAddress, deviceId,
+                Timestamp.from(now), Timestamp.from(now), authenticatedAt == null ? null : Timestamp.from(authenticatedAt));
+    }
+
+    public Optional<RefreshSession> find(String tokenHash) {
+        return jdbcTemplate.query("""
+                SELECT session_id, user_id, expires_at, revoked_at, device_id, ip_address, authenticated_at
+                  FROM gateway_refresh_sessions
+                 WHERE token_hash = ?
+                """, (rs, rowNum) -> new RefreshSession(
+                        rs.getLong("session_id"),
+                        rs.getLong("user_id"),
+                        rs.getTimestamp("expires_at").toInstant(),
+                        nullableInstant(rs, "revoked_at"), rs.getString("device_id"), rs.getString("ip_address"),
+                        nullableInstant(rs, "authenticated_at")),
+                tokenHash).stream().findFirst();
+    }
+
+    public Optional<Instant> authenticatedAt(long userId, long sessionId, Instant now) {
+        return jdbcTemplate.query("""
+                SELECT authenticated_at FROM gateway_refresh_sessions
+                 WHERE user_id = ? AND session_id = ? AND revoked_at IS NULL AND expires_at > ?
+                   AND authenticated_at IS NOT NULL
+                """, (rs, row) -> rs.getTimestamp(1).toInstant(), userId, sessionId, Timestamp.from(now))
+                .stream().findFirst();
+    }
+
+    public boolean active(long userId, long sessionId, Instant now) {
+        Boolean active = jdbcTemplate.queryForObject("""
+                SELECT EXISTS(
+                    SELECT 1 FROM gateway_refresh_sessions
+                     WHERE user_id = ? AND session_id = ? AND revoked_at IS NULL AND expires_at > ?
+                )
+                """, Boolean.class, userId, sessionId, Timestamp.from(now));
+        return Boolean.TRUE.equals(active);
+    }
+
+    public void revoke(long sessionId, Instant now) {
+        jdbcTemplate.update("""
+                UPDATE gateway_refresh_sessions
+                   SET revoked_at = COALESCE(revoked_at, ?),
+                       updated_at = ?
+                 WHERE session_id = ?
+                """, Timestamp.from(now), Timestamp.from(now), sessionId);
+    }
+
+    public int consume(long sessionId, Instant now) {
+        return jdbcTemplate.update("""
+                UPDATE gateway_refresh_sessions
+                   SET revoked_at = ?,
+                       updated_at = ?
+                 WHERE session_id = ?
+                   AND revoked_at IS NULL
+                   AND expires_at > ?
+                """, Timestamp.from(now), Timestamp.from(now), sessionId, Timestamp.from(now));
+    }
+
+    public List<AdminRefreshSessionResponse> find(Long userId, Boolean active, int limit) {
+        return findPage(userId, active, limit, null, null).items();
+    }
+
+    public AdminCursorPage.CursorPage<AdminRefreshSessionResponse> findPage(Long userId,
+                                                                            Boolean active,
+                                                                            int limit,
+                                                                            String cursor,
+                                                                            String sort) {
+        if (userId != null && userId <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        int safeLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
+        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, CREATED_DESC, SORTS);
+        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.add(userId);
+        args.add(active);
+        args.add(active);
+        args.add(active);
+        String sql = """
+                SELECT session_id, user_id, expires_at, revoked_at, user_agent, ip_address, device_id, created_at, updated_at
+                  FROM gateway_refresh_sessions
+                 WHERE (CAST(? AS text) IS NULL OR user_id = ?)
+                   AND (CAST(? AS text) IS NULL OR (? = TRUE AND revoked_at IS NULL AND expires_at > now())
+                         OR (? = FALSE AND (revoked_at IS NOT NULL OR expires_at <= now())))
+                """ + AdminCursorPage.seekCondition(sortSpec, decodedCursor) + """
+                 ORDER BY %s %s, session_id %s
+                 LIMIT ?
+                """.formatted(sortSpec.column(), sortSpec.directionSql(), sortSpec.directionSql());
+        AdminCursorPage.addCursorArgs(args, decodedCursor);
+        args.add(safeLimit + 1);
+        List<AdminRefreshSessionResponse> fetchedRows = jdbcTemplate.query(
+                sql, (rs, rowNum) -> toResponse(rs), args.toArray());
+        return AdminCursorPage.page(fetchedRows, safeLimit, sortSpec,
+                AdminRefreshSessionResponse::createdAt, AdminRefreshSessionResponse::sessionId);
+    }
+
+    public int revokeActive(long sessionId, Instant now) {
+        if (sessionId <= 0) {
+            throw new IllegalArgumentException("sessionId must be positive");
+        }
+        return jdbcTemplate.update("""
+                UPDATE gateway_refresh_sessions
+                   SET revoked_at = COALESCE(revoked_at, ?),
+                       updated_at = ?
+                 WHERE session_id = ?
+                   AND revoked_at IS NULL
+                   AND expires_at > ?
+                """, Timestamp.from(now), Timestamp.from(now), sessionId, Timestamp.from(now));
+    }
+
+    public int revokeActiveForUser(long userId, Instant now) {
+        if (userId <= 0) {
+            throw new IllegalArgumentException("userId must be positive");
+        }
+        return jdbcTemplate.update("""
+                UPDATE gateway_refresh_sessions
+                   SET revoked_at = COALESCE(revoked_at, ?),
+                       updated_at = ?
+                 WHERE user_id = ?
+                   AND revoked_at IS NULL
+                   AND expires_at > ?
+                """, Timestamp.from(now), Timestamp.from(now), userId, Timestamp.from(now));
+    }
+
+    public int revokeActiveForUserExcept(long userId, long excludedSessionId, Instant now) {
+        if (userId <= 0 || excludedSessionId <= 0) {
+            throw new IllegalArgumentException("userId and excludedSessionId must be positive");
+        }
+        return jdbcTemplate.update("""
+                UPDATE gateway_refresh_sessions
+                   SET revoked_at = COALESCE(revoked_at, ?),
+                       updated_at = ?
+                 WHERE user_id = ?
+                   AND session_id <> ?
+                   AND revoked_at IS NULL
+                   AND expires_at > ?
+                """, Timestamp.from(now), Timestamp.from(now), userId, excludedSessionId,
+                Timestamp.from(now));
+    }
+
+    public int revokeActiveForUserSession(long userId, long sessionId, Instant now) {
+        if (userId <= 0 || sessionId <= 0) {
+            throw new IllegalArgumentException("userId and sessionId must be positive");
+        }
+        return jdbcTemplate.update("""
+                UPDATE gateway_refresh_sessions
+                   SET revoked_at = COALESCE(revoked_at, ?),
+                       updated_at = ?
+                 WHERE user_id = ?
+                   AND session_id = ?
+                   AND revoked_at IS NULL
+                   AND expires_at > ?
+                """, Timestamp.from(now), Timestamp.from(now), userId, sessionId, Timestamp.from(now));
+    }
+
+    public int revokeActiveForDevice(long userId, String deviceId, Instant now) {
+        return jdbcTemplate.update("""
+                UPDATE gateway_refresh_sessions SET revoked_at = ?, updated_at = ?
+                 WHERE user_id = ? AND device_id = CAST(? AS uuid)
+                   AND revoked_at IS NULL AND expires_at > ?
+                """, Timestamp.from(now), Timestamp.from(now), userId, deviceId, Timestamp.from(now));
+    }
+
+    public int revokeActiveForIp(long userId, String ipAddress, Instant now) {
+        return jdbcTemplate.update("""
+                UPDATE gateway_refresh_sessions SET revoked_at = ?, updated_at = ?
+                 WHERE user_id = ? AND ip_address = ?
+                   AND revoked_at IS NULL AND expires_at > ?
+                """, Timestamp.from(now), Timestamp.from(now), userId, ipAddress, Timestamp.from(now));
+    }
+
+    public List<DeviceView> devices(long userId, int limit, int offset) {
+        return jdbcTemplate.query("""
+                WITH ranked AS (
+                    SELECT session_id, device_id, user_agent, ip_address, created_at,
+                           row_number() OVER (PARTITION BY COALESCE(device_id::text, 'session:' || session_id::text)
+                                              ORDER BY created_at DESC, session_id DESC) AS rank,
+                           bool_or(revoked_at IS NULL AND expires_at > now()) OVER
+                               (PARTITION BY COALESCE(device_id::text, 'session:' || session_id::text)) AS active
+                      FROM gateway_refresh_sessions WHERE user_id = ?
+                )
+                SELECT session_id, device_id, user_agent, ip_address, created_at, active
+                  FROM ranked WHERE rank = 1 ORDER BY created_at DESC,session_id DESC LIMIT ? OFFSET ?
+                """, (rs, rowNum) -> new DeviceView(rs.getLong("session_id"), rs.getString("device_id"),
+                rs.getString("user_agent"), rs.getString("ip_address"),
+                rs.getTimestamp("created_at").toInstant(), rs.getBoolean("active")), userId, limit, offset);
+    }
+
+    public Optional<String> deviceIdForSession(long userId, long sessionId) {
+        return jdbcTemplate.query("""
+                SELECT device_id FROM gateway_refresh_sessions WHERE user_id = ? AND session_id = ?
+                """, (rs, rowNum) -> rs.getString("device_id"), userId, sessionId)
+                .stream().filter(java.util.Objects::nonNull).findFirst();
+    }
+
+    private AdminRefreshSessionResponse toResponse(java.sql.ResultSet rs) throws java.sql.SQLException {
+        Instant revokedAt = nullableInstant(rs, "revoked_at");
+        Instant expiresAt = rs.getTimestamp("expires_at").toInstant();
+        return new AdminRefreshSessionResponse(
+                rs.getLong("session_id"),
+                rs.getLong("user_id"),
+                revokedAt == null && expiresAt.isAfter(Instant.now()),
+                expiresAt,
+                revokedAt,
+                rs.getString("user_agent"),
+                rs.getString("ip_address"),
+                rs.getString("device_id"),
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant());
+    }
+
+    private Instant nullableInstant(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
+        Timestamp value = rs.getTimestamp(column);
+        return value == null ? null : value.toInstant();
+    }
+
+    public record RefreshSession(
+            long sessionId,
+            long userId,
+            Instant expiresAt,
+            Instant revokedAt,
+            String deviceId,
+            String ipAddress,
+            Instant authenticatedAt) {
+        public RefreshSession(long sessionId, long userId, Instant expiresAt, Instant revokedAt) {
+            this(sessionId, userId, expiresAt, revokedAt, null, null, null);
+        }
+        public RefreshSession(long sessionId, long userId, Instant expiresAt, Instant revokedAt,
+                              String deviceId, String ipAddress) {
+            this(sessionId, userId, expiresAt, revokedAt, deviceId, ipAddress, null);
+        }
+    }
+
+    public record DeviceView(long sessionId, String deviceId, String userAgent, String ipAddress,
+                             Instant lastSeen, boolean active) {}
+}

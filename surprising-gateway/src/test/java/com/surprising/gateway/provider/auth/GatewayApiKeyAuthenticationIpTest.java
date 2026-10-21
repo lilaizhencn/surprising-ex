@@ -1,5 +1,10 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.repository.GatewayApiKeyRepository;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
+import com.surprising.gateway.provider.auth.service.TotpService;
+
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;

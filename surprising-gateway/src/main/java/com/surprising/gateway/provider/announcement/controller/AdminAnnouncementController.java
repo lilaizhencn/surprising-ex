@@ -7,7 +7,7 @@ import com.surprising.gateway.provider.announcement.model.AnnouncementModels.Ann
 import com.surprising.gateway.provider.announcement.model.AnnouncementModels.AdminPage;
 import com.surprising.gateway.provider.announcement.model.AnnouncementModels.AuditEntry;
 import com.surprising.gateway.provider.announcement.model.AnnouncementModels.SaveRequest;
-import com.surprising.gateway.provider.auth.AdminApprovalService;
+import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import org.springframework.http.HttpStatus;

@@ -1,5 +1,13 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.client.TelegramOidcClient;
+import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.LoginVerificationService;
+import com.surprising.gateway.provider.auth.service.TelegramLoginService;
+
 import com.surprising.gateway.provider.auth.repository.TelegramLoginFlowRepository;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;

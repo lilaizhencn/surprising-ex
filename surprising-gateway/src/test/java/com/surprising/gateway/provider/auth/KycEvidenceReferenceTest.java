@@ -1,4 +1,7 @@
 package com.surprising.gateway.provider.auth;
+
+import com.surprising.gateway.provider.auth.model.ComplianceModels;
+import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import java.time.Instant;
@@ -7,7 +10,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
-import com.surprising.gateway.provider.auth.ComplianceModels.KycDocument;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.KycDocumentService;
 class KycEvidenceReferenceTest {

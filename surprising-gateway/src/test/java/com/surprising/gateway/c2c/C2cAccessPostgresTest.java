@@ -1,5 +1,11 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.provider.auth.model.ComplianceModels;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.ComplianceService;
+import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
+
 import com.surprising.gateway.c2c.service.C2cAccess;
 
 import static org.assertj.core.api.Assertions.*;
@@ -7,8 +13,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.surprising.gateway.c2c.model.C2cMarket;
-import com.surprising.gateway.provider.auth.*;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;

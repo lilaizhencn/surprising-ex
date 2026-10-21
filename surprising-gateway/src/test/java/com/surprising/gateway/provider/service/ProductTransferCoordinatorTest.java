@@ -149,12 +149,12 @@ class ProductTransferCoordinatorTest {
     @Test
     void sameProductTransferUsesAuthenticatedSenderAndExplicitRecipient() {
         var client = new RecordingProductAccountClient();
-        var users = org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.GatewayUserRepository.class);
+        var users = org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.repository.GatewayUserRepository.class);
         org.mockito.Mockito.when(users.find(42)).thenReturn(java.util.Optional.of(
-                new com.surprising.gateway.provider.auth.GatewayUserRepository.UserRecord(
+                new com.surprising.gateway.provider.auth.repository.GatewayUserRepository.UserRecord(
                         42, "sender", "sender@example.test", "NORMAL", java.time.Instant.now())));
         org.mockito.Mockito.when(users.find(43)).thenReturn(java.util.Optional.of(
-                new com.surprising.gateway.provider.auth.GatewayUserRepository.UserRecord(
+                new com.surprising.gateway.provider.auth.repository.GatewayUserRepository.UserRecord(
                         43, "recipient", "recipient@example.test", "NORMAL", java.time.Instant.now())));
         var coordinator = new ProductTransferCoordinator(client, users);
         var command = new ProductTransferCommand(42, "to-user", "SPOT", "SPOT", "USDT", 10,
@@ -169,9 +169,9 @@ class ProductTransferCoordinatorTest {
     @Test
     void nonexistentRecipientIsRejectedBeforeSourceDebit() {
         var client = new RecordingProductAccountClient();
-        var users = org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.GatewayUserRepository.class);
+        var users = org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.repository.GatewayUserRepository.class);
         org.mockito.Mockito.when(users.find(42)).thenReturn(java.util.Optional.of(
-                new com.surprising.gateway.provider.auth.GatewayUserRepository.UserRecord(
+                new com.surprising.gateway.provider.auth.repository.GatewayUserRepository.UserRecord(
                         42, "sender", "sender@example.test", "NORMAL", java.time.Instant.now())));
         var coordinator = new ProductTransferCoordinator(client, users);
         assertThatThrownBy(() -> coordinator.transfer(new ProductTransferCommand(42, "invalid-user", "SPOT", "SPOT",
@@ -183,9 +183,9 @@ class ProductTransferCoordinatorTest {
     @Test
     void withdrawalDisabledSenderCannotMoveFundsToAnotherUser() {
         var client = new RecordingProductAccountClient();
-        var users = org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.GatewayUserRepository.class);
+        var users = org.mockito.Mockito.mock(com.surprising.gateway.provider.auth.repository.GatewayUserRepository.class);
         org.mockito.Mockito.when(users.find(42)).thenReturn(java.util.Optional.of(
-                new com.surprising.gateway.provider.auth.GatewayUserRepository.UserRecord(
+                new com.surprising.gateway.provider.auth.repository.GatewayUserRepository.UserRecord(
                         42, "sender", "sender@example.test", "WITHDRAW_DISABLED", java.time.Instant.now())));
         var coordinator = new ProductTransferCoordinator(client, users);
         assertThatThrownBy(() -> coordinator.transfer(new ProductTransferCommand(42, "blocked-user", "SPOT", "SPOT",

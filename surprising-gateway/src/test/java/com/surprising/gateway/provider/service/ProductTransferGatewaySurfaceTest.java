@@ -5,8 +5,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.surprising.account.api.model.ProductTransferOperationRequest;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.AuthService;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;

@@ -1,6 +1,12 @@
 package com.surprising.gateway.provider.auth;
 
-import com.surprising.gateway.provider.auth.ComplianceModels.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.client.KycProvider;
+import com.surprising.gateway.provider.auth.client.KycProviderRegistry;
+import com.surprising.gateway.provider.auth.client.SumsubKycProvider;
+import com.surprising.gateway.provider.auth.client.VeriffKycProvider;
+import com.surprising.gateway.provider.auth.model.ComplianceModels;
+
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -102,7 +108,7 @@ class ExternalKycProviderTest {
         return new KycProvider() {
             @Override public String code() { return code; }
             @Override public KycProviderSession start(long userId, KycSubmissionRequest request,
-                                                       List<com.surprising.gateway.provider.auth.ComplianceModels.KycDocument> documents) {
+                                                       List<com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument> documents) {
                 return new KycProviderSession(code, "new-session", null, null, "PENDING", false);
             }
             @Override public KycProviderSession refreshSession(long userId, String providerReference) {

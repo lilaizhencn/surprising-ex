@@ -1,8 +1,8 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
-import com.surprising.gateway.provider.auth.EmailMessageSender;
-import com.surprising.gateway.provider.auth.MfaRecoveryRepository.RecoveryRequest;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.client.EmailMessageSender;
+import com.surprising.gateway.provider.auth.repository.MfaRecoveryRepository.RecoveryRequest;
 import com.surprising.gateway.provider.repository.SecurityEmailNotificationRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;

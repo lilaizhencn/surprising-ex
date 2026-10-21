@@ -1,5 +1,22 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
+
+import com.surprising.gateway.provider.auth.client.EmailMessageSender;
+import com.surprising.gateway.provider.auth.repository.GatewayLoginLogRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayPermissionRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayRolePermissionRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayRoleRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRoleRepository;
+import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
+import com.surprising.gateway.provider.auth.service.EmailVerificationService;
+import com.surprising.gateway.provider.auth.service.LoginVerificationService;
+import com.surprising.gateway.provider.auth.service.PasswordHasher;
+import com.surprising.gateway.provider.auth.service.TotpService;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -77,9 +94,9 @@ class AuthTableBoundariesPostgresTest {
         assertThat(email.verifyEmail(userId,"before@example.test","123456",now.plusSeconds(3))).isFalse();
     }
     @Test void contactFailureRollsBackFactorAndKeepsTheBindingChallengeUsable() {
-        var issued=login.beginBinding(userId,"EMAIL",new LoginVerificationService.SettingRequest("password","changed@example.test",true),now);
-        var codes=new LoginVerificationService.VerifyRequest(issued.challenge().challengeToken(),"123456",null,null);
-        var confirmation=new LoginVerificationService.SettingConfirmation("password",codes);
+        var issued=login.beginBinding(userId,"EMAIL",new LoginVerificationModels.SettingRequest("password","changed@example.test",true),now);
+        var codes=new LoginVerificationModels.VerifyRequest(issued.challenge().challengeToken(),"123456",null,null);
+        var confirmation=new LoginVerificationModels.SettingConfirmation("password",codes);
         jdbc.execute("ALTER TABLE gateway_users ADD CONSTRAINT mvc_contact_fault CHECK(email<>'changed@example.test') NOT VALID");
         try {
             assertThatThrownBy(()->login.confirmBinding(userId,"EMAIL",confirmation,now.plusSeconds(1))).isInstanceOf(org.springframework.dao.DataAccessException.class);

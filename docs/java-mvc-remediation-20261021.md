@@ -123,3 +123,5 @@
 - 包归类3将13个分页、金额、ID、Topic和快照工具归utils，并同步14个直接源码模块的引用；所有受影响Java方法体在包/导入/类型全名/可见性归一后相等。24项目反应器编译及9模块867项测试通过无跳过；首轮Gateway的跨包directionSql可见性已修正并续编通过。关闭MVC-236至248；见 [工具归包验证](validation/java-mvc-utils-packages-20261021.json)。所属数据库和报告已清理，Controller/Service/Repository及HTTP职责继续。
 
 - 包归类4完成C2C剩余32个平铺类的MVC、异常、模型、工具及WebSocket归包，保留业务方法、SQL、锁/事务、路由和字段。干净构建170项通过，浏览器QA1项环境未启用，关闭28条原归包命中；尚未关闭的HTTP/异常规则同步更新当前路径。见 [C2C归包验证](validation/java-mvc-c2c-packages-20261021.json)。所属数据库/日志/报告已清理；两项外部R2 Live未运行，理由见记录，其余全范围整改继续。
+
+- 包归类5完成认证65个平铺类的Controller、Service、Repository、model、client与utils归位；九个登录请求/响应记录完整移入model，保持sealed登录结果的同包许可约束，去除模型对Service的依赖。177个原文件的业务体/SQL在职责声明归一后保持一致。定向264、按受影响测试清单补充169项全部通过无跳过，关闭51条原归包命中。见 [认证归包验证](validation/java-mvc-auth-packages-20261021.json)。初轮编译和辅助统计恢复已记录，所属数据库/日志/报告已清理；其余MVC和最终实栈继续。

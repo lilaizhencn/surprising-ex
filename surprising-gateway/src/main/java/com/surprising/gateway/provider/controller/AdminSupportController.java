@@ -1,10 +1,10 @@
 package com.surprising.gateway.provider.controller;
 
-import com.surprising.gateway.provider.auth.SupportModels.SupportComplianceSummary;
-import com.surprising.gateway.provider.auth.SupportModels.SupportTicket;
-import com.surprising.gateway.provider.auth.SupportModels.SupportTicketNote;
-import com.surprising.gateway.provider.auth.SupportModels.SupportUserSummary;
-import com.surprising.gateway.provider.auth.SupportTicketService;
+import com.surprising.gateway.provider.auth.model.SupportModels.SupportComplianceSummary;
+import com.surprising.gateway.provider.auth.model.SupportModels.SupportTicket;
+import com.surprising.gateway.provider.auth.model.SupportModels.SupportTicketNote;
+import com.surprising.gateway.provider.auth.model.SupportModels.SupportUserSummary;
+import com.surprising.gateway.provider.auth.service.SupportTicketService;
 import java.time.Instant;
 import java.util.List;
 import java.util.function.Supplier;

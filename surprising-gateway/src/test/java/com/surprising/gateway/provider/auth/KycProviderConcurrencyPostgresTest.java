@@ -1,11 +1,18 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.client.KycProvider;
+import com.surprising.gateway.provider.auth.client.KycProviderRegistry;
+import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.ComplianceService;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
-import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
-import com.surprising.gateway.provider.auth.ComplianceModels.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
 import com.surprising.gateway.provider.auth.repository.KycProviderEventRepository;
 import com.surprising.gateway.provider.service.KycDocumentService;
 import java.nio.file.Files;

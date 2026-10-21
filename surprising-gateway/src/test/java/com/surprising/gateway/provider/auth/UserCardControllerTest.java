@@ -1,5 +1,10 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.controller.UserCardController;
+import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
+import com.surprising.gateway.provider.auth.service.AuthService;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 

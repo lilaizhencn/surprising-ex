@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.interceptor;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
 
-import com.surprising.gateway.provider.auth.ClientIpResolver;
+import com.surprising.gateway.provider.auth.utils.ClientIpResolver;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

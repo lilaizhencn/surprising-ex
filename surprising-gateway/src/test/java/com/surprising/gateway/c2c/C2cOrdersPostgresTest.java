@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.provider.auth.service.TotpService;
+
 import com.surprising.gateway.c2c.controller.C2cController;
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
 import com.surprising.gateway.c2c.repository.C2cFundsRepository;
@@ -20,8 +22,7 @@ import com.surprising.gateway.c2c.model.C2cOrderStatus;
 import com.surprising.gateway.c2c.model.C2cQuote;
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.c2c.utils.C2cDigests;
-import com.surprising.gateway.provider.auth.*;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.ProductAccountAdjustment;
 import com.surprising.gateway.provider.service.ProductAccountClient;

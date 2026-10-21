@@ -1,5 +1,15 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.repository.GatewayLoginLogRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayPermissionRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayRolePermissionRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayRoleRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRoleRepository;
+import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -7,9 +17,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.surprising.gateway.provider.auth.GatewayPermissionRepository.PermissionRecord;
-import com.surprising.gateway.provider.auth.GatewayRoleRepository.RoleRecord;
-import com.surprising.gateway.provider.auth.GatewayUserRepository.UserRecord;
+import com.surprising.gateway.provider.auth.repository.GatewayPermissionRepository.PermissionRecord;
+import com.surprising.gateway.provider.auth.repository.GatewayRoleRepository.RoleRecord;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository.UserRecord;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;

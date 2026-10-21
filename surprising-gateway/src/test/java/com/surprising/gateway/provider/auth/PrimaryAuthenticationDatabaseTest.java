@@ -1,5 +1,16 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.EmailVerificationService;
+import com.surprising.gateway.provider.auth.service.JwtTokenService;
+import com.surprising.gateway.provider.auth.service.LoginVerificationService;
+import com.surprising.gateway.provider.auth.service.PasswordHasher;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;

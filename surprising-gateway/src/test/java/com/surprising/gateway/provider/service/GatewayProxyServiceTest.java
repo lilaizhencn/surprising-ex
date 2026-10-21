@@ -3,9 +3,9 @@ package com.surprising.gateway.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.auth.AdminApprovalRepository;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.AuthService;
+import com.surprising.gateway.provider.auth.repository.AdminApprovalRepository;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.product.api.ProductLine;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -504,7 +504,7 @@ class GatewayProxyServiceTest {
     private GatewayProxyService gateway(GatewayProperties properties, RestTemplate rest, Object... dependencies) {
         AuthService auth = dependencies.length > 0 ? (AuthService) dependencies[0] : null;
         var audit = dependencies.length > 1
-                ? (com.surprising.gateway.provider.auth.AdminAuditRepository) dependencies[1] : null;
+                ? (com.surprising.gateway.provider.auth.repository.AdminAuditRepository) dependencies[1] : null;
         var approval = dependencies.length > 2 ? (AdminApprovalRepository) dependencies[2] : null;
         var mapper = dependencies.length > 3 ? (tools.jackson.databind.ObjectMapper) dependencies[3]
                 : new tools.jackson.databind.ObjectMapper();
@@ -592,7 +592,7 @@ class GatewayProxyServiceTest {
         }
 
         @Override
-        public com.surprising.gateway.provider.auth.AuthModels.AdminApprovalResponse consumeApproved(
+        public com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalResponse consumeApproved(
                 long approvalId,
                 long requesterUserId,
                 String service,

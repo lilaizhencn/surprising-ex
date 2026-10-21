@@ -1,6 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
-import com.surprising.gateway.provider.auth.ComplianceModels.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
+
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;

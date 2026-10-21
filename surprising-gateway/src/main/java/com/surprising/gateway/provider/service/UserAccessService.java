@@ -1,12 +1,12 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.auth.AuthModels.AdminSessionRevokeResponse;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.GatewayLoginLogRepository;
-import com.surprising.gateway.provider.auth.GatewayRefreshSessionRepository;
-import com.surprising.gateway.provider.auth.GatewayUserAccessBlockRepository;
-import com.surprising.gateway.provider.auth.SensitiveActionVerificationService;
-import com.surprising.gateway.provider.auth.UserSecurityService;
+import com.surprising.gateway.provider.auth.model.AuthModels.AdminSessionRevokeResponse;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.repository.GatewayLoginLogRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayRefreshSessionRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserAccessBlockRepository;
+import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
+import com.surprising.gateway.provider.auth.service.UserSecurityService;
 import com.surprising.gateway.provider.exception.SecurityVerificationRequiredException;
 import com.surprising.gateway.provider.model.UserDeviceStatus;
 import com.surprising.gateway.provider.model.UserIpStatus;

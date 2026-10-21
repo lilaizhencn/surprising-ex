@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.controller.AdminComplianceController;
+import com.surprising.gateway.provider.auth.service.ComplianceService;
+
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -9,10 +12,10 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.surprising.gateway.provider.auth.ComplianceModels.AmlCase;
-import com.surprising.gateway.provider.auth.ComplianceModels.ComplianceUserSummary;
-import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
-import com.surprising.gateway.provider.auth.ComplianceModels.RiskTag;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCase;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.ComplianceUserSummary;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.RiskTag;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;

@@ -25,7 +25,7 @@ public final class ProductTransferCoordinator {
     private final AtomicInteger nextReconciliationLine = new AtomicInteger();
 
     private final ProductAccountClient accountClient;
-    private final com.surprising.gateway.provider.auth.GatewayUserRepository users;
+    private final com.surprising.gateway.provider.auth.repository.GatewayUserRepository users;
 
     public ProductTransferCoordinator(ProductAccountClient accountClient) {
         this(accountClient, null);
@@ -33,7 +33,7 @@ public final class ProductTransferCoordinator {
 
     @org.springframework.beans.factory.annotation.Autowired
     public ProductTransferCoordinator(ProductAccountClient accountClient,
-            com.surprising.gateway.provider.auth.GatewayUserRepository users) {
+            com.surprising.gateway.provider.auth.repository.GatewayUserRepository users) {
         this.accountClient = accountClient;
         this.users = users;
     }

@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.controller;
 
-import com.surprising.gateway.provider.auth.AuthService;
+import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.service.WalletFundingService;
 import com.surprising.gateway.provider.service.CustodyWalletClient;
 import jakarta.validation.Valid;

@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.client.TelegramOidcClient;
+
 import static org.assertj.core.api.Assertions.*;
 
 import com.nimbusds.jose.*;

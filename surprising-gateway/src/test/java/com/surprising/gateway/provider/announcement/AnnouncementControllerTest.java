@@ -11,7 +11,7 @@ import com.surprising.gateway.provider.announcement.exception.AnnouncementProble
 import com.surprising.gateway.provider.announcement.exception.AnnouncementExceptionHandler;
 import com.surprising.gateway.provider.announcement.model.AnnouncementModels.*;
 import com.surprising.gateway.provider.announcement.service.AnnouncementService;
-import com.surprising.gateway.provider.auth.AdminApprovalService;
+import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;

@@ -1,5 +1,8 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.service.AdminApprovalService;
+
 import com.surprising.gateway.c2c.controller.C2cAdminController;
 import com.surprising.gateway.c2c.controller.C2cController;
 import com.surprising.gateway.c2c.model.C2cVerification;
@@ -17,7 +20,6 @@ import static org.mockito.Mockito.*;
 import com.surprising.account.api.model.*;
 import com.surprising.gateway.c2c.model.C2cOrderStatus;
 import com.surprising.gateway.c2c.service.C2cMarketService;
-import com.surprising.gateway.provider.auth.*;
 import java.time.Instant;
 import java.util.*;
 import org.junit.jupiter.api.*;

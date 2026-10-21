@@ -1,5 +1,9 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.client.EmailMessageSender;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.service.EmailVerificationService;
+
 import com.surprising.gateway.provider.auth.model.AuthChallenge;
 import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepository;
 import static org.assertj.core.api.Assertions.assertThat;

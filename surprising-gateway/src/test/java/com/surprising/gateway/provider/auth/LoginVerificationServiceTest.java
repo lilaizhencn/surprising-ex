@@ -1,5 +1,17 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
+
+import com.surprising.gateway.provider.auth.client.EmailMessageSender;
+import com.surprising.gateway.provider.auth.client.SmsMessageSender;
+import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
+import com.surprising.gateway.provider.auth.service.LoginVerificationService;
+import com.surprising.gateway.provider.auth.service.PasswordHasher;
+import com.surprising.gateway.provider.auth.service.TotpService;
+
 import com.surprising.gateway.provider.auth.repository.LoginFactorRepository;
 
 import com.surprising.gateway.provider.auth.model.LoginVerificationRows;
@@ -123,14 +135,14 @@ class LoginVerificationServiceTest {
                 });
         when(db.find(anyString())).thenAnswer(inv -> Optional.of(stored.get()));
         var binding = service.beginBinding(1, "EMAIL",
-                new LoginVerificationService.SettingRequest(null, "new@example.test", true), now, now);
-        assertThat(binding.challenge().methods()).extracting(LoginVerificationService.Method::type).containsExactly("EMAIL");
-        var wrong = new LoginVerificationService.SettingConfirmation(null,
-                new LoginVerificationService.VerifyRequest(binding.challenge().challengeToken(), "000000", null, null));
+                new LoginVerificationModels.SettingRequest(null, "new@example.test", true), now, now);
+        assertThat(binding.challenge().methods()).extracting(LoginVerificationModels.Method::type).containsExactly("EMAIL");
+        var wrong = new LoginVerificationModels.SettingConfirmation(null,
+                new LoginVerificationModels.VerifyRequest(binding.challenge().challengeToken(), "000000", null, null));
         assertThatThrownBy(() -> service.confirmBinding(1, "EMAIL", wrong, now, now))
                 .hasMessage("LOGIN_VERIFICATION_INVALID");
-        var correct = new LoginVerificationService.SettingConfirmation(null,
-                new LoginVerificationService.VerifyRequest(binding.challenge().challengeToken(), "123456", null, null));
+        var correct = new LoginVerificationModels.SettingConfirmation(null,
+                new LoginVerificationModels.VerifyRequest(binding.challenge().challengeToken(), "123456", null, null));
         assertThatThrownBy(() -> service.confirmBinding(1, "EMAIL", correct, now.plusSeconds(300), now))
                 .hasMessage("LOGIN_CHALLENGE_EXPIRED");
         assertThatThrownBy(() -> service.confirmBinding(1, "EMAIL", correct, now, now.minusSeconds(300)))
@@ -146,7 +158,7 @@ class LoginVerificationServiceTest {
         passwordless();
         for (String method : List.of("EMAIL", "PHONE", "TOTP")) {
             assertThatThrownBy(() -> service.beginBinding(1, method,
-                    new LoginVerificationService.SettingRequest(null, "new@example.test", true),
+                    new LoginVerificationModels.SettingRequest(null, "new@example.test", true),
                     now, now.minusSeconds(300))).hasMessage("LOGIN_RECENT_AUTHENTICATION_REQUIRED");
         }
         verify(db, never()).issue(anyLong(), anyString(), anyString(), anyString(), anyString(),
@@ -158,7 +170,7 @@ class LoginVerificationServiceTest {
     void passwordlessTotpStillRequiresAnExistingVerifiedContact() {
         passwordless();
         assertThatThrownBy(() -> service.beginBinding(1, "TOTP",
-                new LoginVerificationService.SettingRequest(null, null, true), now, now))
+                new LoginVerificationModels.SettingRequest(null, null, true), now, now))
                 .hasMessage("LOGIN_CONTACT_MISSING");
         verify(db, never()).issue(anyLong(), anyString(), anyString(), anyString(), anyString(),
                 any(), any(), any(), anyBoolean(), any());
@@ -185,10 +197,10 @@ class LoginVerificationServiceTest {
         properties.getSecurity().setSimulatedVerificationCodesEnabled(true);
 
         var response = service.beginBinding(1, "EMAIL",
-                new LoginVerificationService.SettingRequest("password", null, true), now);
+                new LoginVerificationModels.SettingRequest("password", null, true), now);
 
         assertThat(response.challenge().simulated()).isTrue();
-        assertThat(response.challenge().methods()).extracting(LoginVerificationService.Method::type)
+        assertThat(response.challenge().methods()).extracting(LoginVerificationModels.Method::type)
                 .containsExactly("EMAIL", "PHONE");
         verify(db).issue(eq(1L), eq("EMAIL"), anyString(), anyString(), eq("EMAIL,PHONE"),
                 anyString(), anyString(), eq("u@example.test"), eq(true), eq(now));
@@ -205,10 +217,10 @@ class LoginVerificationServiceTest {
                         null, now.plusSeconds(300), false, 0, true)));
 
         var result = service.resendBindingCode(
-                1, "TOTP", new LoginVerificationService.ResendRequest(token), now.plusSeconds(60));
+                1, "TOTP", new LoginVerificationModels.ResendRequest(token), now.plusSeconds(60));
 
         assertThat(result.simulated()).isTrue();
-        assertThat(result.methods()).extracting(LoginVerificationService.Method::type)
+        assertThat(result.methods()).extracting(LoginVerificationModels.Method::type)
                 .containsExactly("EMAIL", "TOTP");
         verify(db).issue(eq(1L), eq("TOTP"), anyString(), anyString(), eq("EMAIL,TOTP"),
                 anyString(), isNull(), isNull(), eq(true), eq(now.plusSeconds(60)));
@@ -225,7 +237,7 @@ class LoginVerificationServiceTest {
                         null, now.plusSeconds(300), false, 0, true)));
 
         assertThatThrownBy(() -> service.resendBindingCode(
-                        1, "TOTP", new LoginVerificationService.ResendRequest(token), now))
+                        1, "TOTP", new LoginVerificationModels.ResendRequest(token), now))
                 .hasMessage("LOGIN_CHALLENGE_EXPIRED");
         verify(db, never()).issue(anyLong(), anyString(), anyString(), anyString(), anyString(),
                 nullable(String.class), nullable(String.class), nullable(String.class), anyBoolean(), any());
@@ -244,7 +256,7 @@ class LoginVerificationServiceTest {
                                         now)));
     }
 
-    LoginVerificationService.ChallengeResponse begin() {
+    LoginVerificationModels.ChallengeResponse begin() {
         var response = service.begin(1, "hash", now);
         var hash = ArgumentCaptor.forClass(String.class);
         var fingerprint = ArgumentCaptor.forClass(String.class);
@@ -303,7 +315,7 @@ class LoginVerificationServiceTest {
         var c = begin();
         assertThat(
                         service.verify(
-                                new LoginVerificationService.VerifyRequest(
+                                new LoginVerificationModels.VerifyRequest(
                                         c.challengeToken(), null, null, totp.code(secret, now)),
                                 now))
                 .isEqualTo(1);
@@ -318,7 +330,7 @@ class LoginVerificationServiceTest {
         assertThatThrownBy(
                         () ->
                                 service.verify(
-                                        new LoginVerificationService.VerifyRequest(
+                                        new LoginVerificationModels.VerifyRequest(
                                                 c.challengeToken(), null, null, null),
                                         now))
                 .hasMessage("LOGIN_VERIFICATION_INVALID");
@@ -336,12 +348,12 @@ class LoginVerificationServiceTest {
                                         "EMAIL", "u@example.test", true, now, now)));
         var c = begin();
         assertThat(c.methods())
-                .extracting(LoginVerificationService.Method::type)
+                .extracting(LoginVerificationModels.Method::type)
                 .containsExactly("EMAIL", "TOTP");
         assertThatThrownBy(
                         () ->
                                 service.verify(
-                                        new LoginVerificationService.VerifyRequest(
+                                        new LoginVerificationModels.VerifyRequest(
                                                 c.challengeToken(),
                                                 null,
                                                 null,
@@ -355,7 +367,7 @@ class LoginVerificationServiceTest {
         assertThat(matcher.find()).isTrue();
         assertThat(
                         service.verify(
-                                new LoginVerificationService.VerifyRequest(
+                                new LoginVerificationModels.VerifyRequest(
                                         c.challengeToken(),
                                         matcher.group(),
                                         null,
@@ -372,7 +384,7 @@ class LoginVerificationServiceTest {
         assertThatThrownBy(
                         () ->
                                 service.verify(
-                                        new LoginVerificationService.VerifyRequest(
+                                        new LoginVerificationModels.VerifyRequest(
                                                 c.challengeToken(),
                                                 null,
                                                 null,
@@ -400,7 +412,7 @@ class LoginVerificationServiceTest {
         assertThatThrownBy(
                         () ->
                                 service.verify(
-                                        new LoginVerificationService.VerifyRequest(
+                                        new LoginVerificationModels.VerifyRequest(
                                                 c.challengeToken(),
                                                 null,
                                                 null,
@@ -423,7 +435,7 @@ class LoginVerificationServiceTest {
         assertThatThrownBy(
                         () ->
                                 service.verify(
-                                        new LoginVerificationService.VerifyRequest(
+                                        new LoginVerificationModels.VerifyRequest(
                                                 c.challengeToken(),
                                                 null,
                                                 null,
@@ -491,7 +503,7 @@ class LoginVerificationServiceTest {
         assertThat(matcher.find()).isTrue();
         assertThat(
                         service.verify(
-                                new LoginVerificationService.VerifyRequest(
+                                new LoginVerificationModels.VerifyRequest(
                                         c.challengeToken(),
                                         matcher.group(),
                                         phone.getValue(),
@@ -508,11 +520,11 @@ class LoginVerificationServiceTest {
                 service.beginBinding(
                         1,
                         "PHONE",
-                        new LoginVerificationService.SettingRequest(
+                        new LoginVerificationModels.SettingRequest(
                                 "password", "+12025550125", true),
                         now);
         assertThat(response.challenge().methods())
-                .extracting(LoginVerificationService.Method::type)
+                .extracting(LoginVerificationModels.Method::type)
                 .containsExactly("EMAIL", "PHONE");
         verify(email).send(eq("u@example.test"), anyString(), anyString());
         verify(sender).send(eq("+12025550125"), anyString());
@@ -527,11 +539,11 @@ class LoginVerificationServiceTest {
                 service.beginBinding(
                         1,
                         "EMAIL",
-                        new LoginVerificationService.SettingRequest(
+                        new LoginVerificationModels.SettingRequest(
                                 "password", "new@example.test", true),
                         now);
         assertThat(response.challenge().methods())
-                .extracting(LoginVerificationService.Method::type)
+                .extracting(LoginVerificationModels.Method::type)
                 .containsExactly("EMAIL", "PHONE", "TOTP");
         verify(email).send(eq("new@example.test"), anyString(), anyString());
     }
@@ -543,7 +555,7 @@ class LoginVerificationServiceTest {
                                 service.beginBinding(
                                         1,
                                         "EMAIL",
-                                        new LoginVerificationService.SettingRequest(
+                                        new LoginVerificationModels.SettingRequest(
                                                 "bad", "new@example.test", true),
                                         now))
                 .hasMessage("LOGIN_PASSWORD_INVALID");
@@ -556,10 +568,10 @@ class LoginVerificationServiceTest {
                 service.beginBinding(
                         1,
                         "EMAIL",
-                        new LoginVerificationService.SettingRequest("password", null, false),
+                        new LoginVerificationModels.SettingRequest("password", null, false),
                         now);
         assertThat(response.challenge().methods())
-                .extracting(LoginVerificationService.Method::type)
+                .extracting(LoginVerificationModels.Method::type)
                 .containsExactly("EMAIL");
     }
 }

@@ -1,11 +1,11 @@
 package com.surprising.gateway.provider.service;
 
 import com.surprising.gateway.provider.config.GatewayProperties;
-import com.surprising.gateway.provider.auth.AdminApprovalRepository;
-import com.surprising.gateway.provider.auth.AdminAuditRepository;
-import com.surprising.gateway.provider.auth.AdminAuditRepository.AdminOperationRecord;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.AuthService;
+import com.surprising.gateway.provider.auth.repository.AdminApprovalRepository;
+import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
+import com.surprising.gateway.provider.auth.repository.AdminAuditRepository.AdminOperationRecord;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.product.api.ProductLine;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;

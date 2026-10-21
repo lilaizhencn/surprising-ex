@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.interceptor;
 
-import com.surprising.gateway.provider.auth.AuthService;
+import com.surprising.gateway.provider.auth.service.AuthService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

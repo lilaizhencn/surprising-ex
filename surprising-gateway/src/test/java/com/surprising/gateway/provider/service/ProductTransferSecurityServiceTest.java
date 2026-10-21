@@ -9,7 +9,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.surprising.gateway.provider.auth.SensitiveActionVerificationService;
+import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.asset.repository.AssetRepository;
 import com.surprising.asset.model.AssetConfiguration.Asset;

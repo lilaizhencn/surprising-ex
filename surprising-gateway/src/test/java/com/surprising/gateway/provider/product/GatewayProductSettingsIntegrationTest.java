@@ -3,8 +3,8 @@ package com.surprising.gateway.provider.product;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-import com.surprising.gateway.provider.auth.AdminAuditRepository;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.repository.GatewayProductLineRepository;
 import com.surprising.gateway.provider.service.GatewayProductSettings;
 import com.surprising.product.api.ProductLine;

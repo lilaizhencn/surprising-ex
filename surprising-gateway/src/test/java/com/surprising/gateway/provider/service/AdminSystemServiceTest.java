@@ -4,8 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.AuthService;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.net.URI;
 import java.time.Instant;

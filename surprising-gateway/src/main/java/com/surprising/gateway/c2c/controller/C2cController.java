@@ -17,7 +17,7 @@ import com.surprising.gateway.c2c.service.C2cQueryService;
 import com.surprising.gateway.c2c.service.C2cQuickQuoteService;
 import com.surprising.gateway.c2c.service.C2cSubmissionService;
 import com.surprising.gateway.c2c.utils.C2cDigests;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import java.util.*;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.*;

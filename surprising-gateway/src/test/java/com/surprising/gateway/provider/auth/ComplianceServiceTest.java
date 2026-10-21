@@ -1,8 +1,22 @@
 package com.surprising.gateway.provider.auth;
 
-import com.surprising.gateway.provider.auth.ComplianceModels.AmlCase;
-import com.surprising.gateway.provider.auth.ComplianceModels.RiskTag;
-import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.client.KycProviderRegistry;
+import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.model.ComplianceModels;
+import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
+import com.surprising.gateway.provider.auth.repository.ComplianceAmlCaseRepository;
+import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
+import com.surprising.gateway.provider.auth.repository.ComplianceRiskTagRepository;
+import com.surprising.gateway.provider.auth.repository.ComplianceUserProjectionRepository;
+import com.surprising.gateway.provider.auth.repository.CountryRepository;
+import com.surprising.gateway.provider.auth.service.AdminApprovalService;
+import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.ComplianceService;
+
+import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCase;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.RiskTag;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.service.KycDocumentService;
 import com.surprising.gateway.provider.service.SecurityNotificationService;
 import java.time.Instant;

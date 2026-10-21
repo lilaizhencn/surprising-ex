@@ -14,7 +14,7 @@ import static org.mockito.Mockito.*;
 import com.surprising.gateway.c2c.model.C2cAd;
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.c2c.utils.C2cDigests;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.service.ProductAccountAdjustment;
 import com.surprising.gateway.provider.service.ProductAccountClient;
 import java.time.Instant;

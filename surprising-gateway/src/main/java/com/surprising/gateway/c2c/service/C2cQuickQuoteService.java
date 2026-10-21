@@ -5,7 +5,7 @@ import com.surprising.gateway.c2c.service.C2cOrders;
 import com.surprising.gateway.c2c.model.C2cOfferFilter;
 import com.surprising.gateway.c2c.model.C2cQuickQuoteSpec;
 import com.surprising.gateway.c2c.model.C2cQuote;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import org.springframework.stereotype.Service;
 
 /** 快捷报价按当前价格顺序尝试原生候选，不分配库存、不调用资金Core。 */

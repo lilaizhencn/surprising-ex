@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.controller;
 
 import com.surprising.account.api.model.*;
 import com.surprising.account.provider.service.AccountRequestService;
-import com.surprising.gateway.provider.auth.AuthService;
+import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.product.GatewayProductSelection;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;

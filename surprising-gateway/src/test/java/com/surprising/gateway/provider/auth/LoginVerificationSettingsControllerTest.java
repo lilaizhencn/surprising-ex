@@ -1,5 +1,16 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.client.EmailMessageSender;
+import com.surprising.gateway.provider.auth.controller.LoginVerificationSettingsController;
+import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.LoginVerificationService;
+import com.surprising.gateway.provider.auth.service.PasswordHasher;
+import com.surprising.gateway.provider.auth.service.TotpService;
+
 import com.surprising.gateway.provider.auth.repository.LoginChallengeRepository;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;

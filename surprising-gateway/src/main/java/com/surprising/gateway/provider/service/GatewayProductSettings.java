@@ -1,7 +1,7 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.auth.AdminAuditRepository;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.model.GatewayProductSetting;
 import com.surprising.gateway.provider.repository.GatewayProductLineRepository;
 import com.surprising.product.api.ProductLine;

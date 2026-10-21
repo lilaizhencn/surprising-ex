@@ -9,7 +9,7 @@ import com.surprising.gateway.c2c.repository.C2cSubmissions;
 import com.surprising.gateway.c2c.utils.C2cViews;
 import com.surprising.gateway.c2c.model.*;
 import com.surprising.gateway.c2c.repository.*;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;

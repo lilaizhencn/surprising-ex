@@ -1,5 +1,13 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.client.KycProviderRegistry;
+import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.model.ComplianceModels;
+import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
+import com.surprising.gateway.provider.auth.repository.CountryRepository;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.ComplianceService;
+
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -8,7 +16,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import com.surprising.gateway.provider.auth.ComplianceModels.KycSubmissionRequest;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmissionRequest;
 import com.surprising.gateway.provider.service.KycDocumentService;
 
 class KycApplicationValidationTest {

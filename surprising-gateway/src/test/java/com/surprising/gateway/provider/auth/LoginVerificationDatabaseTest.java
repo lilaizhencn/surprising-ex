@@ -1,5 +1,17 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
+
+import com.surprising.gateway.provider.auth.client.EmailMessageSender;
+import com.surprising.gateway.provider.auth.client.SmsMessageSender;
+import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
+import com.surprising.gateway.provider.auth.service.LoginVerificationService;
+import com.surprising.gateway.provider.auth.service.PasswordHasher;
+import com.surprising.gateway.provider.auth.service.TotpService;
+
 import com.surprising.gateway.provider.auth.repository.LoginChallengeRepository;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -124,9 +136,9 @@ class LoginVerificationDatabaseTest {
         if (admin != null && schema != null) admin.execute("DROP SCHEMA " + schema + " CASCADE");
     }
 
-    LoginVerificationService.VerifyRequest request(
-            LoginVerificationService.ChallengeResponse challenge, String code) {
-        return new LoginVerificationService.VerifyRequest(
+    LoginVerificationModels.VerifyRequest request(
+            LoginVerificationModels.ChallengeResponse challenge, String code) {
+        return new LoginVerificationModels.VerifyRequest(
                 challenge.challengeToken(), null, null, code);
     }
 
@@ -211,39 +223,39 @@ class LoginVerificationDatabaseTest {
                 service.beginBinding(
                         1,
                         "EMAIL",
-                        new LoginVerificationService.SettingRequest(
+                        new LoginVerificationModels.SettingRequest(
                                 "password", "u@example.test", true),
                         now);
         var token = binding.challenge().challengeToken();
         String code = latestEmailCode();
-        var incomplete = new LoginVerificationService.VerifyRequest(token, code, null, null);
+        var incomplete = new LoginVerificationModels.VerifyRequest(token, code, null, null);
         assertThatThrownBy(
                         () ->
                                 service.confirmBinding(
                                         1,
                                         "EMAIL",
-                                        new LoginVerificationService.SettingConfirmation(
+                                        new LoginVerificationModels.SettingConfirmation(
                                                 "password", incomplete),
                                         now))
                 .hasMessage("LOGIN_VERIFICATION_INVALID");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM gateway_login_factors", Integer.class))
                 .isZero();
         var codes =
-                new LoginVerificationService.VerifyRequest(
+                new LoginVerificationModels.VerifyRequest(
                         token, code, null, totp.code(secret, now));
         assertThatThrownBy(
                         () ->
                                 service.confirmBinding(
                                         1,
                                         "EMAIL",
-                                        new LoginVerificationService.SettingConfirmation(
+                                        new LoginVerificationModels.SettingConfirmation(
                                                 "wrong", codes),
                                         now))
                 .hasMessage("LOGIN_PASSWORD_INVALID");
         service.confirmBinding(
                 1,
                 "EMAIL",
-                new LoginVerificationService.SettingConfirmation("password", codes),
+                new LoginVerificationModels.SettingConfirmation("password", codes),
                 now);
         assertThat(jdbc.queryForObject("SELECT enabled FROM gateway_login_factors", Boolean.class))
                 .isTrue();
@@ -252,7 +264,7 @@ class LoginVerificationDatabaseTest {
                                 service.confirmBinding(
                                         1,
                                         "EMAIL",
-                                        new LoginVerificationService.SettingConfirmation(
+                                        new LoginVerificationModels.SettingConfirmation(
                                                 "password", codes),
                                         now))
                 .hasMessage("LOGIN_CHALLENGE_EXPIRED");
@@ -260,15 +272,15 @@ class LoginVerificationDatabaseTest {
                 service.beginBinding(
                         1,
                         "EMAIL",
-                        new LoginVerificationService.SettingRequest("password", null, false),
+                        new LoginVerificationModels.SettingRequest("password", null, false),
                         now.plusSeconds(61));
         var disableCodes =
-                new LoginVerificationService.VerifyRequest(
+                new LoginVerificationModels.VerifyRequest(
                         disabling.challenge().challengeToken(), latestEmailCode(), null, null);
         service.confirmBinding(
                 1,
                 "EMAIL",
-                new LoginVerificationService.SettingConfirmation("password", disableCodes),
+                new LoginVerificationModels.SettingConfirmation("password", disableCodes),
                 now.plusSeconds(61));
         assertThat(jdbc.queryForObject("SELECT enabled FROM gateway_login_factors", Boolean.class))
                 .isFalse();

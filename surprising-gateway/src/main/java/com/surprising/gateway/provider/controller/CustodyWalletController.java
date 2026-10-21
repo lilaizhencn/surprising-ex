@@ -1,10 +1,10 @@
 package com.surprising.gateway.provider.controller;
 
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.AuthService;
-import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
-import com.surprising.gateway.provider.auth.ComplianceService;
-import com.surprising.gateway.provider.auth.SensitiveActionVerificationService;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.service.ComplianceService;
+import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.service.CustodyWalletClient;
 import com.surprising.gateway.provider.service.CustodyWithdrawalService;
 import jakarta.validation.Valid;
@@ -129,7 +129,7 @@ public class CustodyWalletController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (CustodyWithdrawalService.WithdrawalUnknownException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
-        } catch (com.surprising.gateway.provider.auth.ComplianceService.WithdrawalSecurityHoldException ex) {
+        } catch (com.surprising.gateway.provider.auth.service.ComplianceService.WithdrawalSecurityHoldException ex) {
             throw new ResponseStatusException(HttpStatus.LOCKED, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw badRequest(ex);

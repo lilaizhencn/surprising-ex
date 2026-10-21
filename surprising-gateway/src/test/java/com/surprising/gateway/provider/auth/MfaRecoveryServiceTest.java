@@ -1,5 +1,20 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
+
+import com.surprising.gateway.provider.auth.client.EmailMessageSender;
+import com.surprising.gateway.provider.auth.client.SmsMessageSender;
+import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
+import com.surprising.gateway.provider.auth.repository.ComplianceKycRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.repository.MfaRecoveryRepository;
+import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
+import com.surprising.gateway.provider.auth.service.LoginVerificationService;
+import com.surprising.gateway.provider.auth.service.MfaRecoveryService;
+import com.surprising.gateway.provider.auth.service.PasswordHasher;
+
 import com.surprising.gateway.provider.auth.model.AuthChallenge;
 import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepository;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -7,8 +22,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import com.surprising.gateway.provider.auth.ComplianceModels.KycDocument;
-import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.KycDocumentService;
 import com.surprising.gateway.provider.service.SecurityNotificationService;
@@ -63,8 +78,8 @@ class MfaRecoveryServiceTest {
     @Test
     void emailCodeSubmitsForReviewAndApprovalRemovesMfaAndStartsWithdrawalHold() throws Exception {
         when(loginVerification.settings(USER_ID)).thenReturn(List.of(
-                new LoginVerificationService.Setting("EMAIL", true, true, "u***@example.test"),
-                new LoginVerificationService.Setting("PHONE", true, false, "+***0123")));
+                new LoginVerificationModels.Setting("EMAIL", true, true, "u***@example.test"),
+                new LoginVerificationModels.Setting("PHONE", true, false, "+***0123")));
         var challenge = issueChallenge("EMAIL");
 
         var issued = service.issue(USER_ID, "correct-password", "127.0.0.1", NOW);
@@ -103,8 +118,8 @@ class MfaRecoveryServiceTest {
     @Test
     void phoneCodeIsSimulatedThroughSmsProviderAndRejectedReviewKeepsMfaEnabled() throws Exception {
         when(loginVerification.settings(USER_ID)).thenReturn(List.of(
-                new LoginVerificationService.Setting("EMAIL", false, false, null),
-                new LoginVerificationService.Setting("PHONE", true, true, "+***0123")));
+                new LoginVerificationModels.Setting("EMAIL", false, false, null),
+                new LoginVerificationModels.Setting("PHONE", true, true, "+***0123")));
         AtomicReference<String> smsDestination = new AtomicReference<>();
         AtomicReference<String> smsCode = new AtomicReference<>();
         when(smsProvider.getIfAvailable()).thenReturn((phone, code) -> {
@@ -142,7 +157,7 @@ class MfaRecoveryServiceTest {
     @Test
     void recoveryRequiresVerifiedKycAndCurrentPassword() {
         when(loginVerification.settings(USER_ID)).thenReturn(List.of(
-                new LoginVerificationService.Setting("EMAIL", true, true, "u***@example.test")));
+                new LoginVerificationModels.Setting("EMAIL", true, true, "u***@example.test")));
         when(passwords.matches("wrong-password", "hash")).thenReturn(false);
         assertThatThrownBy(() -> service.issue(USER_ID, "wrong-password", "127.0.0.1", NOW))
                 .hasMessage("current password is invalid");

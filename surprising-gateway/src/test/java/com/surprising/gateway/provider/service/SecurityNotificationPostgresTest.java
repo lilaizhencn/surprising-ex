@@ -3,8 +3,8 @@ package com.surprising.gateway.provider.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.surprising.gateway.provider.auth.EmailMessageSender;
-import com.surprising.gateway.provider.auth.MfaRecoveryRepository.RecoveryRequest;
+import com.surprising.gateway.provider.auth.client.EmailMessageSender;
+import com.surprising.gateway.provider.auth.repository.MfaRecoveryRepository.RecoveryRequest;
 import com.surprising.gateway.provider.repository.SecurityEmailNotificationRepository;
 import java.nio.file.Files;
 import java.nio.file.Path;

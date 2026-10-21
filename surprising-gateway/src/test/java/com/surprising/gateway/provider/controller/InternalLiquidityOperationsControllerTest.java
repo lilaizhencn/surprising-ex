@@ -6,7 +6,7 @@ import static org.mockito.Mockito.*;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
 import com.surprising.account.provider.service.AccountCommandGateway;
-import com.surprising.gateway.provider.auth.AdminAuditRepository;
+import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.instrument.provider.service.InstrumentService;
 import com.surprising.product.api.ProductLine;

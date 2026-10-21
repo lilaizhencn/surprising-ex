@@ -10,7 +10,7 @@ import com.surprising.gateway.c2c.repository.C2cConversationRepository;
 import com.surprising.gateway.c2c.repository.C2cMessageReadRepository;
 import com.surprising.gateway.c2c.repository.C2cMessageRepository;
 import com.surprising.gateway.c2c.repository.C2cOrderEventRepository;
-import com.surprising.gateway.provider.auth.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
 import java.time.Instant;
 import java.util.*;
 import org.springframework.stereotype.Service;

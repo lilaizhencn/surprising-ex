@@ -4,9 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import com.surprising.gateway.provider.auth.AdminApprovalRepository;
-import com.surprising.gateway.provider.auth.AdminAuditRepository;
-import com.surprising.gateway.provider.auth.AuthService;
+import com.surprising.gateway.provider.auth.repository.AdminApprovalRepository;
+import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
+import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.local.LocalBusinessApi;
 import com.surprising.gateway.provider.product.GatewayProductSelection;

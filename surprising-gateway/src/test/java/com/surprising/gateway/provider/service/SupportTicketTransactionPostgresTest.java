@@ -5,12 +5,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.surprising.gateway.provider.auth.AuthModels;
-import com.surprising.gateway.provider.auth.AuthService;
-import com.surprising.gateway.provider.auth.ComplianceService;
-import com.surprising.gateway.provider.auth.SupportTicketNoteRepository;
-import com.surprising.gateway.provider.auth.SupportTicketRepository;
-import com.surprising.gateway.provider.auth.SupportTicketService;
+import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.ComplianceService;
+import com.surprising.gateway.provider.auth.repository.SupportTicketNoteRepository;
+import com.surprising.gateway.provider.auth.repository.SupportTicketRepository;
+import com.surprising.gateway.provider.auth.service.SupportTicketService;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;

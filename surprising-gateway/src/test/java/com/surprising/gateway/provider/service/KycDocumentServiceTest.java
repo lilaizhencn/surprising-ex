@@ -10,8 +10,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.surprising.gateway.provider.auth.ComplianceModels.KycDocument;
-import com.surprising.gateway.provider.auth.KycDocumentRepository;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
+import com.surprising.gateway.provider.auth.repository.KycDocumentRepository;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.file.Files;
 import java.nio.file.Path;

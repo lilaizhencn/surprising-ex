@@ -1,5 +1,15 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.LoginVerificationModels;
+
+import com.surprising.gateway.provider.auth.client.TelegramOidcClient;
+import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.LoginVerificationService;
+import com.surprising.gateway.provider.auth.service.TelegramLoginService;
+
 import com.surprising.gateway.provider.auth.model.TelegramLoginRows;
 import com.surprising.gateway.provider.auth.repository.TelegramLoginFlowRepository;
 import static org.assertj.core.api.Assertions.*;
@@ -60,8 +70,8 @@ class TelegramLoginServiceTest {
                 new TelegramLoginRows.Result("123", "小李", false)));
         when(users.createUser(isNull(), isNull(), isNull(), any()))
                 .thenReturn(new AuthModels.AuthenticatedUser(7, null, null, "NORMAL", List.of("USER"), Instant.now()));
-        var challenge = new LoginVerificationService.ChallengeResponse(true, "challenge", Instant.now().plusSeconds(300),
-                List.of(new LoginVerificationService.Method("TOTP", null)), false);
+        var challenge = new LoginVerificationModels.ChallengeResponse(true, "challenge", Instant.now().plusSeconds(300),
+                List.of(new LoginVerificationModels.Method("TOTP", null)), false);
         when(auth.loginTelegram(7, http)).thenReturn(challenge);
         assertThat(service.complete(state, verifier, "device", http)).isSameAs(challenge);
         verify(identities).bind(eq("123"), eq(7L), any());

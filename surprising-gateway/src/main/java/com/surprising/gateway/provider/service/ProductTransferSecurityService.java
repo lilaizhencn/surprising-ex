@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.auth.SensitiveActionVerificationService;
+import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.asset.repository.AssetRepository;
 import java.math.BigDecimal;

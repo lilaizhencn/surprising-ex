@@ -1,5 +1,15 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.provider.auth.model.ComplianceModels;
+import com.surprising.gateway.provider.auth.repository.AdminApprovalRepository;
+import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.service.AdminApprovalService;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.ComplianceService;
+import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
+import com.surprising.gateway.provider.auth.service.TotpService;
+
 import com.surprising.gateway.c2c.controller.C2cAdminChatController;
 import com.surprising.gateway.c2c.controller.C2cAdminController;
 import com.surprising.gateway.c2c.controller.C2cChatController;
@@ -48,8 +58,7 @@ import com.surprising.gateway.c2c.repository.*;
 import com.surprising.gateway.c2c.service.C2cAdminQueryService;
 import com.surprising.gateway.c2c.service.C2cNotificationService;
 import com.surprising.gateway.c2c.service.C2cMarketService;
-import com.surprising.gateway.provider.auth.*;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.gateway.provider.service.*;

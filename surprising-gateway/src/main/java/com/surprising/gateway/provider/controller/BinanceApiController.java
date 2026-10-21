@@ -1,11 +1,11 @@
 package com.surprising.gateway.provider.controller;
 
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.AuthService;
-import com.surprising.gateway.provider.auth.ComplianceModels.KycProfile;
-import com.surprising.gateway.provider.auth.ComplianceService;
-import com.surprising.gateway.provider.auth.GatewayApiKeyService;
-import com.surprising.gateway.provider.auth.SensitiveActionVerificationService;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycProfile;
+import com.surprising.gateway.provider.auth.service.ComplianceService;
+import com.surprising.gateway.provider.auth.service.GatewayApiKeyService;
+import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.GatewayProxyService;
 import com.surprising.gateway.provider.service.CustodyWalletClient;
@@ -133,7 +133,7 @@ public class BinanceApiController {
                     ex.getReason() == null ? "request failed" : ex.getReason());
         } catch (CustodyWithdrawalService.WithdrawalRejectedException ex) {
             return error(HttpStatus.BAD_REQUEST, -2010, ex.getMessage());
-        } catch (com.surprising.gateway.provider.auth.ComplianceService.WithdrawalSecurityHoldException ex) {
+        } catch (com.surprising.gateway.provider.auth.service.ComplianceService.WithdrawalSecurityHoldException ex) {
             return error(HttpStatus.LOCKED, -2010, ex.getMessage());
         } catch (IllegalArgumentException ex) {
             return error(HttpStatus.BAD_REQUEST, -1100, ex.getMessage());

@@ -1,11 +1,16 @@
 package com.surprising.gateway.c2c.service;
 
+import com.surprising.gateway.provider.auth.repository.AdminApprovalRepository;
+import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayUserRepository;
+import com.surprising.gateway.provider.auth.service.AdminApprovalService;
+import com.surprising.gateway.provider.auth.service.AuthService;
+
 import com.surprising.gateway.c2c.exception.C2cProblem;
 
 import com.surprising.gateway.c2c.utils.C2cDigests;
-import com.surprising.gateway.provider.auth.*;
-import com.surprising.gateway.provider.auth.AuthModels.AdminApprovalResponse;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalResponse;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
 import java.util.List;

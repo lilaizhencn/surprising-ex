@@ -1,7 +1,7 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.auth.ComplianceModels.KycDocument;
-import com.surprising.gateway.provider.auth.KycDocumentRepository;
+import com.surprising.gateway.provider.auth.model.ComplianceModels.KycDocument;
+import com.surprising.gateway.provider.auth.repository.KycDocumentRepository;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.security.MessageDigest;
 import java.util.HexFormat;

@@ -1,11 +1,14 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.repository.AdminApprovalRepository;
+import com.surprising.gateway.provider.auth.repository.AdminAuditRepository;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.surprising.gateway.provider.auth.AuthModels.AdminApprovalCreateRequest;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
-import com.surprising.gateway.provider.auth.AdminAuditRepository.AdminOperationRecord;
+import com.surprising.gateway.provider.auth.model.AuthModels.AdminApprovalCreateRequest;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.repository.AdminAuditRepository.AdminOperationRecord;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;

@@ -1,5 +1,12 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.client.EmailMessageSender;
+import com.surprising.gateway.provider.auth.repository.GatewayUserMfaRepository;
+import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
+import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
+import com.surprising.gateway.provider.auth.service.TotpService;
+import com.surprising.gateway.provider.auth.service.UserSecurityService;
+
 import com.surprising.gateway.provider.auth.model.AuthChallenge;
 import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepository;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -8,7 +15,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.surprising.gateway.provider.auth.AuthModels.AuthenticatedUser;
+import com.surprising.gateway.provider.auth.model.AuthModels.AuthenticatedUser;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.time.Instant;
 import java.util.List;

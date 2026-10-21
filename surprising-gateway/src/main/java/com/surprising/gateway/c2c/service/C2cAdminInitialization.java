@@ -4,7 +4,7 @@ import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.account.provider.service.AccountCommandRejectedException;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
 import java.util.List;

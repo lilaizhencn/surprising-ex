@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.service;
 
-import com.surprising.gateway.provider.auth.AuthService;
+import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.config.GatewayProperties.BackendRoute;
 import java.net.URI;

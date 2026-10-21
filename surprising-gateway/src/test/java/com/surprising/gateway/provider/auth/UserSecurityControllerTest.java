@@ -1,5 +1,13 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.controller.UserSecurityController;
+import com.surprising.gateway.provider.auth.model.AuthModels;
+import com.surprising.gateway.provider.auth.service.AuthPersistenceService;
+import com.surprising.gateway.provider.auth.service.AuthService;
+import com.surprising.gateway.provider.auth.service.LoginVerificationService;
+import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
+import com.surprising.gateway.provider.auth.service.UserSecurityService;
+
 import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -15,8 +23,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
-import com.surprising.gateway.provider.auth.AuthModels.AdminRefreshSessionResponse;
-import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
+import com.surprising.gateway.provider.auth.model.AuthModels.AdminRefreshSessionResponse;
+import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;

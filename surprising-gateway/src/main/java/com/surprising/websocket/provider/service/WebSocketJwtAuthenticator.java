@@ -1,6 +1,6 @@
 package com.surprising.websocket.provider.service;
 
-import com.surprising.gateway.provider.auth.AuthService;
+import com.surprising.gateway.provider.auth.service.AuthService;
 import org.springframework.stereotype.Service;
 
 /** HTTP 与 WebSocket 共用交易登录检查，包括会话撤销、账户状态与有效期。 */

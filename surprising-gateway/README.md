@@ -480,3 +480,9 @@ C2C入口归c2c.controller，HTTP异常映射归controller.advice；业务聚合
 异常归exception，输入与原生视图归model，金额/游标/响应字段工具归utils，聊天连接适配归websocket，
 定时入口归task，配置归config。原始完整请求审批摘要、用户/产品范围、事务和权限检查保持。
 [归包验证](../docs/validation/java-mvc-c2c-packages-20261021.json)记录包迁移与HTTP/数据库回归；HTTP业务边界仍按整改表继续处理。
+
+认证模块按auth.controller、auth.service、auth.repository、auth.model、auth.client及auth.utils分工；
+KYC/OIDC/邮件的协议接入不与业务聚合混放。LoginVerificationModels保存登录挑战及设置的九个请求/响应记录，
+与AuthModels的sealed LoginResult同包，保持响应字段和校验注解；Service只引用模型，模型不反向依赖Service。
+原登录状态、MFA失败计数、权限、审批摘要、幂等及事务顺序保持。
+[认证归包验证](../docs/validation/java-mvc-auth-packages-20261021.json)包含433项实际回归与未测范围。
