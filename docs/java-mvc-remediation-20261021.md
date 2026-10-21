@@ -117,3 +117,5 @@
 - 读取复核3将行情24小时时窗、涨跌幅、成交量和趋势从Repository移至Service，原生样本/结果归model；行情唯一产品认证及合约资产名称必要关联均说明用途。定向20项、干净构建扩大111项通过无跳过，1项负例捕获跨产品歧义ID；关闭MVC-180、181。见 [行情读取验证](validation/java-mvc-market-readers-20261021.json)。所属数据库及报告已清理，其余投影/HTTP和包职责继续。
 
 - 包归类1将12个配置/属性类归config，三个HTTP Filter归provider.interceptor；更新直接导入，保留Bean名、条件、顺序、属性键和正文限制。6个直接受影响模块干净构建共266项通过无跳过，关闭MVC-033、MVC-034、MVC-035、MVC-036、MVC-037、MVC-038、MVC-039、MVC-040、MVC-041、MVC-042、MVC-043、MVC-045、MVC-072、MVC-073、MVC-074。见 [配置拦截归包验证](validation/java-mvc-infra-packages-20261021.json)。所属数据库、日志及报告已清理，其他职责和全范围整改继续。
+
+- 包归类2拆出六个Task定时入口，业务状态与原续办顺序留在Service/接入组件；保留频率、条件、C2C专用调度器和WebSocket首次租约。三模块按类去重198项通过无跳过；撤去调度注解与期权产品条件的负例均捕获预期失败。关闭MVC-159、163、164、165、166、168；全项目生产Scheduled类24个均在task。见 [定时职责验证](validation/java-mvc-task-boundaries-20261021.json)。所属数据库/日志/报告已清理，其余MVC职责与最终实栈继续。

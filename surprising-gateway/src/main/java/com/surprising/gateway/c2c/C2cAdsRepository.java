@@ -105,7 +105,7 @@ public class C2cAdsRepository {
     }
 
     /** 只读关联原AD资金意图的确认进度，筛选当前有界续办批次；本Repository只写c2c_ads，不推断Core余额。 */
-    List<C2cAd> progress(int limit) {
+    public List<C2cAd> progress(int limit) {
         return jdbc.query("""
                 SELECT a.* FROM c2c_ads a WHERE
                     (a.status='RESERVING' AND EXISTS(SELECT 1 FROM c2c_fund_intents f WHERE f.owner_type='AD' AND f.owner_id=a.ad_id

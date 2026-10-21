@@ -4,7 +4,6 @@ import com.surprising.account.provider.service.AccountOpenInterestSnapshotServic
 import com.surprising.websocket.api.model.WsChannel;
 import java.time.Instant;
 import java.util.Map;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /** Public read boundary: one authoritative Core query per tick, shared by all local subscribers. */
@@ -18,7 +17,6 @@ public class OpenInterestPublisher {
         this.products = products;
     }
 
-    @Scheduled(fixedDelay = 1000)
     public void publish() {
         for (var product : products.enabled()) publish(product);
     }

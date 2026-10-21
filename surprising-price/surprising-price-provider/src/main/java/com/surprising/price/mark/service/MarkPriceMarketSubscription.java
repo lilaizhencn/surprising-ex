@@ -21,7 +21,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.env.Environment;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /** 接收已提交行情；只做协议和精度转换，最新计算输入仍由 MarkPriceService 持有。 */
@@ -61,7 +60,6 @@ public final class MarkPriceMarketSubscription implements AutoCloseable {
         receiver = null;
     }
 
-    @Scheduled(fixedDelay = 3000)
     public void renewSubscriptions() {
         if (!receiver.ready()) {
             directory.removeNode(node);

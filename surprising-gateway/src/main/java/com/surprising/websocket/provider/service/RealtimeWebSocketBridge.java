@@ -9,7 +9,6 @@ import jakarta.annotation.PreDestroy;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.env.Environment;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 import java.time.*;
@@ -86,7 +85,6 @@ public final class RealtimeWebSocketBridge
         }
     }
 
-    @Scheduled(fixedDelay = 5000)
     public synchronized void heartbeat() {
         if (!receiver.ready()) {
             directory.removeNode(node);

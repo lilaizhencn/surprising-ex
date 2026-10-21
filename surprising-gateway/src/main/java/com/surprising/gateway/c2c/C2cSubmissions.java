@@ -77,7 +77,7 @@ public class C2cSubmissions {
     }
 
     @Transactional
-    void expireUnstarted(int limit) {
+    public void expireUnstarted(int limit) {
         // 跳过实际业务事务正在持有的行，避免把正在提交的请求误判为失败。
         jdbc.update("""
                 UPDATE c2c_submissions SET status='REJECTED',error_code='REQUEST_EXPIRED',

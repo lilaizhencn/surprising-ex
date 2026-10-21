@@ -358,3 +358,5 @@ HotSpot JDK 27，基线 `292e4e04` 与当前代码使用相同 ThreadPoolTaskSch
 通过ObjectProvider在发布时获取。测试显式构造同样依赖，保留发布顺序、产品线身份和组件缺席时的部署行为。
 
 价格消费库的MarkPriceConsumerConfiguration与MarkPriceConsumerProperties统一归consumer.config；Bean名、产品Topic、配置前缀和分区分配规则保持。验证见 [配置拦截归包记录](../docs/validation/java-mvc-infra-packages-20261021.json)。
+
+标记价行情接收仍由MarkPriceMarketSubscription持有连接与路由身份，3秒租约续订的时钟入口归mark.task.MarkPriceMarketLeaseTask，仅在realtime启用时装配。验证见 [定时职责记录](../docs/validation/java-mvc-task-boundaries-20261021.json)。

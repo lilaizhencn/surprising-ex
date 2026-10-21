@@ -1,15 +1,22 @@
-package com.surprising.gateway.c2c;
+package com.surprising.gateway.c2c.service;
+
+import com.surprising.gateway.c2c.C2cFundsRepository;
+import com.surprising.gateway.c2c.C2cFunds;
+import com.surprising.gateway.c2c.C2cAdsRepository;
+import com.surprising.gateway.c2c.C2cAds;
+import com.surprising.gateway.c2c.C2cOrdersRepository;
+import com.surprising.gateway.c2c.C2cOrders;
+import com.surprising.gateway.c2c.C2cSubmissions;
 
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 
 /** 单独线程续办小批量原指令，Core I/O 不占用行情、交易或共享定时线程。 */
-@Component
+@Service
 @ConditionalOnProperty(name="surprising.c2c.enabled",havingValue="true")
 public class C2cSettlement {
     private final C2cFundsRepository intents;
@@ -27,7 +34,6 @@ public class C2cSettlement {
         this.orderRows=orderRows;this.orders=orders;this.submissions=submissions;this.products=products;
     }
 
-    @Scheduled(fixedDelayString="${surprising.c2c.settlement-delay-ms:1000}",scheduler="c2cSettlementScheduler")
     public void settle() {
         // 关闭市场只停止新订单，已收款订单与在途资金仍须续办。
         if(products.enabled().contains(ProductLine.SPOT)) {

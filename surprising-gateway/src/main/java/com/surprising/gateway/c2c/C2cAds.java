@@ -145,7 +145,7 @@ public class C2cAds {
     }
 
     @Transactional
-    void finishFunding(UUID id) {
+    public void finishFunding(UUID id) {
         var ad=ads.get(id,true);
         if(!List.of("RESERVING","CLOSING").contains(ad.status())) return;
         String purpose=ad.status().equals("RESERVING")?"AD_RESERVE":"AD_REFUND";

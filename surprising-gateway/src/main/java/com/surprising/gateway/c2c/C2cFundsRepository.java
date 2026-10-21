@@ -63,7 +63,7 @@ public class C2cFundsRepository {
         return rows.getFirst();
     }
 
-    List<Intent> due(int limit) {
+    public List<Intent> due(int limit) {
         if (limit < 1 || limit > 64) throw new IllegalArgumentException("C2C 续办批量无效");
         return jdbc.query("""
                 SELECT * FROM c2c_fund_intents WHERE status NOT IN ('APPLIED','REJECTED') AND retry_after<=now()

@@ -101,7 +101,7 @@ public class C2cOrdersRepository {
                 WHERE order_id=?
                 """,status.name(),reason,completed,completed,order.id());
     }
-    List<UUID> expired(int limit) {
+    public List<UUID> expired(int limit) {
         return jdbc.query("SELECT order_id FROM c2c_orders WHERE status='PAYMENT_PENDING' AND payment_expires_at<=now() ORDER BY payment_expires_at LIMIT ?",
                 (r,n)->r.getObject(1,UUID.class),limit);
     }
@@ -109,7 +109,7 @@ public class C2cOrdersRepository {
      * 关联原资金意图的已提交进度，筛选可续办订单；只读EXISTS不扩大订单行数，不读取或复制Core余额。
      * 数据写入仍仅限c2c_orders，续办批次由调用方指定。
      */
-    List<UUID> fundingReady(int limit) {
+    public List<UUID> fundingReady(int limit) {
         return jdbc.query("""
                 SELECT o.order_id FROM c2c_orders o WHERE
                  (o.status='RESERVING' AND EXISTS(SELECT 1 FROM c2c_fund_intents f WHERE f.owner_type='ORDER' AND f.owner_id=o.order_id

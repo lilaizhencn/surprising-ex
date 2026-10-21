@@ -161,14 +161,14 @@ public class C2cOrders {
     }
 
     @Transactional
-    void expire(UUID id) {
+    public void expire(UUID id) {
         var initial=orders.get(id,false);ads.get(initial.adId(),true);var order=orders.get(id,true);
         if(order.status()!=C2cOrderStatus.PAYMENT_PENDING || order.paymentExpiresAt()==null || order.paymentExpiresAt().isAfter(Instant.now())) return;
         prepareCancellation(order,C2cOrderStatus.EXPIRED,"付款窗口已结束",null,false);
     }
 
     @Transactional
-    void finishFunding(UUID id) {
+    public void finishFunding(UUID id) {
         var initial=orders.get(id,false);var ad=ads.get(initial.adId(),true);var order=orders.get(id,true);
         if(order.status()==C2cOrderStatus.RESERVING) {
             var intent=funds.find("ORDER",id,"ORDER_RESERVE");

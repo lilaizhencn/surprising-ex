@@ -78,10 +78,12 @@ class MarketApplicationContextTest {
                     .doesNotHaveBean(com.surprising.aeron.service.bootstrap.AeronCoreLifecycle.class);
             if (line == ProductLine.OPTION) {
                 assertThat(ctx).hasSingleBean(com.surprising.realtime.provider.option.OptionQuoteService.class)
-                        .hasSingleBean(com.surprising.realtime.provider.option.OptionQuoteController.class);
+                        .hasSingleBean(com.surprising.realtime.provider.option.OptionQuoteController.class)
+                        .hasSingleBean(com.surprising.realtime.provider.option.task.OptionQuotePruneTask.class);
             } else {
                 assertThat(ctx).doesNotHaveBean(com.surprising.realtime.provider.option.OptionQuoteService.class)
-                        .doesNotHaveBean(com.surprising.realtime.provider.option.OptionQuoteController.class);
+                        .doesNotHaveBean(com.surprising.realtime.provider.option.OptionQuoteController.class)
+                        .doesNotHaveBean(com.surprising.realtime.provider.option.task.OptionQuotePruneTask.class);
             }
             MockMvcBuilders.webAppContextSetup(ctx).build()
                     .perform(get("/api/v1/candlestick/candles").param("instrumentId", "1")

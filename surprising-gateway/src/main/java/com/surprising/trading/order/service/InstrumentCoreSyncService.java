@@ -11,7 +11,6 @@ import java.util.Comparator;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /** Low-rate control-plane reconciliation on the scheduler, never on user order ingress. */
@@ -31,7 +30,6 @@ public class InstrumentCoreSyncService {
         this.cache=cache; this.gateway=gateway; this.line=properties.getKafka().getProductLine(); this.properties=properties;
     }
 
-    @Scheduled(fixedDelayString="${trading.order.instrument-sync-delay-ms:250}")
     public synchronized void reconcile() {
         if (!cache.initialized(line)) return;
         long now=System.nanoTime();

@@ -21,7 +21,7 @@ public class C2cFunds {
         this.markets = markets;
     }
 
-    C2cFundsRepository.Intent resume(UUID id) {
+    public C2cFundsRepository.Intent resume(UUID id) {
         var intent = intents.get(id);
         while (!intent.terminal()) {
             var configuration = markets.configuration();

@@ -14,7 +14,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
@@ -120,7 +119,6 @@ public final class OptionQuoteService {
                 "BLACK_76_ZERO_RATE_ACT_365", BigDecimal.ONE, "PER_UNDERLYING_UNIT", greeks);
     }
 
-    @Scheduled(fixedDelay = 5000)
     public void prune() {
         var now = clock.instant();
         latest.forEach((id, value) -> {
