@@ -1,9 +1,6 @@
 package com.surprising.aeron.service.cluster;
 
-import lombok.extern.slf4j.Slf4j;
-
 import com.surprising.aeron.benchmarks.transport.CommandReplicationService;
-
 import io.aeron.archive.Archive;
 import io.aeron.archive.ArchiveThreadingMode;
 import io.aeron.archive.client.AeronArchive;
@@ -17,6 +14,7 @@ import java.io.File;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import lombok.extern.slf4j.Slf4j;
 import org.agrona.ErrorHandler;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.NoOpLock;
@@ -110,7 +108,7 @@ public final class CommandReplicationNode {
         return errorHandler(component, status -> Runtime.getRuntime().halt(status));
     }
 
-    static ErrorHandler errorHandler(String component, java.util.function.IntConsumer terminate) {
+    public static ErrorHandler errorHandler(String component, java.util.function.IntConsumer terminate) {
         return throwable -> {
             if (throwable instanceof AeronException aeronException
                     && aeronException.category() == AeronException.Category.WARN) {
@@ -130,7 +128,7 @@ public final class CommandReplicationNode {
         };
     }
 
-    static ThreadingMode coreThreadingMode() {
+    public static ThreadingMode coreThreadingMode() {
         String configured = System.getProperty("surprising.aeron.core.threading-mode");
         if (configured == null || configured.isBlank()) {
             configured = System.getenv().get("AERON_CORE_THREADING_MODE");
@@ -147,11 +145,11 @@ public final class CommandReplicationNode {
         }
     }
 
-    static long coreClientLivenessTimeoutNs() {
+    public static long coreClientLivenessTimeoutNs() {
         return TimeUnit.SECONDS.toNanos(30);
     }
 
-    static Supplier<IdleStrategy> serviceIdleStrategySupplier() {
+    public static Supplier<IdleStrategy> serviceIdleStrategySupplier() {
         String configured = System.getProperty("surprising.aeron.service.idle-strategy");
         if (configured == null || configured.isBlank()) {
             configured = System.getenv("AERON_SERVICE_IDLE_STRATEGY");
@@ -159,7 +157,7 @@ public final class CommandReplicationNode {
         return serviceIdleStrategySupplier(configured);
     }
 
-    static Supplier<IdleStrategy> serviceIdleStrategySupplier(String configured) {
+    public static Supplier<IdleStrategy> serviceIdleStrategySupplier(String configured) {
         // Preserve Aeron's supplier and global property semantics when unset.
         if (configured == null || configured.isBlank()) return null;
         return switch (configured.trim().toUpperCase(Locale.ROOT)) {
@@ -171,16 +169,16 @@ public final class CommandReplicationNode {
         };
     }
 
-    static long corePublicationUnblockTimeoutNs() {
+    public static long corePublicationUnblockTimeoutNs() {
         return TimeUnit.SECONDS.toNanos(60);
     }
 
-    static String clusterIngressChannel() {
+    public static String clusterIngressChannel() {
         return configuredChannel("surprising.aeron.cluster-ingress-channel",
                 "AERON_CLUSTER_INGRESS_CHANNEL", "aeron:udp?term-length=16m");
     }
 
-    static String localArchiveControlChannel() {
+    public static String localArchiveControlChannel() {
         return configuredChannel("surprising.aeron.archive-local-control-channel",
                 "AERON_ARCHIVE_LOCAL_CONTROL_CHANNEL", "aeron:ipc?term-length=1m");
     }

@@ -1,0 +1,291 @@
+package com.surprising.aeron.service.state.order;
+
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CorePositionMode;
+import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
+import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
+import com.surprising.aeron.protocol.CoreTriggerOrderType;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
+import com.surprising.aeron.service.state.TradingRuntimeState;
+import com.surprising.aeron.service.state.account.UserRuntime;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
+import com.surprising.aeron.service.state.position.PositionRuntime;
+import com.surprising.product.api.ProductLine;
+
+/** Owns runtime trigger-order lifecycle and derivative position-capacity checks. */
+public final class RuntimeTriggerOrderStateTransitions {
+
+    private RuntimeTriggerOrderStateTransitions() {
+    }
+
+    public static void upsert(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                       long userId, CoreTriggerOrderStateView view) {
+        if (runtime == null || identities == null || view == null || userId <= 0) {
+            throw new IllegalArgumentException("invalid runtime trigger order update");
+        }
+        int symbolId = identities.symbolId(view.instrumentId());
+        long positionKey = positionKey(identities, runtime.productLine(), userId, view);
+        boolean instrumentSettled = runtime.treasury().lifecycleSettlement(symbolId) != 0;
+        upsert(runtime, userId, view, symbolId, positionKey, instrumentSettled);
+    }
+
+    public static void upsert(TradingRuntimeState runtime, long userId,
+                       CoreTriggerOrderStateView view, int symbolId,
+                       long positionKey, boolean instrumentSettled) {
+        runtime.requireRevisionCapacity();
+        CoreTriggerOrderState trigger = preparePlacement(runtime, userId, view, symbolId, positionKey, instrumentSettled);
+        runtime.putTriggerOrder(trigger);
+        runtime.incrementCommandRevision();
+    }
+
+    /** Both legs are validated on their single account Lane before either becomes visible. */
+    public static void placeOcoPair(TradingRuntimeState runtime, long userId,
+                                   CoreTriggerOrderStateView takeProfit, CoreTriggerOrderStateView stopLoss,
+                                   int symbolId, long positionKey, boolean instrumentSettled) {
+        validateOcoPair(takeProfit, stopLoss);
+        var first = preparePlacement(runtime, userId, takeProfit, symbolId, positionKey, instrumentSettled);
+        var second = preparePlacement(runtime, userId, stopLoss, symbolId, positionKey, instrumentSettled);
+        Math.addExact(runtime.revision(), 2);
+        runtime.putTriggerOrder(first);
+        runtime.putTriggerOrder(second);
+        runtime.incrementCommandRevision();
+        runtime.incrementCommandRevision();
+    }
+
+    public static void validateOcoPair(CoreTriggerOrderStateView first, CoreTriggerOrderStateView second) {
+        if (first == null || second == null || first.ocoGroupId().isBlank()
+                || !first.ocoGroupId().equals(second.ocoGroupId()) || first.userId() != second.userId()
+                || first.productLine() != second.productLine() || !first.instrumentId().equals(second.instrumentId())
+                || first.side() != second.side() || first.marginMode() != second.marginMode()
+                || first.positionSide() != second.positionSide() || first.quantitySteps() != second.quantitySteps()
+                || first.triggerOrderId() == second.triggerOrderId()
+                || first.clientTriggerOrderId().equals(second.clientTriggerOrderId())
+                || first.triggerType() != CoreTriggerOrderType.TAKE_PROFIT
+                || second.triggerType() != CoreTriggerOrderType.STOP_LOSS
+                || (first.side() == com.surprising.aeron.protocol.CoreOrderSide.SELL
+                    ? first.triggerPriceTicks() <= second.triggerPriceTicks()
+                    : first.triggerPriceTicks() >= second.triggerPriceTicks())) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "invalid take-profit / stop-loss OCO pair");
+        }
+    }
+
+    private static CoreTriggerOrderState preparePlacement(TradingRuntimeState runtime, long userId,
+                       CoreTriggerOrderStateView view, int symbolId,
+                       long positionKey, boolean instrumentSettled) {
+        if (runtime == null || view == null || userId <= 0 || symbolId < 0 || positionKey < 0) {
+            throw new IllegalArgumentException("invalid prepared runtime trigger order update");
+        }
+        runtime.assertOwner();
+        if (view.userId() != userId || view.productLine() != runtime.productLine()) {
+            throw new CoreStateRejectedException("TRIGGER_ORDER_OWNER_MISMATCH", "trigger order owner mismatch");
+        }
+        if (view.clientTriggerOrderId().isBlank()) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "clientTriggerOrderId is required");
+        }
+        CoreInstrument instrument = runtime.instrument(view.instrumentId());
+        if (instrument == null) {
+            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "trigger order instrument does not exist");
+        }
+        if (instrumentSettled) {
+            throw new CoreStateRejectedException("INSTRUMENT_SETTLED", "instrument is already settled");
+        }
+        if (runtime.triggerOrder(view.triggerOrderId()) != null) {
+            throw new CoreStateRejectedException("DUPLICATE_TRIGGER_ORDER_ID", "trigger order already exists");
+        }
+        if (runtime.hasTriggerClient(userId, view.clientTriggerOrderId())) {
+            throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID",
+                    "clientTriggerOrderId already exists");
+        }
+        validatePlacement(runtime, userId, symbolId, positionKey, view);
+        return CoreTriggerOrderState.from(view, instrument)
+                .withExecutionSnapshot(instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm());
+    }
+
+    public static boolean cancel(TradingRuntimeState runtime, long userId, long triggerOrderId) {
+        requireInput(runtime, userId, triggerOrderId);
+        CoreTriggerOrderState current = require(runtime, triggerOrderId);
+        if (current.userId() != userId) {
+            throw new CoreStateRejectedException("TRIGGER_ORDER_OWNER_MISMATCH", "trigger order owner mismatch");
+        }
+        if (!current.status().open()) return false;
+        update(runtime, current, CoreTriggerOrderStatus.CANCELED, 0, current.triggerSequence(),
+                current.triggeredPriceTicks(), current.rejectReason(), current.updatedAtEpochMillis());
+        return true;
+    }
+
+    /** Commit event owns version publication; this helper mutates only its scoped account Lane. */
+    public static boolean cancelPendingForCommit(TradingRuntimeState runtime, long triggerId) {
+        CoreTriggerOrderState current = require(runtime, triggerId);
+        if (current.status() != CoreTriggerOrderStatus.PENDING) return false;
+        runtime.putTriggerOrder(preparePendingCancellation(current));
+        return true;
+    }
+
+    public static CoreTriggerOrderState preparePendingCancellation(CoreTriggerOrderState current) {
+        if (current == null || current.status() != CoreTriggerOrderStatus.PENDING)
+            throw new IllegalStateException("closing trigger must be pending");
+        return transition(current, CoreTriggerOrderStatus.CANCELED, 0, current.triggerSequence(),
+                current.triggeredPriceTicks(), current.rejectReason(), current.updatedAtEpochMillis());
+    }
+
+    public static boolean claim(TradingRuntimeState runtime, long triggerOrderId, long triggerSequence,
+                         long triggeredPriceTicks, long triggeredAtEpochMillis) {
+        CoreTriggerOrderState current = require(runtime, triggerOrderId);
+        if (current.status() != CoreTriggerOrderStatus.PENDING) return false;
+        update(runtime, current, CoreTriggerOrderStatus.TRIGGERING, 0, triggerSequence,
+                triggeredPriceTicks, current.rejectReason(), triggeredAtEpochMillis);
+        return true;
+    }
+
+    public static boolean complete(TradingRuntimeState runtime, long triggerOrderId, boolean success,
+                            long placedOrderId, String rejectReason, long completedAtEpochMillis) {
+        CoreTriggerOrderState current = require(runtime, triggerOrderId);
+        if (current.status() != CoreTriggerOrderStatus.TRIGGERING) return false;
+        update(runtime, current, success ? CoreTriggerOrderStatus.TRIGGERED
+                        : CoreTriggerOrderStatus.TRIGGER_FAILED, placedOrderId, current.triggerSequence(),
+                current.triggeredPriceTicks(), rejectReason, completedAtEpochMillis);
+        return true;
+    }
+
+    public static boolean updateTrailing(TradingRuntimeState runtime, long triggerOrderId,
+                                  long highestPriceTicks, long lowestPriceTicks,
+                                  long activatedAtEpochMillis) {
+        CoreTriggerOrderState current = require(runtime, triggerOrderId);
+        if (!current.status().open() || current.triggerType() != CoreTriggerOrderType.TRAILING_STOP) return false;
+        runtime.putTriggerOrder(new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(),
+                current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(), current.instrumentId(),
+                current.instrument(), current.side(),
+                current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(),
+                current.activationPriceTicks(), current.callbackRatePpm(), highestPriceTicks, lowestPriceTicks,
+                activatedAtEpochMillis, current.orderType(), current.timeInForce(), current.priceTicks(),
+                current.quantitySteps(), current.marginMode(), current.positionSide(), current.status(),
+                current.placedOrderId(), current.triggerSequence(), current.triggeredPriceTicks(), current.rejectReason(),
+                current.expiresAtEpochMillis(), current.triggeredAtEpochMillis(),
+                current.createdAtEpochMillis(), Math.max(current.updatedAtEpochMillis(), activatedAtEpochMillis),
+                Math.incrementExact(current.revision()), current.makerFeeRatePpm(),
+                current.takerFeeRatePpm(), current.priceSource()));
+        runtime.incrementCommandRevision();
+        return true;
+    }
+
+    public static boolean expire(TradingRuntimeState runtime, long triggerOrderId, long expiredAtEpochMillis) {
+        CoreTriggerOrderState current = require(runtime, triggerOrderId);
+        if (current.status() != CoreTriggerOrderStatus.PENDING || current.expiresAtEpochMillis() == 0
+                || current.expiresAtEpochMillis() > expiredAtEpochMillis) return false;
+        update(runtime, current, CoreTriggerOrderStatus.EXPIRED, 0, current.triggerSequence(),
+                current.triggeredPriceTicks(), current.rejectReason(), expiredAtEpochMillis);
+        return true;
+    }
+
+    public static boolean retry(TradingRuntimeState runtime, long triggerOrderId,
+                         long staleBeforeEpochMillis, long retryAtEpochMillis) {
+        CoreTriggerOrderState current = require(runtime, triggerOrderId);
+        if (current.status() != CoreTriggerOrderStatus.TRIGGERING
+                || current.updatedAtEpochMillis() > staleBeforeEpochMillis) return false;
+        update(runtime, current, CoreTriggerOrderStatus.PENDING, 0, 0, 0,
+                current.rejectReason(), retryAtEpochMillis);
+        return true;
+    }
+
+    public static long positionKey(RuntimeIdentityRegistry identities, ProductLine productLine,
+                            long userId, CoreTriggerOrderStateView view) {
+        if (!productLine.isDerivative()) return 0;
+        return identities.positionKey(userId, OrderReservation.requireInstrumentId(view.instrumentId()),
+                view.positionSide());
+    }
+
+    public static CoreTriggerOrderState prepareMatchedCompletion(
+            CoreTriggerOrderState current, long placedOrderId, long updatedAt) {
+        if (current == null || current.status() != CoreTriggerOrderStatus.TRIGGERING || placedOrderId <= 0)
+            throw new IllegalStateException("invalid matched trigger completion");
+        return transition(current, CoreTriggerOrderStatus.TRIGGERED, placedOrderId,
+                current.triggerSequence(), current.triggeredPriceTicks(), "", updatedAt);
+    }
+
+    public static CoreTriggerOrderState prepareRejectedCompletion(
+            CoreTriggerOrderState current, String reason, long updatedAt) {
+        if (current == null || current.status() != CoreTriggerOrderStatus.TRIGGERING)
+            throw new IllegalStateException("invalid rejected trigger completion");
+        return transition(current, CoreTriggerOrderStatus.TRIGGER_FAILED, 0,
+                current.triggerSequence(), current.triggeredPriceTicks(), reason, updatedAt);
+    }
+
+    private static void validatePlacement(TradingRuntimeState runtime, long userId, int symbolId,
+                                          long positionKey, CoreTriggerOrderStateView view) {
+        UserRuntime user = runtime.user(userId);
+        if (user == null) throw new CoreStateRejectedException("USER_NOT_FOUND", "user does not exist");
+        if (!runtime.productLine().isDerivative()) return;
+        if (user.positionMode() == CorePositionMode.ONE_WAY && view.positionSide().hedgeSide()
+                || user.positionMode() == CorePositionMode.HEDGE && !view.positionSide().hedgeSide()) {
+            throw new CoreStateRejectedException("POSITION_MODE_MISMATCH",
+                    "trigger position side does not match user position mode");
+        }
+        PositionRuntime position = runtime.position(positionKey);
+        if (position == null || position.signedQuantitySteps() == 0) {
+            throw new CoreStateRejectedException("TRIGGER_POSITION_REQUIRED",
+                    "trigger order requires an open position");
+        }
+        if (position.marginMode() != view.marginMode()) {
+            throw new CoreStateRejectedException("POSITION_MARGIN_ADJUSTMENT_INVALID",
+                    "trigger margin mode does not match position");
+        }
+        CoreOrderSide closeSide = position.signedQuantitySteps() > 0 ? CoreOrderSide.SELL : CoreOrderSide.BUY;
+        if (view.side() != closeSide) {
+            throw new CoreStateRejectedException("TRIGGER_SIDE_NOT_REDUCING",
+                    "trigger order side must reduce the current position");
+        }
+        long openReduceOnly = runtime.openReduceOnlyQuantity(
+                userId, symbolId, view.positionSide(), closeSide, view.marginMode());
+        long projectedTriggerCapacity = runtime.projectedTriggerCapacity(userId, view);
+        if (Math.addExact(openReduceOnly, projectedTriggerCapacity)
+                > Math.absExact(position.signedQuantitySteps())) {
+            throw new CoreStateRejectedException("TRIGGER_CLOSE_CAPACITY_EXCEEDED",
+                    "trigger order quantity exceeds available position");
+        }
+    }
+
+    private static void update(TradingRuntimeState runtime, CoreTriggerOrderState current,
+                               CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence,
+                               long triggeredPriceTicks, String rejectReason, long updatedAt) {
+        runtime.requireRevisionCapacity();
+        runtime.putTriggerOrder(transition(current, status, placedOrderId, triggerSequence,
+                triggeredPriceTicks, rejectReason, updatedAt));
+        runtime.incrementCommandRevision();
+    }
+
+    private static CoreTriggerOrderState transition(CoreTriggerOrderState current,
+                                                    CoreTriggerOrderStatus status, long placedOrderId,
+                                                    long triggerSequence, long triggeredPriceTicks,
+                                                    String rejectReason, long updatedAt) {
+        return new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(), current.userId(),
+                current.clientTriggerOrderId(), current.ocoGroupId(), current.instrumentId(), current.instrument(), current.side(),
+                current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(),
+                current.activationPriceTicks(), current.callbackRatePpm(), current.highestPriceTicks(),
+                current.lowestPriceTicks(), current.activatedAtEpochMillis(), current.orderType(),
+                current.timeInForce(), current.priceTicks(), current.quantitySteps(), current.marginMode(),
+                current.positionSide(), status, placedOrderId, triggerSequence, triggeredPriceTicks, rejectReason,
+                current.expiresAtEpochMillis(),
+                status == CoreTriggerOrderStatus.TRIGGERED || status == CoreTriggerOrderStatus.TRIGGER_FAILED
+                        ? updatedAt : current.triggeredAtEpochMillis(),
+                current.createdAtEpochMillis(), updatedAt, Math.incrementExact(current.revision()),
+                current.makerFeeRatePpm(), current.takerFeeRatePpm(), current.priceSource());
+    }
+
+    private static CoreTriggerOrderState require(TradingRuntimeState runtime, long triggerOrderId) {
+        if (runtime == null || triggerOrderId <= 0) throw new IllegalArgumentException("invalid runtime trigger order");
+        runtime.assertOwner();
+        CoreTriggerOrderState current = runtime.triggerOrder(triggerOrderId);
+        if (current == null) {
+            throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
+        }
+        return current;
+    }
+
+    private static void requireInput(TradingRuntimeState runtime, long userId, long triggerOrderId) {
+        if (runtime == null || userId <= 0 || triggerOrderId <= 0) {
+            throw new IllegalArgumentException("invalid runtime trigger order");
+        }
+    }
+}

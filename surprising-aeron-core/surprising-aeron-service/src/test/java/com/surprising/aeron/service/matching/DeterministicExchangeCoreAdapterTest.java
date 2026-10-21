@@ -1,22 +1,17 @@
 package com.surprising.aeron.service.matching;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static com.surprising.aeron.service.state.DirectMatcherTestInputs.*;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
-import com.surprising.aeron.service.state.index.ActiveOrderIndex;
+import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.account.CoreUserState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.ledger.CoreTreasuryState;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.service.state.model.CoreRiskState;
-import com.surprising.aeron.service.state.CoreTreasuryState;
-import com.surprising.aeron.service.state.CoreUserState;
-import com.surprising.aeron.service.state.TradingCoreState;
-import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherResult;
@@ -30,6 +25,10 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+
+import static com.surprising.aeron.service.state.DirectMatcherTestInputs.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DeterministicExchangeCoreAdapterTest {
 
@@ -296,7 +295,7 @@ class DeterministicExchangeCoreAdapterTest {
 
     @Test
     void matcherEvidenceAdvancesSequences() {
-        var ledger = new MatcherEvidenceLedger(com.surprising.aeron.service.state.LaneTopology.productionDefault());
+        var ledger = new MatcherEvidenceLedger(com.surprising.aeron.service.lane.LaneTopology.productionDefault());
         var first = ledger.bind(1, new java.util.UUID(0, 1), 101, 1000,
                 ledger.nextSequence(0), 0, 0, nativeResult(2, 1));
         var second = ledger.bind(2, new java.util.UUID(0, 2), 102, 1001,
@@ -307,7 +306,7 @@ class DeterministicExchangeCoreAdapterTest {
 
     @Test
     void fixedMatcherShardRejectsOutOfNativeSequenceCompletion() {
-        var ledger = new MatcherEvidenceLedger(com.surprising.aeron.service.state.LaneTopology.productionDefault());
+        var ledger = new MatcherEvidenceLedger(com.surprising.aeron.service.lane.LaneTopology.productionDefault());
         ledger.bind(2, new java.util.UUID(0, 2), 202, 1001,
                 ledger.nextSequence(0), 0, 0, nativeResult(2, 2));
         assertThatThrownBy(() -> ledger.bind(1, new java.util.UUID(0, 1), 201, 1000,

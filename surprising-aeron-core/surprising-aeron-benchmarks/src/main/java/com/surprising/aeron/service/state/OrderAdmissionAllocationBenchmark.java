@@ -6,9 +6,15 @@ import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.service.state.account.AccountLaneState;
+import com.surprising.aeron.service.state.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.order.OrderRuntime;
+import com.surprising.aeron.service.state.order.ReservationRuntime;
+import com.surprising.aeron.service.state.position.PositionCloseCapacity;
+import com.surprising.aeron.service.state.position.PositionRuntime;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -18,8 +24,8 @@ import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
 import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
-import org.openjdk.jmh.annotations.OutputTimeUnit;
 import org.openjdk.jmh.annotations.OperationsPerInvocation;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
 import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
@@ -75,7 +81,7 @@ public class OrderAdmissionAllocationBenchmark {
                             "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
             lane = new AccountLaneState(0, 256);
             long quantity = Math.max(1, liveOrders);
-            lane.positions.put(1, new PositionRuntime(7, 0, 0, CoreMarginMode.CROSS, CorePositionSide.NET,
+            lane.storePosition(1, new PositionRuntime(7, 0, 0, CoreMarginMode.CROSS, CorePositionSide.NET,
                     instrument, quantity, 100, quantity * 100, 0, quantity * 10));
             for (int index = 0; index < liveOrders; index++) {
                 lane.putOrder(new OrderRuntime(index + 1, 7, 0, instrument, CoreOrderSide.SELL, 110,

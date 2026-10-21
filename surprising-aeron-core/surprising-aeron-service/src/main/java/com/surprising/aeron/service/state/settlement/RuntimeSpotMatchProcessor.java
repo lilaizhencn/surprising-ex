@@ -1,0 +1,504 @@
+package com.surprising.aeron.service.state.settlement;
+
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
+import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.TradingRuntimeState;
+import com.surprising.aeron.service.state.account.AccountLaneState;
+import com.surprising.aeron.service.state.account.BalanceRuntime;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.ledger.RuntimeTreasuryDelta;
+import com.surprising.aeron.service.state.math.*;
+import com.surprising.aeron.service.state.math.CoreContractMath;
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+import com.surprising.aeron.service.state.order.OrderRuntime;
+import com.surprising.aeron.service.state.order.ReservationRuntime;
+import exchange.core2.core.common.MatcherEventType;
+import exchange.core2.core.common.MatcherResult.MatcherEvent;
+import java.util.List;
+import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
+import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
+import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
+
+public final class RuntimeSpotMatchProcessor {
+
+    private RuntimeSpotMatchProcessor() {
+    }
+
+    public static void apply(TradingCoreState before, long takerOrderId, String baseAsset, String quoteAsset,
+                             List<MatcherEvent> matches, TradingRuntimeState runtime,
+                             RuntimeIdentityRegistry identities) {
+        if (before == null || runtime == null || before.productLine() != runtime.productLine()
+                || before.revision() != runtime.revision()) {
+            throw new IllegalArgumentException("invalid spot match apply");
+        }
+        applyRuntime(takerOrderId, matches, runtime, identities);
+    }
+
+    public static void applyRuntime(long takerOrderId, List<MatcherEvent> matches,
+                                    TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        if (matches == null || runtime == null || identities == null || runtime.productLine().isDerivative()) {
+            throw new IllegalArgumentException("invalid spot match apply");
+        }
+        runtime.assertOwner();
+        OrderRuntime taker = requireOpen(runtime, takerOrderId);
+        if (matches.isEmpty() && !taker.timeInForce().immediate()
+                && taker.orderType() != com.surprising.aeron.protocol.CoreOrderType.MARKET) {
+            return;
+        }
+        CoreInstrument instrument = runtime.instrument(identities.instrumentId(taker.symbolId()));
+        if (instrument == null || instrument != taker.instrument()) {
+            throw new IllegalStateException("runtime match instrument is missing");
+        }
+        if (ProductTradingRulesRegistry.forInstrument(instrument).productLine()
+                != com.surprising.product.api.ProductLine.SPOT) {
+            throw new IllegalStateException("spot matcher received a non-spot settlement kernel");
+        }
+        int baseAssetId = identities.assetId(instrument.baseAsset());
+        int quoteAssetId = identities.assetId(instrument.quoteAsset());
+        validateMatches(runtime, taker, matches);
+        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        for (int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
+            MatcherEvent match = matches.get(matchIndex);
+            if (match.eventType() != MatcherEventType.TRADE) continue;
+            taker = requireOpen(runtime, takerOrderId);
+            OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
+            boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
+            OrderRuntime buyer = taker.side() == CoreOrderSide.BUY ? taker : maker;
+            OrderRuntime seller = taker.side() == CoreOrderSide.SELL ? taker : maker;
+            applyFill(runtime, instrument, buyer, match.price(), match.size(),
+                    buyer.orderId() == taker.orderId(), baseAssetId, quoteAssetId, treasuryDelta);
+            applyFill(runtime, instrument, seller, match.price(), match.size(),
+                    seller.orderId() == taker.orderId(), baseAssetId, quoteAssetId, treasuryDelta);
+            if (makerTerminal) releaseTerminalReservation(runtime, maker.orderId());
+        }
+        taker = runtime.order(takerOrderId);
+        if (!taker.canceled() && (taker.timeInForce().immediate()
+                || taker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
+            runtime.replaceOrder(taker.withStatus(CoreOrderStatus.CANCELED, Math.incrementExact(taker.revision())));
+        }
+        releaseTerminalReservation(runtime, takerOrderId);
+        treasuryDelta.apply(runtime.treasury());
+        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+    }
+
+    static void applyLane(long takerOrderId, MatcherSettlementPlan plan, AccountLaneState lane, int laneId,
+                          TradingRuntimeState runtime, CoreInstrument instrument,
+                          int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta,
+                          long commitTimestamp, long commitPosition) {
+        if (plan == null || treasuryDelta == null || laneId < 0
+                || laneId >= runtime.topology().accountLaneCount()) {
+            throw new IllegalArgumentException("invalid spot matcher settlement plan");
+        }
+        OrderRuntime localTaker = lane.order(takerOrderId);
+        if (plan.tradeCount() <= 1) {
+            applyLaneDirect(takerOrderId, plan, lane, laneId, runtime, instrument, baseAssetId,
+                    quoteAssetId, treasuryDelta, commitTimestamp, commitPosition, localTaker);
+        } else {
+            applyLaneAccumulated(takerOrderId, plan, lane, laneId, runtime, instrument, baseAssetId,
+                    quoteAssetId, treasuryDelta, commitTimestamp, commitPosition, localTaker);
+        }
+        localTaker = lane.order(takerOrderId);
+        if (localTaker != null) {
+            if (!localTaker.canceled() && (localTaker.timeInForce().immediate()
+                    || localTaker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
+                runtime.updateOrderStatusInLane(lane, localTaker.orderId(), CoreOrderStatus.CANCELED,
+                        Math.incrementExact(localTaker.revision()), commitTimestamp, commitPosition);
+            }
+            releaseTerminalReservation(runtime, lane, takerOrderId);
+        }
+    }
+
+    private static void applyLaneDirect(long takerOrderId, MatcherSettlementPlan plan, AccountLaneState lane, int laneId,
+                                        TradingRuntimeState runtime, CoreInstrument instrument,
+                                        int baseAssetId, int quoteAssetId,
+                                        RuntimeTreasuryDelta treasuryDelta,
+                                        long commitTimestamp, long commitPosition,
+                                        OrderRuntime localTaker) {
+        for (int index = plan.firstMatcherEvent(laneId); index >= 0;
+                index = plan.nextMatcherEvent(index, laneId)) {
+            MatcherEvent match = plan.matcherEvent(index);
+            if (match.eventType() != MatcherEventType.TRADE
+                    || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;
+            if (localTaker != null) {
+                localTaker = requireOpen(lane, takerOrderId);
+                localTaker = applyFill(runtime, lane, instrument, localTaker, match.price(), match.size(), true,
+                        baseAssetId, quoteAssetId, treasuryDelta, commitTimestamp, commitPosition);
+            }
+            OrderRuntime maker = lane.order(match.matchedOrderId());
+            if (maker != null) {
+                maker = requireOpen(lane, maker.orderId());
+                boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
+                maker = applyFill(runtime, lane, instrument, maker, match.price(), match.size(),
+                        false, baseAssetId, quoteAssetId, treasuryDelta, commitTimestamp, commitPosition);
+                if (makerTerminal) releaseTerminalReservation(runtime, lane, maker.orderId());
+            }
+        }
+    }
+
+    private static void applyLaneAccumulated(long takerOrderId, MatcherSettlementPlan plan, AccountLaneState lane, int laneId,
+                                             TradingRuntimeState runtime, CoreInstrument instrument,
+                                             int baseAssetId, int quoteAssetId,
+                                             RuntimeTreasuryDelta treasuryDelta,
+                                             long commitTimestamp, long commitPosition,
+                                             OrderRuntime localTaker) {
+        SpotSettlementAccumulator accumulator = lane.spotSettlementAccumulator();
+        accumulator.reset(runtime, lane, instrument, baseAssetId, quoteAssetId, commitTimestamp, commitPosition);
+        try {
+            for (int index = plan.firstMatcherEvent(laneId); index >= 0;
+                    index = plan.nextMatcherEvent(index, laneId)) {
+                MatcherEvent match = plan.matcherEvent(index);
+                if (match.eventType() != MatcherEventType.TRADE
+                        || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;
+                if (localTaker != null) {
+                    accumulator.apply(takerOrderId, true, match.price(), match.size(), treasuryDelta);
+                }
+                OrderRuntime maker = lane.order(match.matchedOrderId());
+                if (maker != null) {
+                    accumulator.apply(maker.orderId(), false, match.price(), match.size(), treasuryDelta);
+                }
+            }
+            accumulator.publish();
+        } finally {
+            accumulator.clear();
+        }
+    }
+
+    static void validate(long takerOrderId, List<MatcherEvent> matches, TradingRuntimeState runtime) {
+        validateMatches(runtime, requireOpen(runtime, takerOrderId), matches);
+    }
+
+    private static OrderRuntime applyFill(TradingRuntimeState runtime, CoreInstrument instrument, OrderRuntime order,
+                                  long fillPriceTicks, long fillQuantitySteps, boolean taker,
+                                  int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta) {
+        return applyFill(runtime, runtime.accountLaneForUser(order.userId()), instrument, order, fillPriceTicks, fillQuantitySteps, taker,
+                baseAssetId, quoteAssetId, treasuryDelta, -1, -1);
+    }
+
+    private static OrderRuntime applyFill(TradingRuntimeState runtime, AccountLaneState lane, CoreInstrument instrument, OrderRuntime order,
+                                  long fillPriceTicks, long fillQuantitySteps, boolean taker,
+                                  int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta,
+                                       long commitTimestamp, long commitPosition) {
+        ReservationRuntime reservation = lane.reservation(order.orderId());
+        if (reservation == null || reservation.userId() != order.userId()) {
+            throw new IllegalStateException("runtime spot reservation is missing");
+        }
+        long quoteUnits = CoreContractMath.spotQuoteUnits(instrument, fillPriceTicks, fillQuantitySteps);
+        long baseUnits = CoreContractMath.spotBaseUnits(instrument, fillQuantitySteps);
+        long feeRate = taker ? order.takerFeeRatePpm() : order.makerFeeRatePpm();
+        long feeDelta = CoreContractMath.feeDeltaUnits(instrument, fillPriceTicks, fillQuantitySteps, feeRate);
+        int debitAssetId = order.side() == CoreOrderSide.BUY ? quoteAssetId : baseAssetId;
+        if (reservation.assetId() != debitAssetId) {
+            throw new IllegalStateException("spot fill debit asset does not match reservation");
+        }
+        BalanceRuntime debit = runtime.balance(lane, order.userId(), debitAssetId);
+        if (debit == null) throw new IllegalStateException("runtime spot debit balance is missing");
+        BalanceRuntime base = runtime.balance(lane, order.userId(), baseAssetId);
+        BalanceRuntime quote = runtime.balance(lane, order.userId(), quoteAssetId);
+        long nextBaseAvailable = base == null ? 0 : base.availableUnits();
+        long nextBaseLocked = base == null ? 0 : base.lockedUnits();
+        long nextQuoteAvailable = quote == null ? 0 : quote.availableUnits();
+        long nextQuoteLocked = quote == null ? 0 : quote.lockedUnits();
+        long reservationDebit;
+        if (order.side() == CoreOrderSide.BUY) {
+            reservationDebit = Math.addExact(quoteUnits, Math.max(0, Math.negateExact(feeDelta)));
+            nextQuoteLocked = Math.subtractExact(nextQuoteLocked, quoteUnits);
+            if (feeDelta < 0) nextQuoteLocked = Math.subtractExact(nextQuoteLocked, Math.negateExact(feeDelta));
+            else if (feeDelta > 0) nextQuoteAvailable = Math.addExact(nextQuoteAvailable, feeDelta);
+            nextBaseAvailable = Math.addExact(nextBaseAvailable, baseUnits);
+        } else {
+            reservationDebit = baseUnits;
+            nextBaseLocked = Math.subtractExact(nextBaseLocked, baseUnits);
+            nextQuoteAvailable = Math.addExact(nextQuoteAvailable, quoteUnits);
+            nextQuoteAvailable = Math.addExact(nextQuoteAvailable, feeDelta);
+        }
+        if (nextBaseAvailable < 0 || nextBaseLocked < 0 || nextQuoteAvailable < 0 || nextQuoteLocked < 0) {
+            throw new IllegalStateException("runtime spot fill balance would become negative");
+        }
+        long nextExecuted = Math.addExact(order.executedQuantitySteps(), fillQuantitySteps);
+        long nextRemaining = Math.subtractExact(order.remainingQuantitySteps(), fillQuantitySteps);
+        CoreOrderStatus nextStatus = nextRemaining == 0 ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN;
+        long nextRevision = Math.incrementExact(order.revision());
+        replaceBalance(runtime, lane, order.userId(), baseAssetId, base, nextBaseAvailable, nextBaseLocked);
+        replaceBalance(runtime, lane, order.userId(), quoteAssetId, quote, nextQuoteAvailable, nextQuoteLocked);
+        long valueHigh = com.surprising.aeron.protocol.OrderExecutionValue.addHigh(order.executedValueHigh(), order.executedValueLow(), fillPriceTicks, fillQuantitySteps);
+        long valueLow = com.surprising.aeron.protocol.OrderExecutionValue.addLow(order.executedValueLow(), fillPriceTicks, fillQuantitySteps);
+        runtime.updateReservationInLane(lane, order.orderId(),
+                Math.addExact(reservation.consumedUnits(), reservationDebit), reservation.releasedUnits(), nextRemaining != 0);
+        OrderRuntime nextOrder = runtime.updateOrderInLane(lane, order.orderId(), nextExecuted, nextRemaining,
+                Math.negateExact(feeDelta), valueHigh, valueLow, nextStatus, nextRevision, commitTimestamp, commitPosition);
+        treasuryDelta.addFee(quoteAssetId, Math.negateExact(feeDelta));
+        runtime.advanceUserRevision(lane, order.userId());
+        return nextOrder;
+    }
+
+    /** Coalesces all fills for a touched spot order before publishing its immutable state. */
+    public static final class SpotSettlementAccumulator {
+        private final LongObjectHashMap<SpotFillCursor> cursors = new LongObjectHashMap<>();
+        private final LongObjectHashMap<IntObjectHashMap<SpotBalanceState>> balances = new LongObjectHashMap<>();
+        private final java.util.ArrayDeque<SpotFillCursor> free = new java.util.ArrayDeque<>();
+        private final java.util.ArrayDeque<IntObjectHashMap<SpotBalanceState>> freeBalanceMaps =
+                new java.util.ArrayDeque<>();
+        private TradingRuntimeState runtime;
+        private AccountLaneState lane;
+        private CoreInstrument instrument;
+        private int baseAssetId;
+        private int quoteAssetId;
+        private long commitTimestamp;
+        private long commitPosition;
+
+        void reset(TradingRuntimeState runtime, AccountLaneState lane, CoreInstrument instrument,
+                   int baseAssetId, int quoteAssetId, long commitTimestamp, long commitPosition) {
+            this.runtime = runtime;
+            this.lane = lane;
+            this.instrument = instrument;
+            this.baseAssetId = baseAssetId;
+            this.quoteAssetId = quoteAssetId;
+            this.commitTimestamp = commitTimestamp;
+            this.commitPosition = commitPosition;
+        }
+
+        void apply(long orderId, boolean taker, long price, long quantity, RuntimeTreasuryDelta treasury) {
+            SpotFillCursor cursor = cursors.get(orderId);
+            if (cursor == null) {
+                OrderRuntime order = requireOpen(lane, orderId);
+                ReservationRuntime reservation = lane.reservation(orderId);
+                if (reservation == null || reservation.userId() != order.userId()) {
+                    throw new IllegalStateException("runtime spot reservation is missing");
+                }
+                cursor = free.pollFirst();
+                if (cursor == null) cursor = new SpotFillCursor();
+                cursor.reset(order, reservation, balanceState(order.userId(), baseAssetId),
+                        balanceState(order.userId(), quoteAssetId));
+                cursors.put(orderId, cursor);
+            }
+            cursor.apply(price, quantity, taker, treasury);
+        }
+
+        void publish() {
+            balances.forEachKeyValue((userId, userBalances) ->
+                    userBalances.forEachKeyValue((assetId, balance) -> balance.publish(runtime, lane)));
+            // Reservation replacement records its balance after-image while the reservation is
+            // still pending, so balances must be visible before immutable order/reservation state.
+            cursors.forEachKeyValue((orderId, cursor) -> cursor.publish(runtime));
+        }
+
+        void clear() {
+            cursors.forEachKeyValue((orderId, cursor) -> {
+                cursor.clear();
+                free.addFirst(cursor);
+            });
+            cursors.clear();
+            balances.forEachKeyValue((userId, userBalances) -> {
+                userBalances.clear();
+                freeBalanceMaps.addFirst(userBalances);
+            });
+            balances.clear();
+            runtime = null;
+            lane = null;
+            instrument = null;
+        }
+
+        private SpotBalanceState balanceState(long userId, int assetId) {
+            IntObjectHashMap<SpotBalanceState> userBalances = balances.get(userId);
+            if (userBalances == null) {
+                userBalances = freeBalanceMaps.pollFirst();
+                if (userBalances == null) userBalances = new IntObjectHashMap<>();
+                balances.put(userId, userBalances);
+            }
+            SpotBalanceState state = userBalances.get(assetId);
+            if (state == null) {
+                BalanceRuntime current = runtime.balance(lane, userId, assetId);
+                state = new SpotBalanceState(userId, assetId, current);
+                userBalances.put(assetId, state);
+            }
+            return state;
+        }
+
+        private static final class SpotBalanceState {
+            private final long userId;
+            private final int assetId;
+            private final boolean exists;
+            private long available;
+            private long locked;
+
+            SpotBalanceState(long userId, int assetId, BalanceRuntime current) {
+                this.userId = userId;
+                this.assetId = assetId;
+                exists = current != null;
+                available = current == null ? 0 : current.availableUnits();
+                locked = current == null ? 0 : current.lockedUnits();
+            }
+
+            void publish(TradingRuntimeState runtime, AccountLaneState lane) {
+                if (exists) runtime.replaceBalance(lane, userId, assetId, available, locked);
+                else runtime.putBalance(lane, new BalanceRuntime(userId, assetId, available, locked));
+            }
+        }
+
+        private final class SpotFillCursor {
+            private OrderRuntime originalOrder;
+            private ReservationRuntime originalReservation;
+            private SpotBalanceState base;
+            private SpotBalanceState quote;
+            private long executed;
+            private long remaining;
+            private long cumulativeFee;
+            private long executedValueHigh, executedValueLow;
+            private long consumed;
+            private long fills;
+
+            void reset(OrderRuntime order, ReservationRuntime reservation,
+                       SpotBalanceState base, SpotBalanceState quote) {
+                originalOrder = order;
+                originalReservation = reservation;
+                this.base = base;
+                this.quote = quote;
+                executed = order.executedQuantitySteps();
+                remaining = order.remainingQuantitySteps();
+                cumulativeFee = order.cumulativeFeeUnits();
+                executedValueHigh = order.executedValueHigh(); executedValueLow = order.executedValueLow();
+                consumed = reservation.consumedUnits();
+                fills = 0;
+            }
+
+            void apply(long price, long quantity, boolean taker, RuntimeTreasuryDelta treasury) {
+                if (price <= 0 || quantity <= 0 || quantity > remaining) {
+                    throw new IllegalArgumentException("invalid runtime spot fill");
+                }
+                long quoteUnits = CoreContractMath.spotQuoteUnits(instrument, price, quantity);
+                long baseUnits = CoreContractMath.spotBaseUnits(instrument, quantity);
+                long feeRate = taker ? originalOrder.takerFeeRatePpm() : originalOrder.makerFeeRatePpm();
+                long feeDelta = CoreContractMath.feeDeltaUnits(instrument, price, quantity, feeRate);
+                int debitAssetId = originalOrder.side() == CoreOrderSide.BUY ? quoteAssetId : baseAssetId;
+                if (originalReservation.assetId() != debitAssetId) {
+                    throw new IllegalStateException("spot fill debit asset does not match reservation");
+                }
+                long reservationDebit;
+                if (originalOrder.side() == CoreOrderSide.BUY) {
+                    reservationDebit = Math.addExact(quoteUnits, Math.max(0, Math.negateExact(feeDelta)));
+                    quote.locked = Math.subtractExact(quote.locked, quoteUnits);
+                    if (feeDelta < 0) quote.locked = Math.subtractExact(quote.locked, Math.negateExact(feeDelta));
+                    else if (feeDelta > 0) quote.available = Math.addExact(quote.available, feeDelta);
+                    base.available = Math.addExact(base.available, baseUnits);
+                } else {
+                    reservationDebit = baseUnits;
+                    base.locked = Math.subtractExact(base.locked, baseUnits);
+                    quote.available = Math.addExact(quote.available, quoteUnits);
+                    quote.available = Math.addExact(quote.available, feeDelta);
+                }
+                if (base.available < 0 || base.locked < 0 || quote.available < 0 || quote.locked < 0) {
+                    throw new IllegalStateException("runtime spot fill balance would become negative");
+                }
+                consumed = Math.addExact(consumed, reservationDebit);
+                long maxConsumed = Math.addExact(originalReservation.consumedUnits(),
+                        originalReservation.reservedUnits());
+                if (consumed > maxConsumed) throw new IllegalStateException("runtime spot reservation was over-consumed");
+                executed = Math.addExact(executed, quantity);
+                remaining = Math.subtractExact(remaining, quantity);
+                cumulativeFee = Math.addExact(cumulativeFee, Math.negateExact(feeDelta));
+                executedValueHigh = com.surprising.aeron.protocol.OrderExecutionValue.addHigh(executedValueHigh, executedValueLow, price, quantity);
+                executedValueLow = com.surprising.aeron.protocol.OrderExecutionValue.addLow(executedValueLow, price, quantity);
+                fills = Math.incrementExact(fills);
+                treasury.addFee(quoteAssetId, Math.negateExact(feeDelta));
+            }
+
+            void publish(TradingRuntimeState state) {
+                if (fills == 0) return;
+                CoreOrderStatus status = remaining == 0 ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN;
+                long feeDelta = Math.subtractExact(cumulativeFee, originalOrder.cumulativeFeeUnits());
+                state.updateReservationInLane(lane, originalOrder.orderId(), consumed, originalReservation.releasedUnits(), remaining != 0);
+                OrderRuntime nextOrder = state.updateOrderInLane(lane, originalOrder.orderId(), executed, remaining,
+                        feeDelta, executedValueHigh, executedValueLow, status, Math.addExact(originalOrder.revision(), fills),
+                        commitTimestamp, commitPosition);
+                state.advanceUserRevision(lane, originalOrder.userId(), fills);
+                if (nextOrder.canceled()) {
+                    long releaseUnits = lane.reservation(nextOrder.orderId()).reservedUnits();
+                    state.releaseTerminalReservationInLane(lane, nextOrder.orderId());
+                    if (releaseUnits > 0) state.advanceUserRevision(lane, nextOrder.userId());
+                }
+            }
+
+            void clear() {
+                originalOrder = null;
+                originalReservation = null;
+                base = null;
+                quote = null;
+                fills = 0;
+            }
+        }
+    }
+
+    private static void replaceBalance(TradingRuntimeState runtime, AccountLaneState lane, long userId, int assetId,
+                                       BalanceRuntime current, long available, long locked) {
+        if (current == null) runtime.putBalance(lane, new BalanceRuntime(userId, assetId, available, locked));
+        else runtime.replaceBalance(lane, userId, assetId, available, locked);
+    }
+
+    private static void releaseTerminalReservation(TradingRuntimeState runtime, long orderId) {
+        OrderRuntime order = runtime.order(orderId);
+        if (order != null) releaseTerminalReservation(runtime, runtime.accountLaneForUser(order.userId()), orderId);
+    }
+
+    private static void releaseTerminalReservation(TradingRuntimeState runtime, AccountLaneState lane, long orderId) {
+        OrderRuntime order = lane.order(orderId);
+        if (order == null || !order.canceled()) return;
+        long releaseUnits = lane.reservation(orderId).reservedUnits();
+        if (lane.matcherSettlementChanges() != null) {
+            runtime.releaseTerminalReservationInLane(lane, orderId);
+            if (releaseUnits > 0) runtime.advanceUserRevision(lane, order.userId());
+        } else {
+            runtime.releaseTerminalReservation(orderId);
+            if (releaseUnits > 0) runtime.advanceUserRevision(order.userId());
+        }
+    }
+
+    private static void validateMatches(TradingRuntimeState runtime, OrderRuntime taker,
+                                        List<MatcherEvent> matches) {
+        long takerRemaining = taker.remainingQuantitySteps();
+        LongLongHashMap makerRemaining = runtime.matcherSettlementRemainingScratch();
+        makerRemaining.clear();
+        try {
+            for (int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
+                MatcherEvent match = matches.get(matchIndex);
+                if (match == null) {
+                    throw new IllegalArgumentException("invalid runtime match");
+                }
+                if (match.eventType() != MatcherEventType.TRADE) continue;
+                if (match.price() <= 0 || match.size() <= 0) {
+                    throw new IllegalArgumentException("invalid runtime match");
+                }
+                OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
+                if (maker.userId() != match.matchedOrderUid() || maker.symbolId() != taker.symbolId()
+                        || maker.side() == taker.side() || maker.userId() == taker.userId()) {
+                    throw new IllegalStateException("runtime match does not match authoritative orders");
+                }
+                takerRemaining = Math.subtractExact(takerRemaining, match.size());
+                long remaining = Math.subtractExact(makerRemaining.containsKey(maker.orderId())
+                        ? makerRemaining.get(maker.orderId()) : maker.remainingQuantitySteps(), match.size());
+                if (takerRemaining < 0 || remaining < 0) {
+                    throw new IllegalStateException("fill exceeds runtime order remaining quantity");
+                }
+                makerRemaining.put(maker.orderId(), remaining);
+            }
+        } finally {
+            makerRemaining.clear();
+        }
+    }
+
+    private static OrderRuntime requireOpen(AccountLaneState lane, long orderId) {
+        OrderRuntime order = lane.order(orderId);
+        if (order == null || order.canceled() || order.remainingQuantitySteps() == 0)
+            throw new IllegalStateException("runtime matched order is not open: " + orderId);
+        return order;
+    }
+
+    private static OrderRuntime requireOpen(TradingRuntimeState runtime, long orderId) {
+        OrderRuntime order = runtime.order(orderId);
+        if (order == null || order.canceled() || order.remainingQuantitySteps() == 0) {
+            throw new IllegalStateException("runtime matched order is not open: " + orderId);
+        }
+        return order;
+    }
+}

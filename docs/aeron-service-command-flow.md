@@ -100,7 +100,7 @@ sequenceDiagram
 
 方法链：
 
-`InstrumentCoreSyncService.reconcile()` → `applyConfiguration()` → 发送 `REGISTER_INSTRUMENT` → 公共入口 → [`DirectCommandDispatcher.dispatch`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/DirectCommandDispatcher.java#L62) → [`InstrumentConfigurationCommands.executeRegisterInstrument`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/instrument/InstrumentConfigurationCommands.java#L16) → `TradingCommandCodec.decodeRegisterInstrument()` → [`RuntimeInstrumentStateTransitions.applyConfiguration`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeInstrumentStateTransitions.java#L14) → 首次配置加入 registry，或更新同一个 `CoreInstrument` 引用中的计算参数和交易准入开关。
+`InstrumentCoreSyncService.reconcile()` → `applyConfiguration()` → 发送 `REGISTER_INSTRUMENT` → 公共入口 → [`DirectCommandDispatcher.dispatch`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/DirectCommandDispatcher.java#L62) → [`InstrumentConfigurationCommands.executeRegisterInstrument`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/command/instrument/InstrumentConfigurationCommands.java#L16) → `TradingCommandCodec.decodeRegisterInstrument()` → [`RuntimeInstrumentStateTransitions.applyConfiguration`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/instrument/RuntimeInstrumentStateTransitions.java#L14) → 首次配置加入 registry，或更新同一个 `CoreInstrument` 引用中的计算参数和交易准入开关。
 
 Gateway 的定时同步入口在 [`InstrumentCoreSyncService.reconcile`](../surprising-gateway/src/main/java/com/surprising/trading/order/service/InstrumentCoreSyncService.java#L35)，首次注册和后续更新都进入 `applyConfiguration`。这里等待 instrument cache 就绪，再逐项同步当前配置；失败后退避重试，未知结果复用命令 ID。订单状态、订单类型/TIF、市价单、Post Only 和 Reduce Only 开关由 Gateway 快照做前置校验，并在 Core 的订单准入入口再次校验；撤单不经过这些新单开关。
 
@@ -124,7 +124,7 @@ flowchart TD
     G --> H[Account Lane 发布新的账户视图并完成命令]
 ```
 
-具体代码在 [`RuntimeAccountStateTransitions.adjustAccountBalance`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeAccountStateTransitions.java#L31)：没有 `UserRuntime` 时构造用户运行态，然后写入用户和余额；已有用户则基于现有状态更新。[`TradingRuntimeState.putUser`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java) 会把用户注册到对应 Account Lane 并更新运行时视图。
+具体代码在 [`RuntimeAccountStateTransitions.adjustAccountBalance`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/account/RuntimeAccountStateTransitions.java#L31)：没有 `UserRuntime` 时构造用户运行态，然后写入用户和余额；已有用户则基于现有状态更新。[`TradingRuntimeState.putUser`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java) 会把用户注册到对应 Account Lane 并更新运行时视图。
 
 这说明“首次余额调整可以建立运行态用户”，**不代表每个用户都必须由余额调整创建**；其他合法账户命令也可能按自己的业务规则物化所需状态。恢复快照则是把已存在的用户运行态恢复回来，不是重新注册业务用户。
 

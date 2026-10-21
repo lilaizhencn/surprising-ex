@@ -1,13 +1,11 @@
 package com.surprising.aeron.service.state.instrument;
 
-import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.OrderReservation;
-import com.surprising.aeron.service.state.model.AssetBalance;
-
-import com.surprising.aeron.protocol.RegisterInstrumentCommand;
-import com.surprising.aeron.protocol.CoreOrderProtection;
 import com.surprising.aeron.protocol.CoreInstrumentMaintenance;
+import com.surprising.aeron.protocol.CoreOrderProtection;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
+import com.surprising.aeron.service.state.model.AssetBalance;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.OptionType;

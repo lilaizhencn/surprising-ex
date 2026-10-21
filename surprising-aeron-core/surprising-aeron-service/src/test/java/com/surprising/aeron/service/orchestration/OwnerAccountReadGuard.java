@@ -1,14 +1,13 @@
 package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.service.state.TradingRuntimeState;
+import java.lang.reflect.Field;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
-import java.lang.reflect.Field;
-
 /** Rejects Owner account reads when independent Lanes own the tables. FUSED Owner owns all Lanes. */
-final class OwnerAccountReadGuard implements AutoCloseable {
+public final class OwnerAccountReadGuard implements AutoCloseable {
     private final Object[] lanes;
     private final String[] names = {"orders", "reservations", "users", "positions", "balances"};
     private final Object[][] originals;
@@ -17,7 +16,7 @@ final class OwnerAccountReadGuard implements AutoCloseable {
     private final String[] changeNames = {"changedUsers", "changedReservations"};
     private final LongHashSet[] originalChanges = new LongHashSet[changeNames.length];
 
-    OwnerAccountReadGuard(TradingRuntimeState runtime) throws ReflectiveOperationException {
+    public OwnerAccountReadGuard(TradingRuntimeState runtime) throws ReflectiveOperationException {
         this.runtime = runtime;
         Field field = runtime.getClass().getDeclaredField("accountLanes");
         field.setAccessible(true);

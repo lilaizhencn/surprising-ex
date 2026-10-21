@@ -1,10 +1,9 @@
 package com.surprising.aeron.service.command.adl;
 
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.state.RuntimeAdlExecution;
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+import com.surprising.aeron.service.state.risk.RuntimeAdlExecution;
 
 /** 自动减仓（ADL）命令。 */
 public final class AdlCommands {

@@ -8,15 +8,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /** Workload-side retry for offers known not to have entered the Cluster Log. */
-final class ClusterOfferRetry {
+public final class ClusterOfferRetry {
     private ClusterOfferRetry() { }
 
-    static CompletableFuture<CoreResponse> submit(
+    public static CompletableFuture<CoreResponse> submit(
             Supplier<CompletableFuture<CoreResponse>> operation, Runnable onRetry) {
         return submit(operation, onRetry, TimeUnit.SECONDS.toNanos(10));
     }
 
-    static CompletableFuture<CoreResponse> submit(
+    public static CompletableFuture<CoreResponse> submit(
             Supplier<CompletableFuture<CoreResponse>> operation, Runnable onRetry, long timeoutNanos) {
         CompletableFuture<CoreResponse> result = new CompletableFuture<>();
         attempt(operation, onRetry, System.nanoTime() + timeoutNanos, result);

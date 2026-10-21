@@ -1,13 +1,13 @@
 package com.surprising.aeron.service.matching;
 
-import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreBookLevelView;
+import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
-import com.surprising.aeron.service.state.instrument.CoreInstrument;
-import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.model.CoreOrderState;
+import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.service.state.TradingCoreState;
-import com.surprising.aeron.service.state.LaneTopology;
+import com.surprising.aeron.service.state.admission.ResolvedPlaceOrder;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.model.CoreOrderState;
 import exchange.core2.core.SynchronousMatchingEngine;
 import exchange.core2.core.common.CoreSymbolSpecification;
 import exchange.core2.core.common.CoreWaitStrategy;
@@ -28,15 +28,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
@@ -316,7 +316,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     /** Matcher converts the batch item's frozen admission without constructing a CoreMatchingOrder. */
     private exchange.core2.core.common.MatcherResult placeNativeAdmitted(long userId,
-            com.surprising.aeron.service.state.OrderRuntime command, exchange.core2.core.common.MatcherResult target) {
+            com.surprising.aeron.service.state.order.OrderRuntime command, exchange.core2.core.common.MatcherResult target) {
         int symbolId = ensureSymbol(command.instrument().instrumentIdValue());
         recordUser(userId);
         long price = protectedMarketPrice(symbolId, command.side(), command.orderType(),
@@ -331,8 +331,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     /** The existing Matcher slot owns this call; Account Lane authorities are rejected before touching the book. */
     public exchange.core2.core.common.MatcherResult placeAdmittedDirect(
             int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
-            long userId, com.surprising.aeron.service.state.OrderRuntime command,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            long userId, com.surprising.aeron.service.state.order.OrderRuntime command,
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (commandId == null) throw new IllegalArgumentException("invalid direct matcher command");
         return placeAdmittedDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
                 commandId.getLeastSignificantBits(), aeronTimestamp, userId, command, target);
@@ -340,8 +340,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     public exchange.core2.core.common.MatcherResult placeAdmittedDirect(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long aeronTimestamp,
-            long userId, com.surprising.aeron.service.state.OrderRuntime command,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            long userId, com.surprising.aeron.service.state.order.OrderRuntime command,
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null || target == null)
             throw new IllegalArgumentException("invalid direct matcher command");
         command.requireFrozenMatcherInput(userId);
@@ -363,7 +363,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public exchange.core2.core.common.MatcherResult placeDirect(
             int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
             long userId, ResolvedPlaceOrder command,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (commandId == null) throw new IllegalArgumentException("invalid direct matcher command");
         return placeDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
                 commandId.getLeastSignificantBits(), aeronTimestamp, userId, command, target);
@@ -372,7 +372,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public exchange.core2.core.common.MatcherResult placeDirect(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long aeronTimestamp,
             long userId, ResolvedPlaceOrder command,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null || target == null)
             throw new IllegalArgumentException("invalid direct matcher command");
         validateCommandEvidence(coreSequence, commandIdMsb, commandIdLsb, command.orderId(), aeronTimestamp);
@@ -392,7 +392,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public exchange.core2.core.common.MatcherResult placeDirect(
             int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
             long userId, CoreMatchingOrder command,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (commandId == null) throw new IllegalArgumentException("invalid direct matcher command");
         return placeDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
                 commandId.getLeastSignificantBits(), aeronTimestamp, userId, command, target);
@@ -401,7 +401,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public exchange.core2.core.common.MatcherResult placeDirect(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long aeronTimestamp,
             long userId, CoreMatchingOrder command,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null || target == null)
             throw new IllegalArgumentException("invalid direct matcher command");
         validateCommandEvidence(coreSequence, commandIdMsb, commandIdLsb, command.orderId(), aeronTimestamp);
@@ -421,7 +421,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public exchange.core2.core.common.MatcherResult cancelDirect(
             int shardId, long coreSequence, java.util.UUID commandId, long orderId,
             long aeronTimestamp, long userId, String instrumentId,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (commandId == null) throw new IllegalArgumentException("invalid direct matcher cancellation");
         return cancelDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
                 commandId.getLeastSignificantBits(), orderId, aeronTimestamp, userId, instrumentId, target);
@@ -430,7 +430,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public exchange.core2.core.common.MatcherResult cancelDirect(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
             long aeronTimestamp, long userId, String instrumentId,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()
                 || instrumentId == null || instrumentId.isBlank() || target == null)
             throw new IllegalArgumentException("invalid direct matcher cancellation");
@@ -452,7 +452,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int shardId, long coreSequence, java.util.UUID commandId, long orderId,
             long aeronTimestamp, long userId, long originalOrderId, String instrumentId,
             ResolvedPlaceOrder replacement,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (commandId == null) throw new IllegalArgumentException("invalid direct matcher replacement");
         return replaceDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
                 commandId.getLeastSignificantBits(), orderId, aeronTimestamp, userId, originalOrderId,
@@ -463,7 +463,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
             long aeronTimestamp, long userId, long originalOrderId, String instrumentId,
             ResolvedPlaceOrder replacement,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()
                 || instrumentId == null || instrumentId.isBlank() || replacement == null || target == null)
             throw new IllegalArgumentException("invalid direct matcher replacement");
@@ -492,7 +492,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public exchange.core2.core.common.MatcherResult placeDirectBatchItem(
             int shardId, int index, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
             long userId, ResolvedPlaceOrder command,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || index < 0
                 || command == null || target == null)
             throw new IllegalArgumentException("invalid direct matcher batch item");
@@ -518,7 +518,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public exchange.core2.core.common.MatcherResult cancelDirectBatchItem(
             int shardId, int index, long coreSequence, java.util.UUID commandId, long orderId,
             long aeronTimestamp, long userId, String instrumentId,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || index < 0
                 || instrumentId == null || instrumentId.isBlank() || target == null)
             throw new IllegalArgumentException("invalid direct matcher cancellation item");
@@ -549,7 +549,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private exchange.core2.core.common.MatcherResult publishNativeMatcherResult(
             int shardId, long coreSequence, java.util.UUID commandId, long orderId,
             long aeronTimestamp, exchange.core2.core.common.MatcherResult result,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (commandId == null) throw new IllegalArgumentException("invalid direct matcher command");
         return publishNativeMatcherResult(shardId, coreSequence, commandId.getMostSignificantBits(),
                 commandId.getLeastSignificantBits(), orderId, aeronTimestamp, result, target);
@@ -558,7 +558,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private exchange.core2.core.common.MatcherResult publishNativeMatcherResult(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
             long aeronTimestamp, exchange.core2.core.common.MatcherResult result,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         Throwable poison = matcherFailure.get();
         if (poison != null)
             throw new IllegalStateException("matcher completion discarded after fatal divergence", poison);
@@ -585,7 +585,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public exchange.core2.core.common.MatcherResult publishDirectPrefixFailure(
             int shardId, long coreSequence, java.util.UUID commandId, long logicalOrderId,
             long aeronTimestamp, exchange.core2.core.common.MatcherResult result,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (MatcherPrefixFailure.TYPE.isEnabled()) {
             var failure = new MatcherPrefixFailure();
             failure.coreSequence = coreSequence;
@@ -610,7 +610,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public void rejectedPlaceDirect(
             int shardId, long coreSequence, java.util.UUID commandId, long orderId,
             long aeronTimestamp, String resultCode,
-            com.surprising.aeron.service.state.MatcherSettlementEvent target) {
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount()
                 || resultCode == null || resultCode.isBlank() || target == null)
             throw new IllegalArgumentException("invalid rejected direct matcher command");

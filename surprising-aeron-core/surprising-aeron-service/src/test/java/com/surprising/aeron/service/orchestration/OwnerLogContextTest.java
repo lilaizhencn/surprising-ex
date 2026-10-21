@@ -1,12 +1,14 @@
 package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.service.orchestration.egress.ClusterServiceEgress;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.Cluster;
 import java.lang.reflect.Proxy;
 import java.util.UUID;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OwnerLogContextTest {

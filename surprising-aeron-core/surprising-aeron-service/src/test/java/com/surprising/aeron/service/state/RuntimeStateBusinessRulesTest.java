@@ -1,43 +1,49 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
+import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
+import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
+import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
+import com.surprising.aeron.protocol.CancelOrderCommand;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CorePositionMode;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.protocol.UpdateLeverageCommand;
+import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.snapshot.*;
-
-
+import com.surprising.aeron.service.state.account.AccountControlTask;
+import com.surprising.aeron.service.state.account.CoreUserState;
+import com.surprising.aeron.service.state.account.DerivativeAccountCommandProcessor;
+import com.surprising.aeron.service.state.admission.ResolvedPlaceOrder;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.model.AssetBalance;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
 import com.surprising.aeron.service.state.model.CoreLeverageKey;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.service.state.model.CorePositionState;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static com.surprising.aeron.service.matching.MatcherEventFixtures.trade;
-
-import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
-import com.surprising.aeron.protocol.CancelOrderCommand;
-import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
-import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ReservationKind;
-import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
-import com.surprising.aeron.protocol.CoreMarginMode;
-import com.surprising.aeron.protocol.CorePositionMode;
-import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.protocol.UpdatePositionModeCommand;
-import com.surprising.aeron.protocol.UpdateLeverageCommand;
-import com.surprising.aeron.protocol.CoreRiskLimitBracket;
-import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.service.state.order.RuntimeTestStateTransitions;
+import com.surprising.aeron.service.state.snapshot.*;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateMaterializer;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateProjector;
+import com.surprising.aeron.service.state.snapshot.TradingStateSnapshotCodec;
 import com.surprising.product.api.ProductLine;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.stream.Stream;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+
+import static com.surprising.aeron.service.matching.MatcherEventFixtures.trade;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RuntimeStateBusinessRulesTest {
 

@@ -1,42 +1,38 @@
 package com.surprising.aeron.service.state.index;
 
-import com.surprising.aeron.service.state.CoreTreasuryState;
-import com.surprising.aeron.service.state.CoreUserState;
-import com.surprising.aeron.service.state.admission.AdmissionSummary;
-import com.surprising.aeron.service.state.StateMapSupport;
-import com.surprising.aeron.service.state.TradingCoreState;
-
-import com.surprising.aeron.service.state.model.CoreOrderState;
-import com.surprising.aeron.service.state.model.CoreOrderStatus;
-import com.surprising.aeron.service.state.model.CoreRiskState;
-
-import static org.assertj.core.api.Assertions.assertThat;
-
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.account.CoreUserState;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.ledger.CoreTreasuryState;
+import com.surprising.aeron.service.state.model.CoreOrderState;
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+import com.surprising.aeron.service.state.model.CoreRiskState;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 class ActiveOrderIndexTest {
 
     @Test void recycledMembershipDoesNotRetainPreviousUsersOrDisturbLiveRoutes() {
-        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        var identities = new com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry();
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
         var held = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY,
                 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
-        index.apply(1, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(held, identities, instrument("1")), identities);
+        index.apply(1, com.surprising.aeron.service.state.snapshot.RuntimeStateProjector.toRuntimeOrder(held, identities, instrument("1")), identities);
         var otherInstrument = instrument("2");
         for (long id = 1_000_000; id < 1_001_000; id++) {
             long user = id + 1;
             var order = new CoreOrderState(id, ProductLine.SPOT, user, "2", CoreOrderSide.SELL,
                     100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
-            index.apply(id, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(order, identities, otherInstrument), identities);
+            index.apply(id, com.surprising.aeron.service.state.snapshot.RuntimeStateProjector.toRuntimeOrder(order, identities, otherInstrument), identities);
             assertThat(index.sortedIds(user, "2")).containsExactly(id);
             index.apply(id, null, identities);
             index.apply(id, null, identities);
@@ -50,13 +46,13 @@ class ActiveOrderIndexTest {
     }
 
     @Test void completedBurstLeavesBoundedEmptyCachesAndNoIdentityEntries() throws Exception {
-        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        var identities = new com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry();
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
         var instrument = instrument("1");
         for (long id = 1; id <= 4_097; id++) {
             var order = new CoreOrderState(id, ProductLine.SPOT, id, "1", CoreOrderSide.BUY,
                     90, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
-            index.apply(id, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(order, identities, instrument), identities);
+            index.apply(id, com.surprising.aeron.service.state.snapshot.RuntimeStateProjector.toRuntimeOrder(order, identities, instrument), identities);
         }
         for (long id = 1; id <= 4_097; id++) index.apply(id, null, identities);
         assertThat(index.count()).isZero();
@@ -80,12 +76,12 @@ class ActiveOrderIndexTest {
     void terminalRemovalIsIdempotentAndPreservesOtherAccountAndSymbolOrders() {
         for (var status : CoreOrderStatus.values()) {
             if (!status.terminal()) continue;
-            var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+            var identities = new com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry();
             var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
-            var orders = new com.surprising.aeron.service.state.OrderRuntime[3];
+            var orders = new com.surprising.aeron.service.state.order.OrderRuntime[3];
             for (int i = 0; i < orders.length; i++) {
                 var order = new CoreOrderState(i + 1, ProductLine.SPOT, i < 2 ? 7 : 8, "1", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
-                orders[i] = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+                orders[i] = com.surprising.aeron.service.state.snapshot.RuntimeStateProjector.toRuntimeOrder(
                         order, identities, instrument(order.instrumentId()));
                 index.apply(i + 1, orders[i], identities);
             }
@@ -110,7 +106,7 @@ class ActiveOrderIndexTest {
 
     @Test
     void boundedTurnoverKeepsStorageAndIndependentQueryCursors() throws Exception {
-        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        var identities = new com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry();
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
         var mapField = ActiveOrderIndex.class.getDeclaredField("ordersById");
         mapField.setAccessible(true);
@@ -119,14 +115,14 @@ class ActiveOrderIndexTest {
         valuesField.setAccessible(true);
         for (long id = 1; id <= 32; id++) {
             var order = new CoreOrderState(id, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
-            index.apply(id, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+            index.apply(id, com.surprising.aeron.service.state.snapshot.RuntimeStateProjector.toRuntimeOrder(
                     order, identities, instrument(order.instrumentId())), identities);
         }
         Object storage = valuesField.get(entries);
         for (long id = 33; id <= 4096; id++) {
             index.apply(id - 32, null, identities);
             var order = new CoreOrderState(id, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
-            index.apply(id, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+            index.apply(id, com.surprising.aeron.service.state.snapshot.RuntimeStateProjector.toRuntimeOrder(
                     order, identities, instrument(order.instrumentId())), identities);
         }
         assertThat(valuesField.get(entries)).isSameAs(storage);
@@ -147,16 +143,16 @@ class ActiveOrderIndexTest {
 
     @Test
     void runtimeUpdatesRetainRoutingOnlyAndRetireTerminalMembership() {
-        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        var identities = new com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry();
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
         var initial = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
-        var order = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(initial, identities, instrument("1"));
+        var order = com.surprising.aeron.service.state.snapshot.RuntimeStateProjector.toRuntimeOrder(initial, identities, instrument("1"));
         index.apply(1, order, identities);
         var route = index.activeOrderRoute(1);
         assertThat(route.userId()).isEqualTo(7);
         assertThat(route.instrumentId()).isEqualTo("1");
         assertThat(java.util.Arrays.stream(route.getClass().getDeclaredFields()).map(field -> field.getType().getName()))
-                .doesNotContain(com.surprising.aeron.service.state.OrderRuntime.class.getName());
+                .doesNotContain(com.surprising.aeron.service.state.order.OrderRuntime.class.getName());
         index.apply(1, order.withFill(4, 6, 3, CoreOrderStatus.OPEN, 2), identities);
         assertThat(index.activeOrderRoute(1)).isSameAs(route);
         assertThat(index.page(7, "1", 0, 10).orderIds()).containsExactly(1L);
@@ -167,13 +163,13 @@ class ActiveOrderIndexTest {
 
     @Test
     void runtimeScopeChangesReplaceMembershipWithoutRetainingThePreviousParticipant() {
-        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        var identities = new com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry();
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
         var first = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
         var second = new CoreOrderState(1, ProductLine.SPOT, 8, "2", CoreOrderSide.SELL, 110, 10, 0, 10, false, CoreOrderStatus.OPEN, 2);
-        index.apply(1, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+        index.apply(1, com.surprising.aeron.service.state.snapshot.RuntimeStateProjector.toRuntimeOrder(
                 first, identities, instrument(first.instrumentId())), identities);
-        var replacement = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+        var replacement = com.surprising.aeron.service.state.snapshot.RuntimeStateProjector.toRuntimeOrder(
                 second, identities, instrument(second.instrumentId()));
         index.apply(1, replacement, identities);
         assertThat(index.activeOrderRoute(1).userId()).isEqualTo(8);
@@ -226,17 +222,17 @@ class ActiveOrderIndexTest {
                 Map.of(11L, CoreUserState.empty(ProductLine.LINEAR_PERPETUAL, 11)),
                 Map.of(7L, opening, 8L, reducing), instruments(ProductLine.LINEAR_PERPETUAL, "1"),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
-        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
-        try (var runtime = com.surprising.aeron.service.state.RuntimeStateProjector.project(before, identities)) {
+        var identities = new com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry();
+        try (var runtime = com.surprising.aeron.service.state.snapshot.RuntimeStateProjector.project(before, identities)) {
             var laneOrders = runtime.admissionOrders(11, identities.symbolId("1"));
             var summary = laneOrders.inspect(11, "1", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.ISOLATED);
             assertThat(summary.pendingQuantity()).isEqualTo(5);
             assertThat(summary.reduceOnlyQuantity()).isZero();
             assertThat(summary.marginModeCount()).isEqualTo(1);
             runtime.executeUserSettlement(11, () -> {
-                runtime.replaceOrder(com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+                runtime.replaceOrder(com.surprising.aeron.service.state.snapshot.RuntimeStateProjector.toRuntimeOrder(
                         opening.fill(3), identities, runtime.instrument("1")));
-                runtime.replaceOrder(com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(
+                runtime.replaceOrder(com.surprising.aeron.service.state.snapshot.RuntimeStateProjector.toRuntimeOrder(
                         reducing.cancel(), identities, runtime.instrument("1")));
                 return null;
             });

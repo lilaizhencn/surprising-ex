@@ -1,7 +1,5 @@
 package com.surprising.aeron.service.orchestration;
 
-import lombok.extern.slf4j.Slf4j;
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
@@ -15,17 +13,18 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
-import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.matching.MatchingResult;
-import exchange.core2.core.common.MatcherEventType;
+import com.surprising.aeron.service.orchestration.pipeline.BenchmarkMatchingAwait;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
+import exchange.core2.core.common.MatcherEventType;
 import java.util.Arrays;
 import java.util.UUID;
+import lombok.extern.slf4j.Slf4j;
 
 /** Measures the local perpetual path from maker submission through taker fill application. */
 @Slf4j

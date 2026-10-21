@@ -1,6 +1,6 @@
 package com.surprising.aeron.benchmarks.workload;
 
-enum WorkloadOperation {
+public enum WorkloadOperation {
     PLACE,
     CANCEL,
     AMEND,

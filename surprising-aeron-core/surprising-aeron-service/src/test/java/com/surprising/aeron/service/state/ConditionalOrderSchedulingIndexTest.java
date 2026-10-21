@@ -1,8 +1,11 @@
 package com.surprising.aeron.service.state;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.protocol.CoreCancelAllAfterStatus;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.service.state.index.AlgoOrderIndex;
 import com.surprising.aeron.service.state.index.CancelAllAfterIndex;
 import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
@@ -10,6 +13,8 @@ import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 class ConditionalOrderSchedulingIndexTest {
     @Test

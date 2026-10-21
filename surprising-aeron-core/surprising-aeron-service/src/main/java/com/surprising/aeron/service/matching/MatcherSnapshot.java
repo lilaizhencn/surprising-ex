@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.matching;
 
-import com.surprising.aeron.service.state.LaneTopology;
+import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.processors.journaling.ISerializationProcessor.SerializedModuleType;

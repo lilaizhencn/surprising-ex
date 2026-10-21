@@ -1,16 +1,13 @@
 package com.surprising.aeron.service.lane;
 
 import com.surprising.aeron.service.config.TradingCpuAffinity;
-
-import lombok.extern.slf4j.Slf4j;
-
-import com.surprising.aeron.service.state.AccountLaneState;
-import com.surprising.aeron.service.state.MatcherSettlementEvent;
-
+import com.surprising.aeron.service.state.account.AccountLaneState;
+import com.surprising.aeron.service.state.settlement.MatcherSettlementEvent;
 import java.util.Locale;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
+import lombok.extern.slf4j.Slf4j;
 
 abstract class SettlementLaneWorkerLhsPadding {
     @SuppressWarnings("unused")
@@ -479,13 +476,13 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
 
     private static long commandSequence(Command command) {
         if (command instanceof MatcherSettlementEvent event) return event.coreSequence();
-        if (command instanceof com.surprising.aeron.service.state.LaneCancelEvent event)
+        if (command instanceof com.surprising.aeron.service.state.order.LaneCancelEvent event)
             return event.coreSequence();
-        if (command instanceof com.surprising.aeron.service.state.LaneCommitEvent event)
+        if (command instanceof com.surprising.aeron.service.state.change.LaneCommitEvent event)
             return event.coreSequence();
-        if (command instanceof com.surprising.aeron.service.state.PlaceBatchAdmissionEvent event)
+        if (command instanceof com.surprising.aeron.service.state.admission.PlaceBatchAdmissionEvent event)
             return event.coreSequence();
-        if (command instanceof com.surprising.aeron.service.state.ReplacementAdmissionEvent event)
+        if (command instanceof com.surprising.aeron.service.state.admission.ReplacementAdmissionEvent event)
             return event.coreSequence();
         return 0;
     }

@@ -1,0 +1,185 @@
+package com.surprising.aeron.service.state.order;
+
+import com.surprising.aeron.protocol.ReservationKind;
+
+/** Lane-owned reservation; consumption/release mutates primitive counters in place. */
+public final class ReservationRuntime {
+    private long orderId;
+    private long userId;
+    private int symbolId;
+    private ReservationKind kind;
+    private int assetId;
+    private long totalReservedUnits;
+    private long releasedUnits;
+    private long consumedUnits;
+    private long orderQuantitySteps;
+    private boolean mutable;
+    /** Only the resident reservation of a recycled authoritative order may be reset. */
+    private boolean orderSlot;
+    private boolean publicationSlot;
+
+    public ReservationRuntime(long orderId, long userId, int symbolId, ReservationKind kind,
+                              int assetId, long totalReservedUnits,
+                              long releasedUnits, long consumedUnits, long orderQuantitySteps) {
+        validate(orderId, userId, symbolId, kind, assetId, totalReservedUnits,
+                releasedUnits, consumedUnits, orderQuantitySteps);
+        this.orderId = orderId; this.userId = userId; this.symbolId = symbolId;
+        this.kind = kind; this.assetId = assetId;
+        this.totalReservedUnits = totalReservedUnits; this.releasedUnits = releasedUnits;
+        this.consumedUnits = consumedUnits; this.orderQuantitySteps = orderQuantitySteps;
+        this.mutable = true;
+    }
+
+    private static void validate(long orderId, long userId, int symbolId, ReservationKind kind,
+                                 int assetId, long totalReservedUnits, long releasedUnits,
+                                 long consumedUnits, long orderQuantitySteps) {
+        if (orderId <= 0 || userId <= 0 || symbolId < 0 || kind == null
+                || assetId < 0 || totalReservedUnits <= 0 || releasedUnits < 0 || consumedUnits < 0
+                || Math.addExact(releasedUnits, consumedUnits) > totalReservedUnits || orderQuantitySteps <= 0) {
+            throw new IllegalArgumentException("invalid runtime reservation");
+        }
+    }
+
+    public static ReservationRuntime prepareForOrderSlot(ReservationRuntime target, long orderId, long userId,
+            int symbolId, ReservationKind kind, int assetId, long reservedUnits, long quantitySteps) {
+        validate(orderId, userId, symbolId, kind, assetId, reservedUnits, 0, 0, quantitySteps);
+        if (target == null) {
+            target = new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
+                    reservedUnits, 0, 0, quantitySteps);
+            target.orderSlot = true;
+            return target;
+        }
+        if (!target.orderSlot || !target.mutable)
+            throw new IllegalArgumentException("reservation is not an authoritative order slot");
+        target.orderId = orderId; target.userId = userId; target.symbolId = symbolId;
+        target.kind = kind; target.assetId = assetId; target.totalReservedUnits = reservedUnits;
+        target.releasedUnits = target.consumedUnits = 0;
+        target.orderQuantitySteps = quantitySteps;
+        return target;
+    }
+
+    public long orderId() { return orderId; }
+    public long userId() { return userId; }
+    public int symbolId() { return symbolId; }
+    public ReservationKind kind() { return kind; }
+    public int assetId() { return assetId; }
+    public long totalReservedUnits() { return totalReservedUnits; }
+    public long releasedUnits() { return releasedUnits; }
+    public long consumedUnits() { return consumedUnits; }
+    public long orderQuantitySteps() { return orderQuantitySteps; }
+    public long reservedUnits() { return Math.subtractExact(totalReservedUnits, Math.addExact(releasedUnits, consumedUnits)); }
+
+    public ReservationRuntime snapshot() {
+        ReservationRuntime copy = new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
+                totalReservedUnits, releasedUnits, consumedUnits, orderQuantitySteps);
+        copy.mutable = false;
+        return copy;
+    }
+
+    /** Only the physical change buffer owns and reuses this frozen value. */
+    public ReservationRuntime copyIntoPublicationSlot(ReservationRuntime target) {
+        if (target == null) {
+            target = snapshot();
+            target.publicationSlot = true;
+            return target;
+        }
+        if (!target.publicationSlot || target.mutable || target.orderSlot)
+            throw new IllegalArgumentException("reservation copy target is not a publication slot");
+        target.orderId = orderId; target.userId = userId; target.symbolId = symbolId;
+        target.kind = kind; target.assetId = assetId; target.totalReservedUnits = totalReservedUnits;
+        target.releasedUnits = releasedUnits; target.consumedUnits = consumedUnits;
+        target.orderQuantitySteps = orderQuantitySteps;
+        return target;
+    }
+
+    public void clearPublicationSlot() {
+        if (!publicationSlot || mutable || orderSlot)
+            throw new IllegalStateException("reservation is not a publication slot");
+        orderId = userId = 0;
+        kind = null;
+    }
+
+    public ReservationRuntime laneValue() {
+        return mutable ? this : new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
+                totalReservedUnits, releasedUnits, consumedUnits, orderQuantitySteps);
+    }
+
+    ReservationRuntime copyForLane() {
+        return new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
+                totalReservedUnits, releasedUnits, consumedUnits, orderQuantitySteps);
+    }
+
+    public ReservationRuntime publicationValue() { return mutable ? snapshot() : this; }
+
+    void applyPublishedStateInPlace(ReservationRuntime source, long released, long consumed) {
+        if (source == null || orderId != source.orderId || userId != source.userId
+                || released < 0 || consumed < 0 || Math.addExact(released, consumed) > totalReservedUnits) {
+            throw new IllegalStateException("invalid published reservation state");
+        }
+        releasedUnits = released;
+        consumedUnits = consumed;
+    }
+
+    public void consumeInPlace(long units) {
+        if (units < 0 || units > reservedUnits()) throw new IllegalArgumentException("invalid runtime consumption");
+        consumedUnits = Math.addExact(consumedUnits, units);
+    }
+
+    public void releaseInPlace(long units) {
+        if (units < 0 || units > reservedUnits()) throw new IllegalArgumentException("invalid runtime release");
+        releasedUnits = Math.addExact(releasedUnits, units);
+    }
+
+    public void setConsumedInPlace(long nextConsumed) {
+        if (nextConsumed < consumedUnits || Math.addExact(releasedUnits, nextConsumed) > totalReservedUnits)
+            throw new IllegalArgumentException("invalid runtime consumption");
+        consumedUnits = nextConsumed;
+    }
+
+    public ReservationRuntime withRemainingUnits(long remainingUnits) {
+        if (remainingUnits < 0 || remainingUnits > reservedUnits())
+            throw new IllegalArgumentException("invalid runtime reservation remainder");
+        if (remainingUnits == reservedUnits()) return this;
+        return new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
+                totalReservedUnits, Math.addExact(releasedUnits, reservedUnits() - remainingUnits),
+                consumedUnits, orderQuantitySteps);
+    }
+
+    public ReservationRuntime release(long units) {
+        if (units < 0 || units > reservedUnits()) throw new IllegalArgumentException("invalid runtime release");
+        if (units == 0) return this;
+        return new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
+                totalReservedUnits, Math.addExact(releasedUnits, units), consumedUnits, orderQuantitySteps);
+    }
+
+    public ReservationRuntime consume(long units) {
+        if (units < 0 || units > reservedUnits()) throw new IllegalArgumentException("invalid runtime consumption");
+        if (units == 0) return this;
+        return new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
+                totalReservedUnits, releasedUnits, Math.addExact(consumedUnits, units), orderQuantitySteps);
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        if (this == other) return true;
+        if (!(other instanceof ReservationRuntime value)) return false;
+        return orderId == value.orderId && userId == value.userId && symbolId == value.symbolId
+                && assetId == value.assetId
+                && totalReservedUnits == value.totalReservedUnits && releasedUnits == value.releasedUnits
+                && consumedUnits == value.consumedUnits && orderQuantitySteps == value.orderQuantitySteps
+                && kind == value.kind;
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(orderId, userId, symbolId, kind, assetId,
+                totalReservedUnits, releasedUnits, consumedUnits, orderQuantitySteps);
+    }
+
+    @Override
+    public String toString() {
+        return "ReservationRuntime[orderId=" + orderId + ", userId=" + userId + ", assetId=" + assetId
+                + ", totalReservedUnits=" + totalReservedUnits + ", releasedUnits=" + releasedUnits
+                + ", consumedUnits=" + consumedUnits + "]";
+    }
+}

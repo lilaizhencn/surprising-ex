@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
+
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -11,13 +10,15 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
+import com.surprising.aeron.service.orchestration.pipeline.OwnerCommandPipelineState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
-final class LinearPerpetualSaturationWorkload {
+public final class LinearPerpetualSaturationWorkload {
 
     // Keep saturation pairs on a level that the restored density fixture never uses. Otherwise an IOC can
     // consume a fixture order and leave its paired GTC behind, making the benchmark measure fixture cleanup.
@@ -28,52 +29,52 @@ final class LinearPerpetualSaturationWorkload {
     private LinearPerpetualSaturationWorkload() {
     }
 
-    interface SaturationScenario extends LinearPerpetualBenchmarkSupport.Scenario {
-        int completedLatencySamples();
+    public interface SaturationScenario extends LinearPerpetualBenchmarkSupport.Scenario {
+        public int completedLatencySamples();
 
-        long p50LatencyNanos();
+        public long p50LatencyNanos();
 
-        long p99LatencyNanos();
+        public long p99LatencyNanos();
 
-        long p999LatencyNanos();
+        public long p999LatencyNanos();
 
-        LatencyReport latencyReport();
+        public LatencyReport latencyReport();
 
-        double averageMatchingBacklog();
+        public double averageMatchingBacklog();
 
-        double fullWindowPercentage();
+        public double fullWindowPercentage();
 
-        long refillOperations();
+        public long refillOperations();
 
-        long windowSamples();
+        public long windowSamples();
 
-        long fullWindowSamples();
+        public long fullWindowSamples();
 
-        long producerStarvationSamples();
+        public long producerStarvationSamples();
 
-        double producerStarvationPercentage();
+        public double producerStarvationPercentage();
 
     }
 
-    record StageLatency(int samples, long rangeLowestNanos, long rangeHighestNanos,
+    public record StageLatency(int samples, long rangeLowestNanos, long rangeHighestNanos,
                         long timeoutNanos, String unit, boolean coordinatedOmissionCorrected,
                         String histogramCounts, long p50, long p90, long p95, long p99,
                         long p999, long max) {
     }
 
-    record LatencyReport(String businessType, String loadModel, int targetOperationsPerSecond,
+    public record LatencyReport(String businessType, String loadModel, int targetOperationsPerSecond,
                          StageLatency entryAccepted, StageLatency acceptedTerminal,
                          StageLatency entryTerminal) {
     }
 
-    static SaturationScenario scenario(
+    public static SaturationScenario scenario(
             LinearPerpetualMixedWorkload.Template template,
             int maxInFlight,
             int operationsPerRun) {
         return scenario(template, maxInFlight, operationsPerRun, 100_000);
     }
 
-    static SaturationScenario scenario(
+    public static SaturationScenario scenario(
             LinearPerpetualMixedWorkload.Template template,
             int maxInFlight,
             int operationsPerRun,

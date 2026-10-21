@@ -1,6 +1,4 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
@@ -8,10 +6,10 @@ import com.surprising.aeron.protocol.CancelOrderBatchCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.ContinueRiskScanCommand;
+import com.surprising.aeron.protocol.CoreFundingProgressCodec;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageType;
-import com.surprising.aeron.protocol.CoreFundingProgressCodec;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
@@ -24,23 +22,23 @@ import com.surprising.aeron.protocol.CoreTriggerOrderType;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchAction;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand;
-import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
+import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
-import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Harness;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Scenario;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.SnapshotTemplate;
+import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
+import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.ledger.CoreTreasuryState;
 import com.surprising.aeron.service.state.model.AssetBalance;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
-import com.surprising.aeron.service.state.model.CorePositionState;
-import com.surprising.aeron.service.state.CoreTreasuryState;
-import com.surprising.aeron.service.state.LiquidationRuntime;
-import com.surprising.aeron.service.state.LaneTopology;
-import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.risk.LiquidationRuntime;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
@@ -50,12 +48,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-final class LinearPerpetualMixedWorkload {
+public final class LinearPerpetualMixedWorkload {
 
-    static final int DEFAULT_SYMBOLS = 4;
-    static final int DEFAULT_HFT_BATCH_SIZE = 20;
-    static final int HEAVY_WORK_BATCH_SIZE = 64;
-    static final int OPEN_ORDER_USER_CAP = 128;
+    public static final int DEFAULT_SYMBOLS = 4;
+    public static final int DEFAULT_HFT_BATCH_SIZE = 20;
+    public static final int HEAVY_WORK_BATCH_SIZE = 64;
+    public static final int OPEN_ORDER_USER_CAP = 128;
     private static final int MATCHING_DRAIN_THRESHOLD = 256;
     private static final String SETTLE_ASSET = "USDT";
     private static final long ENTRY_PRICE = 100;
@@ -67,11 +65,11 @@ final class LinearPerpetualMixedWorkload {
     private LinearPerpetualMixedWorkload() {
     }
 
-    interface StatefulScenario extends Scenario {
-        SnapshotTemplate captureSnapshot();
+    public interface StatefulScenario extends Scenario {
+        public SnapshotTemplate captureSnapshot();
     }
 
-    record Template(
+    public record Template(
             SnapshotTemplate snapshot,
             int activeUsers,
             List<String> listedSymbols,
@@ -84,7 +82,7 @@ final class LinearPerpetualMixedWorkload {
             LinearPerpetualScaleConfig scaleConfig,
             long openingFunds) {
 
-        Template {
+        public Template {
             listedSymbols = List.copyOf(listedSymbols);
             symbols = List.copyOf(symbols);
             positionMakers = List.copyOf(positionMakers);
@@ -100,11 +98,11 @@ final class LinearPerpetualMixedWorkload {
         }
     }
 
-    static Template template(int accountLanes, int activeUsers, int symbolCount) {
+    public static Template template(int accountLanes, int activeUsers, int symbolCount) {
         return template(accountLanes, activeUsers, LinearPerpetualScaleConfig.production(symbolCount));
     }
 
-    static Template template(int accountLanes, int activeUsers, LinearPerpetualScaleConfig scaleConfig) {
+    public static Template template(int accountLanes, int activeUsers, LinearPerpetualScaleConfig scaleConfig) {
         if (activeUsers < accountLanes || activeUsers > LinearPerpetualBenchmarkSupport.MAX_BENCHMARK_SCALE) {
             throw new IllegalArgumentException("activeUsers must cover every lane and be at most 10000");
         }
@@ -229,27 +227,27 @@ final class LinearPerpetualMixedWorkload {
         }
     }
 
-    static Scenario scenario(Template template) {
+    public static Scenario scenario(Template template) {
         return scenario(template, 1, DEFAULT_HFT_BATCH_SIZE);
     }
 
-    static Scenario scenario(Template template, int hftRounds) {
+    public static Scenario scenario(Template template, int hftRounds) {
         return scenario(template, hftRounds, DEFAULT_HFT_BATCH_SIZE);
     }
 
-    static Scenario scenario(Template template, int hftRounds, int hftBatchSize) {
+    public static Scenario scenario(Template template, int hftRounds, int hftBatchSize) {
         return scenario(template, hftRounds, hftBatchSize, true);
     }
 
-    static Scenario productionScenario(Template template, int hftRounds, int hftBatchSize) {
+    public static Scenario productionScenario(Template template, int hftRounds, int hftBatchSize) {
         return scenario(template, hftRounds, hftBatchSize, false, MATCHING_DRAIN_THRESHOLD);
     }
 
-    static Scenario productionScenario(Template template, int hftRounds, int hftBatchSize, int maxInFlight) {
+    public static Scenario productionScenario(Template template, int hftRounds, int hftBatchSize, int maxInFlight) {
         return scenario(template, hftRounds, hftBatchSize, false, maxInFlight);
     }
 
-    static StatefulScenario scaleScenario(Template template, int hftRounds, int hftBatchSize) {
+    public static StatefulScenario scaleScenario(Template template, int hftRounds, int hftBatchSize) {
         return scenario(template, hftRounds, hftBatchSize, false, MATCHING_DRAIN_THRESHOLD);
     }
 
@@ -852,7 +850,7 @@ final class LinearPerpetualMixedWorkload {
         }
     }
 
-    static long totalFunds(TradingCoreState state) {
+    public static long totalFunds(TradingCoreState state) {
         long total = 0;
         for (var user : state.users().values()) total = Math.addExact(total, user.totalUnits(SETTLE_ASSET));
         CoreTreasuryState treasury = state.treasuryState();

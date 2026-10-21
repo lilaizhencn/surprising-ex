@@ -12,7 +12,7 @@
     <logger name="com.surprising.aeron.client.ClientSourceOrderingBenchmark" level="INFO" additivity="false">
         <appender-ref ref="RESULT"/>
     </logger>
-    <logger name="com.surprising.aeron.service.orchestration.ClusteredBatchTradingBenchmark" level="INFO" additivity="false">
+    <logger name="com.surprising.aeron.service.orchestration.pipeline.ClusteredBatchTradingBenchmark" level="INFO" additivity="false">
         <appender-ref ref="RESULT"/>
     </logger>
     <logger name="com.surprising.aeron.service.orchestration.CoreAcceptFreezeBenchmark" level="INFO" additivity="false">

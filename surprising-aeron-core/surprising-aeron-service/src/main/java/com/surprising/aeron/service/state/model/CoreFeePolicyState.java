@@ -1,8 +1,7 @@
 package com.surprising.aeron.service.state.model;
 
-import com.surprising.aeron.service.state.OrderReservation;
-
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
+import com.surprising.aeron.service.state.order.OrderReservation;
 
 public record CoreFeePolicyState(
         long policyId,

@@ -3,17 +3,17 @@ package com.surprising.aeron.benchmarks.workload;
 import java.time.Duration;
 import java.util.Arrays;
 
-final class P10CapacityGate {
+public final class P10CapacityGate {
 
-    static final int MIN_USERS = 1_000;
-    static final int MIN_SYMBOLS = 200;
-    static final long MIN_RATE_PER_SECOND = 100_000;
-    static final Duration MIN_DURATION = Duration.ofMinutes(40);
+    public static final int MIN_USERS = 1_000;
+    public static final int MIN_SYMBOLS = 200;
+    public static final long MIN_RATE_PER_SECOND = 100_000;
+    public static final Duration MIN_DURATION = Duration.ofMinutes(40);
 
     private P10CapacityGate() {
     }
 
-    static void requireConfiguration(HttpWorkloadConfig config, boolean requireJfr) {
+    public static void requireConfiguration(HttpWorkloadConfig config, boolean requireJfr) {
         if (config.duration().compareTo(MIN_DURATION) < 0
                 || Arrays.stream(config.users()).distinct().count() < MIN_USERS
                 || Arrays.stream(config.symbols()).distinct().count() < MIN_SYMBOLS
@@ -27,7 +27,7 @@ final class P10CapacityGate {
         }
     }
 
-    static void requireResult(HttpOpenLoopWorkload.Summary summary) {
+    public static void requireResult(HttpOpenLoopWorkload.Summary summary) {
         long terminal = Math.addExact(summary.completed(), summary.deliberatelyAborted());
         if (summary.scheduled() == 0 || summary.outstanding() != 0
                 || terminal != summary.scheduled()

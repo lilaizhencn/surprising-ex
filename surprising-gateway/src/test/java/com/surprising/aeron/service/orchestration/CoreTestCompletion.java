@@ -2,6 +2,7 @@ package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.service.matching.MatchingResult;
+import com.surprising.aeron.service.orchestration.pipeline.CommandSlot;
 
 /** Test-only synchronous adapter for driving the asynchronous Matcher/Lane pipeline. */
 final class CoreTestCompletion {
@@ -29,13 +30,13 @@ final class CoreTestCompletion {
                 } else {
                     CommandSlot pending = owner.pendingMatching.get(sequence);
                     MatchingResult matching = pending != null
-                            && pending.orderBatch != null
-                            && (pending.orderBatch.itemSettlementEvent != null
-                            || pending.orderBatch.itemAdmission != null && pending.orderBatch.activated())
-                            ? pending.orderBatch.lastMatchingResult
+                            && pending.orderBatch() != null
+                            && (pending.orderBatch().itemSettlementEvent() != null
+                            || pending.orderBatch().itemAdmission() != null && pending.orderBatch().activated())
+                            ? pending.orderBatch().lastMatchingResult()
                             : pending != null
                             && (pending.settlementEvent() != null
-                            || pending.orderBatch != null && pending.orderBatch.laneCommitEvent != null)
+                            || pending.orderBatch() != null && pending.orderBatch().laneCommitEvent() != null)
                             ? owner.pendingMatching.required(sequence).matchingResult()
                             : awaitMatchingResult(owner, sequence);
                     if (matching == null && owner.matchingFlow.hasPendingMatchingRejection(sequence)) {
@@ -69,8 +70,8 @@ final class CoreTestCompletion {
         if (owner.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
         while (owner.pendingMatching.contains(sequence) && System.nanoTime() < deadline) {
             CommandSlot head = owner.pendingMatching.get(owner.pendingMatching.firstSequence());
-            if (head != null && head.orderBatch != null && !head.orderBatch.activated()) {
-                owner.batches.activateOrderBatch(head.orderBatch, head, true);
+            if (head != null && head.orderBatch() != null && !head.orderBatch().activated()) {
+                owner.batches.activateOrderBatch(head.orderBatch(), head, true);
             }
             owner.matchingProgress.drainMatchingCompletions();
             if (owner.matchingFlow.hasPendingMatchingRejection(sequence)) return null;

@@ -2,7 +2,7 @@ package com.surprising.realtime.provider.export;
 
 import com.surprising.aeron.protocol.CoreAlgoOrderCodec;
 import com.surprising.aeron.protocol.CoreAlgoOrderView;
-import com.surprising.aeron.service.orchestration.CommittedTradeReplay;
+import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;

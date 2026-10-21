@@ -1,11 +1,14 @@
 package com.surprising.aeron.service.state;
 
-import static com.surprising.aeron.service.state.RuntimePerpetualFundingProcessor.*;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateProjector;
 import java.util.UUID;
 
+import static com.surprising.aeron.service.state.lifecycle.RuntimePerpetualFundingProcessor.*;
+
 /** Builds isolated runtime state for financial parity tests. */
-final class RuntimePerpetualFundingFixture {
+public final class RuntimePerpetualFundingFixture {
     public static FundingResult simulate(TradingCoreState before, ApplyFundingCommand command,
                                          Iterable<Long> indexedUserIds, UUID chunkCommandId,
                                          RuntimeIdentityRegistry identities) {

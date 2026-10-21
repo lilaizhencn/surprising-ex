@@ -1,20 +1,22 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrument;
-
-import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.math.*;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.math.*;
+import com.surprising.aeron.service.state.math.CoreArithmetic;
+import com.surprising.aeron.service.state.math.CoreContractMath;
+import com.surprising.aeron.service.state.math.OptionContractMath;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CoreContractMathTest {
 

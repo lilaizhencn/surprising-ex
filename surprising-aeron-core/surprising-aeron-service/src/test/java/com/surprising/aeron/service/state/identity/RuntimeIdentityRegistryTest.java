@@ -1,0 +1,307 @@
+package com.surprising.aeron.service.state.identity;
+
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.service.lane.LaneTopology;
+import com.surprising.aeron.service.state.TradingRuntimeState;
+import com.surprising.aeron.service.state.account.AccountLaneState;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class RuntimeIdentityRegistryTest {
+    @Test
+    void nativePermanentIdsKeepDenseZeroAndSnapshotProtocolSpellings() {
+        var registry = new RuntimeIdentityRegistry();
+        assertThat(registry.symbolId(Integer.MAX_VALUE)).isZero();
+        assertThat(registry.symbolId("2147483647")).isZero();
+        assertThat(registry.symbolId(10000)).isEqualTo(1);
+        assertThat(registry.findSymbolIdValue(Integer.MAX_VALUE)).isZero();
+        assertThat(registry.findSymbolIdValue(9999)).isEqualTo(-1);
+        assertThat(registry.findSymbolId("9999")).isNull();
+        var snapshot = registry.snapshot();
+        assertThat(snapshot.symbolIds()).containsEntry("2147483647", 0).containsEntry("10000", 1);
+        var restored = RuntimeIdentityRegistry.restore(snapshot);
+        assertThat(restored.symbolId(Integer.MAX_VALUE)).isZero();
+        assertThat(restored.symbolId(10000)).isEqualTo(1);
+        assertThat(restored.symbolId(9999)).isEqualTo(2);
+        assertThat(restored.instrumentId(0)).isEqualTo("2147483647");
+    }
+
+    @Test
+    void preparedDerivativePositionProbeMatchesStringIdentityWithoutRebuildingItsName() throws Exception {
+        var registry = new RuntimeIdentityRegistry();
+        long user = 17;
+        var topology = LaneTopology.configured(false);
+        var lane = new AccountLaneState(topology.accountLaneId(user), 16);
+        long expected = registry.positionKey(user, "1:LONG");
+        try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            long actual = executor.submit(() -> registry.retainPositionInLane(
+                    lane, user, "1", CorePositionSide.LONG)).get();
+            assertThat(actual).isEqualTo(expected);
+            assertThat(registry.preparedPositionKey(user, "1", CorePositionSide.LONG))
+                    .isEqualTo(expected);
+            registry.releasePublishedPosition(actual);
+            registry.releasePositionKey(actual);
+        }
+    }
+
+    @Test
+    void lanePositionIdentitySurvivesEarlierCommitRetirementUntilItsOutputIsPublished() throws Exception {
+        verifyPositionRetention(true);
+    }
+
+    @Test
+    void lanePositionIdentityRetentionWithoutSnapshot() throws Exception {
+        verifyPositionRetention(false);
+    }
+
+    private void verifyPositionRetention(boolean snapshot) throws Exception {
+        var registry = new RuntimeIdentityRegistry();
+        registry.assertOwner();
+        long user = 17;
+        var lane = new AccountLaneState(LaneTopology.configured(false).accountLaneId(user), 16);
+        try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            long key = executor.submit(() -> registry.retainPositionInLane(lane, user, "1:LONG")).get();
+            registry.releasePositionKey(key);
+            assertThat(registry.positionKey(user, key)).isEqualTo("1:LONG");
+            executor.submit(() -> registry.retainPositionInLane(lane, user, "1:LONG")).get();
+            registry.releasePublishedPosition(key);
+            registry.releasePositionKey(key);
+            assertThat(registry.findPositionKey(user, "1:LONG")).isEqualTo(key);
+            registry.releasePublishedPosition(key);
+            if (snapshot) {
+                var restored = RuntimeIdentityRegistry.restore(registry.snapshot());
+                assertThat(restored.positionKey(user, key)).isEqualTo("1:LONG");
+            }
+            registry.releasePositionKey(key);
+            assertThat(registry.findPositionKey(user, "1:LONG")).isNull();
+            long recreated = executor.submit(() -> registry.retainPositionInLane(lane, user, "1:LONG")).get();
+            assertThat(recreated).isEqualTo(key);
+            registry.releasePublishedPosition(key);
+            registry.releasePositionKey(key);
+            assertThat(registry.findPositionKey(user, "1:LONG")).isNull();
+            if (snapshot) assertThat(registry.snapshot().positionKeys()).isEmpty();
+        }
+    }
+
+    @Test
+    void laneReleaseCompletesWithoutAnOwnerHandoffAndRestoresLiveKeys() {
+        var registry = new RuntimeIdentityRegistry();
+        long user = 17;
+        var lane = new AccountLaneState(LaneTopology.configured(false).accountLaneId(user), 16);
+        var first = registry.prepareClientKeyInLane(lane, user, "客户-retired");
+        registry.prepareClientKeyInLane(lane, user, "客户-retired");
+        long firstKey = RuntimeIdentityRegistry.clientKeyValue(first);
+        registry.releaseClientKeyInLane(lane, user, firstKey);
+        assertThat(registry.findClientKey(user, "客户-retired")).isEqualTo(firstKey);
+        registry.releaseClientKeyInLane(lane, user, firstKey);
+        assertThat(registry.clientIdentityCount()).isZero();
+        var recreated = registry.prepareClientKeyInLane(lane, user, "客户-retired");
+        var restored = RuntimeIdentityRegistry.restore(registry.snapshot());
+        long recreatedKey = RuntimeIdentityRegistry.clientKeyValue(recreated);
+        restored.releaseClientKeyInLane(lane, user, recreatedKey);
+        assertThat(restored.clientIdentityCount()).isZero();
+        assertThat(registry.clientIdentityCount()).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> registry.releaseClientKeyInLane(
+                new AccountLaneState(lane.laneId() + 1, 16), user, recreatedKey))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void clientReadOnlyLookupAndLaneReleasePreserveOtherKeysAfterRestore() throws Exception {
+        var original = new RuntimeIdentityRegistry();
+        long first = original.clientKey(7, "客户-A");
+        long second = original.clientKey(8, "客户-B");
+        for (var registry : new RuntimeIdentityRegistry[]{original, RuntimeIdentityRegistry.restore(original.snapshot())}) {
+            assertThat(registry.clientOrderId(7, first)).isEqualTo("客户-A");
+            assertThat(registry.clientOrderId(8, second)).isEqualTo("客户-B");
+            var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+            try {
+                assertThat(executor.submit(() -> registry.clientOrderId(7, first)).get()).isEqualTo("客户-A");
+            } finally { executor.shutdownNow(); }
+            registry.releaseClientKey(8, first);
+            assertThat(registry.findClientKey(7, "客户-A")).isEqualTo(first);
+            registry.releaseClientKey(7, first);
+            assertThat(registry.findClientKey(7, "客户-A")).isNull();
+            assertThat(registry.clientOrderId(8, second)).isEqualTo("客户-B");
+            registry.releaseClientKey(8, second);
+            assertThat(registry.clientIdentityCount()).isZero();
+        }
+    }
+
+    @Test
+    void laneOwnsPreparationAndDuplicateRollbackPreservesLiveIdentity() {
+        var identities = new RuntimeIdentityRegistry();
+        long userId = 17;
+        var topology = LaneTopology.configured(false);
+        try (var runtime = new TradingRuntimeState(topology)) {
+            identities.bindClientLanes(runtime);
+            var lane = runtime.accountLane(topology.accountLaneId(userId));
+            var first = identities.prepareClientKeyInLane(lane, userId, "客户😀");
+            var duplicate = identities.prepareClientKeyInLane(lane, userId, "客户😀");
+            assertThat(RuntimeIdentityRegistry.clientKeyValue(duplicate))
+                    .isEqualTo(RuntimeIdentityRegistry.clientKeyValue(first));
+            assertThat(lane.clientIdentityAllocations()).isEqualTo(1);
+            identities.rollbackClientKeyInLane(lane, userId, "客户😀", duplicate);
+            assertThat(identities.clientIdentityCount()).isEqualTo(1);
+            identities.rollbackClientKeyInLane(lane, userId, "客户😀", first);
+            assertThat(identities.clientIdentityCount()).isZero();
+            var wrongLane = new AccountLaneState(lane.laneId() + 1, 16);
+            org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                    identities.prepareClientKeyInLane(wrongLane, userId, "wrong"))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("crossed account Lane");
+            assertThat(identities.clientIdentityCount()).isZero();
+        }
+    }
+
+    @Test
+    void streamedIdentityHashExactlyMatchesJavaUtf8IncludingMalformedSurrogates() throws Exception {
+        var method = RuntimeIdentityRegistry.class.getDeclaredMethod("deterministicKey", long.class, String.class);
+        method.setAccessible(true);
+        var values = new java.util.ArrayList<String>();
+        values.addAll(java.util.List.of("", "client-123", "客户😀", "\ud800", "\udc00", "\ud800x\udc00", "\ud800\ud800\udc00"));
+        for (int c = 0; c <= Character.MAX_VALUE; c++) values.add(String.valueOf((char)c));
+        var random = new java.util.Random(91);
+        for (int i = 0; i < 1_000; i++) {
+            char[] chars = new char[16];
+            for (int j = 0; j < chars.length; j++) chars[j] = (char)random.nextInt(65536);
+            values.add(new String(chars));
+        }
+        for (String value : values) {
+            long userId = random.nextLong() & Long.MAX_VALUE;
+            long expected = 0xcbf29ce484222325L;
+            for (int shift = 0; shift < 64; shift += 8)
+                expected = (expected ^ (userId >>> shift & 255)) * 0x100000001b3L;
+            for (byte b : value.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                expected = (expected ^ (b & 255)) * 0x100000001b3L;
+            expected &= Long.MAX_VALUE;
+            assertThat((long)method.invoke(null, userId, value)).isEqualTo(expected == 0 ? 1 : expected);
+        }
+    }
+
+    @Test
+    void positionLookupSeparatesEqualHashesAndSurvivesRestoreAndRelease() {
+        var identities = new RuntimeIdentityRegistry();
+        assertThat("Aa".hashCode()).isEqualTo("BB".hashCode());
+        long first = identities.positionKey(7, "Aa");
+        long second = identities.positionKey(7, "BB");
+        long third = identities.positionKey(8, "Aa");
+        long unicode = identities.positionKey(7, "客户😀:NET");
+        for (var registry : new RuntimeIdentityRegistry[]{identities, RuntimeIdentityRegistry.restore(identities.snapshot())}) {
+            assertThat(registry.positionKey(7, new String("Aa"))).isEqualTo(first);
+            assertThat(registry.preparedPositionKey(7, "BB")).isEqualTo(second).isNotEqualTo(first);
+            assertThat(registry.preparedPositionKey(8, "Aa")).isEqualTo(third).isNotEqualTo(first);
+            assertThat(registry.findPositionKey(7, "客户😀:NET")).isEqualTo(unicode);
+            registry.releasePositionKey(first);
+            assertThat(registry.findPositionKey(7, "Aa")).isNull();
+            assertThat(registry.findPositionKey(7, "BB")).isEqualTo(second);
+        }
+    }
+
+    @Test
+    void exactIdentityHitsPreserveNormalizationAndRejectInvalidMisses() {
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        int instrumentId = identities.symbolId("1");
+        int asset = identities.assetId(" usdt ");
+        long version = identities.dictionaryVersion();
+        for (String value : new String[] {"1", new String("1"), "1", "1"}) {
+            assertThat(identities.symbolId(value)).isEqualTo(instrumentId);
+            assertThat(identities.findSymbolId(value)).isEqualTo(instrumentId);
+        }
+        for (String value : new String[] {"USDT", new String("USDT"), "usdt", " USDT "}) {
+            assertThat(identities.assetId(value)).isEqualTo(asset);
+            assertThat(identities.findAssetId(value)).isEqualTo(asset);
+        }
+        assertThat(identities.dictionaryVersion()).isEqualTo(version);
+        for (String value : new String[] {null, "", "BTC/USDT"}) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> identities.symbolId(value))
+                    .isInstanceOf(IllegalArgumentException.class);
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> identities.findSymbolId(value))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThat(identities.findSymbolId("2")).isNull();
+    }
+
+    @Test
+    void lanesKeepReadingPreparedKeysWhileOwnerExpandsTheDictionary() throws Exception {
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        long[] keys = new long[256];
+        for (int index = 0; index < keys.length; index++) {
+            keys[index] = identities.positionKey(index + 1, "1:NET");
+        }
+        var started = new java.util.concurrent.CountDownLatch(4);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        try (var workers = java.util.concurrent.Executors.newFixedThreadPool(4)) {
+            var results = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+            for (int lane = 0; lane < 4; lane++) {
+                results.add(workers.submit(() -> {
+                    started.countDown();
+                    start.await();
+                    for (int index = 0; index < 100_000; index++) {
+                        int slot = index & 255;
+                        long actual = identities.preparedPositionKey(slot + 1, "1:NET");
+                        if (actual != keys[slot]) throw new AssertionError("prepared identity changed");
+                    }
+                    return null;
+                }));
+            }
+            try {
+                assertThat(started.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            } finally {
+                start.countDown();
+            }
+            for (int index = 257; index < 50_000; index++) {
+                identities.positionKey(index, "1:NET");
+            }
+            for (var result : results) result.get(10, java.util.concurrent.TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void dictionaryVersionAdvancesOnlyWhenStableIdentitiesAreAllocatedAndSurvivesRestore() {
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        long initial = identities.dictionaryVersion();
+        int assetId = identities.assetId("USDT");
+        int symbolId = identities.symbolId("1");
+        identities.assetId("USDT");
+        identities.symbolId("1");
+
+        assertThat(identities.dictionaryVersion()).isEqualTo(initial + 2);
+        RuntimeIdentityRegistry restored = RuntimeIdentityRegistry.restore(identities.snapshot());
+        assertThat(restored.asset(assetId)).isEqualTo("USDT");
+        assertThat(restored.instrumentId(symbolId)).isEqualTo("1");
+        assertThat(restored.dictionaryVersion()).isEqualTo(identities.dictionaryVersion());
+    }
+
+    @Test
+    void rollbackPositionKeysSkipsAllocationsAlreadyReleasedAfterCheckpoint() {
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        identities.positionKey(1001, "1:NET");
+        long checkpoint = identities.positionCheckpoint();
+        long released = identities.positionKey(1002, "1:NET");
+        identities.positionKey(1003, "2:NET");
+
+        identities.releasePositionKey(released);
+        identities.rollbackPositionKeys(checkpoint);
+
+        assertThat(identities.findPositionKey(1001, "1:NET")).isNotNull();
+        assertThat(identities.findPositionKey(1002, "1:NET")).isNull();
+        assertThat(identities.findPositionKey(1003, "2:NET")).isNull();
+        assertThat(identities.positionCheckpoint()).isEqualTo(checkpoint);
+    }
+
+    @Test
+    void clientIdentityReferenceProtectsAReusedKeyFromAnOlderTerminalRelease() {
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        var first = identities.prepareClientKey(1001, "client-1");
+        var reused = identities.prepareClientKey(1001, "client-1");
+
+        identities.releaseClientKey(1001, first);
+
+        assertThat(identities.clientIdentityCount()).isOne();
+        assertThat(identities.clientOrderId(1001, reused)).isEqualTo("client-1");
+
+        identities.rollbackPreparedClientKey(1001, "client-1", reused);
+        assertThat(identities.clientIdentityCount()).isZero();
+    }
+}

@@ -1,12 +1,11 @@
 package com.surprising.aeron.benchmarks.workload;
 
-import lombok.extern.slf4j.Slf4j;
-
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.ValkeyUserQueries;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.locks.LockSupport;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
@@ -14,7 +13,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Calls the production read/materialization implementation; never falls back to a Core query. */
-@Slf4j
+public @Slf4j
 final class OperationalUserQueries implements AutoCloseable {
     private final LettuceConnectionFactory connection;
     private final ValkeyUserQueries queries;
@@ -25,7 +24,7 @@ final class OperationalUserQueries implements AutoCloseable {
     private long next,ready,unavailable;
     private int cursor;
 
-    OperationalUserQueries(List<Long> users,ClusterOperationalSideLoad owner) {
+    public OperationalUserQueries(List<Long> users,ClusterOperationalSideLoad owner) {
         this.users=List.copyOf(users);this.owner=owner;lastSequence=new long[users.size()];
         int rate=Integer.getInteger("surprising.aeron.operational-query-rate",1000);
         if(rate<1 || rate>100000)throw new IllegalArgumentException("operational query rate must be in [1,100000]");
@@ -38,7 +37,7 @@ final class OperationalUserQueries implements AutoCloseable {
         var template=new StringRedisTemplate(connection);template.afterPropertiesSet();
         queries=new ValkeyUserQueries(template);
     }
-    void step() {
+    public void step() {
         long now=System.nanoTime();
         if(now<next)LockSupport.parkNanos(next-now);
         long start=System.nanoTime();next=Math.max(next+interval,start);
@@ -56,6 +55,6 @@ final class OperationalUserQueries implements AutoCloseable {
             owner.record("VALKEY_QUERY_UNAVAILABLE",start,System.nanoTime());
         }
     }
-    void print(){log.info("operationalReadModel readyIncludingWarmup={} unavailableIncludingWarmup={} coreFallbacks=0", ready,unavailable);}
+    public void print(){log.info("operationalReadModel readyIncludingWarmup={} unavailableIncludingWarmup={} coreFallbacks=0", ready,unavailable);}
     @Override public void close(){connection.destroy();}
 }

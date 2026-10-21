@@ -4,8 +4,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
 /** Real source-to-publication delay for synthetic prices; never backdates or changes Core freshness. */
-final class GeneratedPriceClock {
-    static long timestamp() {
+public final class GeneratedPriceClock {
+    public static long timestamp() {
         long timestamp = System.currentTimeMillis();
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(2);
         long remaining;

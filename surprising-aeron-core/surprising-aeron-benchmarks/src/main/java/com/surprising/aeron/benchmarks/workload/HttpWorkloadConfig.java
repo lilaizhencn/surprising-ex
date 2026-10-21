@@ -1,8 +1,8 @@
 package com.surprising.aeron.benchmarks.workload;
 
 import java.net.URI;
-import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.EnumMap;
@@ -10,7 +10,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 
-record HttpWorkloadConfig(
+public record HttpWorkloadConfig(
         URI baseUri,
         Path outputDirectory,
         String runId,
@@ -28,7 +28,7 @@ record HttpWorkloadConfig(
         TrafficSkew skew,
         Map<WorkloadOperation, Integer> traffic) {
 
-    HttpWorkloadConfig {
+    public HttpWorkloadConfig {
         if (baseUri == null || !"http".equalsIgnoreCase(baseUri.getScheme())) {
             throw new IllegalArgumentException("baseUrl must use real HTTP");
         }
@@ -67,7 +67,7 @@ record HttpWorkloadConfig(
         }
     }
 
-    static HttpWorkloadConfig from(Properties properties) {
+    public static HttpWorkloadConfig from(Properties properties) {
         return new HttpWorkloadConfig(
                 URI.create(required(properties, "baseUrl")),
                 Path.of(required(properties, "output")),
@@ -87,7 +87,7 @@ record HttpWorkloadConfig(
                 parseTraffic(properties.getProperty("traffic")));
     }
 
-    static Map<WorkloadOperation, Integer> defaultTraffic() {
+    public static Map<WorkloadOperation, Integer> defaultTraffic() {
         EnumMap<WorkloadOperation, Integer> traffic = new EnumMap<>(WorkloadOperation.class);
         traffic.put(WorkloadOperation.PLACE, 55);
         traffic.put(WorkloadOperation.CANCEL, 10);
@@ -99,15 +99,15 @@ record HttpWorkloadConfig(
         return Map.copyOf(traffic);
     }
 
-    long totalIntents() {
+    public long totalIntents() {
         return Math.multiplyExact(ratePerSecond, duration.toNanos()) / 1_000_000_000L;
     }
 
-    long expectedIntervalNanos() {
+    public long expectedIntervalNanos() {
         return Math.max(1L, 1_000_000_000L / ratePerSecond);
     }
 
-    String fingerprint() {
+    public String fingerprint() {
         String canonical = baseUri.normalize() + "\n" + runId + "\n" + seed + "\n" + ratePerSecond + "\n"
                 + duration + "\n" + maxInFlight + "\n" + requestTimeout + "\n" + pollInterval + "\n"
                 + maxPolls + "\n" + limitPriceTicks + "\n" + triggerPriceTicks + "\n"
@@ -130,7 +130,7 @@ record HttpWorkloadConfig(
         return canonical.toString();
     }
 
-    HttpWorkloadConfig(URI baseUri, Path outputDirectory, String runId, long seed, long ratePerSecond,
+    public HttpWorkloadConfig(URI baseUri, Path outputDirectory, String runId, long seed, long ratePerSecond,
                        Duration duration, int maxInFlight, Duration requestTimeout, Duration pollInterval,
                        int maxPolls, long[] users, String[] symbols, TrafficSkew skew,
                        Map<WorkloadOperation, Integer> traffic) {

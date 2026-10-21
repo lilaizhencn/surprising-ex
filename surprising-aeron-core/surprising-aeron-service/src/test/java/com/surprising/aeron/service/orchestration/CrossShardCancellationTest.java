@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
-import static org.assertj.core.api.Assertions.*;
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -10,6 +10,8 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.api.parallel.Resources;
+
+import static org.assertj.core.api.Assertions.*;
 
 @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
 class CrossShardCancellationTest {
@@ -69,13 +71,12 @@ class CrossShardCancellationTest {
                 assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
                 assertThat(release.getCount()).isOne();
                 long checkDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                while (!state.pendingMatching.get(state.matchingSequence(batch.header().commandId())).crossShardCancellationStarted) {
+                while (!state.pendingMatching.get(state.matchingSequence(batch.header().commandId())).crossShardCancellationStarted()) {
                     if (System.nanoTime() >= checkDeadline) throw new AssertionError("liquidation Lane check timeout");
                     state.matchingProgress.progressPlaceBatchAdmissions();
                     Thread.onSpinWait();
                 }
-                assertThat(state.pendingMatching.get(state.matchingSequence(batch.header().commandId()))
-                        .crossShardCancellationStarted).isTrue();
+                assertThat(state.pendingMatching.get(state.matchingSequence(batch.header().commandId())).crossShardCancellationStarted()).isTrue();
                 release.countDown();
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
                 Object complete;

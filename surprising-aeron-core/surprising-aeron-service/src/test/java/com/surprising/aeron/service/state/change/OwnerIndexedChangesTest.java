@@ -1,0 +1,81 @@
+package com.surprising.aeron.service.state.change;
+
+import com.surprising.aeron.service.state.CoreStateTestFixtures;
+import com.surprising.aeron.service.state.order.OrderRuntime;
+import java.util.HashMap;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class OwnerIndexedChangesTest {
+    @Test void directUpdateFreezesABorrowedLaneCellBeforeItsSourceIsReleased() {
+        var owner = new OwnerIndexedChanges<OrderRuntime, Void>(new RuntimeOrderChangeBuffer());
+        var lane = new RuntimeOrderChangeBuffer();
+        lane.put(11, CoreStateTestFixtures.order(11, 7, 0, 2));
+        lane.put(12, CoreStateTestFixtures.order(12, 8, 0, 3));
+        owner.adopt(0, lane);
+        OrderRuntime borrowed = owner.get(11);
+        owner.put(11, borrowed);
+        assertThat(owner.get(11).orderId()).isEqualTo(11);
+        assertThat(owner.get(11).quantitySteps()).isEqualTo(2);
+        assertThat(owner.get(12).orderId()).isEqualTo(12);
+        assertThat(owner.get(12).quantitySteps()).isEqualTo(3);
+        assertThat(owner.get(11)).isNotSameAs(borrowed);
+        owner.put(11, null);
+        assertThat(owner.get(11)).isNull();
+        assertThat(owner.get(12).quantitySteps()).isEqualTo(3);
+    }
+
+    @Test void laneStorageMovesWithoutCopyAndCanBeReusedBeforeOwnerPublication() throws Exception {
+        var owner = new OwnerIndexedChanges<String, String>();
+        var first = new RuntimeIndexedChangeBuffer<String, String>();
+        var second = new RuntimeIndexedChangeBuffer<String, String>();
+        first.putIndexed(1, "a", true, "index-a");
+        second.putIndexed(2, "b", true, "index-b");
+        var keys = RuntimeChangeBuffer.class.getDeclaredField("keys"); keys.setAccessible(true);
+        Object originalKeys = keys.get(first);
+        owner.adopt(0, first); owner.adopt(3, second);
+        assertThat(first.isEmpty()).isTrue(); assertThat(second.isEmpty()).isTrue();
+        var lanes = OwnerIndexedChanges.class.getDeclaredField("lanes"); lanes.setAccessible(true);
+        assertThat(keys.get(((Object[])lanes.get(owner))[0])).isSameAs(originalKeys);
+        first.put(1, "next-command"); second.clear();
+        assertThat(owner.get(1)).isEqualTo("a");
+        assertThat(owner.toArray()).containsExactly(1, 2);
+        var prepared = new HashMap<Long, String>();
+        owner.forEachIndexed((id, value, flag, index) -> { assertThat(flag).isTrue(); prepared.put(id, index); });
+        assertThat(prepared).containsEntry(1L,"index-a").containsEntry(2L,"index-b");
+        owner.clear(); assertThat(owner.isEmpty()).isTrue();
+        assertThat(first.get(1)).isEqualTo("next-command");
+    }
+    @Test void sameLaneAndOwnerControlUpdatesKeepLastValueAndInvalidateOldPreparedIndex() {
+        var owner = new OwnerIndexedChanges<String, String>();
+        var lane = new RuntimeIndexedChangeBuffer<String, String>();
+        lane.putIndexed(9, "old", true, "old-index"); owner.adopt(2, lane);
+        lane.putIndexed(9, "new", true, "new-index"); owner.adopt(2, lane);
+        assertThat(owner.toArray()).containsExactly(9);
+        assertThat(owner.get(9)).isEqualTo("new");
+        owner.put(9, null);
+        owner.forEachIndexed((id, value, flag, index) -> { assertThat(value).isNull(); assertThat(flag).isFalse(); assertThat(index).isNull(); });
+        lane.putIndexed(9, "after-control", true, "last-index"); owner.adopt(2,lane);
+        assertThat(owner.get(9)).isEqualTo("after-control");
+        owner.forEachIndexed((id, value, flag, index) -> { assertThat(flag).isTrue(); assertThat(index).isEqualTo("last-index"); });
+    }
+
+    @Test void drainConsumesDirectAndLaneValuesAndClearsRetainedReferences() {
+        var owner = new OwnerIndexedChanges<String, Void>();
+        var lane = new RuntimeIndexedChangeBuffer<String, Void>();
+        var otherLane = new RuntimeIndexedChangeBuffer<String, Void>();
+        lane.put(1, "lane");
+        otherLane.put(2, "other-lane");
+        owner.adopt(2, lane);
+        owner.adopt(4, otherLane);
+        var values = new HashMap<Long, String>();
+
+        owner.drainTo(values::put);
+
+        assertThat(values).containsEntry(1L, "lane").containsEntry(2L, "other-lane");
+        assertThat(owner.isEmpty()).isTrue();
+        owner.put(3, "reused");
+        assertThat(owner.get(3)).isEqualTo("reused");
+    }
+}

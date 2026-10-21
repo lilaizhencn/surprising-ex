@@ -9,12 +9,12 @@ import com.surprising.aeron.protocol.CoreOrderBookView;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import java.util.ArrayList;
 
-final class OrderBookBootstrapLoader {
+public final class OrderBookBootstrapLoader {
 
     private OrderBookBootstrapLoader() {
     }
 
-    static CoreOrderBookView load(Query query) {
+    public static CoreOrderBookView load(Query query) {
         String snapshotId = "";
         String symbolCursor = "";
         long exportSequence = -1;
@@ -40,8 +40,8 @@ final class OrderBookBootstrapLoader {
         }
     }
 
-    @FunctionalInterface
+    public @FunctionalInterface
     interface Query {
-        byte[] execute(CoreMessageType type, byte[] payload);
+        public byte[] execute(CoreMessageType type, byte[] payload);
     }
 }

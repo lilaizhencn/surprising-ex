@@ -9,13 +9,13 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /** One producer owns each endpoint. Independent actors never share request sequences or queues. */
-final class OperationalEndpoint implements AutoCloseable {
-    final AeronClientPool client;
+public final class OperationalEndpoint implements AutoCloseable {
+    public final AeronClientPool client;
     private final long source;
     private long request;
     private final ClusterOperationalSideLoad owner;
 
-    OperationalEndpoint(long seed, String name, int window, ClusterOperationalSideLoad owner) {
+    public OperationalEndpoint(long seed, String name, int window, ClusterOperationalSideLoad owner) {
         source = seed;
         this.owner = owner;
         client = new AeronClientPool(name, ProductLine.LINEAR_PERPETUAL,
@@ -25,7 +25,7 @@ final class OperationalEndpoint implements AutoCloseable {
                 new AeronClientCapacity(1,1,window,16,window,8,32));
     }
 
-    CompletableFuture<CoreResponse> send(CoreMessageType type, long user, byte[] payload) {
+    public CompletableFuture<CoreResponse> send(CoreMessageType type, long user, byte[] payload) {
         long start=System.nanoTime();
         return client.commandAsync(type,new UUID(source,++request),user,payload).thenApply(response -> {
             if(response.commandStatus()!=ResponseStatus.APPLIED)
@@ -37,11 +37,11 @@ final class OperationalEndpoint implements AutoCloseable {
         });
     }
 
-    CoreResponse command(CoreMessageType type,long user,byte[] payload) {
+    public CoreResponse command(CoreMessageType type,long user,byte[] payload) {
         return send(type,user,payload).join();
     }
 
-    CoreLiquidationBatchResultView liquidationBatch(CoreLiquidationWorkView work, int maxRiskScanUsers) {
+    public CoreLiquidationBatchResultView liquidationBatch(CoreLiquidationWorkView work, int maxRiskScanUsers) {
         var command = ExecuteLiquidationBatchCommand.fromWork(work, 0, maxRiskScanUsers);
         long start = System.nanoTime();
         var response = client.commandAsync(CoreMessageType.EXECUTE_LIQUIDATION_BATCH,
@@ -61,7 +61,7 @@ final class OperationalEndpoint implements AutoCloseable {
         return result;
     }
 
-    CoreResponse query(CoreMessageType type,long user,byte[] payload) {
+    public CoreResponse query(CoreMessageType type,long user,byte[] payload) {
         long start=System.nanoTime();
         var response=client.query(type,new UUID(source,++request),user,payload);
         if(response.status()!=ResponseStatus.OK)
@@ -70,7 +70,7 @@ final class OperationalEndpoint implements AutoCloseable {
         return response;
     }
 
-    CoreUserStateView user(long id) {
+    public CoreUserStateView user(long id) {
         return CoreStateQueryCodec.decodeUserState(query(CoreMessageType.USER_STATE_QUERY,id,new byte[0]).data());
     }
 

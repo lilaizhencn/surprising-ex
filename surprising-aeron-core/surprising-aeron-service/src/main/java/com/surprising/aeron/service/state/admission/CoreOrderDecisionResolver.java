@@ -1,22 +1,18 @@
 package com.surprising.aeron.service.state.admission;
 
-import com.surprising.aeron.service.state.instrument.CoreInstrument;
-import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.market.MarkPriceRuntime;
-import com.surprising.aeron.service.state.OrderReservation;
-import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.PlaceAdmissionEvent;
-import com.surprising.aeron.service.state.FeePolicyBook;
-import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.state.TradingRuntimeState;
-import com.surprising.aeron.service.state.TradingCoreState;
-
-import com.surprising.aeron.service.state.model.CoreMarkPriceState;
-
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
+import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.TradingRuntimeState;
+import com.surprising.aeron.service.state.fee.FeePolicyBook;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.market.MarkPriceRuntime;
+import com.surprising.aeron.service.state.model.CoreMarkPriceState;
+import com.surprising.aeron.service.state.order.OrderReservation;
 
 public final class CoreOrderDecisionResolver {
 
@@ -74,7 +70,7 @@ public final class CoreOrderDecisionResolver {
     /** 同一批、同一用户和币对的只读决策上下文；不跨命令复用。 */
     public record Context(CoreInstrument instrument, int symbolId, MarkPriceRuntime mark,
                           FeePolicyBook policies, long clusterTimestamp,
-                          com.surprising.aeron.service.state.TreasuryRuntime.SettlementStatus settlementStatus) {
+                          com.surprising.aeron.service.state.ledger.TreasuryRuntime.SettlementStatus settlementStatus) {
         public boolean lifecycleSettled() { return settlementStatus.lifecycleSettled(); }
         public boolean fundingInProgress() { return settlementStatus.fundingInProgress(); }
     }

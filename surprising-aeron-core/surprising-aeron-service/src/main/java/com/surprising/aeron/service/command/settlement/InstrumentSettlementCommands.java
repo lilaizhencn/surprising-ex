@@ -1,14 +1,9 @@
 package com.surprising.aeron.service.command.settlement;
 
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
-
-import com.surprising.aeron.protocol.CoreMessage;
-import com.surprising.aeron.service.state.RuntimeLifecycleSettlement;
-import com.surprising.aeron.service.state.RuntimeLifecycleSettlementContinuation;
-import com.surprising.aeron.service.state.model.CoreOrderState;
-import java.util.ArrayList;
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+import com.surprising.aeron.service.state.lifecycle.RuntimeLifecycleSettlement;
+import com.surprising.aeron.service.state.lifecycle.RuntimeLifecycleSettlementContinuation;
 import java.util.List;
 import java.util.UUID;
 

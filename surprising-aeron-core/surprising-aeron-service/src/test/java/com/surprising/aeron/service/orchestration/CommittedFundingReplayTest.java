@@ -1,12 +1,14 @@
 package com.surprising.aeron.service.orchestration;
 
-import static org.assertj.core.api.Assertions.*;
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+
+import static org.assertj.core.api.Assertions.*;
 
 class CommittedFundingReplayTest {
     private long sequence;

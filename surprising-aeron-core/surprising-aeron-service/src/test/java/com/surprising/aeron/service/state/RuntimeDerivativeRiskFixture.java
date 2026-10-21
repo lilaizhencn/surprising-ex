@@ -1,10 +1,13 @@
 package com.surprising.aeron.service.state;
 
-import static com.surprising.aeron.service.state.RuntimeDerivativeRiskProcessor.*;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateProjector;
+
+import static com.surprising.aeron.service.state.risk.RuntimeDerivativeRiskProcessor.*;
 
 /** Builds isolated runtime state for financial parity tests. */
-final class RuntimeDerivativeRiskFixture {
+public final class RuntimeDerivativeRiskFixture {
     public static TradingRuntimeState simulateMarkPrice(TradingCoreState before, ApplyMarkPriceCommand command,
                                                         Iterable<Long> indexedUserIds,
                                                         RuntimeIdentityRegistry identities) {

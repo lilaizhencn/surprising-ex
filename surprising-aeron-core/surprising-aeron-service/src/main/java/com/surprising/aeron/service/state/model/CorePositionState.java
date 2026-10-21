@@ -1,9 +1,8 @@
 package com.surprising.aeron.service.state.model;
 
-import com.surprising.aeron.service.state.OrderReservation;
-
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.service.state.order.OrderReservation;
 
 public record CorePositionState(
         String instrumentId,

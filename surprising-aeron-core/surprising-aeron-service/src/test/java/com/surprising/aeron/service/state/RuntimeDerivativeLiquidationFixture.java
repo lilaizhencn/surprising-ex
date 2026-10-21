@@ -1,15 +1,21 @@
 package com.surprising.aeron.service.state;
 
-import static com.surprising.aeron.service.state.RuntimeDerivativeLiquidationProcessor.*;
-import com.surprising.aeron.service.state.model.CoreOrderState;
+import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
-import com.surprising.aeron.protocol.ExecuteAdlCommand;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.model.CoreOrderState;
+import com.surprising.aeron.service.state.order.RuntimeTestStateTransitions;
+import com.surprising.aeron.service.state.risk.RuntimeAdlExecution;
+import com.surprising.aeron.service.state.risk.RuntimeLiquidationResolution;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateProjector;
 import java.util.Collection;
 import java.util.List;
 
+import static com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor.*;
+
 /** Builds isolated runtime state for financial parity tests. */
-final class RuntimeDerivativeLiquidationFixture {
+public final class RuntimeDerivativeLiquidationFixture {
     public static TradingRuntimeState simulateExecution(TradingCoreState before,
                                                         ExecuteLiquidationCommand command,
                                                         RuntimeIdentityRegistry identities) {

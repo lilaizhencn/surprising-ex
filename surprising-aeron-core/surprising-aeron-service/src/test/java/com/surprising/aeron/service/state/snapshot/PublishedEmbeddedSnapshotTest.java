@@ -1,10 +1,23 @@
 package com.surprising.aeron.service.state.snapshot;
 
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.protocol.CoreAlgoOrderView;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreOrderType;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.protocol.CoreTriggerCondition;
+import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
+import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
+import com.surprising.aeron.protocol.CoreTriggerOrderType;
+import com.surprising.aeron.protocol.CoreTriggerPriceSource;
+import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.product.api.ProductLine;
-import java.util.List;
 import java.util.Arrays;
+import java.util.List;
 import org.junit.jupiter.api.Test;
+
 import static org.assertj.core.api.Assertions.*;
 
 class PublishedEmbeddedSnapshotTest {

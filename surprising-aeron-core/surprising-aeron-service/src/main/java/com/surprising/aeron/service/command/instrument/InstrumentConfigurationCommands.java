@@ -1,11 +1,9 @@
 package com.surprising.aeron.service.command.instrument;
 
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-
-
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.state.RuntimeInstrumentStateTransitions;
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+import com.surprising.aeron.service.state.instrument.RuntimeInstrumentStateTransitions;
 
 /** 币对配置与维护状态命令；六产品线按所属运行时隔离。 */
 public final class InstrumentConfigurationCommands {

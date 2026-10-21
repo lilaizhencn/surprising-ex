@@ -1,19 +1,37 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.account.BalanceRuntime;
-
-import com.surprising.aeron.service.state.snapshot.*;
-
 
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
+import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.service.lane.LaneTopology;
+import com.surprising.aeron.service.state.account.BalanceRuntime;
+import com.surprising.aeron.service.state.account.CoreUserState;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.index.AdlPositionIndex;
+import com.surprising.aeron.service.state.index.OpenInterestIndex;
+import com.surprising.aeron.service.state.index.PositionUserIndex;
+import com.surprising.aeron.service.state.index.RuntimeFactIndexes;
 import com.surprising.aeron.service.state.model.*;
+import com.surprising.aeron.service.state.model.AssetBalance;
+import com.surprising.aeron.service.state.model.CorePositionState;
+import com.surprising.aeron.service.state.order.RuntimeTestStateTransitions;
+import com.surprising.aeron.service.state.risk.RiskScanCoordinator;
+import com.surprising.aeron.service.state.risk.RuntimeDerivativeRiskProcessor;
+import com.surprising.aeron.service.state.snapshot.*;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateMaterializer;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateProjector;
+import com.surprising.aeron.service.state.snapshot.TradingStateSnapshotCodec;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
-import org.junit.jupiter.api.Test;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import org.junit.jupiter.api.Test;
+
 import static org.assertj.core.api.Assertions.*;
 
 class ParallelRiskScanTest {

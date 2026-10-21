@@ -1,26 +1,43 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.command.AccountLaneOperationType;
+
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.service.lane.LaneTopology;
+import com.surprising.aeron.service.state.account.AccountLaneState;
+import com.surprising.aeron.service.state.account.AccountLaneTestAccess;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
 import com.surprising.aeron.service.state.account.UserRuntime;
-
-import com.surprising.aeron.service.state.risk.*;
-import com.surprising.aeron.service.state.snapshot.*;
-
+import com.surprising.aeron.service.state.admission.PendingReservationTracker;
+import com.surprising.aeron.service.state.admission.PlaceBatchAdmissionEvent;
+import com.surprising.aeron.service.state.admission.PlaceBatchIntentSource;
+import com.surprising.aeron.service.state.admission.ResolvedPlaceOrder;
+import com.surprising.aeron.service.state.change.LaneCommitEvent;
+import com.surprising.aeron.service.state.change.RuntimeChangeBuffer;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.ledger.SystemLedgerLane;
+import com.surprising.aeron.service.state.ledger.TreasuryRuntime;
+import com.surprising.aeron.service.state.model.CoreLeverageKey;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
-import com.surprising.aeron.service.state.model.CoreLeverageKey;
-import com.surprising.aeron.protocol.CoreMarginMode;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
+import com.surprising.aeron.service.state.order.LaneCancelEvent;
+import com.surprising.aeron.service.state.order.OrderRuntime;
+import com.surprising.aeron.service.state.order.ReservationRuntime;
+import com.surprising.aeron.service.state.position.PositionRuntime;
+import com.surprising.aeron.service.state.risk.*;
+import com.surprising.aeron.service.state.risk.LiquidationRuntime;
+import com.surprising.aeron.service.state.risk.RiskScanRuntime;
+import com.surprising.aeron.service.state.settlement.MatcherSettlementChanges;
+import com.surprising.aeron.service.state.snapshot.*;
+import com.surprising.aeron.service.state.snapshot.AccountLaneSnapshot;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateMaterializer;
+import com.surprising.aeron.service.state.snapshot.TradingRuntimeSnapshot;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
-
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TradingRuntimeStateTest {
 
@@ -33,8 +50,8 @@ class TradingRuntimeStateTest {
             int lane = state.topology().accountLaneId(7);
             var changes = new MatcherSettlementChanges(state.topology().accountLaneCount());
             changes.ensureActiveLanes(1L << lane);
-            changes.balancePatches[lane].add(7, 3, new BalanceRuntime(7, 3, 1000, 0), 0);
-            changes.balancePatches[lane].after(7, 3, new BalanceRuntime(7, 3, 800, 200), 200);
+            changes.balancePatch(lane).add(7, 3, new BalanceRuntime(7, 3, 1000, 0), 0);
+            changes.balancePatch(lane).after(7, 3, new BalanceRuntime(7, 3, 800, 200), 200);
             var admission = new PlaceBatchAdmissionEvent().prepare(2, 7, java.util.UUID.randomUUID(),
                     new ResolvedPlaceOrder[1], new long[1],
                     new OrderRuntime[]{CoreStateTestFixtures.order(11, 7, 5, 2)},
@@ -49,8 +66,8 @@ class TradingRuntimeStateTest {
             complete.setAccessible(true);
             complete.setBoolean(admission, true);
             state.registerPlaceBatchAdmission(admission);
-            assertThat(state.accountRollback.patchOrdersBeforeByLane[lane].isEmpty()).isTrue();
-            assertThat(state.accountRollback.patchBalancesBeforeByLane[lane].size()).isZero();
+            assertThat(AccountLaneTestAccess.rollbackOrdersEmpty(state.accountRollback, lane)).isTrue();
+            assertThat(state.accountRollback.balancePatch(lane).size()).isZero();
             // Completing an earlier commit must not require the future batch's after-image.
             state.clearChangedKeys();
             assertThat(state.pendingReservations.pendingReservationCount()).isEqualTo(1);
@@ -105,7 +122,7 @@ class TradingRuntimeStateTest {
             var ordersField = AccountLaneState.class.getDeclaredField("orders");
             ordersField.setAccessible(true);
             for (int id = 0; id < maps.length; id++) {
-                maps[id] = new OwnerForbiddenOrderMap(state.accountLanes[id].orders, Thread.currentThread());
+                maps[id] = new OwnerForbiddenOrderMap(AccountLaneTestAccess.orders(state.accountLanes[id]), Thread.currentThread());
                 ordersField.set(state.accountLanes[id], maps[id]);
             }
             state.startAccountLanes();
@@ -240,76 +257,23 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void promotionPreservesSetOrderWithoutArrayMaterializationAcrossEveryRemoval() {
-        var index = new PendingReservationTracker.PendingReservationSequenceIndex(4);
-        for (long order = 1; order <= 100; order++) index.add(19, order);
-        while (index.containsKey(19)) {
-            long first = index.firstOrderBySequence.get(19);
-            var additional = index.additionalOrdersBySequence.get(19);
-            long expected = additional == null || additional.isEmpty() ? 0 : additional.toArray()[0];
-            index.remove(19, first);
-            assertThat(index.firstOrderBySequence.get(19)).isEqualTo(expected);
-        }
-        assertThat(index.additionalOrdersBySequence.isEmpty()).isTrue();
-    }
-
-    @Test
     void admissionOnlyPreallocatesWrittenBuffersInItsOwnerLane() throws Exception {
         var constructor = MatcherSettlementChanges.class.getDeclaredConstructor(int.class);
         constructor.setAccessible(true);
         var changes = constructor.newInstance(4);
         changes.ensureAdmissionCapacity(2, 20);
-        Object[] lanes = changes.laneDeltas;
-        for (int lane = 0; lane < lanes.length; lane++) {
+
+        for (int lane = 0; lane < changes.balancePatchCount(); lane++) {
             for (String name : new String[]{"users", "orders", "reservations", "positions"}) {
-                Field bufferField = lanes[lane].getClass().getDeclaredField(name);
+                Field bufferField = changes.laneDelta(lane).getClass().getDeclaredField(name);
                 bufferField.setAccessible(true);
-                Object buffer = bufferField.get(lanes[lane]);
+                Object buffer = bufferField.get(changes.laneDelta(lane));
                 Field keys = RuntimeChangeBuffer.class.getDeclaredField("keys");
                 keys.setAccessible(true);
                 assertThat(((long[]) keys.get(buffer)).length).as("lane %s %s", lane, name)
                         .isEqualTo(lane == 2 && (name.equals("orders") || name.equals("reservations")) ? 32 : 8);
             }
         }
-    }
-
-    @Test
-    void pendingReservationSequenceIndexKeepsSingleOrderOnPrimitivePath() {
-        PendingReservationTracker.PendingReservationSequenceIndex index =
-                new PendingReservationTracker.PendingReservationSequenceIndex(4);
-
-        index.add(101, 1_001);
-
-        assertThat(index.containsKey(101)).isTrue();
-        assertThat(index.contains(101, 1_001)).isTrue();
-        assertThat(index.orderIds(101)).containsExactly(1_001);
-
-        index.remove(101, 1_001);
-
-        assertThat(index.isEmpty()).isTrue();
-        assertThat(index.orderIds(101)).isEmpty();
-    }
-
-    @Test
-    void pendingReservationSequenceRolloverPreservesTheActivePrefixAndLongKeys() {
-        var index = new PendingReservationTracker.PendingReservationSequenceIndex(4);
-        for (long sequence = 1; sequence <= 20_000; sequence++) {
-            index.add(sequence, Long.MAX_VALUE - sequence);
-            if (sequence > 256) index.remove(sequence - 256, Long.MAX_VALUE - (sequence - 256));
-            assertThat(index.firstOrderId(sequence)).isEqualTo(Long.MAX_VALUE - sequence);
-            assertThat(index.firstOrderId(Math.max(1, sequence - 255)))
-                    .isEqualTo(Long.MAX_VALUE - Math.max(1, sequence - 255));
-            if (sequence > 256) assertThat(index.containsKey(sequence - 256)).isFalse();
-        }
-        index.add(Long.MAX_VALUE, 1);
-        index.add(Long.MAX_VALUE, 2);
-        index.remove(Long.MAX_VALUE, 1);
-        assertThat(index.firstOrderId(Long.MAX_VALUE)).isEqualTo(2);
-        index.clear();
-        assertThat(index.isEmpty()).isTrue();
-        assertThat(index.additionalOrdersBySequence.isEmpty()).isTrue();
-        index.add(1, 11);
-        assertThat(index.orderIds(1)).containsExactly(11);
     }
 
     @Test
@@ -335,30 +299,6 @@ class TradingRuntimeStateTest {
         }
         for (var worker : state.laneWorkers) assertThat(worker.thread().isAlive()).isFalse();
         assertThat(ledgerThread.isAlive()).isFalse();
-    }
-
-    @Test
-    void pendingReservationSequenceIndexPromotesBatchOrdersWhenFirstCompletes() {
-        PendingReservationTracker.PendingReservationSequenceIndex index =
-                new PendingReservationTracker.PendingReservationSequenceIndex(4);
-        index.add(101, 1_001);
-        index.add(101, 1_002);
-        index.add(101, 1_003);
-        index.add(102, 2_001);
-
-        assertThat(index.orderIds(101)).containsExactlyInAnyOrder(1_001, 1_002, 1_003);
-        assertThatThrownBy(() -> index.add(101, 1_002))
-                .isInstanceOf(IllegalStateException.class);
-
-        index.remove(101, 1_001);
-        assertThat(index.orderIds(101)).containsExactlyInAnyOrder(1_002, 1_003);
-        index.remove(101, 1_002);
-        index.remove(101, 1_003);
-
-        assertThat(index.containsKey(101)).isFalse();
-        assertThat(index.orderIds(102)).containsExactly(2_001);
-        index.clear();
-        assertThat(index.isEmpty()).isTrue();
     }
 
     @Test
@@ -781,9 +721,9 @@ class TradingRuntimeStateTest {
     void laneCounterOverflowFailsBeforePendingStateChanges() {
         // Given: an account lane with one maximum-unit pending reservation.
         AccountLaneState lane = new AccountLaneState(0, 8);
-        lane.reservations.put(1, CoreStateTestFixtures.reservation(1, 7, 3, Long.MAX_VALUE));
+        AccountLaneTestAccess.reservations(lane).put(1, CoreStateTestFixtures.reservation(1, 7, 3, Long.MAX_VALUE));
         lane.markPendingReservation(1, 1);
-        lane.reservations.put(2, CoreStateTestFixtures.reservation(2, 7, 3, 1));
+        AccountLaneTestAccess.reservations(lane).put(2, CoreStateTestFixtures.reservation(2, 7, 3, 1));
 
         // When: the next mark would overflow reserved units.
         assertThatThrownBy(() -> lane.markPendingReservation(2, 1)).isInstanceOf(ArithmeticException.class);
@@ -832,7 +772,7 @@ class TradingRuntimeStateTest {
         long[] pendingOrderIds = pendingReservationOrderIds(state, 4);
         long firstPendingOwner = pendingReservationOwner(state, 11);
         long laterPendingOwner = pendingReservationOwner(state, 12);
-        accountLaneState(state, topology.accountLaneId(laterUser)).reservations.remove(12);
+        AccountLaneTestAccess.reservations(accountLaneState(state, topology.accountLaneId(laterUser))).remove(12);
 
         // When: preflight reaches the missing reservation in the later lane.
         assertThatThrownBy(() -> state.completePendingReservations(4)).isInstanceOf(IllegalStateException.class);
@@ -1403,17 +1343,17 @@ class TradingRuntimeStateTest {
     void activeOrderMembershipSurvivesUpdatesGrowthAndTerminalRemoval() {
         AccountLaneState lane = new AccountLaneState(0, 16);
         for (long id = 1; id <= 100; id++) lane.putOrder(CoreStateTestFixtures.order(id, 7, 5, 2));
-        var membership = lane.activeOrderIdsByUser.get(7);
+        var membership = AccountLaneTestAccess.activeOrderIdsByUser(lane).get(7);
         for (long id = 1; id <= 100; id++) {
-            OrderRuntime order = lane.orders.get(id);
+            OrderRuntime order = lane.order(id);
             lane.putOrder(order.withExecution(1, 1, CoreOrderStatus.OPEN, 2));
-            assertThat(lane.activeOrderIdsByUser.get(7)).isSameAs(membership);
+            assertThat(AccountLaneTestAccess.activeOrderIdsByUser(lane).get(7)).isSameAs(membership);
         }
         assertThat(membership.size()).isEqualTo(100);
         for (long id = 1; id <= 100; id++) {
-            lane.putOrder(lane.orders.get(id).withStatus(CoreOrderStatus.CANCELED, 3));
+            lane.putOrder(lane.order(id).withStatus(CoreOrderStatus.CANCELED, 3));
         }
-        assertThat(lane.activeOrderIdsByUser.get(7)).isSameAs(membership);
+        assertThat(AccountLaneTestAccess.activeOrderIdsByUser(lane).get(7)).isSameAs(membership);
         assertThat(membership.size()).isZero();
     }
 
@@ -1450,7 +1390,7 @@ class TradingRuntimeStateTest {
         Path testClasses = Path.of(TradingRuntimeStateTest.class.getProtectionDomain()
                 .getCodeSource().getLocation().toURI());
         Path module = testClasses.getParent().getParent();
-        return Files.readString(module.resolve("src/main/java/com/surprising/aeron/service/state/AccountLaneState.java"));
+        return Files.readString(module.resolve("src/main/java/com/surprising/aeron/service/state/account/AccountLaneState.java"));
     }
 
     private static AccountLaneState accountLaneState(TradingRuntimeState state, int laneId) throws Exception {
@@ -1480,11 +1420,8 @@ class TradingRuntimeStateTest {
                               long localStateHash, long localFundsHash) {
     }
 
-    private static long[] pendingReservationOrderIds(TradingRuntimeState state, long coreSequence) throws Exception {
-        Field field = PendingReservationTracker.class.getDeclaredField("pendingReservationsBySequence");
-        field.setAccessible(true);
-        var pending = (PendingReservationTracker.PendingReservationSequenceIndex) field.get(state.pendingReservations);
-        return pending.orderIds(coreSequence);
+    private static long[] pendingReservationOrderIds(TradingRuntimeState state, long coreSequence) {
+        return state.pendingReservations.pendingOrderIds(coreSequence);
     }
 
     private static long pendingReservationOwner(TradingRuntimeState state, long orderId) throws Exception {

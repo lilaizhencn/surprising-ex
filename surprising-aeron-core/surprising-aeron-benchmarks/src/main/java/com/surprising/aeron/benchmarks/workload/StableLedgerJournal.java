@@ -1,10 +1,5 @@
 package com.surprising.aeron.benchmarks.workload;
 
-import static com.surprising.aeron.benchmarks.workload.StableLedgerJson.escape;
-import static com.surprising.aeron.benchmarks.workload.StableLedgerJson.fields;
-import static com.surprising.aeron.benchmarks.workload.StableLedgerJson.number;
-import static com.surprising.aeron.benchmarks.workload.StableLedgerJson.required;
-
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -16,7 +11,12 @@ import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.Map;
 
-final class StableLedgerJournal {
+import static com.surprising.aeron.benchmarks.workload.StableLedgerJson.escape;
+import static com.surprising.aeron.benchmarks.workload.StableLedgerJson.fields;
+import static com.surprising.aeron.benchmarks.workload.StableLedgerJson.number;
+import static com.surprising.aeron.benchmarks.workload.StableLedgerJson.required;
+
+public final class StableLedgerJournal {
 
     private static final int CHECKPOINT_INTERVAL = 8_192;
 
@@ -42,16 +42,16 @@ final class StableLedgerJournal {
                 StandardOpenOption.APPEND);
     }
 
-    static StableLedgerJournal open(Path directory, String runId, long seed, String configFingerprint)
+    public static StableLedgerJournal open(Path directory, String runId, long seed, String configFingerprint)
             throws IOException {
         return new StableLedgerJournal(directory, runId, seed, configFingerprint);
     }
 
-    List<String> replayLines() {
+    public List<String> replayLines() {
         return replayLines;
     }
 
-    void append(String line, long lastSequence) {
+    public void append(String line, long lastSequence) {
         try {
             ByteBuffer buffer = ByteBuffer.wrap((line + '\n').getBytes(StandardCharsets.UTF_8));
             while (buffer.hasRemaining()) events.write(buffer);
@@ -66,7 +66,7 @@ final class StableLedgerJournal {
         }
     }
 
-    void flush(long lastSequence) {
+    public void flush(long lastSequence) {
         try {
             events.force(false);
             checkpoint(lastSequence);
@@ -75,7 +75,7 @@ final class StableLedgerJournal {
         }
     }
 
-    void close(long lastSequence) {
+    public void close(long lastSequence) {
         try {
             events.force(false);
             checkpoint(lastSequence);

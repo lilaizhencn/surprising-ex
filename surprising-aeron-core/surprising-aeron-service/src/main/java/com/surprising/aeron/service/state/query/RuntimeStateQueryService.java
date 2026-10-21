@@ -1,9 +1,4 @@
 package com.surprising.aeron.service.state.query;
-import com.surprising.aeron.service.state.account.UserRuntime;
-
-import com.surprising.aeron.service.state.*;
-
-import com.surprising.aeron.service.state.model.CoreLeverageKey;
 
 import com.surprising.aeron.protocol.CoreBalanceView;
 import com.surprising.aeron.protocol.CoreLeverageView;
@@ -11,6 +6,16 @@ import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CorePositionView;
 import com.surprising.aeron.protocol.CoreReservationView;
 import com.surprising.aeron.protocol.CoreUserStateView;
+import com.surprising.aeron.service.state.*;
+import com.surprising.aeron.service.state.TradingRuntimeState;
+import com.surprising.aeron.service.state.account.AccountLaneState;
+import com.surprising.aeron.service.state.account.UserRuntime;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.model.CoreLeverageKey;
+import com.surprising.aeron.service.state.order.OrderRuntime;
+import com.surprising.aeron.service.state.order.ReservationRuntime;
+import com.surprising.aeron.service.state.position.PositionRuntime;
+import com.surprising.aeron.service.state.snapshot.CoreStateHash;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;

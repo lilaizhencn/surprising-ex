@@ -1,7 +1,5 @@
 package com.surprising.aeron.benchmarks.transport;
 
-import lombok.extern.slf4j.Slf4j;
-
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.client.AeronCluster;
@@ -11,8 +9,9 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import org.agrona.concurrent.UnsafeBuffer;
+import lombok.extern.slf4j.Slf4j;
 import org.HdrHistogram.Histogram;
+import org.agrona.concurrent.UnsafeBuffer;
 
 /**
  * 使用生产编码器预构造订单消息，隔离消息复制与业务执行成本。
@@ -25,7 +24,7 @@ public final class CommandReplicationLoad {
     private final long[] started = new long[256];
     private final Histogram latency = new Histogram(60_000_000_000L, 3);
 
-    static byte[] command(int batchSize) {
+    public static byte[] command(int batchSize) {
         var orders = new ArrayList<PlaceOrderCommand>();
         for (int i = 0; i < batchSize; i++) {
             orders.add(new PlaceOrderCommand(i + 1, "1", CoreOrderSide.BUY,

@@ -1,6 +1,4 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
 import com.surprising.aeron.protocol.CancelOrderBatchCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CommandSource;
@@ -12,16 +10,17 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
-import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Harness;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Scenario;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.SnapshotTemplate;
+import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
+import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.ledger.CoreTreasuryState;
 import com.surprising.aeron.service.state.model.AssetBalance;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
-import com.surprising.aeron.service.state.CoreTreasuryState;
-import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
@@ -31,10 +30,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-final class SpotMixedWorkload {
+public final class SpotMixedWorkload {
 
-    static final int DEFAULT_SYMBOLS = 4;
-    static final int DEFAULT_HFT_BATCH_SIZE = 20;
+    public static final int DEFAULT_SYMBOLS = 4;
+    public static final int DEFAULT_HFT_BATCH_SIZE = 20;
     private static final String QUOTE_ASSET = "USDT";
     private static final long RETAIL_QUOTE_UNITS = 1_000_000L;
     private static final long RETAIL_BASE_UNITS = 10_000L;
@@ -44,7 +43,7 @@ final class SpotMixedWorkload {
     private SpotMixedWorkload() {
     }
 
-    record Template(
+    public record Template(
             SnapshotTemplate snapshot,
             int activeUsers,
             List<String> symbols,
@@ -53,7 +52,7 @@ final class SpotMixedWorkload {
             List<Long> takers,
             Map<String, Long> openingTotals) {
 
-        Template {
+        public Template {
             symbols = List.copyOf(symbols);
             baseAssets = List.copyOf(baseAssets);
             makers = List.copyOf(makers);
@@ -67,7 +66,7 @@ final class SpotMixedWorkload {
         }
     }
 
-    static Template template(int accountLanes, int activeUsers, int symbolCount) {
+    public static Template template(int accountLanes, int activeUsers, int symbolCount) {
         if (activeUsers < accountLanes || activeUsers > LinearPerpetualBenchmarkSupport.MAX_BENCHMARK_SCALE) {
             throw new IllegalArgumentException("activeUsers must cover every lane and be at most 10000");
         }
@@ -122,7 +121,7 @@ final class SpotMixedWorkload {
         }
     }
 
-    static Scenario scenario(Template template, int hftRounds, int hftBatchSize) {
+    public static Scenario scenario(Template template, int hftRounds, int hftBatchSize) {
         if (hftRounds < 1 || hftRounds > 10_000) {
             throw new IllegalArgumentException("hftRounds must be in [1,10000]");
         }

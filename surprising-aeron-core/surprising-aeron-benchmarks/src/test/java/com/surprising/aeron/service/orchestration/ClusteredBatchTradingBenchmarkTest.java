@@ -1,10 +1,11 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.TradingCoreOwner;
-import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.aeron.service.orchestration.pipeline.ClusteredBatchTradingBenchmark;
+import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import com.surprising.product.api.ProductLine;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 class ClusteredBatchTradingBenchmarkTest {
     @org.junit.jupiter.params.ParameterizedTest

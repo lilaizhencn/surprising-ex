@@ -1,7 +1,14 @@
 package com.surprising.aeron.service.orchestration;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
+import com.surprising.aeron.service.orchestration.commit.OrderedCommitCoordinator;
+import com.surprising.aeron.service.orchestration.egress.ClusterServiceEgress;
+import com.surprising.aeron.service.orchestration.ingress.OwnerIngressRing;
+import com.surprising.aeron.service.orchestration.pipeline.ClusterCommandWindow;
+import com.surprising.aeron.service.orchestration.pipeline.CommandSlot;
+import com.surprising.aeron.service.orchestration.pipeline.DirectCommandSlot;
+import com.surprising.aeron.service.orchestration.pipeline.OrderBatchPending;
+import com.surprising.aeron.service.orchestration.pipeline.OwnerCommandPipelineState;
+import com.surprising.aeron.service.orchestration.pipeline.PendingMatchingRing;
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -11,6 +18,8 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 class ProductionSourceBoundaryTest {
     @Test
@@ -103,7 +112,7 @@ class ProductionSourceBoundaryTest {
                 .doesNotContain("dispatchOwnerControlledSettlement");
         assertThat(java.util.Arrays.stream(ClusterCommandWindow.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName)).doesNotContain("complete");
-        assertThat(java.util.Arrays.stream(com.surprising.aeron.service.state.MatcherSettlementEvent.class
+        assertThat(java.util.Arrays.stream(com.surprising.aeron.service.state.settlement.MatcherSettlementEvent.class
                 .getDeclaredMethods()).map(java.lang.reflect.Method::getName))
                 .doesNotContain("markMatcherOwnedPublication", "matcherOwnedPublication");
         assertThat(java.util.Arrays.stream(OrderBatchPending.class.getDeclaredConstructors())
@@ -111,7 +120,7 @@ class ProductionSourceBoundaryTest {
         assertThat(java.util.Arrays.stream(com.surprising.aeron.service.state.index.ActiveOrderIndex.class
                 .getDeclaredMethods()).map(java.lang.reflect.Method::getName)).doesNotContain("ids");
         for (String name : java.util.List.of("preparedResponse", "preparedResponseLength")) {
-            var method = com.surprising.aeron.service.state.LaneOrderResultTarget.class.getMethod(name);
+            var method = com.surprising.aeron.service.state.order.LaneOrderResultTarget.class.getMethod(name);
             assertThat(method.isDefault()).as("Lane response contract %s", name).isFalse();
         }
     }
@@ -123,21 +132,20 @@ class ProductionSourceBoundaryTest {
             root = root.getParent();
             if (root == null) throw new AssertionError("repository root unavailable");
         }
-        Path orchestration = root.resolve("surprising-aeron-core/surprising-aeron-service/src/main/java/"
-                + "com/surprising/aeron/service/orchestration");
-        for (String name : java.util.List.of("TradingCoreOwner", "TradingOwnerLoop", "OwnerIngressRing",
-                "ClusterCommandWindow")) {
-            String source = Files.readString(orchestration.resolve(name + ".java"));
-            assertThat(source).as("Owner session boundary in %s", name)
+        Path sources = root.resolve("surprising-aeron-core/surprising-aeron-service/src/main/java");
+        for (Class<?> type : java.util.List.of(TradingCoreOwner.class, TradingOwnerLoop.class,
+                OwnerIngressRing.class, ClusterCommandWindow.class)) {
+            String source = Files.readString(sources.resolve(type.getName().replace('.', '/') + ".java"));
+            assertThat(source).as("Owner session boundary in %s", type.getSimpleName())
                     .doesNotContain("ClientSession", "TransportSession");
             assertThat(source).contains("long sessionId");
         }
         assertThat(io.aeron.cluster.service.Cluster.class.isAssignableFrom(OwnerLogContext.class)).isFalse();
         assertThat(io.aeron.cluster.service.ClientSession.class.isAssignableFrom(
                 ClusterServiceEgress.TransportSession.class)).isFalse();
-        assertThat(Files.readString(orchestration.resolve("OwnerLogContext.java")))
+        assertThat(Files.readString(sources.resolve(OwnerLogContext.class.getName().replace('.', '/') + ".java")))
                 .doesNotContain("UnsupportedOperationException");
-        assertThat(Files.readString(orchestration.resolve("ClusterServiceEgress.java")))
+        assertThat(Files.readString(sources.resolve(ClusterServiceEgress.class.getName().replace('.', '/') + ".java")))
                 .doesNotContain("UnsupportedOperationException", "tryClaim(", "DirectBufferVector");
     }
 

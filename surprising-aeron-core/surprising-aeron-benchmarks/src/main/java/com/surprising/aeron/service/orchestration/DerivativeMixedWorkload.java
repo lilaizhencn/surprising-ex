@@ -1,6 +1,4 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CancelOrderBatchCommand;
@@ -16,16 +14,17 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
-import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Harness;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Scenario;
 import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.SnapshotTemplate;
+import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
+import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.ledger.CoreTreasuryState;
 import com.surprising.aeron.service.state.model.AssetBalance;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
-import com.surprising.aeron.service.state.CoreTreasuryState;
-import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
@@ -35,10 +34,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-final class DerivativeMixedWorkload {
+public final class DerivativeMixedWorkload {
 
-    static final int DEFAULT_SYMBOLS = 4;
-    static final int DEFAULT_HFT_BATCH_SIZE = 20;
+    public static final int DEFAULT_SYMBOLS = 4;
+    public static final int DEFAULT_HFT_BATCH_SIZE = 20;
     private static final int OPEN_ORDER_USER_CAP = 128;
     private static final int RISK_BATCH_SIZE = 64;
     private static final long ENTRY_PRICE = 100;
@@ -48,7 +47,7 @@ final class DerivativeMixedWorkload {
     private DerivativeMixedWorkload() {
     }
 
-    record Template(
+    public record Template(
             SnapshotTemplate snapshot,
             ProductLine productLine,
             int activeUsers,
@@ -58,7 +57,7 @@ final class DerivativeMixedWorkload {
             String settleAsset,
             long openingFunds) {
 
-        Template {
+        public Template {
             symbols = List.copyOf(symbols);
             makers = List.copyOf(makers);
             takers = List.copyOf(takers);
@@ -70,7 +69,7 @@ final class DerivativeMixedWorkload {
         }
     }
 
-    static Template template(ProductLine productLine, int accountLanes, int activeUsers, int symbolCount) {
+    public static Template template(ProductLine productLine, int accountLanes, int activeUsers, int symbolCount) {
         Profile profile = Profile.forProductLine(productLine);
         if (activeUsers < accountLanes || activeUsers > LinearPerpetualBenchmarkSupport.MAX_BENCHMARK_SCALE) {
             throw new IllegalArgumentException("activeUsers must cover every lane and be at most 10000");
@@ -140,7 +139,7 @@ final class DerivativeMixedWorkload {
         }
     }
 
-    static Scenario scenario(Template template, int hftRounds, int hftBatchSize) {
+    public static Scenario scenario(Template template, int hftRounds, int hftBatchSize) {
         if (hftRounds < 1 || hftRounds > 10_000) {
             throw new IllegalArgumentException("hftRounds must be in [1,10000]");
         }
@@ -404,7 +403,7 @@ final class DerivativeMixedWorkload {
                            String settleAsset, long notionalMultiplier, long settleScale,
                            long expiryEpochMillis, int optionTypeCode, long strikePrice,
                            long userIdBase) {
-        static Profile forProductLine(ProductLine productLine) {
+        public static Profile forProductLine(ProductLine productLine) {
             return switch (productLine) {
                 case LINEAR_PERPETUAL -> new Profile(productLine, ContractType.LINEAR_PERPETUAL,
                         "USDT", "USDT", 1, 1, 0, -1, 0, 400_000);

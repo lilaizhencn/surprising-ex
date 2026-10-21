@@ -1,13 +1,16 @@
 package com.surprising.aeron.service.orchestration;
 
-import static org.assertj.core.api.Assertions.*;
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
+import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+
+import static org.assertj.core.api.Assertions.*;
 
 class CommittedOptionExerciseReplayTest {
     private static final long TIME=1_700_000_000_000L;

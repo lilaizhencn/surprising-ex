@@ -1,9 +1,8 @@
 package com.surprising.realtime.provider.export;
 
-import static org.assertj.core.api.Assertions.*;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
-import com.surprising.aeron.service.orchestration.CommittedTradeReplay.CommittedDeliveryPage;
-import com.surprising.aeron.service.orchestration.CommittedTradeReplay.DeliveryCashFlow;
+import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedDeliveryPage;
+import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.DeliveryCashFlow;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.UUID;
@@ -14,6 +13,8 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+
+import static org.assertj.core.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named = "INSTRUMENT_TEST_JDBC_URL", matches = ".+")
 class CommittedDeliveryProjectionPostgresTest {

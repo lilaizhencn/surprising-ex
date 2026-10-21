@@ -1,10 +1,8 @@
 package com.surprising.aeron.service.state.model;
 
-import java.util.List;
-
-import com.surprising.aeron.service.state.StateMapSupport;
-
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
+import com.surprising.aeron.service.state.snapshot.StateMapSupport;
+import java.util.List;
 import java.util.Map;
 
 public record CoreRiskState(
@@ -143,7 +141,6 @@ public record CoreRiskState(
                     triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor,
                     lastScheduledRevision, List.of());
         }
-
 
         public RiskScan(
             String instrumentId,

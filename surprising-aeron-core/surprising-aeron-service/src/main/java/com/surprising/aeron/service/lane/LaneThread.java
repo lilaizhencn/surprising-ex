@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.lane;
 
-import com.surprising.aeron.service.state.AccountLaneState;
-
+import com.surprising.aeron.service.state.account.AccountLaneState;
 import java.util.Objects;
 
 /**

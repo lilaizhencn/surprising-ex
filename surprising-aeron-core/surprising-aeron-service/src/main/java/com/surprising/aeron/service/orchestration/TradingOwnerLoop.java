@@ -1,16 +1,16 @@
 package com.surprising.aeron.service.orchestration;
 
-import com.surprising.aeron.service.config.TradingCpuAffinity;
-
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.service.cluster.ClusterTopology;
+import com.surprising.aeron.service.config.TradingCpuAffinity;
 import com.surprising.aeron.service.orchestration.cluster.OwnerIdleStrategy;
+import com.surprising.aeron.service.orchestration.egress.ClusterServiceEgress;
+import com.surprising.aeron.service.orchestration.ingress.OwnerIngressRing;
 import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.product.api.ProductLine;
-import static com.surprising.aeron.service.orchestration.ClusterServiceEgress.NO_SESSION_ID;
 import io.aeron.cluster.service.Cluster;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -18,6 +18,8 @@ import org.agrona.concurrent.AgentTerminationException;
 import org.agrona.concurrent.BusySpinIdleStrategy;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+
+import static com.surprising.aeron.service.orchestration.egress.ClusterServiceEgress.NO_SESSION_ID;
 
 /** Owns the trading Owner thread and its single-producer/single-consumer input boundary. */
 @Component
@@ -161,9 +163,9 @@ public final class TradingOwnerLoop implements Runnable {
             while (!stopping) {
                 int work = 0;
                 var next = input.first();
-                if (next != null && next.action != null) {
+                if (next != null && next.action() != null) {
                     try {
-                        next.action.run();
+                        next.action().run();
                         initialized = true;
                     } finally { input.remove(); }
                     work++;
@@ -216,7 +218,7 @@ public final class TradingOwnerLoop implements Runnable {
 
     private boolean ownerWorkAvailable() {
         var next = input.first();
-        return next != null && next.action != null || coreOwner.ownerWorkAvailable();
+        return next != null && next.action() != null || coreOwner.ownerWorkAvailable();
     }
 
     private <T> T boundary(Supplier<T> action, boolean finish) {

@@ -1,17 +1,14 @@
 package com.surprising.aeron.service.matcher;
 
 import com.surprising.aeron.service.config.TradingCpuAffinity;
-
-import lombok.extern.slf4j.Slf4j;
-
 import com.surprising.aeron.service.matching.CoreMatchingResult;
-import com.surprising.aeron.service.orchestration.CommandSlot;
-import com.surprising.aeron.service.state.MatcherSettlementEvent;
-
+import com.surprising.aeron.service.orchestration.pipeline.CommandSlot;
+import com.surprising.aeron.service.state.settlement.MatcherSettlementEvent;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
+import lombok.extern.slf4j.Slf4j;
 import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
 
 /**
@@ -576,8 +573,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
 
     private enum WaitStrategy { BUSY_SPIN, ADAPTIVE }
 
-
-
     private void rethrowPublicationFailure() {
         Throwable failure = publicationFailure;
         if (failure instanceof RuntimeException exception) throw exception;
@@ -656,7 +651,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         private CommandSlot resultTarget;
         private Object result;
         private Throwable failure;
-        private com.surprising.aeron.service.state.MatcherSettlementEvent settlement;
+        private com.surprising.aeron.service.state.settlement.MatcherSettlementEvent settlement;
         /** Stable slot metadata; the settlement event itself is recycled by the owner. */
         private boolean directSettlement;
 

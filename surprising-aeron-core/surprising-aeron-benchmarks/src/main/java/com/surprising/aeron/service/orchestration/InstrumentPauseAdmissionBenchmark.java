@@ -1,5 +1,4 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.protocol.*;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -51,7 +50,7 @@ public class InstrumentPauseAdmissionBenchmark {
             if(core.tradingState().instruments().get("1").maintenance().mode()
                     !=CoreInstrumentMaintenance.Mode.HALTED)
                 throw new IllegalStateException("pause lost on recovery");
-            funds=com.surprising.aeron.service.state.FundsStateHash.compute(core.tradingState());
+            funds=com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(core.tradingState());
             // Exercise reuse after a completed admission, not just a freshly allocated event.
             requireApplied(applyAndDrain(core,message(productLine,5,CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,
                     CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("1",1,
@@ -68,7 +67,7 @@ public class InstrumentPauseAdmissionBenchmark {
         }
         @TearDown(Level.Invocation) public void verify() {
             try {
-                if(funds!=com.surprising.aeron.service.state.FundsStateHash.compute(core.tradingState()) || !core.tradingState().orders().isEmpty())
+                if(funds!=com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(core.tradingState()) || !core.tradingState().orders().isEmpty())
                     throw new IllegalStateException("paused admission changed funds or created an order");
             } finally { core.close(); }
         }

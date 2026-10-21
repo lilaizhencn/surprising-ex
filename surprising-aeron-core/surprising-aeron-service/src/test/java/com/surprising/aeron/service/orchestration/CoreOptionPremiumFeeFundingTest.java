@@ -1,13 +1,15 @@
 package com.surprising.aeron.service.orchestration;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 class CoreOptionPremiumFeeFundingTest {
     private long sequence;

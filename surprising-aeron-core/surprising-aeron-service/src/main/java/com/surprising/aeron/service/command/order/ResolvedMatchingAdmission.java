@@ -2,7 +2,7 @@ package com.surprising.aeron.service.command.order;
 
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
-import com.surprising.aeron.service.state.ResolvedPlaceOrder;
+import com.surprising.aeron.service.state.admission.ResolvedPlaceOrder;
 
 public record ResolvedMatchingAdmission(long userId, long originalOrderId, long originalOrderRevision,
                                  long userRevision, PlaceOrderCommand command,

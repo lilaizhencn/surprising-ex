@@ -1,7 +1,9 @@
 package com.surprising.aeron.service.state;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import com.surprising.aeron.service.lane.LaneTopology;
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 class MatchingNotificationProbeTest {
     @Test

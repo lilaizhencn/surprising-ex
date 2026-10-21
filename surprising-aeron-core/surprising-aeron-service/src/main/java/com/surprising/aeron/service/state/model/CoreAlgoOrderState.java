@@ -1,12 +1,11 @@
 package com.surprising.aeron.service.state.model;
 
-import com.surprising.aeron.service.state.OrderReservation;
-
 import com.surprising.aeron.protocol.CoreAlgoOrderView;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.service.state.order.OrderReservation;
 import java.util.List;
 
 public record CoreAlgoOrderState(

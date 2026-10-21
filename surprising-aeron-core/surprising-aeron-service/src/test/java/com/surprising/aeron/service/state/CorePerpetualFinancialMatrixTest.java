@@ -1,24 +1,4 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrument;
-
-import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.math.*;
-
-import com.surprising.aeron.service.state.snapshot.*;
-
-
-import com.surprising.aeron.service.state.model.AssetBalance;
-import com.surprising.aeron.service.state.model.CoreLiquidationState;
-import com.surprising.aeron.service.state.model.CoreMarkPriceState;
-import com.surprising.aeron.service.state.model.CoreOrderState;
-import com.surprising.aeron.service.state.model.CorePositionState;
-import com.surprising.aeron.service.state.model.CoreRiskSnapshot;
-import com.surprising.aeron.service.state.model.CoreRiskState;
-import com.surprising.aeron.service.state.model.CoreRiskStatus;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static com.surprising.aeron.service.matching.MatcherEventFixtures.trade;
 
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
@@ -30,8 +10,33 @@ import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.protocol.ResolveLiquidationCommand;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
+import com.surprising.aeron.service.state.account.CoreUserState;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.ledger.InsuranceAllocationPolicy;
+import com.surprising.aeron.service.state.ledger.RuntimeInsuranceFundStateTransitions;
+import com.surprising.aeron.service.state.lifecycle.RuntimePerpetualFundingProcessor;
+import com.surprising.aeron.service.state.math.*;
+import com.surprising.aeron.service.state.math.CoreContractMath;
+import com.surprising.aeron.service.state.model.AssetBalance;
+import com.surprising.aeron.service.state.model.CoreLiquidationState;
+import com.surprising.aeron.service.state.model.CoreMarkPriceState;
+import com.surprising.aeron.service.state.model.CoreOrderState;
+import com.surprising.aeron.service.state.model.CorePositionState;
+import com.surprising.aeron.service.state.model.CoreRiskSnapshot;
+import com.surprising.aeron.service.state.model.CoreRiskState;
+import com.surprising.aeron.service.state.model.CoreRiskStatus;
+import com.surprising.aeron.service.state.order.RuntimeTestStateTransitions;
+import com.surprising.aeron.service.state.risk.RuntimeAdlExecution;
+import com.surprising.aeron.service.state.risk.RuntimeDerivativeLiquidationProcessor;
+import com.surprising.aeron.service.state.risk.RuntimeLiquidationResolution;
+import com.surprising.aeron.service.state.snapshot.*;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateMaterializer;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateProjector;
+import com.surprising.aeron.service.state.snapshot.TradingStateSnapshotCodec;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
@@ -42,6 +47,10 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+
+import static com.surprising.aeron.service.matching.MatcherEventFixtures.trade;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CorePerpetualFinancialMatrixTest {
 

@@ -1,11 +1,15 @@
 package com.surprising.aeron.service.state;
+
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
-import static org.assertj.core.api.Assertions.*;
+import com.surprising.aeron.service.state.account.AccountLaneState;
+import com.surprising.aeron.service.state.settlement.MatcherSettlementEvent;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import static org.assertj.core.api.Assertions.*;
 
 class SettlementLaneWorkerTest {
     @ParameterizedTest

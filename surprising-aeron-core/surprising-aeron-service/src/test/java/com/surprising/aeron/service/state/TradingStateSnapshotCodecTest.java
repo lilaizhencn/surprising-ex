@@ -1,27 +1,24 @@
 package com.surprising.aeron.service.state;
 
-import com.surprising.aeron.service.state.snapshot.*;
-
-
-import com.surprising.aeron.service.state.index.TriggerOrderIndex;
-
-import com.surprising.aeron.service.state.model.CoreMarkPriceState;
-import com.surprising.aeron.service.state.model.CoreRiskState;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
-import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
+import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ProtocolException;
-import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.service.state.index.TriggerOrderIndex;
+import com.surprising.aeron.service.state.model.CoreMarkPriceState;
+import com.surprising.aeron.service.state.model.CoreRiskState;
+import com.surprising.aeron.service.state.order.RuntimeTestStateTransitions;
+import com.surprising.aeron.service.state.snapshot.*;
+import com.surprising.aeron.service.state.snapshot.TradingStateSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TradingStateSnapshotCodecTest {
 

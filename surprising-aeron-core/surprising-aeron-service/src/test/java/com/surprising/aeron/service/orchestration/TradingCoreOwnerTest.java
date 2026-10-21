@@ -1,15 +1,8 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
-import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
-import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assertions.catchThrowable;
-
-import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.AmendOrderBatchCommand;
 import com.surprising.aeron.protocol.AmendOrderCommand;
+import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CancelOrderBatchCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CommandSource;
@@ -25,17 +18,23 @@ import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
+import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ProtocolException;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
-import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
+import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
+import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
+import com.surprising.aeron.service.orchestration.pipeline.PipelineTestAccess;
+import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotLifecycle;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
-import io.aeron.cluster.service.Cluster;
 import io.aeron.cluster.service.ClientSession;
+import io.aeron.cluster.service.Cluster;
 import io.aeron.logbuffer.Header;
 import java.lang.reflect.Proxy;
 import java.nio.ByteBuffer;
@@ -52,6 +51,10 @@ import java.util.zip.CRC32C;
 import org.agrona.concurrent.NoOpIdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 class TradingCoreOwnerTest {
     @org.junit.jupiter.params.ParameterizedTest
@@ -107,7 +110,7 @@ class TradingCoreOwnerTest {
             int before = responses.size();
             service.acceptCommittedCommand(clientSession(responses), first, 2_000, 2_000);
             service.acceptCommittedCommand(clientSession(responses), following, 2_001, 2_001);
-            com.surprising.aeron.service.state.MatcherSettlementEvent event = null;
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent event = null;
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
             do {
                 service.pollCommands();
@@ -210,8 +213,8 @@ class TradingCoreOwnerTest {
                     boolean accountsComplete = true;
                     for (CoreMessage request : requests) {
                         var pending = core.pendingMatching.findByCommandId(request.header().commandId());
-                        var event = pending == null ? null : pending.orderBatch == null
-                                ? pending.settlementEvent() : pending.orderBatch.settlementEvent;
+                        var event = pending == null ? null : pending.orderBatch() == null
+                                ? pending.settlementEvent() : pending.orderBatch().settlementEvent();
                         accountsComplete &= event != null && event.ready() && event.completedLaneMask() != 0
                                 && (event.completedLaneMask() & event.requiredLaneMask()) == event.requiredLaneMask();
                     }
@@ -344,7 +347,7 @@ class TradingCoreOwnerTest {
                 } catch (InterruptedException interrupted) { throw new AssertionError(interrupted); }
             })).isTrue();
             assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-            com.surprising.aeron.service.state.SystemLedgerLane.Entry query = ledger -> { };
+            com.surprising.aeron.service.state.ledger.SystemLedgerLane.Entry query = ledger -> { };
             int queued = 0;
             while (runtime.dispatchLedgerQuery(query)) {
                 if (++queued > 8_192) throw new AssertionError("Ledger mailbox did not backpressure");
@@ -364,8 +367,8 @@ class TradingCoreOwnerTest {
                 assertThat(responses).hasSize(before);
                 // Facts are already ready. Even commands admitted outside the independent
                 // ingress path must feed the Ledger before the first response is retired.
-                core.pendingMatching.findByCommandId(first.header().commandId()).clusterIndependent = false;
-                core.pendingMatching.findByCommandId(following.header().commandId()).clusterIndependent = false;
+                PipelineTestAccess.clusterIndependent(core.pendingMatching.findByCommandId(first.header().commandId()), false);
+                PipelineTestAccess.clusterIndependent(core.pendingMatching.findByCommandId(following.header().commandId()), false);
                 release.countDown();
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
                 while (core.pendingMatching.ledgerDispatchHead() != null) {
@@ -529,14 +532,14 @@ class TradingCoreOwnerTest {
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(9800, "1", CoreOrderSide.BUY,
                             98, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                             CoreTimeInForce.IOC, false, "batch-ledger-following"))), 2_001, 2_001);
-            com.surprising.aeron.service.state.MatcherSettlementEvent event;
+            com.surprising.aeron.service.state.settlement.MatcherSettlementEvent event;
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
             do {
                 service.pollCommands();
                 var head = core.pendingMatching.head();
-                var batch = head == null ? null : head.orderBatch;
-                event = batch == null ? null : batch.itemSettlementEvent != null
-                        ? batch.itemSettlementEvent : batch.settlementEvent;
+                var batch = head == null ? null : head.orderBatch();
+                event = batch == null ? null : batch.itemSettlementEvent() != null
+                        ? batch.itemSettlementEvent() : batch.settlementEvent();
                 if (event != null && event.requiredLaneMask() != 0
                         && (event.completedLaneMask() & event.requiredLaneMask()) == event.requiredLaneMask()
                         && !core.matchingProgress.hasNotifications()
@@ -634,8 +637,7 @@ class TradingCoreOwnerTest {
                     if (!business.getAsBoolean()) return false;
                     if (capacityFailure) {
                         // Overflow only: entries must be rejected and cleared before they can be dispatched.
-                        owner.admissions.queuedMatching.addAll(java.util.Collections.nCopies(
-                                owner.pendingMatching.capacity() + 1, null));
+                        PipelineTestAccess.overflowQueuedMatching(owner.admissions, owner.pendingMatching.capacity() + 1);
                     } else {
                         owner.resultBuilder.commandChangedOrderIds = new java.util.AbstractList<Long>() {
                             public int size() { return 1; }
@@ -665,7 +667,7 @@ class TradingCoreOwnerTest {
                         assertThat(balance.lockedUnits()).isZero();
                     });
             assertThat(epoch.getLong(runtime)).isEqualTo(before);
-            assertThat(owner.admissions.queuedMatching).isEmpty();
+            assertThat(owner.admissions.queuedMatchingCount()).isZero();
             var duplicate = CoreTestCompletion.applyAsynchronously(owner, request);
             assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
             assertThat(duplicate.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
@@ -844,7 +846,6 @@ class TradingCoreOwnerTest {
         } finally { release.countDown(); service.onTerminate(null); }
     }
 
-
     @Test
     void emptyPollingChecksSilentFailureWithinOneMillisecondAndCommandsNeverSkipHealth() throws Exception {
         var service = service();
@@ -960,7 +961,6 @@ class TradingCoreOwnerTest {
             service.onTerminate(null);
         }
     }
-
 
     @Test
     void exhaustedRealtimeOutboxDoesNotRejectOrLeaveUnsettledBusinessCommands() {
@@ -1540,7 +1540,6 @@ class TradingCoreOwnerTest {
         return sequence;
     }
 
-
     private static ClientSession clientSession(List<byte[]> responses) {
         return (ClientSession) Proxy.newProxyInstance(ClientSession.class.getClassLoader(),
                 new Class<?>[]{ClientSession.class}, (proxy, method, arguments) -> switch (method.getName()) {
@@ -1569,7 +1568,6 @@ class TradingCoreOwnerTest {
         finishCommands(service);
     }
 
-
     private static void finishCommands(TradingOwnerTestSupport service) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         do {
@@ -1594,7 +1592,6 @@ class TradingCoreOwnerTest {
                 CommandSource.OPERATIONS, 88, 1, 0, 1_000, 1),
                 TradingCommandCodec.encodeRegisterInstrument(instrument));
     }
-
 
     private static CoreMessage instrument() {
         RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",

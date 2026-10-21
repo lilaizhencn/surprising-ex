@@ -5,50 +5,50 @@ import jdk.jfr.Event;
 import jdk.jfr.Label;
 import jdk.jfr.Name;
 
-@Name("com.surprising.LinearPerpetualWorkload")
+public @Name("com.surprising.LinearPerpetualWorkload")
 @Label("Linear perpetual mixed workload")
 @Category({"Surprising", "Benchmark"})
 final class LinearPerpetualWorkloadEvent extends Event {
 
-    @Label("Active users")
+    public @Label("Active users")
     int activeUsers;
 
-    @Label("Symbols")
+    public @Label("Symbols")
     int symbols;
 
-    @Label("Listed symbols")
+    public @Label("Listed symbols")
     int listedSymbols;
 
-    @Label("Maximum positions per user")
+    public @Label("Maximum positions per user")
     int maxPositionsPerUser;
 
-    @Label("Maximum open orders per user")
+    public @Label("Maximum open orders per user")
     int maxOpenOrdersPerUser;
 
-    @Label("Traffic profile")
+    public @Label("Traffic profile")
     String trafficProfile;
 
-    @Label("HFT rounds")
+    public @Label("HFT rounds")
     int hftRounds;
 
-    @Label("HFT batch size")
+    public @Label("HFT batch size")
     int hftBatchSize;
 
-    @Label("Lifecycle symbols per run")
+    public @Label("Lifecycle symbols per run")
     int lifecycleSymbolsPerRun;
 
-    @Label("Accepted business operations")
+    public @Label("Accepted business operations")
     long acceptedBusinessOperations;
 
-    @Label("Terminal business operations")
+    public @Label("Terminal business operations")
     long terminalBusinessOperations;
 
-    @Label("Accepted Core messages")
+    public @Label("Accepted Core messages")
     long acceptedCoreMessages;
 
-    @Label("Terminal Core messages")
+    public @Label("Terminal Core messages")
     long terminalCoreMessages;
 
-    @Label("Maximum matching backlog")
+    public @Label("Maximum matching backlog")
     long maxMatchingBacklog;
 }

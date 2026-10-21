@@ -1,18 +1,5 @@
 package com.surprising.aeron.service.state;
 
-import com.surprising.aeron.service.state.snapshot.*;
-
-
-import com.surprising.aeron.service.state.model.AssetBalance;
-import com.surprising.aeron.service.state.model.CoreMarkPriceState;
-import com.surprising.aeron.service.state.model.CorePositionState;
-import com.surprising.aeron.service.state.model.CoreRiskSnapshot;
-import com.surprising.aeron.service.state.model.CoreRiskState;
-import com.surprising.aeron.service.state.model.CoreRiskStatus;
-
-
-import static org.assertj.core.api.Assertions.assertThat;
-
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -20,16 +7,35 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
+import com.surprising.aeron.service.lane.LaneTopology;
+import com.surprising.aeron.service.state.account.CoreUserState;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.index.PositionUserIndex;
+import com.surprising.aeron.service.state.model.AssetBalance;
+import com.surprising.aeron.service.state.model.CoreMarkPriceState;
+import com.surprising.aeron.service.state.model.CorePositionState;
+import com.surprising.aeron.service.state.model.CoreRiskSnapshot;
+import com.surprising.aeron.service.state.model.CoreRiskState;
+import com.surprising.aeron.service.state.model.CoreRiskStatus;
+import com.surprising.aeron.service.state.order.RuntimeTestStateTransitions;
+import com.surprising.aeron.service.state.risk.RuntimeDerivativeRiskProcessor;
+import com.surprising.aeron.service.state.snapshot.*;
+import com.surprising.aeron.service.state.snapshot.FundsStateHash;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateMaterializer;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateProjector;
+import com.surprising.aeron.service.state.snapshot.TradingStateSnapshotCodec;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeMap;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 class CoreRiskStateTest {
 

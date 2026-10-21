@@ -1,3 +1,42 @@
+# aeron-service 代码导航
+
+本模块按业务状态与执行流程分类；仍是同一个 Maven 模块。`state` 根包仅保留
+`TradingCoreState`（恢复和导出用状态）与 `TradingRuntimeState`（在线状态入口）。
+`orchestration` 根包保留 `TradingCoreOwner`、`TradingCoreRuntime`、`TradingOwnerLoop`、
+`TradingExecutionMode` 与 `OwnerLogContext`，承接 Owner 生命周期及命令主流程。
+
+| 包 | 职责与主要入口 |
+| --- | --- |
+| `state.account` | 用户、余额、客户订单身份和 Lane 所有权；`AccountLaneState`、`RuntimeAccountRollback` |
+| `state.order` / `state.admission` | 订单和冻结状态；下单准入、待完成预留及准入回执 |
+| `state.position` / `state.index` | 持仓、平仓容量及持仓/OI/ADL 等派生索引 |
+| `state.settlement` | Matcher 事实向 Account Lane 的派发、应用及完成回执 |
+| `state.ledger` | Treasury、保险基金及 `SystemLedgerLane` 财务应用 |
+| `state.risk` / `state.lifecycle` | 风险扫描、强平、ADL；资金费、交割和行权状态推进 |
+| `state.change` | 命令变更缓冲、`LaneCommitDelta` 与发布交接 |
+| `state.snapshot` | 状态物化、投影、Lane 快照及哈希 |
+| `state.identity` / `state.fee` / `state.instrument` | 运行时身份字典、费率策略及币对状态推进 |
+| `state.query` / `state.realtime` | 核心读取与回放查询、实时捕获；不承担外部行情查询服务 |
+| `orchestration.pipeline` | 命令窗口、槽位、撮合准入、批次与依赖推进 |
+| `orchestration.commit` / `orchestration.result` | 有序提交与发布；响应构建、结果幂等和响应缓冲租约 |
+| `orchestration.egress` / `orchestration.ingress` | Aeron 响应交接与 Owner 输入环 |
+| `orchestration.query` | `CoreQueryService`：订单簿、账户、风险、预检及划转内部查询 |
+| `orchestration.snapshot` / `orchestration.replay` | Cluster 快照生命周期与分段编解码；已提交日志的离线回放 |
+| `orchestration.retention` | 终态保留与 tombstone 清理 |
+| `lane` | Lane 拓扑、线程与序号队列 |
+
+顺着交易流程阅读：`TradingCoreOwner` 接收命令 → `pipeline` 准入与撮合 →
+`state.settlement` 交给所属账户 Lane → `state.ledger` 应用财务事实 →
+`commit` 按序提交 → `result` / `egress` 交出响应。失败仍由既有回滚和故障传播处理。
+
+跨包协作方法属于 Core 内部接口，调用方继续遵守 Owner、Account Lane 和 Ledger 的线程所有权，
+以及查询屏障、命令槽和响应缓冲的租约。账户表保持封装，逐实体读写和快照导出分别提供入口；
+包迁移不新增账户镜像、线程、队列、提交阶段或快照字段。`CoreQueryService` 原名为
+`OrderBookQueryService`，改名用于体现已有的多类内部查询职责。
+
+本轮包整理的验证命令、模块结果、条件跳过项及清理记录见
+[验证记录](../../docs/validation/aeron-service-packages-20261021.json)。
+
 # 保证金写入简化（2026-10-18）
 
 `DerivativeAccountCommandProcessor.adjustAccountPositionMargin` 按“校验逐仓持仓与余额 →
@@ -29,7 +68,7 @@ HotSpot JDK 27 下 `CommittedFundingReplayTest` 覆盖 U 本位及币本位永�
 这只增加固定长度的 Owner 计数元数据，没有持仓对象副本；按 ID 查找等其他迁移仍需继续。
 功能范围见 [验证清单](../../docs/validation/published-position-count-20261015.json)。
 
-用户、订单及 clientOrderId 内部查询由 `OrderBookQueryService.AccountQuery` 将已选定的
+用户、订单及 clientOrderId 内部查询由 `CoreQueryService.AccountQuery` 将已选定的
 `AccountLaneState` 传入 `RuntimeStateQueryService`。投影中的用户、余额、预留、持仓、杠杆与订单读取
 均使用显式 Lane 参数，校验该 Lane 属于当前运行时且由当前线程持有；不再通过查询门面反查 worker。
 排序、临时余额副本、DTO 和状态哈希仍只在查询边界构建。Owner 只使用既有路由并消费已编码结果，
@@ -174,7 +213,7 @@ Treasury，生产线程启动后非空财务 delta 不能由 Owner 应用。
 
 `AccountTransferOut` 把指令交给来源账户Lane，由Lane检查完整划转身份、扣减可用资金并保存 `TransferRuntime`。`AccountTransferCompletion` 在同一Lane移除身份。完整指令仅保存在 `LaneColdState.pendingTransfers`；Owner保留有界的 `transferId → userId` 路由、容量和公平分页游标，收到完成通知后更新路由，不做扣款或完整幂等比较。相同转出可在容量满时重试，已完成身份的再次完成不改变修订。
 
-`PENDING_TRANSFER_QUERY` 是内部划转对账/重试查询：Owner选取至多256个路由ID，`OrderBookQueryService` 复用既有多Lane查询完成位，各Lane原位读取该页身份，最后完成的Lane编码响应。它不申请Owner账户访问权，也不持有长期业务镜像。查询分页只遍历本页ID，避免对131072条尾集合求size。冷初始化与序列化仍使用原划转协议结构，本轮按要求未执行快照/恢复场景。必要验证、入口边界首次失败及修复见 [划转Lane验证](../../docs/validation/lane-transfer-lifecycle-20261014.json)。
+`PENDING_TRANSFER_QUERY` 是内部划转对账/重试查询：Owner选取至多256个路由ID，`CoreQueryService` 复用既有多Lane查询完成位，各Lane原位读取该页身份，最后完成的Lane编码响应。它不申请Owner账户访问权，也不持有长期业务镜像。查询分页只遍历本页ID，避免对131072条尾集合求size。冷初始化与序列化仍使用原划转协议结构，本轮按要求未执行快照/恢复场景。必要验证、入口边界首次失败及修复见 [划转Lane验证](../../docs/validation/lane-transfer-lifecycle-20261014.json)。
 
 
 ### 持仓索引输入与条目生命周期（2026-10-14）
@@ -326,7 +365,7 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 
 客户端身份仍由 `(userId, clientOrderId)` 确定，原 UTF8 确定性数值键保持不变，数值键在所属 Lane 内使用；不同 Lane 可以持有相同数值键且互不影响，同一 Lane 内用户或名称不符仍报碰撞。冷构造、绑定和重绑定先把完整引用计数转入未发布的目标 Lane，全部成功后才清除原表；活跃运行时禁止重绑定。这里没有新增全局碰撞表、队列或执行阶段。
 
-`OrderBookQueryService` 将客户端订单号原始输入送入现有账户查询任务，在用户所属 Lane 查身份和订单；预检同样在 Lane 查询客户端及持仓身份。重复准入回滚只撤销本次获取的引用，旧订单终态不能提前回收仍被新别名使用的身份。必要验证共 160 个唯一用例，最后移动预检持仓查找后补验其中 23 个，覆盖六产品线、并行 Lane、强制碰撞、回收周转、别名、查询、批量和资金/风险边界，见 [客户端身份验证](../../docs/validation/lane-client-identities-20261015.json)。
+`CoreQueryService` 将客户端订单号原始输入送入现有账户查询任务，在用户所属 Lane 查身份和订单；预检同样在 Lane 查询客户端及持仓身份。重复准入回滚只撤销本次获取的引用，旧订单终态不能提前回收仍被新别名使用的身份。必要验证共 160 个唯一用例，最后移动预检持仓查找后补验其中 23 个，覆盖六产品线、并行 Lane、强制碰撞、回收周转、别名、查询、批量和资金/风险边界，见 [客户端身份验证](../../docs/validation/lane-client-identities-20261015.json)。
 
 完整 Owner 迁移和完整 Core 百字节目标仍未完成；任意 UTF8/UUID 解码、剩余业务收据及输出编码、资金幂等索引同步 I/O、活跃 `stateHash()` 的 Lane 读取仍继续处理。当前只运行受影响路径的必要测试及本地分配诊断，不执行 Cluster 快照/恢复、wallet 或真实单节点压测，不提交数值压测记录。
 

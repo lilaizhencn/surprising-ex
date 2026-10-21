@@ -1,11 +1,12 @@
 package com.surprising.aeron.service.orchestration;
 
-import static org.junit.jupiter.api.Assertions.*;
-
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 class CommittedPortfolioFlowTest {
     private static final long NOW = 1_792_454_400_000L;

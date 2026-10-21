@@ -4,7 +4,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /** 固定报价的独立模拟行情源；源端生成/传播延迟不占用交易发压线程。 */
-final class GeneratedMarkPriceSource implements AutoCloseable {
+public final class GeneratedMarkPriceSource implements AutoCloseable {
     /** 初始化后不再修改的各币对报价，由行情源持有。 */
     private final long[] prices;
     /** 源线程发布完整一期报价的真实生成时间，消费者只读。 */
@@ -13,9 +13,9 @@ final class GeneratedMarkPriceSource implements AutoCloseable {
     private volatile Throwable failure;
     private final Thread worker;
 
-    record Quote(long priceTicks, long generatedAtEpochMillis) {}
+    public record Quote(long priceTicks, long generatedAtEpochMillis) {}
 
-    GeneratedMarkPriceSource(long[] prices) {
+    public GeneratedMarkPriceSource(long[] prices) {
         this.prices = prices.clone();
         if (prices.length == 0) throw new IllegalArgumentException("prices required");
         for (long price : this.prices) if (price <= 0) throw new IllegalArgumentException("positive price required");
@@ -41,7 +41,7 @@ final class GeneratedMarkPriceSource implements AutoCloseable {
         }
     }
 
-    Quote quote(int instrumentId) {
+    public Quote quote(int instrumentId) {
         if (failure != null) throw new IllegalStateException("mark price source failed", failure);
         if (!running) throw new IllegalStateException("mark price source closed");
         return new Quote(prices[instrumentId], publishedTimestamp);

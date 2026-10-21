@@ -2,18 +2,20 @@ package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
+import com.surprising.aeron.service.orchestration.result.CommandResultLedger;
+import com.surprising.aeron.service.orchestration.retention.TerminalStateRetention;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-final class TradingCoreRuntimeRestoreTestSupport {
+public final class TradingCoreRuntimeRestoreTestSupport {
 
     private TradingCoreRuntimeRestoreTestSupport() {
     }
 
-    static TradingCoreRuntime restore(
+    public static TradingCoreRuntime restore(
             ProductLine productLine,
             long appliedCommandCount,
             Map<UUID, CommandResultLedger.StoredResult> commandResults,
@@ -31,7 +33,7 @@ final class TradingCoreRuntimeRestoreTestSupport {
                 snapshotState, matcherSnapshot);
     }
 
-    static TradingCoreRuntime restore(
+    public static TradingCoreRuntime restore(
             ProductLine productLine,
             long appliedCommandCount,
             Map<UUID, CommandResultLedger.StoredResult> commandResults,

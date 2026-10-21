@@ -1,13 +1,13 @@
 package com.surprising.aeron.service.orchestration;
 
-enum LinearPerpetualTrafficProfile {
+public enum LinearPerpetualTrafficProfile {
     UNIFORM,
     PARETO_80_20,
     SINGLE_HOT,
     MOSTLY_IDLE,
     MARK_PRICE_STORM;
 
-    static LinearPerpetualTrafficProfile parse(String value) {
+    public static LinearPerpetualTrafficProfile parse(String value) {
         return valueOf(value.trim().toUpperCase());
     }
 }

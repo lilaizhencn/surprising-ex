@@ -1,13 +1,12 @@
 package com.surprising.aeron.service.state.model;
 
-import com.surprising.aeron.service.state.OrderReservation;
-
-import com.surprising.product.api.ProductLine;
-import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.service.state.order.OrderReservation;
+import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 
 public record CoreOrderState(
@@ -68,7 +67,6 @@ public record CoreOrderState(
         long revision) {
         this(orderId, productLine, userId, instrumentId, side, priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedQuantitySteps == 0 ? 0 : -1, 0, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
     }
-
 
     public CoreOrderState {
         if (orderId <= 0 || productLine == null || userId <= 0

@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -8,6 +9,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+
 import static org.assertj.core.api.Assertions.*;
 
 /** 普通apply入口也必须使用实际Lane；等待仅在功能测试边界。 */

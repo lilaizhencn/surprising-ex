@@ -1,0 +1,203 @@
+package com.surprising.aeron.service.state.snapshot;
+
+import com.surprising.aeron.service.lane.LaneTopology;
+import com.surprising.aeron.service.state.TradingCoreState.ClientOrderKey;
+import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.TradingRuntimeState;
+import com.surprising.aeron.service.state.account.BalanceRuntime;
+import com.surprising.aeron.service.state.account.UserRuntime;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.index.*;
+import com.surprising.aeron.service.state.index.ActiveOrderIndex;
+import com.surprising.aeron.service.state.index.AdlPositionIndex;
+import com.surprising.aeron.service.state.index.AlgoOrderIndex;
+import com.surprising.aeron.service.state.index.CancelAllAfterIndex;
+import com.surprising.aeron.service.state.index.LiquidationIndex;
+import com.surprising.aeron.service.state.index.OpenInterestIndex;
+import com.surprising.aeron.service.state.index.PositionUserIndex;
+import com.surprising.aeron.service.state.index.RuntimeFactIndexes;
+import com.surprising.aeron.service.state.index.TriggerOrderIndex;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.ledger.TreasuryRuntime;
+import com.surprising.aeron.service.state.market.MarkPriceRuntime;
+import com.surprising.aeron.service.state.model.CoreOrderState;
+import com.surprising.aeron.service.state.order.OrderReservation;
+import com.surprising.aeron.service.state.order.OrderRuntime;
+import com.surprising.aeron.service.state.order.ReservationRuntime;
+import com.surprising.aeron.service.state.position.PositionRuntime;
+import com.surprising.aeron.service.state.risk.*;
+import com.surprising.aeron.service.state.risk.LiquidationRuntime;
+import com.surprising.aeron.service.state.risk.RiskScanRuntime;
+import com.surprising.aeron.service.state.risk.RiskSnapshotRuntime;
+import java.util.Map;
+
+public final class RuntimeStateProjector {
+
+    private RuntimeStateProjector() {
+    }
+
+    public static TradingRuntimeState project(TradingCoreState source, RuntimeIdentityRegistry identities) {
+        return project(source, identities,
+                LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization")));
+    }
+
+    public static TradingRuntimeState project(
+            TradingCoreState source, RuntimeIdentityRegistry identities, LaneTopology topology) {
+        if (source == null || identities == null) throw new IllegalArgumentException("source and identities are required");
+        TradingRuntimeState runtime = new TradingRuntimeState(topology);
+        identities.bindClientLanes(runtime);
+        runtime.replaceAuxiliaryState(source);
+        source.instruments().values().forEach(instrument -> {
+            identities.symbolId(instrument.instrumentIdValue());
+            identities.assetId(instrument.baseAsset());
+            identities.assetId(instrument.quoteAsset());
+            identities.assetId(instrument.settleAsset());
+        });
+        source.users().forEach((userId, user) -> {
+            runtime.putUser(new UserRuntime(user.productLine(), userId, user.revision(), user.positionMode()));
+            user.balances().forEach((asset, balance) -> runtime.putBalance(new BalanceRuntime(
+                    userId, identities.assetId(asset), balance.availableUnits(), balance.lockedUnits())));
+            user.reservations().forEach((orderId, reservation) -> runtime.putReservation(toRuntimeReservation(
+                    userId, reservation, identities)));
+            user.positions().forEach((positionKey, position) -> runtime.putPosition(
+                    identities.positionKey(userId, positionKey), new PositionRuntime(userId,
+                            identities.symbolId(position.instrumentId()), identities.assetId(position.marginAsset()),
+                            position.marginMode(), position.positionSide(), requireInstrument(source, position.instrumentId()),
+                            position.signedQuantitySteps(), position.entryPriceTicks(), position.entryValueTicks(),
+                            position.realizedPnlUnits(), position.positionMarginUnits())));
+        });
+        source.treasuryState().feeBalances().forEach((asset, units) ->
+                runtime.treasury().setFee(identities.assetId(asset), units));
+        source.treasuryState().insuranceBalances().forEach((asset, units) ->
+                runtime.treasury().setInsurance(identities.assetId(asset), units,
+                        source.treasuryState().insuranceDeficits().getOrDefault(asset, 0L)));
+        source.treasuryState().insuranceDeficits().forEach((asset, units) -> {
+            if (!source.treasuryState().insuranceBalances().containsKey(asset)) {
+                runtime.treasury().setInsurance(identities.assetId(asset), 0, units);
+            }
+        });
+        source.treasuryState().liquidationFeeBalances().forEach((asset, units) ->
+                runtime.treasury().setLiquidationFee(identities.assetId(asset), units));
+        source.treasuryState().fundingResidualBalances().forEach((asset, units) ->
+                runtime.treasury().setFundingResidual(identities.assetId(asset), units));
+        source.treasuryState().roundingResidualBalances().forEach((asset, units) ->
+                runtime.treasury().setRoundingResidual(identities.assetId(asset), units));
+        source.treasuryState().clearingPnlBalances().forEach((asset, units) ->
+                runtime.treasury().setClearingPnl(identities.assetId(asset), units));
+        source.treasuryState().fundingSettlements().forEach((instrumentId, settlementId) ->
+                runtime.treasury().setFundingSettlement(identities.symbolId(instrumentId), settlementId));
+        source.treasuryState().fundingProgress().forEach((instrumentId, progress) ->
+                runtime.treasury().setFundingProgress(identities.symbolId(instrumentId),
+                        new TreasuryRuntime.FundingProgressRuntime(progress.settlementId(),
+                                requireInstrument(source, instrumentId), progress.fundingRatePpm(),
+                                progress.accountLaneId(), progress.nextCursorUserId(), progress.commandId(),
+                                progress.markPriceTicks(), progress.priceSequence())));
+        source.treasuryState().lifecycleSettlements().forEach((instrumentId, settlementId) ->
+                runtime.treasury().setLifecycleSettlement(identities.symbolId(instrumentId), settlementId));
+        source.treasuryState().lifecycleProgress().forEach((instrumentId, progress) ->
+                runtime.treasury().setLifecycleProgress(identities.symbolId(instrumentId),
+                        new TreasuryRuntime.LifecycleProgressRuntime(progress.settlementId(),
+                                requireInstrument(source, instrumentId), progress.settlementPriceTicks(),
+                                progress.optionCashUnitsPerContract(), progress.ordersComplete(),
+                                progress.accountLaneId(), progress.nextCursorOrderId(),
+                                progress.nextCursorUserId(), progress.commandId(), progress.requiredInsuranceUnits())));
+        source.riskState().liquidations().forEach((liquidationId, liquidation) ->
+                runtime.putLiquidation(new LiquidationRuntime(liquidationId, liquidation.userId(),
+                        identities.symbolId(liquidation.instrumentId()), liquidation.marginMode(),
+                        liquidation.positionSide(), requireInstrument(source, liquidation.instrumentId()),
+                        liquidation.triggerPriceSequence(), liquidation.signedQuantitySteps(),
+                        liquidation.closeQuantitySteps(), liquidation.deficitUnits(),
+                        liquidation.executionPriceTicks(), liquidation.liquidationFeeRatePpm(),
+                        liquidation.liquidationFeeUnits(), liquidation.status(),
+                        liquidation.nextCancelOrderId())));
+        source.riskState().markPrices().forEach((instrumentId, mark) -> runtime.putMarkPrice(new MarkPriceRuntime(
+                identities.symbolId(instrumentId), requireInstrument(source, instrumentId), mark.markPriceTicks(),
+                mark.indexPriceTicks(), mark.forwardPriceTicks(), mark.priceSequence(),
+                mark.generatedAtEpochMillis(), mark.lastPriceTicks())));
+        source.riskState().snapshots().forEach((key, risk) -> runtime.putRiskSnapshot(
+                identities.positionKey(risk.userId(), positionKey(risk.instrumentId(), risk.positionSide())),
+                new RiskSnapshotRuntime(risk.userId(), identities.symbolId(risk.instrumentId()), risk.positionSide(),
+                        risk.priceSequence(), risk.equityUnits(), risk.unrealizedPnlUnits(),
+                        risk.maintenanceMarginUnits(), risk.marginRatioPpm(), risk.status())));
+        source.riskState().scans().forEach((instrumentId, scan) -> runtime.putRiskScan(new RiskScanRuntime(
+                identities.symbolId(instrumentId), scan.accountLaneId(), scan.priceSequence(),
+                scan.scanStartPriceSequence(), scan.lastUserId(),
+                scan.riskComplete(), scan.riskUserId(), scan.riskPhase(), scan.riskPositionCursor(),
+                scan.riskReservationCursor(), scan.riskUnrealizedPnlUnits(), scan.riskMaintenanceMarginUnits(),
+                scan.riskIsolatedMarginUnits(), scan.riskIsolatedReservationUnits(), scan.triggerComplete(),
+                scan.triggerPhase(), scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
+                scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
+                scan.triggerOcoCursor(), scan.lastScheduledRevision(), scan.laneProgress())));
+        runtime.setNextLiquidationId(source.riskState().nextLiquidationId());
+        runtime.setMarketRevision(source.riskState().marketRevision());
+        source.orders().forEach((orderId, order) -> {
+            runtime.putOrder(toRuntimeOrder(order, identities, requireInstrument(source, order.instrumentId())));
+            if (!order.clientOrderId().isEmpty()) {
+                runtime.putClientOrder(order.userId(), identities.clientKey(order.userId(), order.clientOrderId()), orderId);
+            }
+        });
+        validateClientIndex(source, runtime, identities);
+        PositionUserIndex positionUserIndex = new PositionUserIndex(source, identities, topology);
+        OpenInterestIndex openInterestIndex = new OpenInterestIndex(source, identities);
+        TriggerOrderIndex triggerOrderIndex = new TriggerOrderIndex(source);
+        AlgoOrderIndex algoOrderIndex = new AlgoOrderIndex(source);
+        LiquidationIndex liquidationIndex = new LiquidationIndex(source);
+        CancelAllAfterIndex cancelAllAfterIndex = new CancelAllAfterIndex(source);
+        ActiveOrderIndex activeOrderIndex = new ActiveOrderIndex(source, identities);
+        AdlPositionIndex adlPositionIndex = new AdlPositionIndex(source, identities);
+        RuntimeFactIndexes factIndexes = new RuntimeFactIndexes(
+                positionUserIndex, openInterestIndex, triggerOrderIndex, algoOrderIndex,
+                liquidationIndex, cancelAllAfterIndex, activeOrderIndex, adlPositionIndex);
+        runtime.bindFactIndexes(factIndexes, identities);
+        factIndexes.rebuild(source, identities);
+        runtime.rebuildAccountLaneHashes();
+        runtime.clearChangedKeys();
+        runtime.releaseOwnerForHandoff();
+        identities.releaseOwnerForHandoff();
+        return runtime;
+    }
+
+    private static void validateClientIndex(TradingCoreState source, TradingRuntimeState runtime,
+                                             RuntimeIdentityRegistry identities) {
+        for (Map.Entry<ClientOrderKey, Long> entry : source.clientOrderIndex().entrySet()) {
+            ClientOrderKey key = entry.getKey();
+            long clientKey = identities.clientKey(key.userId(), key.clientOrderId());
+            Long projectedOrderId = runtime.orderIdByClient(key.userId(), clientKey);
+            if (!Long.valueOf(entry.getValue()).equals(projectedOrderId)) {
+                throw new IllegalStateException("runtime client order projection mismatch: " + key);
+            }
+        }
+    }
+
+    public static OrderRuntime toRuntimeOrder(CoreOrderState order, RuntimeIdentityRegistry identities,
+                                              CoreInstrument instrument) {
+        return new OrderRuntime(order.orderId(), order.productLine(), order.userId(),
+                identities.symbolId(order.instrumentId()), instrument, order.side(), order.priceTicks(),
+                order.matchingPriceTicks(),
+                order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
+                order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
+                order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),
+                order.takerFeeRatePpm(), order.cumulativeFeeUnits(), order.executedValueHigh(), order.executedValueLow(), order.createdAtEpochMillis(),
+                order.updatedAtEpochMillis(),
+                order.clusterPosition(), order.status(), order.revision());
+    }
+
+    static ReservationRuntime toRuntimeReservation(long userId, OrderReservation reservation,
+                                                    RuntimeIdentityRegistry identities) {
+        return new ReservationRuntime(reservation.orderId(), userId, identities.symbolId(reservation.instrumentId()),
+                reservation.kind(), identities.assetId(reservation.asset()),
+                reservation.reservedUnits(), reservation.releasedUnits(), reservation.consumedUnits(),
+                reservation.orderQuantitySteps());
+    }
+
+    private static String positionKey(String instrumentId, com.surprising.aeron.protocol.CorePositionSide side) {
+        String normalized = OrderReservation.requireInstrumentId(instrumentId);
+        return side.hedgeSide() ? normalized + ':' + side.name() : normalized;
+    }
+
+    private static CoreInstrument requireInstrument(TradingCoreState source, String instrumentId) {
+        CoreInstrument instrument = source.instruments().get(OrderReservation.requireInstrumentId(instrumentId));
+        if (instrument == null) throw new IllegalStateException("instrument is not registered: " + instrumentId);
+        return instrument;
+    }
+}

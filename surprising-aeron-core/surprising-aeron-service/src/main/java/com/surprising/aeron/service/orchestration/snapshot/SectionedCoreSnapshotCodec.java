@@ -2,8 +2,6 @@ package com.surprising.aeron.service.orchestration.snapshot;
 
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
-import com.surprising.aeron.service.orchestration.SectionedCoreSnapshotRecovery;
-import com.surprising.aeron.service.orchestration.SectionedCoreSnapshotWriter;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;

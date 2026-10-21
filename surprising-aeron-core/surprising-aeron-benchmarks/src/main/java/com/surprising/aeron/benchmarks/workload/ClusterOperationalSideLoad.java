@@ -1,17 +1,16 @@
 package com.surprising.aeron.benchmarks.workload;
 
-import lombok.extern.slf4j.Slf4j;
-
 import com.surprising.aeron.protocol.*;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
+import lombok.extern.slf4j.Slf4j;
 import org.HdrHistogram.Histogram;
 
 /** Concurrent price, risk/lifecycle and read-model traffic around the continuously loaded trader. */
-@Slf4j
+public @Slf4j
 final class ClusterOperationalSideLoad implements AutoCloseable {
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
     private final ConcurrentMap<String,Histogram> latency = new ConcurrentHashMap<>();
@@ -26,11 +25,11 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
     private volatile boolean running = true, priceRunning = true;
     private volatile long measurementStart = Long.MAX_VALUE, measurementEnd = Long.MAX_VALUE;
 
-    ClusterOperationalSideLoad(long seed,List<Long> users,long[] marks,long[] sequences) {
+    public ClusterOperationalSideLoad(long seed,List<Long> users,long[] marks,long[] sequences) {
         this(seed, users, marks, sequences, 0);
     }
 
-    ClusterOperationalSideLoad(long seed,List<Long> users,long[] marks,long[] sequences,int controlPageSize) {
+    public ClusterOperationalSideLoad(long seed,List<Long> users,long[] marks,long[] sequences,int controlPageSize) {
         this.marks=marks.clone(); this.sequences=sequences.clone();
         OperationalEndpoint createdPrices=null;
         OperationalLifecycle createdLifecycle=null;
@@ -46,7 +45,7 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
         prices=createdPrices;lifecycle=createdLifecycle;
     }
 
-    void start() {
+    public void start() {
         startThread("operational-prices",() -> {
             try {feedPrices();} catch(Throwable error) {
                 initialPrices.completeExceptionally(error);
@@ -85,25 +84,25 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
         }
     }
 
-    void record(String kind,long start,long end) {
+    public void record(String kind,long start,long end) {
         if(start<measurementStart || start>=measurementEnd)return;
         Histogram h=latency.computeIfAbsent(kind,k->new Histogram(TimeUnit.MINUTES.toNanos(1),3));
         synchronized(h){h.recordValue(Math.max(1,end-start));}
         lastTerminal.accumulateAndGet(end,Math::max);
     }
-    void recordFills(long start,long count) {
+    public void recordFills(long start,long count) {
         if(start>=measurementStart && start<measurementEnd)fills.addAndGet(count);
     }
-    void recordBatchItems(long start, int items) {
+    public void recordBatchItems(long start, int items) {
         if (start>=measurementStart && start<measurementEnd) extraBatchItems.addAndGet(Math.max(0,items-1));
     }
-    void beginMeasurement(long now){measurementStart=now;}
-    void endMeasurement(long now){measurementEnd=now;}
-    void assertHealthy(){Throwable t=failure.get();if(t!=null)throw new IllegalStateException("operational actor failed",t);}
-    long netDeposits(){return lifecycle.netDeposits();}
-    void restoreAudit(long cycles,long deposits){lifecycle.restoreAudit(cycles,deposits);}
-    long verifyAndBalance(){assertHealthy();return lifecycle.verifyAndBalance();}
-    void stop() {
+    public void beginMeasurement(long now){measurementStart=now;}
+    public void endMeasurement(long now){measurementEnd=now;}
+    public void assertHealthy(){Throwable t=failure.get();if(t!=null)throw new IllegalStateException("operational actor failed",t);}
+    public long netDeposits(){return lifecycle.netDeposits();}
+    public void restoreAudit(long cycles,long deposits){lifecycle.restoreAudit(cycles,deposits);}
+    public long verifyAndBalance(){assertHealthy();return lifecycle.verifyAndBalance();}
+    public void stop() {
         running=false;
         // Finish the current financial lifecycle before stopping its price source.
         try {
@@ -118,7 +117,7 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
         try {t.join(60000);}catch(InterruptedException e){Thread.currentThread().interrupt();throw new IllegalStateException(e);}
         if(t.isAlive())throw new IllegalStateException("actor failed to finish: "+t.getName());
     }
-    void print() {
+    public void print() {
         for(String key:new TreeSet<>(latency.keySet())) {
             Histogram h=latency.get(key);
             log.info("operational={} requests={} p50us={} p90us={} p95us={} p99us={} p999us={} maxus={}", key,h.getTotalCount(),h.getValueAtPercentile(50)/1000,h.getValueAtPercentile(90)/1000,
@@ -132,7 +131,7 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
         }
         log.info("operationalCoverage=PASS");
     }
-    void printComposite(long tradingItems,long tradingMessages,long tradingFills,long elapsed) {
+    public void printComposite(long tradingItems,long tradingMessages,long tradingFills,long elapsed) {
         long commands=0;
         for(CoreMessageType type:CoreMessageType.values()) {
             var h=latency.get(type.name());

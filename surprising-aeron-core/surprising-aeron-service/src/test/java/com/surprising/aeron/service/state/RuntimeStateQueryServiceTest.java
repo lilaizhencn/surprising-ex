@@ -1,14 +1,4 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.account.BalanceRuntime;
-import com.surprising.aeron.service.state.account.UserRuntime;
-
-
-import com.surprising.aeron.service.state.query.*;
-
-import com.surprising.aeron.service.state.model.CoreLeverageKey;
-import com.surprising.aeron.service.state.model.CoreOrderStatus;
-
-import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -17,9 +7,22 @@ import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.service.state.account.BalanceRuntime;
+import com.surprising.aeron.service.state.account.UserRuntime;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.model.CoreLeverageKey;
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+import com.surprising.aeron.service.state.order.OrderRuntime;
+import com.surprising.aeron.service.state.order.ReservationRuntime;
+import com.surprising.aeron.service.state.position.PositionRuntime;
+import com.surprising.aeron.service.state.query.*;
+import com.surprising.aeron.service.state.query.RuntimeStateQueryService;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateMaterializer;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 class RuntimeStateQueryServiceTest {
 

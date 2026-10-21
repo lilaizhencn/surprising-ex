@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.config;
 
-import com.surprising.aeron.service.state.LaneTopology;
+import com.surprising.aeron.service.lane.LaneTopology;
 import java.util.BitSet;
 import java.util.Locale;
 import net.openhft.affinity.Affinity;

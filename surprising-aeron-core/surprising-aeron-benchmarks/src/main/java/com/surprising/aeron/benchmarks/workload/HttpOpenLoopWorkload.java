@@ -3,7 +3,6 @@ package com.surprising.aeron.benchmarks.workload;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -13,8 +12,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Deque;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -35,7 +32,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.HdrHistogram.Histogram;
 
-final class HttpOpenLoopWorkload {
+public final class HttpOpenLoopWorkload {
 
     private static final long HIGHEST_TRACKABLE_NANOS = Duration.ofHours(1).toNanos();
     private static final Pattern JSON_STRING = Pattern.compile("\\\"%s\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
@@ -56,7 +53,7 @@ final class HttpOpenLoopWorkload {
     private final PrerequisitePools pools = new PrerequisitePools();
     private volatile StableIdentityLedger ledger;
 
-    HttpOpenLoopWorkload(HttpWorkloadConfig config) {
+    public HttpOpenLoopWorkload(HttpWorkloadConfig config) {
         this.config = Objects.requireNonNull(config, "config");
         this.permits = new Semaphore(config.maxInFlight());
         this.client = HttpClient.newBuilder().connectTimeout(config.requestTimeout())
@@ -64,7 +61,7 @@ final class HttpOpenLoopWorkload {
         for (HttpOutcome outcome : HttpOutcome.values()) classifications.put(outcome, 0L);
     }
 
-    Summary run() {
+    public Summary run() {
         verifyHttpSurface();
         try (StableIdentityLedger opened = StableIdentityLedger.open(
                 config.outputDirectory(), config.runId(), config.seed(), config.fingerprint())) {
@@ -108,7 +105,7 @@ final class HttpOpenLoopWorkload {
         }
     }
 
-    void cancelOutstanding(String reason) {
+    public void cancelOutstanding(String reason) {
         cancelled.set(true);
         StableIdentityLedger current = ledger;
         if (current != null) {
@@ -596,11 +593,11 @@ final class HttpOpenLoopWorkload {
         }
     }
 
-    record Summary(long scheduled, long completed, long outstanding, long deliberatelyAborted,
+    public record Summary(long scheduled, long completed, long outstanding, long deliberatelyAborted,
                    int maxObservedInFlight, Map<HttpOutcome, Long> classifications,
                    long measurementNanos, long terminalWithinMeasurement, long terminalRatePerSecond) {
 
-        Summary(long scheduled, long completed, long outstanding, long deliberatelyAborted,
+        public Summary(long scheduled, long completed, long outstanding, long deliberatelyAborted,
                 int maxObservedInFlight, Map<HttpOutcome, Long> classifications) {
             this(scheduled, completed, outstanding, deliberatelyAborted, maxObservedInFlight,
                     classifications, 1_000_000_000L, completed, completed);
@@ -623,7 +620,7 @@ final class HttpOpenLoopWorkload {
         private final Map<String, Resource> reservedTriggers = new HashMap<>();
         private final Map<String, String> triggerPositions = new HashMap<>();
 
-        synchronized Optional<Resource> reserve(WorkloadOperation operation, long sequence) {
+        public synchronized Optional<Resource> reserve(WorkloadOperation operation, long sequence) {
             if (!requiresPrerequisite(operation, sequence)) return Optional.empty();
             Deque<Resource> source = switch (operation) {
                 case TRIGGER, MARKET_IOC_CLOSE -> positions;
@@ -637,7 +634,7 @@ final class HttpOpenLoopWorkload {
             return Optional.ofNullable(resource);
         }
 
-        synchronized void replayPrerequisiteConsumption(StableIdentityLedger.Intent intent) {
+        public synchronized void replayPrerequisiteConsumption(StableIdentityLedger.Intent intent) {
             if (intent.targetIdentity().isBlank()) return;
             switch (intent.operation()) {
                 case CANCEL -> removeByIdentity(orders, intent.targetIdentity());
@@ -656,7 +653,7 @@ final class HttpOpenLoopWorkload {
             }
         }
 
-        synchronized void complete(StableIdentityLedger.Intent intent, String resourceIdentity) {
+        public synchronized void complete(StableIdentityLedger.Intent intent, String resourceIdentity) {
             if (intent.operation() == WorkloadOperation.PLACE && !resourceIdentity.isBlank()) {
                 orders.addLast(new Resource(intent.userId(), intent.instrumentId(), resourceIdentity));
             } else if (intent.operation() == WorkloadOperation.TRIGGER && !resourceIdentity.isBlank()
@@ -675,7 +672,7 @@ final class HttpOpenLoopWorkload {
             }
         }
 
-        synchronized void release(StableIdentityLedger.Intent intent) {
+        public synchronized void release(StableIdentityLedger.Intent intent) {
             if (intent.targetIdentity().isBlank()) return;
             Resource resource = new Resource(intent.userId(), intent.instrumentId(), intent.targetIdentity());
             if (intent.operation() == WorkloadOperation.TRIGGER_CANCEL) {
@@ -700,7 +697,7 @@ final class HttpOpenLoopWorkload {
     private static final class EpochNanoClock {
         private static final long OFFSET = Math.multiplyExact(System.currentTimeMillis(), 1_000_000L) - System.nanoTime();
 
-        static long now() {
+        public static long now() {
             return Math.addExact(OFFSET, System.nanoTime());
         }
     }

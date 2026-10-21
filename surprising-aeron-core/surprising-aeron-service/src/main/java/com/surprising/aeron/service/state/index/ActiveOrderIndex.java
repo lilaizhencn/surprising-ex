@@ -1,21 +1,19 @@
 package com.surprising.aeron.service.state.index;
 
-import com.surprising.aeron.service.state.OrderReservation;
-import com.surprising.aeron.service.state.OrderRuntime;
-import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.TradingCoreState;
-
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
-import com.surprising.aeron.service.state.instrument.CoreInstrument;
-
-import java.util.ArrayList;
+import com.surprising.aeron.service.state.order.OrderReservation;
+import com.surprising.aeron.service.state.order.OrderRuntime;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import org.eclipse.collections.api.iterator.LongIterator;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.collections.LongHashSet;
+import org.eclipse.collections.api.iterator.LongIterator;
 
 public final class ActiveOrderIndex {
 

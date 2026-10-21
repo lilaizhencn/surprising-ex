@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.orchestration;
 
-record LinearPerpetualScaleConfig(
+public record LinearPerpetualScaleConfig(
         int listedSymbols,
         int activeSymbols,
         int maxPositionsPerUser,
@@ -9,11 +9,11 @@ record LinearPerpetualScaleConfig(
         int lifecycleSymbolsPerRun,
         boolean boundedSymbolWork) {
 
-    static final int MAX_LISTED_SYMBOLS = 512;
-    static final int MAX_POSITIONS_PER_USER = 20;
-    static final int MAX_OPEN_ORDERS_PER_USER = 100;
+    public static final int MAX_LISTED_SYMBOLS = 512;
+    public static final int MAX_POSITIONS_PER_USER = 20;
+    public static final int MAX_OPEN_ORDERS_PER_USER = 100;
 
-    LinearPerpetualScaleConfig {
+    public LinearPerpetualScaleConfig {
         if (listedSymbols < 2 || listedSymbols > MAX_LISTED_SYMBOLS) {
             throw new IllegalArgumentException("listedSymbols must be in [2," + MAX_LISTED_SYMBOLS + "]");
         }
@@ -39,12 +39,12 @@ record LinearPerpetualScaleConfig(
         }
     }
 
-    static LinearPerpetualScaleConfig production(int symbols) {
+    public static LinearPerpetualScaleConfig production(int symbols) {
         return new LinearPerpetualScaleConfig(symbols, symbols, 1, 3,
                 LinearPerpetualTrafficProfile.UNIFORM, symbols, false);
     }
 
-    static LinearPerpetualScaleConfig scale(int listedSymbols, int activeSymbols,
+    public static LinearPerpetualScaleConfig scale(int listedSymbols, int activeSymbols,
                                              int maxPositionsPerUser, int maxOpenOrdersPerUser,
                                              LinearPerpetualTrafficProfile trafficProfile,
                                              int lifecycleSymbolsPerRun) {

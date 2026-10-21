@@ -1,14 +1,14 @@
 package com.surprising.aeron.service.orchestration;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 class CoreSpotAssetUnitsTest {
     private long sequence;
@@ -219,7 +219,7 @@ class CoreSpotAssetUnitsTest {
             throw new AssertionError("Direct command timed out: " + type);
         }
         if (result.resultCode() == CoreResultCode.MATCHING_PENDING) {
-            result = com.surprising.aeron.service.orchestration.CoreTestCompletion.completeMatchingSynchronously(
+            result = com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion.completeMatchingSynchronously(
                     runtime, runtime.matchingSequence(message.header().commandId()), 1_700_000_000_000L + seq, seq);
         }
         return result;

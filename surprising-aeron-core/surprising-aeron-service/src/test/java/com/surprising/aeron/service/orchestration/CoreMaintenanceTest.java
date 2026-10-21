@@ -1,13 +1,38 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.protocol.ApplyFundingCommand;
+import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
+import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
+import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.ContinueRiskScanCommand;
+import com.surprising.aeron.protocol.CoreInstrumentMaintenance;
+import com.surprising.aeron.protocol.CoreMaintenanceCodec;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CoreMessageHeader;
+import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreOrderType;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.CoreResultCode;
+import com.surprising.aeron.protocol.CoreSettlementProgressCodec;
+import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.protocol.ResponseStatus;
+import com.surprising.aeron.protocol.SettleInstrumentCommand;
+import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 class CoreMaintenanceTest {
     private long sequence;
@@ -19,13 +44,13 @@ class CoreMaintenanceTest {
             applied(state,command(line,11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(301,false,CoreOrderSide.SELL))));
             applied(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(302,false,CoreOrderSide.BUY))));
             applied(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(303,false,CoreOrderSide.BUY))));
-            long funds=com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState());
+            long funds=com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(state.tradingState());
             var instrument=state.tradingState().instruments().get("1");
             applied(state,gate(line,0,new CoreInstrumentMaintenance(2,CoreInstrumentMaintenance.Mode.HALTED,0)));
             assertThat(state.tradingState().instruments().get("1")).isSameAs(instrument);
             assertThat(instrument.maintenance()).isEqualTo(
                     new CoreInstrumentMaintenance(2,CoreInstrumentMaintenance.Mode.HALTED,0));
-            assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState())).isEqualTo(funds);
+            assertThat(com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(state.tradingState())).isEqualTo(funds);
             var denied=apply(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(304,false,CoreOrderSide.BUY))));
             assertThat(denied.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             var sameConfig=apply(state,command(line,0,CoreMessageType.REGISTER_INSTRUMENT,
@@ -35,7 +60,7 @@ class CoreMaintenanceTest {
                 var recovered=restored.tradingState().instruments().get("1");
                 assertThat(recovered.maintenance()).isEqualTo(
                         new CoreInstrumentMaintenance(2,CoreInstrumentMaintenance.Mode.HALTED,0));
-                assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(restored.tradingState())).isEqualTo(funds);
+                assertThat(com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(restored.tradingState())).isEqualTo(funds);
                 assertThat(apply(restored,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(305,false,CoreOrderSide.BUY)))).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
                 applied(restored,gate(line,2,CoreInstrumentMaintenance.TRADING));
                 applied(restored,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(306,false,CoreOrderSide.BUY))));
@@ -56,17 +81,16 @@ class CoreMaintenanceTest {
                 v.riskLimitBrackets());
     }
 
-
     @ParameterizedTest
     @EnumSource(ProductLine.class)
     void gateSurvivesSnapshotRejectsOpeningAndRequiresTaskOwnership(ProductLine line) {
         try (var state = fixture(line)) {
             var mode = line == ProductLine.SPOT ? CoreInstrumentMaintenance.Mode.HALTED : CoreInstrumentMaintenance.Mode.REDUCE_ONLY;
             applied(state,gate(line,0,new CoreInstrumentMaintenance(701,mode,0)));
-            long funds = com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState());
+            long funds = com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(state.tradingState());
             var denied = apply(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(200,false,CoreOrderSide.BUY))));
             assertThat(denied.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState())).isEqualTo(funds);
+            assertThat(com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(state.tradingState())).isEqualTo(funds);
             try (var restored = TradingCoreRuntime.fromSnapshot(line,state.snapshot(500))) {
                 assertThat(restored.tradingState().instruments().get("1").maintenance()).isEqualTo(new CoreInstrumentMaintenance(701,mode,0));
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());

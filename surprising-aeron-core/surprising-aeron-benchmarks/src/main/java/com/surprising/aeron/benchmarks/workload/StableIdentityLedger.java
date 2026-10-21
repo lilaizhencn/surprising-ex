@@ -8,7 +8,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,7 +16,7 @@ import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-final class StableIdentityLedger implements AutoCloseable {
+public final class StableIdentityLedger implements AutoCloseable {
 
     private static final Pattern FIELD = Pattern.compile("\\\"([A-Za-z]+)\\\":(\\\"(?:\\\\.|[^\\\"])*\\\"|-?[0-9]+)");
     private static final int CHECKPOINT_INTERVAL = 8_192;
@@ -47,11 +46,11 @@ final class StableIdentityLedger implements AutoCloseable {
                 StandardOpenOption.APPEND);
     }
 
-    static StableIdentityLedger open(Path directory, String runId, long seed) {
+    public static StableIdentityLedger open(Path directory, String runId, long seed) {
         return open(directory, runId, seed, "legacy:" + runId + ':' + seed);
     }
 
-    static StableIdentityLedger open(Path directory, String runId, long seed, String configFingerprint) {
+    public static StableIdentityLedger open(Path directory, String runId, long seed, String configFingerprint) {
         try {
             return new StableIdentityLedger(directory, runId, seed, configFingerprint);
         } catch (IOException exception) {
@@ -59,12 +58,12 @@ final class StableIdentityLedger implements AutoCloseable {
         }
     }
 
-    synchronized Intent intent(long sequence, WorkloadOperation operation, long userId,
+    public synchronized Intent intent(long sequence, WorkloadOperation operation, long userId,
                                String instrumentId, String expectedFinalState) {
         return intent(sequence, operation, userId, instrumentId, expectedFinalState, "");
     }
 
-    synchronized Intent intent(long sequence, WorkloadOperation operation, long userId,
+    public synchronized Intent intent(long sequence, WorkloadOperation operation, long userId,
                                String instrumentId, String expectedFinalState, String targetIdentity) {
         State existing = states.get(sequence);
         if (existing != null) {
@@ -77,7 +76,7 @@ final class StableIdentityLedger implements AutoCloseable {
         return createIntent(sequence, operation, userId, instrumentId, expectedFinalState, targetIdentity);
     }
 
-    synchronized void scheduled(Intent intent, long intendedNanos) {
+    public synchronized void scheduled(Intent intent, long intendedNanos) {
         if (states.containsKey(intent.sequence())) return;
         State state = new State(intent, intendedNanos);
         states.put(intent.sequence(), state);
@@ -89,13 +88,13 @@ final class StableIdentityLedger implements AutoCloseable {
                 + escape(intent.targetIdentity()) + "\",\"intendedNanos\":" + intendedNanos + "}");
     }
 
-    synchronized void sent(long sequence, long sendNanos) {
+    public synchronized void sent(long sequence, long sendNanos) {
         State state = required(sequence);
         state.sendNanos = sendNanos;
         append("{\"event\":\"SENT\",\"sequence\":" + sequence + ",\"sendNanos\":" + sendNanos + "}");
     }
 
-    synchronized void http(long sequence, long httpNanos, int status, HttpOutcome outcome) {
+    public synchronized void http(long sequence, long httpNanos, int status, HttpOutcome outcome) {
         State state = required(sequence);
         state.httpNanos = httpNanos;
         state.httpStatus = status;
@@ -104,7 +103,7 @@ final class StableIdentityLedger implements AutoCloseable {
                 + ",\"status\":" + status + ",\"outcome\":\"" + outcome + "\"}");
     }
 
-    synchronized void finished(long sequence, long finalNanos, String finalState, String resourceIdentity) {
+    public synchronized void finished(long sequence, long finalNanos, String finalState, String resourceIdentity) {
         State state = required(sequence);
         if (state.terminal || state.aborted) return;
         state.finalNanos = finalNanos;
@@ -116,7 +115,7 @@ final class StableIdentityLedger implements AutoCloseable {
                 + escape(state.resourceIdentity) + "\"}");
     }
 
-    synchronized void aborted(long sequence, long finalNanos, String reason) {
+    public synchronized void aborted(long sequence, long finalNanos, String reason) {
         State state = required(sequence);
         if (state.terminal || state.aborted) return;
         state.finalNanos = finalNanos;
@@ -126,40 +125,40 @@ final class StableIdentityLedger implements AutoCloseable {
                 + ",\"reason\":\"" + escape(reason) + "\"}");
     }
 
-    synchronized List<Intent> outstanding() {
+    public synchronized List<Intent> outstanding() {
         return states.values().stream().filter(state -> !state.terminal && !state.aborted)
                 .map(state -> state.intent).sorted(Comparator.comparingLong(Intent::sequence)).toList();
     }
 
-    synchronized List<Snapshot> snapshots() {
+    public synchronized List<Snapshot> snapshots() {
         return states.values().stream().map(State::snapshot).toList();
     }
 
-    synchronized Snapshot snapshot(long sequence) {
+    public synchronized Snapshot snapshot(long sequence) {
         return required(sequence).snapshot();
     }
 
-    synchronized long maxSequence() {
+    public synchronized long maxSequence() {
         return states.keySet().stream().mapToLong(Long::longValue).max().orElse(0L);
     }
 
-    synchronized long scheduledCount() {
+    public synchronized long scheduledCount() {
         return states.size();
     }
 
-    synchronized long completedCount() {
+    public synchronized long completedCount() {
         return states.values().stream().filter(state -> state.terminal).count();
     }
 
-    synchronized long abortedCount() {
+    public synchronized long abortedCount() {
         return states.values().stream().filter(state -> state.aborted).count();
     }
 
-    synchronized long outstandingCount() {
+    public synchronized long outstandingCount() {
         return states.values().stream().filter(state -> !state.terminal && !state.aborted).count();
     }
 
-    synchronized void flush() {
+    public synchronized void flush() {
         try {
             events.force(false);
             checkpoint();
@@ -396,11 +395,11 @@ final class StableIdentityLedger implements AutoCloseable {
         return result.toString();
     }
 
-    record Intent(long sequence, UUID intentId, String clientIdentity, WorkloadOperation operation,
+    public record Intent(long sequence, UUID intentId, String clientIdentity, WorkloadOperation operation,
                   long userId, String instrumentId, String expectedFinalState, String targetIdentity) {
     }
 
-    record Snapshot(Intent intent, long intendedNanos, long sendNanos, long httpNanos, long finalNanos,
+    public record Snapshot(Intent intent, long intendedNanos, long sendNanos, long httpNanos, long finalNanos,
                     int httpStatus, HttpOutcome outcome, String finalState, String resourceIdentity,
                     boolean terminal, boolean aborted) {
     }

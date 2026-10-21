@@ -6,7 +6,7 @@ import java.util.EnumMap;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
-final class OpenLoopBusinessLatencyRecorder {
+public final class OpenLoopBusinessLatencyRecorder {
     private static final long TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(30);
     private final int targetOperationsPerSecond;
     private final long intervalNanos;
@@ -20,14 +20,14 @@ final class OpenLoopBusinessLatencyRecorder {
                 : TimeUnit.SECONDS.toNanos(1) / targetOperationsPerSecond;
     }
 
-    static OpenLoopBusinessLatencyRecorder createIfEnabled(int targetOperationsPerSecond) {
+    public static OpenLoopBusinessLatencyRecorder createIfEnabled(int targetOperationsPerSecond) {
         if (targetOperationsPerSecond <= 0) throw new IllegalArgumentException("target rate must be positive");
         boolean paced = Boolean.getBoolean("surprising.benchmark.openLoop");
         return paced || new LinearPerpetualBusinessLatencyEvent().isEnabled()
                 ? new OpenLoopBusinessLatencyRecorder(paced ? targetOperationsPerSecond : 0) : null;
     }
 
-    Token enter(CoreMessageType messageType, int operationWeight) {
+    public Token enter(CoreMessageType messageType, int operationWeight) {
         if (operationWeight <= 0) throw new IllegalArgumentException("operation weight must be positive");
         BusinessType type = BusinessType.classify(messageType);
         if (type == null) return null;
@@ -38,11 +38,11 @@ final class OpenLoopBusinessLatencyRecorder {
         return new Token(type, operationWeight, scheduled);
     }
 
-    void accepted(Token token) {
+    public void accepted(Token token) {
         if (token != null) token.acceptedNanos = System.nanoTime();
     }
 
-    void terminal(Token token) {
+    public void terminal(Token token) {
         if (token == null) return;
         long terminal = System.nanoTime();
         if (token.acceptedNanos < token.entryNanos || terminal < token.acceptedNanos) {
@@ -53,11 +53,11 @@ final class OpenLoopBusinessLatencyRecorder {
                 terminal - token.acceptedNanos, token.operationWeight);
     }
 
-    void commit() {
+    public void commit() {
         for (var entry : samples.entrySet()) entry.getValue().commit(entry.getKey(), targetOperationsPerSecond);
     }
 
-    static final class Token {
+    public static final class Token {
         private final BusinessType type;
         private final int operationWeight;
         private final long entryNanos;
@@ -70,11 +70,11 @@ final class OpenLoopBusinessLatencyRecorder {
         }
     }
 
-    enum BusinessType {
+    public enum BusinessType {
         PLACE_ORDER, TAKER_FILL, CANCEL_ORDER, AMEND_ORDER, ORDER_BATCH, TRIGGER_ORDER,
         RISK_SCAN, LIQUIDATION, FUNDING, ADL, SETTLEMENT, MAINTENANCE, SNAPSHOT_RECOVERY;
 
-        static BusinessType classify(CoreMessageType type) {
+        public static BusinessType classify(CoreMessageType type) {
             return switch (Objects.requireNonNull(type, "message type")) {
                 case PLACE_ORDER -> PLACE_ORDER;
                 case CANCEL_ORDER -> CANCEL_ORDER;
@@ -124,7 +124,7 @@ final class OpenLoopBusinessLatencyRecorder {
         private int size;
         private long businessOperations;
 
-        void add(long total, long first, long second, int operationWeight) {
+        public void add(long total, long first, long second, int operationWeight) {
             ensureCapacity();
             entryAccepted[size] = first;
             acceptedTerminal[size] = second;
@@ -141,7 +141,7 @@ final class OpenLoopBusinessLatencyRecorder {
             entryTerminal = Arrays.copyOf(entryTerminal, capacity);
         }
 
-        void commit(BusinessType type, int targetRate) {
+        public void commit(BusinessType type, int targetRate) {
             LinearPerpetualBusinessLatencyEvent event = new LinearPerpetualBusinessLatencyEvent();
             event.businessType = type.name();
             event.loadModel = targetRate == 0 ? "CLOSED_LOOP_FIXED_IN_FLIGHT"

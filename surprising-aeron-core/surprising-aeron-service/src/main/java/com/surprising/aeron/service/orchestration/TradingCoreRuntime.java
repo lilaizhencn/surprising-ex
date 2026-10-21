@@ -1,83 +1,89 @@
 package com.surprising.aeron.service.orchestration;
 
-import com.surprising.aeron.service.config.TradingCpuAffinity;
-
-import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
-
-import com.surprising.aeron.service.command.instrument.InstrumentConfigurationCommands;
-import lombok.extern.slf4j.Slf4j;
-import com.surprising.aeron.service.state.account.TransferRuntime;
-
-import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
-import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
-import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
-
-
-import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
-import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
-import com.surprising.aeron.service.command.ImmutableLongArrayList;
-import com.surprising.aeron.service.command.DirectCommandDispatcher;
-import com.surprising.aeron.service.command.balance.BalanceTransferCommands;
-import com.surprising.aeron.service.command.position.PositionCommands;
-import com.surprising.aeron.service.command.leverage.LeverageCommands;
-import com.surprising.aeron.service.command.risk.RiskCommands;
-import com.surprising.aeron.service.command.liquidation.LiquidationCommands;
-import com.surprising.aeron.service.command.adl.AdlCommands;
-import com.surprising.aeron.service.command.insurance.InsuranceFundCommands;
-import com.surprising.aeron.service.command.funding.PerpetualFundingCommands;
-import com.surprising.aeron.service.command.settlement.InstrumentSettlementCommands;
-import com.surprising.aeron.service.command.fee.FeePolicyCommands;
-import com.surprising.aeron.service.command.trigger.TriggerOrderCommands;
-import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
-import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
-import com.surprising.aeron.service.orchestration.CommandResultLedger.StoredResult;
-
+import com.surprising.aeron.protocol.CommandFingerprint;
+import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
-import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreResponse;
-import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
-import com.surprising.aeron.protocol.CommandSource;
-import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.WireMessageKind;
-import com.surprising.aeron.protocol.CoreFundingProgressView;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.CoreSettlementProgressView;
+import com.surprising.aeron.protocol.ResponseStatus;
+import com.surprising.aeron.protocol.WireMessageKind;
+import com.surprising.aeron.service.command.DirectCommandDispatcher;
+import com.surprising.aeron.service.command.ImmutableLongArrayList;
+import com.surprising.aeron.service.command.adl.AdlCommands;
+import com.surprising.aeron.service.command.balance.BalanceTransferCommands;
+import com.surprising.aeron.service.command.fee.FeePolicyCommands;
+import com.surprising.aeron.service.command.funding.PerpetualFundingCommands;
+import com.surprising.aeron.service.command.instrument.InstrumentConfigurationCommands;
+import com.surprising.aeron.service.command.insurance.InsuranceFundCommands;
+import com.surprising.aeron.service.command.leverage.LeverageCommands;
+import com.surprising.aeron.service.command.liquidation.LiquidationCommands;
+import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
+import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
+import com.surprising.aeron.service.command.position.PositionCommands;
+import com.surprising.aeron.service.command.risk.RiskCommands;
+import com.surprising.aeron.service.command.settlement.InstrumentSettlementCommands;
+import com.surprising.aeron.service.command.trigger.TriggerOrderCommands;
+import com.surprising.aeron.service.config.TradingCpuAffinity;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.state.OpenInterestIndex;
-import com.surprising.aeron.service.state.index.AlgoOrderIndex;
-import com.surprising.aeron.service.state.index.LiquidationIndex;
-import com.surprising.aeron.service.state.index.CancelAllAfterIndex;
-import com.surprising.aeron.service.state.index.ActiveOrderIndex;
-import com.surprising.aeron.service.state.AdlPositionIndex;
-import com.surprising.aeron.service.state.PositionUserIndex;
-import com.surprising.aeron.service.state.risk.RiskScanRuntime;
-import com.surprising.aeron.service.state.LiquidationRuntime;
-import com.surprising.aeron.service.state.market.MarkPriceRuntime;
-import com.surprising.aeron.service.state.PositionRuntime;
-import com.surprising.aeron.service.state.index.TriggerOrderIndex;
-import com.surprising.aeron.service.state.TradingCoreState;
-import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.state.RuntimeOrderStateTransitions;
-import com.surprising.aeron.service.state.RuntimeOrderCommitStateTransitions;
-import com.surprising.aeron.service.state.OrderRuntime;
-import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
-import com.surprising.aeron.service.state.ResolvedPlaceOrder;
-import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
-import com.surprising.aeron.service.state.TradingRuntimeState;
-import com.surprising.aeron.service.state.model.CoreOrderState;
+import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
+import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
+import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder;
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
+import com.surprising.aeron.service.matching.MatcherSnapshot;
+import com.surprising.aeron.service.orchestration.commit.OrderedCommitCoordinator;
+import com.surprising.aeron.service.orchestration.metrics.CoreLaneMetrics;
+import com.surprising.aeron.service.orchestration.pipeline.ClusterCommandWindow;
+import com.surprising.aeron.service.orchestration.pipeline.CommandSlot;
+import com.surprising.aeron.service.orchestration.pipeline.CoreMatchingFlow;
+import com.surprising.aeron.service.orchestration.pipeline.DirectCommandSlot;
+import com.surprising.aeron.service.orchestration.pipeline.MatchingCommandAdmission;
+import com.surprising.aeron.service.orchestration.pipeline.MatchingPipelineProgress;
+import com.surprising.aeron.service.orchestration.pipeline.OrderBatchExecutor;
+import com.surprising.aeron.service.orchestration.pipeline.OrderBatchPending;
+import com.surprising.aeron.service.orchestration.pipeline.PendingMatchingRing;
+import com.surprising.aeron.service.orchestration.query.CoreQueryService;
+import com.surprising.aeron.service.orchestration.result.CommandResultBuilder;
+import com.surprising.aeron.service.orchestration.result.CommandResultLedger.StoredResult;
+import com.surprising.aeron.service.orchestration.result.CommandResultLedger;
+import com.surprising.aeron.service.orchestration.result.ResponseArena;
+import com.surprising.aeron.service.orchestration.result.SourceSequenceIndex;
+import com.surprising.aeron.service.orchestration.retention.TerminalStateRetention;
+import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotImage;
+import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotLifecycle;
+import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotWriter;
+import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.TradingRuntimeState;
+import com.surprising.aeron.service.state.account.TransferRuntime;
+import com.surprising.aeron.service.state.admission.CoreOrderDecisionResolver;
+import com.surprising.aeron.service.state.admission.ResolvedPlaceOrder;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.index.ActiveOrderIndex;
+import com.surprising.aeron.service.state.index.AdlPositionIndex;
+import com.surprising.aeron.service.state.index.AlgoOrderIndex;
+import com.surprising.aeron.service.state.index.CancelAllAfterIndex;
+import com.surprising.aeron.service.state.index.LiquidationIndex;
+import com.surprising.aeron.service.state.index.OpenInterestIndex;
+import com.surprising.aeron.service.state.index.PositionUserIndex;
+import com.surprising.aeron.service.state.index.TriggerOrderIndex;
+import com.surprising.aeron.service.state.ledger.RuntimeTreasuryDelta;
+import com.surprising.aeron.service.state.market.MarkPriceRuntime;
+import com.surprising.aeron.service.state.model.CoreOrderState;
+import com.surprising.aeron.service.state.order.OrderRuntime;
+import com.surprising.aeron.service.state.order.RuntimeOrderCommitStateTransitions;
+import com.surprising.aeron.service.state.order.RuntimeOrderStateTransitions;
+import com.surprising.aeron.service.state.risk.LiquidationRuntime;
+import com.surprising.aeron.service.state.risk.RiskScanRuntime;
+import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
-import com.surprising.aeron.service.matching.MatcherSnapshot;
-import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -94,10 +100,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
 
-
     /** 交割与期权等币对到期结算：沿用产品结算处理器，并登记受影响账户。 */
     final InstrumentSettlementCommands instrumentSettlement = new InstrumentSettlementCommands(this);
-
 
     /** 撮合命令准入：校验订单与生命周期依赖，登记延后命令，不提交未完成结算。 */
     final MatchingCommandAdmission admissions = new MatchingCommandAdmission(this);
@@ -171,7 +175,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     public final CoreSnapshotLifecycle snapshots = new CoreSnapshotLifecycle(this);
 
     /** 盘口查询与分页会话；仅在查询边界物化视图。 */
-    public final OrderBookQueryService bookQueries = new OrderBookQueryService(this);
+    public final CoreQueryService bookQueries = new CoreQueryService(this);
     /** 撮合在途推进状态；拥有 Lane/Matcher 通知排空和队首唤醒规则。 */
     public final MatchingPipelineProgress matchingProgress = new MatchingPipelineProgress(this);
 
@@ -186,7 +190,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return realtimeCapture;
     }
 
-    private java.util.concurrent.CompletableFuture<com.surprising.aeron.service.state.RealtimeUserSnapshot> pendingRealtimeSnapshot;
+    private java.util.concurrent.CompletableFuture<com.surprising.aeron.service.state.realtime.RealtimeUserSnapshot> pendingRealtimeSnapshot;
     private long realtimeSnapshotUser, realtimeSnapshotId, realtimeSnapshotPosition, realtimeSnapshotTimestamp, realtimeSnapshotExportSequence;
     private java.util.concurrent.CompletableFuture<java.util.List<com.surprising.aeron.protocol.CoreBookLevelView>> realtimeBook;
     private String realtimeBookSymbol;
@@ -269,7 +273,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 查询协议路由：读取已有路由索引并向实际账户、撮合器或账本所有者派发查询。 */
     CoreResponse routeQuery(CoreMessage message, long clusterTimestamp) {
         if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && OrderBookQueryService.accountQuery(message.header().messageType())) {
+                && CoreQueryService.accountQuery(message.header().messageType())) {
             try { return bookQueries.beginAccountQuery(message); }
             catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException tooLarge) {
                 return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
@@ -377,7 +381,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             }
         }
         if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
-                && OrderBookQueryService.riskAccountQuery(message.header().messageType())) {
+                && CoreQueryService.riskAccountQuery(message.header().messageType())) {
             try { return bookQueries.beginRiskAccountQuery(message); }
             catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException failure) {
                 return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
@@ -465,46 +469,46 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /** 幂等结果账本允许保留的最大命令数。 */
-    static final int MAX_IDEMPOTENCY_RESULTS = 128;
+    public static final int MAX_IDEMPOTENCY_RESULTS = 128;
     /** 幂等响应账本的总字节预算。 */
-    static final long MAX_RESULT_LEDGER_BYTES = 32L * 1024 * 1024;
+    public static final long MAX_RESULT_LEDGER_BYTES = 32L * 1024 * 1024;
     /** 单条可保留响应的字节上限，不得超过账本总预算。 */
-    static final int MAX_STORED_RESPONSE_BYTES = Math.toIntExact(MAX_RESULT_LEDGER_BYTES);
+    public static final int MAX_STORED_RESPONSE_BYTES = Math.toIntExact(MAX_RESULT_LEDGER_BYTES);
     /** 来源序号去重表的容量上限。 */
-    static final int MAX_SOURCE_SEQUENCES = 65_536;
+    public static final int MAX_SOURCE_SEQUENCES = 65_536;
     /** 单次盘口响应允许返回的最大档位数。 */
-    static final int MAX_BOOK_RESPONSE_LEVELS = 10_000;
+    public static final int MAX_BOOK_RESPONSE_LEVELS = 10_000;
     /** 单次盘口响应的编码字节上限。 */
-    static final int MAX_BOOK_RESPONSE_BYTES = 1024 * 1024;
+    public static final int MAX_BOOK_RESPONSE_BYTES = 1024 * 1024;
     /** 同步完成边界等待撮合的超时时间，单位为纳秒。 */
-    static final long MATCHING_AWAIT_TIMEOUT_NANOS =
+    public static final long MATCHING_AWAIT_TIMEOUT_NANOS =
             java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
     /** 同时保留的盘口分页快照会话上限。 */
-    static final int MAX_BOOK_BOOTSTRAP_SNAPSHOTS = 4;
+    public static final int MAX_BOOK_BOOTSTRAP_SNAPSHOTS = 4;
     /** 未显式指定时，每轮触发扫描处理的条数。 */
-    static final int DEFAULT_TRIGGER_SCAN_BATCH_SIZE = 2;
+    public static final int DEFAULT_TRIGGER_SCAN_BATCH_SIZE = 2;
     /** 无订单结果共用的空数组，不得写入。 */
-    static final long[] EMPTY_ORDER_IDS = new long[0];
+    public static final long[] EMPTY_ORDER_IDS = new long[0];
     /** 独立快照调用等待完成的超时时间，单位为秒。 */
-    static final int STANDALONE_SNAPSHOT_TIMEOUT_SECONDS = Integer.getInteger(
+    public static final int STANDALONE_SNAPSHOT_TIMEOUT_SECONDS = Integer.getInteger(
             "surprising.aeron.standalone-snapshot-timeout-seconds", 300);
     /** 确定性状态摘要的 FNV 初始值。 */
-    static final long HASH_OFFSET_BASIS = 0xcbf29ce484222325L;
+    public static final long HASH_OFFSET_BASIS = 0xcbf29ce484222325L;
     /** 确定性状态摘要的 FNV 混合乘数。 */
-    static final long HASH_PRIME = 0x100000001b3L;
+    public static final long HASH_PRIME = 0x100000001b3L;
     /** 无需响应正文时共用的空字节数组。 */
-    static final byte[] EMPTY_RESPONSE_DATA = new byte[0];
+    public static final byte[] EMPTY_RESPONSE_DATA = new byte[0];
     /** 协议中的撮合处理中结果码，保留现有线协议取值。 */
-    static final int MATCHING_PENDING_WIRE_CODE = 66;
+    public static final int MATCHING_PENDING_WIRE_CODE = 66;
     /** 撮合在途命令上限，用于入口背压和有界容量。 */
-    static final int MAX_PENDING_MATCHING = Integer.getInteger(
+    public static final int MAX_PENDING_MATCHING = Integer.getInteger(
             "surprising.aeron.max-pending-matching", 4_096);
     /** 所属产品线；所有命令、账户与币对均在此边界隔离。 */
     final ProductLine productLine;
     /** 拥有当前执行上下文的唯一 owner；不得在其他线程直接修改其状态。 */
     Thread owner;
     /** 已提交业务变化的索引更新器；不复制完整交易状态。 */
-    final com.surprising.aeron.service.state.RuntimeFactIndexes factIndexes;
+    final com.surprising.aeron.service.state.index.RuntimeFactIndexes factIndexes;
     /** 有界命令结果账本；保存幂等响应而非业务状态副本。 */
     final CommandResultLedger resultLedger;
 
@@ -597,7 +601,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     public void evaluatePendingTriggerScan(String instrumentId, int maxWork) {
         triggers.evaluatePendingTriggerScan(instrumentId, maxWork);
     }
-    public int queuedMatchingCount() { return admissions.queuedMatching.size(); }
+    public int queuedMatchingCount() { return admissions.queuedMatchingCount(); }
     public int defaultTriggerScanBatchSize() { return DEFAULT_TRIGGER_SCAN_BATCH_SIZE; }
     public long currentClusterTimestamp() { return currentClusterTimestamp; }
     public boolean terminalAlgoRetained(long algoOrderId, long userId, String clientAlgoOrderId) {
@@ -606,7 +610,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     public boolean terminalTriggerRetained(long triggerOrderId, long userId, String clientTriggerOrderId) {
         return terminalRetention.containsTrigger(triggerOrderId, userId, clientTriggerOrderId);
     }
-    public com.surprising.aeron.service.state.TreasuryRuntime.LifecycleProgressRuntime
+    public com.surprising.aeron.service.state.ledger.TreasuryRuntime.LifecycleProgressRuntime
             lifecycleProgress(String instrumentId) {
         return runtimeLifecycleProgress(instrumentId);
     }
@@ -617,20 +621,20 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 0, Map.of(), Map.of(), null, null);
     }
 
-    TradingCoreRuntime(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture) {
+    public TradingCoreRuntime(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture) {
         this(productLine, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
                 TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
                 0, Map.of(), Map.of(), matcherSnapshotCapture, null);
     }
 
-    TradingCoreRuntime(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture,
+    public TradingCoreRuntime(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture,
                    SnapshotEncoder snapshotEncoder) {
         this(productLine, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
                 TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
                 0, Map.of(), Map.of(), matcherSnapshotCapture, snapshotEncoder);
     }
 
-    TradingCoreRuntime(
+    public TradingCoreRuntime(
             ProductLine productLine,
             long appliedCommandCount,
             LinkedHashMap<UUID, StoredResult> commandResults,
@@ -648,17 +652,17 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.committedCoreSequence = appliedCommandCount;
         this.resultLedger = new CommandResultLedger(commandResults, responseArena);
         this.lastSourceSequences = new SourceSequenceIndex(lastSourceSequences);
-        admissions.pendingLifecycleScopes = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
-        snapshots.lastSnapshotId = matcherSnapshot == null ? 0 : matcherSnapshot.snapshotId();
+        admissions.initializeLifecycleScopes();
+        snapshots.lastSnapshotId(matcherSnapshot == null ? 0 : matcherSnapshot.snapshotId());
         this.terminalRetention = terminalRetention;
         long restoredBusinessStateHash = canonicalBusinessStateHash(
                 snapshotState.businessStateHash(), restoredFeePolicies, restoredPendingTransfers);
         var topology = matcherSnapshot == null
-                ? com.surprising.aeron.service.state.LaneTopology.configured(
+                ? com.surprising.aeron.service.lane.LaneTopology.configured(
                         Boolean.getBoolean("surprising.aeron.p10-characterization"))
                 : matcherSnapshot.topology();
         this.identities = new RuntimeIdentityRegistry();
-        this.runtimeState = com.surprising.aeron.service.state.RuntimeStateProjector.project(
+        this.runtimeState = com.surprising.aeron.service.state.snapshot.RuntimeStateProjector.project(
                 snapshotState, identities, topology);
         this.activeOrderIndex = new ActiveOrderIndex(snapshotState, identities);
         this.matchingAdapter = matcherSnapshot == null
@@ -669,19 +673,19 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 Math.min(MAX_PENDING_MATCHING, matchingAdapter.topology().matcherWindowSize()),
                 matchingAdapter.topology().matchingEngineCount(),
                 matchingAdapter.topology().accountLaneCount());
-        commits.appliedMatcherSequences = new long[matchingAdapter.topology().matchingEngineCount() + 1];
+        commits.initializeMatcherProgress(matchingAdapter.topology().matchingEngineCount() + 1);
         commits.initializeMatcherProgress(matcherSnapshot);
         this.matcherPipeline = new MatcherPipelineGroup(
                 matchingAdapter.topology().matchingEngineCount(),
                 Math.min(matchingAdapter.topology().matcherWindowSize(),
                         matchingAdapter.topology().matchingCompletionCapacity()), false, pendingMatching.contexts());
-        snapshots.matcherSnapshotCapture = matcherSnapshotCapture == null
-                ? snapshots::captureMatcherSnapshot : matcherSnapshotCapture;
+        snapshots.matcherSnapshotCapture(matcherSnapshotCapture == null
+                ? snapshots::captureMatcherSnapshot : matcherSnapshotCapture);
         if (snapshotEncoder == null) {
-            snapshots.snapshotEncoder = image -> CompletableFuture.completedFuture(
-                    SectionedCoreSnapshotWriter.encode(image));
+            snapshots.snapshotEncoder(image -> CompletableFuture.completedFuture(
+                    SectionedCoreSnapshotWriter.encode(image)));
         } else {
-            snapshots.snapshotEncoder = snapshotEncoder;
+            snapshots.snapshotEncoder(snapshotEncoder);
         }
         this.positionUserIndex = new PositionUserIndex(snapshotState, identities, topology);
         this.openInterestIndex = new OpenInterestIndex(snapshotState, identities);
@@ -690,7 +694,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.liquidationIndex = new LiquidationIndex(snapshotState);
         this.cancelAllAfterIndex = new CancelAllAfterIndex(snapshotState);
         this.adlPositionIndex = new AdlPositionIndex(snapshotState, identities);
-        this.factIndexes = new com.surprising.aeron.service.state.RuntimeFactIndexes(
+        this.factIndexes = new com.surprising.aeron.service.state.index.RuntimeFactIndexes(
                 positionUserIndex, openInterestIndex, triggerOrderIndex, algoOrderIndex,
                 liquidationIndex, cancelAllAfterIndex, activeOrderIndex, adlPositionIndex);
         runtimeState.bindFactIndexes(factIndexes, identities);
@@ -702,7 +706,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         identities.releaseOwnerForHandoff();
     }
 
-    static TradingCoreRuntime prepareRestore(
+    public static TradingCoreRuntime prepareRestore(
             ProductLine productLine,
             long appliedCommandCount,
             Map<UUID, StoredResult> commandResults,
@@ -732,15 +736,15 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return apply(message, message.header().submittedAtEpochMillis(), Math.addExact(appliedCommandCount, 1));
     }
 
-    boolean clusterPipelineAdmission() {
+    public boolean clusterPipelineAdmission() {
         return clusterPipelineAdmission;
     }
 
-    long preparedRouteUserLaneBit() {
+    public long preparedRouteUserLaneBit() {
         return preparedRouteUserLaneBit;
     }
 
-    int preparedRouteMatcherShard() {
+    public int preparedRouteMatcherShard() {
         return preparedRouteMatcherShard;
     }
 
@@ -755,8 +759,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
         currentClusterTimestamp = clusterTimestamp;
         currentClusterPosition = clusterPosition;
         assertHealthy();
-        if (snapshots.snapshotFence != null
-                && snapshots.snapshotFence.encodedSnapshot == null) {
+        if (snapshots.snapshotFence() != null
+                && snapshots.snapshotFence().encodedSnapshot() == null) {
             throw new IllegalStateException("snapshot fence is active");
         }
         if (!pendingMatching.isEmpty()
@@ -788,10 +792,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /** Queries can borrow Lane state for a read fence; commands hand mutations to their Lane. */
-    boolean requiresOwnerLaneAccessForPreparation(CoreMessage message) {
+    public boolean requiresOwnerLaneAccessForPreparation(CoreMessage message) {
         if (message.header().kind() != WireMessageKind.QUERY) return false;
         var type = message.header().messageType();
-        if (OrderBookQueryService.accountQuery(type) || OrderBookQueryService.riskAccountQuery(type)) return false;
+        if (CoreQueryService.accountQuery(type) || CoreQueryService.riskAccountQuery(type)) return false;
         if (type == CoreMessageType.ORDER_PREFLIGHT_QUERY || type == CoreMessageType.LANE_METRICS_QUERY) return false;
         if (type == CoreMessageType.TRIGGER_ORDER_QUERY || type == CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY) return false;
         if (type == CoreMessageType.TREASURY_STATE_QUERY || type == CoreMessageType.FUNDING_PROGRESS_QUERY
@@ -801,11 +805,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return true;
     }
 
-    CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position) {
+    public CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position) {
         return applyClusterCommand(message, timestamp, position, null);
     }
 
-    CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position,
+    public CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position,
                                      DecodedMatchingCommand decoded) {
         boolean entered = !runtimeState.asynchronousCommands();
         if (entered) runtimeState.enterAsynchronousCommandScope();
@@ -816,12 +820,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
     }
 
-    CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
+    public CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
                                      DecodedMatchingCommand decoded, boolean independent) {
         return applyDecodedCommand(message, timestamp, position, decoded, independent, null);
     }
 
-    CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
+    public CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
                                      DecodedMatchingCommand decoded, boolean independent,
                                      CommandFingerprint fingerprint) {
         CommandFingerprint previousFingerprint = preparedIngressFingerprint;
@@ -842,7 +846,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
     }
 
-    DecodedMatchingCommand decodeMatchingCommand(CoreMessage message) {
+    public DecodedMatchingCommand decodeMatchingCommand(CoreMessage message) {
         if (message != decodedIngressMessage || decodedIngressCommand == null)
             return DecodedMatchingCommand.decode(message);
         // Decode after idempotency/source checks and inside admission's rejection handling.
@@ -851,7 +855,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return decodedIngressCommand;
     }
 
-    boolean prepareClusterPipelineScope(CoreMessage message, ClusterCommandWindow window) {
+    public boolean prepareClusterPipelineScope(CoreMessage message, ClusterCommandWindow window) {
         if (!activated()) activate();
         assertOwner();
         long user = message.header().userId();
@@ -955,7 +959,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return applyDirectCommand(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint);
     }
 
-    CoreResponse applyDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
+    public CoreResponse applyDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
                                     SourceKey sourceKey, CommandFingerprint fingerprint) {
         ResponseStatus status;
         CoreResultCode resultCode = CoreResultCode.NONE;
@@ -1025,7 +1029,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return null;
     }
 
-    CoreResponse fundsReplayResponse(CoreMessage message, CommandFingerprint fingerprint, CommandFingerprint retained) {
+    public CoreResponse fundsReplayResponse(CoreMessage message, CommandFingerprint fingerprint, CommandFingerprint retained) {
         if (retained == null) return null;
         if (!retained.matchesCommittedCommand(message, fingerprint)) {
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
@@ -1038,7 +1042,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     appliedCommandCount, EMPTY_RESPONSE_DATA);
     }
 
-    CoreResponse checkSourceSequence(CoreMessage message, long lastSourceSequence) {
+    public CoreResponse checkSourceSequence(CoreMessage message, long lastSourceSequence) {
         if (lastSourceSequence >= 0 && message.header().sourceSequence() <= lastSourceSequence) {
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
                     com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
@@ -1051,7 +1055,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return null;
     }
 
-    CoreResponse finishDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
+    public CoreResponse finishDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
             SourceKey sourceKey, CommandFingerprint fingerprint,
             long beforeRuntimeRevision, long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
             ResponseStatus status, CoreResultCode resultCode) {
@@ -1085,7 +1089,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 } else {
                     triggers.cancelTriggersForClosedPositions();
                 }
-                if (pendingMatching.size() + admissions.queuedMatching.size()
+                if (pendingMatching.size() + admissions.queuedMatchingCount()
                         > pendingMatching.capacity()) {
                     admissions.clearQueuedMatching();
                     if (deferFinalizationRejection(CoreResultCode.MATCHING_BACKPRESSURE)) return null;
@@ -1099,7 +1103,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                         ? java.util.List.of() : resultBuilder.commandChangedOrderIds;
                 try {
                     if (runtimeState.asynchronousCommands()) {
-                        com.surprising.aeron.service.state.RuntimeOrderCommitStateTransitions.validateStampInputs(
+                        com.surprising.aeron.service.state.order.RuntimeOrderCommitStateTransitions.validateStampInputs(
                                 clusterTimestamp, clusterPosition, changedOrderIds);
                     } else {
                         stampOrderChangesRuntime(clusterTimestamp, clusterPosition, changedOrderIds);
@@ -1205,12 +1209,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 || type == CoreMessageType.SETTLE_INSTRUMENT;
     }
 
-    static boolean isOrderBatchCommand(CoreMessageType type) {
+    public static boolean isOrderBatchCommand(CoreMessageType type) {
         return type == CoreMessageType.PLACE_ORDER_BATCH || type == CoreMessageType.CANCEL_ORDER_BATCH
                 || type == CoreMessageType.AMEND_ORDER_BATCH;
     }
 
-    CoreResponse finishFactContext(CoreResponse response) {
+    public CoreResponse finishFactContext(CoreResponse response) {
         clearFactContext();
         return response;
     }
@@ -1220,7 +1224,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (response != null) responseArena.release(response.dataUnsafe());
     }
 
-    void activateFactContext(CoreMessage command, CommandFingerprint fingerprint) {
+    public void activateFactContext(CoreMessage command, CommandFingerprint fingerprint) {
         if (command == null || fingerprint == null) {
             throw new IllegalArgumentException("complete commit context is required before mutation");
         }
@@ -1228,11 +1232,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
         factContextActive = true;
     }
 
-    void clearFactContext() {
+    public void clearFactContext() {
         factContextActive = false;
     }
 
-    CoreResponse admissionRejected(CoreResultCode resultCode) {
+    public CoreResponse admissionRejected(CoreResultCode resultCode) {
         currentClusterTimestamp = admissionPreviousClusterTimestamp;
         currentClusterPosition = admissionPreviousClusterPosition;
         return rejected(resultCode);
@@ -1286,15 +1290,14 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return commandId != null && isMatchingPending(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
     }
 
-    long matchingSequence(long msb, long lsb) {
+    public long matchingSequence(long msb, long lsb) {
         CommandSlot pending = pendingMatching.findByCommandId(msb, lsb);
         return pending == null ? 0 : pending.sequence();
     }
 
-    long matchingSequence(UUID commandId) {
+    public long matchingSequence(UUID commandId) {
         return commandId == null ? 0 : matchingSequence(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
     }
-
 
     /**
      * Reads the existing Lane/financial completion held by the ordered Owner head. Completion
@@ -1309,22 +1312,20 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (pending == null) return false;
         var settlement = pending.settlementEvent();
         if (settlement != null && settlement.complete()) return true;
-        if (pending.commitEvent != null && pending.commitEvent.complete()) return true;
-        OrderBatchPending batch = pending.orderBatch;
+        if (pending.commitEvent() != null && pending.commitEvent().complete()) return true;
+        OrderBatchPending batch = pending.orderBatch();
         if (batch == null) return false;
         // Batch facts are retained on the batch, not on the ordinary command slot. Ledger can
         // finish after every Matcher/Lane notification was consumed, so read these same facts.
-        if (batch.itemSettlementEvent != null && batch.itemSettlementEvent.complete()) return true;
-        if (batch.settlementEvent != null && batch.settlementEvent.complete()) return true;
-        return batch.laneCommitEvent != null && batch.laneCommitEvent.complete();
+        if (batch.itemSettlementEvent() != null && batch.itemSettlementEvent().complete()) return true;
+        if (batch.settlementEvent() != null && batch.settlementEvent().complete()) return true;
+        return batch.laneCommitEvent() != null && batch.laneCommitEvent().complete();
     }
-
 
     @FunctionalInterface
     public interface MatchingCommitHandler {
         void onCommitted(long sequence, CoreResponse response);
     }
-
 
     public long terminalTradeCount() {
         assertOwner();
@@ -1365,27 +1366,27 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return encoder.finish();
     }
 
-    com.surprising.aeron.service.state.LaneTopology laneTopology() {
+    com.surprising.aeron.service.lane.LaneTopology laneTopology() {
         return matchingAdapter.topology();
     }
 
-    List<com.surprising.aeron.service.state.AccountLaneSnapshot> accountLaneSnapshots(
+    public List<com.surprising.aeron.service.state.snapshot.AccountLaneSnapshot> accountLaneSnapshots(
             long fenceSequence, TradingCoreState globalState) {
         return runtimeState.accountLaneSnapshots(fenceSequence, globalState);
     }
 
-    void restoreAccountLaneSnapshots(
-            List<com.surprising.aeron.service.state.AccountLaneSnapshot> snapshots,
+    public void restoreAccountLaneSnapshots(
+            List<com.surprising.aeron.service.state.snapshot.AccountLaneSnapshot> snapshots,
             long fenceSequence) {
         if (activated) throw new IllegalStateException("account lanes must restore before activation");
         runtimeState.restoreAccountLaneSnapshots(snapshots, fenceSequence, snapshotTradingState());
     }
 
-    void activate() {
+    public void activate() {
         activate(TradingCpuAffinity.disabled());
     }
 
-    void activate(TradingCpuAffinity affinity) {
+    public void activate(TradingCpuAffinity affinity) {
         if (activated) return;
         if (closed) throw new IllegalStateException("cannot activate closed core state");
         affinity.validateConfiguration(laneTopology());
@@ -1415,7 +1416,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
     }
 
-    boolean activated() { return activated; }
+    public boolean activated() { return activated; }
 
     int terminalRetentionCandidateCount() {
         return terminalRetention.candidateCount();
@@ -1429,7 +1430,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return identities.clientIdentityCount();
     }
 
-    TerminalStateRetention terminalRetention() {
+    public TerminalStateRetention terminalRetention() {
         return terminalRetention;
     }
 
@@ -1440,23 +1441,23 @@ public final class TradingCoreRuntime implements AutoCloseable {
     byte[] captureSnapshot(long clusterTimestamp, long clusterPosition, long nowNanos) {
         byte[] snapshot = snapshots.pollSnapshot(clusterTimestamp, clusterPosition, nowNanos);
         if (snapshot != null) return snapshot;
-        if (snapshots.snapshotFence != null && snapshots.snapshotFence.encodedSnapshot == null) snapshots.releaseSnapshotFence();
+        if (snapshots.snapshotFence() != null && snapshots.snapshotFence().encodedSnapshot() == null) snapshots.releaseSnapshotFence();
         throw new SnapshotNotReadyException();
     }
 
-    static final class SnapshotNotReadyException extends IllegalStateException {
-        SnapshotNotReadyException() {
+    public static final class SnapshotNotReadyException extends IllegalStateException {
+        public SnapshotNotReadyException() {
             super("snapshot not ready");
         }
     }
 
-    static final class SnapshotFenceTimeoutException extends IllegalStateException {
-        SnapshotFenceTimeoutException() {
+    public static final class SnapshotFenceTimeoutException extends IllegalStateException {
+        public SnapshotFenceTimeoutException() {
             super("snapshot fence timed out");
         }
     }
 
-    @FunctionalInterface
+    public @FunctionalInterface
     interface MatcherSnapshotCapture {
         CompletableFuture<MatcherSnapshot> capture(
                 long snapshotId,
@@ -1466,12 +1467,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 Iterable<CoreOrderState> activeOrders);
     }
 
-    @FunctionalInterface
+    public @FunctionalInterface
     interface SnapshotEncoder {
         CompletableFuture<SectionedCoreSnapshotCodec.SectionedSnapshot> encode(CoreSnapshotImage image);
     }
 
-    FatalMatchingDivergenceException failMatching(
+    public FatalMatchingDivergenceException failMatching(
             CommandSlot pending,
             String detail,
             Throwable cause) {
@@ -1488,26 +1489,26 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return fatalFailure;
     }
 
-    void assertClusterCallbackComplete() {
+    public void assertClusterCallbackComplete() {
         if (!activated) activate();
         assertOwner();
         assertHealthy();
         if (directCommand.active() || !pendingMatching.isEmpty()
-                || !bookQueries.queryIds.isEmpty()) {
+                || bookQueries.hasPendingQueries()) {
             throw new IllegalStateException("unfinished business work outside cluster log callback"
                     + " direct=" + directCommand.active()
                     + " matching=" + !pendingMatching.isEmpty()
-                    + " book=" + !bookQueries.queryIds.isEmpty());
+                    + " book=" + bookQueries.hasPendingQueries());
         }
     }
 
-    void assertHealthy() {
+    public void assertHealthy() {
         terminalRetention.assertHealthy();
         if (fatalFailure != null) throw fatalFailure;
         if (commitPublicationFailure != null) throw commitPublicationFailure;
         if (runtimeState != null) runtimeState.assertAccountLanesHealthy();
         commits.publication.assertHealthy();
-        RuntimeException auditFailure = snapshots.snapshotAuditFailure.get();
+        RuntimeException auditFailure = snapshots.snapshotAuditFailure().get();
         if (auditFailure != null) throw auditFailure;
     }
 
@@ -1532,7 +1533,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /** 为流水线命令预分配下一个单调自增序号。由唯一 Owner 线程调用。 */
-    long nextAppliedSequence() {
+    public long nextAppliedSequence() {
         assertOwner();
         return Math.incrementExact(appliedCommandCount);
     }
@@ -1541,7 +1542,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * 确认推进已应用命令序号至指定序号，同步刷新已提交全局水位，并登记来源序号幂等去重。
      * 由唯一 Owner 线程在命令正式入队或应用时调用。
      */
-    void recordAppliedSequence(long sequence, SourceKey sourceKey, long sourceSequence) {
+    public void recordAppliedSequence(long sequence, SourceKey sourceKey, long sourceSequence) {
         assertOwner();
         this.appliedCommandCount = sequence;
         refreshCommittedCoreSequence();
@@ -1554,7 +1555,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * 刷新全局已提交水位；根据在途撮合环首序列号或已应用命令计数推进，
      * 并同步通知账户 Lane 释放终态订单回收栅栏。
      */
-    void refreshCommittedCoreSequence() {
+    public void refreshCommittedCoreSequence() {
         assertOwner();
         long candidate = pendingMatching.isEmpty()
                 ? appliedCommandCount
@@ -1586,7 +1587,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             long currentMarketRevision = runtimeState.marketRevision();
             long currentSequence = commits.publication.publishedSequence();
             if (cachedTradingState == null || cachedRevision != currentRevision || cachedMarketRevision != currentMarketRevision || cachedSequence != currentSequence) {
-                cachedTradingState = com.surprising.aeron.service.state.RuntimeStateMaterializer.materialize(runtimeState, identities);
+                cachedTradingState = com.surprising.aeron.service.state.snapshot.RuntimeStateMaterializer.materialize(runtimeState, identities);
                 cachedRevision = currentRevision;
                 cachedMarketRevision = currentMarketRevision;
                 cachedSequence = currentSequence;
@@ -1597,12 +1598,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
     }
 
-    TradingCoreState snapshotTradingState() {
-        CoreSnapshotLifecycle.SnapshotFence fence = snapshots.snapshotFence;
-        return fence != null && fence.snapshotState != null ? fence.snapshotState : tradingState();
+    public TradingCoreState snapshotTradingState() {
+        CoreSnapshotLifecycle.SnapshotFence fence = snapshots.snapshotFence();
+        return fence != null && fence.snapshotState() != null ? fence.snapshotState() : tradingState();
     }
-    long snapshotBusinessStateHash() { return currentBusinessStateHash(); }
-    long snapshotProjectionSequence() { return commits.publication.publishedSequence(); }
+    public long snapshotBusinessStateHash() { return currentBusinessStateHash(); }
+    public long snapshotProjectionSequence() { return commits.publication.publishedSequence(); }
     boolean runtimeRiskScanComplete() { return runtimeState.firstIncompleteRiskScan() == null; }
     boolean runtimeRiskScanComplete(String instrumentId) {
         RiskScanRuntime scan = runtimeRiskScan(instrumentId);
@@ -1639,13 +1640,13 @@ public final class TradingCoreRuntime implements AutoCloseable {
             }
         }
     }
-    boolean snapshotHasPendingCommands() {
+    public boolean snapshotHasPendingCommands() {
         return factContextActive || directCommand.active() || pendingMatching.inFlight() != 0;
     }
-    Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies() {
+    public Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies() {
         return runtimeState.feePoliciesSnapshot();
     }
-    Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers() {
+    public Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> pendingTransfers() {
         boolean acquired = runtimeState.accountLanesStarted() && !runtimeState.ownerLaneAccess;
         try {
             if (acquired) {
@@ -1663,14 +1664,13 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
     }
 
-    Map<UUID, StoredResult> commandResults() {
+    public Map<UUID, StoredResult> commandResults() {
         return resultLedger.entries();
     }
 
-    Map<SourceKey, Long> lastSourceSequences() {
+    public Map<SourceKey, Long> lastSourceSequences() {
         return Collections.unmodifiableMap(lastSourceSequences.snapshot());
     }
-
 
     public void cancelAllOcoSiblings(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger) {
         long cursor = Long.MAX_VALUE;
@@ -1693,18 +1693,18 @@ public final class TradingCoreRuntime implements AutoCloseable {
         identities.assertOwner();
     }
 
-    void assertOwner() {
+    public void assertOwner() {
         if (owner == null) bindOwner();
         else if (owner != Thread.currentThread()) {
             throw new IllegalStateException("trading runtime is bound to another thread");
         }
     }
 
-    com.surprising.aeron.service.state.PlaceAdmissionEvent dispatchPlaceAdmission(
+    public com.surprising.aeron.service.state.admission.PlaceAdmissionEvent dispatchPlaceAdmission(
             long userId, PlaceOrderCommand command, UUID commandId, long coreSequence,
             long timestamp, long position) {
         var event = runtimeState.acquirePlaceAdmission();
-        com.surprising.aeron.service.state.TreasuryRuntime.SettlementStatus settlementStatus;
+        com.surprising.aeron.service.state.ledger.TreasuryRuntime.SettlementStatus settlementStatus;
         int assetId;
         try {
             CoreOrderDecisionResolver.prepare(event, runtimeState, identities, userId,
@@ -1729,7 +1729,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             throw new IllegalStateException("active trigger admission requires its Account Lane continuation");
         ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimeState,
                 identities, userId, command, currentClusterTimestamp);
-        var admissionIdentity = com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(
+        var admissionIdentity = com.surprising.aeron.service.state.admission.RuntimeOrderAdmission.admissionIdentity(
                 runtimeState, identities, userId, resolved);
         long openInterestSteps = resolved.instrument().usesOpenInterestForUserLimit() && !command.reduceOnly()
                 ? openInterestIndex.openInterestSteps(command.instrumentId()) : 0;
@@ -1739,11 +1739,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
             var preparedClientKey = identities.prepareClientKeyInCurrentLane(
                     userId, resolved.clientOrderId());
             try {
-                long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationPrepared(
+                long requiredReservation = com.surprising.aeron.service.state.admission.RuntimeOrderAdmission.requiredReservationPrepared(
                         runtimeState, runtimeState.accountLaneForUser(userId), userId, resolved, openInterestSteps, runtimeState.admissionOrders(userId, resolved.symbolId()), admissionIdentity);
                 RuntimeOrderStateTransitions.placePrepared(runtimeState, userId, resolved,
                         commandId, requiredReservation,
-                        com.surprising.aeron.service.state.RuntimeIdentityRegistry.clientKeyValue(preparedClientKey),
+                        com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry.clientKeyValue(preparedClientKey),
                         symbolId, assetId);
                 runtimeState.markPendingReservation(userId, resolved.orderId(), pendingCoreSequence);
                 return null;
@@ -1759,37 +1759,33 @@ public final class TradingCoreRuntime implements AutoCloseable {
         else commits.publication.request();
     }
 
-    ResolvedMatchingAdmission requireMatchingAdmission(CommandSlot pending) {
+    public ResolvedMatchingAdmission requireMatchingAdmission(CommandSlot pending) {
         ResolvedMatchingAdmission admission = pending.matchingAdmission();
         if (admission == null) throw new IllegalStateException("replace admission is missing");
         return admission;
     }
-
-
 
     OrderRuntime runtimeOrder(long orderId) {
         return runtimeState.hasChangedOrder(orderId) ? runtimeState.changedOrderValue(orderId)
                 : runtimeState.order(orderId);
     }
 
-    String runtimeOrderSymbol(OrderRuntime order) {
+    public String runtimeOrderSymbol(OrderRuntime order) {
         return identities.instrumentId(order.symbolId());
     }
 
-    String runtimeLiquidationSymbol(
-            com.surprising.aeron.service.state.LiquidationRuntime liquidation) {
+    public String runtimeLiquidationSymbol(
+            com.surprising.aeron.service.state.risk.LiquidationRuntime liquidation) {
         return identities.instrumentId(liquidation.symbolId());
     }
 
-    com.surprising.aeron.service.state.TreasuryRuntime.LifecycleProgressRuntime
+    public com.surprising.aeron.service.state.ledger.TreasuryRuntime.LifecycleProgressRuntime
             runtimeLifecycleProgress(String instrumentId) {
         Integer symbolId = identities.findSymbolId(instrumentId);
         return symbolId == null ? null : runtimeState.treasury().lifecycleProgress(symbolId);
     }
 
-
-
-    void stampOrderChangesRuntime(long timestamp, long clusterPosition,
+    public void stampOrderChangesRuntime(long timestamp, long clusterPosition,
                                           Iterable<Long> changedOrderIds) {
         if (RuntimeOrderCommitStateTransitions.stampChangedOrdersByLane(
                 runtimeState, timestamp, clusterPosition,
@@ -1798,12 +1794,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
     }
 
-
-
-    void suspendMatchingCommitContext(CommandSlot pending) {
+    public void suspendMatchingCommitContext(CommandSlot pending) {
         if (!commits.publication.deferred() || pending == null
                 || pending.settlementEvent() == null
-                && pending.orderBatch == null
+                && pending.orderBatch() == null
                 && !commits.controlPending(pending.sequence())) {
             throw new IllegalStateException("matching commit context cannot be suspended");
         }
@@ -1811,7 +1805,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         // those buffers to the sequence slot instead of materializing boxed Lists and copying
         // them back when the ordered commit resumes.
         seedChangeAccumulators();
-        runtimeState.acceptChangedUserIds(resultBuilder.changedUserIds::add);
+        runtimeState.acceptChangedUserIds(resultBuilder.changedUserIds()::add);
         CommandSlot context = pending;
         context.suspendCommitContext(
                 resultBuilder, runtimeState.coldCommandFunds(),
@@ -1823,7 +1817,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         clearFactContext();
     }
 
-    void restoreMatchingCommitContext(CommandSlot pending) {
+    public void restoreMatchingCommitContext(CommandSlot pending) {
         if (commits.publication.deferred() || factContextActive) {
             throw new IllegalStateException("another owner commit context is active");
         }
@@ -1835,7 +1829,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         resultBuilder.commandChangedOrderIds = List.of();
         context.takeCommitFundsTo(runtimeState.coldCommandFunds());
         context.clearCommitContext();
-        resultBuilder.commandTradeCount = 0;
+        resultBuilder.commandTradeCount(0);
         resultBuilder.commandLiquidationProgress = null;
         resultBuilder.commandLiquidationBatchResult = null;
         resultBuilder.commandRiskScanControl = null;
@@ -1852,7 +1846,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 || runtimeState.changedOrderValue(orderId) != null || terminalRetention.orderIdInUse(orderId);
     }
 
-    void rollbackCommandState(
+    public void rollbackCommandState(
             long runtimeCheckpoint,
             long positionIdentityCheckpoint,
             long commandSequence) {
@@ -1880,20 +1874,20 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     void setCommandFundsDelta(
-            com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta) {
+            com.surprising.aeron.service.state.ledger.RuntimeFundsDelta fundsDelta) {
         if (runtimeState.systemLedgerStarted()) return;
         runtimeState.coldCommandFunds().clear();
         runtimeState.coldCommandFunds().add(fundsDelta);
     }
 
-    void setCommandFunds(
-            com.surprising.aeron.service.state.RuntimeFundsAccumulator fundsAccumulator) {
+    public void setCommandFunds(
+            com.surprising.aeron.service.state.ledger.RuntimeFundsAccumulator fundsAccumulator) {
         if (runtimeState.systemLedgerStarted()) return;
         runtimeState.coldCommandFunds().clear();
         runtimeState.coldCommandFunds().add(fundsAccumulator);
     }
 
-    void validateFundsConservation(CoreMessage command) {
+    public void validateFundsConservation(CoreMessage command) {
         if (runtimeState.systemLedgerStarted()) return;
         boolean externalAdjustment = command.header().messageType() == CoreMessageType.ADJUST_BALANCE
                 || command.header().messageType() == CoreMessageType.TRANSFER_OUT
@@ -1903,8 +1897,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     public void seedChangeAccumulators() {
-        if (resultBuilder.commandChangedUserIds != null) resultBuilder.changedUserIds.addAll(resultBuilder.commandChangedUserIds);
-        if (resultBuilder.commandChangedOrderIds != null) resultBuilder.changedOrderIds.addAll(resultBuilder.commandChangedOrderIds);
+        if (resultBuilder.commandChangedUserIds != null) resultBuilder.changedUserIds().addAll(resultBuilder.commandChangedUserIds);
+        if (resultBuilder.commandChangedOrderIds != null) resultBuilder.changedOrderIds().addAll(resultBuilder.commandChangedOrderIds);
     }
 
     static <T> List<T> appendDistinct(List<T> existing, List<T> additions) {
@@ -1917,14 +1911,14 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return List.copyOf(values);
     }
 
-    static List<Long> boxedOrderIds(
-            com.surprising.aeron.service.state.MatcherSettlementPlan plan) {
+    public static List<Long> boxedOrderIds(
+            com.surprising.aeron.service.state.settlement.MatcherSettlementPlan plan) {
         if (plan == null || plan.orderCount() == 0) return List.of();
         return plan.orderIdList();
     }
 
     /** Collect lifecycle order identities without creating boxed Long elements. */
-    static List<Long> boxedOrderIds(List<CancellationOrder> orders) {
+    public static List<Long> boxedOrderIds(List<CancellationOrder> orders) {
         if (orders == null || orders.isEmpty()) return List.of();
         long[] values = new long[orders.size()];
         for (int index = 0; index < values.length; index++) values[index] = orders.get(index).orderId();
@@ -1950,7 +1944,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (activated) assertOwner();
         closed = true;
         snapshots.releaseSnapshotFence();
-        snapshots.inFlightMatcherSnapshot.set(null);
+        snapshots.inFlightMatcherSnapshot().set(null);
         matcherPipeline.closeShards(matchingAdapter::closeShard);
         runtimeState.endOrderBatchMutationScope();
         commits.publication.close();
@@ -1963,17 +1957,17 @@ public final class TradingCoreRuntime implements AutoCloseable {
             batches.clearPendingBatches();
             pendingMatching.clear();
             crossShardCancellations.clear();
-            admissions.pendingLifecycleScopes.clear();
+            admissions.clearLifecycleScopes();
             terminalRetention.close();
         }
     }
 
-    void captureRealtimeTrades(CommandSlot pending) {
+    public void captureRealtimeTrades(CommandSlot pending) {
         var plan = pending.settlementPlan();
-        OrderRuntime taker = pending.realtimeTakerOrder;
-        ResolvedPlaceOrder resolvedTaker = pending.place.realtimeResolvedTakerOrder;
-        pending.realtimeTakerOrder = null;
-        pending.place.realtimeResolvedTakerOrder = null;
+        OrderRuntime taker = pending.realtimeTakerOrder();
+        ResolvedPlaceOrder resolvedTaker = pending.place().realtimeResolvedTakerOrder();
+        pending.realtimeTakerOrder(null);
+        pending.place().realtimeResolvedTakerOrder(null);
         if (realtimeCapture == null || !realtimeCapture.active()) return;
         try {
             for (int index = 0; index < plan.matcherEventCount(); index++) {
@@ -1991,14 +1985,14 @@ public final class TradingCoreRuntime implements AutoCloseable {
         } catch (RuntimeException failure) { realtimeCapture.failed(); }
     }
 
-    static long tradeCount(com.surprising.aeron.service.state.MatcherSettlementPlan plan) {
+    public static long tradeCount(com.surprising.aeron.service.state.settlement.MatcherSettlementPlan plan) {
         long trades = 0;
         for (int index = 0; index < plan.matcherEventCount(); index++)
             if (plan.matcherEvent(index).eventType() == MatcherEventType.TRADE) trades++;
         return trades;
     }
 
-    OrderRuntime responseOrder(long orderId) {
+    public OrderRuntime responseOrder(long orderId) {
         return runtimeOrder(orderId);
     }
 
@@ -2023,7 +2017,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
     }
 
-    static long canonicalBusinessStateHash(
+    public static long canonicalBusinessStateHash(
             long base,
             Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> policies,
             Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> transfers) {
@@ -2079,7 +2073,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return digest;
     }
 
-    static long mixText(long hash, String value) {
+    public static long mixText(long hash, String value) {
         if (value == null || value.isEmpty()) return mix(hash, 0);
         int length = value.length();
         boolean isAscii = true;
@@ -2144,7 +2138,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return result;
     }
 
-    static long mix(long hash, long value) {
+    public static long mix(long hash, long value) {
         long result = hash;
         for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
             result ^= (value >>> shift) & 0xff;
@@ -2153,7 +2147,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return result;
     }
 
-    static long sourceSequenceDigest(Map<SourceKey, Long> sequences) {
+    public static long sourceSequenceDigest(Map<SourceKey, Long> sequences) {
         long digest = 0;
         for (Map.Entry<SourceKey, Long> entry : sequences.entrySet()) {
             digest ^= sourceSequenceDigest(entry.getKey(), entry.getValue());
@@ -2161,29 +2155,29 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return digest;
     }
 
-    static long sourceSequenceDigest(SourceKey key, long sequence) {
+    public static long sourceSequenceDigest(SourceKey key, long sequence) {
         long digest = HASH_OFFSET_BASIS;
         digest = mix(digest, key.source().wireCode());
         digest = mix(digest, key.sourceId());
         return mix(digest, sequence);
     }
 
-    CoreResponse rejected(CoreResultCode resultCode) {
+    public CoreResponse rejected(CoreResultCode resultCode) {
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                 resultCode, appliedCommandCount);
     }
 
-    static CoreResultCode matchingPendingCode() {
+    public static CoreResultCode matchingPendingCode() {
         return CoreResultCode.fromWireCode(MATCHING_PENDING_WIRE_CODE);
     }
 
-    static final class PipelinedBatchNotApplicable extends RuntimeException {
-        PipelinedBatchNotApplicable() {
+    public static final class PipelinedBatchNotApplicable extends RuntimeException {
+        public PipelinedBatchNotApplicable() {
             super(null, null, false, false);
         }
     }
 
-    record SourceKey(CommandSource source, long sourceId) {
+    public record SourceKey(CommandSource source, long sourceId) {
     }
 
     public byte[] snapshot() { return snapshots.snapshot(); }
@@ -2193,20 +2187,20 @@ public final class TradingCoreRuntime implements AutoCloseable {
                                   com.surprising.aeron.service.matching.MatchingResult matchingResult,
                                   long clusterTimestamp, long clusterPosition) { return commits.completeMatching(sequence, matchingResult, clusterTimestamp, clusterPosition); }
 
-    static final class CrossShardCancellationCoordinator {
+    public static final class CrossShardCancellationCoordinator {
         private final TradingCoreRuntime owner;
         private final java.util.ArrayDeque<Progress> pending = new java.util.ArrayDeque<>();
 
         CrossShardCancellationCoordinator(TradingCoreRuntime owner) { this.owner = owner; }
 
-        void start(CommandSlot command, java.util.List<com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder> orders) {
-            if (command.crossShardCancellationStarted) return;
-            command.crossShardCancellationStarted = true;
+        public void start(CommandSlot command, java.util.List<com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.CancellationOrder> orders) {
+            if (command.crossShardCancellationStarted()) return;
+            command.crossShardCancellationStarted(true);
             pending.addLast(new Progress(command, orders));
             poll();
         }
 
-        void poll() {
+        public void poll() {
             for (int work = 0; work < 64 && !pending.isEmpty(); work++) {
                 Progress progress = pending.peekFirst();
                 if (progress.token != 0) {
@@ -2235,7 +2229,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                         command.sequence(), command.command().header().commandId(), 0,
                         command.command().header().submittedAtEpochMillis(), progress.orders, progress.results);
                 pending.removeFirst();
-                command.crossShardCancellationStarted = false;
+                command.crossShardCancellationStarted(false);
                 owner.matchingFlow.publishMatchingCompletion(command.sequence(), evidenced);
                 command.matchingSubmitted();
                 owner.matchingProgress.submissionCompleted(command);
@@ -2244,7 +2238,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
         void clear() { pending.clear(); }
 
-        boolean hasPending() { return !pending.isEmpty(); }
+        public boolean hasPending() { return !pending.isEmpty(); }
 
         private static final class Progress {
             final CommandSlot command;
@@ -2260,7 +2254,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
     }
 
-    com.surprising.aeron.service.state.MatcherSettlementEvent prepareForMatching(CommandSlot pending) {
+    public com.surprising.aeron.service.state.settlement.MatcherSettlementEvent prepareForMatching(CommandSlot pending) {
         if (pending.operation() == CommandSlot.Operation.REPLACE
                 || pending.operation() == CommandSlot.Operation.AMEND) {
             return prepareReplacement(pending);
@@ -2273,9 +2267,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
         };
     }
 
-    private com.surprising.aeron.service.state.MatcherSettlementEvent preparePlace(CommandSlot pending) {
+    private com.surprising.aeron.service.state.settlement.MatcherSettlementEvent preparePlace(CommandSlot pending) {
         var admission = java.util.Objects.requireNonNull(pending.placeAdmission(), "place admission receipt");
-        com.surprising.aeron.service.state.MatcherSettlementEvent direct = runtimeState.prepareDirectMatcherSettlement(
+        com.surprising.aeron.service.state.settlement.MatcherSettlementEvent direct = runtimeState.prepareDirectMatcherSettlement(
                 pending.sequence(), directInitialLaneMask(admission.userId()), admission,
                 pending.command().header().commandId(), matchingFlow.matcherShard(pending),
                 identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
@@ -2284,37 +2278,37 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return direct;
     }
 
-    private com.surprising.aeron.service.state.MatcherSettlementEvent prepareReplacement(CommandSlot pending) {
+    private com.surprising.aeron.service.state.settlement.MatcherSettlementEvent prepareReplacement(CommandSlot pending) {
         var admission = requireMatchingAdmission(pending);
-        com.surprising.aeron.service.state.MatcherSettlementEvent direct = runtimeState.prepareDirectReplacement(
+        com.surprising.aeron.service.state.settlement.MatcherSettlementEvent direct = runtimeState.prepareDirectReplacement(
                 pending.sequence(), pending.sequence(), directInitialLaneMask(admission.userId()), admission,
                 pending.command().header().commandId(), matchingFlow.matcherShard(pending), identities,
                 pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                 pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
         reserveMatcherPublication(pending, direct);
-        if (realtimeCapture != null) pending.realtimeTakerOrder = direct.admittedOrder();
+        if (realtimeCapture != null) pending.realtimeTakerOrder(direct.admittedOrder());
         return direct;
     }
 
-    private com.surprising.aeron.service.state.MatcherSettlementEvent prepareTrigger(CommandSlot pending) {
+    private com.surprising.aeron.service.state.settlement.MatcherSettlementEvent prepareTrigger(CommandSlot pending) {
         long[] execute = pending.decodedCommand().trigger();
         var trigger = java.util.Objects.requireNonNull(pending.sourceTrigger(),
                 "admitted trigger is missing");
-        com.surprising.aeron.service.state.OrderRuntime triggerOrder = java.util.Objects.requireNonNull(pending.triggerAdmissionOrder(),
+        com.surprising.aeron.service.state.order.OrderRuntime triggerOrder = java.util.Objects.requireNonNull(pending.triggerAdmissionOrder(),
                 "trigger admission receipt is missing");
-        com.surprising.aeron.service.state.MatcherSettlementEvent direct = runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
+        com.surprising.aeron.service.state.settlement.MatcherSettlementEvent direct = runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
                 directInitialLaneMask(triggerOrder.userId()), triggerOrder, null, 1,
                 pending.command().header().commandId(), matchingFlow.matcherShard(pending), identities,
                 pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                 pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
         direct.triggerCompletion(trigger, execute[3]);
         reserveMatcherPublication(pending, direct);
-        if (realtimeCapture != null) pending.realtimeTakerOrder = triggerOrder;
+        if (realtimeCapture != null) pending.realtimeTakerOrder(triggerOrder);
         return direct;
     }
 
-    private com.surprising.aeron.service.state.MatcherSettlementEvent prepareCancellation(CommandSlot pending) {
-        com.surprising.aeron.service.state.MatcherSettlementEvent direct = runtimeState.prepareDirectCancellation(pending.sequence(),
+    private com.surprising.aeron.service.state.settlement.MatcherSettlementEvent prepareCancellation(CommandSlot pending) {
+        com.surprising.aeron.service.state.settlement.MatcherSettlementEvent direct = runtimeState.prepareDirectCancellation(pending.sequence(),
                 pending.command().header().userId(), pending.decodedCommand().cancelOrder().orderId(),
                 pending.command().header().commandId(), matchingFlow.matcherShard(pending), identities,
                 pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), pending.laneResultTarget());
@@ -2322,7 +2316,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return direct;
     }
 
-    private void reserveMatcherPublication(CommandSlot pending, com.surprising.aeron.service.state.MatcherSettlementEvent direct) {
+    private void reserveMatcherPublication(CommandSlot pending, com.surprising.aeron.service.state.settlement.MatcherSettlementEvent direct) {
         pending.settlement(direct, direct.plan());
         direct.reserveMatcherPublication();
     }
@@ -2331,4 +2325,29 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (userId <= 0) throw new IllegalArgumentException("direct settlement user is required");
         return runtimeState.topology().accountLaneMask(userId);
     }
+
+    /** Core 内部业务协作入口；状态仍由原所属线程或有效读取屏障持有。 */
+    public CommandFingerprint.Calculator fingerprints() { return fingerprints; }
+    public OrderBatchExecutor batches() { return batches; }
+    public CommandResultLedger resultLedger() { return resultLedger; }
+    public DeterministicExchangeCoreAdapter matchingAdapter() { return matchingAdapter; }
+    public LiquidationIndex liquidationIndex() { return liquidationIndex; }
+    public void currentClusterPosition(long value) { this.currentClusterPosition = value; }
+    public LiquidationCommands liquidations() { return liquidations; }
+    public InstrumentSettlementCommands instrumentSettlement() { return instrumentSettlement; }
+    public void terminalTradeCount(long value) { this.terminalTradeCount = value; }
+    public MatchingCommandAdmission admissions() { return admissions; }
+    public ResponseArena responseArena() { return responseArena; }
+    public CrossShardCancellationCoordinator crossShardCancellations() { return crossShardCancellations; }
+    public FatalMatchingDivergenceException fatalFailure() { return fatalFailure; }
+    public com.surprising.aeron.service.state.realtime.RealtimeStateCapture realtimeCapture() { return realtimeCapture; }
+    public long currentClusterPosition() { return currentClusterPosition; }
+    public void currentClusterTimestamp(long value) { this.currentClusterTimestamp = value; }
+    public AlgoOrderIndex algoOrderIndex() { return algoOrderIndex; }
+    public OpenInterestIndex openInterestIndex() { return openInterestIndex; }
+    public PerpetualFundingCommands funding() { return funding; }
+    public boolean factContextActive() { return factContextActive; }
+    public com.surprising.aeron.service.state.index.RuntimeFactIndexes factIndexes() { return factIndexes; }
+    public void commitPublicationFailure(RuntimeException value) { this.commitPublicationFailure = value; }
+    public SourceSequenceIndex sourceSequenceIndex() { return lastSourceSequences; }
 }

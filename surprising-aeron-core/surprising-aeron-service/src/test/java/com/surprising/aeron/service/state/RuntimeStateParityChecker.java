@@ -1,14 +1,17 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.snapshot.*;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateMaterializer;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateProjector;
+import com.surprising.aeron.service.state.snapshot.TradingRuntimeSnapshot;
 
-
-final class RuntimeStateParityChecker {
+public final class RuntimeStateParityChecker {
 
     private RuntimeStateParityChecker() {
     }
 
-    static TradingCoreState assertMatches(
+    public static TradingCoreState assertMatches(
             TradingCoreState expected, RuntimeIdentityRegistry identities, TradingRuntimeState actual) {
         if (expected == null || identities == null || actual == null) {
             throw new IllegalArgumentException("parity arguments are required");

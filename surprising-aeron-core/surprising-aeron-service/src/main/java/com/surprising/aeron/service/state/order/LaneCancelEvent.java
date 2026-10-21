@@ -1,0 +1,166 @@
+package com.surprising.aeron.service.state.order;
+
+import com.surprising.aeron.service.lane.SettlementLaneWorker;
+import com.surprising.aeron.service.state.TradingRuntimeState;
+import com.surprising.aeron.service.state.account.AccountLaneState;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+import com.surprising.aeron.service.state.settlement.MatcherSettlementChanges;
+
+/** Sequence-local cancellation applied entirely by the order owner's Account Lane. */
+public final class LaneCancelEvent implements SettlementLaneWorker.Command {
+    private TradingRuntimeState runtime;
+    private MatcherSettlementChanges changes;
+    private RuntimeIdentityRegistry identities;
+    private long coreSequence;
+    private long userId;
+    private long[] orderIds;
+    private int orderCount;
+    private long commitTimestamp;
+    private long commitClusterPosition;
+    private int laneId;
+    private boolean commitLane;
+    /** 对应账户 Lane 的最终结果接收槽，事件完成后由 Owner 消费。 */
+    LaneOrderResultTarget resultTarget;
+    @SuppressWarnings("unused")
+    private volatile boolean completed;
+
+    public LaneCancelEvent prepare(long sequence, long ownerUserId, long targetOrderId,
+                            long timestamp, long clusterPosition, int ownerLaneId,
+                            TradingRuntimeState owner,
+                            RuntimeIdentityRegistry identityRegistry,
+                            MatcherSettlementChanges commandChanges) {
+        if (sequence <= 0 || ownerUserId <= 0 || targetOrderId <= 0 || timestamp < 0 || clusterPosition < 0
+                || ownerLaneId < 0 || owner == null || commandChanges == null || coreSequence != 0 || completed) {
+            throw new IllegalStateException("invalid Account Lane cancel event");
+        }
+        if (orderIds == null) orderIds = new long[1];
+        orderIds[0] = targetOrderId;
+        orderCount = 1;
+        return prepare(sequence, ownerUserId, orderIds, orderCount, timestamp, clusterPosition,
+                ownerLaneId, true, owner, identityRegistry, commandChanges);
+    }
+
+    public LaneCancelEvent prepare(long sequence, long ownerUserId, long[] targetOrderIds, int targetOrderCount,
+                            long timestamp, long clusterPosition, int ownerLaneId,
+                            boolean commitAccountLane,
+                            TradingRuntimeState owner,
+                            RuntimeIdentityRegistry identityRegistry,
+                            MatcherSettlementChanges commandChanges) {
+        if (sequence <= 0 || ownerUserId <= 0 || targetOrderIds == null
+                || targetOrderCount <= 0 || targetOrderCount > targetOrderIds.length
+                || timestamp < 0 || clusterPosition < 0 || ownerLaneId < 0 || owner == null
+                || commandChanges == null || coreSequence != 0 || completed) {
+            throw new IllegalStateException("invalid Account Lane cancel event");
+        }
+        if (orderIds == null || orderIds.length < targetOrderCount) {
+            orderIds = new long[targetOrderCount];
+        }
+        System.arraycopy(targetOrderIds, 0, orderIds, 0, targetOrderCount);
+        coreSequence = sequence;
+        userId = ownerUserId;
+        orderCount = targetOrderCount;
+        commitTimestamp = timestamp;
+        commitClusterPosition = clusterPosition;
+        laneId = ownerLaneId;
+        commitLane = commitAccountLane;
+        runtime = owner;
+        identities = identityRegistry;
+        changes = commandChanges;
+        runtime.expectMatcherSettlement(1L << laneId);
+        return this;
+    }
+
+    public void execute(AccountLaneState lane) {
+        if (lane.laneId() != laneId) throw new IllegalStateException("cancel reached the wrong Account Lane");
+        runtime.enterMatcherSettlementScope(lane, changes);
+        try {
+            for (int index = 0; index < orderCount; index++) {
+                long orderId = orderIds[index];
+                OrderRuntime order = lane.order(orderId);
+                // A sequential SPOT amend releases the original in its reservation task.
+                // This batch event still owns its commit metadata and terminal retirement.
+                if (!commitLane && order != null && order.productLine() == com.surprising.product.api.ProductLine.SPOT
+                        && order.userId() == userId && order.status() == CoreOrderStatus.CANCELED) {
+                    ReservationRuntime reservation = lane.reservation(orderId);
+                    if (reservation == null || reservation.reservedUnits() != 0) {
+                        throw new IllegalStateException("canceled spot batch order retained locked funds");
+                    }
+                    // Include the terminal in this event even when timestamp/position are unchanged.
+                    runtime.updateOrderStatusInLane(lane, orderId, order.status(), order.revision(),
+                            commitTimestamp, commitClusterPosition);
+                } else {
+                    runtime.cancelOrderInLane(lane, userId, orderId, commitTimestamp, commitClusterPosition);
+                }
+                // 两条分支均已在构造终态时写入本次提交元数据，无需再查订单补写。
+            }
+            changes.prepareLaneTerminal(laneId, identities, lane, runtime, coreSequence);
+            changes.laneFundsDelta(laneId).requireConserved(false);
+            if (commitLane) {
+                if (resultTarget != null) LaneOrderResultTarget.capture(resultTarget, changes.laneDelta(laneId), identities, lane);
+                lane.applied(coreSequence);
+                lane.committed(coreSequence);
+                runtime.publishLaneCommittedSequence(lane);
+            }
+        } finally {
+            runtime.exitMatcherSettlementScope(lane, changes);
+        }
+        lane.recordSettlementOperation();
+        TradingRuntimeState completionRuntime = runtime;
+        int completionLaneId = laneId;
+        long completionSequence = coreSequence;
+        completed = true;
+        completionRuntime.publishMatcherSettlementReady(completionLaneId, completionSequence);
+    }
+
+    public boolean commitsLane() { return commitLane; }
+    public long coreSequence() { return coreSequence; }
+    public long userId() { return userId; }
+    public int orderCount() { return orderCount; }
+    public long orderId() { return orderIds[0]; }
+    public int laneId() { return laneId; }
+    public long requiredLaneMask() { return 1L << laneId; }
+    public boolean complete() { return completed; }
+    RuntimeIdentityRegistry identities() { return identities; }
+
+    public MatcherSettlementChanges takeChanges() {
+        if (!complete() || changes == null) throw new IllegalStateException("cancel event is incomplete");
+        MatcherSettlementChanges result = changes;
+        changes = null;
+        return result;
+    }
+
+    public void clear() {
+        if (!complete() || changes != null) throw new IllegalStateException("cancel event was not collected");
+        resultTarget = null;
+        runtime = null;
+        identities = null;
+        coreSequence = 0;
+        userId = 0;
+        orderCount = 0;
+        commitTimestamp = 0;
+        commitClusterPosition = 0;
+        laneId = 0;
+        commitLane = false;
+        completed = false;
+    }
+
+    public void discard() {
+        if (complete()) throw new IllegalStateException("completed cancel event must be collected");
+        runtime.releaseSettlementExpectation(laneId);
+        changes = null;
+        resultTarget = null;
+        runtime = null;
+        identities = null;
+        coreSequence = 0;
+        userId = 0;
+        orderCount = 0;
+        commitTimestamp = 0;
+        commitClusterPosition = 0;
+        laneId = 0;
+        commitLane = false;
+    }
+
+    /** Core 内部业务协作入口；状态仍由原所属线程或有效读取屏障持有。 */
+    public void resultTarget(LaneOrderResultTarget value) { this.resultTarget = value; }
+}

@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-final class StableLedgerJson {
+public final class StableLedgerJson {
 
     private static final Pattern FIELD = Pattern.compile(
             "\\\"([A-Za-z]+)\\\":(\\\"(?:\\\\.|[^\\\"])*\\\"|-?[0-9]+)");
@@ -13,7 +13,7 @@ final class StableLedgerJson {
     private StableLedgerJson() {
     }
 
-    static Map<String, String> fields(String json) {
+    public static Map<String, String> fields(String json) {
         if (json == null || json.length() < 2 || json.charAt(0) != '{' || json.charAt(json.length() - 1) != '}') {
             throw new IllegalStateException("not a JSON object");
         }
@@ -28,17 +28,17 @@ final class StableLedgerJson {
         return result;
     }
 
-    static String required(Map<String, String> values, String name) {
+    public static String required(Map<String, String> values, String name) {
         String value = values.get(name);
         if (value == null) throw new IllegalStateException("missing ledger field " + name);
         return value;
     }
 
-    static long number(Map<String, String> values, String name) {
+    public static long number(Map<String, String> values, String name) {
         return Long.parseLong(required(values, name));
     }
 
-    static String escape(String value) {
+    public static String escape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"")
                 .replace("\n", "\\n").replace("\r", "\\r");
     }

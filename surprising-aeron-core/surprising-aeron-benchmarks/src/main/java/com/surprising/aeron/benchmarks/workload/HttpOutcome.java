@@ -1,6 +1,6 @@
 package com.surprising.aeron.benchmarks.workload;
 
-enum HttpOutcome {
+public enum HttpOutcome {
     SUCCESS_2XX,
     ACCEPTED_202,
     RATE_LIMITED_429,
@@ -10,7 +10,7 @@ enum HttpOutcome {
     TRANSPORT_ERROR,
     ORACLE_MISMATCH;
 
-    static HttpOutcome fromStatus(int status) {
+    public static HttpOutcome fromStatus(int status) {
         if (status == 202) return ACCEPTED_202;
         if (status == 429) return RATE_LIMITED_429;
         if (status >= 200 && status < 300) return SUCCESS_2XX;

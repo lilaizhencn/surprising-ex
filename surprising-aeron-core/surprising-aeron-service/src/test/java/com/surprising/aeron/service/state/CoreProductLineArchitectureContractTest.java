@@ -1,20 +1,20 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrument;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
-import com.surprising.aeron.service.business.ProductTradingRules;
-import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
 
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
-import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.protocol.SettleInstrumentCommand;
+import com.surprising.aeron.service.business.ProductTradingRules;
+import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.order.RuntimeTestStateTransitions;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CoreProductLineArchitectureContractTest {
 

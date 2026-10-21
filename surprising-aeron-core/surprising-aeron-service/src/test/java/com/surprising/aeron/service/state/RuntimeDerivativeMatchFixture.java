@@ -1,12 +1,16 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.account.UserRuntime;
 
-import static com.surprising.aeron.service.state.RuntimeDerivativeMatchProcessor.*;
+import com.surprising.aeron.service.state.account.CoreUserState;
+import com.surprising.aeron.service.state.account.UserRuntime;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateProjector;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import java.util.List;
 
+import static com.surprising.aeron.service.state.settlement.RuntimeDerivativeMatchProcessor.*;
+
 /** Builds isolated runtime state for financial parity tests. */
-final class RuntimeDerivativeMatchFixture {
+public final class RuntimeDerivativeMatchFixture {
     public static TradingRuntimeState simulate(TradingCoreState before, long takerOrderId,
                                                List<MatcherEvent> matches,
                                                RuntimeIdentityRegistry identities) {

@@ -1,13 +1,14 @@
 package com.surprising.aeron.service.orchestration;
 
-import static org.assertj.core.api.Assertions.*;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.state.FundsStateHash;
+import com.surprising.aeron.service.state.snapshot.FundsStateHash;
 import com.surprising.product.api.ProductLine;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+
+import static org.assertj.core.api.Assertions.*;
 
 /** 固定的已发布格式样本，不在测试中调用当前写入器生成历史输入。 */
 class PublishedSnapshotRecoveryTest {

@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.service.orchestration.pipeline.CommandSlot;
+import com.surprising.aeron.service.orchestration.pipeline.OrderBatchExecutor;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotParser;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassTransform;
 import java.lang.classfile.instruction.InvokeInstruction;
@@ -11,7 +14,7 @@ import java.security.ProtectionDomain;
 
 /** Loaded only by Surefire. Production class files and deployment jars are never rewritten. */
 public final class CoreFaultAgent {
-    static boolean installed;
+    public static boolean installed;
 
     public static void premain(String args, Instrumentation instrumentation) {
         installed = true;
@@ -19,8 +22,8 @@ public final class CoreFaultAgent {
             @Override
             public byte[] transform(ClassLoader loader, String name, Class<?> type,
                                     ProtectionDomain domain, byte[] bytes) {
-                boolean core = name.equals("com/surprising/aeron/service/orchestration/OrderBatchExecutor");
-                boolean snapshot = name.startsWith("com/surprising/aeron/service/orchestration/SectionedCoreSnapshotParser$");
+                boolean core = name.equals("com/surprising/aeron/service/orchestration/pipeline/OrderBatchExecutor");
+                boolean snapshot = name.startsWith("com/surprising/aeron/service/orchestration/snapshot/SectionedCoreSnapshotParser$");
                 if (!core && !snapshot) return null;
                 ClassDesc hooks = ClassDesc.of("com.surprising.aeron.service.orchestration.CoreFaults");
                 return ClassFile.of().transformClass(ClassFile.of().parse(bytes),

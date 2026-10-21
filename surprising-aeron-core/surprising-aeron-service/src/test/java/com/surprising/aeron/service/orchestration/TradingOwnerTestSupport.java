@@ -1,9 +1,11 @@
 package com.surprising.aeron.service.orchestration;
 
-import com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.service.orchestration.egress.ClusterServiceEgress;
+import com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder;
+import com.surprising.aeron.service.orchestration.pipeline.ClusterCommandWindow;
 import com.surprising.product.api.ProductLine;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
@@ -20,7 +22,7 @@ import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 import org.agrona.concurrent.UnsafeBuffer;
 
 /** Test-only callback and response fixture for the real trading Owner. */
-final class TradingOwnerTestSupport implements ClusteredService {
+public final class TradingOwnerTestSupport implements ClusteredService {
     private final TradingCoreOwner owner;
     private final CoreMessageFlyweightDecoder messageDecoder = new CoreMessageFlyweightDecoder();
     private Cluster cluster;
@@ -34,7 +36,7 @@ final class TradingOwnerTestSupport implements ClusteredService {
             });
     private long epoch;
 
-    TradingOwnerTestSupport(ProductLine productLine) {
+    public TradingOwnerTestSupport(ProductLine productLine) {
         owner = new TradingCoreOwner(productLine, this::respond);
     }
 
@@ -73,18 +75,18 @@ final class TradingOwnerTestSupport implements ClusteredService {
         acceptCommittedCommand(session, request, timestamp, header.position());
     }
 
-    void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position) {
+    public void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position) {
         enqueueCommittedCommand(session, request, timestamp, position, null);
         owner.pollCommands();
     }
 
-    void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
+    public void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
                                 CommandFingerprint fingerprint) {
         enqueueCommittedCommand(session, request, timestamp, position, fingerprint);
         owner.pollCommands();
     }
 
-    void enqueueCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
+    public void enqueueCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
                                  CommandFingerprint fingerprint) {
         logContext.timestamp = timestamp;
         logContext.position = position;
@@ -117,11 +119,11 @@ final class TradingOwnerTestSupport implements ClusteredService {
         }
     }
 
-    byte[] captureSnapshot(long snapshotId) {
+    public byte[] captureSnapshot(long snapshotId) {
         return owner.captureSnapshot(snapshotId);
     }
 
-    byte[] captureSnapshot(long snapshotId, long deadlineNanos) {
+    public byte[] captureSnapshot(long snapshotId, long deadlineNanos) {
         return owner.captureSnapshot(snapshotId, deadlineNanos);
     }
 
@@ -165,44 +167,44 @@ final class TradingOwnerTestSupport implements ClusteredService {
         // Historical timer callbacks do not produce trading operations.
     }
 
-    int pendingCommandCount() { return owner.pendingCommandCount(); }
-    String stalledCommandDiagnostics() { return owner.stalledCommandDiagnostics(); }
-    boolean ownerWorkAvailable() { return owner.ownerWorkAvailable(); }
-    boolean ownerCompletionAvailable() { return owner.ownerCompletionAvailable(); }
-    void ownerCompletionSignal(Runnable signal) { owner.ownerCompletionSignal(signal); }
-    int pollCommands() {
+    public int pendingCommandCount() { return owner.pendingCommandCount(); }
+    public String stalledCommandDiagnostics() { return owner.stalledCommandDiagnostics(); }
+    public boolean ownerWorkAvailable() { return owner.ownerWorkAvailable(); }
+    public boolean ownerCompletionAvailable() { return owner.ownerCompletionAvailable(); }
+    public void ownerCompletionSignal(Runnable signal) { owner.ownerCompletionSignal(signal); }
+    public int pollCommands() {
         int work = owner.pollCommands();
         return work + egress.drainResponses(owner);
     }
-    void finishCommands() { owner.finishCommands(); egress.drainResponses(owner); }
-    int commandWindowSize() { return owner.commandWindowSize(); }
-    int commandWindowHighWaterMark() { return owner.commandWindowHighWaterMark(); }
-    ClusterCommandWindow commandWindow() { return owner.commandWindow(); }
-    ManyToOneConcurrentArrayQueue<com.surprising.aeron.protocol.RealtimeFrame> snapshotRequests() {
+    public void finishCommands() { owner.finishCommands(); egress.drainResponses(owner); }
+    public int commandWindowSize() { return owner.commandWindowSize(); }
+    public int commandWindowHighWaterMark() { return owner.commandWindowHighWaterMark(); }
+    public ClusterCommandWindow commandWindow() { return owner.commandWindow(); }
+    public ManyToOneConcurrentArrayQueue<com.surprising.aeron.protocol.RealtimeFrame> snapshotRequests() {
         return owner.snapshotRequests();
     }
-    TradingCoreRuntime state() { return owner.state(); }
-    void releaseResponse(CoreResponse response) { owner.releaseResponse(response); }
+    public TradingCoreRuntime state() { return owner.state(); }
+    public void releaseResponse(CoreResponse response) { owner.releaseResponse(response); }
 
-    void attachRealtime(com.surprising.aeron.client.RealtimeOutbox outbox) {
+    public void attachRealtime(com.surprising.aeron.client.RealtimeOutbox outbox) {
         owner.attachRealtime(outbox, null);
     }
 
-    void restoreSnapshot(byte[] snapshot) {
+    public void restoreSnapshot(byte[] snapshot) {
         owner.restoreSnapshot(snapshot);
     }
 
-    void loadSnapshot(SnapshotFragmentSource source, BooleanSupplier endOfStream) {
+    public void loadSnapshot(SnapshotFragmentSource source, BooleanSupplier endOfStream) {
         owner.loadSnapshot(source::poll, endOfStream);
     }
 
-    static void ensureSnapshotCapacity(int currentLength, int fragmentLength) {
+    public static void ensureSnapshotCapacity(int currentLength, int fragmentLength) {
         TradingCoreOwner.ensureSnapshotCapacity(currentLength, fragmentLength);
     }
 
-    @FunctionalInterface
+    public @FunctionalInterface
     interface SnapshotFragmentSource {
-        int poll(FragmentHandler fragmentHandler, int fragmentLimit);
+        public int poll(FragmentHandler fragmentHandler, int fragmentLimit);
     }
 
     private static boolean retryableOffer(long result) {

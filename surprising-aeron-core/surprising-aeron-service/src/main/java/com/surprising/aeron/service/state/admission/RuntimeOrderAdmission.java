@@ -1,0 +1,311 @@
+package com.surprising.aeron.service.state.admission;
+
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CorePositionMode;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
+import com.surprising.aeron.service.exception.CoreStateRejectedException;
+import com.surprising.aeron.service.state.TradingRuntimeState;
+import com.surprising.aeron.service.state.account.AccountLaneState;
+import com.surprising.aeron.service.state.account.UserRuntime;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.math.*;
+import com.surprising.aeron.service.state.math.CoreArithmetic;
+import com.surprising.aeron.service.state.math.CoreContractMath;
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+import com.surprising.aeron.service.state.order.OrderRuntime;
+import com.surprising.aeron.service.state.order.RuntimeAlgoOrderStateTransitions;
+import com.surprising.aeron.service.state.position.PositionRuntime;
+
+public final class RuntimeOrderAdmission {
+
+    private static final long PPM = 1_000_000L;
+
+    private RuntimeOrderAdmission() {
+    }
+
+    public static long requiredReservation(
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId,
+            ResolvedPlaceOrder order, long openInterestSteps, AdmissionOrderIndex activeOrders) {
+        return requiredReservation(runtime, identities, userId, order, openInterestSteps, activeOrders, 0);
+    }
+
+    public static long requiredReservation(
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId,
+            ResolvedPlaceOrder order, long openInterestSteps, AdmissionOrderIndex activeOrders,
+            long excludedOrderId) {
+        if (runtime == null || identities == null || order == null || activeOrders == null || userId <= 0) {
+            throw new IllegalArgumentException("invalid runtime order admission input");
+        }
+        AccountLaneState lane = runtime.accountLaneForUser(userId);
+        AdmissionIdentity identity = admissionIdentity(runtime, identities, userId, order);
+        String excludedSymbol = null;
+        if (excludedOrderId != 0) {
+            OrderRuntime excluded = lane.order(excludedOrderId);
+            if (excluded != null) excludedSymbol = identities.instrumentId(excluded.symbolId());
+        }
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
+                excludedOrderId, identity.clientKey(), identity.symbolId(), identity.positionKey(),
+                identity.lifecycleSettled(), identity.fundingInProgress(), excludedSymbol);
+    }
+
+    public static AdmissionIdentity admissionIdentity(
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+            long userId, ResolvedPlaceOrder order) {
+        if (runtime == null || identities == null || order == null || userId <= 0) {
+            throw new IllegalArgumentException("invalid runtime order admission identity");
+        }
+        int symbolId = identities.symbolId(order.instrumentId());
+        return new AdmissionIdentity(identities.findClientKeyValue(userId, order.clientOrderId()),
+                symbolId,
+                identities.findPositionKeyValue(userId, order.instrument(), order.positionSide()),
+                runtime.treasury().settlementStatus(symbolId));
+    }
+
+    public static long requiredReservationPrepared(
+            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
+            long openInterestSteps, AdmissionOrderIndex activeOrders, AdmissionIdentity identity) {
+        if (runtime == null || order == null || activeOrders == null || identity == null || userId <= 0) {
+            throw new IllegalArgumentException("invalid prepared runtime order admission input");
+        }
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
+                0, identity.clientKey(), identity.symbolId(), identity.positionKey(),
+                identity.lifecycleSettled(), identity.fundingInProgress(), null);
+    }
+
+    public static long requiredReservationPrepared(
+            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
+            long openInterestSteps, AdmissionOrderIndex activeOrders,
+            long clientKey, int symbolId, long positionKey,
+            boolean lifecycleSettled, boolean fundingInProgress) {
+        if (runtime == null || order == null || activeOrders == null || userId <= 0) {
+            throw new IllegalArgumentException("invalid primitive prepared runtime order admission input");
+        }
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
+                0, clientKey, symbolId, positionKey, lifecycleSettled, fundingInProgress, null);
+    }
+
+    static long requiredReplacementReservationPrepared(
+            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
+            long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
+            long clientKey, long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
+        OrderRuntime original = lane.order(excludedOrderId);
+        String originalSymbol = original != null && original.symbolId() == order.symbolId()
+                ? order.instrumentId() : null;
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
+                excludedOrderId, clientKey, order.symbolId(), positionKey,
+                lifecycleSettled, fundingInProgress, originalSymbol);
+    }
+
+    private static long requiredReservation(
+            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
+            long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
+            long clientKey, int symbolId, long positionKey,
+            boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol) {
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders, excludedOrderId,
+                clientKey, symbolId, positionKey, lifecycleSettled, fundingInProgress, excludedSymbol, null);
+    }
+
+    /** 预检只读所属Lane及Owner已固定的市场输入，不分配身份、创建订单或冻结资金。 */
+    public static long requiredReservationForQuery(TradingRuntimeState runtime, AccountLaneState lane, long userId,
+            ResolvedPlaceOrder order, long openInterestSteps, AdmissionIdentity identity) {
+        if (lane == null || runtime.topology().accountLaneId(userId) != lane.laneId()
+                || order == null || identity == null)
+            throw new IllegalStateException("preflight query requires its owning Lane scope");
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps,
+                lane.admissionOrderIndex(identity.symbolId()), 0, identity.clientKey(), identity.symbolId(),
+                identity.positionKey(), identity.lifecycleSettled(), identity.fundingInProgress(), null, order.instrument());
+    }
+
+    private static long requiredReservation(
+            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
+            long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
+            long clientKey, int symbolId, long positionKey,
+            boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol, CoreInstrument queryInstrument) {
+        runtime.requireLaneAccess(lane, userId);
+        RuntimeAlgoOrderStateTransitions.requireChildAdmission(lane, userId, order);
+        if (lane.order(order.orderId()) != null && order.orderId() != excludedOrderId) {
+            throw rejected("DUPLICATE_ORDER_ID", "orderId already exists");
+        }
+        var clientOrders = lane.userClientOrders(userId);
+        long clientOrderId = clientKey == 0 || clientOrders == null ? 0 : clientOrders.get(clientKey);
+        if (clientOrderId != 0 && clientOrderId != excludedOrderId) {
+            throw rejected("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
+        }
+        CoreInstrument instrument = queryInstrument == null ? runtime.instrument(lane, order.instrumentId()) : queryInstrument;
+        if (instrument == null || instrument != order.instrument()) {
+            throw rejected("INSTRUMENT_ORDER_MISMATCH", "order instrument differs from Runtime");
+        }
+        if (lifecycleSettled) {
+            throw rejected("INSTRUMENT_SETTLED", "instrument is already settled");
+        }
+        if (fundingInProgress) {
+            throw rejected("LIFECYCLE_IN_PROGRESS", "funding position cut is in progress");
+        }
+        validateReservation(instrument.contractType().productLine().isDerivative(), instrument, order);
+        UserRuntime user = lane.user(userId);
+        CorePositionMode positionMode = user == null ? CorePositionMode.ONE_WAY : user.positionMode();
+        PositionRuntime position = positionKey == 0 ? null : lane.position(positionKey);
+        OrderRuntime excluded = excludedOrderId == 0 ? null : lane.order(excludedOrderId);
+        if (excludedOrderId != 0 && (excluded == null || excluded.userId() != userId
+                || !order.instrumentId().equals(excludedSymbol))) {
+            throw rejected("ORDER_NOT_FOUND", "excluded replacement order is invalid");
+        }
+        CoreMarginMode conflictingMode = order.marginMode() == CoreMarginMode.CROSS
+                ? CoreMarginMode.ISOLATED : CoreMarginMode.CROSS;
+        AdmissionSummary admissionSummary = activeOrders.inspect(
+                userId, order.instrumentId(), order.positionSide(), order.side(), conflictingMode);
+        validatePositionIdentity(
+                positionMode, position, order, admissionSummary, conflictingMode, excluded);
+        validateReduceOnly(instrument.contractType().productLine().isDerivative(), position, order,
+                admissionSummary, userId, excluded);
+        long leverage = effectiveLeverage(lane, instrument, order, userId);
+        validateRiskLimits(runtime, instrument, position, order, admissionSummary, userId,
+                openInterestSteps, excluded, leverage);
+        return ProductTradingRulesRegistry.forProductLine(instrument.contractType().productLine())
+                .reservationUnits(instrument, position, order, leverage, admissionSummary.pendingQuantity());
+    }
+
+    private static void validateReservation(
+            boolean derivative, CoreInstrument instrument, ResolvedPlaceOrder order) {
+        String asset = order.reservationAsset();
+        if (asset == null) {
+            throw rejected("INVALID_RESERVATION_ASSET", "reservation asset is required");
+        }
+        if (derivative) {
+            if (order.reservationKind() != ReservationKind.DERIVATIVE_MARGIN) {
+                throw rejected("INVALID_RESERVATION_KIND", "derivative order must reserve margin");
+            }
+            if (!asset.equals(instrument.settleAsset())) {
+                throw rejected("INVALID_DERIVATIVE_RESERVATION_ASSET", "invalid derivative reservation asset");
+            }
+        } else {
+            if (order.reservationKind() != ReservationKind.SPOT_ASSET) {
+                throw rejected("INVALID_RESERVATION_KIND", "spot order must reserve an asset");
+            }
+            String expected = order.side() == CoreOrderSide.BUY
+                    ? instrument.quoteAsset() : instrument.baseAsset();
+            if (!asset.equals(expected)) {
+                throw rejected("INVALID_SPOT_RESERVATION_ASSET", "invalid spot reservation asset");
+            }
+        }
+        if (order.matchingPriceTicks() <= 0) {
+            throw rejected("INVALID_ORDER_PRICE", "matching price must be positive");
+        }
+    }
+
+    private static void validatePositionIdentity(
+            CorePositionMode mode, PositionRuntime position, ResolvedPlaceOrder order,
+            AdmissionSummary admissionSummary, CoreMarginMode conflictingMode, OrderRuntime excluded) {
+        if ((mode == CorePositionMode.ONE_WAY && order.positionSide().hedgeSide())
+                || (mode == CorePositionMode.HEDGE && !order.positionSide().hedgeSide())) {
+            throw rejected("POSITION_MODE_MISMATCH", "position side differs from user position mode");
+        }
+        if (order.marginMode() == CoreMarginMode.ISOLATED
+                && order.reservationKind() == ReservationKind.SPOT_ASSET) {
+            throw rejected("POSITION_MARGIN_ADJUSTMENT_INVALID", "spot order cannot use isolated margin");
+        }
+        boolean positionConflict = position != null && position.signedQuantitySteps() != 0
+                && position.marginMode() != order.marginMode();
+        int conflictingOrders = admissionSummary.marginModeCount();
+        if (excluded != null && excluded.status() == CoreOrderStatus.OPEN
+                && excluded.positionSide() == order.positionSide()
+                && excluded.marginMode() == conflictingMode) {
+            conflictingOrders--;
+        }
+        if (positionConflict || conflictingOrders > 0) {
+            throw rejected("POSITION_MARGIN_ADJUSTMENT_INVALID", "margin mode switch requires an empty position");
+        }
+        if ((order.positionSide() == CorePositionSide.LONG
+                && order.reduceOnly() == (order.side() == CoreOrderSide.BUY))
+                || (order.positionSide() == CorePositionSide.SHORT
+                && order.reduceOnly() == (order.side() == CoreOrderSide.SELL))) {
+            throw rejected("POSITION_MODE_MISMATCH", "hedge side and direction are inconsistent");
+        }
+    }
+
+    private static void validateReduceOnly(
+            boolean derivative, PositionRuntime position, ResolvedPlaceOrder order,
+            AdmissionSummary admissionSummary, long userId, OrderRuntime excluded) {
+        if (!order.reduceOnly()) return;
+        if (!derivative) throw rejected("REDUCE_ONLY_UNSUPPORTED", "spot order cannot be reduce-only");
+        if (position == null || position.signedQuantitySteps() == 0
+                || (position.signedQuantitySteps() > 0) == (order.side() == CoreOrderSide.BUY)) {
+            throw rejected("REDUCE_ONLY_REQUIRES_POSITION_STATE", "reduce-only order must close a position");
+        }
+        long positionSteps = Math.absExact(position.signedQuantitySteps());
+        long committedOrders = admissionSummary.reduceOnlyQuantity();
+        if (excluded != null && excluded.status() == CoreOrderStatus.OPEN && excluded.reduceOnly()
+                && excluded.userId() == userId && excluded.side() == order.side()) {
+            committedOrders = Math.subtractExact(committedOrders, excluded.remainingQuantitySteps());
+        }
+        long committed = Math.min(positionSteps, committedOrders);
+        if (order.quantitySteps() > Math.subtractExact(positionSteps, committed)) {
+            throw rejected("REDUCE_ONLY_CAPACITY_EXCEEDED", "reduce-only quantity exceeds position capacity");
+        }
+    }
+
+    private static void validateRiskLimits(
+            TradingRuntimeState runtime, CoreInstrument instrument, PositionRuntime position,
+            ResolvedPlaceOrder order, AdmissionSummary admissionSummary, long userId, long openInterestSteps,
+            OrderRuntime excluded, long leverage) {
+        if (!instrument.contractType().productLine().isDerivative() || order.reduceOnly()) return;
+        long current = position == null ? 0 : position.signedQuantitySteps();
+        long pending = admissionSummary.pendingQuantity();
+        if (excluded != null && excluded.status() == CoreOrderStatus.OPEN && !excluded.reduceOnly()
+                && excluded.userId() == userId && excluded.positionSide() == order.positionSide()
+                && excluded.side() == order.side()) {
+            pending = Math.subtractExact(pending, excluded.remainingQuantitySteps());
+        }
+        long totalOrders = Math.addExact(pending, order.quantitySteps());
+        long signedOrders = order.side() == CoreOrderSide.BUY ? totalOrders : Math.negateExact(totalOrders);
+        long projectedSteps = Math.absExact(Math.addExact(current, signedOrders));
+        long riskPriceTicks = instrument.contractType().isOption()
+                ? order.indexPriceTicks() : order.markPriceTicks();
+        long projectedNotional = CoreContractMath.riskNotionalUnits(
+                instrument, projectedSteps, riskPriceTicks);
+        if (projectedNotional > instrument.maxPositionNotionalUnits()) {
+            throw rejected("POSITION_NOTIONAL_LIMIT_EXCEEDED", "projected position exceeds instrument limit");
+        }
+        long scaledLimit = Math.min(instrument.userOpenInterestLimitFloorUnits(), instrument.maxPositionNotionalUnits());
+        if (instrument.usesOpenInterestForUserLimit()) {
+            long openInterestNotional = openInterestSteps == 0 ? 0
+                    : CoreContractMath.riskNotionalUnits(instrument, openInterestSteps, riskPriceTicks);
+            scaledLimit = CoreArithmetic.scaledFloorCapped(
+                    openInterestNotional, instrument.userOpenInterestLimitRatePpm(), PPM,
+                    instrument.userOpenInterestLimitFloorUnits(), instrument.maxPositionNotionalUnits());
+        }
+        if (projectedNotional > scaledLimit) {
+            throw rejected("OPEN_INTEREST_LIMIT_EXCEEDED", "projected position exceeds open-interest limit");
+        }
+        var bracket = CoreContractMath.riskBracket(instrument, projectedNotional);
+        if (projectedNotional > bracket.notionalCapUnits()) {
+            throw rejected("RISK_BRACKET_EXCEEDED", "projected position exceeds risk bracket");
+        }
+        if (!instrument.contractType().isOption() && (leverage > bracket.maxLeveragePpm()
+                || CoreContractMath.initialMarginRateFromLeverage(leverage) < bracket.initialMarginRatePpm())) {
+            throw rejected("LEVERAGE_EXCEEDS_RISK_BRACKET", "configured leverage exceeds risk bracket");
+        }
+    }
+
+    private static long effectiveLeverage(
+            AccountLaneState lane, CoreInstrument instrument,
+            ResolvedPlaceOrder order, long userId) {
+        if (!instrument.contractType().productLine().isDerivative()) return instrument.maxLeveragePpm();
+        if (lane.leverageValuesEmpty()) return instrument.maxLeveragePpm();
+        var lookup = lane.leverageLookup();
+        lookup.set(userId, instrument.instrumentId(), order.marginMode());
+        Long configured;
+        try { configured = lane.leverage(lookup); }
+        finally { lookup.clear(); }
+        return configured == null ? instrument.maxLeveragePpm() : configured;
+    }
+
+    private static CoreStateRejectedException rejected(String code, String message) {
+        return new CoreStateRejectedException(code, message);
+    }
+
+}

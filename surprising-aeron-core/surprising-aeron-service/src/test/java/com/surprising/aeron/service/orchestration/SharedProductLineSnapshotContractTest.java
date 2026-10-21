@@ -1,10 +1,5 @@
 package com.surprising.aeron.service.orchestration;
 
-import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
@@ -22,17 +17,22 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ProtocolException;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
+import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
-import com.surprising.aeron.service.orchestration.snapshot.CoreSnapshotManifest;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SharedProductLineSnapshotContractTest {
 
@@ -80,7 +80,7 @@ class SharedProductLineSnapshotContractTest {
             long laneFence = original.appliedCommandCount();
             long stateHash = original.stateHash();
             long businessHash = original.snapshotBusinessStateHash();
-            long fundsHash = com.surprising.aeron.service.state.FundsStateHash.compute(
+            long fundsHash = com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(
                     original.snapshotTradingState());
             long economicUnits = economicAssetUnits(original, settleAsset(productLine));
 
@@ -95,7 +95,7 @@ class SharedProductLineSnapshotContractTest {
                 assertThat(restored.tradingState()).isEqualTo(original.tradingState());
                 assertThat(restored.stateHash()).isEqualTo(stateHash);
                 assertThat(restored.snapshotBusinessStateHash()).isEqualTo(businessHash);
-                assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(
+                assertThat(com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(
                         restored.snapshotTradingState())).isEqualTo(fundsHash);
                 assertThat(economicAssetUnits(restored, settleAsset(productLine))).isEqualTo(economicUnits);
                 assertThat(restored.accountLaneSnapshots(laneFence, restored.tradingState()))

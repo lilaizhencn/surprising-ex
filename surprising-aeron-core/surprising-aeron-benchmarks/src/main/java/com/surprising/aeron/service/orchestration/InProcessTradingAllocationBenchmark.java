@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.service.orchestration.egress.ClusterServiceEgress;
 import com.surprising.aeron.service.orchestration.ingress.CoreMessageFlyweightDecoder;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;

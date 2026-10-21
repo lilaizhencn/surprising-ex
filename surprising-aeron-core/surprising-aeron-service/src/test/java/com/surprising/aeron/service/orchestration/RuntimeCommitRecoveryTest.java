@@ -1,51 +1,48 @@
 package com.surprising.aeron.service.orchestration;
 
-import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
+import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
-import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.ContinueRiskScanCommand;
+import com.surprising.aeron.protocol.CoreCommandResultCodec;
 import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
 import com.surprising.aeron.protocol.CoreLiquidationWorkView;
+import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
-import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreResponse;
-import com.surprising.aeron.protocol.CoreCommandResultCodec;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
+import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ProtocolException;
-import com.surprising.aeron.protocol.ResponseStatus;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
+import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.protocol.TransferFundsCommand;
-import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.service.lane.LaneTopology;
+import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
+import com.surprising.aeron.service.orchestration.snapshot.SectionedCoreSnapshotCodec;
+import com.surprising.aeron.service.state.account.TransferRuntime;
 import com.surprising.aeron.service.state.model.CoreFeePolicyState;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
-import com.surprising.aeron.service.state.LaneTopology;
-import com.surprising.aeron.service.state.account.TransferRuntime;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
-import io.aeron.cluster.service.Cluster;
 import io.aeron.cluster.service.ClientSession;
+import io.aeron.cluster.service.Cluster;
 import io.aeron.logbuffer.Header;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
@@ -62,6 +59,9 @@ import java.util.zip.CRC32C;
 import org.agrona.concurrent.NoOpIdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RuntimeCommitRecoveryTest {
 
@@ -430,9 +430,9 @@ class RuntimeCommitRecoveryTest {
                                         planned.liquidationId(), ResolveLiquidationCommand.Resolution.INSURANCE, 25))));
                 replayClustered(uninterrupted, List.of(partialInsurance.getFirst()));
                 replayClustered(restoredBeforeInsurance, List.of(partialInsurance.getFirst()));
-                assertThat(com.surprising.aeron.service.state.InsuranceAllocationPolicy.isNext(
+                assertThat(com.surprising.aeron.service.state.ledger.InsuranceAllocationPolicy.isNext(
                         uninterrupted.state().tradingState(), planned.liquidationId())).isTrue();
-                assertThat(com.surprising.aeron.service.state.InsuranceAllocationPolicy.expectedCoverage(
+                assertThat(com.surprising.aeron.service.state.ledger.InsuranceAllocationPolicy.expectedCoverage(
                         uninterrupted.state().tradingState(), planned.liquidationId())).isEqualTo(25);
                 long insuranceHandoff = (long) field(uninterrupted.state().runtimeState, "laneHandoffEpoch");
                 ReplayResult partialReference = replayClustered(uninterrupted, List.of(partialInsurance.getLast()));
@@ -759,8 +759,8 @@ class RuntimeCommitRecoveryTest {
                 .isEqualTo(expectedState.tradingState().treasuryState());
         assertThat(actualState.stateHash()).isEqualTo(expectedState.stateHash());
         assertThat(actualState.snapshotBusinessStateHash()).isEqualTo(expectedState.snapshotBusinessStateHash());
-        assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(actualState.snapshotTradingState()))
-                .isEqualTo(com.surprising.aeron.service.state.FundsStateHash.compute(
+        assertThat(com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(actualState.snapshotTradingState()))
+                .isEqualTo(com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(
                         expectedState.snapshotTradingState()));
         assertThat(actualState.snapshotProjectionSequence()).isEqualTo(expectedState.snapshotProjectionSequence());
         assertThat(actualState.commandResults()).isEqualTo(expectedState.commandResults());
@@ -966,16 +966,16 @@ class RuntimeCommitRecoveryTest {
         assertThat(recovered.tradingState().orders()).isEqualTo(reference.tradingState().orders());
         assertThat(recovered.tradingState().clientOrderIndex())
                 .isEqualTo(reference.tradingState().clientOrderIndex());
-        var recoveredIdentities = (com.surprising.aeron.service.state.RuntimeIdentityRegistry)
+        var recoveredIdentities = (com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry)
                 field(recovered, "identities");
-        var referenceIdentities = (com.surprising.aeron.service.state.RuntimeIdentityRegistry)
+        var referenceIdentities = (com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry)
                 field(reference, "identities");
         assertThat(recoveredIdentities.snapshot()).isEqualTo(referenceIdentities.snapshot());
         assertThat(recovered.tradingState().riskState()).isEqualTo(reference.tradingState().riskState());
         assertThat(recovered.tradingState().treasuryState()).isEqualTo(reference.tradingState().treasuryState());
         assertThat(recovered.snapshotBusinessStateHash()).isEqualTo(reference.snapshotBusinessStateHash());
-        assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(recovered.snapshotTradingState()))
-                .isEqualTo(com.surprising.aeron.service.state.FundsStateHash.compute(
+        assertThat(com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(recovered.snapshotTradingState()))
+                .isEqualTo(com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(
                         reference.snapshotTradingState()));
         assertThat(recovered.stateHash()).isEqualTo(reference.stateHash());
         assertThat(recovered.commandResults()).isEqualTo(reference.commandResults());
@@ -1024,13 +1024,13 @@ class RuntimeCommitRecoveryTest {
 
     private static void assertIndexesEqualCanonicalRebuild(TradingCoreRuntime state) throws Exception {
         var core = state.tradingState();
-        var identities = (com.surprising.aeron.service.state.RuntimeIdentityRegistry)
+        var identities = (com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry)
                 field(state, "identities");
         Map<String, Map<String, Object>> rebuilt = Map.ofEntries(
                 Map.entry("position-user", indexSnapshot(
-                        new com.surprising.aeron.service.state.PositionUserIndex(core, identities))),
+                        new com.surprising.aeron.service.state.index.PositionUserIndex(core, identities))),
                 Map.entry("open-interest", indexSnapshot(
-                        new com.surprising.aeron.service.state.OpenInterestIndex(core, identities))),
+                        new com.surprising.aeron.service.state.index.OpenInterestIndex(core, identities))),
                 Map.entry("trigger", indexSnapshot(
                         new com.surprising.aeron.service.state.index.TriggerOrderIndex(core))),
                 Map.entry("algo", indexSnapshot(
@@ -1042,7 +1042,7 @@ class RuntimeCommitRecoveryTest {
                 Map.entry("active-order", indexSnapshot(
                         new com.surprising.aeron.service.state.index.ActiveOrderIndex(core, identities))),
                 Map.entry("adl-position", indexSnapshot(
-                        new com.surprising.aeron.service.state.AdlPositionIndex(core, identities))));
+                        new com.surprising.aeron.service.state.index.AdlPositionIndex(core, identities))));
         assertThat(allIndexSnapshots(state)).isEqualTo(rebuilt);
     }
 
@@ -1063,12 +1063,12 @@ class RuntimeCommitRecoveryTest {
     }
 
     private static Object canonicalIndexValue(Object value) {
-        if (value instanceof com.surprising.aeron.service.state.RuntimeIdentityRegistry identities)
+        if (value instanceof com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry identities)
             return identities.snapshot(); // Compare dictionary content across restored JVM objects.
-        if (value instanceof com.surprising.aeron.service.state.OrderRuntime order)
+        if (value instanceof com.surprising.aeron.service.state.order.OrderRuntime order)
             return order.toString(); // Canonical instrument identity is JVM-local after snapshot recovery.
         if (value == null) return "<null>";
-        if (value.getClass().getName().startsWith("com.surprising.aeron.service.state.OpenInterestIndex$")) {
+        if (value.getClass().getName().startsWith("com.surprising.aeron.service.state.index.OpenInterestIndex$")) {
             try {
                 Map<String, Object> snapshot = indexSnapshot(value);
                 if (snapshot.get("longQuantity") instanceof Long l && l == 0L
@@ -1081,7 +1081,7 @@ class RuntimeCommitRecoveryTest {
             }
         }
         if (value.getClass().getName().startsWith("com.surprising.aeron.service.state.index.ActiveOrderIndex$")
-                || value.getClass().getName().startsWith("com.surprising.aeron.service.state.AdlPositionIndex$")) {
+                || value.getClass().getName().startsWith("com.surprising.aeron.service.state.index.AdlPositionIndex$")) {
             try {
                 return indexSnapshot(value);
             } catch (Exception failure) {

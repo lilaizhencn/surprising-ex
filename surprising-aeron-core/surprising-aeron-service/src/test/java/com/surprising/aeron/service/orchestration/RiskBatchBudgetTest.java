@@ -1,11 +1,14 @@
 package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.service.orchestration.pipeline.CoreTestCompletion;
+import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RiskBatchBudgetTest {
@@ -37,7 +40,7 @@ class RiskBatchBudgetTest {
                                 user%2==1?CoreOrderSide.SELL:CoreOrderSide.BUY,100,1,false,CoreMarginMode.CROSS,
                                 CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"risk-"+user))));
             }
-            long funds=com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState());
+            long funds=com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(state.tradingState());
             var firstBatch = batch(line, work(state, line), 16);
             try (var reference = TradingCoreRuntime.fromSnapshot(line, state.snapshot(400))) {
                 var expected = reference.apply(firstBatch);
@@ -71,7 +74,7 @@ class RiskBatchBudgetTest {
                 }
                 assertThat(work(state,line).riskScanPending()).isFalse();
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
-                assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState())).isEqualTo(funds);
+                assertThat(com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(state.tradingState())).isEqualTo(funds);
             }
         }
     }
@@ -98,7 +101,7 @@ class RiskBatchBudgetTest {
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100+user,"104",
                             user==7?CoreOrderSide.SELL:CoreOrderSide.BUY,100,1,false,CoreMarginMode.CROSS,
                             CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"risk-"+user))));
-            long funds=com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState());
+            long funds=com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(state.tradingState());
             var first=work(state,line);
             applied(state, batch(line,first,2));
             assertThat(state.tradingState().riskState().scans().values().stream()
@@ -115,7 +118,7 @@ class RiskBatchBudgetTest {
                 applied(state,finish);applied(restored,finish);
                 assertThat(state.tradingState().riskState().scans().values()).allMatch(s->s.riskComplete());
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
-                assertThat(com.surprising.aeron.service.state.FundsStateHash.compute(state.tradingState())).isEqualTo(funds);
+                assertThat(com.surprising.aeron.service.state.snapshot.FundsStateHash.compute(state.tradingState())).isEqualTo(funds);
             }
         }
     }

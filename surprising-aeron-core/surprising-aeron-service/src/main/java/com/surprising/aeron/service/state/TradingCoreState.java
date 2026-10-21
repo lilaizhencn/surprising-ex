@@ -1,6 +1,8 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
+import com.surprising.aeron.service.state.account.CoreUserState;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.ledger.CoreTreasuryState;
 import com.surprising.aeron.service.state.model.AssetBalance;
 import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
@@ -13,13 +15,13 @@ import com.surprising.aeron.service.state.model.CorePositionState;
 import com.surprising.aeron.service.state.model.CoreRiskSnapshot;
 import com.surprising.aeron.service.state.model.CoreRiskState;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
-
+import com.surprising.aeron.service.state.order.OrderReservation;
+import com.surprising.aeron.service.state.snapshot.CoreStateHash;
+import com.surprising.aeron.service.state.snapshot.StateMapSupport;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
-import java.util.Collections;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.TreeSet;
 
 public record TradingCoreState(
         ProductLine productLine,
@@ -265,7 +267,7 @@ public record TradingCoreState(
         return fullBusinessStateHash();
     }
 
-    long fullBusinessStateHash() {
+    public long fullBusinessStateHash() {
         long hash = CoreStateHash.mix(CoreStateHash.start(), com.surprising.aeron.service.state.snapshot.SnapshotEnumCodes.encode(productLine));
         hash = CoreStateHash.mix(hash, revision);
         for (CoreUserState user : users.values()) {
@@ -512,7 +514,6 @@ public record TradingCoreState(
     public Set<Long> changedTriggerOrderIds() {
         return StateMapSupport.changedKeys(triggerOrders);
     }
-
 
     public Set<Long> changedAlgoOrderIds() {
         return StateMapSupport.changedKeys(algoOrders);

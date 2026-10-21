@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
 import com.surprising.aeron.protocol.CommandFingerprint;
+import com.surprising.aeron.service.orchestration.result.FundsCommandIndex;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;

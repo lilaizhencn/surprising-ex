@@ -1,14 +1,12 @@
 package com.surprising.aeron.service.state;
 
-import com.surprising.aeron.service.state.snapshot.*;
-
-
 import com.surprising.aeron.service.state.model.CoreFeePolicyState;
-
-import static org.assertj.core.api.Assertions.assertThat;
-
+import com.surprising.aeron.service.state.snapshot.*;
+import com.surprising.aeron.service.state.snapshot.CoreFeePolicySnapshotCodec;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 class CoreFeePolicySnapshotCodecTest {
 

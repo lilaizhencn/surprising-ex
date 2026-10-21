@@ -12,17 +12,17 @@ public final class CoreFaults {
     private static final Map<Object, Runnable> settlements = new IdentityHashMap<>();
     private static Consumer<TradingCoreRuntime> activation;
 
-    static void laneMask(TradingCoreRuntime state, long mask) {
+    public static void laneMask(TradingCoreRuntime state, long mask) {
         requireAgent();
         laneMasks.put(state, mask);
     }
 
-    static void afterSettlement(TradingCoreRuntime state, Runnable assertion) {
+    public static void afterSettlement(TradingCoreRuntime state, Runnable assertion) {
         requireAgent();
         settlements.put(state, assertion);
     }
 
-    static void beforeActivation(Consumer<TradingCoreRuntime> observer) {
+    public static void beforeActivation(Consumer<TradingCoreRuntime> observer) {
         requireAgent();
         activation = observer;
     }
@@ -32,22 +32,22 @@ public final class CoreFaults {
     }
 
     public static void afterLaneContext(Object state, Object batch) {
-        Long mask = laneMasks.remove(((OrderBatchExecutor) state).owner);
+        Long mask = laneMasks.remove(get(state, "owner"));
         if (mask != null) set(batch, "actualLaneMask", mask);
     }
 
     public static void afterSettlement(Object state, Object batch) {
-        Runnable assertion = settlements.remove(((OrderBatchExecutor) state).owner);
+        Runnable assertion = settlements.remove(get(state, "owner"));
         if (assertion == null) return;
         assertion.run();
         set(batch, "actualLaneMask", (long) get(batch, "actualLaneMask") ^ 1L);
     }
 
-    static void attachRealtime(TradingOwnerTestSupport service, RealtimeOutbox outbox) {
+    public static void attachRealtime(TradingOwnerTestSupport service, RealtimeOutbox outbox) {
         service.attachRealtime(outbox);
     }
 
-    static ActivationState activationState(TradingCoreRuntime state) {
+    public static ActivationState activationState(TradingCoreRuntime state) {
         return new ActivationState(state.activated(),
                 state.activated(),
                 ((com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter)
@@ -55,12 +55,12 @@ public final class CoreFaults {
                 state.commits.publication.activated());
     }
 
-    record ActivationState(boolean core, boolean runtime, boolean matcher, boolean projector) {
-        boolean allPassive() {
+    public record ActivationState(boolean core, boolean runtime, boolean matcher, boolean projector) {
+        public boolean allPassive() {
             return !core && !runtime && !matcher && !projector;
         }
 
-        boolean allActivated() {
+        public boolean allActivated() {
             return core && runtime && matcher && projector;
         }
     }

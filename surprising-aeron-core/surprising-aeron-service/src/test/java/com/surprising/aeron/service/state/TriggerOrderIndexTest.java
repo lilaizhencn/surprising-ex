@@ -1,14 +1,4 @@
 package com.surprising.aeron.service.state;
-import com.surprising.aeron.service.state.account.UserRuntime;
-
-import com.surprising.aeron.service.state.index.TriggerOrderIndex;
-
-
-import com.surprising.aeron.service.state.model.CoreRiskState;
-import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -18,10 +8,27 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.CoreTriggerCondition;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.protocol.CoreTriggerOrderType;
+import com.surprising.aeron.service.lane.LaneTopology;
+import com.surprising.aeron.service.state.account.CoreUserState;
+import com.surprising.aeron.service.state.account.UserRuntime;
+import com.surprising.aeron.service.state.change.LaneCommitEvent;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.index.AdlPositionIndex;
+import com.surprising.aeron.service.state.index.OpenInterestIndex;
+import com.surprising.aeron.service.state.index.PositionUserIndex;
+import com.surprising.aeron.service.state.index.RuntimeFactIndexes;
+import com.surprising.aeron.service.state.index.TriggerOrderIndex;
+import com.surprising.aeron.service.state.ledger.CoreTreasuryState;
+import com.surprising.aeron.service.state.model.CoreRiskState;
+import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateProjector;
 import com.surprising.product.api.ProductLine;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TriggerOrderIndexTest {
     @Test void descendingQueryRangeStartsAtItsCursorBeyondTheScanBound() {

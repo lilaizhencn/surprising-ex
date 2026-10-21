@@ -1,15 +1,14 @@
 package com.surprising.aeron.benchmarks.workload;
 
-import lombok.extern.slf4j.Slf4j;
-
 import com.surprising.aeron.protocol.*;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import lombok.extern.slf4j.Slf4j;
 
 /** A separate control producer; its response dependencies never drain the trading producer. */
-@Slf4j
+public @Slf4j
 final class OperationalLifecycle implements AutoCloseable {
     private static final String ACTIVE="17", RISK="18";
     /** JMH 控制页参数；0 沿用原资金费页大小和运行中的风险预算。 */
@@ -19,23 +18,23 @@ final class OperationalLifecycle implements AutoCloseable {
     private final long maker,user,riskMaker,victim;
     private long id,activeSequence,riskSequence,fundingId=1,deposits,cycles,nextRiskScanAtNanos;
 
-    OperationalLifecycle(long seed,ClusterOperationalSideLoad owner,int controlPageSize) {
+    public OperationalLifecycle(long seed,ClusterOperationalSideLoad owner,int controlPageSize) {
         this.controlPageSize=controlPageSize;
         this.owner=owner;
         endpoint=new OperationalEndpoint(seed,"operational-lifecycle",8,owner);
         maker=10_000_000L+seed*4;user=maker+1;riskMaker=maker+2;victim=maker+3;
         id=800_000_000_000L+seed*1_000_000;
     }
-    long netDeposits(){return deposits;}
-    void restoreAudit(long cycles,long deposits) {
+    public long netDeposits(){return deposits;}
+    public void restoreAudit(long cycles,long deposits) {
         if(cycles<=0 || deposits!=expectedDeposits(cycles))throw new IllegalArgumentException("invalid operational audit ledger");
         this.cycles=cycles;this.deposits=deposits;
     }
-    static long expectedDeposits(long cycles) {
+    public static long expectedDeposits(long cycles) {
         if(cycles<0)throw new IllegalArgumentException("negative cycles");
         return Math.addExact(3*ClusterMixedCapacityMain.BALANCE,Math.multiplyExact(cycles,125));
     }
-    void setup() {
+    public void setup() {
         for(String instrumentId:List.of(ACTIVE,RISK))endpoint.command(CoreMessageType.REGISTER_INSTRUMENT,0,
                 TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,
                         ContractType.LINEAR_PERPETUAL.ordinal(),"OPS","USDT","USDT",1,1,1,
@@ -59,7 +58,7 @@ final class OperationalLifecycle implements AutoCloseable {
                 new PlaceOrderCommand(++id,instrumentId,side,price,quantity,reduceOnly,CoreMarginMode.CROSS,
                         CorePositionSide.NET,CoreOrderType.LIMIT,tif,false,"ops-"+id)));
     }
-    void cycle() {
+    public void cycle() {
         long started=System.nanoTime();
         price(ACTIVE,100);
         openActive();
@@ -180,7 +179,7 @@ final class OperationalLifecycle implements AutoCloseable {
         if(!ClusterMixedCapacityMain.flat(state.positions()) || !state.reservations().isEmpty())
             throw new IllegalStateException("closed account retains exposure/reservations: "+account);
     }
-    long verifyAndBalance() {
+    public long verifyAndBalance() {
         if(cycles==0)throw new IllegalStateException("no operational lifecycle completed");
         if(deposits!=expectedDeposits(cycles))throw new IllegalStateException("operational deposit ledger mismatch");
         requireFlat(user);requireFlat(victim);requireFlat(maker);
@@ -191,6 +190,6 @@ final class OperationalLifecycle implements AutoCloseable {
         }
         return total;
     }
-    void print(){log.info("operationalLifecycle=PASS cycles={} netDeposits={} manualClose=true triggerClose=true liquidation=true insurance=true adl=true", cycles,deposits);}
+    public void print(){log.info("operationalLifecycle=PASS cycles={} netDeposits={} manualClose=true triggerClose=true liquidation=true insurance=true adl=true", cycles,deposits);}
     @Override public void close(){endpoint.close();}
 }

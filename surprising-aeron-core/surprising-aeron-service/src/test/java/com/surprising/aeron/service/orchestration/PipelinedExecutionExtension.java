@@ -1,11 +1,11 @@
 package com.surprising.aeron.service.orchestration;
 
-import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.AfterEachCallback;
+import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
 /** 只用于需要阻塞真实 matcher/Lane 工作线程的协调测试；普通业务测试使用默认融合执行。 */
-final class PipelinedExecutionExtension implements BeforeEachCallback, AfterEachCallback {
+public final class PipelinedExecutionExtension implements BeforeEachCallback, AfterEachCallback {
     private String previousMode;
     private String previousLanes;
     @Override

@@ -1,11 +1,14 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.snapshot.RuntimeStateMaterializer;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+
 import static org.assertj.core.api.Assertions.*;
 
-final class LedgerControlTestSupport {
-    static void await(TradingRuntimeState runtime, BooleanSupplier completion) {
+public final class LedgerControlTestSupport {
+    public static void await(TradingRuntimeState runtime, BooleanSupplier completion) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (!completion.getAsBoolean()) {
             runtime.assertAccountLanesHealthy();
@@ -14,7 +17,7 @@ final class LedgerControlTestSupport {
         }
     }
 
-    static void awaitFunds(TradingRuntimeState runtime, boolean external) {
+    public static void awaitFunds(TradingRuntimeState runtime, boolean external) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (!runtime.pollControlFundsValidation(external)) {
             runtime.assertAccountLanesHealthy();
@@ -23,7 +26,7 @@ final class LedgerControlTestSupport {
         }
     }
 
-    static TradingCoreState commit(TradingRuntimeState runtime, RuntimeIdentityRegistry identities, boolean external) {
+    public static TradingCoreState commit(TradingRuntimeState runtime, RuntimeIdentityRegistry identities, boolean external) {
         awaitFunds(runtime, external);
         runtime.clearChangedKeys();
         boolean acquired = runtime.accountLanesStarted && !runtime.ownerLaneAccess;

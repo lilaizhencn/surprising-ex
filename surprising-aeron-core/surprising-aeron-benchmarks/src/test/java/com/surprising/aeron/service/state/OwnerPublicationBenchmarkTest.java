@@ -1,6 +1,8 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.change.OwnerPublicationBenchmark;
 import org.junit.jupiter.api.Test;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OwnerPublicationBenchmarkTest {

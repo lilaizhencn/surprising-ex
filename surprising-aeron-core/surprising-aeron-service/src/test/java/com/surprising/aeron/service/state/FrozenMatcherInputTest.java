@@ -1,8 +1,15 @@
 package com.surprising.aeron.service.state;
 
-import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.*;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreOrderType;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+import com.surprising.aeron.service.state.order.OrderRuntime;
 import org.junit.jupiter.api.Test;
+
 import static org.assertj.core.api.Assertions.*;
 
 class FrozenMatcherInputTest {

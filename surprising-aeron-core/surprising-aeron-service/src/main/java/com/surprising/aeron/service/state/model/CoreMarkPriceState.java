@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state.model;
 
-import com.surprising.aeron.service.state.OrderReservation;
+import com.surprising.aeron.service.state.order.OrderReservation;
 
 public record CoreMarkPriceState(String instrumentId, long markPriceTicks,
                                  long indexPriceTicks, long forwardPriceTicks, long priceSequence,

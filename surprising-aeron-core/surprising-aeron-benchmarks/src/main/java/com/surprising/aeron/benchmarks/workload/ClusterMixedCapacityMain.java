@@ -1,11 +1,9 @@
 package com.surprising.aeron.benchmarks.workload;
 
-import lombok.extern.slf4j.Slf4j;
-
-import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.client.AeronClientCapacity;
+import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.state.LaneTopology;
+import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
@@ -13,6 +11,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import lombok.extern.slf4j.Slf4j;
 import org.HdrHistogram.Histogram;
 
 /** Network counterpart of LinearPerpetualMixedWorkload's UNIFORM scale scenario.

@@ -1,9 +1,6 @@
 package com.surprising.aeron.service.config;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
-import com.surprising.aeron.service.state.LaneTopology;
+import com.surprising.aeron.service.lane.LaneTopology;
 import java.util.BitSet;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -14,6 +11,9 @@ import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ClassPathResource;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TradingCpuAffinityTest {
     @Test
@@ -102,7 +102,7 @@ class TradingCpuAffinityTest {
                     case "idleStrategy" -> org.agrona.concurrent.NoOpIdleStrategy.INSTANCE;
                     default -> throw new AssertionError("unexpected Cluster API " + method.getName());
                 });
-        var egress = new com.surprising.aeron.service.orchestration.ClusterServiceEgress();
+        var egress = new com.surprising.aeron.service.orchestration.egress.ClusterServiceEgress();
         var loop = new com.surprising.aeron.service.orchestration.TradingOwnerLoop(
                 com.surprising.product.api.ProductLine.SPOT, egress, configuration);
         egress.start(cluster);

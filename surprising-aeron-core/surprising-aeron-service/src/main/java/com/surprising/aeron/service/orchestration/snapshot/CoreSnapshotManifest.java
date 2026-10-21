@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.orchestration.snapshot;
 
+import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.product.api.ProductLine;
-import com.surprising.aeron.service.state.LaneTopology;
 
 public record CoreSnapshotManifest(
         ProductLine productLine,

@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
-import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
+
 import com.surprising.aeron.protocol.AmendOrderCommand;
+import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CommandSource;
@@ -19,19 +19,22 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchAction;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand;
-import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
-import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.service.matching.MatchingResult;
-import com.surprising.aeron.service.state.model.CoreRiskState;
+import com.surprising.aeron.service.orchestration.egress.ClusterServiceEgress;
+import com.surprising.aeron.service.orchestration.pipeline.BenchmarkMatchingAwait;
+import com.surprising.aeron.service.orchestration.pipeline.ClusterCommandWindow;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
-import com.surprising.aeron.service.state.LaneTopology;
+import com.surprising.aeron.service.state.model.CoreRiskState;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayDeque;
@@ -42,12 +45,12 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.locks.LockSupport;
 
-final class LinearPerpetualBenchmarkSupport {
+public final class LinearPerpetualBenchmarkSupport {
 
-    static final int DEFAULT_ACCOUNT_LANES = 4;
-    static final int DEFAULT_MAKER_DEPTH = 16;
-    static final int DEFAULT_RISK_USERS = 32;
-    static final int MAX_BENCHMARK_SCALE = 10_000;
+    public static final int DEFAULT_ACCOUNT_LANES = 4;
+    public static final int DEFAULT_MAKER_DEPTH = 16;
+    public static final int DEFAULT_RISK_USERS = 32;
+    public static final int MAX_BENCHMARK_SCALE = 10_000;
     private static final String SYMBOL = "10";
     private static final String SETTLE_ASSET = "USDT";
     private static final long ENTRY_PRICE = 100;
@@ -61,87 +64,87 @@ final class LinearPerpetualBenchmarkSupport {
     private LinearPerpetualBenchmarkSupport() {
     }
 
-    interface Scenario extends AutoCloseable {
-        long run();
+    public interface Scenario extends AutoCloseable {
+        public long run();
 
-        default long operations() {
+        public default long operations() {
             return 1;
         }
 
-        default long acceptedOperations() {
+        public default long acceptedOperations() {
             return operations();
         }
 
-        default long terminalOperations() {
+        public default long terminalOperations() {
             return operations();
         }
 
-        default long acceptedCoreMessages() {
+        public default long acceptedCoreMessages() {
             return acceptedOperations();
         }
 
-        default long terminalCoreMessages() {
+        public default long terminalCoreMessages() {
             return terminalOperations();
         }
 
-        default long maxBacklog() {
+        public default long maxBacklog() {
             return 0;
         }
 
-        default long terminalTrades() {
+        public default long terminalTrades() {
             return 0;
         }
 
-        default long terminalTradingOperations() {
+        public default long terminalTradingOperations() {
             return terminalOperations();
         }
 
-        default long terminalLifecycleOperations() {
+        public default long terminalLifecycleOperations() {
             return 0;
         }
 
-        default int incompleteRiskScans() {
+        public default int incompleteRiskScans() {
             return 0;
         }
 
-        default int incompleteFundingSettlements() {
+        public default int incompleteFundingSettlements() {
             return 0;
         }
 
-        default int activeOrders() {
+        public default int activeOrders() {
             return 0;
         }
 
-        default int positions() {
+        public default int positions() {
             return 0;
         }
 
-        default int triggerOrders() {
+        public default int triggerOrders() {
             return 0;
         }
 
-        default int terminalTombstones() {
+        public default int terminalTombstones() {
             return 0;
         }
 
-        default long laneOperations() {
+        public default long laneOperations() {
             return 0;
         }
 
-        default long laneOperations(int operationType) {
+        public default long laneOperations(int operationType) {
             return 0;
         }
 
-        default void verify() {
+        public default void verify() {
         }
 
-        @Override
+        public @Override
         void close();
     }
 
-    record SnapshotTemplate(byte[] bytes, long businessStateHash, int accountLanes,
+    public record SnapshotTemplate(byte[] bytes, long businessStateHash, int accountLanes,
                             ProductLine productLine, long nextClusterPosition) {
-        SnapshotTemplate {
+        public SnapshotTemplate {
             bytes = bytes.clone();
             if (businessStateHash == 0 || accountLanes < 2 || productLine == null
                     || nextClusterPosition <= 0) {
@@ -154,13 +157,13 @@ final class LinearPerpetualBenchmarkSupport {
             return bytes.clone();
         }
 
-        int sizeBytes() {
+        public int sizeBytes() {
             return bytes.length;
         }
     }
 
-    record OrderContinuationTemplate(SnapshotTemplate snapshot, long[] userIds, long[] orderIds) {
-        OrderContinuationTemplate {
+    public record OrderContinuationTemplate(SnapshotTemplate snapshot, long[] userIds, long[] orderIds) {
+        public OrderContinuationTemplate {
             userIds = userIds.clone();
             orderIds = orderIds.clone();
             if (snapshot == null || userIds.length != 256 || orderIds.length != 256) {
@@ -169,7 +172,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
     }
 
-    static void configureAccountLanes(int accountLanes) {
+    public static void configureAccountLanes(int accountLanes) {
         if (accountLanes < 2 || accountLanes > Long.SIZE
                 || (accountLanes & (accountLanes - 1)) != 0) {
             throw new IllegalArgumentException("accountLanes must be a power of two in [2,64]");
@@ -177,11 +180,11 @@ final class LinearPerpetualBenchmarkSupport {
         System.setProperty("surprising.aeron.account-lanes", Integer.toString(accountLanes));
     }
 
-    static long benchmarkTimestamp(long correlationId) {
+    public static long benchmarkTimestamp(long correlationId) {
         return BASE_EPOCH_MILLIS + correlationId / COMMANDS_PER_LOGICAL_MILLISECOND;
     }
 
-    static Scenario limitOrderPlacement(int accountLanes) {
+    public static Scenario limitOrderPlacement(int accountLanes) {
         Harness harness = base(accountLanes);
         long userId = usersAcrossLanes(accountLanes, 1, 1_000).getFirst();
         harness.adjust(userId, SAFE_BALANCE);
@@ -190,7 +193,7 @@ final class LinearPerpetualBenchmarkSupport {
         return commandScenario(harness, command);
     }
 
-    static Scenario cancelRestingOrder(int accountLanes) {
+    public static Scenario cancelRestingOrder(int accountLanes) {
         Harness harness = base(accountLanes);
         long userId = usersAcrossLanes(accountLanes, 1, 2_000).getFirst();
         harness.adjust(userId, SAFE_BALANCE);
@@ -202,7 +205,7 @@ final class LinearPerpetualBenchmarkSupport {
         return commandScenario(harness, command);
     }
 
-    static DenseResidentBook denseResidentBook(int accountLanes, int priceLevels, int ordersPerLevel) {
+    public static DenseResidentBook denseResidentBook(int accountLanes, int priceLevels, int ordersPerLevel) {
         int residentOrders = Math.multiplyExact(priceLevels, ordersPerLevel);
         if (priceLevels <= 0 || ordersPerLevel <= 0 || residentOrders > 2_000_000) {
             throw new IllegalArgumentException("dense resident book requires 1..2000000 orders");
@@ -231,7 +234,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
     }
 
-    static final class DenseResidentBook implements AutoCloseable {
+    public static final class DenseResidentBook implements AutoCloseable {
         private static final int MAX_IN_FLIGHT = 256;
         private static final int COMPLETION_BATCH_SIZE = 64;
         private static final long MARK_HEARTBEAT_INTERVAL_NANOS = 1_000_000_000L;
@@ -272,7 +275,7 @@ final class LinearPerpetualBenchmarkSupport {
             this.nextMarkHeartbeatNanos = System.nanoTime() + MARK_HEARTBEAT_INTERVAL_NANOS;
         }
 
-        long runAsync(int operations) {
+        public long runAsync(int operations) {
             if (operations < maxInFlight || operations % completionBatchSize != 0) {
                 throw new IllegalArgumentException("async dense-book operations must cover the window in batches");
             }
@@ -369,39 +372,39 @@ final class LinearPerpetualBenchmarkSupport {
             return userIndex;
         }
 
-        long acceptedMessages() {
+        public long acceptedMessages() {
             return harness.acceptedMessages();
         }
 
-        long terminalMessages() {
+        public long terminalMessages() {
             return harness.terminalMessages();
         }
 
-        long acceptedCoreMessages() {
+        public long acceptedCoreMessages() {
             return harness.acceptedCoreMessages();
         }
 
-        long terminalCoreMessages() {
+        public long terminalCoreMessages() {
             return harness.terminalCoreMessages();
         }
 
-        long windowSamples() {
+        public long windowSamples() {
             return windowSamples;
         }
 
-        long fullWindowSamples() {
+        public long fullWindowSamples() {
             return fullWindowSamples;
         }
 
-        long refillOperations() {
+        public long refillOperations() {
             return refillOperations;
         }
 
-        long producerStarvationSamples() {
+        public long producerStarvationSamples() {
             return producerStarvationSamples;
         }
 
-        void verify() {
+        public void verify() {
             if (inFlightSize != 0 || harness.pendingSubmissions() != 0
                     || harness.acceptedMessages() != harness.terminalMessages()
                     || harness.acceptedCoreMessages() != harness.terminalCoreMessages()
@@ -435,7 +438,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
     }
 
-    static Scenario amendRestingOrder(int accountLanes) {
+    public static Scenario amendRestingOrder(int accountLanes) {
         Harness harness = base(accountLanes);
         long userId = usersAcrossLanes(accountLanes, 1, 2_500).getFirst();
         harness.adjust(userId, SAFE_BALANCE);
@@ -449,7 +452,7 @@ final class LinearPerpetualBenchmarkSupport {
         return commandScenario(harness, command);
     }
 
-    static OrderContinuationTemplate orderContinuationTemplate(int accountLanes) {
+    public static OrderContinuationTemplate orderContinuationTemplate(int accountLanes) {
         Harness harness = base(accountLanes);
         long[] users = new long[256];
         long[] orders = new long[256];
@@ -468,7 +471,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
     }
 
-    static Scenario cancelBurst256(OrderContinuationTemplate template) {
+    public static Scenario cancelBurst256(OrderContinuationTemplate template) {
         Harness harness = Harness.restore(template.snapshot());
         CoreMessage[] commands = new CoreMessage[256];
         for (int index = 0; index < commands.length; index++) {
@@ -479,7 +482,7 @@ final class LinearPerpetualBenchmarkSupport {
         return burstScenario(harness, commands);
     }
 
-    static SnapshotTemplate deepFillBurstTemplate(int accountLanes, int makerDepth) {
+    public static SnapshotTemplate deepFillBurstTemplate(int accountLanes, int makerDepth) {
         validateScale("makerDepth", accountLanes, makerDepth);
         try (Harness harness = base(accountLanes)) {
             List<Long> users = usersAcrossLanes(accountLanes, accountLanes + 256, 50_000);
@@ -493,7 +496,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
     }
 
-    static Scenario deepFillBurst256(SnapshotTemplate template, int makerDepth) {
+    public static Scenario deepFillBurst256(SnapshotTemplate template, int makerDepth) {
         Harness harness = Harness.restore(template);
         List<Long> users = usersAcrossLanes(template.accountLanes(), template.accountLanes() + 256, 50_000);
         CoreMessage[] commands = new CoreMessage[256];
@@ -534,7 +537,7 @@ final class LinearPerpetualBenchmarkSupport {
         };
     }
 
-    static Scenario amendBurst256(OrderContinuationTemplate template) {
+    public static Scenario amendBurst256(OrderContinuationTemplate template) {
         Harness harness = Harness.restore(template.snapshot());
         CoreMessage[] commands = new CoreMessage[256];
         for (int index = 0; index < commands.length; index++) {
@@ -578,19 +581,19 @@ final class LinearPerpetualBenchmarkSupport {
         };
     }
 
-    static Scenario fullTakerFill(int accountLanes) {
+    public static Scenario fullTakerFill(int accountLanes) {
         return fill(accountLanes, 10, 10, 3_000);
     }
 
-    static Scenario partialFill(int accountLanes) {
+    public static Scenario partialFill(int accountLanes) {
         return fill(accountLanes, 10, 4, 4_000);
     }
 
-    static Scenario multiLaneMatching(int accountLanes, int makerDepth) {
+    public static Scenario multiLaneMatching(int accountLanes, int makerDepth) {
         return multiLaneMatching(multiLaneMatchingTemplate(accountLanes, makerDepth), makerDepth);
     }
 
-    static SnapshotTemplate multiLaneMatchingTemplate(int accountLanes, int makerDepth) {
+    public static SnapshotTemplate multiLaneMatchingTemplate(int accountLanes, int makerDepth) {
         validateScale("makerDepth", accountLanes, makerDepth);
         Harness harness = base(accountLanes);
         try {
@@ -610,7 +613,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
     }
 
-    static Scenario multiLaneMatching(SnapshotTemplate template, int makerDepth) {
+    public static Scenario multiLaneMatching(SnapshotTemplate template, int makerDepth) {
         validateScale("makerDepth", template.accountLanes(), makerDepth);
         Harness harness = Harness.restore(template);
         long taker = usersAcrossLanes(template.accountLanes(), template.accountLanes() + 1, 5_000).getLast();
@@ -619,7 +622,7 @@ final class LinearPerpetualBenchmarkSupport {
         return commandScenario(harness, command);
     }
 
-    static SnapshotTemplate riskScanTemplate(int accountLanes, int riskUsers) {
+    public static SnapshotTemplate riskScanTemplate(int accountLanes, int riskUsers) {
         Harness harness = positionedUsers(accountLanes, riskUsers);
         try {
             return harness.snapshotTemplate(accountLanes);
@@ -628,7 +631,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
     }
 
-    static Scenario riskScan(SnapshotTemplate template) {
+    public static Scenario riskScan(SnapshotTemplate template) {
         Harness harness = Harness.restore(template);
         CoreMessage mark = harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
@@ -656,7 +659,7 @@ final class LinearPerpetualBenchmarkSupport {
         };
     }
 
-    static SnapshotTemplate stablePositionScanTemplate(int accountLanes, int positionUsers) {
+    public static SnapshotTemplate stablePositionScanTemplate(int accountLanes, int positionUsers) {
         if (positionUsers < 1 || positionUsers > MAX_BENCHMARK_SCALE) {
             throw new IllegalArgumentException("positionUsers must be positive and at most "
                     + MAX_BENCHMARK_SCALE);
@@ -681,7 +684,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
     }
 
-    static Scenario stablePositionScan(SnapshotTemplate template, int positionUsers) {
+    public static Scenario stablePositionScan(SnapshotTemplate template, int positionUsers) {
         Harness harness = Harness.restore(template);
         CoreMessage mark = harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
@@ -710,7 +713,7 @@ final class LinearPerpetualBenchmarkSupport {
         };
     }
 
-    static Scenario liquidationExecution(int accountLanes) {
+    public static Scenario liquidationExecution(int accountLanes) {
         Harness harness = base(accountLanes);
         List<Long> users = usersAcrossLanes(accountLanes, 2, 30_000);
         long shortUser = users.getFirst();
@@ -755,7 +758,7 @@ final class LinearPerpetualBenchmarkSupport {
         };
     }
 
-    static Scenario liquidationBatchExecution(int accountLanes, int liquidationUsers, int openOrders) {
+    public static Scenario liquidationBatchExecution(int accountLanes, int liquidationUsers, int openOrders) {
         if (liquidationUsers < 1 || liquidationUsers > ExecuteLiquidationBatchCommand.MAX_ACTIONS
                 || openOrders < 0 || openOrders > 256) {
             throw new IllegalArgumentException("invalid liquidation batch benchmark scale");
@@ -807,7 +810,7 @@ final class LinearPerpetualBenchmarkSupport {
         };
     }
 
-    static Scenario insuranceShortfall(int accountLanes, int liquidationUsers, boolean resolveToAdl) {
+    public static Scenario insuranceShortfall(int accountLanes, int liquidationUsers, boolean resolveToAdl) {
         Harness harness = positionedUsers(accountLanes, liquidationUsers);
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
@@ -892,7 +895,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
     }
 
-    static SnapshotTemplate recoveryTemplate(int accountLanes, int makerDepth) {
+    public static SnapshotTemplate recoveryTemplate(int accountLanes, int makerDepth) {
         try (Scenario scenario = multiLaneMatching(accountLanes, makerDepth)) {
             scenario.run();
         }
@@ -910,7 +913,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
     }
 
-    static Scenario snapshotRecovery(SnapshotTemplate template) {
+    public static Scenario snapshotRecovery(SnapshotTemplate template) {
         return new Scenario() {
             private TradingCoreRuntime restored;
 
@@ -1091,7 +1094,7 @@ final class LinearPerpetualBenchmarkSupport {
                 SETTLE_ASSET, 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
     }
 
-    static List<Long> usersAcrossLanes(int accountLanes, int count, long startUserId) {
+    public static List<Long> usersAcrossLanes(int accountLanes, int count, long startUserId) {
         configureAccountLanes(accountLanes);
         LaneTopology topology = LaneTopology.configured(false);
         List<Long> users = new ArrayList<>(count);
@@ -1104,7 +1107,7 @@ final class LinearPerpetualBenchmarkSupport {
         return List.copyOf(users);
     }
 
-    static final class Harness implements AutoCloseable {
+    public static final class Harness implements AutoCloseable {
         private final TradingCoreRuntime state;
         private final Sequences sequences;
         private long executedMessages;
@@ -1128,11 +1131,11 @@ final class LinearPerpetualBenchmarkSupport {
             this.sequences = sequences;
         }
 
-        static Harness create(int accountLanes) {
+        public static Harness create(int accountLanes) {
             return create(accountLanes, ProductLine.LINEAR_PERPETUAL);
         }
 
-        static Harness create(int accountLanes, ProductLine productLine) {
+        public static Harness create(int accountLanes, ProductLine productLine) {
             configureAccountLanes(accountLanes);
             Harness harness = new Harness(new TradingCoreRuntime(productLine), new Sequences());
             if (harness.state.laneTopology().accountLaneCount() != accountLanes) {
@@ -1142,11 +1145,11 @@ final class LinearPerpetualBenchmarkSupport {
             return harness;
         }
 
-        static Harness restore(SnapshotTemplate template) {
+        public static Harness restore(SnapshotTemplate template) {
             return restore(template, false);
         }
 
-        static Harness restore(SnapshotTemplate template, boolean deferBatchResponseValidation) {
+        public static Harness restore(SnapshotTemplate template, boolean deferBatchResponseValidation) {
             configureAccountLanes(template.accountLanes());
             TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(template.productLine(), template.bytes());
             Harness harness = new Harness(restored, Sequences.after(
@@ -1155,31 +1158,31 @@ final class LinearPerpetualBenchmarkSupport {
             return harness;
         }
 
-        void adjust(long userId, long units) {
+        public void adjust(long userId, long units) {
             adjust(userId, SETTLE_ASSET, units);
         }
 
-        void adjust(long userId, String asset, long units) {
+        public void adjust(long userId, String asset, long units) {
             execute(command(CoreMessageType.ADJUST_BALANCE, CommandSource.GATEWAY, userId,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, units))));
         }
 
-        long nextOrderId() {
+        public long nextOrderId() {
             return sequences.orderId++;
         }
 
-        long nextCommandTimestamp() {
+        public long nextCommandTimestamp() {
             return benchmarkTimestamp(sequences.clusterPosition);
         }
 
-        void advanceClockTo(long epochMillis) {
+        public void advanceClockTo(long epochMillis) {
             if (epochMillis < nextCommandTimestamp()) throw new IllegalArgumentException("clock cannot go backwards");
             sequences.clusterPosition = Math.max(sequences.clusterPosition,
                     Math.multiplyExact(Math.subtractExact(epochMillis, BASE_EPOCH_MILLIS),
                             COMMANDS_PER_LOGICAL_MILLISECOND));
         }
 
-        void refreshMarkPricesIfDue(List<String> symbols) {
+        public void refreshMarkPricesIfDue(List<String> symbols) {
             long now = nextCommandTimestamp();
             for (String instrumentId : symbols) {
                 var mark = state.runtimeMarkPrice(instrumentId);
@@ -1192,7 +1195,7 @@ final class LinearPerpetualBenchmarkSupport {
             }
         }
 
-        void publishMarkPriceHeartbeat(String instrumentId) {
+        public void publishMarkPriceHeartbeat(String instrumentId) {
             long now = nextCommandTimestamp();
             var mark = state.runtimeMarkPrice(instrumentId);
             if (mark == null) throw new IllegalStateException("workload mark price is missing: " + instrumentId);
@@ -1201,16 +1204,16 @@ final class LinearPerpetualBenchmarkSupport {
                             mark.markPriceTicks(), Math.incrementExact(mark.priceSequence()), now))));
         }
 
-        void beginBusinessLatencies(int targetOperationsPerSecond) {
+        public void beginBusinessLatencies(int targetOperationsPerSecond) {
             businessLatencies = OpenLoopBusinessLatencyRecorder.createIfEnabled(targetOperationsPerSecond);
         }
 
-        void commitBusinessLatencies() {
+        public void commitBusinessLatencies() {
             if (businessLatencies != null) businessLatencies.commit();
             businessLatencies = null;
         }
 
-        CoreMessage command(CoreMessageType type, CommandSource source, long userId, byte[] payload) {
+        public CoreMessage command(CoreMessageType type, CommandSource source, long userId, byte[] payload) {
             long sourceSequence = sequences.next(source);
             long correlationId = sequences.clusterPosition++;
             return new CoreMessage(CoreMessageHeader.command(type,
@@ -1219,7 +1222,7 @@ final class LinearPerpetualBenchmarkSupport {
                     correlationId), payload);
         }
 
-        CoreMessage batchCommand(CoreMessageType type, CommandSource source, long userId,
+        public CoreMessage batchCommand(CoreMessageType type, CommandSource source, long userId,
                                  byte[] payload, int operationWeight) {
             if ((type != CoreMessageType.PLACE_ORDER_BATCH
                     && type != CoreMessageType.CANCEL_ORDER_BATCH
@@ -1231,26 +1234,26 @@ final class LinearPerpetualBenchmarkSupport {
             return command;
         }
 
-        CoreResponse execute(CoreMessage command) {
+        public CoreResponse execute(CoreMessage command) {
             PendingCommand submitted = submitCommand(command);
             drainSubmitted();
             return submitted.response;
         }
 
-        void submit(CoreMessage command) {
+        public void submit(CoreMessage command) {
             submitCommand(command);
         }
 
-        void submitTimed(CoreMessage command) {
+        public void submitTimed(CoreMessage command) {
             submitCommand(command, System.nanoTime());
         }
 
-        void submitScheduled(CoreMessage command, long scheduledEntryNanos) {
+        public void submitScheduled(CoreMessage command, long scheduledEntryNanos) {
             if (scheduledEntryNanos <= 0) throw new IllegalArgumentException("scheduled entry must be positive");
             submitCommand(command, scheduledEntryNanos);
         }
 
-        void useClusterMatchingPipeline() {
+        public void useClusterMatchingPipeline() {
             clusterMatchingPipeline = true;
             clusterCommandWindow = new ClusterCommandWindow(256);
         }
@@ -1323,7 +1326,7 @@ final class LinearPerpetualBenchmarkSupport {
             return pending;
         }
 
-        void drainSubmitted() {
+        public void drainSubmitted() {
             long deadline = System.nanoTime() + MATCH_TIMEOUT_NANOS;
             int idle = 0;
             while (!submittedMatching.isEmpty()) {
@@ -1344,11 +1347,11 @@ final class LinearPerpetualBenchmarkSupport {
             }
         }
 
-        int pendingSubmissions() {
+        public int pendingSubmissions() {
             return submittedMatching.size();
         }
 
-        long drainOldestLatencyNanos() {
+        public long drainOldestLatencyNanos() {
             PendingCommand pending = submittedMatching.peekFirst();
             if (pending == null) throw new IllegalStateException("no matching submission to drain");
             long deadline = System.nanoTime() + MATCH_TIMEOUT_NANOS;
@@ -1401,7 +1404,7 @@ final class LinearPerpetualBenchmarkSupport {
             return pending.submittedAtNanos == 0 ? 0 : System.nanoTime() - pending.submittedAtNanos;
         }
 
-        int drainReadyMatching(int maxCompletions, java.util.function.LongConsumer latencyRecorder) {
+        public int drainReadyMatching(int maxCompletions, java.util.function.LongConsumer latencyRecorder) {
             if (maxCompletions <= 0 || latencyRecorder == null) {
                 throw new IllegalArgumentException("matching drain batch requires a positive limit and recorder");
             }
@@ -1410,14 +1413,14 @@ final class LinearPerpetualBenchmarkSupport {
                             latencyRecorder.accept(entryNanos == 0 ? 0 : terminalNanos - entryNanos));
         }
 
-        int awaitReadyMatching(int maxCompletions, MatchingCompletionConsumer completionConsumer) {
+        public int awaitReadyMatching(int maxCompletions, MatchingCompletionConsumer completionConsumer) {
             if (maxCompletions <= 0 || completionConsumer == null) {
                 throw new IllegalArgumentException("matching batch requires a positive limit and consumer");
             }
             return commitReadyMatching(maxCompletions, true, completionConsumer);
         }
 
-        int pollReadyMatching(int maxCompletions, MatchingCompletionConsumer completionConsumer) {
+        public int pollReadyMatching(int maxCompletions, MatchingCompletionConsumer completionConsumer) {
             if (maxCompletions <= 0 || completionConsumer == null) {
                 throw new IllegalArgumentException("matching batch requires a positive limit and consumer");
             }
@@ -1459,9 +1462,9 @@ final class LinearPerpetualBenchmarkSupport {
             if (clusterCommandWindow != null) clusterCommandWindow.removePrefix(1);
         }
 
-        @FunctionalInterface
+        public @FunctionalInterface
         interface MatchingCompletionConsumer {
-            void accept(long userId, long scheduledEntryNanos,
+            public void accept(long userId, long scheduledEntryNanos,
                         long acceptedAtNanos, long terminalAtNanos);
         }
 
@@ -1493,7 +1496,7 @@ final class LinearPerpetualBenchmarkSupport {
             }
         }
 
-        void verifyDeferredBatchResponse() {
+        public void verifyDeferredBatchResponse() {
             if (!deferBatchResponseValidation || deferredBatchResponseData == null) {
                 return;
             }
@@ -1521,7 +1524,7 @@ final class LinearPerpetualBenchmarkSupport {
             return response;
         }
 
-        CoreLiquidationWorkView executionWork() {
+        public CoreLiquidationWorkView executionWork() {
             CoreMessage query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.LIQUIDATION_WORK_QUERY,
                     new UUID(99, sequences.clusterPosition++), productLine(),
                     CommandSource.OPERATIONS, sourceId(CommandSource.OPERATIONS), 0, 0,
@@ -1540,7 +1543,7 @@ final class LinearPerpetualBenchmarkSupport {
             return CoreLiquidationWorkCodec.decodeWork(response.data());
         }
 
-        CoreLiquidationWorkView insuranceWork() {
+        public CoreLiquidationWorkView insuranceWork() {
             CoreMessage query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.LIQUIDATION_WORK_QUERY,
                     new UUID(100, sequences.clusterPosition++), productLine(),
                     CommandSource.OPERATIONS, sourceId(CommandSource.OPERATIONS), 0, 0,
@@ -1559,7 +1562,7 @@ final class LinearPerpetualBenchmarkSupport {
             return CoreLiquidationWorkCodec.decodeWork(response.data());
         }
 
-        SnapshotTemplate snapshotTemplate(int accountLanes) {
+        public SnapshotTemplate snapshotTemplate(int accountLanes) {
             byte[] snapshot = state.snapshot();
             return new SnapshotTemplate(snapshot, state.tradingState().businessStateHash(), accountLanes,
                     productLine(), sequences.clusterPosition);
@@ -1569,47 +1572,47 @@ final class LinearPerpetualBenchmarkSupport {
             return state.productLine();
         }
 
-        TradingCoreRuntime state() {
+        public TradingCoreRuntime state() {
             return state;
         }
 
-        long executedMessages() {
+        public long executedMessages() {
             return executedMessages;
         }
 
-        long acceptedMessages() {
+        public long acceptedMessages() {
             return acceptedMessages;
         }
 
-        long terminalMessages() {
+        public long terminalMessages() {
             return terminalMessages;
         }
 
-        long acceptedCoreMessages() {
+        public long acceptedCoreMessages() {
             return acceptedCoreMessages;
         }
 
-        long terminalCoreMessages() {
+        public long terminalCoreMessages() {
             return terminalCoreMessages;
         }
 
-        int maxMatchingBacklog() {
+        public int maxMatchingBacklog() {
             return maxMatchingBacklog;
         }
 
-        int matchingCompletionHighWaterMark() {
+        public int matchingCompletionHighWaterMark() {
             return state.matcherPipeline.completionHighWaterMark();
         }
 
-        int matchingCompletionCapacity() {
+        public int matchingCompletionCapacity() {
             return state.matcherPipeline.capacity();
         }
 
-        int dispatchedSettlementHighWaterMark() {
+        public int dispatchedSettlementHighWaterMark() {
             return state.commits.dispatchedSettlementHighWaterMark();
         }
 
-        long terminalTradeCount() {
+        public long terminalTradeCount() {
             return state.terminalTradeCount();
         }
 
@@ -1659,7 +1662,7 @@ final class LinearPerpetualBenchmarkSupport {
         private long clusterPosition = 1;
         private long orderId = 1_000_000;
 
-        static Sequences after(long appliedCommandCount, long nextClusterPosition) {
+        public static Sequences after(long appliedCommandCount, long nextClusterPosition) {
             Sequences sequences = new Sequences();
             long next = Math.addExact(appliedCommandCount, 1);
             sequences.gateway = next;
@@ -1670,7 +1673,7 @@ final class LinearPerpetualBenchmarkSupport {
             return sequences;
         }
 
-        long next(CommandSource source) {
+        public long next(CommandSource source) {
             return switch (source) {
                 case OPERATIONS -> operations++;
                 case KAFKA_INPUT_BRIDGE -> kafka++;

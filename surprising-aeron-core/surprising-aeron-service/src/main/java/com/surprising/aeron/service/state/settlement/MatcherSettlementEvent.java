@@ -1,0 +1,1146 @@
+package com.surprising.aeron.service.state.settlement;
+
+import com.surprising.aeron.protocol.CoreResultCode;
+import com.surprising.aeron.service.lane.SettlementLaneWorker;
+import com.surprising.aeron.service.state.TradingRuntimeState;
+import com.surprising.aeron.service.state.account.AccountLaneState;
+import com.surprising.aeron.service.state.account.UserRuntime;
+import com.surprising.aeron.service.state.admission.ResolvedPlaceOrder;
+import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
+import com.surprising.aeron.service.state.instrument.CoreInstrument;
+import com.surprising.aeron.service.state.ledger.RuntimeFundsAccumulator;
+import com.surprising.aeron.service.state.ledger.RuntimeTreasuryDelta;
+import com.surprising.aeron.service.state.ledger.SystemLedgerLane;
+import com.surprising.aeron.service.state.ledger.TreasuryRuntime;
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+import com.surprising.aeron.service.state.order.LaneOrderResultTarget;
+import com.surprising.aeron.service.state.order.OrderRuntime;
+import com.surprising.aeron.service.state.order.RuntimeTriggerOrderStateTransitions;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
+
+/**
+ * Immutable matcher fact routed once to every Account Lane it touches.
+ * Mutable completion state is isolated from the fact payload and is only used by the owner coordinator.
+ */
+public final class MatcherSettlementEvent implements
+        SettlementLaneWorker.Command,
+        com.surprising.aeron.service.matching.MatchingResult {
+    public interface MatcherCompletionRoute {
+        void releaseMatcherSubmission(int matcherShard);
+    }
+
+    private static final RuntimeTreasuryDelta EMPTY_TREASURY_DELTA = new RuntimeTreasuryDelta(1);
+    private static final int CACHE_LINE_LONGS = 16;
+    private static final VarHandle LONGS = MethodHandles.arrayElementVarHandle(long[].class);
+
+    private long commitSequence;
+    private long requiredLaneMask;
+    private long commitTimestamp;
+    private long commitClusterPosition;
+    private TradingRuntimeState runtime;
+    private RuntimeIdentityRegistry identities;
+    private RuntimeTreasuryDelta[] touchedLaneTreasuryDeltas;
+    private MatcherSettlementChanges changes;
+    private boolean treasuryTrades;
+    private long[] completedLanes;
+    private boolean collected;
+    /** One retained financial slot for this pooled fact; never a second ledger. */
+    private volatile TreasurySettlement treasurySettlement;
+    /** Owner 已以 acquire 观察到的完成位；本代事件不会倒退，复用时清零。 */
+    private long observedCompletedLaneMask;
+
+    // Storage belongs to this pooled event, never to a shared owner scratch buffer.
+    private BatchStorage batchStorage;
+    /** 本代有效项数；缓冲容量不决定业务执行范围。 */
+    private int batchPlanCount;
+    private boolean cancellation;
+    private long cancellationUserId;
+    private com.surprising.aeron.service.command.order.ResolvedMatchingAdmission replacement;
+    private int replacementAssetId;
+    private long replacementIdentityAllocations;
+    private com.surprising.aeron.service.state.model.CoreTriggerOrderState sourceTrigger;
+    private long triggeredAt;
+    /** Matcher proof sequence for direct events; may differ from the final Lane commit sequence. */
+    private long directCoreSequence;
+    /** Logical dispatch reservation; the Owner reserves it and the Matcher completes publication. */
+    private boolean dispatched;
+    /** Mask of Lane rings that already contain this event. Written by the single Matcher publisher. */
+    private long queuedLaneMask;
+    /** Async single-Lane routes may expand when Matcher discovers maker accounts. */
+    private boolean expandLaneRoute;
+    private volatile boolean directPublished;
+    /** Matcher publication keeps the pooled event alive until its SPSC slot is released. */
+    private volatile boolean matcherPublicationDeferred;
+    private Throwable directFailure;
+    private long routedLaneMask;
+    private java.util.UUID directCommandId;
+    private long directCommandIdMsb;
+    private long directCommandIdLsb;
+    private int directShard;
+    private java.util.List<Long> authorizedCancellations = java.util.List.of();
+    /** Native immutable result used by the allocation-free ordinary Matcher handoff. */
+    private exchange.core2.core.common.MatcherResult directNativeResult;
+    private long directMatcherSequence;
+    private long directLastMatcherSequence;
+    private long directOrderId;
+    private int directNativeItemCount;
+    private long[] directAcceptedCancellations;
+    private int directAcceptedCancellationCount;
+    private boolean directNativeAccepted;
+    private boolean directNativeStateChanged;
+    private String directSyntheticResultCode;
+    private static final exchange.core2.core.common.MatcherResult.MarketData EMPTY_MARKET_DATA =
+            new exchange.core2.core.common.MatcherResult.MarketData(
+                    java.util.List.of(), java.util.List.of(), 0, 0);
+    /** 已有序号上下文的路由；直达结果先释放路由，再通知 Lane。 */
+    private MatcherCompletionRoute matcherCompletionRoute;
+    private int matcherCompletionShard;
+    /** Optional normal-PLACE admission receipt consumed by the Matcher before matching. */
+    private boolean admissionRequired;
+    /** Immutable admission input retained by the pooled settlement until the Matcher builds its fact. */
+    private ResolvedPlaceOrder admissionOrder;
+    private long admissionUserId;
+    private long admissionOrderId;
+    private int admissionLaneId = -1;
+    /** Admission outcome copied from the fixed Lane→Matcher receipt slot. */
+    private volatile boolean admissionResolved;
+    private boolean admissionAccepted;
+    private int admissionResultCode;
+    private long admissionReservationId;
+    private long admissionAccountVersion;
+    private long admissionReservedAmount;
+    /** 完成前由命令持有，不归还结果容器；事件回收时释放引用。 */
+    LaneOrderResultTarget resultTarget;
+    static final class BatchStorage {
+        /** 本批币对ID到首个元数据槽；只在Owner构建阶段写入，事件回收时清空。 */
+        final org.agrona.collections.Int2IntHashMap metadataSlots =
+                new org.agrona.collections.Int2IntHashMap(8, 0.65f, -1, false);
+        final MatcherSettlementPlan[] plans;
+        final CoreInstrument[] instruments;
+        final OrderRuntime[] admittedOrders;
+        final long[] cancellationOrderIds;
+        /** One native result per in-flight item; Matcher writes before Lane publication. */
+        final exchange.core2.core.common.MatcherResult[] nativeResults;
+        exchange.core2.core.common.MatcherResult replacementCancellation;
+        OrderRuntime replacementOrder;
+        final int[] baseAssetIds, quoteAssetIds, settleAssetIds;
+        /** Number of slots populated by the current preparation, not backing capacity. */
+        private int activeSize;
+        BatchStorage(int size) {
+            plans = new MatcherSettlementPlan[size];
+            for (int i = 0; i < size; i++) plans[i] = new MatcherSettlementPlan();
+            instruments = new CoreInstrument[size];
+            admittedOrders = new OrderRuntime[size];
+            cancellationOrderIds = new long[size];
+            nativeResults = new exchange.core2.core.common.MatcherResult[size];
+            baseAssetIds = new int[size]; quoteAssetIds = new int[size]; settleAssetIds = new int[size];
+        }
+        void activate(int size) {
+            if (size <= 0 || size > plans.length) throw new IllegalArgumentException("invalid active batch size");
+            activeSize = size;
+        }
+        void clear() {
+            metadataSlots.clear();
+            for (int index = 0; index < activeSize; index++) {
+                plans[index].clearReferences();
+                instruments[index] = null;
+                admittedOrders[index] = null;
+                cancellationOrderIds[index] = 0;
+                if (nativeResults[index] != null) nativeResults[index].clearCommandSlot();
+            }
+            if (replacementCancellation != null) replacementCancellation.clearCommandSlot();
+            if (replacementOrder != null) replacementOrder.clearCommandSlot();
+            activeSize = 0;
+        }
+    }
+    /** Borrowed until this event retires, never shared with another in-flight command. */
+    public exchange.core2.core.common.MatcherResult nativeResultSlot(int index) {
+        if (batchStorage == null || index < 0 || index >= batchPlanCount || directPublished)
+            throw new IllegalStateException("native result slot is not writable");
+        var result = batchStorage.nativeResults[index];
+        if (result == null) batchStorage.nativeResults[index] = result = exchange.core2.core.common.MatcherResult.commandSlot();
+        return result;
+    }
+
+    public exchange.core2.core.common.MatcherResult replacementCancellationSlot() {
+        if (batchStorage == null || directPublished)
+            throw new IllegalStateException("replacement cancellation is not writable");
+        if (batchStorage.replacementCancellation == null)
+            batchStorage.replacementCancellation = exchange.core2.core.common.MatcherResult.commandSlot();
+        return batchStorage.replacementCancellation;
+    }
+
+    BatchStorage batchStorage(int size) {
+        if (batchPlanCount != 0) throw new IllegalStateException("settlement event is still active");
+        if (size <= 0) throw new IllegalArgumentException("settlement batch must not be empty");
+        if (batchStorage == null || batchStorage.plans.length < size)
+            batchStorage = new BatchStorage(size);
+        batchStorage.activate(size);
+        return batchStorage;
+    }
+
+    public MatcherSettlementEvent() {
+    }
+
+    /** Owner reserves only the existing ordering slot and stable input metadata. */
+    void prepareDirect(long sequence, long laneMask, long timestamp, long position,
+                       java.util.UUID commandId, int shard, TradingRuntimeState runtime,
+                       RuntimeIdentityRegistry identities, int count, java.util.List<Long> cancellations,
+                       LaneOrderResultTarget target) {
+        prepareDirect(sequence, sequence, laneMask, timestamp, position, commandId, shard,
+                runtime, identities, count, cancellations, target);
+    }
+
+    /**
+     * Reserves a direct event with an explicit final Lane commit sequence.  Sequential batch
+     * items use commitSequence=0: their facts are applied and collected immediately, while the
+     * batch's terminal Lane mutation advances the account sequence once for the whole command.
+     */
+    void prepareDirect(long coreSequence, long commitSequence, long laneMask, long timestamp, long position,
+                       java.util.UUID commandId, int shard, TradingRuntimeState runtime,
+                       RuntimeIdentityRegistry identities, int count, java.util.List<Long> cancellations,
+                       LaneOrderResultTarget target) {
+        if (coreSequence <= 0 || commitSequence < 0 || laneMask == 0 || timestamp < 0 || position < 0 || commandId == null
+                || count <= 0 || batchStorage == null || count > batchStorage.plans.length)
+            throw new IllegalArgumentException("invalid direct settlement reservation");
+        cancellation = false; directPublished = false; matcherPublicationDeferred = false;
+        dispatched = false; queuedLaneMask = 0;
+        expandLaneRoute = Long.bitCount(laneMask) == 1;
+        directFailure = null;
+        admissionRequired = false;
+        admissionOrder = null;
+        admissionUserId = admissionOrderId = 0;
+        admissionLaneId = -1;
+        admissionResolved = false;
+        admissionAccepted = false;
+        admissionResultCode = CoreResultCode.NONE.wireCode();
+        admissionReservationId = admissionAccountVersion = admissionReservedAmount = 0;
+        directCoreSequence = coreSequence;
+        this.commitSequence = commitSequence; routedLaneMask = requiredLaneMask = laneMask;
+        commitTimestamp = timestamp; commitClusterPosition = position;
+        directCommandId = commandId;
+        directCommandIdMsb = commandId == null ? 0 : commandId.getMostSignificantBits();
+        directCommandIdLsb = commandId == null ? 0 : commandId.getLeastSignificantBits();
+        directShard = shard;
+        authorizedCancellations = java.util.Objects.requireNonNull(cancellations);
+        this.runtime = runtime; this.identities = identities; resultTarget = target;
+        batchPlanCount = count;
+        changes = runtime.acquireMatcherSettlementChanges(laneMask);
+        changes.directPositionIdentities = true;
+        collected = false;
+        resetCompletions(runtime.topology().accountLaneCount());
+        // Direct events expose their completion through the event-owned padded bitset.  Do not
+        // register per-Lane notification expectations used by materialized settlement plans.
+    }
+
+    /** Owner 在交给 Matcher 前选定撤单业务，Lane 只应用接受的撤单。 */
+    void cancellation(long userId) {
+        if (batchPlanCount == 0 || dispatched || directPublished || userId <= 0)
+            throw new IllegalStateException("invalid direct cancellation preparation");
+        cancellation = true;
+        cancellationUserId = userId;
+    }
+
+    public void triggerCompletion(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
+                                  long timestamp) {
+        if (dispatched || directPublished || batchPlanCount != 1 || trigger == null
+                || timestamp < 0 || sourceTrigger != null)
+            throw new IllegalStateException("invalid direct trigger preparation");
+        sourceTrigger = trigger;
+        triggeredAt = timestamp;
+    }
+
+    void replacement(com.surprising.aeron.service.command.order.ResolvedMatchingAdmission admission, int assetId) {
+        if (dispatched || directPublished || batchPlanCount != 1 || admission == null)
+            throw new IllegalStateException("invalid direct replacement preparation");
+        replacement = admission;
+        replacementAssetId = assetId;
+    }
+
+    public long replacementIdentityAllocations() { return replacementIdentityAllocations; }
+
+    public OrderRuntime admittedOrder() {
+        if (batchPlanCount != 1) throw new IllegalStateException("single direct order is required");
+        return batchStorage.admittedOrders[0];
+    }
+
+    /** An active event always follows direct Matcher publication. */
+    public boolean direct() { return batchPlanCount != 0; }
+    /** Core sequence used by the Lane merge gate. */
+    public long coreSequence() { return directCoreSequence; }
+    int directShard() { return directShard; }
+    TradingRuntimeState runtime() { return runtime; }
+    public boolean dispatched() { return dispatched; }
+    void markLaneQueued(int laneId) {
+        if (batchPlanCount == 0 || !dispatched || laneId < 0 || laneId >= Long.SIZE)
+            throw new IllegalStateException("invalid direct settlement Lane queue");
+        long bit = 1L << laneId;
+        if ((routedLaneMask & bit) == 0 || (queuedLaneMask & bit) != 0) {
+            throw new IllegalStateException("direct settlement Lane queue is outside its route");
+        }
+        queuedLaneMask |= bit;
+    }
+    long queuedLaneMask() { return queuedLaneMask; }
+    long routedLaneMask() { return routedLaneMask; }
+    public boolean ready() { return directPublished && !matcherPublicationDeferred; }
+
+    /** Lane readiness is gated only by the Matcher fact publication. */
+    public boolean readyForLane() {
+        return directPublished;
+    }
+
+    public String admissionResultCode() {
+        return admissionResultCode == CoreResultCode.NONE.wireCode()
+                ? "SUCCESS" : CoreResultCode.fromWireCode(admissionResultCode).name();
+    }
+
+    boolean admissionRequired() { return admissionRequired; }
+    public boolean admissionAccepted() { return !admissionRequired || admissionAccepted; }
+    int admissionLaneId() { return admissionLaneId; }
+
+    void admissionOrder(ResolvedPlaceOrder order, long userId) {
+        if (batchPlanCount == 0 || !admissionRequired || order == null || userId <= 0) {
+            throw new IllegalStateException("invalid place admission order");
+        }
+        admissionOrder = order;
+        admissionUserId = userId;
+        admissionOrderId = order.orderId();
+    }
+
+    /** Matcher copies a receipt slot into this already pooled event. */
+    public void admissionReceipt(long reservationId, long accountVersion, long reservedAmount,
+                          boolean accepted, int resultCode) {
+        if (batchPlanCount == 0 || !admissionRequired || admissionResolved || reservationId <= 0
+                || reservationId != admissionOrderId
+                || accountVersion < 0 || reservedAmount < 0 || resultCode < 0) {
+            throw new IllegalStateException("invalid place admission receipt");
+        }
+        admissionReservationId = reservationId;
+        admissionAccountVersion = accountVersion;
+        admissionReservedAmount = reservedAmount;
+        admissionAccepted = accepted;
+        admissionResultCode = resultCode;
+        admissionResolved = true;
+    }
+
+    /** Matcher 自身用于区分结果已构建和已经允许 Lane 消费，不新增就绪状态。 */
+    public boolean resultPrepared() {
+        return directNativeResult != null
+                || directSyntheticResultCode != null || directFailure != null;
+    }
+
+    /** Defer Owner wake-up while the Matcher still owns the slot and event reference. */
+    public void beginMatcherPublication() {
+        if (batchPlanCount == 0 || !dispatched || directPublished || matcherPublicationDeferred) {
+            throw new IllegalStateException("invalid matcher publication start");
+        }
+        matcherPublicationDeferred = true;
+    }
+
+    /** Finish event publication before the Matcher exposes its transport completion. */
+    public void completeMatcherPublication() {
+        if (batchPlanCount == 0 || !matcherPublicationDeferred) return;
+        if (resultPrepared()) notifyDirectPublication();
+        else matcherPublicationDeferred = false;
+    }
+
+    /** Matcher writes its immutable native result directly into this already-owned pooled event. */
+    public void publishDirectNativeResult(exchange.core2.core.common.MatcherResult result,
+            long coreSequence, long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
+            long orderId, long matcherSequence, int matcherShard) {
+        if (!dispatched || directPublished || batchPlanCount != 1 || result == null
+                || coreSequence != directCoreSequence || directCommandId == null
+                || commandIdMostSignificantBits != directCommandId.getMostSignificantBits()
+                || commandIdLeastSignificantBits != directCommandId.getLeastSignificantBits()
+                || matcherShard != directShard || matcherSequence <= 0) {
+            throw new IllegalStateException("direct native matcher result proof is inconsistent");
+        }
+        try {
+            OrderRuntime admitted = batchStorage.admittedOrders[0];
+            if (cancellation) {
+                if (batchStorage.cancellationOrderIds[0] != orderId)
+                    throw new IllegalStateException("direct cancellation order is inconsistent");
+                batchStorage.plans[0].buildDirectNativeCancellation(directCoreSequence, cancellationUserId,
+                        orderId, result, runtime);
+            } else if (admissionRequired && admissionAccepted) {
+                if (admissionOrder == null || admissionOrder.orderId() != orderId)
+                    throw new IllegalStateException("direct admission order is inconsistent");
+                batchStorage.plans[0].buildDirectNative(directCoreSequence, admissionUserId, admissionOrder,
+                        batchStorage.instruments[0], result, runtime);
+            } else {
+                if (admitted == null || admitted.orderId() != orderId)
+                    throw new IllegalStateException("direct matcher order is inconsistent");
+                batchStorage.plans[0].buildDirectNative(directCoreSequence, admitted,
+                        batchStorage.instruments[0], result, runtime);
+            }
+            directNativeResult = result;
+            directMatcherSequence = matcherSequence;
+            directLastMatcherSequence = matcherSequence;
+            directOrderId = orderId;
+            directNativeItemCount = 1;
+            directNativeAccepted = result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
+                    || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
+            // A rejected placement may still have an accepted cancellation prefix.
+            // Preserve that outcome so commit validates the Lane's final authorization.
+            directNativeStateChanged = directAcceptedCancellationCount != 0 && !directNativeAccepted;
+            if (sourceTrigger != null) {
+                batchStorage.plans[0].completeTrigger(directNativeAccepted
+                        ? RuntimeTriggerOrderStateTransitions.prepareMatchedCompletion(sourceTrigger,
+                                batchStorage.admittedOrders[0].orderId(), triggeredAt)
+                        : RuntimeTriggerOrderStateTransitions.prepareRejectedCompletion(sourceTrigger,
+                                result.resultCode().name(), triggeredAt));
+            }
+            batchStorage.plans[0].acceptedPreCancellations(
+                    directAcceptedCancellations, directAcceptedCancellationCount);
+            finishDirectPublication();
+        } catch (Throwable failure) { failDirect(failure); throw failure; }
+    }
+
+    public void publishDirectNativeBatchItem(exchange.core2.core.common.MatcherResult result,
+            int index, long coreSequence,
+            long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
+            long orderId, long matcherSequence, int matcherShard) {
+        if (!dispatched || directPublished || result == null || batchPlanCount <= 0
+                || index != directNativeItemCount || index < 0 || index >= batchPlanCount
+                || coreSequence != directCoreSequence || directCommandId == null
+                || commandIdMostSignificantBits != directCommandId.getMostSignificantBits()
+                || commandIdLeastSignificantBits != directCommandId.getLeastSignificantBits()
+                || matcherShard != directShard || matcherSequence <= directLastMatcherSequence) {
+            throw new IllegalStateException("direct native matcher batch proof is inconsistent");
+        }
+        try {
+            OrderRuntime admitted = batchStorage.admittedOrders[index];
+            if (cancellation ? batchStorage.cancellationOrderIds[index] != orderId
+                    : admitted == null || admitted.orderId() != orderId)
+                throw new IllegalStateException("direct matcher batch order is inconsistent");
+            if (cancellation) {
+                batchStorage.plans[index].buildDirectNativeCancellation(directCoreSequence, cancellationUserId,
+                        orderId, result, runtime);
+            } else {
+                batchStorage.plans[index].buildDirectNative(directCoreSequence, admitted,
+                        batchStorage.instruments[index], result, runtime);
+            }
+            if (index == 0) {
+                batchStorage.plans[index].acceptedPreCancellations(
+                        directAcceptedCancellations, directAcceptedCancellationCount);
+                directNativeResult = result;
+                directMatcherSequence = matcherSequence;
+                directOrderId = orderId;
+                directNativeAccepted = nativeAccepted(result);
+            }
+            if (resultTarget != null) resultTarget.matcherResult(index, nativeAccepted(result));
+            directLastMatcherSequence = matcherSequence;
+            directNativeItemCount++;
+            if (directNativeItemCount == batchPlanCount) finishDirectPublication();
+        } catch (Throwable failure) { failDirect(failure); throw failure; }
+    }
+
+    public void publishDirectNativeReplacement(
+            exchange.core2.core.common.MatcherResult cancellation,
+            exchange.core2.core.common.MatcherResult result,
+            long coreSequence, long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
+            long orderId, long matcherSequence, int matcherShard) {
+        if (!dispatched || directPublished || replacement == null || batchPlanCount != 1
+                || cancellation == null || result == null || coreSequence != directCoreSequence
+                || directCommandId == null
+                || commandIdMostSignificantBits != directCommandId.getMostSignificantBits()
+                || commandIdLeastSignificantBits != directCommandId.getLeastSignificantBits()
+                || matcherShard != directShard || matcherSequence <= 0
+                || replacement.resolved().orderId() != orderId) {
+            throw new IllegalStateException("direct native replacement proof is inconsistent");
+        }
+        try {
+            boolean cancellationAccepted = nativeAccepted(cancellation);
+            boolean placementAccepted = cancellationAccepted && nativeAccepted(result);
+            boolean businessRejection = cancellationAccepted && !placementAccepted
+                    && result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.MATCHING_POST_ONLY_FAILED;
+            OrderRuntime admitted = batchStorage.admittedOrders[0];
+            if (admitted == null) throw new IllegalStateException("replacement order is missing");
+            batchStorage.plans[0].buildDirectNative(directCoreSequence, admitted,
+                    batchStorage.instruments[0], result, runtime);
+            if (placementAccepted || businessRejection)
+                batchStorage.plans[0].acceptedReplacementCancellation(replacement.originalOrderId());
+            batchStorage.plans[0].acceptedPreCancellations(
+                    directAcceptedCancellations, directAcceptedCancellationCount);
+            if (!placementAccepted) batchStorage.plans[0].omitUnplacedOrder();
+            directNativeResult = result;
+            directMatcherSequence = matcherSequence;
+            directLastMatcherSequence = matcherSequence;
+            directOrderId = orderId;
+            directNativeItemCount = 1;
+            directNativeAccepted = placementAccepted;
+            directNativeStateChanged = cancellationAccepted && !placementAccepted;
+            finishDirectPublication();
+        } catch (Throwable failure) { failDirect(failure); throw failure; }
+    }
+
+    public void publishDirectRejection(String resultCode, long coreSequence,
+            long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
+            long orderId, long matcherSequence, int matcherShard) {
+        if (batchPlanCount == 0 || !dispatched || directPublished || !admissionRequired || admissionAccepted
+                || resultCode == null || resultCode.isBlank() || coreSequence != directCoreSequence
+                || directCommandId == null
+                || commandIdMostSignificantBits != directCommandId.getMostSignificantBits()
+                || commandIdLeastSignificantBits != directCommandId.getLeastSignificantBits()
+                || orderId != admissionOrderId || matcherSequence <= 0 || matcherShard != directShard)
+            throw new IllegalStateException("direct matcher rejection proof is inconsistent");
+        try {
+            batchStorage.plans[0].prepareRejectedDirect(
+                    directCoreSequence, admissionUserId, admissionOrderId, routedLaneMask);
+            directSyntheticResultCode = resultCode;
+            directMatcherSequence = directLastMatcherSequence = matcherSequence;
+            directOrderId = orderId;
+            directNativeAccepted = false;
+            directNativeItemCount = 1;
+            finishDirectPublication();
+        } catch (Throwable failure) { failDirect(failure); throw failure; }
+    }
+
+    private static boolean nativeAccepted(exchange.core2.core.common.MatcherResult result) {
+        return result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
+                || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
+    }
+
+    /** Matcher combines Owner routing decisions with the accepted Lane admission receipt. */
+    public void addAdmissionCancellations(java.util.List<Long> orderIds) {
+        if (batchPlanCount == 0 || directPublished || !admissionResolved || !admissionAccepted)
+            throw new IllegalStateException("place admission cancellations are not ready");
+        if (orderIds.isEmpty()) return;
+        var combined = new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
+        for (int index = 0; index < authorizedCancellations.size(); index++)
+            combined.add(cancellationIdAt(authorizedCancellations, index));
+        for (int index = 0; index < orderIds.size(); index++) {
+            long orderId = cancellationIdAt(orderIds, index);
+            if (orderId <= 0) throw new IllegalArgumentException("invalid admission cancellation order");
+            combined.add(orderId);
+        }
+        long[] sorted = combined.toArray();
+        java.util.Arrays.sort(sorted);
+        authorizedCancellations = com.surprising.aeron.service.command.ImmutableLongArrayList.takeOwnership(sorted);
+    }
+
+    /** Matcher reads the combined decision after consuming admission, before publication. */
+    public java.util.List<Long> admissionCancellations() {
+        if (batchPlanCount == 0 || !admissionResolved || !admissionAccepted)
+            throw new IllegalStateException("place admission cancellations are not ready");
+        return authorizedCancellations;
+    }
+
+    /** Owner validates a completed native prefix against the final immutable authorization. */
+    public java.util.List<Long> completedPreMatchingCancellations() {
+        requireDirectResult();
+        return authorizedCancellations;
+    }
+
+    private static long cancellationIdAt(java.util.List<Long> orderIds, int index) {
+        return orderIds instanceof com.surprising.aeron.service.command.ImmutableLongArrayList primitive
+                ? primitive.valueAt(index) : orderIds.get(index);
+    }
+
+    public void recordDirectPreCancellation(long orderId) {
+        boolean authorized = authorizedCancellations instanceof com.surprising.aeron.service.command.ImmutableLongArrayList primitive
+                ? primitive.containsLong(orderId) : authorizedCancellations.contains(orderId);
+        if (batchPlanCount == 0 || directPublished || orderId <= 0 || !authorized)
+            throw new IllegalStateException("unauthorized direct pre-cancellation");
+        if (directAcceptedCancellations == null)
+            directAcceptedCancellations = new long[Math.max(4, authorizedCancellations.size())];
+        if (directAcceptedCancellationCount == directAcceptedCancellations.length)
+            directAcceptedCancellations = java.util.Arrays.copyOf(
+                    directAcceptedCancellations, directAcceptedCancellations.length * 2);
+        directAcceptedCancellations[directAcceptedCancellationCount++] = orderId;
+    }
+
+    public boolean hasDirectNativeResult() { return directNativeResult != null; }
+    public exchange.core2.core.common.MatcherResult directNativeResult() {
+        requireDirectResult();
+        if (directNativeResult == null) throw new IllegalStateException("direct native result is missing");
+        return directNativeResult;
+    }
+    public boolean directNativeAccepted() { requireDirectResult(); return directNativeAccepted; }
+    public long directMatcherSequence() { return directMatcherSequence; }
+    public long directLastMatcherSequence() { return directLastMatcherSequence; }
+    public int directMatcherShard() { return directShard; }
+    public long directResultCoreSequence() { return directCoreSequence; }
+    public boolean directCommandMatches(java.util.UUID commandId) {
+        return directCommandId != null && directCommandId.equals(commandId);
+    }
+
+    private void finishDirectPublication() {
+        long actualLanes = 0; int orders = 0;
+        for (int index = 0; index < batchPlanCount; index++) {
+            actualLanes |= batchStorage.plans[index].requiredLaneMask();
+            orders = Math.addExact(orders, batchStorage.plans[index].orderCount());
+        }
+        // The initial route contains only the taker's Lane. The Matcher discovers maker Lanes
+        // while building the immutable fact, then publishes to each Lane's Matcher mailbox.
+        // Each Lane applies its facts in order. The initial Lane remains in the route.
+        if (actualLanes == 0
+                || !expandLaneRoute && (actualLanes & ~routedLaneMask) != 0
+                || expandLaneRoute && (routedLaneMask & ~actualLanes) != 0)
+            throw new IllegalStateException("matcher result escaped its admitted Lane dependency scope");
+        if (expandLaneRoute) routedLaneMask = actualLanes;
+        requiredLaneMask = actualLanes;
+        treasuryTrades = hasTrade(batchStorage.plans, batchPlanCount);
+        prepareTreasuryDeltas(actualLanes, treasuryTrades);
+        changes.ensureOrderCapacity(orders, actualLanes);
+        if (!matcherPublicationDeferred) notifyDirectPublication();
+    }
+
+    public void failDirect(Throwable failure) {
+        if (batchPlanCount == 0 || directPublished) return;
+        if (!dispatched) throw new IllegalStateException("Matcher publication was not reserved");
+        directFailure = java.util.Objects.requireNonNull(failure);
+        if (!matcherPublicationDeferred) notifyDirectPublication();
+    }
+
+    private void notifyDirectPublication() {
+        TradingRuntimeState completionRuntime = runtime;
+        // Lane may consume a prepared fact as soon as its queue publication is visible.
+        // Owner cannot recycle it until the producer has released its route and finished every enqueue.
+        matcherPublicationDeferred = true;
+        releaseMatcherCompletionBeforeSignal();
+        directPublished = true;
+        completionRuntime.settlements().publishMatcherOwned(this);
+        matcherPublicationDeferred = false;
+        // The producer has relinquished the event. Only the captured runtime may be accessed now.
+        completionRuntime.signalOwnerCompletion();
+    }
+
+    /** 由 Matcher pipeline 设置；复用已有 Context，不为每笔直达命令创建回调对象。 */
+    public void matcherCompletionRoute(MatcherCompletionRoute route, int matcherShard) {
+        if (batchPlanCount == 0 || directPublished || matcherCompletionRoute != null || matcherShard < 0) {
+            throw new IllegalStateException("invalid matcher completion release callback");
+        }
+        matcherCompletionRoute = java.util.Objects.requireNonNull(route);
+        matcherCompletionShard = matcherShard;
+    }
+
+    private void releaseMatcherCompletionBeforeSignal() {
+        MatcherCompletionRoute route = matcherCompletionRoute;
+        int shard = matcherCompletionShard;
+        matcherCompletionRoute = null;
+        matcherCompletionShard = -1;
+        if (route != null) route.releaseMatcherSubmission(shard);
+    }
+
+    public com.surprising.aeron.service.matching.MatchingResult directResult() {
+        requireDirectResult();
+        return this;
+    }
+    /** A direct Matcher failure is prepared too, but has no result that can advance evidence. */
+    public boolean directResultAvailable() {
+        return directPublished && directFailure == null
+                && hasEventOwnedResult();
+    }
+    @Override public boolean accepted() {
+        return directNativeAccepted;
+    }
+    @Override public String resultCode() {
+        if (directSyntheticResultCode != null) return directSyntheticResultCode;
+        return directNativeResult.resultCode().name();
+    }
+    @Override public java.util.List<com.surprising.aeron.service.matching.CoreCancellationResult> cancellations() {
+        return java.util.List.of();
+    }
+    @Override public int successfulPrefixCount() {
+        return 0;
+    }
+    @Override public boolean matcherStateChanged() {
+        return directNativeStateChanged;
+    }
+    @Override public com.surprising.aeron.service.matching.MatchingResult.Outcome outcome() {
+        if (directNativeStateChanged) {
+            return directNativeResult != null
+                    && directNativeResult.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.MATCHING_POST_ONLY_FAILED
+                    ? com.surprising.aeron.service.matching.MatchingResult.Outcome.KNOWN_PREFIX_APPLIED
+                    : com.surprising.aeron.service.matching.MatchingResult.Outcome.FATAL_DIVERGENCE;
+        }
+        return directNativeAccepted
+                ? com.surprising.aeron.service.matching.MatchingResult.Outcome.APPLIED
+                : com.surprising.aeron.service.matching.MatchingResult.Outcome.REJECTED_UNCHANGED;
+    }
+    @Override public long nativeCoreSequence() {
+        return directCoreSequence;
+    }
+    @Override public long nativeOrderId() {
+        return directOrderId;
+    }
+    @Override public long nativeMatcherSequence() {
+        return directMatcherSequence;
+    }
+    @Override public int nativeMatcherShardId() {
+        return directShard;
+    }
+    @Override public boolean nativeMatches(long most, long least) {
+        return directCommandIdMsb == most && directCommandIdLsb == least;
+    }
+    @Override public boolean nativeMatches(java.util.UUID commandId) {
+        return commandId != null && nativeMatches(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
+    }
+    @Override public exchange.core2.core.common.MatcherResult nativeMatcherResult() {
+        return directNativeResult;
+    }
+    @Override public java.util.List<exchange.core2.core.common.MatcherResult.MatcherEvent> matcherEvents() {
+        if (directSyntheticResultCode != null) return java.util.List.of();
+        return directNativeResult.events();
+    }
+    @Override public exchange.core2.core.common.MatcherResult.MarketData marketData() {
+        if (directSyntheticResultCode != null) return EMPTY_MARKET_DATA;
+        return directNativeResult.marketData();
+    }
+    private boolean hasEventOwnedResult() {
+        return directNativeResult != null || directSyntheticResultCode != null;
+    }
+    private void requireDirectResult() {
+        if (batchPlanCount == 0 || !directPublished) throw new IllegalStateException("direct result is not published");
+        if (directFailure != null) throw new IllegalStateException("direct matcher failed", directFailure);
+    }
+
+    void admissionRoute(int laneId) {
+        if (batchPlanCount == 0 || admissionRequired || laneId < 0) {
+            throw new IllegalStateException("invalid place admission route");
+        }
+        admissionRequired = true;
+        admissionLaneId = laneId;
+    }
+
+    /** Reserve the logical dispatch state before Matcher publication; no Lane queue is touched. */
+    public void reserveMatcherPublication() {
+        if (batchPlanCount == 0 || dispatched || directPublished) {
+            throw new IllegalStateException("invalid Matcher publication reservation");
+        }
+        dispatched = true;
+    }
+
+    void clear() {
+        if (!complete() || changes != null) {
+            throw new IllegalStateException("cannot recycle an incomplete matcher settlement");
+        }
+        if (treasurySettlement != null) treasurySettlement.clear();
+        cancellation = false; directPublished = false; directFailure = null; dispatched = false;
+        queuedLaneMask = 0;
+        expandLaneRoute = false;
+        matcherPublicationDeferred = false;
+        cancellationUserId = 0;
+        replacement = null;
+        replacementAssetId = 0;
+        replacementIdentityAllocations = 0;
+        sourceTrigger = null;
+        triggeredAt = 0;
+        matcherCompletionRoute = null;
+        matcherCompletionShard = -1;
+        admissionRequired = false;
+        admissionOrder = null;
+        admissionUserId = admissionOrderId = 0;
+        admissionLaneId = -1;
+        admissionResolved = false;
+        admissionAccepted = false;
+        admissionResultCode = CoreResultCode.NONE.wireCode();
+        admissionReservationId = admissionAccountVersion = admissionReservedAmount = 0;
+        directCoreSequence = 0;
+        directCommandId = null;
+        directCommandIdMsb = directCommandIdLsb = 0;
+        authorizedCancellations = java.util.List.of();
+        directNativeResult = null;
+        directMatcherSequence = directLastMatcherSequence = directOrderId = 0;
+        directNativeItemCount = 0;
+        directAcceptedCancellationCount = 0;
+        directNativeAccepted = directNativeStateChanged = false;
+        directSyntheticResultCode = null;
+        routedLaneMask = 0;
+        resultTarget = null;
+        if (batchStorage != null) batchStorage.clear();
+        batchPlanCount = 0;
+        runtime = null;
+        identities = null;
+        treasuryTrades = false;
+        collected = false;
+    }
+
+    public void execute(AccountLaneState lane) {
+        requireDirectResult();
+        int laneId = lane.laneId();
+        long laneMask = 1L << laneId;
+        if ((requiredLaneMask & laneMask) == 0) {
+            if ((routedLaneMask & laneMask) != 0) {
+                publishCompletion(lane);
+                return;
+            }
+            throw new IllegalStateException("matcher fact was routed to an unrelated account lane");
+        }
+        // A direct normal PLACE is queued behind its admission on the same Lane.  If admission
+        // rejected, consume this already-submitted matcher fact as a no-op so the Owner can
+        // retire the pooled event without touching account state.
+        if (admissionRequired && !admissionResolved) {
+            throw new IllegalStateException("place admission receipt is missing");
+        }
+        if (admissionRequired && !admissionAccepted) {
+            changes().prepareLaneTerminal(laneId, identities, lane, runtime, directCoreSequence);
+            publishCompletion(lane);
+            return;
+        }
+        runtime.enterMatcherSettlementScope(lane, changes());
+        try {
+            RuntimeTreasuryDelta delta = !treasuryTrades
+                    ? EMPTY_TREASURY_DELTA : touchedLaneTreasuryDeltas[laneSlot(laneId)];
+            for (int index = 0; index < batchPlanCount; index++) {
+                MatcherSettlementPlan batchPlan = batchStorage.plans[index];
+                if ((batchPlan.requiredLaneMask() & laneMask) == 0) continue;
+                applyPlan(lane, laneId, batchPlan, batchStorage.instruments[index],
+                        batchStorage.baseAssetIds[index], batchStorage.quoteAssetIds[index],
+                        batchStorage.settleAssetIds[index], delta,
+                        batchStorage.admittedOrders[index]);
+                if (commitSequence != 0 || cancellation) {
+                    runtime.stampMatcherOrders(
+                            lane, batchPlan, commitTimestamp, commitClusterPosition);
+                }
+            }
+            changes.prepareLaneTerminal(laneId, identities, lane, runtime, directCoreSequence);
+            if (resultTarget != null
+                    && laneId == runtime.topology().accountLaneId(plan().activeUserId())) {
+                LaneOrderResultTarget.capture(resultTarget, changes.laneDeltas[laneId], identities, lane);
+            }
+            if (commitSequence != 0) {
+                lane.applied(commitSequence);
+                lane.committed(commitSequence);
+                runtime.publishLaneCommittedSequence(lane);
+            }
+        } finally {
+            runtime.exitMatcherSettlementScope(lane, changes);
+        }
+        // Publish each Lane independently. The owner validates the event-wide completion fence,
+        // avoiding a contended atomic OR written by every Lane.
+        publishCompletion(lane);
+    }
+
+    private void publishCompletion(AccountLaneState lane) {
+        int laneId = lane.laneId();
+        TradingRuntimeState completionRuntime = runtime;
+        lane.recordSettlementOperation();
+        int completionOffset = laneId * CACHE_LINE_LONGS;
+        if ((long) LONGS.getAcquire(completedLanes, completionOffset) != 0) {
+            throw new IllegalStateException("account lane completed the same matcher fact twice");
+        }
+        LONGS.setRelease(completedLanes, completionOffset, 1L);
+        completionRuntime.publishDirectMatcherSettlementReady(laneId);
+    }
+
+    private void applyPlan(AccountLaneState lane, int laneId, MatcherSettlementPlan value,
+                           CoreInstrument valueInstrument, int valueBaseAssetId,
+                           int valueQuoteAssetId, int valueSettleAssetId, RuntimeTreasuryDelta delta,
+                           OrderRuntime admissionVersion) {
+        if (cancellation) {
+            if (!value.rejectedTaker())
+                runtime.cancelOrderInLane(lane, value.activeUserId(), value.takerOrderId(),
+                        commitTimestamp, commitClusterPosition);
+            return;
+        }
+        if (replacement != null) {
+            applyReplacement(lane, value);
+            if (!accepted()) return;
+        }
+        value.validateDirectLane(lane, runtime, identities, valueInstrument);
+        for (int index = 0; replacement == null && index < value.preCancellationCount(); index++) {
+            long orderId = value.preCancellationOrderId(index);
+            OrderRuntime order = lane.order(orderId);
+            if (order != null && order.status() == CoreOrderStatus.OPEN) {
+                runtime.cancelOrderInLane(lane, order.userId(), orderId);
+            }
+        }
+        if (value.rejectedTaker()) {
+            if (lane.laneId() == runtime.accountLaneId(value.activeUserId()))
+                runtime.rejectOrderInLane(lane, value.activeUserId(), value.takerOrderId(), commitTimestamp, commitClusterPosition);
+        } else if (valueInstrument.contractType().productLine().isDerivative()) {
+            RuntimeDerivativeMatchProcessor.applyLane(value.takerOrderId(), value, lane, laneId,
+                    runtime, identities, valueInstrument, valueSettleAssetId, delta, commitTimestamp, commitClusterPosition);
+        } else {
+            RuntimeSpotMatchProcessor.applyLane(value.takerOrderId(), value, lane, laneId,
+                    runtime, valueInstrument, valueBaseAssetId, valueQuoteAssetId, delta, commitTimestamp, commitClusterPosition);
+        }
+        runtime.completeMatcherPendingReservations(lane, value, admissionVersion);
+        publishAdmittedState(lane, value, admissionVersion);
+        var trigger = value.completedTrigger();
+        if (trigger != null && lane.laneId() == runtime.accountLaneId(trigger.userId())) runtime.putTriggerOrder(lane, trigger);
+    }
+
+    /**
+     * Admission is provisional until this matcher fact retires. Publish its final Lane values in
+     * the same terminal delta, including the no-fill resting-order case that has no other state
+     * mutation. Existing changed keys are coalesced by the Lane buffers.
+     */
+    private void publishAdmittedState(
+            AccountLaneState lane, MatcherSettlementPlan value, OrderRuntime admissionVersion) {
+        OrderRuntime admitted = admissionVersion == null ? value.admittedTaker() : admissionVersion;
+        boolean eventAdmission = admissionRequired && admissionAccepted && admissionOrder != null;
+        long userId = admitted != null ? admitted.userId()
+                : eventAdmission ? admissionUserId : value.activeUserId();
+        long orderId = admitted != null ? admitted.orderId()
+                : eventAdmission ? admissionOrderId : value.takerOrderId();
+        if ((admitted == null && value.resolvedTaker() == null && !eventAdmission)
+                || lane.laneId() != runtime.accountLaneId(userId)) return;
+        runtime.publishUser(lane, userId, lane.user(userId));
+        runtime.publishOrder(lane, orderId, lane.order(orderId));
+        runtime.publishReservation(lane, orderId, lane.reservation(orderId));
+    }
+
+    private void applyReplacement(AccountLaneState lane, MatcherSettlementPlan value) {
+        if (lane.laneId() != runtime.accountLaneId(replacement.userId())) return;
+        long userId = replacement.userId();
+        OrderRuntime original = lane.order(replacement.originalOrderId());
+        UserRuntime user = lane.user(userId);
+        if (original == null || original.revision() != replacement.originalOrderRevision()
+                || user == null || user.revision() != replacement.userRevision())
+            throw new IllegalStateException("replace admission changed before Lane execution: order="
+                    + (original == null ? "missing" : original.revision()) + '/'
+                    + replacement.originalOrderRevision() + " user="
+                    + (user == null ? "missing" : user.revision()) + '/' + replacement.userRevision());
+        for (int index = 0; index < value.preCancellationCount(); index++)
+            runtime.cancelOrderInLane(lane, userId, value.preCancellationOrderId(index),
+                    commitTimestamp, commitClusterPosition);
+        if (!accepted()) return;
+        OrderRuntime prepared = batchStorage.admittedOrders[0];
+        if (lane.order(replacement.originalOrderId()).status() != CoreOrderStatus.CANCELED)
+            throw new IllegalStateException("accepted replacement did not cancel original order");
+        long allocationsBefore = lane.clientIdentityAllocations();
+        long clientKey = RuntimeIdentityRegistry.clientKeyValue(
+                identities.prepareClientKeyInLane(lane, userId, prepared.clientOrderId()));
+        replacementIdentityAllocations = lane.clientIdentityAllocations() - allocationsBefore;
+        runtime.accountRollback().captureBalanceBefore(lane, userId, replacementAssetId);
+        runtime.placeOrderInLane(lane, userId, replacement.resolved(), directCommandId,
+                replacement.requiredReservationUnits(), clientKey, prepared.symbolId(), replacementAssetId,
+                directCoreSequence, prepared, commitTimestamp, commitClusterPosition);
+        runtime.publishUser(lane, userId, lane.user(userId));
+        runtime.publishOrder(lane, prepared.orderId(), lane.order(prepared.orderId()));
+        runtime.publishReservation(lane, prepared.orderId(), lane.reservation(prepared.orderId()));
+        runtime.accountRollback().captureBalanceAfter(lane, userId, replacementAssetId);
+    }
+
+    /**
+     * Treasury slots follow the compact touched-Lane order used by laneSlot(). Capacity belongs
+     * to the pooled event: initial admission often touches one Lane, then matching discovers
+     * more. Keep the cells through that expansion and through the next single-Lane admission.
+     */
+    private void prepareTreasuryDeltas(long laneMask, boolean trades) {
+        if (trades) {
+            int touchedLaneCount = Long.bitCount(laneMask);
+            int capacity = touchedLaneTreasuryDeltas == null ? 0 : touchedLaneTreasuryDeltas.length;
+            if (capacity < touchedLaneCount) {
+                touchedLaneTreasuryDeltas = capacity == 0
+                        ? new RuntimeTreasuryDelta[touchedLaneCount]
+                        : java.util.Arrays.copyOf(touchedLaneTreasuryDeltas, touchedLaneCount);
+                for (int index = capacity; index < touchedLaneCount; index++) {
+                    touchedLaneTreasuryDeltas[index] = new RuntimeTreasuryDelta();
+                }
+            }
+        }
+        // Called once after the actual fact is known, including no-trade reuse after a fill.
+        if (touchedLaneTreasuryDeltas != null)
+            for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) delta.clear();
+    }
+
+    private static boolean hasTrade(MatcherSettlementPlan[] plans, int planCount) {
+        for (int index = 0; index < planCount; index++) if (plans[index].tradeCount() != 0) return true;
+        return false;
+    }
+
+    public long commitSequence() { return commitSequence; }
+    public long requiredLaneMask() { return requiredLaneMask; }
+    public long completedLaneMask() {
+        if (!ready()) return 0;
+        long remaining = routedLaneMask() & ~observedCompletedLaneMask;
+        while (remaining != 0) {
+            int laneId = Long.numberOfTrailingZeros(remaining);
+            long bit = 1L << laneId;
+            remaining &= ~bit;
+            if ((long) LONGS.getAcquire(completedLanes, laneId * CACHE_LINE_LONGS) != 0)
+                observedCompletedLaneMask |= bit;
+        }
+        return observedCompletedLaneMask;
+    }
+
+    /** Ledger reads release markers without mutating the Owner's completion cache or running a Lane. */
+    boolean accountLanesCompleteForLedger() {
+        if (!ready()) return false;
+        long remaining = routedLaneMask();
+        while (remaining != 0) {
+            int laneId = Long.numberOfTrailingZeros(remaining);
+            remaining &= remaining - 1;
+            if ((long) LONGS.getAcquire(completedLanes, laneId * CACHE_LINE_LONGS) == 0) return false;
+        }
+        return true;
+    }
+
+    public void ensureLanesExecuted() {
+        if (!ready() || runtime == null || runtime.accountLanesStarted() || !dispatched) return;
+        long remaining = routedLaneMask() & ~completedLaneMask();
+        while (remaining != 0) {
+            int laneId = Long.numberOfTrailingZeros(remaining);
+            remaining &= remaining - 1;
+            if ((queuedLaneMask & (1L << laneId)) == 0) {
+                markLaneQueued(laneId);
+            }
+            execute(runtime.accountLane(laneId));
+        }
+    }
+
+    public boolean complete() {
+        if (ownerObservedComplete) return true;
+        if (!ready()) return false;
+        ensureLanesExecuted();
+        if (completedLaneMask() != routedLaneMask()) return false;
+        if (treasurySettlement != null && treasurySettlement.localNoTrade && !treasurySettlement.completed) {
+            treasurySettlement.completeLocalNoTrade();
+        }
+        boolean done = treasurySettlement == null || treasurySettlement.ledger == null || treasurySettlement.completed;
+        if (done) ownerObservedComplete = true;
+        return done;
+    }
+    public MatcherSettlementPlan plan() { return plan(0); }
+    public int planCount() { return batchPlanCount; }
+    OrderRuntime admittedOrder(int index) {
+        if (index < 0 || index >= planCount()) throw new IndexOutOfBoundsException(index);
+        return batchStorage.admittedOrders[index];
+    }
+    public MatcherSettlementPlan plan(int index) {
+        if (index < 0 || index >= planCount()) throw new IndexOutOfBoundsException(index);
+        return batchStorage.plans[index];
+    }
+    public RuntimeIdentityRegistry identities() { return identities; }
+    CoreInstrument instrument() { return batchStorage.instruments[0]; }
+    int baseAssetId() { return batchStorage.baseAssetIds[0]; }
+    int quoteAssetId() { return batchStorage.quoteAssetIds[0]; }
+    int settleAssetId() { return batchStorage.settleAssetIds[0]; }
+    MatcherSettlementChanges changes() {
+        if (changes == null) throw new IllegalStateException("matcher settlement changes are unavailable");
+        return changes;
+    }
+
+    boolean hasChanges() { return changes != null; }
+    public MatcherSettlementChanges takeChanges() {
+        MatcherSettlementChanges value = changes();
+        changes = null;
+        return value;
+    }
+
+    public RuntimeTreasuryDelta collectTreasuryDelta() {
+        return collectTreasuryDelta(null);
+    }
+
+    public RuntimeTreasuryDelta collectTreasuryDelta(RuntimeFundsAccumulator target) {
+        if (!complete()) return null;
+        if (collected) throw new IllegalStateException("matcher settlement event was already collected");
+        if (hasLedgerSettlement() && target != null)
+            throw new IllegalStateException("Ledger funds remain on SystemLedgerLane");
+        collected = true;
+        if (treasurySettlement != null && treasurySettlement.queued) return EMPTY_TREASURY_DELTA;
+        return mergeTreasuryDeltas();
+    }
+
+    private RuntimeTreasuryDelta mergeTreasuryDeltas() {
+        if (!treasuryTrades) return EMPTY_TREASURY_DELTA;
+        RuntimeTreasuryDelta aggregate = null;
+        int touchedLaneCount = Long.bitCount(requiredLaneMask);
+        for (int index = 0; index < touchedLaneCount; index++) {
+            RuntimeTreasuryDelta delta = touchedLaneTreasuryDeltas[index];
+            if (aggregate == null) aggregate = delta;
+            else aggregate.merge(delta);
+        }
+        if (aggregate == null) throw new IllegalStateException("matcher settlement event has no lane delta");
+        return aggregate;
+    }
+
+    public boolean submitTreasurySettlement(SystemLedgerLane ledger) {
+        if (ledger == null || runtime == null || changes == null || collected)
+            throw new IllegalStateException("Ledger settlement requires retained isolated account facts");
+        if (treasurySettlement == null) treasurySettlement = new TreasurySettlement();
+        if (treasurySettlement.queued) throw new IllegalStateException("Treasury settlement was already queued");
+        ownerObservedComplete = false;
+        if (ready() && !treasuryTrades) {
+            ledger.assertHealthy();
+            treasurySettlement.ledger = ledger;
+            treasurySettlement.localNoTrade = true;
+            treasurySettlement.queued = true;
+            if (completedLaneMask() == routedLaneMask()) {
+                treasurySettlement.completeLocalNoTrade();
+                ownerObservedComplete = true;
+            }
+            return true;
+        }
+        treasurySettlement.ledger = ledger;
+        if (runtime.isFusedExecution() && ledger.tryApplyInline(treasurySettlement)) {
+            treasurySettlement.queued = true;
+            return true;
+        }
+        if (!ledger.offer(treasurySettlement)) return false;
+        treasurySettlement.queued = true;
+        return true;
+    }
+
+    public boolean hasLedgerSettlement() { return treasurySettlement != null && treasurySettlement.queued; }
+
+    private final class TreasurySettlement implements SystemLedgerLane.Entry {
+        private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
+        private volatile SystemLedgerLane ledger;
+        private boolean queued;
+        private boolean localNoTrade;
+        private volatile boolean completed;
+
+        @Override public boolean ready() { return accountLanesCompleteForLedger(); }
+
+        void completeLocalNoTrade() {
+            if (completed) return;
+            changes.appendFundsDelta(requiredLaneMask, funds);
+            funds.requireConserved(false);
+            funds.clear();
+            completed = true;
+        }
+
+        @Override public void apply(TreasuryRuntime treasury) {
+            if (!ready() || completed || treasury.hasChangedValues())
+                throw new IllegalStateException("invalid Ledger financial scope");
+            mergeTreasuryDeltas().apply(treasury);
+            changes.appendFundsDelta(requiredLaneMask, funds);
+            treasury.appendFundsDelta(funds);
+            funds.requireConserved(false);
+            funds.clear();
+            runtime.applyLedgerSettlementPositions(changes, requiredLaneMask, identities);
+            treasury.clearChangedKeys();
+            TradingRuntimeState completionRuntime = runtime;
+            // Owner may immediately move the buffers and recycle this slot. Capture the wake
+            // target first and never read any slot/event fields after publishing completion.
+            completed = true;
+            completionRuntime.signalOwnerCompletion();
+        }
+
+        void clear() {
+            if (ledger != null && !completed) throw new IllegalStateException("Ledger still owns this settlement");
+            if (!funds.isEmpty()) throw new IllegalStateException("Ledger funds scratch was not cleared");
+            ledger = null;
+            queued = localNoTrade = completed = false;
+        }
+    }
+
+    private int laneSlot(int laneId) {
+        long laneBit = 1L << laneId;
+        if ((requiredLaneMask & laneBit) == 0) {
+            throw new IllegalStateException("matcher fact has no treasury slot for lane " + laneId);
+        }
+        return Long.bitCount(requiredLaneMask & (laneBit - 1));
+    }
+
+    private boolean ownerObservedComplete;
+
+    private void resetCompletions(int laneCount) {
+        observedCompletedLaneMask = 0;
+        ownerObservedComplete = false;
+        int length = Math.multiplyExact(laneCount, CACHE_LINE_LONGS);
+        if (completedLanes == null || completedLanes.length != length) {
+            completedLanes = new long[length];
+        } else {
+            for (int laneId = 0; laneId < laneCount; laneId++) {
+                completedLanes[laneId * CACHE_LINE_LONGS] = 0L;
+            }
+        }
+    }
+}

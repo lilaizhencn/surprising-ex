@@ -1,8 +1,10 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.change.LaneCommitDelta;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import java.util.ArrayList;
 import org.junit.jupiter.api.Test;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LaneTerminalSummaryTest {
