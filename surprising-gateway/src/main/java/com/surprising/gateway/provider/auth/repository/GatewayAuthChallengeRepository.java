@@ -1,4 +1,6 @@
-package com.surprising.gateway.provider.auth;
+package com.surprising.gateway.provider.auth.repository;
+
+import com.surprising.gateway.provider.auth.model.AuthChallenge;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -15,7 +17,7 @@ public class GatewayAuthChallengeRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public Challenge create(long userId,
+    public AuthChallenge create(long userId,
                             String purpose,
                             String channel,
                             String destination,
@@ -30,7 +32,7 @@ public class GatewayAuthChallengeRepository {
 ) VALUES (?, ?, ?, ?, ?, ?, 0, CAST(? AS inet), ?)
                 RETURNING challenge_id, user_id, purpose, channel, destination,
                           code_hash, expires_at, attempts, consumed_at
-                """, (rs, rowNum) -> new Challenge(
+                """, (rs, rowNum) -> new AuthChallenge(
                         rs.getLong("challenge_id"),
                         rs.getLong("user_id"),
                         rs.getString("purpose"),
@@ -44,7 +46,7 @@ public class GatewayAuthChallengeRepository {
                 Timestamp.from(expiresAt), requestIp, Timestamp.from(now));
     }
 
-    public Optional<Challenge> findActive(long userId, String purpose, String destination, Instant now) {
+    public Optional<AuthChallenge> findActive(long userId, String purpose, String destination, Instant now) {
         return jdbcTemplate.query("""
                 SELECT challenge_id, user_id, purpose, channel, destination,
                        code_hash, expires_at, attempts, consumed_at
@@ -60,7 +62,7 @@ public class GatewayAuthChallengeRepository {
                 Timestamp.from(now)).stream().findFirst();
     }
 
-    public Optional<Challenge> findActive(long challengeId, long userId, String purpose, Instant now) {
+    public Optional<AuthChallenge> findActive(long challengeId, long userId, String purpose, Instant now) {
         return jdbcTemplate.query("""
                 SELECT challenge_id, user_id, purpose, channel, destination, code_hash,
                        expires_at, attempts, consumed_at
@@ -98,17 +100,9 @@ public class GatewayAuthChallengeRepository {
                 Timestamp.from(now)) > 0;
     }
 
-    public void markEmailVerified(long userId, Instant now) {
-        jdbcTemplate.update("""
-                UPDATE gateway_users
-                   SET email_verified_at = COALESCE(email_verified_at, ?),
-                       updated_at = ?
-                 WHERE user_id = ?
-                """, Timestamp.from(now), Timestamp.from(now), userId);
-    }
 
-    private Challenge toChallenge(java.sql.ResultSet rs) throws java.sql.SQLException {
-        return new Challenge(
+    private AuthChallenge toChallenge(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new AuthChallenge(
                 rs.getLong("challenge_id"),
                 rs.getLong("user_id"),
                 rs.getString("purpose"),
@@ -125,15 +119,4 @@ public class GatewayAuthChallengeRepository {
         return value == null ? null : value.toInstant();
     }
 
-    public record Challenge(
-            long challengeId,
-            long userId,
-            String purpose,
-            String channel,
-            String destination,
-            String codeHash,
-            Instant expiresAt,
-            int attempts,
-            Instant consumedAt) {
-    }
 }

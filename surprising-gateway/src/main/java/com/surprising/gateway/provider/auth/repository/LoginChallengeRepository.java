@@ -1,4 +1,7 @@
-package com.surprising.gateway.provider.auth;
+package com.surprising.gateway.provider.auth.repository;
+
+import com.surprising.gateway.provider.auth.model.LoginVerificationRows;
+import com.surprising.gateway.provider.auth.model.LoginVerificationRows.Challenge;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -8,60 +11,13 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
-/** 每个用户每种用途仅一条挑战；行锁串行化验证、失败计数与一次性消费。 */
+/** 只访问gateway_login_challenges；用户行锁和跨表业务由Service聚合。 */
 @Repository
-public class LoginVerificationRepository {
+public class LoginChallengeRepository {
     private final JdbcTemplate jdbc;
 
-    public LoginVerificationRepository(JdbcTemplate jdbc) {
+    public LoginChallengeRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
-    }
-
-    public void lockUser(long userId) {
-        jdbc.queryForObject(
-                "SELECT user_id FROM gateway_users WHERE user_id=? FOR UPDATE", Long.class, userId);
-    }
-
-    public List<Factor> factors(long userId) {
-        return jdbc.query(
-                "SELECT method,destination,enabled,verified_at,updated_at FROM"
-                    + " gateway_login_factors WHERE user_id=? ORDER BY method",
-                (r, n) ->
-                        new Factor(
-                                r.getString(1),
-                                r.getString(2),
-                                r.getBoolean(3),
-                                r.getTimestamp(4).toInstant(),
-                                r.getTimestamp(5).toInstant()),
-                userId);
-    }
-
-    public void saveFactor(
-            long userId, String method, String destination, boolean enabled, Instant now) {
-        jdbc.update(
-                """
-                INSERT INTO gateway_login_factors(user_id,method,destination,enabled,verified_at,updated_at)
-                VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,method) DO UPDATE
-                SET destination=EXCLUDED.destination,enabled=EXCLUDED.enabled,verified_at=EXCLUDED.verified_at,updated_at=EXCLUDED.updated_at
-                """,
-                userId,
-                method,
-                destination,
-                enabled,
-                Timestamp.from(now),
-                Timestamp.from(now));
-        if (enabled) {
-            String column = "EMAIL".equals(method) ? "email" : "phone";
-            jdbc.update(
-                    "UPDATE gateway_users SET "
-                            + column
-                            + "=?,updated_at=?"
-                            + ("EMAIL".equals(method) ? ",email_verified_at=CURRENT_TIMESTAMP" : "")
-                            + " WHERE user_id=?",
-                    destination,
-                    Timestamp.from(now),
-                    userId);
-        }
     }
 
     public Optional<Challenge> find(String tokenHash) {
@@ -143,34 +99,4 @@ public class LoginVerificationRepository {
                 "UPDATE gateway_login_challenges SET consumed=true WHERE token_hash=?", tokenHash);
     }
 
-    public boolean consumeTotp(long userId, long step) {
-        return jdbc.update(
-                        "UPDATE gateway_user_mfa SET last_login_step=? WHERE user_id=? AND"
-                            + " enabled=true AND verified_at IS NOT NULL AND last_login_step<?",
-                        step,
-                        userId,
-                        step)
-                == 1;
-    }
-
-    public record Factor(
-            String method,
-            String destination,
-            boolean enabled,
-            Instant verifiedAt,
-            Instant updatedAt) {}
-
-    public record Challenge(
-            long userId,
-            String purpose,
-            String tokenHash,
-            String fingerprint,
-            String methods,
-            String emailHash,
-            String phoneHash,
-            String destination,
-            Instant expiresAt,
-            boolean consumed,
-            int attempts,
-            boolean targetEnabled) {}
 }

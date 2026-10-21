@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.AuthChallenge;
+import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -16,9 +18,10 @@ import org.junit.jupiter.api.Test;
 class EmailVerificationServiceTest {
 
     private final GatewayAuthChallengeRepository repository = mock(GatewayAuthChallengeRepository.class);
+    private final GatewayUserRepository users = mock(GatewayUserRepository.class);
     private final EmailMessageSender sender = mock(EmailMessageSender.class);
     private final EmailVerificationService service = new EmailVerificationService(
-            new GatewayProperties(), repository, sender);
+            new GatewayProperties(), repository, users, sender);
 
     @Test
     void verificationCodeIsPersistedAsDigestAndSentThroughEmailProvider() {
@@ -28,7 +31,7 @@ class EmailVerificationServiceTest {
                 any(), any(), eq("127.0.0.1"), any()))
                 .thenAnswer(invocation -> {
                     storedDigest.set(invocation.getArgument(4));
-                    return new GatewayAuthChallengeRepository.Challenge(
+                    return new AuthChallenge(
                             11L, 42L, "EMAIL_VERIFY", "EMAIL", "user@example.com",
                             storedDigest.get(), now.plusSeconds(600), 0, null);
                 });
@@ -45,13 +48,13 @@ class EmailVerificationServiceTest {
     void verificationConsumesOnlyAnUnexpiredChallenge() {
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
         when(repository.findActive(eq(42L), eq("EMAIL_VERIFY"), eq("user@example.com"), eq(now)))
-                .thenReturn(Optional.of(new GatewayAuthChallengeRepository.Challenge(
+                .thenReturn(Optional.of(new AuthChallenge(
                         11L, 42L, "EMAIL_VERIFY", "EMAIL", "user@example.com",
                         VerificationCodeFixture.digest("123456", "EMAIL_VERIFY", "user@example.com"),
                         now.plusSeconds(600), 0, null)));
         when(repository.consume(eq(11L), eq(42L), any())).thenReturn(true);
 
         assertThat(service.verifyEmail(42L, "user@example.com", "123456", now)).isTrue();
-        verify(repository).markEmailVerified(eq(42L), eq(now));
+        verify(users).markEmailVerified(eq(42L), eq(now));
     }
 }

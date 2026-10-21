@@ -273,4 +273,22 @@ public class GatewayUserRepository {
             this(userId, username, email, null, passwordHash, status, createdAt);
         }
     }
+    public void markEmailVerified(long userId, Instant now) {
+        jdbcTemplate.update("""
+                UPDATE gateway_users
+                   SET email_verified_at = COALESCE(email_verified_at, ?),
+                       updated_at = ?
+                 WHERE user_id = ?
+                """, Timestamp.from(now), Timestamp.from(now), userId);
+    }
+    public void lockForUpdate(long userId) {
+        jdbcTemplate.queryForObject("SELECT user_id FROM gateway_users WHERE user_id=? FOR UPDATE",Long.class,userId);
+    }
+    public void updateVerifiedEmailContact(long userId,String email,Instant now) {
+        jdbcTemplate.update("UPDATE gateway_users SET email=?,updated_at=?,email_verified_at=CURRENT_TIMESTAMP WHERE user_id=?",email,Timestamp.from(now),userId);
+    }
+    public void updatePhoneContact(long userId,String phone,Instant now) {
+        jdbcTemplate.update("UPDATE gateway_users SET phone=?,updated_at=? WHERE user_id=?",phone,Timestamp.from(now),userId);
+    }
+
 }

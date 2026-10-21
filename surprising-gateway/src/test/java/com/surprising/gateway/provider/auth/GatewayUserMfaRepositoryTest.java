@@ -12,7 +12,6 @@ class GatewayUserMfaRepositoryTest {
     @Test
     void disablingClearsVerifiedStateSoNextEnrollmentMustRotateTheSecret() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
-        when(jdbc.queryForObject(anyString(), eq(Long.class), eq(7L))).thenReturn(7L);
         GatewayUserMfaRepository repository = new GatewayUserMfaRepository(jdbc);
         Instant now = Instant.parse("2026-10-06T12:00:00Z");
 

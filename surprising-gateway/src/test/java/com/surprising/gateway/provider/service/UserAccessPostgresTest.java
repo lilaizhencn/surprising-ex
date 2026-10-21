@@ -8,7 +8,7 @@ import static org.mockito.Mockito.when;
 import com.surprising.gateway.provider.auth.AuthModels;
 import com.surprising.gateway.provider.auth.AuthPersistenceService;
 import com.surprising.gateway.provider.auth.EmailMessageSender;
-import com.surprising.gateway.provider.auth.GatewayAuthChallengeRepository;
+import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepository;
 import com.surprising.gateway.provider.auth.GatewayLoginLogRepository;
 import com.surprising.gateway.provider.auth.GatewayRefreshSessionRepository;
 import com.surprising.gateway.provider.auth.GatewayUserAccessBlockRepository;

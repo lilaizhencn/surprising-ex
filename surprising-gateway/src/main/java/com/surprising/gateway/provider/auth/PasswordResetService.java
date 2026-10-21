@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.AuthChallenge;
+import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepository;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -60,7 +62,7 @@ public class PasswordResetService {
             return new ResetResult(false);
         }
         String email = credential.email().toLowerCase(Locale.ROOT);
-        GatewayAuthChallengeRepository.Challenge challenge = challenges
+        AuthChallenge challenge = challenges
                 .findActive(credential.userId(), PURPOSE, email, now).orElse(null);
         if (challenge == null || challenge.attempts() >= 5) {
             return new ResetResult(false);

@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 聚合认证域的单表仓储，不直接执行 SQL。
@@ -186,17 +187,24 @@ public class AuthPersistenceService {
         return mfaRepository.find(userId);
     }
 
+    /** 用户行串行化账户安全变更，事务覆盖用户锁和MFA表写入。 */
+    @Transactional
     public void upsertMfaSecret(long userId, String secretCiphertext, Instant now) {
+        userRepository.lockForUpdate(userId);
         mfaRepository.upsertSecret(userId, secretCiphertext, now);
     }
 
     public boolean consumeMfaCode(long userId, long step) { return mfaRepository.consumeCode(userId, step); }
 
+    @Transactional
     public void enableMfa(long userId, Instant now) {
+        userRepository.lockForUpdate(userId);
         mfaRepository.enable(userId, now);
     }
 
+    @Transactional
     public void disableMfa(long userId, Instant now) {
+        userRepository.lockForUpdate(userId);
         mfaRepository.disable(userId, now);
     }
 

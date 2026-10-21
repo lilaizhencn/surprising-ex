@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.AuthChallenge;
+import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -43,7 +45,7 @@ class SensitiveActionVerificationServiceTest {
         when(persistence.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
                 42L, null, "user@example.com", "NORMAL", List.of("USER"), now)));
         when(challengeRepository.findActive(42L, "SENSITIVE_ACTION", "user@example.com", now))
-                .thenReturn(Optional.of(new GatewayAuthChallengeRepository.Challenge(
+                .thenReturn(Optional.of(new AuthChallenge(
                         1L, 42L, "SENSITIVE_ACTION", "EMAIL", "user@example.com",
                         digest("123456", "WITHDRAWAL", "user@example.com"), now.plusSeconds(600), 0, null)));
         when(challengeRepository.consume(1L, 42L, now)).thenReturn(true);
@@ -62,7 +64,7 @@ class SensitiveActionVerificationServiceTest {
         when(persistence.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
                 42L, null, "user@example.com", "NORMAL", List.of("USER"), now)));
         when(challengeRepository.create(any(Long.class), any(), any(), any(), any(), any(), any(), any()))
-                .thenReturn(new GatewayAuthChallengeRepository.Challenge(
+                .thenReturn(new AuthChallenge(
                         2L, 42L, "SENSITIVE_ACTION", "EMAIL", "user@example.com", "hash",
                         now.plusSeconds(600), 0, null));
 
@@ -76,7 +78,7 @@ class SensitiveActionVerificationServiceTest {
         when(persistence.user(42L)).thenReturn(Optional.of(new AuthenticatedUser(
                 42L, null, "user@example.com", "NORMAL", List.of("USER"), now)));
         when(challengeRepository.create(any(Long.class), any(), any(), any(), any(), any(), any(), any()))
-                .thenReturn(new GatewayAuthChallengeRepository.Challenge(
+                .thenReturn(new AuthChallenge(
                         3L, 42L, "SENSITIVE_ACTION", "EMAIL", "user@example.com", "hash",
                         now.plusSeconds(600), 0, null));
 

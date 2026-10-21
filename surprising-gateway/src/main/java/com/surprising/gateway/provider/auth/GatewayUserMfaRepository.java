@@ -34,7 +34,6 @@ public class GatewayUserMfaRepository {
     }
 
     public void upsertSecret(long userId, String secretCiphertext, Instant now) {
-        jdbcTemplate.queryForObject("SELECT user_id FROM gateway_users WHERE user_id = ? FOR UPDATE", Long.class, userId);
         int updated = jdbcTemplate.update("""
                 INSERT INTO gateway_user_mfa (
                     user_id, totp_secret_ciphertext, enabled, verified_at, created_at, updated_at
@@ -51,7 +50,6 @@ public class GatewayUserMfaRepository {
     }
 
     public void enable(long userId, Instant now) {
-        jdbcTemplate.queryForObject("SELECT user_id FROM gateway_users WHERE user_id = ? FOR UPDATE", Long.class, userId);
         int updated = jdbcTemplate.update("""
                 UPDATE gateway_user_mfa
                    SET enabled = TRUE,
@@ -65,7 +63,6 @@ public class GatewayUserMfaRepository {
     }
 
     public void disable(long userId, Instant now) {
-        jdbcTemplate.queryForObject("SELECT user_id FROM gateway_users WHERE user_id = ? FOR UPDATE", Long.class, userId);
         jdbcTemplate.update("""
                 UPDATE gateway_user_mfa
                    SET enabled = FALSE,
@@ -92,4 +89,14 @@ public class GatewayUserMfaRepository {
             Instant createdAt,
             Instant updatedAt) {
     }
+    public boolean consumeVerifiedLoginCode(long userId, long step) {
+        return jdbcTemplate.update(
+                        "UPDATE gateway_user_mfa SET last_login_step=? WHERE user_id=? AND"
+                            + " enabled=true AND verified_at IS NOT NULL AND last_login_step<?",
+                        step,
+                        userId,
+                        step)
+                == 1;
+    }
+
 }

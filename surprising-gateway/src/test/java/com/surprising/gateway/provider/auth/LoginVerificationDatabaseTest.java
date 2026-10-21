@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.repository.LoginChallengeRepository;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -100,7 +101,10 @@ class LoginVerificationDatabaseTest {
                                         == 1);
         var target =
                 new LoginVerificationService(
-                        new LoginVerificationRepository(jdbc),
+                        new LoginChallengeRepository(jdbc),
+                        new com.surprising.gateway.provider.auth.repository.LoginFactorRepository(jdbc),
+                        new GatewayUserRepository(jdbc),
+                        new GatewayUserMfaRepository(jdbc),
                         users,
                         properties,
                         totp,

@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.LoginVerificationRows;
+import com.surprising.gateway.provider.auth.repository.LoginFactorRepository;
+import com.surprising.gateway.provider.auth.repository.LoginChallengeRepository;
 import com.surprising.gateway.provider.config.GatewayProperties;
 
 import org.springframework.beans.factory.ObjectProvider;
@@ -18,8 +21,11 @@ import java.util.Locale;
 /** 密码验证后的短时挑战。此处不签发会话，所有要求的方式一起通过后才交回 AuthService。 */
 @Service
 public class LoginVerificationService {
-    private final LoginVerificationRepository challenges;
+    private final LoginChallengeRepository challenges;
     private final AuthPersistenceService users;
+    private final LoginFactorRepository factorRows;
+    private final GatewayUserRepository userRows;
+    private final GatewayUserMfaRepository mfa;
     private final GatewayProperties properties;
     private final TotpService totp;
     private final EmailMessageSender email;
@@ -28,7 +34,10 @@ public class LoginVerificationService {
     private final SecureRandom random = new SecureRandom();
 
     public LoginVerificationService(
-            LoginVerificationRepository challenges,
+            LoginChallengeRepository challenges,
+            LoginFactorRepository factors,
+            GatewayUserRepository userRows,
+            GatewayUserMfaRepository mfa,
             AuthPersistenceService users,
             GatewayProperties properties,
             TotpService totp,
@@ -36,6 +45,9 @@ public class LoginVerificationService {
             ObjectProvider<SmsMessageSender> sms,
             PasswordHasher passwordHasher) {
         this.challenges = challenges;
+        this.factorRows = factors;
+        this.userRows = userRows;
+        this.mfa = mfa;
         this.users = users;
         this.properties = properties;
         this.totp = totp;
@@ -46,7 +58,7 @@ public class LoginVerificationService {
 
     @Transactional(noRollbackFor = VerificationFailure.class)
     public ChallengeResponse begin(long userId, String checkedPasswordHash, Instant now) {
-        challenges.lockUser(userId);
+        userRows.lockForUpdate(userId);
         var currentCredential = users.credential(userId).orElseThrow();
         if ("FROZEN".equals(currentCredential.status())
                 || !java.util.Objects.equals(currentCredential.passwordHash(), checkedPasswordHash))
@@ -69,7 +81,7 @@ public class LoginVerificationService {
     }
 
     private void verifyCodes(
-            LoginVerificationRepository.Challenge challenge,
+            LoginVerificationRows.Challenge challenge,
             VerifyRequest request,
             Instant now,
             boolean login) {
@@ -105,7 +117,7 @@ public class LoginVerificationService {
         if (valid && step >= 0)
             valid =
                     login
-                            ? challenges.consumeTotp(challenge.userId(), step)
+                            ? mfa.consumeVerifiedLoginCode(challenge.userId(), step)
                             : users.consumeMfaCode(challenge.userId(), step);
         if (!valid) {
             challenges.failed(challenge.tokenHash());
@@ -118,7 +130,7 @@ public class LoginVerificationService {
                 users.credential(userId)
                         .orElseThrow(() -> new VerificationFailure("LOGIN_CHALLENGE_EXPIRED"));
         List<Method> methods = new ArrayList<>();
-        for (var factor : challenges.factors(userId)) {
+        for (var factor : factorRows.factors(userId)) {
             if (!factor.enabled() || factor.verifiedAt() == null) continue;
             String current =
                     "EMAIL".equals(factor.method()) ? credential.email() : credential.phone();
@@ -139,7 +151,7 @@ public class LoginVerificationService {
     }
 
     public List<Setting> settings(long userId) {
-        var factors = challenges.factors(userId);
+        var factors = factorRows.factors(userId);
         List<Setting> result = new ArrayList<>();
         var credential = users.credential(userId).orElseThrow();
         for (String method : List.of("EMAIL", "PHONE")) {
@@ -197,7 +209,7 @@ public class LoginVerificationService {
     public BindingResponse beginBinding(
             long userId, String method, SettingRequest request, Instant now, Instant authenticatedAt) {
         requireSettingMethod(method);
-        challenges.lockUser(userId);
+        userRows.lockForUpdate(userId);
         requirePassword(userId, request.currentPassword(), now, authenticatedAt);
         var account = users.credential(userId).orElseThrow();
         if ("TOTP".equals(method)
@@ -208,7 +220,7 @@ public class LoginVerificationService {
             throw new VerificationFailure("LOGIN_MFA_ENROLLMENT_REQUIRED");
         }
         var existing =
-                challenges.factors(userId).stream()
+                factorRows.factors(userId).stream()
                         .filter(f -> f.method().equals(method))
                         .findFirst()
                         .orElse(null);
@@ -315,9 +327,13 @@ public class LoginVerificationService {
         if ("TOTP".equals(method)) {
             if (challenge.targetEnabled()) users.enableMfa(userId, now);
             else users.disableMfa(userId, now);
-        } else
-            challenges.saveFactor(
-                    userId, method, challenge.destination(), challenge.targetEnabled(), now);
+        } else {
+            factorRows.saveFactor(userId, method, challenge.destination(), challenge.targetEnabled(), now);
+            if (challenge.targetEnabled()) {
+                if ("EMAIL".equals(method)) userRows.updateVerifiedEmailContact(userId, challenge.destination(), now);
+                else userRows.updatePhoneContact(userId, challenge.destination(), now);
+            }
+        }
         challenges.consume(challenge.tokenHash());
         users.recordSecurityChange(userId, now);
     }
@@ -404,7 +420,7 @@ public class LoginVerificationService {
         return new ChallengeResponse(true, token, now.plusSeconds(300), methods, false);
     }
 
-    private LoginVerificationRepository.Challenge active(
+    private LoginVerificationRows.Challenge active(
             String token, String purpose, Instant now) {
         if (token == null || !token.matches("[A-Za-z0-9_-]{43}"))
             throw new VerificationFailure("LOGIN_CHALLENGE_EXPIRED");
@@ -413,7 +429,7 @@ public class LoginVerificationService {
                 challenges
                         .find(hash)
                         .orElseThrow(() -> new VerificationFailure("LOGIN_CHALLENGE_EXPIRED"));
-        challenges.lockUser(initial.userId());
+        userRows.lockForUpdate(initial.userId());
         var c =
                 challenges
                         .find(hash)
@@ -439,7 +455,7 @@ public class LoginVerificationService {
                         + "|"
                         + users.roles(userId)
                         + "|"
-                        + challenges.factors(userId)
+                        + factorRows.factors(userId)
                         + "|"
                         + (mfa == null
                                 ? ""

@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepository;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.service.KycDocumentService;
 import com.surprising.gateway.provider.service.SecurityNotificationService;

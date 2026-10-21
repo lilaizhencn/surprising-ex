@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepository;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;

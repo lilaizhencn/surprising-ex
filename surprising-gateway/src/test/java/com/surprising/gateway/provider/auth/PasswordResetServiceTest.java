@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.AuthChallenge;
+import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -40,12 +42,12 @@ class PasswordResetServiceTest {
                 new GatewayUserRepository.UserCredential(42L, null, "user@example.com", "hash", "NORMAL", now)));
         when(challenges.create(eq(42L), eq("PASSWORD_RESET"), eq("EMAIL"), eq("user@example.com"),
                 any(), any(), eq("127.0.0.1"), any()))
-                .thenReturn(new GatewayAuthChallengeRepository.Challenge(
+                .thenReturn(new AuthChallenge(
                         12L, 42L, "PASSWORD_RESET", "EMAIL", "user@example.com",
                         VerificationCodeFixture.digest("123456", "PASSWORD_RESET", "user@example.com"),
                         now.plusSeconds(600), 0, null));
         when(challenges.findActive(eq(42L), eq("PASSWORD_RESET"), eq("user@example.com"), eq(now)))
-                .thenReturn(Optional.of(new GatewayAuthChallengeRepository.Challenge(
+                .thenReturn(Optional.of(new AuthChallenge(
                         12L, 42L, "PASSWORD_RESET", "EMAIL", "user@example.com",
                         VerificationCodeFixture.digest("123456", "PASSWORD_RESET", "user@example.com"),
                         now.plusSeconds(600), 0, null)));

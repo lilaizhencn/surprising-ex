@@ -1,5 +1,9 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.repository.LoginFactorRepository;
+
+import com.surprising.gateway.provider.auth.model.LoginVerificationRows;
+import com.surprising.gateway.provider.auth.repository.LoginChallengeRepository;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -14,7 +18,10 @@ import java.time.Instant;
 import java.util.*;
 
 class LoginVerificationServiceTest {
-    final LoginVerificationRepository db = mock(LoginVerificationRepository.class);
+    final LoginChallengeRepository db = mock(LoginChallengeRepository.class);
+    final LoginFactorRepository factorRows = mock(LoginFactorRepository.class);
+    final GatewayUserRepository userRows = mock(GatewayUserRepository.class);
+    final GatewayUserMfaRepository mfaRows = mock(GatewayUserMfaRepository.class);
     final AuthPersistenceService users = mock(AuthPersistenceService.class);
     final GatewayProperties properties = new GatewayProperties();
     final TotpService totp = new TotpService(properties);
@@ -25,7 +32,7 @@ class LoginVerificationServiceTest {
 
     final PasswordHasher passwordHasher = mock(PasswordHasher.class);
     final LoginVerificationService service =
-            new LoginVerificationService(db, users, properties, totp, email, sms, passwordHasher);
+            new LoginVerificationService(db, factorRows, userRows, mfaRows, users, properties, totp, email, sms, passwordHasher);
     final Instant now = Instant.now();
     final String secret = totp.newSecret();
 
@@ -53,7 +60,7 @@ class LoginVerificationServiceTest {
                                         now)));
         when(passwordHasher.matches("password", "hash")).thenReturn(true);
         when(users.roles(1)).thenReturn(List.of("USER"));
-        when(db.factors(1)).thenReturn(List.of());
+        when(factorRows.factors(1)).thenReturn(List.of());
         when(users.mfaCredential(1)).thenReturn(Optional.empty());
         when(db.issue(
                         anyLong(),
@@ -105,11 +112,11 @@ class LoginVerificationServiceTest {
     void passwordlessBindingStillVerifiesTheNewContactCodeAndRechecksPrimaryExpiry() {
         passwordless();
         properties.getSecurity().setSimulatedVerificationCodesEnabled(true);
-        var stored = new java.util.concurrent.atomic.AtomicReference<LoginVerificationRepository.Challenge>();
+        var stored = new java.util.concurrent.atomic.AtomicReference<LoginVerificationRows.Challenge>();
         when(db.issue(anyLong(), anyString(), anyString(), anyString(), anyString(),
                 nullable(String.class), nullable(String.class), nullable(String.class), anyBoolean(), any()))
                 .thenAnswer(inv -> {
-                    stored.set(new LoginVerificationRepository.Challenge(1, inv.getArgument(1), inv.getArgument(2),
+                    stored.set(new LoginVerificationRows.Challenge(1, inv.getArgument(1), inv.getArgument(2),
                             inv.getArgument(3), inv.getArgument(4), inv.getArgument(5), inv.getArgument(6),
                             inv.getArgument(7), now.plusSeconds(300), false, 0, true));
                     return true;
@@ -128,9 +135,9 @@ class LoginVerificationServiceTest {
                 .hasMessage("LOGIN_CHALLENGE_EXPIRED");
         assertThatThrownBy(() -> service.confirmBinding(1, "EMAIL", correct, now, now.minusSeconds(300)))
                 .hasMessage("LOGIN_RECENT_AUTHENTICATION_REQUIRED");
-        verify(db, never()).saveFactor(anyLong(), anyString(), anyString(), anyBoolean(), any());
+        verify(factorRows, never()).saveFactor(anyLong(), anyString(), anyString(), anyBoolean(), any());
         service.confirmBinding(1, "EMAIL", correct, now, now);
-        verify(db).saveFactor(1, "EMAIL", "new@example.test", true, now);
+        verify(factorRows).saveFactor(1, "EMAIL", "new@example.test", true, now);
         verify(db).consume(stored.get().tokenHash());
     }
 
@@ -193,7 +200,7 @@ class LoginVerificationServiceTest {
         properties.getSecurity().setSimulatedVerificationCodesEnabled(true);
         var token = "a".repeat(43);
         when(db.find(anyString()))
-                .thenReturn(Optional.of(new LoginVerificationRepository.Challenge(
+                .thenReturn(Optional.of(new LoginVerificationRows.Challenge(
                         1, "TOTP", "old-hash", "fingerprint", "EMAIL,TOTP", "email-hash", null,
                         null, now.plusSeconds(300), false, 0, true)));
 
@@ -213,7 +220,7 @@ class LoginVerificationServiceTest {
     void resendTotpEnrollmentCodeRejectsAnotherUsersChallenge() {
         var token = "a".repeat(43);
         when(db.find(anyString()))
-                .thenReturn(Optional.of(new LoginVerificationRepository.Challenge(
+                .thenReturn(Optional.of(new LoginVerificationRows.Challenge(
                         2, "TOTP", "old-hash", "fingerprint", "EMAIL,TOTP", "email-hash", null,
                         null, now.plusSeconds(300), false, 0, true)));
 
@@ -259,7 +266,7 @@ class LoginVerificationServiceTest {
         when(db.find(hash.getValue()))
                 .thenReturn(
                         Optional.of(
-                                new LoginVerificationRepository.Challenge(
+                                new LoginVerificationRows.Challenge(
                                         1,
                                         "LOGIN",
                                         hash.getValue(),
@@ -272,7 +279,7 @@ class LoginVerificationServiceTest {
                                         false,
                                         0,
                                         true)));
-        when(db.consumeTotp(eq(1L), anyLong())).thenReturn(true);
+        when(mfaRows.consumeVerifiedLoginCode(eq(1L), anyLong())).thenReturn(true);
         return response;
     }
 
@@ -301,7 +308,7 @@ class LoginVerificationServiceTest {
                                 now))
                 .isEqualTo(1);
         verify(db).consume(anyString());
-        verify(db).consumeTotp(1, now.getEpochSecond() / 30);
+        verify(mfaRows).consumeVerifiedLoginCode(1, now.getEpochSecond() / 30);
     }
 
     @Test
@@ -322,10 +329,10 @@ class LoginVerificationServiceTest {
     @Test
     void multipleFactorsRequireEveryCode() {
         enableTotp(true, now);
-        when(db.factors(1))
+        when(factorRows.factors(1))
                 .thenReturn(
                         List.of(
-                                new LoginVerificationRepository.Factor(
+                                new LoginVerificationRows.Factor(
                                         "EMAIL", "u@example.test", true, now, now)));
         var c = begin();
         assertThat(c.methods())
@@ -341,7 +348,7 @@ class LoginVerificationServiceTest {
                                                 totp.code(secret, now)),
                                         now))
                 .hasMessage("LOGIN_VERIFICATION_INVALID");
-        verify(db, never()).consumeTotp(anyLong(), anyLong());
+        verify(mfaRows, never()).consumeVerifiedLoginCode(anyLong(), anyLong());
         var text = ArgumentCaptor.forClass(String.class);
         verify(email).send(eq("u@example.test"), anyString(), text.capture());
         var matcher = java.util.regex.Pattern.compile("[0-9]{6}").matcher(text.getValue());
@@ -361,7 +368,7 @@ class LoginVerificationServiceTest {
     void totpReplayRejectedEvenWithAnotherChallenge() {
         enableTotp(true, now);
         var c = begin();
-        when(db.consumeTotp(eq(1L), anyLong())).thenReturn(false);
+        when(mfaRows.consumeVerifiedLoginCode(eq(1L), anyLong())).thenReturn(false);
         assertThatThrownBy(
                         () ->
                                 service.verify(
@@ -423,15 +430,15 @@ class LoginVerificationServiceTest {
                                                 totp.code(secret, now)),
                                         now.plusSeconds(301)))
                 .hasMessage("LOGIN_CHALLENGE_EXPIRED");
-        verify(db, never()).consumeTotp(anyLong(), anyLong());
+        verify(mfaRows, never()).consumeVerifiedLoginCode(anyLong(), anyLong());
     }
 
     @Test
     void unavailableSmsNeverSilentlySkipsPhone() {
-        when(db.factors(1))
+        when(factorRows.factors(1))
                 .thenReturn(
                         List.of(
-                                new LoginVerificationRepository.Factor(
+                                new LoginVerificationRows.Factor(
                                         "PHONE", "+12025550123", true, now, now)));
         assertThatThrownBy(() -> service.begin(1, "hash", now)).hasMessage("LOGIN_SMS_UNAVAILABLE");
         verify(db, never())
@@ -450,10 +457,10 @@ class LoginVerificationServiceTest {
 
     @Test
     void deliveryFailureInvalidatesChallenge() {
-        when(db.factors(1))
+        when(factorRows.factors(1))
                 .thenReturn(
                         List.of(
-                                new LoginVerificationRepository.Factor(
+                                new LoginVerificationRows.Factor(
                                         "EMAIL", "u@example.test", true, now, now)));
         doThrow(new IllegalStateException("provider down"))
                 .when(email)
@@ -468,12 +475,12 @@ class LoginVerificationServiceTest {
         enableTotp(true, now);
         var sender = mock(SmsMessageSender.class);
         when(sms.getIfAvailable()).thenReturn(sender);
-        when(db.factors(1))
+        when(factorRows.factors(1))
                 .thenReturn(
                         List.of(
-                                new LoginVerificationRepository.Factor(
+                                new LoginVerificationRows.Factor(
                                         "EMAIL", "u@example.test", true, now, now),
-                                new LoginVerificationRepository.Factor(
+                                new LoginVerificationRows.Factor(
                                         "PHONE", "+12025550123", true, now, now)));
         var c = begin();
         var phone = ArgumentCaptor.forClass(String.class);

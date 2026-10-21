@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.AuthChallenge;
+import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepository;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -17,14 +19,17 @@ public class EmailVerificationService {
     private final GatewayProperties properties;
     private final GatewayAuthChallengeRepository repository;
     private final EmailMessageSender sender;
+    private final GatewayUserRepository users;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public EmailVerificationService(GatewayProperties properties,
                                     GatewayAuthChallengeRepository repository,
+                                    GatewayUserRepository users,
                                     EmailMessageSender sender) {
         this.properties = properties;
         this.repository = repository;
         this.sender = sender;
+        this.users = users;
     }
 
     @Transactional
@@ -33,7 +38,7 @@ public class EmailVerificationService {
         boolean simulated = properties.getSecurity().isSimulatedVerificationCodesEnabled();
         String code = simulated ? "123456" : String.format("%06d", secureRandom.nextInt(1_000_000));
         Instant expiresAt = now.plus(properties.getSecurity().getVerificationCodeTtl());
-        GatewayAuthChallengeRepository.Challenge challenge = repository.create(userId, PURPOSE, "EMAIL", destination,
+        AuthChallenge challenge = repository.create(userId, PURPOSE, "EMAIL", destination,
                 digest(code, PURPOSE, destination), expiresAt, requestIp, now);
         if (!simulated) sender.send(destination, "Verify your Surprising account",
                 "Your verification code is " + code + ". It expires in 10 minutes. If you did not request this, ignore this email.");
@@ -43,7 +48,7 @@ public class EmailVerificationService {
     @Transactional
     public boolean verifyEmail(long userId, String email, String code, Instant now) {
         String destination = normalizeEmail(email);
-        GatewayAuthChallengeRepository.Challenge challenge = repository
+        AuthChallenge challenge = repository
                 .findActive(userId, PURPOSE, destination, now)
                 .orElse(null);
         if (challenge == null || challenge.attempts() >= 5 || code == null || !code.matches("\\d{6}")) {
@@ -58,7 +63,7 @@ public class EmailVerificationService {
         if (!repository.consume(challenge.challengeId(), userId, now)) {
             return false;
         }
-        repository.markEmailVerified(userId, now);
+        users.markEmailVerified(userId, now);
         return true;
     }
 

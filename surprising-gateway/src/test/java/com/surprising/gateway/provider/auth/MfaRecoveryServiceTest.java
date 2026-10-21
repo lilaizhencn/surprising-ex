@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.auth;
 
+import com.surprising.gateway.provider.auth.model.AuthChallenge;
+import com.surprising.gateway.provider.auth.repository.GatewayAuthChallengeRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
@@ -153,8 +155,8 @@ class MfaRecoveryServiceTest {
                 .hasMessageContaining("verified KYC");
     }
 
-    private GatewayAuthChallengeRepository.Challenge issueChallenge(String channel) {
-        var challenge = new GatewayAuthChallengeRepository.Challenge(
+    private AuthChallenge issueChallenge(String channel) {
+        var challenge = new AuthChallenge(
                 301, USER_ID, "MFA_RECOVERY", channel,
                 "EMAIL".equals(channel) ? "user@example.test" : "+12025550123",
                 "pending-hash", NOW.plusSeconds(300), 0, null);
@@ -170,13 +172,13 @@ class MfaRecoveryServiceTest {
         return new AuthModels.JwtPrincipal(8, "reviewer", "NORMAL", List.of("ADMIN"), NOW.plusSeconds(3600));
     }
 
-    private GatewayAuthChallengeRepository.Challenge challengeWithCode(String code, String channel)
+    private AuthChallenge challengeWithCode(String code, String channel)
             throws Exception {
         String destination = "EMAIL".equals(channel) ? "user@example.test" : "+12025550123";
         String payload = "test-recovery-pepper|MFA_RECOVERY|" + USER_ID + "|" + destination + "|" + code;
         String hash = Base64.getUrlEncoder().withoutPadding().encodeToString(
                 MessageDigest.getInstance("SHA-256").digest(payload.getBytes(StandardCharsets.UTF_8)));
-        return new GatewayAuthChallengeRepository.Challenge(
+        return new AuthChallenge(
                 301, USER_ID, "MFA_RECOVERY", channel, destination, hash, NOW.plusSeconds(300), 0, null);
     }
 
