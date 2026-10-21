@@ -16,8 +16,8 @@ class AdminCursorPageTest {
         AdminCursorPage.SortSpec sort = new AdminCursorPage.SortSpec(
                 "createdAt", "created_at", "entry_id", true);
         List<Row> rows = List.of(
-                new Row(12L, Instant.parse("2026-07-02T01:00:00Z")),
-                new Row(11L, Instant.parse("2026-07-02T00:59:00Z")));
+                new Row(Long.MAX_VALUE, Instant.parse("2026-07-02T01:00:00.123456789Z")),
+                new Row(Long.MAX_VALUE - 1, Instant.parse("2026-07-02T01:00:00.123456789Z")));
 
         AdminCursorPage.CursorPage<Row> page = AdminCursorPage.page(rows, 1, sort, Row::createdAt, Row::id);
 

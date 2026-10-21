@@ -3,6 +3,7 @@ package com.surprising.account.provider.repository;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AdminBalanceAdjustmentRecord;
 import com.surprising.account.api.utils.AdminCursorPage;
+import com.surprising.account.provider.model.AccountHistoryPageQuery;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -46,16 +47,7 @@ public class AdminBalanceAdjustmentRepository {
                 referenceId, reason, Timestamp.from(Instant.now()));
     }
 
-    public List<AdminBalanceAdjustmentRecord> entries(Long adminUserId,
-                                                       Long userId,
-                                                       String adjustmentKind,
-                                                       AccountType accountType,
-                                                       String asset,
-                                                       String referenceId,
-                                                       int limit) {
-        return page(adminUserId, userId, adjustmentKind, accountType, asset, referenceId,
-                limit, null, null).items();
-    }
+
 
     public AdminCursorPage.CursorPage<AdminBalanceAdjustmentRecord> page(Long adminUserId,
                                                                          Long userId,
@@ -63,29 +55,25 @@ public class AdminBalanceAdjustmentRepository {
                                                                          AccountType accountType,
                                                                          String asset,
                                                                          String referenceId,
-                                                                         int limit,
-                                                                         String cursor,
-                                                                         String sort) {
-        String normalizedKind = emptyToNull(adjustmentKind);
+                                                                         AccountHistoryPageQuery pageQuery) {
         String normalizedAccountType = accountType == null ? null : accountType.name();
-        String normalizedAsset = emptyToNull(asset);
-        String normalizedReferenceId = emptyToNull(referenceId);
-        int safeLimit = AdminCursorPage.limit(limit, 1000);
-        AdminCursorPage.SortSpec sortSpec = createdAtSort(sort, "adjustment_id");
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        int safeLimit = pageQuery.limit();
+        AdminCursorPage.SortSpec sortSpec = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", "adjustment_id", pageQuery.descending());
+        AdminCursorPage.Cursor decodedCursor = pageQuery.after();
         List<Object> args = new ArrayList<>();
         args.add(adminUserId);
         args.add(adminUserId);
         args.add(userId);
         args.add(userId);
-        args.add(normalizedKind);
-        args.add(normalizedKind);
+        args.add(adjustmentKind);
+        args.add(adjustmentKind);
         args.add(normalizedAccountType);
         args.add(normalizedAccountType);
-        args.add(normalizedAsset);
-        args.add(normalizedAsset);
-        args.add(normalizedReferenceId);
-        args.add(normalizedReferenceId);
+        args.add(asset);
+        args.add(asset);
+        args.add(referenceId);
+        args.add(referenceId);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(safeLimit + 1);
         List<AdminBalanceAdjustmentRecord> rows = jdbcTemplate.query("""
@@ -125,13 +113,7 @@ public class AdminBalanceAdjustmentRepository {
                 resultSet.getTimestamp("created_at").toInstant());
     }
 
-    private static AdminCursorPage.SortSpec createdAtSort(String sort, String idColumn) {
-        AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
-                "createdAt", "created_at", idColumn, true);
-        AdminCursorPage.SortSpec createdAtAsc = new AdminCursorPage.SortSpec(
-                "createdAt", "created_at", idColumn, false);
-        return AdminCursorPage.parseSort(sort, createdAtDesc, List.of(createdAtDesc, createdAtAsc));
-    }
+
 
     private static AccountType nullableAccountType(String accountType) {
         return accountType == null || accountType.isBlank() ? null : AccountType.valueOf(accountType);

@@ -2,6 +2,7 @@ package com.surprising.account.provider.repository;
 
 import com.surprising.account.api.model.AccountLedgerEntryResponse;
 import com.surprising.account.api.utils.AdminCursorPage;
+import com.surprising.account.provider.model.AccountHistoryPageQuery;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -24,31 +25,21 @@ public class AccountLedgerRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public List<AccountLedgerEntryResponse> entries(Long userId,
-                                                    String asset,
-                                                    String referenceType,
-                                                    int limit) {
-        return page(userId, asset, referenceType, limit, null, null).items();
-    }
-
     public AdminCursorPage.CursorPage<AccountLedgerEntryResponse> page(Long userId,
                                                                        String asset,
                                                                        String referenceType,
-                                                                       int limit,
-                                                                       String cursor,
-                                                                       String sort) {
-        String normalizedAsset = emptyToNull(asset);
-        String normalizedReferenceType = emptyToNull(referenceType);
-        int safeLimit = AdminCursorPage.limit(limit, 1000);
-        AdminCursorPage.SortSpec sortSpec = createdAtSort(sort, "entry_id");
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+                                                                       AccountHistoryPageQuery pageQuery) {
+        int safeLimit = pageQuery.limit();
+        AdminCursorPage.SortSpec sortSpec = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", "entry_id", pageQuery.descending());
+        AdminCursorPage.Cursor decodedCursor = pageQuery.after();
         List<Object> args = new ArrayList<>();
         args.add(userId);
         args.add(userId);
-        args.add(normalizedAsset);
-        args.add(normalizedAsset);
-        args.add(normalizedReferenceType);
-        args.add(normalizedReferenceType);
+        args.add(asset);
+        args.add(asset);
+        args.add(referenceType);
+        args.add(referenceType);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(safeLimit + 1);
         List<AccountLedgerEntryResponse> rows = jdbcTemplate.query("""
@@ -81,20 +72,9 @@ public class AccountLedgerRepository {
                 AccountLedgerEntryResponse::entryId);
     }
 
-    private static AdminCursorPage.SortSpec createdAtSort(String sort, String idColumn) {
-        AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
-                "createdAt", "created_at", idColumn, true);
-        AdminCursorPage.SortSpec createdAtAsc = new AdminCursorPage.SortSpec(
-                "createdAt", "created_at", idColumn, false);
-        return AdminCursorPage.parseSort(sort, createdAtDesc, List.of(createdAtDesc, createdAtAsc));
-    }
-
     private static Long nullableLong(ResultSet resultSet, String column) throws SQLException {
         long value = resultSet.getLong(column);
         return resultSet.wasNull() ? null : value;
     }
 
-    private static String emptyToNull(String value) {
-        return value == null || value.isBlank() ? null : value.trim();
-    }
 }

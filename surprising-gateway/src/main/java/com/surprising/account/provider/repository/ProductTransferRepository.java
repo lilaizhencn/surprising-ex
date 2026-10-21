@@ -2,6 +2,7 @@ package com.surprising.account.provider.repository;
 
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.utils.AdminCursorPage;
+import com.surprising.account.provider.model.AccountHistoryPageQuery;
 import com.surprising.account.api.model.ProductTransferRecordResponse;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,32 +18,23 @@ public class ProductTransferRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public List<ProductTransferRecordResponse> entries(Long userId,
-                                                       AccountType accountType,
-                                                       String asset,
-                                                       int limit) {
-        return page(userId, accountType, asset, limit, null, null).items();
-    }
-
     public AdminCursorPage.CursorPage<ProductTransferRecordResponse> page(Long userId,
                                                                           AccountType accountType,
                                                                           String asset,
-                                                                          int limit,
-                                                                          String cursor,
-                                                                          String sort) {
-        String normalizedAsset = emptyToNull(asset);
+                                                                          AccountHistoryPageQuery pageQuery) {
         String normalizedAccountType = accountType == null ? null : accountType.name();
-        int safeLimit = AdminCursorPage.limit(limit, 1000);
-        AdminCursorPage.SortSpec sortSpec = createdAtSort(sort, "transfer_id");
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        int safeLimit = pageQuery.limit();
+        AdminCursorPage.SortSpec sortSpec = new AdminCursorPage.SortSpec(
+                "createdAt", "created_at", "transfer_id", pageQuery.descending());
+        AdminCursorPage.Cursor decodedCursor = pageQuery.after();
         List<Object> args = new ArrayList<>();
         args.add(userId);
         args.add(userId);
         args.add(normalizedAccountType);
         args.add(normalizedAccountType);
         args.add(normalizedAccountType);
-        args.add(normalizedAsset);
-        args.add(normalizedAsset);
+        args.add(asset);
+        args.add(asset);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(safeLimit + 1);
         List<ProductTransferRecordResponse> rows = jdbcTemplate.query("""
@@ -73,15 +65,4 @@ public class ProductTransferRepository {
                 ProductTransferRecordResponse::transferId);
     }
 
-    private static AdminCursorPage.SortSpec createdAtSort(String sort, String idColumn) {
-        AdminCursorPage.SortSpec createdAtDesc = new AdminCursorPage.SortSpec(
-                "createdAt", "created_at", idColumn, true);
-        AdminCursorPage.SortSpec createdAtAsc = new AdminCursorPage.SortSpec(
-                "createdAt", "created_at", idColumn, false);
-        return AdminCursorPage.parseSort(sort, createdAtDesc, List.of(createdAtDesc, createdAtAsc));
-    }
-
-    private static String emptyToNull(String value) {
-        return value == null || value.isBlank() ? null : value.trim();
-    }
 }

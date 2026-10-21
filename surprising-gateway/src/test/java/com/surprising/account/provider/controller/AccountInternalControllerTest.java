@@ -23,6 +23,8 @@ class AccountInternalControllerTest {
 
     private final AccountService accountService = mock(AccountService.class);
 
+    private final com.surprising.account.provider.service.AccountQueryService history = mock(com.surprising.account.provider.service.AccountQueryService.class);
+
     private final AccountProperties properties = new AccountProperties();
 
     private final BalanceAdjustmentRequest request = new BalanceAdjustmentRequest(42L, "USDT", 1_250_000L, "custody-wallet:event-1:deposit.confirmed", "custody wallet deposit");
@@ -31,7 +33,7 @@ class AccountInternalControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new AccountInternalController(new com.surprising.account.provider.controller.AccountRequestController(accountService, commandGateway, properties));
+        controller = new AccountInternalController(new com.surprising.account.provider.controller.AccountRequestController(accountService, history, commandGateway, properties));
     }
 
     @Test
@@ -55,10 +57,10 @@ class AccountInternalControllerTest {
     @Test
     void exposesUserProductTransferRecordsThroughAccountGateway() {
         ProductTransferRecordQueryResponse expected = new ProductTransferRecordQueryResponse(0, List.of(), null, false, "createdAt.desc", 50);
-        when(accountService.productTransfers(42L, AccountType.SPOT, "USDT", 50, null, null)).thenReturn(expected);
+        when(history.productTransfers(42L, AccountType.SPOT, "USDT", new com.surprising.account.provider.model.AccountHistoryPageQuery(50,null,true))).thenReturn(expected);
         ProductTransferRecordQueryResponse actual = controller.userProductTransfers(42L, AccountType.SPOT, "USDT", 50, null, null);
         assertThat(actual).isSameAs(expected);
-        verify(accountService).productTransfers(42L, AccountType.SPOT, "USDT", 50, null, null);
+        verify(history).productTransfers(42L, AccountType.SPOT, "USDT", new com.surprising.account.provider.model.AccountHistoryPageQuery(50,null,true));
     }
 
 }

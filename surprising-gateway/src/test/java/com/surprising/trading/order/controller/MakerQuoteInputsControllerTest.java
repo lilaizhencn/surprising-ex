@@ -50,9 +50,8 @@ class MakerQuoteInputsControllerTest {
     @ParameterizedTest @EnumSource(ProductLine.class)
     void batchKeepsAccountsProductsInventoryUnitsAndAccountFeePolicies(ProductLine line) throws Exception {
         var core = mock(com.surprising.account.provider.service.AccountAeronGateway.class);
-        var projection = mock(com.surprising.account.provider.service.AccountQueryService.class);
         var accounts = new AccountService(properties(line), mock(com.surprising.account.provider.service.AccountCommandGateway.class),
-                new com.surprising.realtime.api.ValkeyUserQueries(redis), projection);
+                new com.surprising.realtime.api.ValkeyUserQueries(redis));
         var fees = mock(TradingFeeService.class);
         var cache = mock(InstrumentSnapshotCache.class);
         var instrument = mock(InstrumentResponse.class);
@@ -75,7 +74,7 @@ class MakerQuoteInputsControllerTest {
         assertThat(response.accounts()).containsExactly(
                 new MakerQuoteInputs.Account(11, line == ProductLine.SPOT ? 10 : -3, 11),
                 new MakerQuoteInputs.Account(12, line == ProductLine.SPOT ? 10 : -3, 12));
-        verifyNoInteractions(core, projection);
+        verifyNoInteractions(core);
     }
 
     @Test void wrongProductAndUnavailableInstrumentFailBeforeAnyAccountOrFeeQuery() {

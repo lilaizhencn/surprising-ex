@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import com.surprising.account.provider.model.AccountHistoryPageQuery;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -19,7 +20,7 @@ class SingleTableRepositoryBoundaryTest {
         JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
         AccountLedgerRepository repository = new AccountLedgerRepository(jdbcTemplate);
 
-        repository.page(null, null, null, 100, null, null);
+        repository.page(null, null, null, new AccountHistoryPageQuery(100,null,true));
 
         String sql = capturedQuery(jdbcTemplate);
         assertThat(sql)
@@ -32,7 +33,7 @@ class SingleTableRepositoryBoundaryTest {
         JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
         ProductLedgerRepository repository = new ProductLedgerRepository(jdbcTemplate);
 
-        repository.page(null, null, null, null, 100, null, null);
+        repository.page(null, null, null, null, new AccountHistoryPageQuery(100,null,true));
 
         String sql = capturedQuery(jdbcTemplate);
         assertThat(sql)
@@ -45,7 +46,7 @@ class SingleTableRepositoryBoundaryTest {
         JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
         AdminBalanceAdjustmentRepository repository = new AdminBalanceAdjustmentRepository(jdbcTemplate);
 
-        repository.page(null, null, null, null, null, null, 100, null, null);
+        repository.page(null, null, null, null, null, null, new AccountHistoryPageQuery(100,null,true));
 
         String sql = capturedQuery(jdbcTemplate);
         assertThat(sql)
@@ -58,7 +59,7 @@ class SingleTableRepositoryBoundaryTest {
         JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
         ProductTransferRepository repository = new ProductTransferRepository(jdbcTemplate);
 
-        repository.page(null, null, null, 100, null, null);
+        repository.page(null, null, null, new AccountHistoryPageQuery(100,null,true));
 
         String sql = capturedQuery(jdbcTemplate);
         assertThat(sql)

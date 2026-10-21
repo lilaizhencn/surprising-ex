@@ -1,9 +1,7 @@
 package com.surprising.account.provider.service;
 
 import com.surprising.account.provider.exception.AccountStateUnavailableException;
-import com.surprising.account.api.model.AccountLedgerQueryResponse;
 import com.surprising.account.api.model.AccountType;
-import com.surprising.account.api.model.AdminBalanceAdjustmentQueryResponse;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
@@ -18,8 +16,6 @@ import com.surprising.account.api.model.PositionResponse;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
 import com.surprising.account.api.model.ProductBalanceQueryResponse;
 import com.surprising.account.api.model.ProductBalanceResponse;
-import com.surprising.account.api.model.ProductLedgerQueryResponse;
-import com.surprising.account.api.model.ProductTransferRecordQueryResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
@@ -53,17 +49,14 @@ public class AccountService {
 
     private final AccountProperties properties;
     private final AccountCommandGateway commandGateway;
-    private final AccountQueryService projectionQueryService;
 
     @Autowired
     public AccountService(AccountProperties properties,
                           AccountCommandGateway commandGateway,
-                          com.surprising.realtime.api.ValkeyUserQueries realtimeQueries,
-                          AccountQueryService projectionQueryService) {
+                          com.surprising.realtime.api.ValkeyUserQueries realtimeQueries) {
         this.properties = properties;
         this.commandGateway = commandGateway;
         this.realtimeQueries = java.util.Objects.requireNonNull(realtimeQueries, "realtime queries are required");
-        this.projectionQueryService = projectionQueryService;
     }
 
     /** 管理员余额调整也必须进入同一用户分区，不能另开数据库事务。 */
@@ -136,105 +129,6 @@ public class AccountService {
                         Math.addExact(value.availableUnits(), value.lockedUnits()), Instant.now()))
                 .toList();
         return new ProductBalanceQueryResponse(rows.size(), rows);
-    }
-
-    /** 账本是异步投影查询，不参与余额裁决。 */
-    public AccountLedgerQueryResponse accountLedger(Long userId,
-                                                    String asset,
-                                                    String referenceType,
-                                                    int limit) {
-        return accountLedger(userId, asset, referenceType, limit, null, null);
-    }
-
-    public AccountLedgerQueryResponse accountLedger(Long userId,
-                                                    String asset,
-                                                    String referenceType,
-                                                    int limit,
-                                                    String cursor,
-                                                    String sort) {
-        requireUserId(userId);
-        var page = projectionQueryService.accountLedgerPage(userId, optionalAsset(asset),
-                optionalReferenceType(referenceType), normalizeLimit(limit), cursor, sort);
-        return new AccountLedgerQueryResponse(page.items().size(), page.items(), page.nextCursor(), page.hasMore(),
-                page.sort(), page.limit());
-    }
-
-    /** 产品账本是异步投影查询，不参与余额裁决。 */
-    public ProductLedgerQueryResponse productLedger(Long userId,
-                                                    AccountType accountType,
-                                                    String asset,
-                                                    String referenceType,
-                                                    int limit) {
-        return productLedger(userId, accountType, asset, referenceType, limit, null, null);
-    }
-
-    public ProductLedgerQueryResponse productLedger(Long userId,
-                                                    AccountType accountType,
-                                                    String asset,
-                                                    String referenceType,
-                                                    int limit,
-                                                    String cursor,
-                                                    String sort) {
-        requireUserId(userId);
-        requireProductAccount(accountType);
-        var page = projectionQueryService.productLedgerPage(userId, accountType,
-                optionalAsset(asset), optionalReferenceType(referenceType), normalizeLimit(limit), cursor, sort);
-        return new ProductLedgerQueryResponse(page.items().size(), page.items(), page.nextCursor(), page.hasMore(),
-                page.sort(), page.limit());
-    }
-
-    /** 转账记录是异步投影查询；转账命令在当前账户 reducer 未支持前失败关闭。 */
-    public ProductTransferRecordQueryResponse productTransfers(Long userId,
-                                                               AccountType accountType,
-                                                               String asset,
-                                                               int limit) {
-        return productTransfers(userId, accountType, asset, limit, null, null);
-    }
-
-    public ProductTransferRecordQueryResponse productTransfers(Long userId,
-                                                               AccountType accountType,
-                                                               String asset,
-                                                               int limit,
-                                                               String cursor,
-                                                               String sort) {
-        requireUserId(userId);
-        var page = projectionQueryService.productTransferPage(userId, accountType,
-                optionalAsset(asset), normalizeLimit(limit), cursor, sort);
-        return new ProductTransferRecordQueryResponse(page.items().size(), page.items(), page.nextCursor(),
-                page.hasMore(), page.sort(), page.limit());
-    }
-
-    /** 后台调整记录是异步审计查询。 */
-    public AdminBalanceAdjustmentQueryResponse adminBalanceAdjustments(Long adminUserId,
-                                                                       Long userId,
-                                                                       String adjustmentKind,
-                                                                       AccountType accountType,
-                                                                       String asset,
-                                                                       String referenceId,
-                                                                       int limit) {
-        return adminBalanceAdjustments(adminUserId, userId, adjustmentKind, accountType, asset, referenceId,
-                limit, null, null);
-    }
-
-    public AdminBalanceAdjustmentQueryResponse adminBalanceAdjustments(Long adminUserId,
-                                                                       Long userId,
-                                                                       String adjustmentKind,
-                                                                       AccountType accountType,
-                                                                       String asset,
-                                                                       String referenceId,
-                                                                       int limit,
-                                                                       String cursor,
-                                                                       String sort) {
-        requireUserId(adminUserId);
-        requireUserId(userId);
-        if (accountType != null) {
-            requireProductAccount(accountType);
-        }
-        var page = projectionQueryService.adminBalanceAdjustmentPage(adminUserId, userId,
-                optionalAdjustmentKind(adjustmentKind), accountType, optionalAsset(asset),
-                optionalReferenceId(referenceId), normalizeLimit(limit), cursor, sort);
-        return new AdminBalanceAdjustmentQueryResponse(page.items().size(), page.items(), page.nextCursor(),
-                page.hasMore(), page.sort(), page.limit());
     }
 
     public ProductTransferResponse transfer(ProductTransferRequest request) {
@@ -404,43 +298,6 @@ public class AccountService {
         return value;
     }
 
-    private static String optionalAsset(String asset) {
-        return asset == null || asset.isBlank() ? null : normalizeAsset(asset);
-    }
-
-    private static String optionalReferenceType(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        String normalized = value.trim().toUpperCase(java.util.Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9_:-]{2,80}")) {
-            throw new IllegalArgumentException("invalid referenceType: " + value);
-        }
-        return normalized;
-    }
-
-    private static String optionalAdjustmentKind(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        String normalized = value.trim().toUpperCase(java.util.Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9_:-]{2,80}")) {
-            throw new IllegalArgumentException("invalid adjustmentKind: " + value);
-        }
-        return normalized;
-    }
-
-    private static String optionalReferenceId(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        String normalized = value.trim();
-        if (normalized.length() > 200) {
-            throw new IllegalArgumentException("referenceId is too long");
-        }
-        return normalized;
-    }
-
     private static String normalizeSymbol(String instrumentId) {
         if (instrumentId == null || instrumentId.isBlank()) {
             throw new IllegalArgumentException("instrumentId is required");
@@ -462,10 +319,4 @@ public class AccountService {
                 : com.surprising.trading.api.model.PositionSide.valueOf(value.trim().toUpperCase());
     }
 
-    private static int normalizeLimit(int limit) {
-        if (limit < 1 || limit > 1000) {
-            throw new IllegalArgumentException("limit must be in [1, 1000]");
-        }
-        return limit;
-    }
 }

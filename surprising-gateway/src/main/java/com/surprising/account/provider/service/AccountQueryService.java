@@ -1,11 +1,14 @@
 package com.surprising.account.provider.service;
 
-import com.surprising.account.api.model.AccountLedgerEntryResponse;
-import com.surprising.account.api.model.AdminBalanceAdjustmentRecord;
-import com.surprising.account.api.utils.AdminCursorPage;
-import com.surprising.account.api.model.ProductLedgerEntryResponse;
-import com.surprising.account.api.model.ProductTransferRecordResponse;
 import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.AccountLedgerQueryResponse;
+import com.surprising.account.api.model.ProductLedgerQueryResponse;
+import com.surprising.account.api.model.ProductTransferRecordQueryResponse;
+import com.surprising.account.api.model.AdminBalanceAdjustmentQueryResponse;
+import com.surprising.account.provider.model.AccountHistoryPageQuery;
+import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.product.api.ProductLine;
+import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.account.provider.repository.AccountLedgerRepository;
 import com.surprising.account.provider.repository.AdminBalanceAdjustmentRepository;
 import com.surprising.account.provider.repository.ProductLedgerRepository;
@@ -20,6 +23,7 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class AccountQueryService {
+    private final AccountProperties properties;
 
     private final AccountLedgerRepository accountLedgerRepository;
     private final ProductLedgerRepository productLedgerRepository;
@@ -29,52 +33,82 @@ public class AccountQueryService {
     public AccountQueryService(AccountLedgerRepository accountLedgerRepository,
                                ProductLedgerRepository productLedgerRepository,
                                ProductTransferRepository productTransferRepository,
-                               AdminBalanceAdjustmentRepository adminBalanceAdjustmentRepository) {
+                               AdminBalanceAdjustmentRepository adminBalanceAdjustmentRepository, AccountProperties properties) {
+        this.properties = properties;
         this.accountLedgerRepository = accountLedgerRepository;
         this.productLedgerRepository = productLedgerRepository;
         this.productTransferRepository = productTransferRepository;
         this.adminBalanceAdjustmentRepository = adminBalanceAdjustmentRepository;
     }
 
-    public AdminCursorPage.CursorPage<AccountLedgerEntryResponse> accountLedgerPage(Long userId,
-                                                                                    String asset,
-                                                                                    String referenceType,
-                                                                                    int limit,
-                                                                                    String cursor,
-                                                                                    String sort) {
-        return accountLedgerRepository.page(userId, asset, referenceType, limit, cursor, sort);
+    public AccountLedgerQueryResponse accountLedger(Long userId,
+                                                    String asset,
+                                                    String referenceType,
+                                                    AccountHistoryPageQuery pageQuery) {
+        var page = accountLedgerRepository.page(userId, asset,
+                referenceType, pageQuery);
+        return new AccountLedgerQueryResponse(page.items().size(), page.items(), page.nextCursor(), page.hasMore(),
+                page.sort(), page.limit());
     }
 
-    public AdminCursorPage.CursorPage<ProductLedgerEntryResponse> productLedgerPage(Long userId,
-                                                                                    AccountType accountType,
-                                                                                    String asset,
-                                                                                    String referenceType,
-                                                                                    int limit,
-                                                                                    String cursor,
-                                                                                    String sort) {
-        return productLedgerRepository.page(userId, accountType, asset, referenceType, limit, cursor, sort);
+    public ProductLedgerQueryResponse productLedger(Long userId,
+                                                    AccountType accountType,
+                                                    String asset,
+                                                    String referenceType,
+                                                    AccountHistoryPageQuery pageQuery) {
+        requireProductAccount(accountType);
+        var page = productLedgerRepository.page(userId, accountType,
+                asset, referenceType, pageQuery);
+        return new ProductLedgerQueryResponse(page.items().size(), page.items(), page.nextCursor(), page.hasMore(),
+                page.sort(), page.limit());
     }
 
-    public AdminCursorPage.CursorPage<ProductTransferRecordResponse> productTransferPage(Long userId,
-                                                                                         AccountType accountType,
-                                                                                         String asset,
-                                                                                         int limit,
-                                                                                         String cursor,
-                                                                                         String sort) {
-        return productTransferRepository.page(userId, accountType, asset, limit, cursor, sort);
+    public ProductTransferRecordQueryResponse productTransfers(Long userId,
+                                                               AccountType accountType,
+                                                               String asset,
+                                                               AccountHistoryPageQuery pageQuery) {
+        var page = productTransferRepository.page(userId, accountType,
+                asset, pageQuery);
+        return new ProductTransferRecordQueryResponse(page.items().size(), page.items(), page.nextCursor(),
+                page.hasMore(), page.sort(), page.limit());
     }
 
-    public AdminCursorPage.CursorPage<AdminBalanceAdjustmentRecord> adminBalanceAdjustmentPage(
-            Long adminUserId,
-            Long userId,
-            String adjustmentKind,
-            AccountType accountType,
-            String asset,
-            String referenceId,
-            int limit,
-            String cursor,
-            String sort) {
-        return adminBalanceAdjustmentRepository.page(adminUserId, userId, adjustmentKind, accountType, asset,
-                referenceId, limit, cursor, sort);
+    public AdminBalanceAdjustmentQueryResponse adminBalanceAdjustments(Long adminUserId,
+                                                                       Long userId,
+                                                                       String adjustmentKind,
+                                                                       AccountType accountType,
+                                                                       String asset,
+                                                                       String referenceId,
+                                                                       AccountHistoryPageQuery pageQuery) {
+        if (accountType != null) {
+            requireProductAccount(accountType);
+        }
+        var page = adminBalanceAdjustmentRepository.page(adminUserId, userId,
+                adjustmentKind, accountType, asset,
+                referenceId, pageQuery);
+        return new AdminBalanceAdjustmentQueryResponse(page.items().size(), page.items(), page.nextCursor(),
+                page.hasMore(), page.sort(), page.limit());
     }
+
+    private ProductLine currentProductLine() {
+        AccountProperties.Kafka kafka = properties == null ? null : properties.getKafka();
+        if (kafka == null || kafka.getProductLine() == null) {
+            throw new IllegalStateException("account 未配置唯一产品线");
+        }
+        return kafka.getProductLine();
+    }
+
+    private void requireCurrentProduct(ProductLine productLine) {
+        ProductLine current = currentProductLine();
+        ProductLineConfiguration.requireSame(current, productLine, "account.product-line");
+    }
+
+    private void requireProductAccount(AccountType accountType) {
+        if (accountType == null || accountType == AccountType.FUNDING
+                || accountType.productLine().isEmpty()) {
+            throw new IllegalArgumentException("产品账户类型无效: " + accountType);
+        }
+        requireCurrentProduct(accountType.productLine().orElseThrow());
+    }
+
 }

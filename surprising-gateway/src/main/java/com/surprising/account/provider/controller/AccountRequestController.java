@@ -21,6 +21,7 @@ import com.surprising.account.api.model.ProductTransferRecordQueryResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.provider.service.AccountService;
+import com.surprising.account.provider.service.AccountQueryService;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.account.provider.exception.AccountCommandTimeoutException;
 import com.surprising.account.provider.config.AccountProperties;
@@ -36,13 +37,15 @@ import org.springframework.stereotype.Component;
 public class AccountRequestController {
 
     private final AccountService accountService;
+    private final AccountQueryService history;
 
     private final AccountCommandGateway commandGateway;
 
     private final AccountProperties properties;
 
-    public AccountRequestController(AccountService accountService, AccountCommandGateway commandGateway, AccountProperties properties) {
+    public AccountRequestController(AccountService accountService, AccountQueryService history, AccountCommandGateway commandGateway, AccountProperties properties) {
         this.accountService = accountService;
+        this.history = history;
         this.commandGateway = commandGateway;
         this.properties = properties;
     }
@@ -229,7 +232,11 @@ public class AccountRequestController {
     public AccountLedgerQueryResponse accountLedger(String adminUserId, Long userId, String asset, String referenceType, int limit, String cursor, String sort) {
         requireAdmin(adminUserId);
         try {
-            return accountService.accountLedger(userId, asset, referenceType, limit, cursor, sort);
+            AccountHistoryRequestBinding.userId(userId);
+            return history.accountLedger(userId,
+                    AccountHistoryRequestBinding.optionalAsset(asset),
+                    AccountHistoryRequestBinding.optionalReferenceType(referenceType),
+                    AccountHistoryRequestBinding.page(limit,cursor,sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -237,7 +244,11 @@ public class AccountRequestController {
 
     public AccountLedgerQueryResponse userAccountLedger(long userId, String asset, String referenceType, int limit, String cursor, String sort) {
         try {
-            return accountService.accountLedger(userId, asset, referenceType, limit, cursor, sort);
+            AccountHistoryRequestBinding.userId(userId);
+            return history.accountLedger(userId,
+                    AccountHistoryRequestBinding.optionalAsset(asset),
+                    AccountHistoryRequestBinding.optionalReferenceType(referenceType),
+                    AccountHistoryRequestBinding.page(limit,cursor,sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -246,7 +257,11 @@ public class AccountRequestController {
     public ProductLedgerQueryResponse productLedger(String adminUserId, Long userId, AccountType accountType, String asset, String referenceType, int limit, String cursor, String sort) {
         requireAdmin(adminUserId);
         try {
-            return accountService.productLedger(userId, accountType, asset, referenceType, limit, cursor, sort);
+            AccountHistoryRequestBinding.userId(userId);
+            return history.productLedger(userId, accountType,
+                    AccountHistoryRequestBinding.optionalAsset(asset),
+                    AccountHistoryRequestBinding.optionalReferenceType(referenceType),
+                    AccountHistoryRequestBinding.page(limit,cursor,sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -254,7 +269,11 @@ public class AccountRequestController {
 
     public ProductLedgerQueryResponse userProductLedger(long userId, AccountType accountType, String asset, String referenceType, int limit, String cursor, String sort) {
         try {
-            return accountService.productLedger(userId, accountType, asset, referenceType, limit, cursor, sort);
+            AccountHistoryRequestBinding.userId(userId);
+            return history.productLedger(userId, accountType,
+                    AccountHistoryRequestBinding.optionalAsset(asset),
+                    AccountHistoryRequestBinding.optionalReferenceType(referenceType),
+                    AccountHistoryRequestBinding.page(limit,cursor,sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -263,7 +282,10 @@ public class AccountRequestController {
     public ProductTransferRecordQueryResponse productTransfers(String adminUserId, Long userId, AccountType accountType, String asset, int limit, String cursor, String sort) {
         requireAdmin(adminUserId);
         try {
-            return accountService.productTransfers(userId, accountType, asset, limit, cursor, sort);
+            AccountHistoryRequestBinding.userId(userId);
+            return history.productTransfers(userId, accountType,
+                    AccountHistoryRequestBinding.optionalAsset(asset),
+                    AccountHistoryRequestBinding.page(limit,cursor,sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -271,7 +293,10 @@ public class AccountRequestController {
 
     public ProductTransferRecordQueryResponse userProductTransfers(long userId, AccountType accountType, String asset, int limit, String cursor, String sort) {
         try {
-            return accountService.productTransfers(userId, accountType, asset, limit, cursor, sort);
+            AccountHistoryRequestBinding.userId(userId);
+            return history.productTransfers(userId, accountType,
+                    AccountHistoryRequestBinding.optionalAsset(asset),
+                    AccountHistoryRequestBinding.page(limit,cursor,sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -280,7 +305,13 @@ public class AccountRequestController {
     public AdminBalanceAdjustmentQueryResponse adminBalanceAdjustments(String headerAdminUserId, Long adminUserId, Long userId, String adjustmentKind, AccountType accountType, String asset, String referenceId, int limit, String cursor, String sort) {
         requireAdmin(headerAdminUserId);
         try {
-            return accountService.adminBalanceAdjustments(adminUserId, userId, adjustmentKind, accountType, asset, referenceId, limit, cursor, sort);
+            AccountHistoryRequestBinding.userId(userId);
+            AccountHistoryRequestBinding.userId(adminUserId);
+            return history.adminBalanceAdjustments(adminUserId, userId,
+                    AccountHistoryRequestBinding.optionalAdjustmentKind(adjustmentKind), accountType,
+                    AccountHistoryRequestBinding.optionalAsset(asset),
+                    AccountHistoryRequestBinding.optionalReferenceId(referenceId),
+                    AccountHistoryRequestBinding.page(limit,cursor,sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
