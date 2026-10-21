@@ -6,7 +6,7 @@ import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
 import com.surprising.account.api.model.PositionModeUpdateRequest;
 import com.surprising.account.api.model.ProductBalanceAdjustmentRequest;
 import com.surprising.account.api.model.ProductTransferRequest;
-import com.surprising.account.provider.service.AccountRequestService;
+import com.surprising.account.provider.controller.AccountRequestController;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -42,9 +42,9 @@ public final class AccountLocalRoutes {
     private static final PathPattern ACCOUNT_CONTROLLER_USERPRODUCTTRANSFERS = PathPatternParser.defaultInstance.parse("/api/v1/accounts/transfers");
     private static final PathPattern ACCOUNT_CONTROLLER_ADMINBALANCEADJUSTMENTS = PathPatternParser.defaultInstance.parse("/api/v1/admin/accounts/adjustments");
 
-    private final AccountRequestService accountRequests;
+    private final AccountRequestController accountRequests;
 
-    public AccountLocalRoutes(AccountRequestService accountRequests) {
+    public AccountLocalRoutes(AccountRequestController accountRequests) {
         this.accountRequests = accountRequests;
     }
 

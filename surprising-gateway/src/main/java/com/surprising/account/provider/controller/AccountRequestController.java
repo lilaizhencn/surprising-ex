@@ -1,4 +1,4 @@
-package com.surprising.account.provider.service;
+package com.surprising.account.provider.controller;
 
 import com.surprising.account.api.model.AccountLedgerQueryResponse;
 import com.surprising.account.api.model.AccountType;
@@ -27,13 +27,13 @@ import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.product.api.ProductLine;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 /**
- * 共享原始 HTTP 与网关入口的请求校验、业务编排和结果转换；不持有 HTTP 路由。
+ * 本地协议与内部HTTP共用的请求绑定、参数校验及响应转换；业务由实际Service处理，不声明HTTP路由。
  */
-@Service()
-public class AccountRequestService {
+@Component
+public class AccountRequestController {
 
     private final AccountService accountService;
 
@@ -41,7 +41,7 @@ public class AccountRequestService {
 
     private final AccountProperties properties;
 
-    public AccountRequestService(AccountService accountService, AccountCommandGateway commandGateway, AccountProperties properties) {
+    public AccountRequestController(AccountService accountService, AccountCommandGateway commandGateway, AccountProperties properties) {
         this.accountService = accountService;
         this.commandGateway = commandGateway;
         this.properties = properties;

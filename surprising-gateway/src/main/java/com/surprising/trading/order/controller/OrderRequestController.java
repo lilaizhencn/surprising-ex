@@ -1,4 +1,4 @@
-package com.surprising.trading.order.service;
+package com.surprising.trading.order.controller;
 
 import com.surprising.trading.api.model.AmendOrderRequest;
 import com.surprising.trading.api.model.CancellationPlanResponse;
@@ -33,13 +33,13 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 /**
- * 共享原始 HTTP 与网关入口的请求校验、业务编排和结果转换；不持有 HTTP 路由。
+ * 本地协议与内部HTTP共用的请求绑定、参数校验及响应转换；业务由实际Service处理，不声明HTTP路由。
  */
-@Service()
-public class OrderRequestService {
+@Component
+public class OrderRequestController {
 
     private final OrderService orderService;
 
@@ -47,7 +47,7 @@ public class OrderRequestService {
 
     private final CancelAllAfterService cancelAllAfterService;
 
-    public OrderRequestService(OrderService orderService, AlgoOrderService algoOrderService, CancelAllAfterService cancelAllAfterService) {
+    public OrderRequestController(OrderService orderService, AlgoOrderService algoOrderService, CancelAllAfterService cancelAllAfterService) {
         this.orderService = orderService;
         this.algoOrderService = algoOrderService;
         this.cancelAllAfterService = cancelAllAfterService;

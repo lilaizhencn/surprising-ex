@@ -1,6 +1,6 @@
 package com.surprising.account.provider.controller;
 
-import com.surprising.account.provider.service.AccountRequestService;
+import com.surprising.account.provider.controller.AccountRequestController;
 import com.surprising.account.api.AccountApiPaths;
 import com.surprising.account.api.model.AccountLedgerQueryResponse;
 import com.surprising.account.api.model.AccountType;
@@ -115,9 +115,9 @@ public class AccountInternalController {
         return requests.userProductTransfers(userId, accountType, asset, limit, cursor, sort);
     }
 
-    private final AccountRequestService requests;
+    private final AccountRequestController requests;
 
-    public AccountInternalController(AccountRequestService requests) {
+    public AccountInternalController(AccountRequestController requests) {
         this.requests = requests;
     }
 }

@@ -8,7 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.surprising.account.api.model.*;
-import com.surprising.account.provider.service.AccountRequestService;
+import com.surprising.account.provider.controller.AccountRequestController;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.product.*;
@@ -51,8 +51,8 @@ class AccountAssetsControllerTest {
     }
 
     @Test void enabledAccountStillUsesAuthoritativeQueryAndPreservesFailures() throws Exception {
-        var accounts = mock(AccountRequestService.class);
-        when(products.service(ProductLine.SPOT, AccountRequestService.class)).thenReturn(accounts);
+        var accounts = mock(AccountRequestController.class);
+        when(products.service(ProductLine.SPOT, AccountRequestController.class)).thenReturn(accounts);
         when(accounts.balances(42)).thenReturn(new BalanceQueryResponse(1,
                 List.of(new BalanceResponse(42, "USDT", 50, 10, 60, Instant.now()))));
         mvc.perform(get("/api/v1/gateway/account/balances").header("Authorization", "Bearer own")

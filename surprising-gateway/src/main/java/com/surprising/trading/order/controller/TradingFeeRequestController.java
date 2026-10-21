@@ -1,4 +1,4 @@
-package com.surprising.trading.order.service;
+package com.surprising.trading.order.controller;
 
 import com.surprising.trading.api.model.EffectiveTradingFeeResponse;
 import com.surprising.trading.api.model.FeeScheduleQueryResponse;
@@ -10,17 +10,17 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.service.TradingFeeService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 /**
- * 共享原始 HTTP 与网关入口的请求校验、业务编排和结果转换；不持有 HTTP 路由。
+ * 本地协议与内部HTTP共用的请求绑定、参数校验及响应转换；业务由实际Service处理，不声明HTTP路由。
  */
-@Service()
-public class TradingFeeRequestService {
+@Component
+public class TradingFeeRequestController {
 
     private final TradingFeeService tradingFeeService;
 
-    public TradingFeeRequestService(TradingFeeService tradingFeeService) {
+    public TradingFeeRequestController(TradingFeeService tradingFeeService) {
         this.tradingFeeService = tradingFeeService;
     }
 

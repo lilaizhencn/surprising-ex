@@ -1,7 +1,7 @@
 package com.surprising.gateway.provider.controller;
 
 import com.surprising.account.api.model.*;
-import com.surprising.account.provider.service.AccountRequestService;
+import com.surprising.account.provider.controller.AccountRequestController;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.product.GatewayProductSelection;
 import com.surprising.gateway.provider.product.GatewayProductServices;
@@ -33,7 +33,7 @@ public class AccountAssetsController {
                                          @RequestParam long userId, HttpServletRequest request) {
         ProductLine product = product(authorization, userId, request);
         var balance = products.disabled().contains(product) ? new BalanceQueryResponse(0, List.of())
-                : products.service(product, AccountRequestService.class).balances(userId);
+                : products.service(product, AccountRequestController.class).balances(userId);
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(balance);
     }
 
@@ -44,7 +44,7 @@ public class AccountAssetsController {
         if (accountType.productLine().orElse(null) != product)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "account type does not match product");
         var balance = products.disabled().contains(product) ? new ProductBalanceQueryResponse(0, List.of())
-                : products.service(product, AccountRequestService.class).productBalances(userId, accountType);
+                : products.service(product, AccountRequestController.class).productBalances(userId, accountType);
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(balance);
     }
 

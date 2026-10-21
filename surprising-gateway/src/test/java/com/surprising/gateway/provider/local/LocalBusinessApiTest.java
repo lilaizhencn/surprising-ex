@@ -43,7 +43,7 @@ class LocalBusinessApiTest {
         verifyNoMoreInteractions(orders);
         verifyNoInteractions(adminOrders);
     }
-    private final com.surprising.trading.trigger.service.TriggerOrderRequestService triggers = mock(com.surprising.trading.trigger.service.TriggerOrderRequestService.class);
+    private final com.surprising.trading.trigger.controller.TriggerOrderRequestController triggers = mock(com.surprising.trading.trigger.controller.TriggerOrderRequestController.class);
 
     @Test void triggerReceiptRoutesBindUserAndPreserveOriginalIdentities() {
         var receipt = new com.surprising.trading.api.model.OrderCommandReceipt(new java.util.UUID(4, 5),
@@ -67,7 +67,7 @@ class LocalBusinessApiTest {
         verify(adminOrders).metrics("7","LINEAR_PERPETUAL","LINEAR_PERPETUAL",60,1);
         assertThat(invoke("trading-orders","/api/v1/admin/trading/orders/metrics",HttpMethod.GET,userHeaders(),null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
-    private final com.surprising.trading.order.service.AdminOrderRequestService adminOrders = mock(com.surprising.trading.order.service.AdminOrderRequestService.class);
+    private final com.surprising.trading.order.controller.AdminOrderRequestController adminOrders = mock(com.surprising.trading.order.controller.AdminOrderRequestController.class);
 
     @Test void executionAuditRouteRequiresAdminAndPreservesExactOrderIdentityAndProductScope() {
         var headers = new HttpHeaders(); headers.set("X-Admin-User-Id","7"); headers.set("X-Product-Line","LINEAR_PERPETUAL");
@@ -237,13 +237,13 @@ class LocalBusinessApiTest {
 
     private final com.surprising.websocket.provider.service.SubscriptionRegistry websocket = mock(com.surprising.websocket.provider.service.SubscriptionRegistry.class);
 
-    private final com.surprising.trading.order.service.OrderRequestService orders = mock(com.surprising.trading.order.service.OrderRequestService.class);
+    private final com.surprising.trading.order.controller.OrderRequestController orders = mock(com.surprising.trading.order.controller.OrderRequestController.class);
 
-    private final com.surprising.trading.order.service.LeverageRequestService leverage = mock(com.surprising.trading.order.service.LeverageRequestService.class);
+    private final com.surprising.trading.order.controller.LeverageRequestController leverage = mock(com.surprising.trading.order.controller.LeverageRequestController.class);
 
     private final com.surprising.trading.matching.service.MatchingMarketDataService market = mock(com.surprising.trading.matching.service.MatchingMarketDataService.class);
 
-    private final com.surprising.account.provider.service.AccountRequestService accounts = mock(com.surprising.account.provider.service.AccountRequestService.class);
+    private final com.surprising.account.provider.controller.AccountRequestController accounts = mock(com.surprising.account.provider.controller.AccountRequestController.class);
 
     private final com.surprising.instrument.provider.controller.InstrumentRequestController instruments = mock(com.surprising.instrument.provider.controller.InstrumentRequestController.class);
 
@@ -261,7 +261,7 @@ class LocalBusinessApiTest {
     }
 
     private LocalBusinessApi api() {
-        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, triggers, mock(com.surprising.trading.trigger.service.AdminTriggerOrderRequestService.class), leverage, mock(com.surprising.trading.order.service.TradingFeeRequestService.class), orders, adminOrders, mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments, mock(com.surprising.trading.order.controller.OrderBusinessSettingsController.class)), mapper, Validation.buildDefaultValidatorFactory().getValidator(), websocket, accountProperties, tradingProperties);
+        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, triggers, mock(com.surprising.trading.trigger.controller.AdminTriggerOrderRequestController.class), leverage, mock(com.surprising.trading.order.controller.TradingFeeRequestController.class), orders, adminOrders, mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments, mock(com.surprising.trading.order.controller.OrderBusinessSettingsController.class)), mapper, Validation.buildDefaultValidatorFactory().getValidator(), websocket, accountProperties, tradingProperties);
     }
 
     private ResponseEntity<byte[]> invoke(String service, String path, HttpMethod method, HttpHeaders headers, String body) {

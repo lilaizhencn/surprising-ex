@@ -1,4 +1,7 @@
-package com.surprising.trading.order.service;
+package com.surprising.trading.order.controller;
+
+import com.surprising.trading.order.service.LeverageService;
+import com.surprising.trading.order.service.OrderCommandRejectedException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -13,7 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
-class LeverageRequestServiceTest {
+class LeverageRequestControllerTest {
 
     @Test
     void terminalBusinessRejectionRemainsAConflictAtTheHttpBoundary() {
@@ -23,7 +26,7 @@ class LeverageRequestServiceTest {
         org.mockito.Mockito.when(leverage.set(org.mockito.ArgumentMatchers.any())).thenThrow(failure);
         var request = new LeverageSettingRequest(1, ProductLine.LINEAR_PERPETUAL, "604",
                 MarginMode.CROSS, 2_000_000, "web");
-        assertThatThrownBy(() -> new LeverageRequestService(leverage).set(request, null, null))
+        assertThatThrownBy(() -> new LeverageRequestController(leverage).set(request, null, null))
                 .isSameAs(failure)
                 .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode())
                         .isEqualTo(HttpStatus.CONFLICT));
@@ -32,7 +35,7 @@ class LeverageRequestServiceTest {
     @Test
     void adminSetRequiresTrustedAdminIdentity() {
         LeverageService leverage = mock(LeverageService.class);
-        LeverageRequestService requests = new LeverageRequestService(leverage);
+        LeverageRequestController requests = new LeverageRequestController(leverage);
         LeverageSettingRequest request = new LeverageSettingRequest(900001L,
                 ProductLine.LINEAR_PERPETUAL, "49", MarginMode.CROSS,
                 10_000_000L, "maker depth QA");

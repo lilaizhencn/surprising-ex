@@ -1,4 +1,6 @@
-package com.surprising.trading.trigger.service;
+package com.surprising.trading.trigger.controller;
+
+import com.surprising.trading.trigger.service.TriggerOrderAeronGateway;
 
 import com.surprising.trading.api.model.BatchCancelTriggerOrdersRequest;
 import com.surprising.trading.api.model.BatchPlaceTriggerOrderRequest;
@@ -14,18 +16,18 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 /**
- * 共享原始 HTTP 与网关入口的请求校验、业务编排和结果转换；不持有 HTTP 路由。
+ * 本地协议与内部HTTP共用的请求绑定、参数校验及响应转换；业务由实际Service处理，不声明HTTP路由。
  */
-@Service()
-public class TriggerOrderRequestService {
+@Component
+public class TriggerOrderRequestController {
 
     private final TriggerOrderService triggerOrderService;
     private final com.surprising.trading.order.service.OrderService orderResults;
 
-    public TriggerOrderRequestService(TriggerOrderService triggerOrderService,
+    public TriggerOrderRequestController(TriggerOrderService triggerOrderService,
             com.surprising.trading.order.service.OrderService orderResults) {
         this.triggerOrderService = triggerOrderService;
         this.orderResults = orderResults;

@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.controller;
 
+import com.surprising.account.provider.controller.AccountRequestController;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -20,7 +22,7 @@ class ReadViewHttpErrorsTest {
         var account = mock(AccountService.class);
         when(account.balances(42L)).thenThrow(new ReadViewUnavailableException("READ_VIEW_INITIALIZING"));
         var properties = new AccountProperties();properties.getKafka().setProductLine(product);
-        var controller = new AccountInternalController(new AccountRequestService(account, mock(AccountCommandGateway.class), properties));
+        var controller = new AccountInternalController(new AccountRequestController(account, mock(AccountCommandGateway.class), properties));
         var mvc = MockMvcBuilders.standaloneSetup(controller).setControllerAdvice(new ReadViewHttpErrors()).build();
         mvc.perform(get("/api/v1/accounts/balances").param("userId", "42")).andExpect(status().isServiceUnavailable())
                 .andExpect(result -> assertThat(result.getResponse().getErrorMessage()).isEqualTo("READ_VIEW_INITIALIZING"));
