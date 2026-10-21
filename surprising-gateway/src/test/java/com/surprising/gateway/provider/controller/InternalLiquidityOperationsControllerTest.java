@@ -29,7 +29,7 @@ class InternalLiquidityOperationsControllerTest {
         when(local.service(ProductLine.LINEAR_PERPETUAL, AccountCommandGateway.class)).thenReturn(accounts);
         when(local.service(ProductLine.LINEAR_PERPETUAL, LeverageService.class)).thenReturn(leverage);
         doThrow(new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND)).when(local).requireEnabled(ProductLine.INVERSE_PERPETUAL);
-        return new InternalLiquidityOperationsController(configured, local, instruments, audit, new ObjectMapper());
+        return new InternalLiquidityOperationsController(configured, new com.surprising.gateway.provider.service.LiquidityOperationsService(local,instruments,audit), new ObjectMapper());
     }
     private MockHttpServletRequest request() {
         var r = new MockHttpServletRequest("POST", "/internal/v1/operations/liquidity/balance-adjustments");
@@ -40,6 +40,56 @@ class InternalLiquidityOperationsControllerTest {
     }
     private ProductBalanceAdjustmentRequest funds(AccountType type) {
         return new ProductBalanceAdjustmentRequest(2, type, "USDT", 100, "maker-capacity-test", "maker capacity");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"symbol","sourceUrl"})
+    void instrumentRepresentationIsRejectedBeforeIntentOrBusiness(String invalid) {
+        var body=mock(com.surprising.instrument.api.model.InstrumentUpsertRequest.class);
+        when(body.instrumentId()).thenReturn(null);
+        when(body.symbol()).thenReturn(invalid.equals("symbol")?"BTC-USDT-SWAP":"BTC-USDT");
+        when(body.baseAssetId()).thenReturn(3);when(body.quoteAssetId()).thenReturn(1);
+        when(body.settleAssetId()).thenReturn(1);when(body.contractValueAssetId()).thenReturn(1);
+        when(body.status()).thenReturn(com.surprising.instrument.api.model.InstrumentStatus.TRADING);
+        when(body.instrumentType()).thenReturn(com.surprising.instrument.api.model.InstrumentType.SPOT);
+        when(body.contractType()).thenReturn(com.surprising.instrument.api.model.ContractType.SPOT);
+        when(body.supportedOrderTypes()).thenReturn(java.util.List.of("LIMIT"));
+        when(body.supportedTimeInForce()).thenReturn(java.util.List.of("GTC"));
+        if (invalid.equals("sourceUrl")) {
+            var source=mock(com.surprising.instrument.api.model.IndexSourceConfig.class);
+            when(source.baseUrl()).thenReturn("not-an-absolute-url");
+            when(body.indexSources()).thenReturn(java.util.List.of(source));
+        }
+        assertThatThrownBy(()->controller(token).instrument(body,"update config",request()))
+                .isInstanceOfSatisfying(ResponseStatusException.class,failure->assertThat(failure.getStatusCode().value()).isEqualTo(400));
+        verifyNoInteractions(instruments,audit);
+    }
+
+    @Test void operationFailureRecordsItsOutcomeAfterTheDurableIntent() {
+        var body=funds(AccountType.USDT_PERPETUAL);
+        doThrow(new IllegalStateException("Core outcome unknown")).when(accounts).adjustProductBalance(any(),any(),any());
+        assertThatThrownBy(()->controller(token).adjust(body,request())).hasMessage("Core outcome unknown");
+        var order=inOrder(audit,accounts);
+        order.verify(audit).recordRequired(argThat(record->record.responseStatus()==202));
+        order.verify(accounts).adjustProductBalance(body,null,"SYSTEM:LIQUIDITY_OPERATIONS");
+        order.verify(audit).record(argThat(record->record.responseStatus()==500 && !record.success() && record.errorMessage().equals("IllegalStateException")));
+        verify(audit,times(1)).recordRequired(any());
+    }
+
+    @Test void failedSuccessAuditNeverRetriesAnAlreadyIssuedFundsCommand() {
+        doNothing().doThrow(new IllegalStateException("result audit unavailable")).when(audit).recordRequired(any());
+        var body=funds(AccountType.USDT_PERPETUAL);
+        assertThatThrownBy(()->controller(token).adjust(body,request())).hasMessage("result audit unavailable");
+        verify(accounts,times(1)).adjustProductBalance(body,null,"SYSTEM:LIQUIDITY_OPERATIONS");
+        verify(audit).record(argThat(record->record.responseStatus()==500 && !record.success()));
+    }
+
+    @Test void malformedLeverageReadNeverReachesBusiness() {
+        var c=controller(token);
+        assertThatThrownBy(()->c.leverage(0,"604",ProductLine.LINEAR_PERPETUAL,MarginMode.CROSS,request())).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(()->c.leverage(2,"BTC-USDT",ProductLine.LINEAR_PERPETUAL,MarginMode.CROSS,request())).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(()->c.leverage(2,"604",ProductLine.LINEAR_PERPETUAL,null,request())).isInstanceOf(ResponseStatusException.class);
+        verifyNoInteractions(leverage,audit);
     }
 
     @Test void disabledMissingOrWrongTokenCannotMutate() {

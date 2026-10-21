@@ -514,3 +514,5 @@ C2C后台的原始请求头、method/path/query、User-Agent和IP由 `c2c.contro
 网关原 `GatewayProxyService` 的请求绑定、路由和HTTP响应转换已合入 `GatewayProxyController`，兼容协议入口复用同一Controller。账户写限制由 `AuthService` 检查；高风险审批策略、匹配和审计持久化经 `AdminApprovalService`。`AdminOperationRecord` 位于 auth.model，审批摘要基于原始正文，查询字符串保持原样。
 
 划转HTTP入口先认证，再直接按BigDecimal绑定金额，验证正整数及long范围，经 `ProductTransferAmount` 的精确long原子单位调用安全估值，随后绑定账户枚举/完整命令并调用资金业务。`ProductTransferSecurityService` 和 `ProductTransferCoordinator` 均不再读JSON或HTTP正文；Command/Result/Status/WireRequest位于provider.model，资金命令使用AccountType原生枚举，公开结果返回规范账户代码。资产精度仍由业务查询资产配置决定。
+
+本机流动性运维入口由 `InternalLiquidityOperationsController` 完成loopback/token、合约自定义格式和请求元数据校验；`LiquidityOperationsService` 检查产品并保证审计意图先持久化、再调用资金/杠杆/合约业务、最后记录结果，审计失败不触发额外资金重试。`LiquidityOperationMetadata` 只包含绑定后的审计事实，不带Servlet或Repository对象。
