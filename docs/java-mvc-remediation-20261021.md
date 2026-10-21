@@ -131,4 +131,6 @@
 - HTTP职责1完成期权报价Controller参数绑定/404/503映射、consumer Kafka接入、原生报价model和业务异常；Service保持唯一源缓存和计算，不再引用HTTP/Kafka/JSON。定向51和完整实时模块187项通过无跳过，13项负例捕获四处预期失败。关闭MVC-016；见 [期权HTTP职责验证](validation/java-mvc-option-http-20261021.json)。所属数据库/日志/报告已清理，其余HTTP/投影/参数职责及最终实栈继续。
 
 - HTTP职责2将做市进程内设置与策略存储接口归store，原生版本冲突由Controller映射409；保留版本锁、深复制与YAML重启边界。定向10/完整模块131项通过无跳过，10项负例捕获5项预期失败；直接基准消费者及依赖源码编译通过。关闭MVC-189、190；见 [做市HTTP职责验证](validation/java-mvc-maker-http-20261021.json)。所属日志/报告已清理。
-- 持续复核补充 [五处职责发现](audit/java-mvc-additional-findings-20261022.csv)：C2C Service协议输入、做市Service/Store格式校验、资金费和合约Repository游标绑定；均继续待整改。完整目标包括补充发现，不能仅以原248条关闭数量作为完成依据。
+- 持续复核补充 [五处职责发现](audit/java-mvc-additional-findings-20261022.csv)：C2C Service协议输入、做市Service/Store格式校验、资金费和合约Repository游标绑定；按补充清单逐项整改。完整目标包括补充发现，不能仅以原248条关闭数量作为完成依据。
+
+- 参数职责1将做市公共设置的Bean Validation、ID/URL/JSON/时长和请求元数据校验移至现有Controller；Service保留产品线/业务数量约束及保存后安装，策略Store不再接受未使用的管理员/原因参数。定向32项、完整模块干净构建153项通过无跳过；22项负例捕获20处入口放行失败，恢复后绿色。关闭补充ADD-002、003；见 [做市参数职责验证](validation/java-mvc-maker-validation-20261022.json)。所属日志/已汇总报告已清理，其余全范围问题及最终实栈继续。

@@ -1084,7 +1084,7 @@ class MarketMakerServiceTest {
         }
         @Override
         public com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition saveDefinition(
-                com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition definition, String admin, String reason) {
+                com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition definition) {
             throw new UnsupportedOperationException();
         }
 

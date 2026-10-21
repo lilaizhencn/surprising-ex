@@ -22,6 +22,8 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
 class MarketMakerSettingsConflictTest {
+    private final jakarta.validation.ValidatorFactory validation = jakarta.validation.Validation.buildDefaultValidatorFactory();
+    @org.junit.jupiter.api.AfterEach void closeValidator() { validation.close(); }
     private final tools.jackson.databind.ObjectMapper json = JsonMapper.builder().findAndAddModules().build();
 
     @Test void staleBusinessSettingsRemainHttp409AtTheController() throws Exception {
@@ -30,7 +32,7 @@ class MarketMakerSettingsConflictTest {
                 .thenThrow(new MarketMakerSettingsConflictException("做市公共设置已更新，请重新加载"));
         var properties = new MarketMakerProperties();
         properties.setProductLine(ProductLine.LINEAR_PERPETUAL);
-        var mvc = MockMvcBuilders.standaloneSetup(new MarketMakerBusinessSettingsController(service, properties)).build();
+        var mvc = MockMvcBuilders.standaloneSetup(new MarketMakerBusinessSettingsController(service, properties, validation.getValidator(), json)).build();
         var request = new MarketMakerBusinessSettingsController.Update(MarketMakerBusinessSettings.initialDisabled(), 1, "edit");
         mvc.perform(post("/api/v1/admin/market-maker/business-settings").header("X-Admin-User-Id", "1001")
                 .param("productLine", "LINEAR_PERPETUAL").contentType(MediaType.APPLICATION_JSON)
@@ -41,7 +43,7 @@ class MarketMakerSettingsConflictTest {
 
     @Test void staleStrategyDefinitionRemainsHttp409AtTheController() throws Exception {
         var service = mock(MarketMakerService.class);
-        when(service.saveStrategyDefinition(any(), eq("1001"), eq("edit")))
+        when(service.saveStrategyDefinition(any()))
                 .thenThrow(new MarketMakerSettingsConflictException("做市配置已更新，请重新加载"));
         var mvc = MockMvcBuilders.standaloneSetup(new AdminMarketMakerController(service)).build();
         var request = new MarketMakerStrategyDefinition("test-maker", ProductLine.LINEAR_PERPETUAL, false,

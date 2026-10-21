@@ -1601,8 +1601,7 @@ public class MarketMakerService {
     }
 
     public com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition saveStrategyDefinition(
-            com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition definition,
-            String adminUserId, String reason) {
+            com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition definition) {
         com.surprising.product.api.ProductLineConfiguration.requireSame(properties.getProductLine(), definition.productLine(), "market-maker strategy");
         for (String id : definition.instrumentIds()) {
             var instrument = instrumentSnapshotCache.current(definition.productLine(), Integer.parseInt(id))
@@ -1618,7 +1617,7 @@ public class MarketMakerService {
         if (old.isPresent() && (!old.get().accountIds().equals(definition.accountIds())
                 || !old.get().instrumentIds().equals(definition.instrumentIds())))
             throw new IllegalArgumentException("existing strategy account and instrument bindings cannot change; create a new strategy");
-        var saved = overrideStore.saveDefinition(definition, adminUserId, reason);
+        var saved = overrideStore.saveDefinition(definition);
         return saved;
     }
 

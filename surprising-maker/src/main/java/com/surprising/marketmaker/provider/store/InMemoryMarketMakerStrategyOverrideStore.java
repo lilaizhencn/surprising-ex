@@ -35,9 +35,7 @@ public class InMemoryMarketMakerStrategyOverrideStore implements MarketMakerStra
         return List.copyOf(definitions.values());
     }
     @Override public synchronized MarketMakerStrategyDefinition saveDefinition(
-            MarketMakerStrategyDefinition d, String admin, String reason) {
-        if (admin == null || admin.isBlank() || reason == null || reason.isBlank() || reason.length() > 1000)
-            throw new IllegalArgumentException("admin identity and reason (1-1000 characters) are required");
+            MarketMakerStrategyDefinition d) {
         String key = key(d.productLine(), d.strategyId());
         var old = definitions.get(key);
         // Worker registrations and client order prefixes own the original strategy identity.

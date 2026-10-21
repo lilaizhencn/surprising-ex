@@ -10,8 +10,7 @@ public interface MarketMakerStrategyOverrideStore {
     List<com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition> definitions();
 
     com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition saveDefinition(
-            com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition definition,
-            String adminUserId, String reason);
+            com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition definition);
 
     List<StrategyConfigOverride> findAll();
 

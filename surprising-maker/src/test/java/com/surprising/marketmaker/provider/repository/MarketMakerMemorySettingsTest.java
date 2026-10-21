@@ -42,12 +42,12 @@ class MarketMakerMemorySettingsTest {
         yaml.setStrategies(List.of(definition(ProductLine.LINEAR_PERPETUAL, 1, 10).strategy()));
         var store = new InMemoryMarketMakerStrategyOverrideStore(yaml);
         assertThat(store.definitions()).singleElement().satisfies(d -> assertThat(d.version()).isEqualTo(1));
-        assertThatThrownBy(() -> store.saveDefinition(definition(ProductLine.LINEAR_PERPETUAL, 0, 10), "1", "duplicate"))
+        assertThatThrownBy(() -> store.saveDefinition(definition(ProductLine.LINEAR_PERPETUAL, 0, 10)))
                 .isInstanceOf(MarketMakerSettingsConflictException.class);
-        assertThat(store.saveDefinition(definition(ProductLine.LINEAR_PERPETUAL, 1, 12), "1", "edit").version()).isEqualTo(2);
-        assertThatThrownBy(() -> store.saveDefinition(definition(ProductLine.LINEAR_PERPETUAL, 1, 99), "2", "stale"))
+        assertThat(store.saveDefinition(definition(ProductLine.LINEAR_PERPETUAL, 1, 12)).version()).isEqualTo(2);
+        assertThatThrownBy(() -> store.saveDefinition(definition(ProductLine.LINEAR_PERPETUAL, 1, 99)))
                 .isInstanceOf(MarketMakerSettingsConflictException.class);
-        store.saveDefinition(definition(ProductLine.INVERSE_PERPETUAL, 0, 8), "1", "other line");
+        store.saveDefinition(definition(ProductLine.INVERSE_PERPETUAL, 0, 8));
         assertThat(store.definitions()).hasSize(2);
         assertThat(new InMemoryMarketMakerStrategyOverrideStore(yaml).definitions()).singleElement()
                 .satisfies(d -> assertThat(d.baseQuantitySteps()).isEqualTo(10));
@@ -60,7 +60,7 @@ class MarketMakerMemorySettingsTest {
         var store = new InMemoryMarketMakerStrategyOverrideStore(yaml);
         var renamed = new MarketMakerStrategyDefinition("TEST-MAKER", original.productLine(), true,
                 List.of(3L), List.of("653"), 10, MarginMode.CROSS, 10, 10, 1000, 100000, 3, 0, 1);
-        assertThatThrownBy(() -> store.saveDefinition(renamed, "1", "change case and bindings"))
+        assertThatThrownBy(() -> store.saveDefinition(renamed))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("ID spelling cannot change");
         assertThat(store.definitions()).containsExactly(original);
     }

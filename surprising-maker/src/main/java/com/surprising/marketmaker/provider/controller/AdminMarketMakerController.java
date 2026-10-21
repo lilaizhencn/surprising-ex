@@ -99,7 +99,9 @@ public class AdminMarketMakerController {
             @RequestBody com.surprising.marketmaker.provider.model.MarketMakerStrategyDefinition definition) {
         requireAdmin(adminUserId);
         try {
-            return marketMakerService.saveStrategyDefinition(definition, adminUserId, reason);
+            if (reason == null || reason.isBlank() || reason.length() > 1000)
+                throw new IllegalArgumentException("admin identity and reason (1-1000 characters) are required");
+            return marketMakerService.saveStrategyDefinition(definition);
         } catch (MarketMakerSettingsConflictException conflict) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, conflict.getMessage(), conflict);
         } catch (IllegalArgumentException error) {

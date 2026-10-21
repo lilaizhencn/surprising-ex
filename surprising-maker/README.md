@@ -543,3 +543,5 @@ JFR profile 上限 16 MiB。实际内存配置的 definitions＋单策略覆盖�
 进程内做市设置与策略覆盖归provider.store，YAML仅作为启动初值，当前版本/覆盖仍由原存储对象唯一持有，
 不代表数据库持久化。Store抛MarketMakerSettingsConflictException，HTTP409及原提示由两个管理Controller处理。
 [做市HTTP职责验证](../docs/validation/java-mvc-maker-http-20261021.json)包含完整模块与负例；参数/游标职责和最终实栈仍继续。
+
+公共设置入口 `controller/MarketMakerBusinessSettingsController` 负责字段、时长、引用源ID/URL/订阅JSON和修改元数据的格式校验；`MarketMakerBusinessSettingsService` 负责产品/数量业务约束以及保存后安装。策略定义的修改原因在 `AdminMarketMakerController.saveDefinition` 校验；`MarketMakerService` 聚合合约状态和绑定约束，进程内Store仅处理策略事实与乐观版本。
