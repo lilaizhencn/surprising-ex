@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
@@ -40,13 +41,13 @@ class C2cAdsPostgresTest {
                 VALUES(?,11,'CNY','ALIPAY','fixture ciphertext','****0000','APPROVED')
                 """,paymentId);
         rows=new C2cAdsRepository(jdbc);intents=new C2cFundsRepository(jdbc);access=mock(C2cAccess.class);
-        ads=new C2cAds(rows,new C2cMarkets(jdbc),new C2cPaymentAccounts(jdbc,null,null,null),access,intents,jdbc,new ObjectMapper(),new C2cSubmissions(jdbc));
+        ads=new C2cAds(rows,C2cDatabaseFixture.markets(jdbc),new C2cPaymentAccounts(jdbc,null,null,null),access,intents,jdbc,new ObjectMapper(),new C2cSubmissions(jdbc));
         var accounts=mock(ProductAccountClient.class);
         var applied=new ProductAccountAdjustment(ProductAccountAdjustment.Status.APPLIED,null);
         when(accounts.transferOut(any(),any())).thenReturn(applied);
         when(accounts.transferIn(any(),any())).thenReturn(applied);
         when(accounts.completeTransfer(any(),any())).thenReturn(applied);
-        funds=new C2cFunds(intents,accounts,new C2cMarkets(jdbc));
+        funds=new C2cFunds(intents,accounts,C2cDatabaseFixture.markets(jdbc));
     }
     @AfterEach void cleanup() {if(db!=null)db.close();}
     private C2cAds.Publish request() {return new C2cAds.Publish(marketId,"SELL","6.65","10","1","10000",List.of("ALIPAY"),List.of(paymentId),900,"QA terms",0);}

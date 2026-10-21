@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.auth.ComplianceService;
 import com.surprising.gateway.provider.auth.GatewayUserRepository;
 import java.time.Instant;
@@ -18,7 +19,7 @@ public class C2cAdminReview {
     public record ReportDecision(String decision,String reason) { }
     private final C2cAdminAccess access;
     private final JdbcTemplate jdbc;
-    private final C2cMarkets markets;
+    private final C2cMarketService markets;
     private final C2cAdsRepository adRows;
     private final C2cAds ads;
     private final C2cOrdersRepository orderRows;
@@ -28,7 +29,7 @@ public class C2cAdminReview {
     private final ComplianceService compliance;
     private final GatewayUserRepository users;
 
-    public C2cAdminReview(C2cAdminAccess access,JdbcTemplate jdbc,C2cMarkets markets,C2cAdsRepository adRows,C2cAds ads,
+    public C2cAdminReview(C2cAdminAccess access,JdbcTemplate jdbc,C2cMarketService markets,C2cAdsRepository adRows,C2cAds ads,
                           C2cOrdersRepository orderRows,C2cOrders orders,C2cPaymentAccounts payments,C2cQueries queries,
                           ComplianceService compliance,GatewayUserRepository users) {
         this.access=access;this.jdbc=jdbc;this.markets=markets;this.adRows=adRows;this.ads=ads;

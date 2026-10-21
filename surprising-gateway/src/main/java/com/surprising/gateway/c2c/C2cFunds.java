@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.gateway.provider.service.ProductAccountAdjustment;
@@ -13,8 +14,8 @@ import org.springframework.stereotype.Service;
 public class C2cFunds {
     private final C2cFundsRepository intents;
     private final ProductAccountClient accounts;
-    private final C2cMarkets markets;
-    public C2cFunds(C2cFundsRepository intents, ProductAccountClient accounts, C2cMarkets markets) {
+    private final C2cMarketService markets;
+    public C2cFunds(C2cFundsRepository intents, ProductAccountClient accounts, C2cMarketService markets) {
         this.intents = intents;
         this.accounts = accounts;
         this.markets = markets;

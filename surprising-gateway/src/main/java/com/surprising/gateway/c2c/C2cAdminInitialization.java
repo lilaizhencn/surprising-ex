@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.account.provider.service.AccountCommandRejectedException;
@@ -17,11 +18,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class C2cAdminInitialization {
     private record Accepted(JwtPrincipal administrator, long escrow, long fees, String asset) { }
     private final C2cAdminAccess access;
-    private final C2cMarkets markets;
+    private final C2cMarketService markets;
     private final GatewayProductServices products;
     private final TransactionTemplate transactions;
 
-    public C2cAdminInitialization(C2cAdminAccess access, C2cMarkets markets, GatewayProductServices products,
+    public C2cAdminInitialization(C2cAdminAccess access, C2cMarketService markets, GatewayProductServices products,
                                  PlatformTransactionManager transactions) {
         this.access=access;this.markets=markets;this.products=products;
         this.transactions=new TransactionTemplate(transactions);

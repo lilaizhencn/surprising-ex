@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -21,12 +22,12 @@ public class C2cQueries {
     private final JdbcTemplate jdbc;
     private final C2cAdsRepository ads;
     private final C2cOrdersRepository orders;
-    private final C2cMarkets markets;
+    private final C2cMarketService markets;
     private final C2cPaymentAccounts payments;
     private final ObjectMapper json;
 
     public C2cQueries(JdbcTemplate jdbc, C2cAdsRepository ads, C2cOrdersRepository orders,
-                      C2cMarkets markets, C2cPaymentAccounts payments, ObjectMapper json) {
+                      C2cMarketService markets, C2cPaymentAccounts payments, ObjectMapper json) {
         this.jdbc = jdbc; this.ads = ads; this.orders = orders;
         this.markets = markets; this.payments = payments; this.json = json;
     }

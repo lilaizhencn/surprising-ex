@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.ComplianceService;
 import com.surprising.gateway.provider.auth.GatewayUserRepository;
@@ -21,11 +22,11 @@ public class C2cProfiles {
     private final ComplianceService compliance;
     private final GatewayUserRepository users;
     private final C2cOrdersRepository orders;
-    private final C2cMarkets markets;
+    private final C2cMarketService markets;
     private final ObjectMapper json;
 
     public C2cProfiles(JdbcTemplate jdbc,C2cAccess access,ComplianceService compliance,GatewayUserRepository users,
-                       C2cOrdersRepository orders,C2cMarkets markets,ObjectMapper json) {
+                       C2cOrdersRepository orders,C2cMarketService markets,ObjectMapper json) {
         this.jdbc=jdbc;this.access=access;this.compliance=compliance;this.users=users;
         this.orders=orders;this.markets=markets;this.json=json;
     }

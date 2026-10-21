@@ -47,6 +47,12 @@ final class C2cDatabaseFixture implements AutoCloseable {
         jdbc.execute("CREATE SEQUENCE "+table+"_qa_sequence");
         jdbc.execute("ALTER TABLE "+table+" ALTER COLUMN "+column+" SET DEFAULT nextval('"+table+"_qa_sequence')");
     }
+    static com.surprising.gateway.c2c.service.C2cMarketService markets(JdbcTemplate jdbc) {
+        return new com.surprising.gateway.c2c.service.C2cMarketService(
+                new com.surprising.gateway.c2c.repository.C2cConfigurationRepository(jdbc),
+                new com.surprising.gateway.c2c.repository.C2cMarketRepository(jdbc),
+                new com.surprising.gateway.c2c.repository.C2cMerchantBondRepository(jdbc));
+    }
     // Controlled Core fixture: a pre-existing approved merchant has already committed its bond.
     void seedMerchantBond(long userId) {
         jdbc.update("INSERT INTO c2c_merchant_bond_policy(singleton,asset,amount_units,updated_by) VALUES(true,'USDT',100000000,9) ON CONFLICT DO NOTHING");

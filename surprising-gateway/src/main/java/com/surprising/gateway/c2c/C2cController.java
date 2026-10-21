@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
@@ -27,7 +28,7 @@ public class C2cController {
     public record PaymentDisable(String revision,C2cVerification verification) { }
 
     private final C2cAccess access;
-    private final C2cMarkets markets;
+    private final C2cMarketService markets;
     private final C2cAds ads;
     private final C2cAdsRepository adRows;
     private final C2cOrders orders;
@@ -38,7 +39,7 @@ public class C2cController {
     private final GatewayProductServices products;
     private final ObjectMapper json;
 
-    public C2cController(C2cAccess access,C2cMarkets markets,C2cAds ads,C2cAdsRepository adRows,
+    public C2cController(C2cAccess access,C2cMarketService markets,C2cAds ads,C2cAdsRepository adRows,
                          C2cOrders orders,C2cOrdersRepository orderRows,C2cSubmissions submissions,C2cQueries queries,
                          C2cPaymentAccounts payments,GatewayProductServices products,ObjectMapper json) {
         this.access=access;this.markets=markets;this.ads=ads;this.adRows=adRows;this.orders=orders;this.orderRows=orderRows;

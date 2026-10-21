@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
@@ -18,12 +19,12 @@ public class C2cMerchantBonds {
     public record Policy(String revision,String asset,String amount,String reason) { }
     private final JdbcTemplate jdbc;
     private final C2cFundsRepository funds;
-    private final C2cMarkets markets;
+    private final C2cMarketService markets;
     private final C2cAccess access;
     private final C2cAdminAccess admin;
     private final GatewayProductServices products;
 
-    public C2cMerchantBonds(JdbcTemplate jdbc,C2cFundsRepository funds,C2cMarkets markets,C2cAccess access,
+    public C2cMerchantBonds(JdbcTemplate jdbc,C2cFundsRepository funds,C2cMarketService markets,C2cAccess access,
                              C2cAdminAccess admin,GatewayProductServices products) {
         this.jdbc=jdbc;this.funds=funds;this.markets=markets;this.access=access;this.admin=admin;this.products=products;
     }

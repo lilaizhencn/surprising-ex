@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
@@ -12,11 +13,11 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/c2c")
 public class C2cStatusController {
     private final boolean runtimeEnabled;
-    private final C2cMarkets markets;
+    private final C2cMarketService markets;
     private final GatewayProductServices products;
 
     public C2cStatusController(@Value("${surprising.c2c.enabled:false}") boolean runtimeEnabled,
-                               C2cMarkets markets, GatewayProductServices products) {
+                               C2cMarketService markets, GatewayProductServices products) {
         this.runtimeEnabled = runtimeEnabled; this.markets = markets; this.products = products;
     }
 

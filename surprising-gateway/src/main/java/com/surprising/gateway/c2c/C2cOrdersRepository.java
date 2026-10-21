@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cMarket;
+
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -13,7 +15,7 @@ import tools.jackson.databind.ObjectMapper;
 public class C2cOrdersRepository {
     record Quote(UUID id,long userId,UUID adId,long adRevision,long marketRevision,long quantityUnits,long feeUnits,
                  BigDecimal fiatAmount,BigDecimal price,UUID paymentAccountId,long accountRevision,Instant expiresAt) { }
-    record Order(UUID id,UUID quoteId,UUID adId,UUID marketId,long creatorUserId,long buyerUserId,long sellerUserId,
+    public record Order(UUID id,UUID quoteId,UUID adId,UUID marketId,long creatorUserId,long buyerUserId,long sellerUserId,
                  long quantityUnits,long feeUnits,BigDecimal fiatAmount,BigDecimal price,
                  UUID paymentAccountId,String paymentCiphertext,int paymentWindowSeconds,String terms,C2cOrderStatus status,
                  String requestedTerminal,Instant paymentExpiresAt,Instant paidAt,Instant completedAt,Instant canceledAt,
@@ -22,12 +24,21 @@ public class C2cOrdersRepository {
     private final ObjectMapper json;
     public C2cOrdersRepository(JdbcTemplate jdbc,ObjectMapper json) {this.jdbc=jdbc;this.json=json;}
 
+    public List<Order> adminPage(String status, Long userId, UUID orderId, UUID market, int count, int offset) {
+        return jdbc.query("""
+                SELECT * FROM c2c_orders WHERE (CAST(? AS text) IS NULL OR status=?)
+                    AND (CAST(? AS bigint) IS NULL OR buyer_user_id=? OR seller_user_id=?)
+                    AND (CAST(? AS uuid) IS NULL OR order_id=?) AND (CAST(? AS uuid) IS NULL OR market_id=?)
+                ORDER BY updated_at DESC,order_id DESC LIMIT ? OFFSET ?
+                """, this::readOrder, status, status, userId, userId, userId, orderId, orderId, market, market, count, offset);
+    }
+
     Quote quote(UUID id,boolean lock) {
         var rows=jdbc.query("SELECT * FROM c2c_quotes WHERE quote_id=?"+(lock?" FOR UPDATE":""),this::readQuote,id);
         if(rows.isEmpty()) throw new IllegalArgumentException("报价不存在或已过期");
         return rows.getFirst();
     }
-    Quote createQuote(long userId,C2cAdsRepository.Ad ad,C2cMarkets.Market market,long units,long fee,BigDecimal fiat,C2cPaymentAccounts.Account account) {
+    Quote createQuote(long userId,C2cAdsRepository.Ad ad,C2cMarket market,long units,long fee,BigDecimal fiat,C2cPaymentAccounts.Account account) {
         UUID id=UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO c2c_quotes(quote_id,user_id,ad_id,ad_revision,market_revision,quantity_units,buyer_fee_units,

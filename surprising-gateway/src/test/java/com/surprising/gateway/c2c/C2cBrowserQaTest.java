@@ -1,5 +1,8 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cAdminQueryService;
+
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.websocket.provider.config.WebSocketProperties;
 import com.surprising.websocket.provider.service.*;
 import jakarta.servlet.MultipartConfigElement;
@@ -28,12 +31,12 @@ class C2cBrowserQaTest {
     @EnableWebSocket
     static class Web implements WebSocketConfigurer {
         @Bean C2cChatController chat() {return new C2cChatController(fixture.bean(C2cAccess.class),fixture.bean(C2cConversations.class),fixture.bean(C2cMessages.class),fixture.bean(C2cAttachments.class));}
-        @Bean C2cStatusController status() {return new C2cStatusController(true,fixture.bean(C2cMarkets.class),fixture.products);}
+        @Bean C2cStatusController status() {return new C2cStatusController(true,fixture.bean(C2cMarketService.class),fixture.products);}
         @Bean C2cMeController me() {return new C2cMeController(fixture.bean(C2cAccess.class),fixture.bean(C2cProfiles.class));}
-        @Bean C2cController orders() {return new C2cController(fixture.bean(C2cAccess.class),fixture.bean(C2cMarkets.class),fixture.bean(C2cAds.class),fixture.bean(C2cAdsRepository.class),fixture.bean(C2cOrders.class),fixture.bean(C2cOrdersRepository.class),fixture.bean(C2cSubmissions.class),fixture.bean(C2cQueries.class),fixture.bean(C2cPaymentAccounts.class),fixture.products,fixture.json);}
+        @Bean C2cController orders() {return new C2cController(fixture.bean(C2cAccess.class),fixture.bean(C2cMarketService.class),fixture.bean(C2cAds.class),fixture.bean(C2cAdsRepository.class),fixture.bean(C2cOrders.class),fixture.bean(C2cOrdersRepository.class),fixture.bean(C2cSubmissions.class),fixture.bean(C2cQueries.class),fixture.bean(C2cPaymentAccounts.class),fixture.products,fixture.json);}
         @Bean C2cHttpErrors errors() {return new C2cHttpErrors();}
         @Bean C2cAdminChatController adminChat() {return new C2cAdminChatController(fixture.bean(C2cAdminAccess.class),fixture.bean(C2cAdminChat.class),fixture.json);}
-        @Bean C2cAdminController admin() {return new C2cAdminController(fixture.bean(C2cAdminAccess.class),fixture.bean(C2cAdminMarkets.class),fixture.bean(C2cAdminReview.class),fixture.bean(C2cAdminQueries.class),fixture.bean(C2cAdminInitialization.class),fixture.json);}
+        @Bean C2cAdminController admin() {return new C2cAdminController(fixture.bean(C2cAdminAccess.class),fixture.bean(C2cAdminMarkets.class),fixture.bean(C2cAdminReview.class),fixture.bean(C2cAdminQueryService.class),fixture.bean(C2cAdminInitialization.class),fixture.json);}
         @Bean StandardServletMultipartResolver multipartResolver() {return new StandardServletMultipartResolver();}
         @Bean C2cChatRealtime realtime() {return new C2cChatRealtime(fixture.json,fixture.bean(C2cAccess.class),fixture.bean(C2cConversations.class),fixture.bean(C2cMessages.class),10);}
         @Bean SubscriptionRegistry registry() {return new SubscriptionRegistry(fixture.json,new WebSocketProperties());}

@@ -1,0 +1,373 @@
+{
+  "date": "2026-10-21",
+  "verified_at_utc": "2026-10-21T09:15:34.717798+00:00",
+  "scope": "C2C后台七类列表、市场与配置/质押准入分层、当前页市场批量读取",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16; isolated PostgreSQL 18.4",
+  "stages": {
+    "baseline": {
+      "tests": 97,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cAccessPostgresTest"
+        },
+        {
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest"
+        },
+        {
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cSubmissionsPostgresTest"
+        },
+        {
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest"
+        },
+        {
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cChatPostgresTest"
+        },
+        {
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cOrdersPostgresTest"
+        },
+        {
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest"
+        },
+        {
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cFundsPostgresTest"
+        },
+        {
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cAdsPostgresTest"
+        },
+        {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cMoneyTest"
+        }
+      ],
+      "log_sha256": "62afe0e8f13c417ab92718e36bd04443c8488d6b0b6239dfce8da3edfe6aa490",
+      "exit_code": 0,
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=C2c*PostgresTest,C2cMoneyTest",
+        "test"
+      ]
+    },
+    "focused": {
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cAdminQueryPostgresTest"
+        },
+        {
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest"
+        },
+        {
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cFundsPostgresTest"
+        },
+        {
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cAdminQueryControllerTest"
+        }
+      ],
+      "log_sha256": "24c4409357487cdb4c4de3fd178b85c8e089dee79827b435b7166f4fd812fc03",
+      "exit_code": 0,
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=C2cAdminQueryControllerTest,C2cAdminQueryPostgresTest,C2cAdminHttpPostgresTest,C2cFundsPostgresTest",
+        "test"
+      ]
+    },
+    "green": {
+      "tests": 104,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cAdminQueryPostgresTest"
+        },
+        {
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cChatRealtimePostgresTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cAccessPostgresTest"
+        },
+        {
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cAdminHttpPostgresTest"
+        },
+        {
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cMerchantBondPostgresTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cSubmissionsPostgresTest"
+        },
+        {
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cAttachmentsPostgresTest"
+        },
+        {
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cChatPostgresTest"
+        },
+        {
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cOrdersPostgresTest"
+        },
+        {
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cHttpPostgresTest"
+        },
+        {
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cFundsPostgresTest"
+        },
+        {
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cMeHttpPostgresTest"
+        },
+        {
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cAdminQueryControllerTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cAdsPostgresTest"
+        },
+        {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.c2c.C2cMoneyTest"
+        },
+        {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest"
+        },
+        {
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "class": "com.surprising.gateway.provider.product.ProductBusinessConfigurationTest"
+        }
+      ],
+      "log_sha256": "c1381b415f5860e95f07dbba91c959590ef4bc34c8a49a8ac8ce1b31201c873d",
+      "exit_code": 0,
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "clean",
+        "-Dtest=C2c*PostgresTest,C2cMoneyTest,C2cAdminQueryControllerTest,ProductBusinessConfigurationTest,GatewayProductRoutesConfigurationTest",
+        "test"
+      ]
+    }
+  },
+  "red_regression": {
+    "tests": 2,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "exit_code": 1,
+    "description": "临时将广告/订单市场批量读取恢复为逐行读取，数据库查询预算测试捕获两条广告触发3次查询超出2次预算；finally恢复批量源码。",
+    "log_sha256": "5ca3e38cc63c869ec57b53a15cdbcba3d7ffa6c69cb733f76dd7feaa8528ae9e"
+  },
+  "behavior_evidence": [
+    "Controller在业务查询前拒绝七类列表分页/状态及用户编号错误",
+    "广告/订单当前页最多两次SQL；空页只查根表",
+    "稳定翻页与hasMore保持；金额、int64、版本均保留字符串",
+    "七类后台列表不选择或返回付款密文、完整账号、证件原件",
+    "原市场活跃条件、质押覆盖政策、意图所有者/托管校验SQL与业务规则保留",
+    "单表职责与具体关联用途见docs/c2c-java-layering.md"
+  ],
+  "source_sha256": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAccess.java": "3eaf08301ebb1c7125fcbbe54402a3fc78ddaa4be98c2a28265c7ac7fe9bc0a4",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminController.java": "b86c91997aaf10fb2d329c56b660baf515b6c9282d2cf266ead8773cc7d12bd0",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminInitialization.java": "5d6f968a2e292b55c0e270608a0eea913cab0eb7143d6423bb579c1f2b3fa7d7",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminMarkets.java": "d6f6ae1e7ee7b235f6bf7c2026491d0e2e1162bedad92e549a84f3cbc9406331",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminReview.java": "66dcf3746343cb372015259a1837e00ca692f54a0b3737c583e3aaa8b56c9ef9",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAds.java": "813838f579a45a4022ffdcc9fa8dd940357239d93e50ae427131efc6746af6b4",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdsRepository.java": "885af1822ef79b833bc00c50c50713f5a9400d787a45e0a0a6b8c673f67bf472",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cController.java": "14727ad855bdae9318f3c0667c5099f373d11a373a165024cd355f939c7d539f",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cFunds.java": "0bd18c157e07057f1b2c9c0e1cb5a613100114524f3086b27207166535eba4d6",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cFundsRepository.java": "1a30b356ea8efe603e7ca1cb9b4a9627818ab3527c1e921b7101a8602ff2676a",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cMerchantBonds.java": "e83a5757d5622f3c541832db271f6b8b7bf12b92c15c314494be3a689d65f7d2",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cOrders.java": "9fa605413d8e9a1a7979d247bd1cd025bc316c1a911702fc224f22724cacbe47",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cOrdersRepository.java": "2db851e3dd9f13a6ffcae799edf29225a04a285f6e99051f7817eb078a4a6ffc",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cProfiles.java": "4cb75fcb0139bddd50197a91644e074fff4dc02fb3953f448c2405859ea7457d",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cQueries.java": "c96dabc2312f46145273a3c23b42c47a499236d4783db5f6073ee4b72112ba79",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cStatusController.java": "05776a9b9a80fe2fe45e465aec825bc7b73850fc78921b7ecfacbbd6139c87fe",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cViews.java": "f0ea2a70b27dc85023b9ad1b2939d83428ee9cbb26a26beb8da7ede134748958",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/model/C2cAdminRows.java": "c6f2058d16b26d81bb7de0325d7f274a6ad2fa484908902328457a24a4ac8179",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/model/C2cAdminViews.java": "1bc73eaf836f225680ee2eb9bebbb28244776f1d5e393f710158dd5b77ec7fd5",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/model/C2cConfiguration.java": "d35a8c08279debfb2a610dacf91acfea119e4d24eea2289842fe07de0e5f3362",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/model/C2cMarket.java": "f466d3eec0fbf6a17da6ee351a9985ed4455daf38c536daa2f96fc6357c56cf6",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/model/C2cPage.java": "b736e8384c4813a38d455ac38362495b799e5125d75f324c36f321df3eb8591a",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cAppealRepository.java": "ca255b7e994421a7a091c4a91759980320f3614230278e5d4bec863b9d74fed6",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cConfigurationRepository.java": "68e1771f7603e8dbd3c48c8780b6c33df60fb0ac50f08cd0a64f5dfdb9c8de3b",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cMarketRepository.java": "c855f1a80a7aac7420255a44386dc288599125b255279b2b916e54d81668e037",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cMerchantBondRepository.java": "84be7de87dc078dbd624c6c5a742e4aa93e5684f1c71dd3a170c6462cbab7fc7",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cMerchantRepository.java": "550b9c29ab732ca5ab28cbab89b1a96e01efc4d3d700ac2a345ac57cc53e8b2a",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cPaymentAccountRepository.java": "db08ad82cafa8282a309e88b17912b3a5a3b77703917a0add57b38dcf2f398a5",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/repository/C2cReportRepository.java": "cc2149fac60cbb97fbbd1f5a914f8142d47ab425c8d59bb56e19220c2cb02c2e",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminQueryService.java": "343677db45651b4f98990431b204fedd7ffe8da46881ece959c51a73144fe154",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cMarketService.java": "bbc86d6339484bc6201b1cab4ff50e4b591225fc455a84b3f6647556f477ac39",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAccessPostgresTest.java": "3e067e46d41d86d87a43d63907214d75501c27dd450efb8c52720022395224f9",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAdminHttpPostgresTest.java": "7aad30255bb10a75a9a4ea6af54bd183155f3e2fed1892a98f5a8e7ccf43cfcd",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAdminQueryControllerTest.java": "20711804fccb7850892fcf3722a5fd7bc060950f5de8efd53254baad8566162b",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAdminQueryPostgresTest.java": "aa3f8c6edf9eb5ee09d0b45f32dcaae4087ae29248a30d26cc4feb186123e36f",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAdsPostgresTest.java": "76797513fde8587e4f1f5b23026bfd5e655806e6efe229a7b4dd0acdddad129a",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cBrowserQaTest.java": "22d7dd4c791b8ba5fa43866761a3e2c12f793c8443e9fe19e0a16b87dbb1dc50",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cDatabaseFixture.java": "ad66c4d4e0c05863b0b0e836a392d6fa512337dc6485c9a859f53660028c35d2",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cFundsPostgresTest.java": "5575017950c5026321036984102c972a776c873e04620cd4804bad74c16b21ff",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cHttpFixture.java": "0cbbc64e3471b78cfa51b848c01d9c604c1abd4daea1fa4dde051117ef2447b9",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cHttpPostgresTest.java": "dcc0ea5a4813ce36c1019970e4a6e7af75dca834e5faa588061d7d01f35ff85b",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cOrdersPostgresTest.java": "f1e216747795b97d9f1a919dbbf7f189784cd4ae284bbea88883ce773b1fe1f5"
+  },
+  "deleted_source": [
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cAdminQueries.java",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/C2cMarkets.java"
+  ],
+  "not_run": [
+    "真实Core链路/六产品资金核对：本批没有修改资金计算或原资金指令，受控Core数据库回归已跑，后续资金写路径仍需实栈验证",
+    "外部R2/钱包：本批只改列表和配置/准入读取，不涉及存储或链上能力"
+  ],
+  "cleanup": {
+    "postgres_root": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-mvc-c2c-pg-n1e68w28",
+    "status": "已停止所属PostgreSQL，删除所属数据库/日志及已汇总测试报告，保留源码和构建产物。",
+    "removed_reports": 34,
+    "cleaned_at_utc": "2026-10-21T09:15:37.458744+00:00"
+  }
+}

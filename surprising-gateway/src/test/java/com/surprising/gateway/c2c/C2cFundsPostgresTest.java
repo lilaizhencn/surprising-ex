@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import com.surprising.account.api.model.ProductTransferOperationRequest;
@@ -24,7 +25,7 @@ class C2cFundsPostgresTest {
         jdbc = database.jdbc;
         repository = new C2cFundsRepository(jdbc);
         accounts = mock(ProductAccountClient.class);
-        funds = new C2cFunds(repository, accounts, new C2cMarkets(jdbc));
+        funds = new C2cFunds(repository, accounts, C2cDatabaseFixture.markets(jdbc));
     }
     @AfterEach void cleanup() { if (database != null) database.close(); }
     private C2cFundsRepository.Intent reserve() {
@@ -40,7 +41,7 @@ class C2cFundsPostgresTest {
         when(accounts.completeTransfer(eq("SPOT"), any())).thenReturn(applied());
         assertThat(funds.resume(intent.id()).status()).isEqualTo("PREPARED");
         verify(accounts, never()).transferIn(any(), any());
-        var restarted = new C2cFunds(new C2cFundsRepository(jdbc), accounts, new C2cMarkets(jdbc));
+        var restarted = new C2cFunds(new C2cFundsRepository(jdbc), accounts, C2cDatabaseFixture.markets(jdbc));
         assertThat(restarted.resume(intent.id()).status()).isEqualTo("APPLIED");
         var commands = org.mockito.ArgumentCaptor.forClass(ProductTransferOperationRequest.class);
         verify(accounts, times(2)).transferOut(eq("SPOT"), commands.capture());
@@ -78,7 +79,7 @@ class C2cFundsPostgresTest {
     }
 
     @Test void internalAccountsCannotBeImportedAsLoginUsersOrReassigned() {
-        long escrow = new C2cMarkets(jdbc).configuration().escrowUserId();
+        long escrow = C2cDatabaseFixture.markets(jdbc).configuration().escrowUserId();
         assertThatThrownBy(() -> jdbc.update("INSERT INTO gateway_users(user_id) VALUES (?)", escrow))
                 .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbc.update("UPDATE c2c_configuration SET escrow_user_id=12345"))

@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cMarket;
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import java.math.BigDecimal;
 import java.util.*;
@@ -15,14 +17,14 @@ public class C2cAds {
                    List<String> methodCodes,List<UUID> paymentAccountIds,int paymentWindowSeconds,
                    String terms,int minCompleted) { }
     private final C2cAdsRepository ads;
-    private final C2cMarkets markets;
+    private final C2cMarketService markets;
     private final C2cPaymentAccounts payments;
     private final C2cAccess access;
     private final C2cFundsRepository funds;
     private final C2cSubmissions submissions;
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
-    public C2cAds(C2cAdsRepository ads,C2cMarkets markets,C2cPaymentAccounts payments,C2cAccess access,
+    public C2cAds(C2cAdsRepository ads,C2cMarketService markets,C2cPaymentAccounts payments,C2cAccess access,
                    C2cFundsRepository funds,JdbcTemplate jdbc,ObjectMapper json,C2cSubmissions submissions) {
         this.submissions=submissions;
         this.ads=ads;this.markets=markets;this.payments=payments;this.access=access;this.funds=funds;this.jdbc=jdbc;this.json=json;
@@ -189,7 +191,7 @@ public class C2cAds {
     static void requireKey(String key) {
         if(key==null || !key.matches("[A-Za-z0-9_-]{16,80}")) throw new IllegalArgumentException("请提供稳定的原请求标识");
     }
-    private static void validateTerms(C2cMarkets.Market market,String price,String min,String max,String terms,int minCompleted) {
+    private static void validateTerms(C2cMarket market,String price,String min,String max,String terms,int minCompleted) {
         var p=C2cMoney.decimal(price);var low=C2cMoney.decimal(min);var high=C2cMoney.decimal(max);
         if(p.compareTo(market.minPrice())<0 || p.compareTo(market.maxPrice())>0 || p.scale()>18
                 || low.compareTo(market.minFiat())<0 || high.compareTo(market.maxFiat())>0 || low.compareTo(high)>0

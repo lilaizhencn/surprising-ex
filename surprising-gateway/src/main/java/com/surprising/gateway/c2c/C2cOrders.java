@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cMarket;
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -13,13 +15,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class C2cOrders {
     private final C2cOrdersRepository orders;
     private final C2cAdsRepository ads;
-    private final C2cMarkets markets;
+    private final C2cMarketService markets;
     private final C2cPaymentAccounts payments;
     private final C2cAccess access;
     private final C2cFundsRepository funds;
     private final JdbcTemplate jdbc;
     private final C2cSubmissions submissions;
-    public C2cOrders(C2cOrdersRepository orders,C2cAdsRepository ads,C2cMarkets markets,C2cPaymentAccounts payments,
+    public C2cOrders(C2cOrdersRepository orders,C2cAdsRepository ads,C2cMarketService markets,C2cPaymentAccounts payments,
                       C2cAccess access,C2cFundsRepository funds,JdbcTemplate jdbc,C2cSubmissions submissions) {
         this.submissions=submissions;
         this.orders=orders;this.ads=ads;this.markets=markets;this.payments=payments;this.access=access;this.funds=funds;this.jdbc=jdbc;
@@ -197,7 +199,7 @@ public class C2cOrders {
     static void requireParticipant(long userId,C2cOrdersRepository.Order order) {
         if(userId!=order.buyerUserId() && userId!=order.sellerUserId()) throw C2cProblem.forbidden("只能查看和操作本人订单");
     }
-    private void prepareRelease(C2cOrdersRepository.Order order,C2cMarkets.Market market,Long actor,String event) {
+    private void prepareRelease(C2cOrdersRepository.Order order,C2cMarket market,Long actor,String event) {
         var config=markets.configuration();
         funds.createOrGet("ORDER",order.id(),"ORDER_RELEASE",config.escrowUserId(),order.buyerUserId(),market.asset(),order.quantityUnits()-order.feeUnits());
         if(order.feeUnits()>0) funds.createOrGet("ORDER",order.id(),"BUYER_FEE",config.escrowUserId(),config.feeUserId(),market.asset(),order.feeUnits());
@@ -216,14 +218,14 @@ public class C2cOrders {
     }
     private boolean applied(UUID order,String purpose) {var intent=funds.find("ORDER",order,purpose);return intent!=null && intent.status().equals("APPLIED");}
     private static boolean canRestore(C2cAdsRepository.Ad ad) {return List.of("ACTIVE","PAUSED").contains(ad.status());}
-    private C2cPaymentAccounts.Account paymentAccount(long userId,C2cAdsRepository.Ad ad,C2cMarkets.Market market,UUID id) {
+    private C2cPaymentAccounts.Account paymentAccount(long userId,C2cAdsRepository.Ad ad,C2cMarket market,UUID id) {
         long seller=ad.side().equals("SELL")?ad.makerUserId():userId;
         var account=payments.get(seller,id,true);
         if(!account.fiat().equals(market.fiat()) || !ad.methods().contains(account.method())
                 || (ad.side().equals("SELL") && !ad.accounts().contains(account.id()))) throw new IllegalArgumentException("收款账号不属于本次报价");
         return account;
     }
-    private void requireOffer(JwtPrincipal user,C2cAdsRepository.Ad ad,C2cMarkets.Market market) {
+    private void requireOffer(JwtPrincipal user,C2cAdsRepository.Ad ad,C2cMarket market) {
         if(!ad.status().equals("ACTIVE") || ad.availableUnits()<=0) throw new IllegalStateException("广告暂不可交易");
         if(ad.makerUserId()==user.userId()) throw new IllegalArgumentException("不能与本人广告成交");
         access.requireTrading(user,market);access.requireCounterparty(ad.makerUserId(),market);
@@ -236,7 +238,7 @@ public class C2cOrders {
         Long completed=jdbc.queryForObject("SELECT count(*) FROM c2c_orders WHERE status='COMPLETED' AND (buyer_user_id=? OR seller_user_id=?)",Long.class,user.userId(),user.userId());
         if(completed!=null && completed<ad.minCompleted()) throw new IllegalStateException("尚未满足商家成交笔数要求");
     }
-    private static void requireAmount(C2cAdsRepository.Ad ad,C2cMarkets.Market market,long units,BigDecimal fiat) {
+    private static void requireAmount(C2cAdsRepository.Ad ad,C2cMarket market,long units,BigDecimal fiat) {
         if(units<=0 || units>ad.availableUnits() || fiat.compareTo(ad.minFiat())<0 || fiat.compareTo(ad.maxFiat())>0
                 || fiat.compareTo(market.minFiat())<0 || fiat.compareTo(market.maxFiat())>0) throw new IllegalArgumentException("交易金额或数量不在当前广告限额内");
     }

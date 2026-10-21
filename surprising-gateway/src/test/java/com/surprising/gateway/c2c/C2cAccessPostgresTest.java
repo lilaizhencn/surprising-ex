@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cMarket;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -35,7 +37,7 @@ class C2cAccessPostgresTest {
     @AfterEach void cleanup() { if (db != null) db.close(); }
 
     @Test void verifiedKycUsesTheExistingContractAndRejectsExpiredOrUnverifiedProfiles() {
-        var market = new C2cMarkets.Market(UUID.randomUUID(),"USDT",100000000,"CNY",2,true,
+        var market = new C2cMarket(UUID.randomUUID(),"USDT",100000000,"CNY",2,true,
                 BigDecimal.ONE,BigDecimal.TEN,BigDecimal.ONE,BigDecimal.TEN,0,900,3,true,100,1);
         when(compliance.kyc(11)).thenReturn(kyc("VERIFIED",Instant.now().plusSeconds(60)));
         assertThatCode(() -> access.requireTrading(user(),market)).doesNotThrowAnyException();

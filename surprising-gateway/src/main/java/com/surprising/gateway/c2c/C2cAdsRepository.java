@@ -7,12 +7,19 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public class C2cAdsRepository {
-    record Ad(UUID id,long makerUserId,UUID marketId,String side,BigDecimal price,long totalUnits,long availableUnits,
+    public record Ad(UUID id,long makerUserId,UUID marketId,String side,BigDecimal price,long totalUnits,long availableUnits,
               long reservedUnits,long completedUnits,long closedUnits,BigDecimal minFiat,BigDecimal maxFiat,
               List<String> methods,List<UUID> accounts,int paymentWindowSeconds,String terms,int minCompleted,
               String status,long revision) { }
     private final JdbcTemplate jdbc;
     public C2cAdsRepository(JdbcTemplate jdbc) {this.jdbc=jdbc;}
+
+    public List<Ad> adminPage(String status, Long userId, UUID market, int count, int offset) {
+        return jdbc.query("""
+                SELECT * FROM c2c_ads WHERE (CAST(? AS text) IS NULL OR status=?) AND (CAST(? AS bigint) IS NULL OR maker_user_id=?)
+                    AND (CAST(? AS uuid) IS NULL OR market_id=?) ORDER BY updated_at DESC,ad_id DESC LIMIT ? OFFSET ?
+                """, this::read, status, status, userId, userId, market, market, count, offset);
+    }
 
     Ad get(UUID id,boolean lock) {
         var rows=jdbc.query("SELECT * FROM c2c_ads WHERE ad_id=?"+(lock?" FOR UPDATE":""),this::read,id);

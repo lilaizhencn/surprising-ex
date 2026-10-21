@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -131,7 +132,7 @@ class C2cAdminHttpPostgresTest {
     }
 
     @Test void coldReadViewsRequestBothInternalAccountsAndKeepTradingClosedUntilReady() throws Exception {
-        var configuration=fixture.bean(C2cMarkets.class).configuration();
+        var configuration=fixture.bean(C2cMarketService.class).configuration();
         fixture.db.jdbc.update("UPDATE c2c_configuration SET enabled=false");
         when(fixture.accountQueries.balances(anyLong())).thenThrow(new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"READ_VIEW_STALE"));
@@ -152,7 +153,7 @@ class C2cAdminHttpPostgresTest {
         fixture.call(HttpMethod.PUT,"/api/v1/admin/c2c/configuration",9,new C2cAdminMarkets.ConfigurationInput("2",true,20,"Synthetic market reopening"),409);
         fixture.settle();
         assertThat(fixture.call(HttpMethod.GET,"/api/v1/admin/c2c/reconciliation",9,null,200).get("status")).isEqualTo("MISMATCH");
-        var configuration=fixture.bean(C2cMarkets.class).configuration();
+        var configuration=fixture.bean(C2cMarketService.class).configuration();
         when(fixture.accountQueries.balances(configuration.escrowUserId())).thenReturn(new BalanceQueryResponse(1,List.of(
                 new BalanceResponse(configuration.escrowUserId(),"USDT",1000000000,0,1000000000,Instant.now()))));
         assertThat(fixture.call(HttpMethod.GET,"/api/v1/admin/c2c/reconciliation",9,null,200).get("status")).isEqualTo("MATCHED");
@@ -198,10 +199,10 @@ class C2cAdminHttpPostgresTest {
         verifyNoInteractions(fixture.accountCommands);
         var result=fixture.call(HttpMethod.POST,"/api/v1/admin/c2c/initialization",9,null,200);
         assertThat(result.get("commandsApplied")).isEqualTo(true);
-        assertThat(fixture.bean(C2cMarkets.class).configuration().enabled()).isFalse();
+        assertThat(fixture.bean(C2cMarketService.class).configuration().enabled()).isFalse();
         var captured=org.mockito.ArgumentCaptor.forClass(BalanceAdjustmentRequest.class);
         verify(fixture.accountCommands,times(2)).adjustBalance(captured.capture(),eq("9"),any());
-        var config=fixture.bean(C2cMarkets.class).configuration();
+        var config=fixture.bean(C2cMarketService.class).configuration();
         assertThat(captured.getAllValues()).extracting(BalanceAdjustmentRequest::userId)
                 .containsExactly(config.escrowUserId(),config.feeUserId());
         assertThat(fixture.db.jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents",Integer.class)).isZero();

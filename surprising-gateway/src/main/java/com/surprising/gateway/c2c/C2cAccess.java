@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cMarket;
+
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.AuthService;
 import com.surprising.gateway.provider.auth.GatewayUserRepository;
@@ -39,8 +41,8 @@ public class C2cAccess {
         } catch (IllegalStateException failure) { throw C2cProblem.forbidden("账户当前不可使用 C2C"); }
     }
 
-    void requireTrading(JwtPrincipal user, C2cMarkets.Market market) { requireTrading(user.userId(),user.status(),market); }
-    private void requireTrading(long userId, String status, C2cMarkets.Market market) {
+    void requireTrading(JwtPrincipal user, C2cMarket market) { requireTrading(user.userId(),user.status(),market); }
+    private void requireTrading(long userId, String status, C2cMarket market) {
         if (!"NORMAL".equals(status)) throw new IllegalStateException("账户当前不能进行 C2C 交易");
         compliance.requireWithdrawalEligibility(userId);
         if (market.requireKyc()) {
@@ -51,7 +53,7 @@ public class C2cAccess {
         }
     }
 
-    void requireCounterparty(long userId, C2cMarkets.Market market) {
+    void requireCounterparty(long userId, C2cMarket market) {
         var user=users.find(userId).orElseThrow(()->new IllegalStateException("交易对手不可用"));
         requireTrading(userId,user.status(),market);
     }

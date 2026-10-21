@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -134,7 +135,7 @@ class C2cHttpPostgresTest {
             assertThat(context.getBeansOfType(C2cController.class)).isEmpty();
             assertThat(context.containsBean("c2cSettlementScheduler")).isFalse();
         }
-        var markets=mock(C2cMarkets.class);var products=mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
+        var markets=mock(C2cMarketService.class);var products=mock(com.surprising.gateway.provider.product.GatewayProductServices.class);
         assertThat(new C2cStatusController(false,markets,products).status().get("available")).isEqualTo(false);
         verifyNoInteractions(markets,products);
     }

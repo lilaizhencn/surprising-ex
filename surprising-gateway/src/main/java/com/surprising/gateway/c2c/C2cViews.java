@@ -1,14 +1,16 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cMarket;
+
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** 三端共用的 HTTP 字段：int64 全部为字符串，密文和内部托管身份永不直接序列化。 */
-final class C2cViews {
+public final class C2cViews {
     private C2cViews() { }
 
-    static Map<String,Object> market(C2cMarkets.Market market) {
+    static Map<String,Object> market(C2cMarket market) {
         var view = new LinkedHashMap<String,Object>();
         view.put("marketId", market.id().toString());
         view.put("asset", market.asset());
@@ -29,7 +31,7 @@ final class C2cViews {
         return view;
     }
 
-    static Map<String,Object> ad(C2cAdsRepository.Ad ad, C2cMarkets.Market market, boolean own) {
+    public static Map<String,Object> ad(C2cAdsRepository.Ad ad, C2cMarket market, boolean own) {
         var view = new LinkedHashMap<String,Object>();
         view.put("adId", ad.id().toString());
         view.put("makerUserId", Long.toString(ad.makerUserId()));
@@ -56,7 +58,7 @@ final class C2cViews {
         return view;
     }
 
-    static Map<String,Object> quote(C2cOrdersRepository.Quote quote, C2cMarkets.Market market) {
+    static Map<String,Object> quote(C2cOrdersRepository.Quote quote, C2cMarket market) {
         var view = new LinkedHashMap<String,Object>();
         view.put("quoteId", quote.id().toString());
         view.put("ownerUserId", Long.toString(quote.userId()));
@@ -77,7 +79,7 @@ final class C2cViews {
         return view;
     }
 
-    static Map<String,Object> order(C2cOrdersRepository.Order order, C2cMarkets.Market market) {
+    public static Map<String,Object> order(C2cOrdersRepository.Order order, C2cMarket market) {
         var view = new LinkedHashMap<String,Object>();
         view.put("orderId", order.id().toString());
         view.put("quoteId", order.quoteId().toString());
@@ -125,7 +127,7 @@ final class C2cViews {
         view.put("message", receipt == null ? "原请求尚未确认，请继续查询或明确停止；勿更换标识重新提交" : receipt.errorMessage());
         return view;
     }
-    static String quantity(long units, long scale) {
+    public static String quantity(long units, long scale) {
         if (scale <= 0 || !Long.toString(scale).matches("10*")) throw new IllegalStateException("资产精度未就绪");
         return BigDecimal.valueOf(units).divide(BigDecimal.valueOf(scale)).stripTrailingZeros().toPlainString();
     }

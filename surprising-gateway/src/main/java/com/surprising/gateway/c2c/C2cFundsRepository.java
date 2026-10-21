@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cAdminRows.FundIntent;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -17,6 +18,18 @@ public class C2cFundsRepository {
     }
     private final JdbcTemplate jdbc;
     public C2cFundsRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+
+    public List<FundIntent> adminPage(String status, UUID ownerId, int count, int offset) {
+        return jdbc.query("""
+                SELECT * FROM c2c_fund_intents WHERE (CAST(? AS text) IS NULL OR status=?)
+                    AND (CAST(? AS uuid) IS NULL OR owner_id=?) ORDER BY updated_at DESC,intent_id DESC LIMIT ? OFFSET ?
+                """, (r, n) -> new FundIntent(r.getObject("intent_id", UUID.class), r.getLong("transfer_id"),
+                        r.getString("owner_type"), r.getObject("owner_id", UUID.class), r.getString("purpose"),
+                        r.getLong("source_user_id"), r.getLong("target_user_id"), r.getString("asset"), r.getLong("amount_units"),
+                        r.getString("status"), r.getString("error_code"), r.getInt("attempts"),
+                        r.getTimestamp("retry_after").toInstant(), r.getTimestamp("updated_at").toInstant()),
+                status, status, ownerId, ownerId, count, offset);
+    }
 
     Intent createOrGet(String ownerType, UUID ownerId, String purpose,
                        long sourceUserId, long targetUserId, String asset, long units) {

@@ -1,6 +1,10 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cAdminViews;
+import com.surprising.gateway.c2c.model.C2cPage;
+import com.surprising.gateway.c2c.service.C2cAdminQueryService;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -16,10 +20,10 @@ public class C2cAdminController {
     private final C2cAdminAccess access;
     private final C2cAdminMarkets markets;
     private final C2cAdminReview review;
-    private final C2cAdminQueries queries;
+    private final C2cAdminQueryService queries;
     private final C2cAdminInitialization initialization;
     private final ObjectMapper json;
-    public C2cAdminController(C2cAdminAccess access,C2cAdminMarkets markets,C2cAdminReview review,C2cAdminQueries queries,
+    public C2cAdminController(C2cAdminAccess access,C2cAdminMarkets markets,C2cAdminReview review,C2cAdminQueryService queries,
                               C2cAdminInitialization initialization,ObjectMapper json) {
         this.access=access;this.markets=markets;this.review=review;this.queries=queries;this.initialization=initialization;this.json=json;
     }
@@ -61,10 +65,12 @@ public class C2cAdminController {
         return markets.reconciliation(authorization);
     }
     @GetMapping("/merchants")
-    public Map<String,Object> merchants(@RequestHeader(value="Authorization",required=false) String authorization,
+    public C2cPage<C2cAdminViews.Merchant> merchants(@RequestHeader(value="Authorization",required=false) String authorization,
             @RequestParam(required=false) String status,@RequestParam(required=false) Long userId,
             @RequestParam(defaultValue="50") int limit,@RequestParam(defaultValue="0") int offset) {
-        access.read(authorization,false);return queries.merchants(status,userId,limit,offset);
+        access.read(authorization,false);
+        validateList(status,userId,limit,offset,List.of("PENDING","APPROVED","REJECTED","SUSPENDED","WITHDRAWN"));
+        return queries.merchants(status,userId,limit,offset);
     }
     @PostMapping("/merchants/{id}/review")
     public Map<String,Object> merchantReview(@RequestHeader(value="Authorization",required=false) String authorization,
@@ -73,10 +79,12 @@ public class C2cAdminController {
         return audited(authorization,request,body,()->review.merchant(authorization,request,body,id,read(body,C2cAdminReview.MerchantDecision.class)));
     }
     @GetMapping("/payment-accounts")
-    public Map<String,Object> accounts(@RequestHeader(value="Authorization",required=false) String authorization,
+    public C2cPage<C2cAdminViews.PaymentAccount> accounts(@RequestHeader(value="Authorization",required=false) String authorization,
             @RequestParam(required=false) String status,@RequestParam(required=false) Long userId,
             @RequestParam(defaultValue="50") int limit,@RequestParam(defaultValue="0") int offset) {
-        access.read(authorization,false);return queries.paymentAccounts(status,userId,limit,offset);
+        access.read(authorization,false);
+        validateList(status,userId,limit,offset,List.of("PENDING","APPROVED","REJECTED","DISABLED"));
+        return queries.paymentAccounts(status,userId,limit,offset);
     }
     @GetMapping("/payment-accounts/{id}")
     public Map<String,Object> account(@RequestHeader(value="Authorization",required=false) String authorization,
@@ -91,10 +99,12 @@ public class C2cAdminController {
         return audited(authorization,request,body,()->review.payment(authorization,request,body,id,read(body,C2cAdminReview.PaymentDecision.class)));
     }
     @GetMapping("/ads")
-    public Map<String,Object> ads(@RequestHeader(value="Authorization",required=false) String authorization,
+    public C2cPage<Map<String,Object>> ads(@RequestHeader(value="Authorization",required=false) String authorization,
             @RequestParam(required=false) String status,@RequestParam(required=false) Long userId,@RequestParam(required=false) UUID marketId,
             @RequestParam(defaultValue="50") int limit,@RequestParam(defaultValue="0") int offset) {
-        access.read(authorization,false);return queries.ads(status,userId,marketId,limit,offset);
+        access.read(authorization,false);
+        validateList(status,userId,limit,offset,List.of("RESERVING","ACTIVE","PAUSED","CLOSING","CLOSED","REJECTED"));
+        return queries.ads(status,userId,marketId,limit,offset);
     }
     @PostMapping("/ads/{id}/status")
     public Map<String,Object> ad(@RequestHeader(value="Authorization",required=false) String authorization,
@@ -109,10 +119,12 @@ public class C2cAdminController {
         return audited(authorization,request,body,()->review.closeAd(authorization,request,body,id,read(body,C2cAdminReview.AdDecision.class)));
     }
     @GetMapping("/orders")
-    public Map<String,Object> orders(@RequestHeader(value="Authorization",required=false) String authorization,
+    public C2cPage<Map<String,Object>> orders(@RequestHeader(value="Authorization",required=false) String authorization,
             @RequestParam(required=false) String status,@RequestParam(required=false) Long userId,@RequestParam(required=false) UUID orderId,
             @RequestParam(required=false) UUID marketId,@RequestParam(defaultValue="50") int limit,@RequestParam(defaultValue="0") int offset) {
-        access.read(authorization,false);return queries.orders(status,userId,orderId,marketId,limit,offset);
+        access.read(authorization,false);
+        validateList(status,userId,limit,offset,java.util.Arrays.stream(C2cOrderStatus.values()).map(Enum::name).toList());
+        return queries.orders(status,userId,orderId,marketId,limit,offset);
     }
     @GetMapping("/orders/{id}")
     public Map<String,Object> order(@RequestHeader(value="Authorization",required=false) String authorization,@PathVariable UUID id) {
@@ -125,16 +137,20 @@ public class C2cAdminController {
         return audited(authorization,request,null,()->review.orderPayment(authorization,request,id));
     }
     @GetMapping("/fund-intents")
-    public Map<String,Object> funds(@RequestHeader(value="Authorization",required=false) String authorization,
+    public C2cPage<C2cAdminViews.FundIntent> funds(@RequestHeader(value="Authorization",required=false) String authorization,
             @RequestParam(required=false) String status,@RequestParam(required=false) UUID ownerId,
             @RequestParam(defaultValue="50") int limit,@RequestParam(defaultValue="0") int offset) {
-        access.read(authorization,false);return queries.funds(status,ownerId,limit,offset);
+        access.read(authorization,false);
+        validateList(status,null,limit,offset,List.of("PREPARED","DEBITED","CREDITED","APPLIED","REJECTED"));
+        return queries.funds(status,ownerId,limit,offset);
     }
     @GetMapping("/appeals")
-    public Map<String,Object> appeals(@RequestHeader(value="Authorization",required=false) String authorization,
+    public C2cPage<C2cAdminViews.Appeal> appeals(@RequestHeader(value="Authorization",required=false) String authorization,
             @RequestParam(required=false) String status,@RequestParam(required=false) UUID orderId,
             @RequestParam(defaultValue="50") int limit,@RequestParam(defaultValue="0") int offset) {
-        access.read(authorization,false);return queries.appeals(status,orderId,limit,offset);
+        access.read(authorization,false);
+        validateList(status,null,limit,offset,List.of("OPEN","REVIEWING","RESOLVED","WITHDRAWN"));
+        return queries.appeals(status,orderId,limit,offset);
     }
     @PostMapping("/appeals/{id}/decision")
     public Map<String,Object> appeal(@RequestHeader(value="Authorization",required=false) String authorization,
@@ -143,10 +159,12 @@ public class C2cAdminController {
         return audited(authorization,request,body,()->review.appeal(authorization,request,body,id,read(body,C2cAdminReview.AppealDecision.class)));
     }
     @GetMapping("/reports")
-    public Map<String,Object> reports(@RequestHeader(value="Authorization",required=false) String authorization,
+    public C2cPage<C2cAdminViews.Report> reports(@RequestHeader(value="Authorization",required=false) String authorization,
             @RequestParam(required=false) String status,@RequestParam(required=false) Long userId,
             @RequestParam(defaultValue="50") int limit,@RequestParam(defaultValue="0") int offset) {
-        access.read(authorization,false);return queries.reports(status,userId,limit,offset);
+        access.read(authorization,false);
+        validateList(status,userId,limit,offset,List.of("OPEN","REVIEWED","DISMISSED"));
+        return queries.reports(status,userId,limit,offset);
     }
     @PostMapping("/reports/{id}/review")
     public Map<String,Object> report(@RequestHeader(value="Authorization",required=false) String authorization,
@@ -154,6 +172,13 @@ public class C2cAdminController {
         var request=access.request(http);
         return audited(authorization,request,body,()->review.report(authorization,request,body,id,read(body,C2cAdminReview.ReportDecision.class)));
     }
+    private static void validateList(String status, Long userId, int limit, int offset, List<String> allowed) {
+        if (limit < 1 || limit > 100 || offset < 0 || offset > 10000)
+            throw new IllegalArgumentException("后台分页参数无效");
+        if (status != null && !allowed.contains(status)) throw new IllegalArgumentException("查询状态无效");
+        if (userId != null && userId <= 0) throw new IllegalArgumentException("用户编号无效");
+    }
+
     private <T> T audited(String authorization,C2cAdminAccess.Request request,byte[] body,Supplier<T> action) {
         try {return action.get();}
         catch(RuntimeException failure) {access.failure(authorization,request,body,failure);throw failure;}

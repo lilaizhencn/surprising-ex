@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.service.C2cMarketService;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import com.surprising.gateway.provider.auth.*;
@@ -49,7 +50,7 @@ class C2cOrdersPostgresTest {
         sellerAccount=payments.save(12,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Taker","qa-taker-account","",null)).id();
         jdbc.update("UPDATE c2c_payment_accounts SET status='APPROVED'");
         adRows=new C2cAdsRepository(jdbc);orderRows=new C2cOrdersRepository(jdbc,json);intents=new C2cFundsRepository(jdbc);
-        requests=new C2cSubmissions(jdbc);access=mock(C2cAccess.class);var markets=new C2cMarkets(jdbc);
+        requests=new C2cSubmissions(jdbc);access=mock(C2cAccess.class);var markets=C2cDatabaseFixture.markets(jdbc);
         ads=new C2cAds(adRows,markets,payments,access,intents,jdbc,json,requests);
         orders=new C2cOrders(orderRows,adRows,markets,payments,access,intents,jdbc,requests);
         core=mock(ProductAccountClient.class);var applied=new ProductAccountAdjustment(ProductAccountAdjustment.Status.APPLIED,null);
