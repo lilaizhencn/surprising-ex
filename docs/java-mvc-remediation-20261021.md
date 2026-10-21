@@ -166,3 +166,5 @@
 - 复扫整改1将本机流动性运维的产品检查、审计意图、资金/杠杆/合约调用及结果顺序归LiquidityOperationsService；Controller只绑定/验证本机鉴权、请求及原生审计metadata，不直接持有Repository。补上独立合约写入口的InstrumentConfigurationFormats校验和杠杆读取格式检查。定向202项、扩大干净构建292项通过无跳过；撤去审计意图的1项负例与撤去合约格式检查的2项负例分别捕获预期失败，逐字节恢复后绿色。关闭ADD-019、021；见 [本机运维职责验证](validation/java-mvc-liquidity-boundary-20261022.json)。意图写失败不发资金命令，操作失败记录结果，成功结果审计失败也不盲重试Core；所属资源已清理，其余复扫问题/门禁及最终实栈继续。
 
 - 复扫整改2将站内通知按可信用户读取、已读时间和更新/结果读取事务归UserNotificationService；Controller保留认证、limit原范围绑定与404映射，Repository只读写通知表并返回Optional事实，NotificationView归model。全部SQL文本块不变。真实Controller→事务Service→PostgreSQL验证跨用户隔离、1至100分页、首个已读时间、批量仅更新本人未读项和读取失败回滚。定向63项、扩大干净构建163项通过无跳过；撤去事务的1项负例捕获部分已读状态残留，逐字节恢复后绿色。关闭ADD-020；见 [通知职责验证](validation/java-mvc-notifications-boundary-20261022.json)。所属资源已清理；第一轮复扫两处Controller直连Repository已处理，其余协议/包职责候选、架构门禁及最终实栈继续。
+
+- 复扫归包1将账户操作结果、深度增量、WebSocket指标及其频道指标/时序载荷五个共享数据契约归model；结果工厂因跨包访问改public，不改变状态/消息。22个原文件的完整方法体在包/导入/限定类型及必要可见性归一后相等。定向116项、干净构建扩大286项、直接C2C/本地资金消费者补充170项通过无跳过，后两组按类去重456项；最后清理新模型未使用导入后静态编译通过。关闭ADD-022至026；见 [共享模型归包验证](validation/java-mvc-shared-models-20261022.json)。六产品资金守恒、C2C资金/广告/订单/保证金和深度/订阅/指标均覆盖，原class产物经clean移除。所属资源已清理，剩余HTTP和Kafka接入职责、复扫/门禁与最终实栈继续。

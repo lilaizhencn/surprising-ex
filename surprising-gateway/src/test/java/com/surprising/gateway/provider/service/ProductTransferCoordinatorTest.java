@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.model.ProductAccountAdjustment;
+
 import com.surprising.gateway.provider.model.ProductTransferCommand;
 import com.surprising.gateway.provider.model.ProductTransferResult;
 import com.surprising.gateway.provider.model.ProductTransferStatus;

@@ -1,5 +1,7 @@
 package com.surprising.websocket.provider.service;
 
+import com.surprising.websocket.provider.model.TimedPayload;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
@@ -103,11 +105,11 @@ class KafkaFanoutConsumerTest {
         consumer.onPriceEvent(new ConsumerRecord<>("surprising.linear-perp.price.events.v1", 0, 0L,
                 "1", objectMapper.writeValueAsString(PricePublishedEvent.mark(markPricePublication(event)))));
 
-        ArgumentCaptor<List<SubscriptionRegistry.TimedPayload>> events = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<TimedPayload>> events = ArgumentCaptor.forClass(List.class);
         verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.MARK_PRICE, "1", null, null,
                         ProductLine.LINEAR_PERPETUAL)),
                 events.capture());
-        assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime()));
+        assertThat(events.getValue()).containsExactly(new TimedPayload(event, event.eventTime()));
     }
 
     @Test
@@ -121,11 +123,11 @@ class KafkaFanoutConsumerTest {
         consumer.onPriceEvent(new ConsumerRecord<>("surprising.linear-perp.price.events.v1", 0, 0L,
                 "1", objectMapper.writeValueAsString(PricePublishedEvent.index(event))));
 
-        ArgumentCaptor<List<SubscriptionRegistry.TimedPayload>> events = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<TimedPayload>> events = ArgumentCaptor.forClass(List.class);
         verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.INDEX_PRICE, "1", null, null,
                         ProductLine.LINEAR_PERPETUAL)),
                 events.capture());
-        assertThat(events.getValue()).containsExactly(new SubscriptionRegistry.TimedPayload(event, event.eventTime()));
+        assertThat(events.getValue()).containsExactly(new TimedPayload(event, event.eventTime()));
     }
 
     @Test

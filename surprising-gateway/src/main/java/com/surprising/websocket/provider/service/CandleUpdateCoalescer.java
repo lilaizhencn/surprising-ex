@@ -1,5 +1,7 @@
 package com.surprising.websocket.provider.service;
 
+import com.surprising.websocket.provider.model.TimedPayload;
+
 import com.surprising.candlestick.api.model.CandleStatus;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.product.api.ProductLine;
@@ -22,7 +24,7 @@ public class CandleUpdateCoalescer {
     private final WebSocketProperties properties;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
             Thread.ofVirtual().name("ws-candle-coalescer-", 0).factory());
-    private final Map<SubscriptionTopic, SubscriptionRegistry.TimedPayload> latestPartial = new ConcurrentHashMap<>();
+    private final Map<SubscriptionTopic, TimedPayload> latestPartial = new ConcurrentHashMap<>();
     private final Set<SubscriptionTopic> scheduled = ConcurrentHashMap.newKeySet();
 
     public CandleUpdateCoalescer(SubscriptionRegistry registry, WebSocketProperties properties) {
@@ -42,7 +44,7 @@ public class CandleUpdateCoalescer {
             registry.publish(topic, event, event.eventTime());
             return;
         }
-        latestPartial.put(topic, new SubscriptionRegistry.TimedPayload(event, event.eventTime()));
+        latestPartial.put(topic, new TimedPayload(event, event.eventTime()));
         if (scheduled.add(topic)) {
             scheduler.schedule(() -> flush(topic), delayMillis(), TimeUnit.MILLISECONDS);
         }

@@ -1,5 +1,7 @@
 package com.surprising.websocket.provider.service;
 
+import com.surprising.websocket.provider.model.DepthUpdate;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static com.surprising.aeron.protocol.CoreOrderSide.*;
 

@@ -518,3 +518,5 @@ C2C后台的原始请求头、method/path/query、User-Agent和IP由 `c2c.contro
 本机流动性运维入口由 `InternalLiquidityOperationsController` 完成loopback/token、合约自定义格式和请求元数据校验；`LiquidityOperationsService` 检查产品并保证审计意图先持久化、再调用资金/杠杆/合约业务、最后记录结果，审计失败不触发额外资金重试。`LiquidityOperationMetadata` 只包含绑定后的审计事实，不带Servlet或Repository对象。
 
 站内通知由 `UserNotificationController` 绑定认证身份、原limit范围和HTTP结果；`UserNotificationService` 按该用户作用域操作，决定已读时间，并在同一事务内完成单条已读更新及结果读取。`UserNotificationRepository` 仅访问gateway_user_notifications，查询结果 `NotificationView` 位于auth.model，缺失事实由Service转为原生未找到，再由入口映射404。
+
+共享数据结果按职责归model：`gateway.provider.model.ProductAccountAdjustment` 表示已应用/拒绝/未知结果，`websocket.provider.model` 的 `DepthUpdate`、`WebSocketAdminMetrics`、`ChannelMetric` 和 `TimedPayload` 承载深度、指标和载荷时间。字段、深度绝对数量/零删除及序号字符串协议保持；SubscriptionRegistry继续唯一拥有订阅和缓存状态。

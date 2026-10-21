@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.model.ProductAccountAdjustment;
+
 import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.product.api.ProductLine;
 

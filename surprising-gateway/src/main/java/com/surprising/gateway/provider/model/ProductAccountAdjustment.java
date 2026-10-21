@@ -1,4 +1,4 @@
-package com.surprising.gateway.provider.service;
+package com.surprising.gateway.provider.model;
 
 public record ProductAccountAdjustment(Status status, String errorMessage) {
 
@@ -8,15 +8,15 @@ public record ProductAccountAdjustment(Status status, String errorMessage) {
         UNKNOWN
     }
 
-    static ProductAccountAdjustment applied(String message) {
+    public static ProductAccountAdjustment applied(String message) {
         return new ProductAccountAdjustment(Status.APPLIED, message);
     }
 
-    static ProductAccountAdjustment rejected(String message) {
+    public static ProductAccountAdjustment rejected(String message) {
         return new ProductAccountAdjustment(Status.REJECTED, message);
     }
 
-    static ProductAccountAdjustment unknown(String message) {
+    public static ProductAccountAdjustment unknown(String message) {
         return new ProductAccountAdjustment(Status.UNKNOWN, message);
     }
 }

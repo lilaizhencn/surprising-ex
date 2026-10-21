@@ -1,4 +1,4 @@
-package com.surprising.websocket.provider.service;
+package com.surprising.websocket.provider.model;
 
 import java.time.Instant;
 import java.util.List;
@@ -13,5 +13,5 @@ public record WebSocketAdminMetrics(
             long totalSubscriptions,
             long uniqueTopics,
             long maxSubscriptionsPerSession,
-            List<SubscriptionRegistry.ChannelMetric> channels) {
+            List<ChannelMetric> channels) {
     }

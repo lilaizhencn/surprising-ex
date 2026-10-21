@@ -1,4 +1,4 @@
-package com.surprising.websocket.provider.service;
+package com.surprising.websocket.provider.model;
 
 import com.surprising.aeron.protocol.CoreBookLevelView;
 import com.surprising.aeron.protocol.CoreOrderBookView;

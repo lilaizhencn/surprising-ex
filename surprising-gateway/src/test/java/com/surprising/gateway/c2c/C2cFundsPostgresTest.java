@@ -7,7 +7,7 @@ import com.surprising.gateway.c2c.service.C2cMarketService;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import com.surprising.account.api.model.ProductTransferOperationRequest;
-import com.surprising.gateway.provider.service.ProductAccountAdjustment;
+import com.surprising.gateway.provider.model.ProductAccountAdjustment;
 import com.surprising.gateway.provider.service.ProductAccountClient;
 import java.util.List;
 import java.util.UUID;

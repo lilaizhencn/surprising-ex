@@ -1,5 +1,8 @@
 package com.surprising.websocket.provider.service;
 
+import com.surprising.websocket.provider.model.ChannelMetric;
+import com.surprising.websocket.provider.model.TimedPayload;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -31,7 +34,7 @@ class SubscriptionRegistryTest {
 
         var topic = new SubscriptionTopic(WsChannel.EXECUTION_REPORTS, "1", null, 1001L, product);
         var time = Instant.parse("2026-09-26T00:00:00Z");
-        registry.publishTimedBatch(topic, java.util.List.of(new SubscriptionRegistry.TimedPayload("fill", time)));
+        registry.publishTimedBatch(topic, java.util.List.of(new TimedPayload("fill", time)));
         ArgumentCaptor<String> messages = ArgumentCaptor.forClass(String.class);
         verify(subscriber).send(messages.capture());
         var event = new ObjectMapper().readTree(messages.getValue());
@@ -51,8 +54,8 @@ class SubscriptionRegistryTest {
         var firstTime = Instant.parse("2026-09-26T00:00:00Z");
         var secondTime = firstTime.plusSeconds(1);
         registry.publishTimedBatch(topic, java.util.List.of(
-                new SubscriptionRegistry.TimedPayload("first", firstTime),
-                new SubscriptionRegistry.TimedPayload("second", secondTime)));
+                new TimedPayload("first", firstTime),
+                new TimedPayload("second", secondTime)));
         @SuppressWarnings("unchecked")
         ArgumentCaptor<java.util.List<String>> batch = ArgumentCaptor.forClass(java.util.List.class);
         verify(subscriber).sendBatch(batch.capture());
@@ -171,7 +174,7 @@ class SubscriptionRegistryTest {
         assertThat(registry.maxSubscriptionsPerSession()).isEqualTo(2);
         assertThat(registry.queuedMessageCount()).isEqualTo(5);
         assertThat(registry.queueCapacity()).isEqualTo(10);
-        assertThat(registry.channelMetrics()).extracting(SubscriptionRegistry.ChannelMetric::channel)
+        assertThat(registry.channelMetrics()).extracting(ChannelMetric::channel)
                 .containsExactly("INDEX_PRICE", "ORDERS");
     }
 

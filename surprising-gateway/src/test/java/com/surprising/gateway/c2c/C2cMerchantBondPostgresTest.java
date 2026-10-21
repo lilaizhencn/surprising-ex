@@ -13,7 +13,7 @@ import com.surprising.gateway.c2c.service.C2cMerchantBonds;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-import com.surprising.gateway.provider.service.ProductAccountAdjustment;
+import com.surprising.gateway.provider.model.ProductAccountAdjustment;
 import java.util.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;

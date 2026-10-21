@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.model.ProductAccountAdjustment;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import com.surprising.account.api.model.*;

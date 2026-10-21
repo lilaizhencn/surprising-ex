@@ -1,5 +1,10 @@
 package com.surprising.websocket.provider.service;
 
+import com.surprising.websocket.provider.model.DepthUpdate;
+import com.surprising.websocket.provider.model.WebSocketAdminMetrics;
+import com.surprising.websocket.provider.model.ChannelMetric;
+import com.surprising.websocket.provider.model.TimedPayload;
+
 import com.surprising.aeron.protocol.CoreOrderBookView;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
@@ -329,15 +334,7 @@ public class SubscriptionRegistry {
         private int subscriberCount;
     }
 
-    public record ChannelMetric(
-            String channel,
-            int topicCount,
-            int subscriberCount) {
-    }
 
-    public record TimedPayload(Object payload, Instant eventTime) {
-
-    }
     public WebSocketAdminMetrics metrics(String adminUserId, String adminUsername) {
         return new WebSocketAdminMetrics(java.time.Instant.now(), adminUserId, adminUsername,
                 activeConnectionCount(), authenticatedConnectionCount(), anonymousConnectionCount(),

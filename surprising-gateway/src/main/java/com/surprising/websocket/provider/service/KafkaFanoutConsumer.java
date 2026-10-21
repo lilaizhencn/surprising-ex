@@ -1,5 +1,7 @@
 package com.surprising.websocket.provider.service;
 
+import com.surprising.websocket.provider.model.TimedPayload;
+
 import lombok.extern.slf4j.Slf4j;
 import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
@@ -95,7 +97,7 @@ public class KafkaFanoutConsumer {
 
     public void onPriceEvent(ConsumerRecord<String, String> record) {
         try {
-            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
+            Map<SubscriptionTopic, List<TimedPayload>> grouped = new LinkedHashMap<>();
             dispatchPriceEvent(record, grouped);
             publishBatches(grouped);
         } catch (Exception ex) {
@@ -109,7 +111,7 @@ public class KafkaFanoutConsumer {
             groupId = "#{__listener.groupId()}",
             containerFactory = "webSocketKafkaBatchListenerContainerFactory")
     public void onPriceEventBatch(List<ConsumerRecord<String, String>> records) {
-        Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
+        Map<SubscriptionTopic, List<TimedPayload>> grouped = new LinkedHashMap<>();
         for (ConsumerRecord<String, String> record : records) {
             try {
                 dispatchPriceEvent(record, grouped);
@@ -122,7 +124,7 @@ public class KafkaFanoutConsumer {
     }
 
     private void dispatchPriceEvent(ConsumerRecord<String, String> record,
-                                    Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped)
+                                    Map<SubscriptionTopic, List<TimedPayload>> grouped)
             throws Exception {
         requireCurrentProductTopic(record.topic(), priceEventsTopic(), "price event");
         PricePublishedEvent publication = objectMapper.readValue(record.value(), PricePublishedEvent.class);
@@ -185,7 +187,7 @@ public class KafkaFanoutConsumer {
             containerFactory = "webSocketKafkaBatchListenerContainerFactory")
     public void onFundingRateBatch(List<ConsumerRecord<String, String>> records) {
         try {
-            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
+            Map<SubscriptionTopic, List<TimedPayload>> grouped = new LinkedHashMap<>();
             for (ConsumerRecord<String, String> record : records) {
 
                 requireCurrentProductTopic(record.topic(), fundingRateTopic(), "funding rate");
@@ -404,15 +406,15 @@ public class KafkaFanoutConsumer {
         return value == null ? null : value.name();
     }
 
-    private void addBatch(Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped,
+    private void addBatch(Map<SubscriptionTopic, List<TimedPayload>> grouped,
                           SubscriptionTopic topic,
                           Object payload,
                           Instant eventTime) {
         grouped.computeIfAbsent(topic, ignored -> new ArrayList<>())
-                .add(new SubscriptionRegistry.TimedPayload(payload, eventTime));
+                .add(new TimedPayload(payload, eventTime));
     }
 
-    private void publishBatches(Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped) {
+    private void publishBatches(Map<SubscriptionTopic, List<TimedPayload>> grouped) {
         grouped.forEach(registry::publishTimedBatch);
     }
 }

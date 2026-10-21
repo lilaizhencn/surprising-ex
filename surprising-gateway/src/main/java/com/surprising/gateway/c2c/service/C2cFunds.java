@@ -5,7 +5,7 @@ import com.surprising.gateway.c2c.repository.C2cFundsRepository;
 import com.surprising.gateway.c2c.service.C2cMarketService;
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.ProductTransferOperationRequest;
-import com.surprising.gateway.provider.service.ProductAccountAdjustment;
+import com.surprising.gateway.provider.model.ProductAccountAdjustment;
 import com.surprising.gateway.provider.service.ProductAccountClient;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
