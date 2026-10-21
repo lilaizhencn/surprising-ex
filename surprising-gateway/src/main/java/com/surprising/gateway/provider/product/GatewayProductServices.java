@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.product;
 
+import com.surprising.gateway.provider.model.GatewayProductSetting;
+import com.surprising.gateway.provider.service.GatewayProductSettings;
 import com.surprising.gateway.provider.local.*;
 import com.surprising.product.api.ProductLine;
 import jakarta.annotation.PreDestroy;
@@ -29,7 +31,6 @@ public final class GatewayProductServices implements AutoCloseable {
         this.settings = settings;
     }
 
-    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 5000, scheduler = "gatewayProductActivationScheduler")
     public synchronized void reload() {
         if (closed) return;
         var failures = new EnumMap<ProductLine, String>(ProductLine.class);
@@ -99,7 +100,7 @@ public final class GatewayProductServices implements AutoCloseable {
     /** 只有数据库明确未启用的产品可按零资产展示；连接失败与初始化中不能归为零。 */
     public List<ProductLine> disabled() {
         return settings.list().stream().filter(setting -> !setting.enabled())
-                .map(GatewayProductSettings.Setting::productLine).toList();
+                .map(GatewayProductSetting::productLine).toList();
     }
 
     public void requireEnabled(ProductLine product) {

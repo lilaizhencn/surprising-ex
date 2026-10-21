@@ -1,4 +1,4 @@
-package com.surprising.trading.order.config;
+package com.surprising.trading.order.model;
 
 import com.surprising.aeron.protocol.CoreOrderProtection;
 

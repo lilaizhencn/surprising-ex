@@ -1,9 +1,10 @@
 package com.surprising.gateway.provider.controller;
 
+import com.surprising.gateway.provider.model.GatewayProductSetting;
 import com.surprising.gateway.provider.auth.AuthService;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.product.GatewayProductServices;
-import com.surprising.gateway.provider.product.GatewayProductSettings;
+import com.surprising.gateway.provider.service.GatewayProductSettings;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -14,7 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/v1/admin/product-lines")
 public class AdminProductLinesController {
-    public record Status(GatewayProductSettings.Setting configuration, String runtimeStatus, String message) { }
+    public record Status(GatewayProductSetting configuration, String runtimeStatus, String message) { }
     private final AuthService auth;
     private final GatewayProductSettings settings;
     private final GatewayProductServices products;
@@ -37,10 +38,22 @@ public class AdminProductLinesController {
     }
 
     @PostMapping("/{productLine}/enable")
-    public GatewayProductSettings.Setting enable(@RequestHeader("Authorization") String authorization,
+    public GatewayProductSetting enable(@RequestHeader("Authorization") String authorization,
             @PathVariable ProductLine productLine, @RequestBody tools.jackson.databind.JsonNode request) {
         var principal = admin(authorization, "write");
-        return settings.enable(productLine, settings.parseEnable(request), principal);
+        if (request == null || !request.isObject()
+                || !new java.util.HashSet<>(request.propertyNames()).equals(java.util.Set.of("expectedVersion", "reason"))
+                || !request.get("expectedVersion").isIntegralNumber() || !request.get("expectedVersion").canConvertToLong()
+                || !request.get("reason").isString())
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "只接受整数 expectedVersion 和文本 reason");
+        long version = request.get("expectedVersion").asLong();
+        String reason = request.get("reason").asString();
+        if (version < 1 || reason.isBlank() || reason.length() > 1000)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "需要配置版本和 1 至 1000 字的修改原因");
+        try { return settings.enable(productLine, version, reason.trim(), principal); }
+        catch (org.springframework.dao.OptimisticLockingFailureException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        }
     }
 
     private JwtPrincipal admin(String authorization, String action) {

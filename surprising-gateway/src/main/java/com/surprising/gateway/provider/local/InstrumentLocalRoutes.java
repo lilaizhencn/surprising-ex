@@ -25,10 +25,10 @@ public final class InstrumentLocalRoutes {
     private static final PathPattern INSTRUMENT_CONTROLLER_CLOSEFORSETTLEMENT = PathPatternParser.defaultInstance.parse("/api/v1/instruments/admin/{instrumentId}/settlement");
 
     private final InstrumentRequestService instrumentRequests;
-    private final com.surprising.trading.order.config.OrderBusinessSettingsService orderSettings;
+    private final com.surprising.trading.order.controller.OrderBusinessSettingsController orderSettings;
     private static final PathPattern ORDER_SETTINGS = PathPatternParser.defaultInstance.parse("/api/v1/instruments/admin/order-settings");
 
-    public InstrumentLocalRoutes(InstrumentRequestService instrumentRequests, com.surprising.trading.order.config.OrderBusinessSettingsService orderSettings) {
+    public InstrumentLocalRoutes(InstrumentRequestService instrumentRequests, com.surprising.trading.order.controller.OrderBusinessSettingsController orderSettings) {
         this.orderSettings=orderSettings;
         this.instrumentRequests = instrumentRequests;
     }
@@ -36,7 +36,7 @@ public final class InstrumentLocalRoutes {
     public Object invoke(LocalApiRequest r) {
         if(r.matches(HttpMethod.GET, ORDER_SETTINGS)) return orderSettings.current(r.query("productLine",ProductLine.class,null,true));
         if(r.matches(HttpMethod.POST, ORDER_SETTINGS)) return orderSettings.save(r.query("productLine",ProductLine.class,null,true),
-                orderSettings.parseUpdate(r.body(tools.jackson.databind.JsonNode.class,true,false)),r.header("X-Admin-User-Id",String.class,null,true));
+                r.body(tools.jackson.databind.JsonNode.class,true,false),r.header("X-Admin-User-Id",String.class,null,true));
         if (r.matches(HttpMethod.GET, INSTRUMENT_CONTROLLER_DEFAULT)) {
             return instrumentRequests.defaultInstrument(r.header("X-Product-Line", String.class, null, false),
                     r.query("productLine", String.class, null, false));

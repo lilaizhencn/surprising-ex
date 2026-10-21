@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.product;
 
+import com.surprising.gateway.provider.service.GatewayProductSettings;
 import com.surprising.account.provider.service.AccountAeronGateway;
 import com.surprising.aeron.protocol.*;
 import com.surprising.trading.order.service.MarkPriceReadinessHealthIndicator;

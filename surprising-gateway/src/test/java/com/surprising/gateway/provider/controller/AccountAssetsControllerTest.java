@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.controller;
 
+import com.surprising.gateway.provider.model.GatewayProductSetting;
+import com.surprising.gateway.provider.service.GatewayProductSettings;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -85,8 +87,8 @@ class AccountAssetsControllerTest {
     @Test void onlyDisabledDatabaseConfigurationDefinesZeroNotMissingRuntime() {
         var settings = mock(GatewayProductSettings.class);
         when(settings.list()).thenReturn(List.of(
-                new GatewayProductSettings.Setting(ProductLine.SPOT, false, 1, "qa", "", Instant.now()),
-                new GatewayProductSettings.Setting(ProductLine.OPTION, true, 1, "qa", "", Instant.now())));
+                new GatewayProductSetting(ProductLine.SPOT, false, 1, "qa", "", Instant.now()),
+                new GatewayProductSetting(ProductLine.OPTION, true, 1, "qa", "", Instant.now())));
         var services = new GatewayProductServices(null, null, settings);
         assertThat(services.enabled()).isEmpty();
         assertThat(services.disabled()).containsExactly(ProductLine.SPOT);

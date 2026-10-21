@@ -253,7 +253,7 @@ class LocalBusinessApiTest {
     }
 
     private LocalBusinessApi api() {
-        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, triggers, mock(com.surprising.trading.trigger.service.AdminTriggerOrderRequestService.class), leverage, mock(com.surprising.trading.order.service.TradingFeeRequestService.class), orders, adminOrders, mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments, mock(com.surprising.trading.order.config.OrderBusinessSettingsService.class)), mapper, Validation.buildDefaultValidatorFactory().getValidator(), websocket, accountProperties, tradingProperties);
+        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, triggers, mock(com.surprising.trading.trigger.service.AdminTriggerOrderRequestService.class), leverage, mock(com.surprising.trading.order.service.TradingFeeRequestService.class), orders, adminOrders, mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments, mock(com.surprising.trading.order.controller.OrderBusinessSettingsController.class)), mapper, Validation.buildDefaultValidatorFactory().getValidator(), websocket, accountProperties, tradingProperties);
     }
 
     private ResponseEntity<byte[]> invoke(String service, String path, HttpMethod method, HttpHeaders headers, String body) {

@@ -1,0 +1,408 @@
+{
+  "date": "2026-10-21",
+  "verified_at_utc": "2026-10-21T12:05:27.345904+00:00",
+  "scope": "Gateway产品接入与订单设置的Controller/Service/单表Repository及task分层",
+  "toolchain": "Corretto HotSpot JDK 27; Maven 3.9.16; isolated PostgreSQL 18.4",
+  "stages": {
+    "initial": {
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.product.GatewayProductSelectionTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.AccountAssetsControllerTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.OrderBusinessSettingsControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.AdminProductLinesControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.GatewayProductSettingsIntegrationTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.config.OrderBusinessSettingsIntegrationTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 35,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "ea0b123ed835103275a8024661cda4869e68d1d320efd9ee81e8828b9a118726",
+      "finding": "Local dispatch must not depend on an annotated HTTP controller; keep a dedicated local protocol entry in controller package."
+    },
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=GatewayProductSettingsIntegrationTest,OrderBusinessSettingsIntegrationTest,AdminProductLinesControllerTest,OrderBusinessSettingsControllerTest,AccountAssetsControllerTest,LocalBusinessApiTest,GatewayProductSelectionTest,GatewayProductRoutesConfigurationTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.product.GatewayProductSelectionTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.AccountAssetsControllerTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.OrderBusinessSettingsControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.AdminProductLinesControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.GatewayProductSettingsIntegrationTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.config.OrderBusinessSettingsIntegrationTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 35,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "01a7bd2fce79e044e8e0576410cbb6e31fc8058f9190a67a16ca87e2067eeea6",
+      "tests": 81,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=GatewayProductSettingsIntegrationTest,OrderBusinessSettingsIntegrationTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.product.GatewayProductSettingsIntegrationTest",
+          "tests": 6,
+          "failures": 6,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.config.OrderBusinessSettingsIntegrationTest",
+          "tests": 12,
+          "failures": 6,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "0d0e563b84b714c3b1c4126fd9a30e5cece47eae78b62880f044111249f21505",
+      "tests": 18,
+      "failures": 12,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=GatewayProductSettingsIntegrationTest,OrderBusinessSettingsIntegrationTest,AdminProductLinesControllerTest,OrderBusinessSettingsControllerTest,AccountAssetsControllerTest,LocalBusinessApiTest,GatewayProductSelectionTest,GatewayProductRoutesConfigurationTest,GatewayRuntimeTest,TradingOrderPropertiesTest,OrderValidatorTest,AlgoOrderServiceTest,AlgoOrderCancellationTest,InstrumentSnapshotRuleLookupTest,InstrumentCoreSyncServiceTest,InstrumentCurrentConfigurationIntegrationTest,InstrumentCurrentCacheTest,InstrumentLifecycleServiceTest,OrderServiceTest",
+        "clean",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.trading.order.service.OrderServiceTest",
+          "tests": 124,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.InstrumentCoreSyncServiceTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.GatewayProductSelectionTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.service.InstrumentLifecycleServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.InstrumentSnapshotRuleLookupTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderValidatorTest",
+          "tests": 24,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.AccountAssetsControllerTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.OrderBusinessSettingsControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.AdminProductLinesControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.GatewayRuntimeTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.GatewayProductSettingsIntegrationTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.AlgoOrderCancellationTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.config.TradingOrderPropertiesTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.AlgoOrderServiceTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.config.OrderBusinessSettingsIntegrationTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.service.InstrumentCurrentConfigurationIntegrationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.instrument.provider.service.InstrumentCurrentCacheTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 35,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "96d668c5d92e7cf60d0a561c7d2eb93f04ac3f76fda5716978200616dae2e985",
+      "tests": 264,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "assertions": [
+    "Gateway接入意图与必需审计同一事务，六产品线分别验证审计故障回滚与版本冲突。",
+    "Controller严格检查完整字段、类型、版本、管理员及原因；无效输入未调用Service。",
+    "订单设置按产品线CAS保存；数据库写失败不改变本机风险/算法单规则。",
+    "订单设置实际Spring代理暂停调用方事务，独立提交后安装；调用方回滚不留下未提交内存版本。",
+    "共享产品激活与每产品订单刷新入口迁到task，保留原调度器及周期。",
+    "本地协议Controller不注册额外HTTP路由；LocalBusinessApi分发架构测试继续通过。"
+  ],
+  "source_sha256": {
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/controller/AdminProductLinesController.java": "b976bb35e66321cf48cd06940f53eb486d418e2265f40e7dc4d83887f789baa7",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/local/InstrumentLocalRoutes.java": "490df9c5059295c057a9c4b2c1daa72a5068bbf245b3cc6a19e1de5948779995",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/model/GatewayProductSetting.java": "f5f176a379ef4aec297db8e65c1aea95888bd8f36a4a610d4092a08197a92f0b",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/product/GatewayProductServices.java": "2ebc9ed60bd0bf2ec6a7cf0b80ae37eac3b33a1826a83c8e0685c9c7ae74883d",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/product/GatewayProductsHealth.java": "45a9540fc1c7e0d11f14081999855d4134fc3f148d976960e59caa4732e837b0",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/GatewayProductLineRepository.java": "37b48d02dc0dda29599270e781ed9525c4a14bf5215dc974a7c6e13d050cc246",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/service/GatewayProductSettings.java": "75260e7fde12e92150008408256fc1b18aa0bdb2e276ff5807480f514016d1c9",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/task/GatewayProductActivationTask.java": "f1ebe02b8b5699d1cd38065e84a241ebf9dbab8068666c51c4bb1978cf295552",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/controller/OrderBusinessSettingsController.java": "7e8b8680f4129ae7b5b1472fd24510859245679773e8d2b3b8cc06179c06e5e2",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/model/OrderBusinessSettings.java": "1e584423946647677aae52593466f7fb1b0eaf3a598f3b548b7cb15a530a4ef8",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/model/OrderSettingsSnapshot.java": "a727547fee53483d919ab2feef53dfb56a5994873c7bfb4e6dc6fa2168ff5d1d",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/repository/OrderBusinessSettingsRepository.java": "731d7d1d7dbae87e61e2a4a04037026510118faf126ed13cb164158167f58ad8",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/service/OrderBusinessSettingsService.java": "6d728d5c71dc17f709a8dc3a2c1b52c2150803a137cca9f09f065087c8ab81e9",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/task/OrderBusinessSettingsTask.java": "3e58165ca9cd9e86a16fc84f61bd46fb05e52293b1c39ded40af567219068301",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/controller/AccountAssetsControllerTest.java": "52135809e9d8537907d2ac3ff51e078349bc52cdd8a9c377b8d781b08eadc1b4",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/controller/AdminProductLinesControllerTest.java": "e82b46747c83d491eec7757b88f3b821c3246ffcb75f2de90d0d19ef71723dd4",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/local/LocalBusinessApiTest.java": "7f2842a8e11c9e2320285f80cea27f81539042b92b5d43e74e3b2b8a065527fd",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/product/GatewayProductSettingsIntegrationTest.java": "f9784067673b25fc67d08bb28b118d0d387c87daad19cf229cd5e18b469402b8",
+    "surprising-gateway/src/test/java/com/surprising/trading/order/config/OrderBusinessSettingsIntegrationTest.java": "d530b2c5a9f101baf3323d0578569694903688350e09b6887a6b7a8e0c846883",
+    "surprising-gateway/src/test/java/com/surprising/trading/order/controller/OrderBusinessSettingsControllerTest.java": "febd7914205aba162eff813024281a79ed5c337c4c95eb850a300a00f8704949"
+  },
+  "not_run": [
+    "六Core/Kafka/做市用户API的产品热接入实栈场景本批未运行；本批未改资金核算、Core状态或交易协议。",
+    "价格及生命周期设置、其余全范围分层/架构门禁和最终实栈核对仍待后续整改。"
+  ],
+  "cleanup": {
+    "postgres_stopped": true,
+    "owned_database_removed": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-mvc-settings-pg-_pwxpnvx",
+    "owned_logs_and_summarized_reports_removed": [
+      "/tmp/surprising-mvc-settings-negative.log",
+      "/tmp/surprising-mvc-settings-expanded.log",
+      "/tmp/surprising-mvc-settings-focused.log",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.OrderServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.InstrumentCoreSyncServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.product.GatewayProductSelectionTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.product.GatewayProductSelectionTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.config.OrderBusinessSettingsIntegrationTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.controller.OrderBusinessSettingsControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.InstrumentSnapshotRuleLookupTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.instrument.provider.service.InstrumentLifecycleServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.InstrumentSnapshotRuleLookupTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.OrderValidatorTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.controller.AccountAssetsControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.controller.GatewayRuntimeTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.OrderServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.controller.OrderBusinessSettingsControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.controller.AdminProductLinesControllerTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.InstrumentCoreSyncServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.local.LocalBusinessApiTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.controller.GatewayRuntimeTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.OrderValidatorTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.product.GatewayProductSettingsIntegrationTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.AlgoOrderCancellationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.instrument.provider.service.InstrumentCurrentConfigurationIntegrationTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.config.TradingOrderPropertiesTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.config.TradingOrderPropertiesTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.AlgoOrderCancellationTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.config.GatewayProductRoutesConfigurationTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.service.AlgoOrderServiceTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.controller.AccountAssetsControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.trading.order.config.OrderBusinessSettingsIntegrationTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.instrument.provider.service.InstrumentCurrentConfigurationIntegrationTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.trading.order.service.AlgoOrderServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.product.GatewayProductSettingsIntegrationTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.instrument.provider.service.InstrumentLifecycleServiceTest.txt",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.instrument.provider.service.InstrumentCurrentCacheTest.xml",
+      "surprising-gateway/target/surefire-reports/TEST-com.surprising.gateway.provider.local.LocalBusinessApiTest.xml",
+      "surprising-gateway/target/surefire-reports/com.surprising.gateway.provider.controller.AdminProductLinesControllerTest.txt",
+      "surprising-gateway/target/surefire-reports/com.surprising.instrument.provider.service.InstrumentCurrentCacheTest.txt"
+    ],
+    "build_outputs_retained": true
+  }
+}
