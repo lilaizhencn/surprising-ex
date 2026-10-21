@@ -133,10 +133,15 @@ risk、funding、保险和 ADL 继续读同一份缓存，产品线校验、事�
 
 结算先查询 Core 维护状态和最新资金费游标：已完成或已被后续窗口覆盖的预测仅从本地待结算缓存移除，不能再次发布 FINAL。Core 状态不可用时停止本次结算并重试，不能当作新窗口开始。
 
-`FundingSettlementRepository.reserveCore` 在首次提交 Core 前按产品线、合约、结算时间冻结完整费率输入到 `funding_settlement_rates`；后续分页、进程重启及预测重放继续使用首次费率。该表是尚未执行命令的持久输入，不是结算成功凭据。已完成历史只读取 realtime 从 Archive 实际支付构建的 `core_funding_settlement_projection` 和 `core_funding_payment_projection`。`FundingRateRepository` 不再把内存中的预测写成 FINAL，也不读旧 `funding_rate_ticks` 作为结算历史。
+`FundingService` 调用 `FundingSettlementRateRepository.reserve`，在首次提交 Core 前按产品线、合约、结算时间冻结完整费率输入到 `funding_settlement_rates`；后续分页、进程重启及预测重放继续使用首次费率。该表是尚未执行命令的持久输入，不是结算成功凭据。已完成历史只读取 realtime 从 Archive 实际支付构建的 `core_funding_settlement_projection` 和 `core_funding_payment_projection`。`FundingRateRepository` 不再把内存中的预测写成 FINAL，也不读旧 `funding_rate_ticks` 作为结算历史。
 
 旧核心命令未保存预测的溢价、利息和周期；回放得到的真实费率仍可显示，但未知组成项通过 `FundingRateHistoryResponse` 返回 null，只有与实际费率一致的冻结输入才能补齐组成项。不根据当前仓位或重复预测推算过去扣款，旧预测记录留存供审计。
 
 部署前执行 `init.sql` 中新增的 `funding_settlement_rates`、`core_funding_page_projection` DDL，并对既有 `core_funding_settlement_projection.instrument_change_id` 执行 `DROP NOT NULL`；核心资金费命令没有合约配置版本，不能伪造该值。先准备表，再更新 realtime 与 lifecycle；在线 Core 不需要重启。真实历史补入程序和隔离边界见 [realtime README](../surprising-realtime/README.md)。
 
 验证包含 U/币本位核心真实资金费、重启续页、已完成预测重放、冻结输入在数据库重启读取和产品线隔离、真实历史排序与游标分页，以及数据库未知组成项。真实 PostgreSQL 测试需要 `INSTRUMENT_TEST_JDBC_URL`、`INSTRUMENT_TEST_DB_USER`、`INSTRUMENT_TEST_DB_PASSWORD`，使用随机 schema 并清理；不启动 wallet。
+
+资金费选率与历史读取按表分工：FundingSettlementRateRepository只冻结funding_settlement_rates，
+FundingSettlementProjectionRepository只读确定性提交的结算投影。FundingService检查标记价新鲜度和结算身份，
+冻结首选率后再驱动原确定性Core分页；FundingRateRepository的历史关联仅在完整身份与费率匹配时补充组成，
+未知组成保持NULL。验证见 [资金费表职责验证](../docs/validation/java-mvc-funding-tables-20261021.json)。

@@ -1,12 +1,8 @@
 package com.surprising.funding.provider.repository;
 
 import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
 import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.provider.config.FundingProperties;
-import com.surprising.price.api.model.MarkPriceEvent;
-import com.surprising.price.consumer.LatestMarkPriceCache;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.*;
@@ -34,14 +30,23 @@ class FundingHistoryPostgresTest {
     @AfterEach void clean() { if(jdbc!=null) jdbc.execute("DROP SCHEMA " + schema + " CASCADE"); }
 
     @Test void firstReservedRateSurvivesNewPredictionAndRepositoryRestartWithProductIsolation() {
-        var marks = mock(LatestMarkPriceCache.class);
-        when(marks.fresh(eq("1"), any())).thenReturn(Optional.of(mock(MarkPriceEvent.class)));
         var first = rate(100, 10);
-        assertThat(new FundingSettlementRepository(jdbc, properties, marks).reserveCore(first).rate()).isEqualTo(first);
-        assertThat(new FundingSettlementRepository(jdbc, properties, marks).reserveCore(rate(999, 20)).rate()).isEqualTo(first);
+        assertThat(new FundingSettlementRateRepository(jdbc, properties).reserve(first, first.fundingTime().toEpochMilli())).isEqualTo(first);
+        assertThat(new FundingSettlementRateRepository(jdbc, properties).reserve(rate(999, 20), first.fundingTime().toEpochMilli())).isEqualTo(first);
         properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
-        assertThat(new FundingSettlementRepository(jdbc, properties, marks).reserveCore(rate(999, 20)).rate().fundingRatePpm()).isEqualTo(999);
+        assertThat(new FundingSettlementRateRepository(jdbc, properties).reserve(rate(999, 20), first.fundingTime().toEpochMilli()).fundingRatePpm()).isEqualTo(999);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM funding_settlement_rates", Integer.class)).isEqualTo(2);
+    }
+
+    @Test
+    void latestProjectionRemainsIsolatedFromReservationsAndOtherProducts() {
+        insert("LINEAR_PERPETUAL", 900, 100, 4096, "APPLIED");
+        insert("INVERSE_PERPETUAL", 1800, 200, 8192, "APPLIED");
+        var projection = new FundingSettlementProjectionRepository(jdbc, properties);
+        assertThat(projection.latestCore("1").orElseThrow().fundingRatePpm()).isEqualTo(100);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM funding_settlement_rates", Integer.class)).isZero();
+        properties.getKafka().setProductLine(ProductLine.INVERSE_PERPETUAL);
+        assertThat(projection.latestCore("1").orElseThrow().fundingRatePpm()).isEqualTo(200);
     }
 
     @Test void historyUsesActualCompletedRateAndPagesWithoutInventingUnknownComponents() {

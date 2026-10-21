@@ -19,8 +19,11 @@ import com.surprising.funding.provider.repository.FundingPaymentRepository;
 import com.surprising.funding.provider.repository.FundingRateInputRepository;
 import com.surprising.funding.provider.repository.FundingRateRepository;
 import com.surprising.funding.provider.repository.FundingSequenceRepository;
-import com.surprising.funding.provider.repository.FundingSettlementRepository;
+import com.surprising.funding.provider.repository.FundingSettlementRateRepository;
 import com.surprising.price.api.model.PerpFundingRateEvent;
+import com.surprising.price.consumer.LatestMarkPriceCache;
+import com.surprising.funding.provider.model.CoreFundingSettlement;
+import com.surprising.funding.provider.repository.FundingSettlementProjectionRepository;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -39,8 +42,10 @@ public class FundingService {
     private final FundingSequenceRepository sequenceRepository;
     private final FundingRateInputRepository rateInputRepository;
     private final FundingRateRepository rateRepository;
-    private final FundingSettlementRepository settlementRepository;
+    private final FundingSettlementRateRepository settlementRepository;
     private final FundingPaymentRepository paymentRepository;
+    private final FundingSettlementProjectionRepository settlementProjection;
+    private final LatestMarkPriceCache markPriceCache;
     private final LatestFundingRateCache latestFundingRateCache;
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final FundingAeronGateway aeron;
@@ -51,11 +56,15 @@ public class FundingService {
                           FundingSequenceRepository sequenceRepository,
                           FundingRateInputRepository rateInputRepository,
                           FundingRateRepository rateRepository,
-                          FundingSettlementRepository settlementRepository,
+                          FundingSettlementRateRepository settlementRepository,
                           FundingPaymentRepository paymentRepository,
                           LatestFundingRateCache latestFundingRateCache,
                           @Qualifier("fundingKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
-                          FundingAeronGateway aeron) {
+                          FundingAeronGateway aeron,
+                          FundingSettlementProjectionRepository settlementProjection,
+                          LatestMarkPriceCache markPriceCache) {
+        this.settlementProjection = settlementProjection;
+        this.markPriceCache = markPriceCache;
         this.properties = properties;
         this.leaseRepository = leaseRepository;
         this.sequenceRepository = sequenceRepository;
@@ -118,14 +127,14 @@ public class FundingService {
                     continue; // No funding payment occurred; do not publish a false FINAL rate.
                 }
                 if (gate.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT) continue;
-                var probe = new FundingSettlementRepository.CoreSettlement(rate.fundingTime().toEpochMilli(), rate);
+                var probe = new CoreFundingSettlement(rate.fundingTime().toEpochMilli(), rate);
                 CoreFundingProgressView persisted = decodeProgressOrQuery(rate.instrumentId(), probe, null);
                 if (persisted != null && (persisted.settlementId() > probe.settlementId()
                         || persisted.complete() && persisted.settlementId() == probe.settlementId())) {
                     latestFundingRateCache.removeThrough(rate.instrumentId(), rate.fundingTime());
                     continue; // Only committed replay may publish FINAL history, never a replayed prediction.
                 }
-                FundingSettlementRepository.CoreSettlement settlement = settlementRepository.reserveCore(rate);
+                CoreFundingSettlement settlement = reserveCore(rate);
                 rate = settlement.rate();
                 String commandPrefix = properties.getKafka().getProductLine() + ":funding:"
                         + rate.instrumentId() + ':' + settlement.settlementId();
@@ -167,9 +176,18 @@ public class FundingService {
         return new SettlementCycle(true, dueRates, settledRates, pages, failedRates);
     }
 
+    /** Freshness is a business precondition. Freeze before any mutating Core funding page. */
+    private CoreFundingSettlement reserveCore(FundingRateResponse rate) {
+        markPriceCache.fresh(rate.instrumentId(), properties.getCalculation().getMaxMarkAge())
+                .orElseThrow(() -> new IllegalStateException("fresh mark price not found for " + rate.instrumentId()));
+        long settlementId = rate.fundingTime().toEpochMilli();
+        if (settlementId <= 0) throw new IllegalArgumentException("funding time must produce a positive settlement id");
+        return new CoreFundingSettlement(settlementId, settlementRepository.reserve(rate, settlementId));
+    }
+
     private CoreFundingProgressView decodeProgressOrQuery(
             String instrumentId,
-            FundingSettlementRepository.CoreSettlement settlement,
+            CoreFundingSettlement settlement,
             CoreResponse response) {
         CoreResponse effective = response;
         if (effective == null || effective.data().length == 0) {
@@ -212,7 +230,7 @@ public class FundingService {
     }
 
     public FundingSettlementResponse latestSettlement(String instrumentId) {
-        return settlementRepository.latestCore(normalizeSymbol(instrumentId))
+        return settlementProjection.latestCore(normalizeSymbol(instrumentId))
                 .orElseThrow(() -> new java.util.NoSuchElementException("funding settlement not found for instrumentId: " + instrumentId));
     }
 

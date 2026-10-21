@@ -1,7 +1,6 @@
 package com.surprising.funding.provider.repository;
 
 import com.surprising.funding.api.model.AdminCursorPage;
-import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.api.model.FundingRateHistoryResponse;
 import com.surprising.funding.provider.config.FundingProperties;
 import java.util.ArrayList;
@@ -21,6 +20,9 @@ public class FundingRateRepository {
         this.properties = properties;
     }
 
+    /** 必要关联只读：以core_funding_settlement_projection的APPLIED事实为准，
+     * 同产品/合约/结算身份且费率一致时才关联funding_settlement_rates补充预测组成。
+     * 无冻结记录或费率不匹配时保留NULL，不能把预测冒充已结算事实；筛选与游标分页在同一SQL内完成。 */
     public AdminCursorPage.CursorPage<FundingRateHistoryResponse> historyPage(String instrumentId,
             int limit, String cursor, String sort) {
         int safeLimit = AdminCursorPage.limit(limit, 1000);
@@ -56,16 +58,5 @@ public class FundingRateRepository {
                 FundingRateHistoryResponse::sequence);
     }
 
-    static FundingRateResponse toRate(java.sql.ResultSet rs) throws java.sql.SQLException {
-        return new FundingRateResponse(
-                rs.getString("instrument_id"),
-                rs.getLong("sequence"),
-                rs.getLong("funding_rate_ppm"),
-                rs.getLong("premium_rate_ppm"),
-                rs.getLong("interest_rate_ppm"),
-                rs.getTimestamp("funding_time").toInstant(),
-                rs.getInt("funding_interval_hours"),
-                rs.getString("status"),
-                rs.getTimestamp("event_time").toInstant());
-    }
+
 }
