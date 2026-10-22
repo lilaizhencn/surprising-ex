@@ -28,7 +28,6 @@ Surprising-EX 是交易所后端核心项目。改动必须严谨，资金安全
 - **默认直接实现。** 优先在现有业务模块内完成；只有独立业务职责、明确状态所有权或实际协议、持久化、并发边界才拆分。不为单一实现新增接口、工厂、策略注册或通用执行框架；已有契约及外部依赖隔离确有需要时，说明具体边界。未来扩展、统一风格、方便测试不能单独作为理由。
 - **每层都要承担实际职责。** 不新增仅透传参数、转发调用或重复搬运字段的层；协议转换和必要的线程交接除外。一次确定性成交事件直接交给对应 owner lane 串行应用，不拆出无业务意义的任务、barrier 或 commit 阶段。
 - **一个状态一个权威来源。** 新增状态、Map/List/Set、索引或缓冲区必须说明所有者、生命周期、读写方，以及现有数据为何不能满足。不得重复维护同一业务事实、逐命令复制快照或为未来场景预留容器；必要索引、恢复快照须明确与权威状态的一致性关系。
-- **技术机制留在必要边界。** 不把排序、canonicalization、rolling hash、导出视图和快照物化从协议、查询、恢复或持久化边界带入 matcher、settlement 或 Account Lane 热路径；不为统一抽象引入全表扫描、临时聚合或状态副本。能直接消费不可变事件、使用 primitive 数组/集合或复用固定容量缓冲区时，不改用 boxed 集合或动态临时集合。
 - **复杂优化必须有实测依据。** 按统一压测标准定位实际瓶颈，优先做局部改进；引入数据结构或处理阶段前先说明业务/正确性需求和简单方案为何不够，完成后用受影响路径的 JMH/JFR 验证成本。不得用“高性能”“解耦”“可扩展”代替证据。
 - **交付前检查并删除多余抽象。** 对本次新增的类、接口、状态和阶段，简要说明“负责什么业务或技术边界、为什么现有代码不能直接承担”；没有具体理由就合并或删除。交付以业务流程和关键源码入口说明改动，不能只列抽象类名。
 - **简化不破坏正确性边界。** 保留产品线隔离、资金不变量、状态所有权、确定性顺序、结算完成及恢复要求。只简化本次影响范围；不得借可读性优化发起无关架构重写，也不得照搬已有过度设计继续扩散。
@@ -84,17 +83,15 @@ Surprising-EX 是交易所后端核心项目。改动必须严谨，资金安全
 
 | 证据 | 最低采集内容 | 要回答的问题 |
 |---|---|---|
-| 业务吞吐与完成性 | API 分类型 `requests/s`；Core `terminal business ops/s`、`terminal Core messages/s`、`fills/s` 或 `trades/s`；批量另报 batches/s、items/s、平均/最大 batch size；accepted/terminal 总数、unfinished、最大/期末 backlog、拒绝/错误/超时率 | 是业务处理能力不足，还是批量口径、拒单或未完成量造成虚高？ |
-| 分段尾延迟 | 各业务分别报入口→accepted、accepted→terminal、入口→terminal 的 p50/p90/p95/p99/p99.9/max、直方图区间、样本数及超时上限；客户端等待另报 | 慢在接入、Core 内部还是发压端？不得合并下单、成交、撤单、批量、触发、风险、强平、资金费、ADL、结算及 snapshot fence |
-| 阶段与线程 | owner、matcher、风险、snapshot/projection、Core Fact、Aeron/Kafka/外围及发压端分别报 CPU、execution samples/top stacks、队列/背压；锁竞争、park/wait、阻塞栈、线程数及启停、上下文切换 | 哪个阶段积压、哪个线程限制推进？busy-spin CPU 单列；墙钟热点需对应墙钟/等待证据，不能由 CPU 样本代替 |
+| 业务吞吐与完成性 | API 分类型 `requests/s`；Core `terminal business ops/s`、`terminal Core messages/s`、`fills/s` 或 `trades/s`；批量另报 batches/s、items/s、平均/最大 batch size；accepted/terminal 总数、unfinished、最大/期末 backlog、拒绝/错误/超时率 |
+| 分段尾延迟 | 各业务分别报入口→accepted、accepted→terminal、入口→terminal 的 p50/p90/p95/p99/p99.9/max、直方图区间、样本数及超时上限；客户端等待另报 |
+| 阶段与线程 | owner、matcher、风险、snapshot/projection、Core Fact、Aeron/Kafka/外围及发压端分别报 CPU、execution samples/top stacks、队列/背压；锁竞争、park/wait、阻塞栈、线程数及启停、上下文切换 |
 | 分配与 GC | bytes/s、bytes/business op、对象数/op 的测量或估算方法、TLAB/非 TLAB、最大观测对象及 top class/thread/site；heap committed/used、GC 前后/live set/old 趋势、各类 GC 次数/原因/总时间占比、pause p50/p95/p99/max、最长 phase、晋升/疏散失败 | 哪条分配路径导致 GC，停顿是否与业务尾延迟同窗？采样事件不能直接当作精确对象总数 |
 | Native 与长稳 | NMT 各类 reserved/committed、峰值及增量；Direct/Mapped、Aeron/Netty/Chronicle buffer/pool 当前/峰值及分配释放差；多轮 GC 后 live set、old object/class、线程、FD 和 native 增长斜率 | 是合理驻留、积压还是持续增长？短 JFR 不能证明无泄漏 |
 | JVM 停顿与预热 | safepoint 次数/原因/到达时间/停顿、VM operation；compilation 次数/总时间/最长耗时、code cache、deoptimization、类加载卸载及 metaspace | p99/p99.9 是否被 VM 停顿或未完成预热影响？接近尾延迟的停顿必须解释 |
 | I/O 与系统 | file/socket 次数/字节/阻塞时长/top stack，异常数量/top throw site；进程/机器 CPU、物理内存、swap/page fault、容器内存/配额/节流及干扰进程 | 是同步 I/O、网络/Archive、异常风暴还是宿主资源限制？交易 owner 同步文件、网络或数据库 I/O 判主链路验收失败 |
-
-- 一个下单、撤单、改单、触发或风险/结算动作算一个 business operation；批量按 item 展开，fill 不能混作订单操作。JMH 另报主分数、误差/置信区间、业务计数换算及 `-prof gc` 分配率、bytes/op、GC 次数/时间；局部微基准不能冒充完整 Core 吞吐。
+| 缓存行失效 |
 - 排空后必须满足 `acceptedBusinessOperations == terminalBusinessOperations`、accepted/terminal Core messages 相等、两个 `unfinished* == 0`、期末 backlog 为零；资金核对遵循测试要求，并验证冻结/持仓、订单终态及快照恢复后的状态一致。
-- JFR 检查可用分配事件（`ObjectAllocationSample`、`ObjectAllocationInNewTLAB`、`ObjectAllocationOutsideTLAB`、`ThreadAllocationStatistics`），说明启用情况和覆盖限制。涉及长期状态、缓存、订单簿、snapshot/outbox 或 native buffer 必须做长稳；疑似泄漏才增加 `OldObjectSample`/`path-to-gc-roots` 并记录停顿开销。
 
 ### 5. 归因、结论与归档
 
@@ -103,13 +100,3 @@ Surprising-EX 是交易所后端核心项目。改动必须严谨，资金安全
 - 结论分为：**通过**（有效且达到预锁门槛，正确性和必需证据齐全）、**失败**（正确性错误或有效结果未达门槛）、**部分验证**（缺场景/指标/长稳等证据）、**无效**（采集或环境不满足条件）。诊断假设未定位不等同业务失败；无效性能数据不能掩盖已确认的正确性失败。
 - 最终报告同时给出指定并发/负载下的持续吞吐、分业务尾延迟、完成性/资金状态、GC/分配、heap/native、热点/阻塞及长稳结论；不适用项须给依据。不得用短时峰值、平均延迟或一句“无泄漏”代替证据。
 - 每轮（含失败/无效）在 `PERFORMANCE_VALIDATION.md` 追加：锁定计划、实际参数及偏差、完整命令、指标与时间序列摘要、关键栈/方法及源码定位、资金/恢复核对、结论和下一步。JFR 附 `jfr summary`、相关 `jfr view`/JMC 聚合结果、配置/时长、各进程 artifact 原始路径/大小/校验信息；按测试清理规则清理并追加状态，保证删原始文件后记录仍足以复核结论。
-
-## 文档
-
-- 新增或调整产品线、资金模型、撮合、风控、交割、期权、WebSocket、Kafka Topic 后，要同步中文 README 和相关文档。
-- 说明要结合源码路径和关键类，避免只写概念。
-
-## 提交
-
-- 后续仅在 `master` 分支开发、提交和推送；未经用户明确要求，不再创建或切换开发分支。
-- 每完成一个模块并通过测试后 commit and push。
