@@ -3,7 +3,6 @@ package com.surprising.gateway.provider.auth.repository;
 import com.surprising.gateway.provider.auth.model.AuthModels.AdminPermissionResponse;
 import java.util.Collection;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -64,13 +63,7 @@ public class GatewayPermissionRepository {
         return rows.stream().collect(Collectors.toUnmodifiableMap(PermissionRecord::permissionId, Function.identity()));
     }
 
-    public static String normalizePermissionCode(String permissionCode) {
-        String normalized = permissionCode == null ? null : permissionCode.trim().toLowerCase(Locale.ROOT);
-        if (normalized == null || !normalized.matches("[a-z0-9*][a-z0-9.*_-]{1,127}")) {
-            throw new IllegalArgumentException("invalid permission code");
-        }
-        return normalized;
-    }
+
 
     public record PermissionRecord(long permissionId, String permissionCode) {
     }

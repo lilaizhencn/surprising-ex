@@ -45,7 +45,7 @@ public class AuthController {
     @PostMapping("/register")
     public AuthResponse register(@Valid @RequestBody RegisterRequest request, HttpServletRequest httpRequest) {
         try {
-            return authService.register(request, clients.bind(httpRequest));
+            return authService.register(AuthRequestBinding.register(request), clients.bind(httpRequest));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -108,7 +108,7 @@ public class AuthController {
     @PostMapping("/login")
     public AuthModels.LoginResult login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
         try {
-            return authService.login(request, clients.bind(httpRequest));
+            return authService.login(AuthRequestBinding.login(request), clients.bind(httpRequest));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

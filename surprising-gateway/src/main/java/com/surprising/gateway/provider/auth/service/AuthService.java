@@ -35,14 +35,14 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
-import java.util.Locale;
+import com.surprising.gateway.provider.auth.utils.AuthCodeFormats;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AuthService {
 
-    private static final String USERNAME_PATTERN = "^[A-Za-z0-9_]{3,32}$";
+
 
     private final GatewayProperties properties;
     private final AuthPersistenceService repository;
@@ -73,11 +73,9 @@ public class AuthService {
 
     @Transactional
     public AuthResponse register(RegisterRequest request, AuthClientMetadata httpRequest) {
-        validatePassword(request.password());
-        String username = request.username() == null || request.username().isBlank()
-                ? null : normalizeUsername(request.username());
-        String email = normalizeEmail(request.email());
-        String phone = normalizePhone(request.phone());
+        String username = request.username();
+        String email = request.email();
+        String phone = request.phone();
         if (username != null) {
             throw new IllegalArgumentException("username registration is disabled; use email or phone");
         }
@@ -107,7 +105,7 @@ public class AuthService {
 
     @Transactional(noRollbackFor = LoginVerificationService.VerificationFailure.class)
     public AuthModels.LoginResult login(LoginRequest request, AuthClientMetadata httpRequest) {
-        String identifier = normalizeLoginIdentifier(request.identifier());
+        String identifier = request.identifier();
         Instant now = Instant.now();
         GatewayUserRepository.UserCredential credential = credential(identifier).orElse(null);
         if (credential == null || !passwordHasher.matches(request.password(), credential.passwordHash())) {
@@ -238,7 +236,7 @@ public class AuthService {
     }
 
     public void requireAdminPermission(long userId, List<String> roles, String permissionCode) {
-        String normalizedPermission = normalizePermission(permissionCode);
+        String normalizedPermission = AuthCodeFormats.permission(permissionCode);
         if (roles != null && roles.contains("SUPER_ADMIN")) {
             return;
         }
@@ -354,7 +352,7 @@ public class AuthService {
 
     public AdminRolePermissionsResponse adminRolePermissions(String authorizationHeader, String roleCode) {
         requireAdminPermission(authorizationHeader, "admin.permissions.read");
-        String normalizedRole = normalizeRole(roleCode);
+        String normalizedRole = roleCode;
         return new AdminRolePermissionsResponse(normalizedRole, repository.rolePermissions(normalizedRole));
     }
 
@@ -363,7 +361,7 @@ public class AuthService {
                                                                String roleCode,
                                                                AdminRolePermissionsRequest request) {
         requireAdminPermission(authorizationHeader, "admin.permissions.write");
-        String normalizedRole = normalizeRole(roleCode);
+        String normalizedRole = roleCode;
         if ("SUPER_ADMIN".equals(normalizedRole)) {
             throw new IllegalArgumentException("SUPER_ADMIN permissions are managed by system policy");
         }
@@ -430,21 +428,9 @@ public class AuthService {
         return required.matches(regex.toString());
     }
 
-    private String normalizePermission(String permissionCode) {
-        String normalized = permissionCode == null ? "" : permissionCode.trim().toLowerCase(Locale.ROOT);
-        if (!normalized.matches("[a-z0-9*][a-z0-9.*_-]{1,127}")) {
-            throw new IllegalArgumentException("invalid permission code");
-        }
-        return normalized;
-    }
 
-    private String normalizeRole(String roleCode) {
-        String normalized = roleCode == null ? "" : roleCode.trim().toUpperCase(Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9_]{2,64}")) {
-            throw new IllegalArgumentException("invalid role code");
-        }
-        return normalized;
-    }
+
+
 
     private AuthResponse authResponse(AuthenticatedUser user, AuthClientMetadata request, Instant now) {
         return authResponse(user, request, now, false);
@@ -473,27 +459,9 @@ public class AuthService {
                 requiresEmailVerification);
     }
 
-    private String normalizeUsername(String username) {
-        String normalized = username == null ? "" : username.trim().toLowerCase(Locale.ROOT);
-        if (!normalized.matches(USERNAME_PATTERN)) {
-            throw new IllegalArgumentException("username must be 3-32 letters, digits or underscore");
-        }
-        return normalized;
-    }
 
-    private String normalizeLoginIdentifier(String identifier) {
-        if (identifier == null || identifier.isBlank()) {
-            throw new IllegalArgumentException("email, phone or username is required");
-        }
-        String normalized = identifier.trim();
-        if (normalized.contains("@")) {
-            return normalizeEmail(normalized);
-        }
-        if (normalized.startsWith("+")) {
-            return normalizePhone(normalized);
-        }
-        return normalizeUsername(normalized);
-    }
+
+
 
     private java.util.Optional<GatewayUserRepository.UserCredential> credential(String identifier) {
         if (identifier.contains("@")) {
@@ -505,33 +473,11 @@ public class AuthService {
         return repository.credentialByUsername(identifier);
     }
 
-    private void validatePassword(String password) {
-        if (password == null || password.length() < 8 || password.length() > 128) {
-            throw new IllegalArgumentException("password length must be 8-128");
-        }
-    }
 
-    private String normalizeEmail(String email) {
-        if (email == null || email.isBlank()) {
-            return null;
-        }
-        String normalized = email.trim().toLowerCase(Locale.ROOT);
-        if (normalized.length() > 254 || !normalized.contains("@")) {
-            throw new IllegalArgumentException("invalid email");
-        }
-        return normalized;
-    }
 
-    private String normalizePhone(String phone) {
-        if (phone == null || phone.isBlank()) {
-            return null;
-        }
-        String normalized = phone.trim().replace(" ", "").replace("-", "");
-        if (!normalized.matches("\\+[1-9]\\d{7,14}")) {
-            throw new IllegalArgumentException("phone must use E.164 format");
-        }
-        return normalized;
-    }
+
+
+
 
     private String newRefreshToken() {
         byte[] bytes = new byte[32];

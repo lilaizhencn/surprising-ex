@@ -173,8 +173,9 @@ public class AdminAuthController {
                                           HttpServletRequest httpRequest) {
         try {
             AdminUserRolesRequest request = readBody(body, AdminUserRolesRequest.class);
+            var roles = AuthRequestBinding.roles(request.roles());
             requireLocalAdminApproval(authorization, httpRequest, body);
-            return authService.replaceUserRoles(authorization, userId, request.roles());
+            return authService.replaceUserRoles(authorization, userId, roles);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -247,7 +248,7 @@ public class AdminAuthController {
     public AdminRolePermissionsResponse rolePermissions(@RequestHeader("Authorization") String authorization,
                                                         @PathVariable("roleCode") String roleCode) {
         try {
-            return authService.adminRolePermissions(authorization, roleCode);
+            return authService.adminRolePermissions(authorization, com.surprising.gateway.provider.auth.utils.AuthCodeFormats.role(roleCode));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -261,9 +262,10 @@ public class AdminAuthController {
                                                                @RequestBody byte[] body,
                                                                HttpServletRequest httpRequest) {
         try {
-            AdminRolePermissionsRequest request = readBody(body, AdminRolePermissionsRequest.class);
+            AdminRolePermissionsRequest request = AuthRequestBinding.permissions(readBody(body, AdminRolePermissionsRequest.class));
+            String normalizedRole = com.surprising.gateway.provider.auth.utils.AuthCodeFormats.role(roleCode);
             requireLocalAdminApproval(authorization, httpRequest, body);
-            return authService.replaceRolePermissions(authorization, roleCode, request);
+            return authService.replaceRolePermissions(authorization, normalizedRole, request);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

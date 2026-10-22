@@ -339,7 +339,7 @@ class AuthServiceTest {
         when(jwtTokenService.createAccessToken(eq(42L), eq(null), eq(List.of("USER")), any()))
                 .thenReturn("access");
 
-        var response = (AuthModels.AuthResponse) service.login(new LoginRequest("USER@EXAMPLE.COM", "password"),
+        var response = (AuthModels.AuthResponse) service.login(new LoginRequest("user@example.com", "password"),
                 new AuthClientMetadataBinding(new GatewayProperties()).bind(new MockHttpServletRequest()));
 
         assertThat(response.user().email()).isEqualTo("user@example.com");

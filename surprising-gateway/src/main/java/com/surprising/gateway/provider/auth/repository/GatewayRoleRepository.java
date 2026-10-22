@@ -4,7 +4,6 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -28,7 +27,7 @@ public class GatewayRoleRepository {
                 INSERT INTO gateway_roles (role_code, role_name, created_at)
                 VALUES (?, ?, ?)
                 ON CONFLICT (role_code) DO NOTHING
-                """, normalizeRoleCode(roleCode), roleName, Timestamp.from(now));
+                """, roleCode, roleName, Timestamp.from(now));
     }
 
     public RoleRecord requireByCode(String roleCode) {
@@ -36,7 +35,7 @@ public class GatewayRoleRepository {
                 SELECT role_id, role_code, role_name, created_at
                   FROM gateway_roles
                  WHERE role_code = ?
-                """, (rs, rowNum) -> toRecord(rs), normalizeRoleCode(roleCode)).stream()
+                """, (rs, rowNum) -> toRecord(rs), roleCode).stream()
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("role not found"));
     }
@@ -62,15 +61,7 @@ public class GatewayRoleRepository {
         return rows.stream().collect(Collectors.toUnmodifiableMap(RoleRecord::roleId, Function.identity()));
     }
 
-    public static String normalizeRoleCode(String roleCode) {
-        String normalized = roleCode == null || roleCode.isBlank()
-                ? null
-                : roleCode.trim().toUpperCase(Locale.ROOT);
-        if (normalized == null || !normalized.matches("[A-Z0-9_]{2,64}")) {
-            throw new IllegalArgumentException("invalid role code");
-        }
-        return normalized;
-    }
+
 
     private RoleRecord toRecord(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new RoleRecord(

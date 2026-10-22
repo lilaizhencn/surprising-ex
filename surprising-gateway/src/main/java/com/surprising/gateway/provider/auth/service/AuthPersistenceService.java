@@ -135,7 +135,7 @@ public class AuthPersistenceService {
     }
 
     public void replaceRoles(long userId, List<String> roleCodes, Instant now) {
-        List<String> normalizedRoles = normalizeRoleCodes(roleCodes);
+        List<String> normalizedRoles = roleCodes;
         List<Long> roleIds = new ArrayList<>();
         for (String roleCode : normalizedRoles) {
             roleRepository.ensure(roleCode, roleName(roleCode), now);
@@ -172,7 +172,7 @@ public class AuthPersistenceService {
 
     public void replaceRolePermissions(String roleCode, List<String> permissionCodes, Instant now) {
         RoleRecord role = roleRepository.requireByCode(roleCode);
-        List<String> normalizedPermissions = normalizePermissionCodes(permissionCodes);
+        List<String> normalizedPermissions = permissionCodes;
         Map<String, PermissionRecord> permissions = permissionRepository.findByCodes(normalizedPermissions);
         for (String permissionCode : normalizedPermissions) {
             if (!permissions.containsKey(permissionCode)) {
@@ -348,24 +348,9 @@ public class AuthPersistenceService {
                 user.createdAt(), user.displayName());
     }
 
-    private List<String> normalizeRoleCodes(List<String> roleCodes) {
-        if (roleCodes == null || roleCodes.isEmpty()) {
-            throw new IllegalArgumentException("roles are required");
-        }
-        LinkedHashSet<String> normalized = new LinkedHashSet<>();
-        roleCodes.forEach(roleCode -> normalized.add(GatewayRoleRepository.normalizeRoleCode(roleCode)));
-        return List.copyOf(normalized);
-    }
 
-    private List<String> normalizePermissionCodes(List<String> permissionCodes) {
-        if (permissionCodes == null) {
-            return List.of();
-        }
-        LinkedHashSet<String> normalized = new LinkedHashSet<>();
-        permissionCodes.forEach(permissionCode ->
-                normalized.add(GatewayPermissionRepository.normalizePermissionCode(permissionCode)));
-        return List.copyOf(normalized);
-    }
+
+
 
     private String roleName(String roleCode) {
         return roleCode.replace('_', ' ');
