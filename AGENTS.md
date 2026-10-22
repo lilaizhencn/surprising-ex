@@ -2,6 +2,8 @@
 
 资金正确性优先。**性能优化、压测或 JMH/JFR 前，必须读取子规范 [AGENTS-performance.md](AGENTS-performance.md)。**
 
+**代码简化、逻辑整理或结构重构前，必须读取子规范 [AGENTS-simplify.md](AGENTS-simplify.md)。**
+
 ## MVC 分层
 
 - `controller`：请求/消息入口、参数绑定、响应转换；不写业务或 SQL。
