@@ -6,6 +6,9 @@ import com.surprising.adl.api.model.AdlQueueQueryResponse;
 import com.surprising.adl.provider.service.AdlRuntimeConfigService;
 import com.surprising.adl.provider.service.AdlService;
 import java.util.Map;
+import com.surprising.adl.api.utils.AdminCursorPage;
+import com.surprising.adl.provider.model.AdlEventPageQuery;
+import java.time.DateTimeException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -45,7 +48,7 @@ public class AdlController {
                                         @RequestParam(required = false) String instrumentId,
                                         @RequestParam(defaultValue = "100") int limit) {
         try {
-            return adlService.events(userId, asset, instrumentId, limit);
+            return adlService.events(userId, optionalAsset(asset), optionalInstrument(instrumentId), historyPage(limit, null, null));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -82,7 +85,7 @@ public class AdlController {
                                              @RequestParam(required = false) String sort) {
         requireAdmin(adminUserId);
         try {
-            return adlService.events(userId, asset, instrumentId, limit, cursor, sort);
+            return adlService.events(userId, optionalAsset(asset), optionalInstrument(instrumentId), historyPage(limit, cursor, sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -132,4 +135,34 @@ public class AdlController {
             Integer maxDeleveragesPerDeficit,
             Integer candidateMultiplier, Long expectedVersion, String reason) {
     }
+    private AdlEventPageQuery historyPage(int limit, String cursor, String sort) {
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1,1000]");
+        String order = sort == null || sort.isBlank() ? "createdAt.desc" : sort.trim();
+        if (!order.equals("createdAt.desc") && !order.equals("createdAt.asc")) {
+            throw new IllegalArgumentException("unsupported sort: " + sort);
+        }
+        try {
+            var after = AdminCursorPage.decodeCursor(cursor);
+            return new AdlEventPageQuery(limit, after == null ? null : after.timestamp(),
+                    after == null ? 0L : after.id(), order.equals("createdAt.desc"));
+        } catch (DateTimeException invalid) {
+            throw new IllegalArgumentException("invalid cursor", invalid);
+        }
+    }
+
+    private String optionalAsset(String asset) {
+        return asset == null || asset.isBlank() ? null : normalizeAsset(asset);
+    }
+
+    private String normalizeAsset(String asset) {
+        if (asset == null || !asset.trim().toUpperCase().matches("[A-Z0-9]{2,20}")) {
+            throw new IllegalArgumentException("invalid asset");
+        }
+        return asset.trim().toUpperCase();
+    }
+
+    private String optionalInstrument(String value) {
+        return value == null || value.isBlank() ? null : value.trim().toUpperCase();
+    }
+
 }

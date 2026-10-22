@@ -14,6 +14,7 @@ import com.surprising.insurance.api.model.InsuranceFundBalanceQueryResponse;
 import com.surprising.insurance.api.model.InsuranceFundBalanceResponse;
 import com.surprising.insurance.api.model.InsuranceLedgerQueryResponse;
 import com.surprising.insurance.provider.config.InsuranceProperties;
+import com.surprising.insurance.provider.model.InsuranceHistoryPageQuery;
 import com.surprising.insurance.provider.repository.InsuranceCoverageRepository;
 import com.surprising.insurance.provider.repository.InsuranceFundLedgerRepository;
 import java.time.Instant;
@@ -118,33 +119,14 @@ import java.util.UUID;
         return new InsuranceFundBalanceQueryResponse(rows.size(), rows);
     }
 
-    public InsuranceLedgerQueryResponse ledger(String asset, int limit) {
-        return ledger(asset, limit, null, null);
-    }
-
-    public InsuranceLedgerQueryResponse ledger(String asset, int limit, String cursor, String sort) {
-        int capped = normalizeLimit(limit);
-        var page = ledgerRepository.page(accountType(),
-                asset == null || asset.isBlank() ? null : normalizeAsset(asset), capped, cursor, sort);
+    public InsuranceLedgerQueryResponse ledger(String asset, InsuranceHistoryPageQuery query) {
+        var page = ledgerRepository.page(accountType(), asset, query);
         return new InsuranceLedgerQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
 
-    public InsuranceCoverageQueryResponse coverages(Long userId, String asset, int limit) {
-        return coverages(userId, asset, limit, null, null);
-    }
-
-    public InsuranceCoverageQueryResponse coverages(Long userId,
-                                                    String asset,
-                                                    int limit,
-                                                    String cursor,
-                                                    String sort) {
-        if (userId != null && userId <= 0) {
-            throw new IllegalArgumentException("userId must be positive");
-        }
-        int capped = normalizeLimit(limit);
-        var page = coverageRepository.page(accountType(), userId,
-                asset == null || asset.isBlank() ? null : normalizeAsset(asset), capped, cursor, sort);
+    public InsuranceCoverageQueryResponse coverages(Long userId, String asset, InsuranceHistoryPageQuery query) {
+        var page = coverageRepository.page(accountType(), userId, asset, query);
         return new InsuranceCoverageQueryResponse(page.items().size(), page.items(),
                 page.nextCursor(), page.hasMore(), page.sort(), page.limit());
     }
@@ -207,12 +189,7 @@ import java.util.UUID;
         return normalized;
     }
 
-    private int normalizeLimit(int limit) {
-        if (limit < 1 || limit > 1000) {
-            throw new IllegalArgumentException("limit must be in [1, 1000]");
-        }
-        return limit;
-    }
+
 
     public record CoverageCycle(boolean enabled, int resolutions, int covered, int unresolved) {
         static CoverageCycle disabled() {

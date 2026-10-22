@@ -1,6 +1,7 @@
 package com.surprising.adl.provider.service;
 
 import com.surprising.adl.api.utils.AdminCursorPage;
+import com.surprising.adl.provider.model.AdlEventPageQuery;
 import com.surprising.adl.api.model.AdlEventQueryResponse;
 import com.surprising.adl.api.model.AdlEventResponse;
 import com.surprising.adl.api.model.AdlQueuePositionResponse;
@@ -114,16 +115,8 @@ public class AdlService {
                 "priorityScorePpm.desc", safeLimit);
     }
 
-    public AdlEventQueryResponse events(Long userId, String asset, String instrumentId, int limit) {
-        return events(userId, asset, instrumentId, limit, null, null);
-    }
-
-    public AdlEventQueryResponse events(Long userId, String asset, String instrumentId, int limit,
-                                        String cursor, String sort) {
-        AdminCursorPage.CursorPage<AdlEventResponse> page = events.page(accountType(), userId,
-                asset == null || asset.isBlank() ? null : normalizeAsset(asset),
-                instrumentId == null || instrumentId.isBlank() ? null : instrumentId.trim().toUpperCase(),
-                normalizeLimit(limit), cursor, sort);
+    public AdlEventQueryResponse events(Long userId, String asset, String instrumentId, AdlEventPageQuery query) {
+        AdminCursorPage.CursorPage<AdlEventResponse> page = events.page(accountType(), userId, asset, instrumentId, query);
         return new AdlEventQueryResponse(page.items().size(), page.items(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }

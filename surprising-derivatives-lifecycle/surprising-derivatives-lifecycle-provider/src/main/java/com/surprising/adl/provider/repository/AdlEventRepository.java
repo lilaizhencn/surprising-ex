@@ -1,6 +1,7 @@
 package com.surprising.adl.provider.repository;
 
 import com.surprising.adl.api.utils.AdminCursorPage;
+import com.surprising.adl.provider.model.AdlEventPageQuery;
 import com.surprising.adl.api.model.AdlEventResponse;
 import com.surprising.adl.api.model.AdlSide;
 import com.surprising.adl.provider.model.CoreAdlLiquidationProjection;
@@ -49,16 +50,12 @@ public class AdlEventRepository {
                                                              Long userId,
                                                              String asset,
                                                              String instrumentId,
-                                                             int limit,
-                                                             String cursor,
-                                                             String sort) {
-        int safeLimit = AdminCursorPage.limit(limit, 1000);
-        AdminCursorPage.SortSpec desc =
-                new AdminCursorPage.SortSpec("createdAt", "created_at", "event_id", true);
-        AdminCursorPage.SortSpec asc =
-                new AdminCursorPage.SortSpec("createdAt", "created_at", "event_id", false);
-        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, desc, List.of(desc, asc));
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+                                                             AdlEventPageQuery query) {
+        int safeLimit = query.limit();
+        AdminCursorPage.SortSpec sortSpec =
+                new AdminCursorPage.SortSpec("createdAt", "created_at", "event_id", query.descending());
+        AdminCursorPage.Cursor decodedCursor = query.afterTime() == null ? null
+                : new AdminCursorPage.Cursor(query.afterTime(), query.afterId());
         List<Object> args = new ArrayList<>();
         args.add(accountType);
         args.add(userId);

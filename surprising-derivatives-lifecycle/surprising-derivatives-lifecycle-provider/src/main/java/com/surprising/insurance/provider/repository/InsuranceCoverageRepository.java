@@ -1,6 +1,7 @@
 package com.surprising.insurance.provider.repository;
 
 import com.surprising.insurance.api.utils.AdminCursorPage;
+import com.surprising.insurance.provider.model.InsuranceHistoryPageQuery;
 import com.surprising.insurance.api.model.InsuranceCoverageResponse;
 import com.surprising.insurance.provider.model.CoreLiquidationProjection;
 import java.sql.Timestamp;
@@ -49,23 +50,18 @@ public class InsuranceCoverageRepository {
     public AdminCursorPage.CursorPage<InsuranceCoverageResponse> page(String accountType,
                                                                       Long userId,
                                                                       String asset,
-                                                                      int limit,
-                                                                      String cursor,
-                                                                      String sort) {
-        String normalizedAsset = asset == null || asset.isBlank() ? null : asset;
-        int safeLimit = AdminCursorPage.limit(limit, 1000);
-        AdminCursorPage.SortSpec desc =
-                new AdminCursorPage.SortSpec("createdAt", "created_at", "coverage_id", true);
-        AdminCursorPage.SortSpec asc =
-                new AdminCursorPage.SortSpec("createdAt", "created_at", "coverage_id", false);
-        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, desc, List.of(desc, asc));
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+                                                                      InsuranceHistoryPageQuery query) {
+        int safeLimit = query.limit();
+        AdminCursorPage.SortSpec sortSpec =
+                new AdminCursorPage.SortSpec("createdAt", "created_at", "coverage_id", query.descending());
+        AdminCursorPage.Cursor decodedCursor = query.afterTime() == null ? null
+                : new AdminCursorPage.Cursor(query.afterTime(), query.afterId());
         List<Object> args = new ArrayList<>();
         args.add(accountType);
         args.add(userId);
         args.add(userId);
-        args.add(normalizedAsset);
-        args.add(normalizedAsset);
+        args.add(asset);
+        args.add(asset);
         AdminCursorPage.addCursorArgs(args, decodedCursor);
         args.add(safeLimit + 1);
         List<InsuranceCoverageResponse> rows = jdbcTemplate.query("""

@@ -34,13 +34,13 @@ public final class AdminCursorPage {
         }
         try {
             String decoded = new String(Base64.getUrlDecoder().decode(value.trim()), StandardCharsets.UTF_8);
-            int split = decoded.indexOf(':');
+            int split = decoded.lastIndexOf('|');
             if (split <= 0 || split == decoded.length() - 1) {
                 throw new IllegalArgumentException("invalid cursor");
             }
-            long epochMillis = Long.parseLong(decoded.substring(0, split));
+            Instant timestamp = Instant.parse(decoded.substring(0, split));
             long id = Long.parseLong(decoded.substring(split + 1));
-            return new Cursor(Instant.ofEpochMilli(epochMillis), id);
+            return new Cursor(timestamp, id);
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException("invalid cursor", ex);
         }
@@ -85,7 +85,7 @@ public final class AdminCursorPage {
         if (timestamp == null) {
             throw new IllegalArgumentException("cursor timestamp is required");
         }
-        String raw = timestamp.toEpochMilli() + ":" + id;
+        String raw = timestamp + "|" + id;
         return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 

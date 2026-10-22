@@ -157,3 +157,5 @@ DerivativesInstrumentSnapshotInitializer归derivatives.lifecycle.service；初�
 Kafka职责归包：独立快照、审计、结算/排空及推送消费入口统一放在各自provider.consumer（价格为index.consumer/mark.consumer），业务和缓存继续由原Service/状态所有者负责。监听topic、group、启动条件与处理顺序保持；做市事件唤醒组件为consumer.MakerQuoteWakeups，原唯一信号状态不变。详见 docs/validation/java-mvc-consumer-packages-20261022.json。
 
 陈旧资金费的原生失败位于 `funding.provider.exception.StaleFundingRateException`，缓存新鲜度和资金费业务判断保持。
+
+历史ADL事件、保险赔付及保险账本的分页/筛选由对应Controller绑定，Service决定产品范围，三个单表Repository只接受原生时间/ID/方向。查询limit仍要求1..1000，默认createdAt.desc；不透明游标保留完整ISO Instant及long主键，客户端直接回传，避免微秒被截断后重复/漏项。
