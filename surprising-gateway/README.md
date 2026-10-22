@@ -556,3 +556,5 @@ Binance APIKey请求由 `auth.controller.ApiKeyRequestBinding` 绑定原生 `Api
 合规写入的HTTP格式通过 `auth.controller.ComplianceRequestBinding` 绑定；`ComplianceService` 在事务内处理管理员审批消费、KYC结果/人脸状态、AML关闭时间与风险标签冲突。三个合规Repository各自只操作一张表并返回持久化事实。资料引用由 `KycDocumentService` 按用户实际拥有的资料生成并验证；客户端提交的引用提示不作为存储事实。AML重新打开保留原关闭时间，空分数沿用原值。
 
 费率管理入口 `trading.order.controller.TradingFeeRequestController` 绑定费率请求及分页，向Service传递原生 `FeeSchedulePageQuery`；`TradingFeeService` 决定费率关系、有效期、产品归属和发布/导入Core顺序。`OrderFeeRepository` 只执行费率表查询与Kafka事实投影，分页默认100、最大500，支持createdAt/updatedAt/effectiveTime双向排序及精确时间/long游标。订单生效费率仍从JVM快照获取。
+
+托管充值、提现扣款和退款经 `provider.client.SpotAccountClient` 固定调用本机SPOT Core；客户端只适配原生命令及结果分类。`provider.exception.SpotAccountRejectedException` 表示明确拒绝，`SpotAccountUnknownException` 表示结果未确认，提现Service继续使用原意图和幂等引用对账，协议入口决定HTTP响应。

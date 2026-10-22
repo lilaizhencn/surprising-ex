@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.exception.SpotAccountRejectedException;
+import com.surprising.gateway.provider.client.SpotAccountClient;
 import com.surprising.gateway.provider.client.CustodyWalletClient;
 import com.surprising.gateway.provider.client.WithdrawalValuationClient;
 
@@ -358,7 +360,7 @@ public class CustodyWithdrawalService {
         try {
             spotAccountClient.adjustBalance(record.userId(), record.assetSymbol(), -record.amountUnits(),
                     record.spotDebitReference(), "custody wallet withdrawal");
-        } catch (SpotAccountClient.SpotAccountRejectedException ex) {
+        } catch (SpotAccountRejectedException ex) {
             states.markRejected(record.withdrawalId(), "SPOT_REJECTED", message(ex));
             throw new WithdrawalRejectedException("spot account rejected withdrawal", ex);
         } catch (RuntimeException ex) {

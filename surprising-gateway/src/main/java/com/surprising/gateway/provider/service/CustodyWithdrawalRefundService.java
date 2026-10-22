@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.client.SpotAccountClient;
 import com.surprising.gateway.provider.model.CustodyWithdrawalModels;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

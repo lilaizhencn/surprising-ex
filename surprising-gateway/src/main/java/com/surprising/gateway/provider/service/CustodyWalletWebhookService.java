@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.client.SpotAccountClient;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import com.surprising.gateway.provider.repository.CustodyWalletWebhookRepository;
 import java.nio.charset.StandardCharsets;

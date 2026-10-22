@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.gateway.provider.client.SpotAccountClient;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;

@@ -1,4 +1,7 @@
-package com.surprising.gateway.provider.service;
+package com.surprising.gateway.provider.client;
+
+import com.surprising.gateway.provider.exception.SpotAccountRejectedException;
+import com.surprising.gateway.provider.exception.SpotAccountUnknownException;
 
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.provider.service.AccountCommandGateway;
@@ -6,10 +9,10 @@ import com.surprising.account.provider.exception.AccountCommandRejectedException
 import com.surprising.gateway.provider.product.GatewayProductServices;
 import com.surprising.product.api.ProductLine;
 import java.util.Locale;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 /** 托管资金始终记入 SPOT Core，不依赖现货币对或额外 Gateway 进程。 */
-@Service
+@Component
 public class SpotAccountClient {
     private final GatewayProductServices products;
     public SpotAccountClient(GatewayProductServices products) { this.products = products; }
@@ -21,44 +24,11 @@ public class SpotAccountClient {
             commands.adjustBalance(new BalanceAdjustmentRequest(userId, asset.trim().toUpperCase(Locale.ROOT),
                     amountUnits, referenceId, reason == null ? "" : reason), null, null);
         } catch (AccountCommandRejectedException ex) {
-            throw new SpotAccountRejectedException(ex.getMessage(), 409);
+            throw new SpotAccountRejectedException(ex.getMessage());
         } catch (IllegalArgumentException ex) {
-            throw new SpotAccountRejectedException(ex.getMessage(), 400);
+            throw new SpotAccountRejectedException(ex.getMessage());
         } catch (RuntimeException ex) {
-            throw new SpotAccountUnknownException("spot adjustment outcome is unknown", 503, ex);
-        }
-    }
-
-    public static class SpotAccountRejectedException extends IllegalStateException {
-
-        private final int status;
-
-        public SpotAccountRejectedException(String message, int status) {
-            super(message);
-            this.status = status;
-        }
-
-        public int status() {
-            return status;
-        }
-    }
-
-    public static class SpotAccountUnknownException extends IllegalStateException {
-
-        private final int status;
-
-        public SpotAccountUnknownException(String message, int status) {
-            super(message);
-            this.status = status;
-        }
-
-        public SpotAccountUnknownException(String message, int status, Throwable cause) {
-            super(message, cause);
-            this.status = status;
-        }
-
-        public int status() {
-            return status;
+            throw new SpotAccountUnknownException("spot adjustment outcome is unknown", ex);
         }
     }
 }

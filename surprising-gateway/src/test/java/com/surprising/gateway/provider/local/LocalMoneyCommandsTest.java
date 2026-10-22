@@ -1,5 +1,7 @@
 package com.surprising.gateway.provider.local;
 
+import com.surprising.gateway.provider.exception.SpotAccountUnknownException;
+import com.surprising.gateway.provider.client.SpotAccountClient;
 import com.surprising.gateway.provider.model.ProductAccountAdjustment;
 
 import static org.assertj.core.api.Assertions.*;
@@ -78,7 +80,7 @@ class LocalMoneyCommandsTest {
         when(commands.adjustBalance(any(), isNull(), isNull())).thenThrow(new IllegalStateException("reply lost"));
         var client = new SpotAccountClient(products);
         assertThatThrownBy(() -> client.adjustBalance(42, "USDT", -100, "withdrawal-1", "withdrawal"))
-                .isInstanceOf(SpotAccountClient.SpotAccountUnknownException.class);
+                .isInstanceOf(SpotAccountUnknownException.class);
         verifyNoInteractions(http);
     }
 }
