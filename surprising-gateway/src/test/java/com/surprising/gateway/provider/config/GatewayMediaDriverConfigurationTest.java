@@ -95,6 +95,8 @@ class GatewayMediaDriverConfigurationTest {
                         () -> org.mockito.Mockito.mock(org.springframework.data.redis.core.StringRedisTemplate.class,
                                 org.mockito.Mockito.RETURNS_DEEP_STUBS))
                 .withBean(tools.jackson.databind.ObjectMapper.class, tools.jackson.databind.ObjectMapper::new)
+                .withBean(io.micrometer.core.instrument.MeterRegistry.class,
+                        io.micrometer.core.instrument.simple.SimpleMeterRegistry::new)
                 .run(context -> assertThat(context).hasNotFailed()
                         .hasSingleBean(com.surprising.websocket.provider.service.RealtimeWebSocketBridge.class));
         assertThat(bridgeClosed).isTrue();

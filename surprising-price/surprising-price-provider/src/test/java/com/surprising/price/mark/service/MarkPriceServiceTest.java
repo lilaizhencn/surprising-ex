@@ -379,6 +379,37 @@ class MarkPriceServiceTest {
         assertThat(publication.tradeInput().tradeTime()).isEqualTo(now.minusSeconds(60));
     }
 
+    @Test
+    void transportGapImmediatelyInvalidatesOldBookTradeAndBasisUntilFreshInputsArrive() {
+        var coordination = mock(MarkPriceCoordinationService.class);
+        when(coordination.nextSequence("price-mark", "1")).thenReturn(1L);
+        KafkaTemplate<String, Object> kafka = mock(KafkaTemplate.class);
+        var service = service(coordination, kafka);
+        Instant now = Instant.now();
+        service.acceptIndexPrice(new IndexPriceEvent("1", new BigDecimal("100"), 1,
+                PriceStatus.HEALTHY, 3, 3, BigDecimal.valueOf(3), now, List.of()));
+        supplyMarket(service, now);
+        assertThat(service.inputs("1").bookUsable()).isTrue();
+        assertThat(service.inputs("1").tradeUsable()).isTrue();
+        service.marketContinuityLost();
+        assertThat(service.inputs("1").book()).isNull();
+        assertThat(service.inputs("1").lastTrade()).isNull();
+        service.publishMarkPrices();
+        var capture = ArgumentCaptor.forClass(Object.class);
+        verify(kafka).send(any(), any(), capture.capture());
+        var publication = ((PricePublishedEvent) capture.getValue()).markPrice();
+        assertThat(publication.result().status()).isEqualTo(PriceStatus.DEGRADED);
+        assertThat(publication.bookInput()).isNull();
+        assertThat(publication.tradeInput()).isNull();
+        assertThat(publication.result().basisAverage()).isNull();
+        service.resetMarketInputs();
+        assertThat(service.inputs("1").book()).isNull();
+        assertThat(service.inputs("1").lastTrade()).isNull();
+        supplyMarket(service, now);
+        assertThat(service.inputs("1").bookUsable()).isTrue();
+        assertThat(service.inputs("1").tradeUsable()).isTrue();
+    }
+
     private static void supplyMarket(MarkPriceService service, Instant now) {
         service.acceptBookTicker(new PerpBookTickerEvent("1", new BigDecimal("99.99"),
                 new BigDecimal("100.01"), 1, now));

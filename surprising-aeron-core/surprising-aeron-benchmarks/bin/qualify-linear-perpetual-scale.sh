@@ -86,7 +86,7 @@ write_environment() {
 
 run_targeted_tests() {
   local protocol_tests='CoreExportCodecTest'
-  local service_tests='RuntimeCommitHashTest,RuntimeCommitJournalTest,RuntimeCommitRecoveryTest,RuntimeStateProjectorTest,TradingRuntimeStateTest,TradingRuntimeStateIndexTest,RuntimeTreasuryDeltaTest,RuntimeCommandProcessorTest,CoreProbeStateTest,CoreOrderedOrderBatchTest,CoreLifecycleStateTest,CoreMatchingStateTest,CorePerpetualFinancialMatrixTest,CoreDeliveryOptionFinancialMatrixTest,CoreTreasuryStateTest,FundsDeltaTest,RuntimePerpetualMatchProcessorTest,RuntimePerpetualFundingProcessorTest,RuntimePerpetualFillCalculatorTest,CoreRiskStateTest,CoreProductLineArchitectureContractTest,CoreFundsIdempotencyTest,CoreStateSnapshotCodecTest,TradingStateSnapshotCodecTest,CoreFeePolicySnapshotCodecTest,CoreNativeSnapshotProductLineTest,SharedProductLineSnapshotContractTest,TradingCoreRuntimeAuthorityTest,W1W2InvariantFenceTest,DeterministicExchangeCoreAdapterTest,SurprisingClusteredServiceTest,ActiveOrderIndexTest,PositionUserIndexTest'
+  local service_tests='RuntimeCommitHashTest,RuntimeCommitJournalTest,RuntimeCommitRecoveryTest,RuntimeStateProjectorTest,TradingAccountRuntimeTest,TradingAccountRuntimeIndexTest,RuntimeTreasuryDeltaTest,RuntimeCommandProcessorTest,CoreProbeStateTest,CoreOrderedOrderBatchTest,CoreLifecycleStateTest,CoreMatchingStateTest,CorePerpetualFinancialMatrixTest,CoreDeliveryOptionFinancialMatrixTest,CoreTreasuryStateTest,FundsDeltaTest,RuntimePerpetualMatchProcessorTest,RuntimePerpetualFundingProcessorTest,RuntimePerpetualFillCalculatorTest,CoreRiskStateTest,CoreProductLineArchitectureContractTest,CoreFundsIdempotencyTest,CoreStateSnapshotCodecTest,TradingStateSnapshotCodecTest,CoreFeePolicySnapshotCodecTest,CoreNativeSnapshotProductLineTest,SharedProductLineSnapshotContractTest,TradingCoreRuntimeAuthorityTest,W1W2InvariantFenceTest,DeterministicExchangeCoreAdapterTest,SurprisingClusteredServiceTest,ActiveOrderIndexTest,PositionUserIndexTest'
   local gateway_tests='KafkaFanoutConsumerTest,KafkaFanoutConsumerTopicTest'
   local benchmark_tests='LinearPerpetualBenchmarkSupportTest'
   local protocol_marker="${ARTIFACT_DIR}/maven-protocol-tests.start"
@@ -289,7 +289,7 @@ run_profile() {
   [[ -s "${ARTIFACT_DIR}/scale-profile-gc.log" ]]
   [[ -s "${ARTIFACT_DIR}/scale-nmt-baseline.txt" ]]
   [[ -s "${ARTIFACT_DIR}/scale-nmt-summary.diff.txt" ]]
-  REQUIRE_WORKLOAD_LATENCY_CONTRACT='PLACE_ORDER=EXERCISED,TAKER_FILL=NOT_EXERCISED,CANCEL_ORDER=EXERCISED,AMEND_ORDER=NOT_EXERCISED,ORDER_BATCH=EXERCISED,TRIGGER_ORDER=EXERCISED,RISK_SCAN=EXERCISED,LIQUIDATION=EXERCISED,FUNDING=EXERCISED,ADL=EXERCISED,SETTLEMENT=NOT_EXERCISED,SNAPSHOT_RECOVERY=NOT_EXERCISED' \
+  REQUIRE_WORKLOAD_LATENCY_CONTRACT='PLACE_ORDER=EXERCISED,TAKER_FILL=NOT_EXERCISED,CANCEL_ORDER=EXERCISED,AMEND_ORDER=NOT_EXERCISED,ORDER_BATCH=EXERCISED,TRIGGER_ORDER=EXERCISED,RISK_SCAN=EXERCISED,LIQUIDATION=EXERCISED,FUNDING=EXERCISED,ADL=EXERCISED,SETTLEMENT=NOT_EXERCISED,MAINTENANCE=NOT_EXERCISED,SNAPSHOT_RECOVERY=NOT_EXERCISED' \
     JFR_SETTINGS_FILE="${JFR_SETTINGS_FILE}" "${JFR_ANALYZER}" \
     "${ARTIFACT_DIR}/scale.jfr" "${ARTIFACT_DIR}/scale-jfr-analysis"
 }
@@ -399,7 +399,7 @@ run_saturation_profile() {
   [[ -s "${ARTIFACT_DIR}/saturation-gc.log" ]]
   [[ -s "${ARTIFACT_DIR}/saturation-nmt-baseline.txt" ]]
   [[ -s "${ARTIFACT_DIR}/saturation-nmt-summary.diff.txt" ]]
-  REQUIRE_WORKLOAD_LATENCY_CONTRACT='PLACE_ORDER=EXERCISED,TAKER_FILL=NOT_EXERCISED,CANCEL_ORDER=NOT_EXERCISED,AMEND_ORDER=NOT_EXERCISED,ORDER_BATCH=NOT_EXERCISED,TRIGGER_ORDER=NOT_EXERCISED,RISK_SCAN=NOT_EXERCISED,LIQUIDATION=NOT_EXERCISED,FUNDING=NOT_EXERCISED,ADL=NOT_EXERCISED,SETTLEMENT=NOT_EXERCISED,SNAPSHOT_RECOVERY=NOT_EXERCISED' \
+  REQUIRE_WORKLOAD_LATENCY_CONTRACT='PLACE_ORDER=EXERCISED,TAKER_FILL=NOT_EXERCISED,CANCEL_ORDER=NOT_EXERCISED,AMEND_ORDER=NOT_EXERCISED,ORDER_BATCH=NOT_EXERCISED,TRIGGER_ORDER=NOT_EXERCISED,RISK_SCAN=NOT_EXERCISED,LIQUIDATION=NOT_EXERCISED,FUNDING=NOT_EXERCISED,ADL=NOT_EXERCISED,SETTLEMENT=NOT_EXERCISED,MAINTENANCE=NOT_EXERCISED,SNAPSHOT_RECOVERY=NOT_EXERCISED' \
     JFR_SETTINGS_FILE="${JFR_SETTINGS_FILE}" "${JFR_ANALYZER}" \
     "${ARTIFACT_DIR}/saturation.jfr" "${ARTIFACT_DIR}/saturation-jfr-analysis"
 }
@@ -426,8 +426,7 @@ validate_owner_commit_jmh() {
 }
 
 run_owner_commit() {
-  # OwnerFactFrameBenchmark was removed with the old fact-frame export path.
-  # Keep this mode as the focused owner/commit workload using the current runtime.
+  # Focused mixed workload; its LinearPerpetual summaries are actual workload boundaries.
   local benchmark='LinearPerpetualCoreBenchmark.scaleMixedWorkload'
   local params=(
     -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 -p accountLanes=2
@@ -464,7 +463,7 @@ run_owner_commit() {
   [[ -s "${ARTIFACT_DIR}/owner-commit-profile-gc.log" ]]
   [[ -s "${ARTIFACT_DIR}/owner-commit-nmt-baseline.txt" ]]
   [[ -s "${ARTIFACT_DIR}/owner-commit-nmt-summary.diff.txt" ]]
-  REQUIRE_OWNER_MEASUREMENTS=true JAVA_HOME="${JAVA_HOME_27}" \
+  JAVA_HOME="${JAVA_HOME_27}" \
     JFR_SETTINGS_FILE="${JFR_SETTINGS_FILE}" "${JFR_ANALYZER}" \
     "${ARTIFACT_DIR}/owner-commit.jfr" "${ARTIFACT_DIR}/owner-commit-jfr-analysis"
 }

@@ -180,7 +180,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         return MediaDriver.launchEmbedded(context);
     }
 
-    static Duration pooledConnectionTimeout() {
+    public static Duration pooledConnectionTimeout() {
         Duration timeout = Duration.ofMillis(Long.getLong("surprising.aeron.client.connect-timeout-ms", 30_000L));
         if (timeout.isZero() || timeout.isNegative())
             throw new IllegalArgumentException("Aeron connect timeout must be positive");

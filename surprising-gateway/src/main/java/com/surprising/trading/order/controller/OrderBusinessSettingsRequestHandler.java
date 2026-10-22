@@ -16,12 +16,12 @@ import tools.jackson.databind.ObjectMapper;
 
 /** 网关本地协议入口：校验完整请求后调用业务；不注册额外 HTTP 路由。 */
 @Component
-public class OrderBusinessSettingsController {
+public class OrderBusinessSettingsRequestHandler {
     public record Update(OrderBusinessSettings settings, Long expectedVersion, String reason) { }
     private final OrderBusinessSettingsService settings;
     private final ObjectMapper json;
 
-    public OrderBusinessSettingsController(OrderBusinessSettingsService settings, ObjectMapper json) {
+    public OrderBusinessSettingsRequestHandler(OrderBusinessSettingsService settings, ObjectMapper json) {
         this.settings = settings;
         this.json = json;
     }

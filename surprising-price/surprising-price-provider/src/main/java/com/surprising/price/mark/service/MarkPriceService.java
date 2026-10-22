@@ -46,6 +46,8 @@ public class MarkPriceService {
     private final ConcurrentHashMap<String, PerpTradeEvent> trades = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, PerpFundingRateEvent> fundingRates = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, BasisWindow> basisWindows = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicLong marketGeneration = new java.util.concurrent.atomic.AtomicLong();
+    private volatile long restoredMarketGeneration;
 
     @org.springframework.beans.factory.annotation.Autowired
     public MarkPriceService(MarkPriceProperties properties,
@@ -98,6 +100,18 @@ public class MarkPriceService {
                 com.surprising.aeron.protocol.RealtimeFrame.Kind.FUNDING,event.instrumentId(),event.instrumentId(),event.sequence(),event.eventTime(),event));
     }
 
+    /** Receiver callback only marks invalidity; it does not mutate owner-owned windows or do I/O. */
+    void marketContinuityLost() { marketGeneration.incrementAndGet(); }
+
+    /** Lease owner restores from new input after dropping the untrustworthy pre-gap market state. */
+    void resetMarketInputs() {
+        long generation = marketGeneration.get();
+        bookTickers.clear();
+        trades.clear();
+        basisWindows.clear();
+        restoredMarketGeneration = generation;
+    }
+
     public void publishMarkPrices() {
         Instant now = Instant.now();
         for (String instrumentId : symbols()) {
@@ -123,12 +137,14 @@ public class MarkPriceService {
             }
             throw ex;
         }
-        PerpBookTickerEvent book = bookTickers.get(instrumentId);
+        long generation = marketGeneration.get();
+        boolean marketAvailable = generation == restoredMarketGeneration;
+        PerpBookTickerEvent book = marketAvailable ? bookTickers.get(instrumentId) : null;
         if (!fresh(book, now)) {
             basisWindows.remove(instrumentId);
             book = null;
         }
-        PerpTradeEvent trade = trades.get(instrumentId);
+        PerpTradeEvent trade = marketAvailable ? trades.get(instrumentId) : null;
         if (!usableLastTrade(trade, now)) trade = null;
         if (!ownsSymbol(instrumentId)) {
             return false;
@@ -146,8 +162,9 @@ public class MarkPriceService {
         MarkPriceEvent event = markPriceCalculator.calculate(instrumentId, sequence, index, book, trade,
                 fundingRates.get(instrumentId), basisAverage, encoding, now);
 
+        if (generation != marketGeneration.get()) return false;
         latestMarkPriceCache.update(event);
-        log.info("mark.calculated instrumentId={} indexSequence={} tradeSequence={}", instrumentId,
+        if (log.isDebugEnabled()) log.debug("mark.calculated instrumentId={} indexSequence={} tradeSequence={}", instrumentId,
                 index.sequence(), trade == null ? null : trade.sequence());
         corePublisher.ifAvailable(publisher -> publisher.publish(event));
         MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, index, book, trade,
@@ -165,8 +182,9 @@ public class MarkPriceService {
     public MarketInputs inputs(String instrumentId) {
         Instant now = Instant.now();
         var index = indexPrices.get(instrumentId);
-        var book = bookTickers.get(instrumentId);
-        var trade = trades.get(instrumentId);
+        boolean marketAvailable = marketGeneration.get() == restoredMarketGeneration;
+        var book = marketAvailable ? bookTickers.get(instrumentId) : null;
+        var trade = marketAvailable ? trades.get(instrumentId) : null;
         return new MarketInputs(index, book, trade, fresh(index, now), fresh(book, now), usableLastTrade(trade, now));
     }
 

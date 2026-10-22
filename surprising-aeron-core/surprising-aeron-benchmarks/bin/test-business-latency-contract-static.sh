@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 MODULE="${ROOT}/surprising-aeron-core/surprising-aeron-benchmarks"
 PROTOCOL="${ROOT}/surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreMessageType.java"
-RECORDER="${MODULE}/src/main/java/com/surprising/aeron/bootstrap/execution/OpenLoopBusinessLatencyRecorder.java"
+RECORDER="${MODULE}/src/main/java/com/surprising/aeron/service/core/OpenLoopBusinessLatencyRecorder.java"
 ANALYZER="${MODULE}/bin/analyze-owner-commit-jfr.sh"
 QUALIFIER="${MODULE}/bin/qualify-linear-perpetual-scale.sh"
 OUTPUT="${1:-${ROOT}/.omo/evidence/round8-static}"
@@ -39,7 +39,7 @@ grep -q 'Objects.requireNonNull(type, "message type")' "${RECORDER}"
 printf 'PASS null/unknown classification is rejected and future enum constants break exhaustive compilation\n' \
   > "${OUTPUT}/unknown-type-reject.txt"
 
-EXPECTED_TYPES='ADL AMEND_ORDER CANCEL_ORDER FUNDING LIQUIDATION ORDER_BATCH PLACE_ORDER RISK_SCAN SETTLEMENT SNAPSHOT_RECOVERY TAKER_FILL TRIGGER_ORDER'
+EXPECTED_TYPES='ADL AMEND_ORDER CANCEL_ORDER FUNDING LIQUIDATION MAINTENANCE ORDER_BATCH PLACE_ORDER RISK_SCAN SETTLEMENT SNAPSHOT_RECOVERY TAKER_FILL TRIGGER_ORDER'
 ACTUAL_TYPES="$(sed -n '/enum BusinessType {/,/;/p' "${RECORDER}" | tail -n +2 \
   | tr ',;' '\n\n' | sed 's/[[:space:]]//g' | sed '/^$/d' | sort | tr '\n' ' ' | sed 's/ $//')"
 [[ "${ACTUAL_TYPES}" == "${EXPECTED_TYPES}" ]]

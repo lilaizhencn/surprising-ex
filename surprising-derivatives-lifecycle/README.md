@@ -3,6 +3,8 @@
 `surprising-derivatives-lifecycle-provider` 统一运行资金费、风险、强平、保险基金和 ADL。
 默认端口 `9087`，启动类 `SurprisingDerivativesLifecycleApplication`，Core 保持独立。
 
+ADL 保留 Core 候选顺序，只处理同合约、反向且不属于源用户的盈利持仓；`COMPLETED` 表示本笔已确认亏空归零，盈利对手可保留余仓。`clearing PnL` 是已实现结算的现金对手项，不表示合约净头寸。
+
 本目录包含 API 与 provider，保留聚合 POM 供 Maven/IDE 分组。
 两个子模块沿用直接继承 `surprising-parent` 的关系和已有 artifactId。
 下方构建命令均从仓库根目录执行。
@@ -161,3 +163,9 @@ Kafka职责归包：独立快照、审计、结算/排空及推送消费入口�
 历史ADL事件、保险赔付及保险账本的分页/筛选由对应Controller绑定，Service决定产品范围，三个单表Repository只接受原生时间/ID/方向。查询limit仍要求1..1000，默认createdAt.desc；不透明游标保留完整ISO Instant及long主键，客户端直接回传，避免微秒被截断后重复/漏项。
 
 风控候选分页和规则格式由 `risk.provider.controller.RiskRequestBinding` 为公开/管理入口绑定，Service接收原生 `LiquidationCandidatePageQuery` 与 `RiskRuleModels`。Core仍裁决全局保证金策略所有权和运行参数版本冲突，Service保留风险聚合及内部范围约束；候选列表按Core清算ID续页，默认eventTime.asc，limit要求1..1000。
+
+### 管理请求的整数精度
+
+金额单位和64位ID可用十进制JSON字符串传递，绑定到原有long/Long及ID列表后保持精确。应用YAML关闭 `spring.jackson.deserialization.accept-float-as-int`，小数数值、非整数字符串和超出目标整数范围的值在绑定时拒绝，不截断或饱和；未新增wire模型或改变请求路径。
+
+共享生命周期API的Feign/Spring Web依赖为optional，模型注解保留；实际生命周期应用显式依赖Web/OpenFeign starter，纯模型消费者不引入HTTP框架。

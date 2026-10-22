@@ -103,6 +103,8 @@ public class WebSocketProperties {
     @Getter
     @Setter
     public static class Security {
+        private int authorizationWorkers = 4;
+        private int authorizationQueueCapacity = 256;
         private List<String> allowedOrigins = new ArrayList<>(List.of("*"));
 
     }

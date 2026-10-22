@@ -391,7 +391,7 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 ## exchange-core 撮合
 
 每个 `ProductLine` 的 Aeron Core 内嵌一个 fork exchange-core；它是该产品线唯一价格树、FIFO 和可执行盘口。
-`TradingRuntimeState` 保存 owner-thread 热路径业务状态和 primitive/有界索引；`TradingCoreState` 只作为快照、事实、恢复、hash 与对账投影，
+`TradingAccountRuntime` 保存 owner-thread 热路径业务状态和 primitive/有界索引；`TradingCoreState` 只作为快照、事实、恢复、hash 与对账投影，
 两者都不保存 `CoreBookState`、价格桶或 priority sequence。realtime 只负责行情/成交查询投影，
 不持有、恢复或裁决第二个 exchange-core。
 
@@ -609,3 +609,7 @@ Core 协议的服务需一起更新。本地测试环境已授权重建测试数
 ## 快照格式与业务演进
 
 Core 的字段兼容、历史快照读取、划转日志重放及跨版本资金幂等契约见 [快照与命令恢复设计](../docs/core-snapshot-evolution.md)。普通业务字段演进由后端 Codec 和固定历史恢复测试保障，不依赖部署脚本改写日志。
+
+### 共享契约依赖
+
+Feign与Spring Web仅供RPC/HTTP适配，标记为optional；只引用模型的模块不会传递引入这些框架。实际Feign消费者自行声明OpenFeign starter，HTTP应用自行声明Web starter；模型使用的Jakarta Validation与Jackson注解仍保留。

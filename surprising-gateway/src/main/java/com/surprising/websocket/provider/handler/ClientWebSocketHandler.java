@@ -18,6 +18,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public class ClientWebSocketHandler extends TextWebSocketHandler {
+    private final java.util.concurrent.atomic.AtomicLong nextFailureLog = new java.util.concurrent.atomic.AtomicLong();
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ClientWebSocketHandler.class);
 
     private com.surprising.gateway.c2c.websocket.C2cChatRealtime c2c;
@@ -66,7 +67,7 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
             }
             WsClientCommand command = objectMapper.treeToValue(envelope, WsClientCommand.class);
             String op = command.op() == null ? "" : command.op().trim().toLowerCase();
-            log.info("ws.command.start session={} op={}", session.getId(), op);
+            log.debug("ws.command.start session={} op={}", session.getId(), op);
             switch (op) {
                 case "authenticate" -> authenticate(connection, command);
                 case "subscribe" -> subscribe(connection, command);
@@ -74,9 +75,9 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
                 case "ping" -> connection.send(objectMapper.writeValueAsString(WsServerMessage.pong(command.id())));
                 default -> throw new IllegalArgumentException("unsupported websocket op: " + command.op());
             }
-            log.info("ws.command.end session={} op={} result=OK", session.getId(), op);
+            log.debug("ws.command.end session={} op={} result=OK", session.getId(), op);
         } catch (Exception ex) {
-            log.warn("ws.command.failed session={} error={}", session.getId(), ex.getClass().getSimpleName());
+            logFailure("ws.command.failed", session.getId(), ex);
             if(operation.startsWith("c2c.")) {
                 String error=(ex instanceof IllegalArgumentException || ex instanceof IllegalStateException) && ex.getMessage()!=null
                         ?ex.getMessage():"聊天请求未完成，请稍后重试";
@@ -110,8 +111,9 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void authenticate(ClientConnection connection, WsClientCommand command) {
-        long userId = jwtAuthenticator.authenticate(command.token());
-        connection.authenticate(userId,command.token());
+        var principal = jwtAuthenticator.principal(command.token());
+        long userId = principal.userId();
+        connection.authenticate(userId, command.token(), principal.expiresAt());
         connection.send(objectMapper.writeValueAsString(WsServerMessage.authenticated(command.id(), userId)));
     }
 
@@ -119,6 +121,13 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(command, connection.authenticatedUserId());
         registry.unsubscribe(connection, topic);
         connection.send(objectMapper.writeValueAsString(WsServerMessage.unack(command.id(), topic)));
+    }
+
+    private void logFailure(String operation, String sessionId, Exception failure) {
+        long now = System.nanoTime();
+        long next = nextFailureLog.get();
+        if (now >= next && nextFailureLog.compareAndSet(next, now + 5_000_000_000L))
+            log.warn("{} session={} error={}", operation, sessionId, failure.getClass().getSimpleName());
     }
 
     private ClientConnection connection(WebSocketSession session) {

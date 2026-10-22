@@ -15,12 +15,12 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
-class InstrumentRequestControllerTest {
+class InstrumentRequestHandlerTest {
     private final InstrumentStorageService storage = mock(InstrumentStorageService.class);
     private final MarketSummaryService market = mock(MarketSummaryService.class);
     private final InstrumentService instruments = new InstrumentService(storage, mock(InstrumentValidator.class),
             new InstrumentProperties(), mock(InstrumentOutboxService.class), market);
-    private final InstrumentRequestController requests = new InstrumentRequestController(instruments,
+    private final InstrumentRequestHandler requests = new InstrumentRequestHandler(instruments,
             JsonMapper.builder().findAndAddModules().build());
 
     @ParameterizedTest
@@ -32,7 +32,7 @@ class InstrumentRequestControllerTest {
         var target=path.startsWith("source.")?(tools.jackson.databind.node.ObjectNode)fields.get("indexSources").get(0):fields;
         target.set(path.substring(path.lastIndexOf('.')+1),json.readTree(jsonValue));
         var request=json.treeToValue(fields,InstrumentUpsertRequest.class);
-        var controller=new InstrumentRequestController(business,json);
+        var controller=new InstrumentRequestHandler(business,json);
         for (boolean edit:List.of(false,true)) {
             assertThatThrownBy(()->{if(edit)controller.edit(request,"1","edit config",0);else controller.upsert(request,"1","edit config");})
                     .isInstanceOfSatisfying(ResponseStatusException.class,failure->assertThat(failure.getStatusCode().value()).isEqualTo(400));
@@ -60,7 +60,7 @@ class InstrumentRequestControllerTest {
         var business=mock(InstrumentService.class);
         var json=JsonMapper.builder().findAndAddModules().build();
         var request=json.treeToValue(validFormat(json),InstrumentUpsertRequest.class);
-        new InstrumentRequestController(business,json).edit(request,"1","edit config",0);
+        new InstrumentRequestHandler(business,json).edit(request,"1","edit config",0);
         verify(business).edit(request,"1","edit config",0);
     }
 

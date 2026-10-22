@@ -21,15 +21,15 @@ import java.util.concurrent.atomic.LongAdder;
 @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "surprising.realtime.router.enabled", havingValue = "true", matchIfMissing = true)
 public final class RealtimeRouter implements AutoCloseable {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RealtimeRouter.class);
-    private static final System.Logger LOG = System.getLogger(RealtimeRouter.class.getName());
+    private final java.util.concurrent.atomic.AtomicLong nextDiagnosticNanos = new java.util.concurrent.atomic.AtomicLong();
     private final ArrayBlockingQueue<RealtimeFrame> inbound = new ArrayBlockingQueue<>(8192);
     private final RealtimeRouterProperties config;
     private final ValkeyRouteDirectory routes;
     private final ValkeyReadViewStore views;
     private final ValkeyMarketData marketData;
     private final ValkeySnapshotRequests requests;
-    private final SnapshotAssembler snapshots = new SnapshotAssembler();
-    private final SnapshotAssembler commits = new SnapshotAssembler();
+    private SnapshotAssembler snapshots = new SnapshotAssembler();
+    private SnapshotAssembler commits = new SnapshotAssembler();
     private final java.util.concurrent.atomic.AtomicLong queuedBytes =
             new java.util.concurrent.atomic.AtomicLong();
     // Encoded transport retries belong only to the router thread, never to the trading Core.
@@ -85,8 +85,15 @@ public final class RealtimeRouter implements AutoCloseable {
                         config.directory(),
                         config.channel(),
                         config.stream(),
-                        this::offer);
-        worker = Thread.ofPlatform().name("realtime-router").start(this::run);
+                        frame -> {
+                            if (!offer(frame)) throw new IllegalStateException("realtime router input capacity exceeded");
+                        }, failure -> { /* The owner observes receiver.recoveryRequired/recoveryVersion. */ });
+        worker = Thread.ofPlatform().name("realtime-router").unstarted(this::run);
+        try { worker.start(); }
+        catch (RuntimeException | Error failure) {
+            try { receiver.close(); } catch (RuntimeException cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+            throw failure;
+        }
     }
 
     /** Thread handoff shared by Core frames and in-process candle updates; never blocks the producer. */
@@ -95,8 +102,7 @@ public final class RealtimeRouter implements AutoCloseable {
         if (queuedBytes.addAndGet(bytes) > 16 * 1024 * 1024 || !inbound.offer(frame)) {
             queuedBytes.addAndGet(-bytes);
             inputDropped.increment();
-            log.warn("router.input.dropped productLine={} kind={} entityId={}",
-                    frame.productLine(), frame.kind(), frame.entityId());
+            diagnostic("input-capacity", frame.productLine(), frame.kind().name(), null);
             return false;
         }
         return true;
@@ -110,7 +116,7 @@ public final class RealtimeRouter implements AutoCloseable {
                                     .aeronDirectoryName(config.directory())
                                     .errorHandler(failure -> {
                                         failures.increment();
-                                        LOG.log(System.Logger.Level.WARNING, "Realtime router Aeron transport error", failure);
+                                        diagnostic("transport", null, "unknown", failure);
                                     }))) {
                 config.controlChannels()
                         .forEach(
@@ -126,6 +132,7 @@ public final class RealtimeRouter implements AutoCloseable {
                 // Only this router thread owns the drain; release frame references after each batch.
                 var frames = new ArrayList<RealtimeFrame>(256);
                 while (running && !aeron.isClosed()) {
+                    if (receiver.recoveryRequired()) recoverReceiver();
                     long now = System.currentTimeMillis();
                     if (now >= nextRefresh) {
                         refresh(aeron, now);
@@ -156,6 +163,25 @@ public final class RealtimeRouter implements AutoCloseable {
         }
     }
 
+    /** Only the router owner discards partial batches, resets the source epoch and reissues reads. */
+    private void recoverReceiver() {
+        long version = receiver.recoveryVersion();
+        RealtimeFrame discarded;
+        while ((discarded = inbound.poll()) != null) {
+            queuedBytes.addAndGet(-discarded.payloadLength() - 448);
+            inputDropped.increment();
+        }
+        snapshots = new SnapshotAssembler();
+        commits = new SnapshotAssembler();
+        pendingBooks.clear();
+        controls.keySet().forEach(this::resetSource);
+        // Retire the source images: downstream consumers must invalidate their old baselines too.
+        nodes.values().forEach(this::closeNode);
+        nodes.clear();
+        dirtySources.clear();
+        receiver.resumeAfterRecovery(version);
+    }
+
     /** Router thread owns this drain and its route lookup; neither survives the batch. */
     private void routeBatch(Aeron aeron, List<RealtimeFrame> frames, long now) {
         try {
@@ -172,9 +198,7 @@ public final class RealtimeRouter implements AutoCloseable {
                 } catch (RuntimeException failure) {
                     dirtySources.add(frame.productLine());
                     failures.increment();
-                    log.warn("router.failed productLine={} kind={} entityId={} error={}",
-                            frame.productLine(), frame.kind(), frame.entityId(), failure.getClass().getSimpleName());
-                    LOG.log(System.Logger.Level.WARNING, "Realtime frame routing failed", failure);
+                    diagnostic("route", frame.productLine(), frame.kind().name(), failure);
                 }
             }
             publishReady(aeron, ready, now, targets);
@@ -182,9 +206,7 @@ public final class RealtimeRouter implements AutoCloseable {
             frames.forEach(frame -> dirtySources.add(frame.productLine()));
             failures.increment();
             inputDropped.add(frames.size());
-            for (var frame : frames) log.warn("router.batch.failed productLine={} kind={} error={}",
-                    frame.productLine(), frame.kind(), failure.getClass().getSimpleName());
-            LOG.log(System.Logger.Level.WARNING, "Realtime route lookup failed", failure);
+            diagnostic("batch", frames.getFirst().productLine(), frames.getFirst().kind().name(), failure);
         } finally {
             for (var frame : frames) queuedBytes.addAndGet(-frame.payloadLength() - 448);
         }
@@ -301,7 +323,7 @@ public final class RealtimeRouter implements AutoCloseable {
             }
             long result = node.publication.offer(buffer);
             if (result > 0) {
-                log.info("router.send.end productLine={} kind={} entityId={} node={} result=OFFERED",
+                if (log.isDebugEnabled()) log.debug("router.send.end productLine={} kind={} entityId={} node={} result=OFFERED",
                         f.productLine(), f.kind(), f.entityId(), entry.getKey());
                 continue;
             }
@@ -319,15 +341,14 @@ public final class RealtimeRouter implements AutoCloseable {
         if (pendingFrames.get() >= 8192 || pendingBytes.get() + bytes.length > 16 * 1024 * 1024) {
             transportDropped.increment();
             transportCapacityDropped.increment();
-            log.warn("router.queue.dropped productLine={} kind={} entityId={}",
-                    product, frame.kind(), frame.entityId());
+            diagnostic("output-capacity", product, frame.kind().name(), null);
             dirtySources.add(product);
             return;
         }
         node.pending.addLast(new PendingFrame(new UnsafeBuffer(bytes), product, System.nanoTime()));
         pendingFrames.incrementAndGet();
         pendingBytes.addAndGet(bytes.length);
-        log.info("router.queued productLine={} kind={} entityId={}",
+        if (log.isDebugEnabled()) log.debug("router.queued productLine={} kind={} entityId={}",
                 product, frame.kind(), frame.entityId());
     }
 
@@ -347,7 +368,7 @@ public final class RealtimeRouter implements AutoCloseable {
                 }
                 long result = node.publication.offer(frame.buffer);
                 if (result > 0) {
-                    log.info("router.send.end productLine={} result=OFFERED queueMs={}",
+                    if (log.isDebugEnabled()) log.debug("router.send.end productLine={} result=OFFERED queueMs={}",
                             frame.product, (now - frame.enqueuedAt) / 1_000_000.0);
                     releaseFirst(node);
                 }
@@ -369,8 +390,7 @@ public final class RealtimeRouter implements AutoCloseable {
     private void discardFirst(Node node) {
         var frame = node.pending.getFirst();
         dirtySources.add(frame.product);
-        log.warn("router.send.end productLine={} result=DROPPED queueMs={}",
-                frame.product, (System.nanoTime() - frame.enqueuedAt) / 1_000_000.0);
+        diagnostic("output-drop", frame.product, "queued-frame", null);
         transportDropped.increment();
         releaseFirst(node);
     }
@@ -455,12 +475,22 @@ public final class RealtimeRouter implements AutoCloseable {
         }
     }
 
+    private void diagnostic(String operation, ProductLine product, String kind, Throwable failure) {
+        long now = System.nanoTime();
+        long next = nextDiagnosticNanos.get();
+        if ((next != 0 && now < next) || !nextDiagnosticNanos.compareAndSet(next, now + 5_000_000_000L)) return;
+        String stack = failure == null ? "" : java.util.Arrays.stream(failure.getStackTrace()).limit(6)
+                .map(StackTraceElement::toString).collect(java.util.stream.Collectors.joining(" <- "));
+        log.warn("router.failure operation={} product={} kind={} cause={} at={}", operation, product, kind,
+                failure == null ? "capacity-or-continuity" : failure.getClass().getSimpleName(), stack);
+    }
+
     public long dropped() {
         return inputDropped.sum() + transportDropped.sum();
     }
 
     public long failures() {
-        return failures.sum();
+        return failures.sum() + receiver.failures();
     }
 
     @PreDestroy

@@ -8,7 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.surprising.account.api.model.*;
-import com.surprising.account.provider.controller.AccountRequestController;
+import com.surprising.account.provider.service.AccountService;
 import com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.service.AuthService;
 import com.surprising.gateway.provider.product.*;
@@ -18,10 +18,8 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import org.springframework.http.HttpStatus;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.ObjectMapper;
 
 class AccountAssetsControllerTest {
@@ -29,7 +27,8 @@ class AccountAssetsControllerTest {
     private final GatewayProductServices products = mock(GatewayProductServices.class);
     private final GatewayProductSelection selection = new GatewayProductSelection(products, new ObjectMapper());
     private final MockMvc mvc = MockMvcBuilders.standaloneSetup(
-            new AccountAssetsController(auth, selection, products)).build();
+            new AccountAssetsController(auth, selection, products))
+            .setControllerAdvice(new com.surprising.gateway.provider.controller.advice.ReadViewHttpErrors()).build();
 
     AccountAssetsControllerTest() {
         when(auth.authenticateBearer("Bearer own")).thenReturn(
@@ -51,14 +50,14 @@ class AccountAssetsControllerTest {
     }
 
     @Test void enabledAccountStillUsesAuthoritativeQueryAndPreservesFailures() throws Exception {
-        var accounts = mock(AccountRequestController.class);
-        when(products.service(ProductLine.SPOT, AccountRequestController.class)).thenReturn(accounts);
+        var accounts = mock(AccountService.class);
+        when(products.service(ProductLine.SPOT, AccountService.class)).thenReturn(accounts);
         when(accounts.balances(42)).thenReturn(new BalanceQueryResponse(1,
                 List.of(new BalanceResponse(42, "USDT", 50, 10, 60, Instant.now()))));
         mvc.perform(get("/api/v1/gateway/account/balances").header("Authorization", "Bearer own")
                 .header("X-Product-Line", "SPOT").param("userId", "42"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.balances[0].equityUnits").value(60));
-        when(accounts.balances(42)).thenThrow(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "read view stale"));
+        when(accounts.balances(42)).thenThrow(new com.surprising.realtime.api.exception.ReadViewUnavailableException("read view stale"));
         mvc.perform(get("/api/v1/gateway/account/balances").header("Authorization", "Bearer own")
                 .header("X-Product-Line", "SPOT").param("userId", "42"))
                 .andExpect(status().isServiceUnavailable());

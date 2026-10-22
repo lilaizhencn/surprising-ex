@@ -12,11 +12,11 @@ import com.surprising.trading.maintenance.service.MaintenanceService;
  * 本地管理协议入口：校验请求和转换HTTP参数，业务交给MaintenanceService。
  */
 @Component
-public class AdminMaintenanceController {
+public class AdminMaintenanceRequestHandler {
 
     private final MaintenanceService service;
 
-    public AdminMaintenanceController(MaintenanceService service) {
+    public AdminMaintenanceRequestHandler(MaintenanceService service) {
         this.service = service;
     }
 

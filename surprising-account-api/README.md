@@ -320,7 +320,7 @@ HTTP 请求可传 `recipientUserId`；省略表示本人跨产品线划转，发
 完成后原账号减额、收款账号等额增加；中途差额由原 Core pending 代表在途资金。
 
 补偿调度逐产品线、逐笔隔离异常，并轮换六条产品线的起点、保留批次份额，查询最多 256 笔。
-同一源 Core 的 `TradingRuntimeState.pendingTransfers(limit)` 按 transferId 分页轮换，永久失败记录
+同一源 Core 的 `TradingAccountRuntime.pendingTransfers(limit)` 按 transferId 分页轮换，永久失败记录
 不会一直霸占查询前缀。游标只影响查询顺序，由 owner 持有，恢复归零不改变资金权威状态。
 
 ### 资金幂等容量
@@ -375,3 +375,7 @@ JNI 路径的 Java 执行样本很少，不能由此推导低 CPU 占用。需�
 另补充线性永续/交割各一项 500 万 U 名义金额的合成资金/盘口回归：全成交形成双方持仓、资金守恒和快照恢复通过；不代表实际做市额度和资金已到位。
 未部署新版本，未启动钱包或复用/重置已有集群数据。临时日志与四份 JFR 在记录结果后清理；
 现有 target/Surefire 报告保留，已有运行目录不删除。
+
+### 共享契约依赖
+
+Feign与Spring Web仅供RPC/HTTP适配，标记为optional；只引用模型的模块不会传递引入这些框架。实际Feign消费者自行声明OpenFeign starter，HTTP应用自行声明Web starter；模型使用的Jakarta Validation与Jackson注解仍保留。

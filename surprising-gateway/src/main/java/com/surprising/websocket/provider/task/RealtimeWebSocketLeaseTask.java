@@ -15,7 +15,7 @@ public final class RealtimeWebSocketLeaseTask {
         this.service = service;
     }
 
-    @Scheduled(fixedDelay = 5000)
+    @Scheduled(fixedDelay = 1000)
     public void heartbeat() {
         service.heartbeat();
     }

@@ -24,30 +24,26 @@ import com.surprising.account.provider.service.AccountService;
 import com.surprising.account.provider.service.AccountQueryService;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.account.provider.exception.AccountCommandTimeoutException;
-import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.product.api.ProductLine;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.stereotype.Component;
 
 /**
- * 本地协议与内部HTTP共用的请求绑定、参数校验及响应转换；业务由实际Service处理，不声明HTTP路由。
+ * HTTP/本地路由共用的协议适配：绑定格式和错误响应；业务由实际Service处理，不声明HTTP路由。
  */
 @Component
-public class AccountRequestController {
+public class AccountRequestHandler {
 
     private final AccountService accountService;
     private final AccountQueryService history;
 
     private final AccountCommandGateway commandGateway;
 
-    private final AccountProperties properties;
-
-    public AccountRequestController(AccountService accountService, AccountQueryService history, AccountCommandGateway commandGateway, AccountProperties properties) {
+    public AccountRequestHandler(AccountService accountService, AccountQueryService history, AccountCommandGateway commandGateway) {
         this.accountService = accountService;
         this.history = history;
         this.commandGateway = commandGateway;
-        this.properties = properties;
     }
 
     public BalanceResponse adjustBalance(BalanceAdjustmentRequest request) {

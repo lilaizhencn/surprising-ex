@@ -33,7 +33,6 @@ if ! command -v jq > /dev/null 2>&1; then
 fi
 
 OUTPUT_DIR="${2:-$(dirname "${RECORDING}")/owner-commit-jfr-analysis}"
-OWNER_MEASUREMENTS="${REQUIRE_OWNER_MEASUREMENTS:-false}"
 WORKLOAD_LATENCY_CONTRACT="${REQUIRE_WORKLOAD_LATENCY_CONTRACT:-}"
 OLD_OBJECT_ESCALATION="${OLD_OBJECT_ESCALATION:-false}"
 JFR_SETTINGS_FILE="${JFR_SETTINGS_FILE:-}"
@@ -135,11 +134,6 @@ fi
 
 emit_group cpu \
   'jdk.CPULoad,jdk.ThreadCPULoad,jdk.ExecutionSample,jdk.NativeMethodSample' required
-if [[ "${OWNER_MEASUREMENTS}" == "true" ]]; then
-  emit_group owner-measurements 'com.surprising.OwnerCommitMeasurement' required
-else
-  emit_group owner-measurements 'com.surprising.OwnerCommitMeasurement' optional
-fi
 emit_group workload-measurements \
   'com.surprising.LinearPerpetualWorkload,com.surprising.LinearPerpetualSaturation,com.surprising.LinearPerpetualBusinessLatency' optional
 emit_group allocations \
@@ -147,7 +141,7 @@ emit_group allocations \
 emit_group heap-gc \
   'jdk.GCHeapSummary,jdk.GarbageCollection,jdk.GCPhasePause,jdk.GCPhasePauseLevel1,jdk.GCPhasePauseLevel2,jdk.GCPhasePauseLevel3,jdk.GCPhaseConcurrent,jdk.GCConfiguration,jdk.YoungGenerationConfiguration' required
 emit_group gc-failure-signals \
-  'jdk.ZAllocationStall,jdk.G1EvacuationFailure,jdk.PromotionFailed,jdk.EvacuationFailed,jdk.ShenandoahHeapRegionStateChange' optional
+  'jdk.ZAllocationStall,jdk.PromotionFailed,jdk.EvacuationFailed,jdk.ShenandoahHeapRegionStateChange' optional
 emit_group native-direct-memory \
   'jdk.NativeMemoryUsage,jdk.DirectBufferStatistics' required
 emit_group locks-parks \
@@ -155,7 +149,7 @@ emit_group locks-parks \
 emit_group thread-lifecycle \
   'jdk.ThreadStart,jdk.ThreadEnd,jdk.JavaThreadStatistics' required
 emit_group safepoints \
-  'jdk.SafepointBegin,jdk.SafepointStateSynchronization,jdk.SafepointCleanup,jdk.SafepointCleanupTask,jdk.SafepointEnd,jdk.ExecuteVMOperation' required
+  'jdk.SafepointBegin,jdk.SafepointStateSynchronization,jdk.SafepointEnd,jdk.ExecuteVMOperation' required
 emit_group jit \
   'jdk.Compilation,jdk.CompilationFailure,jdk.Deoptimization,jdk.CodeCacheStatistics,jdk.ClassLoad,jdk.ClassUnload,jdk.MetaspaceSummary,jdk.MetaspaceGCThreshold' required
 emit_group io 'jdk.FileRead,jdk.FileWrite,jdk.SocketRead,jdk.SocketWrite' optional
@@ -191,7 +185,6 @@ jq -n \
   --slurpfile exceptions "${OUTPUT_DIR}/exceptions.json" \
   --slurpfile oldObjects "${OUTPUT_DIR}/old-objects.json" \
   --slurpfile system "${OUTPUT_DIR}/system-container.json" \
-  --slurpfile owner "${OUTPUT_DIR}/owner-measurements.json" \
   --slurpfile workload "${OUTPUT_DIR}/workload-measurements.json" \
   --slurpfile threads "${OUTPUT_DIR}/thread-lifecycle.json" \
   --argjson executionSamplePeriodNanos "${EXECUTION_SAMPLE_PERIOD_NANOS}" \
@@ -404,7 +397,7 @@ jq -n \
           else . end
         else . end) | .value)
     end;
-  def ownerLatency($events):
+  def workloadLatency($events):
     [$events[] | select(.values.businessType != null) | .values] | group_by(.businessType) | map(
       . as $group |
       mergeHistograms([$group[].entryAcceptedHistogramCounts]) as $entryAcceptedHistogram |
@@ -473,13 +466,10 @@ jq -n \
   (events($exceptions)) as $exceptionEvents |
   (events($oldObjects)) as $oldObjectEvents |
   (events($system)) as $systemEvents |
-  (events($owner)) as $ownerEvents |
   (events($workload)) as $workloadEvents |
   (events($threads)) as $threadEvents |
-  (terminalOperations($ownerEvents)) as $ownerTerminalOps |
   (terminalOperations([$workloadEvents[] |
-    select(.type != "com.surprising.LinearPerpetualBusinessLatency")])) as $workloadTerminalOps |
-  ($ownerTerminalOps + $workloadTerminalOps) as $terminalOps |
+    select(.type != "com.surprising.LinearPerpetualBusinessLatency")])) as $terminalOps |
   (threadAllocationDelta($allocationEvents)) as $threadAllocatedBytes |
   ([$allocationEvents[] | select(.type != "jdk.ThreadAllocationStatistics")]) as $allAllocationSamples |
   (if ([$allAllocationSamples[] | select(.type == "jdk.ObjectAllocationSample")] | length) > 0
@@ -488,7 +478,7 @@ jq -n \
   ([$allocationSamples[] | allocationWeightBytes] | add // 0) as $allocatedBytes |
   ([$allocationSamples[] | singleObjectBytes | select(. != null and . > 0)]) as $singleObjectSizes |
   (($cpuEvents + $allocationEvents + $gcEvents + $lockEvents + $ioEvents + $exceptionEvents
-    + $threadEvents + $ownerEvents + $workloadEvents) | recordingSeconds(.)) as $recordingSeconds |
+    + $threadEvents + $workloadEvents) | recordingSeconds(.)) as $recordingSeconds |
   (stateRows($cpuEvents; $lockEvents; $executionSamplePeriodNanos)) as $stateRows |
   ([$cpuEvents[] | select(.type == "jdk.ExecutionSample" or .type == "jdk.NativeMethodSample") |
     {source: eventSamplePeriodSource, nanos: eventSamplePeriodNanos($executionSamplePeriodNanos)}])
@@ -503,8 +493,7 @@ jq -n \
     },
     terminalBusinessOperations: $terminalOps,
     terminalBusinessOperationSources: {
-      ownerCommitEvents: $ownerTerminalOps,
-      scaleOrSaturationEvents: $workloadTerminalOps,
+      scaleOrSaturationEvents: $terminalOps,
       scaleOrSaturationParameters: [$workloadEvents[] |
         select(.type != "com.surprising.LinearPerpetualBusinessLatency") | {
         type, operationsPerInvocation: (.values.operationsPerInvocation // null),
@@ -819,10 +808,9 @@ jq -n \
     },
     systemAndContainer: {events: ($systemEvents | length), byType: top($systemEvents; .type),
       observations: [$systemEvents[] | {type, values: .values}]},
-    ownerLatencyByBusinessType: ownerLatency($ownerEvents)
-    ,workloadLatencyByBusinessType: ownerLatency($workloadEvents)
+    workloadLatencyByBusinessType: workloadLatency($workloadEvents)
     ,workloadLatencyQualification:
-      latencyQualification($workloadLatencyContract; ownerLatency($workloadEvents))
+      latencyQualification($workloadLatencyContract; workloadLatency($workloadEvents))
   }' > "${OUTPUT_DIR}/aggregate.json"
 
 jq -e '.terminalBusinessOperations > 0
@@ -897,17 +885,9 @@ if ! jq -e --argjson maximumEvents "${MAX_OWNER_SYNC_IO_EVENTS}" \
   exit 7
 fi
 
-if [[ "${OWNER_MEASUREMENTS}" == "true" ]]; then
-  jq -e '.terminalBusinessOperations > 0
-    and (.ownerLatencyByBusinessType | length) > 0
-    and all(.ownerLatencyByBusinessType[];
-      .operationsPerInvocation == 16384 and .terminalBusinessOperations > 0
-      and .loadModel == "OPEN_LOOP_CONSTANT_ARRIVAL"
-      and .coordinatedOmissionCorrected == true)' \
-    "${OUTPUT_DIR}/aggregate.json" > /dev/null
-fi
 if [[ -n "${WORKLOAD_LATENCY_CONTRACT}" ]]; then
-  jq -e '.workloadLatencyQualification | length == 12 and
+  jq -e --arg contract "${WORKLOAD_LATENCY_CONTRACT}" '
+    .workloadLatencyQualification | length == ($contract | split(",") | length) and
     all(.[]; .status == .expectedStatus and
       ((.status == "EXERCISED" and .eventCount == 1 and .latency != null and .reason == null) or
        (.status == "NOT_EXERCISED" and .eventCount == 0 and .latency == null

@@ -307,6 +307,8 @@ flowchart TD
 
 保险变更经 `InsuranceFundCommands` / `RuntimeInsuranceFundStateTransitions`；ADL 经 [`AdlCommands`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/command/AdlCommands.java) / [`RuntimeAdlExecution`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java)。它们是独立复制命令，不是每次强平无条件自动执行的步骤。过期标记价、游标冲突和已结束计划按既有规则拒绝或跳过，不能重复扣减持仓。
 
+强平记录的 `COMPLETED` 表示本笔已确认亏空归零，部分 ADL 后盈利对手可保留持仓。`clearing PnL` 是已实现结算的现金对手项，不表示合约净头寸。
+
 按业务边界找源码：`service.risk` 负责估值和生成计划，`service.liquidation` 负责执行与结果确认，`service.adl` 负责自动减仓。它们共用 `service.risk.LiquidationRuntime` 这份强平记录，并继续通过原有账户 Lane 和 System Ledger 写入权威状态；分包不复制记录或新建处理阶段。各包的 `package-info.java` 按本文步骤列出类和方法，在 IDE 中也能顺着读。
 
 ### 资金费、交割与期权到期

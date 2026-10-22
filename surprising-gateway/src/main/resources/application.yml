@@ -2,6 +2,9 @@ server:
   port: 9094
 
 spring:
+  jackson:
+    deserialization:
+      accept-float-as-int: false
   config:
     import: classpath:application-trading.yml,classpath:application-account.yml,classpath:application-instrument.yml
   application:
@@ -631,6 +634,8 @@ surprising:
       outbound-queue-capacity: 1000
       send-timeout: 5s
     security:
+      authorization-workers: 4
+      authorization-queue-capacity: 256
       allowed-origins:
         - ${SURPRISING_WS_ALLOWED_ORIGIN:*}
     fanout:

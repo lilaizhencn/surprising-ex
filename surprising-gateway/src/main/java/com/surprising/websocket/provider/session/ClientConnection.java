@@ -24,7 +24,9 @@ public class ClientConnection implements AutoCloseable {
 
     private final WebSocketSession session;
     private volatile Long authenticatedUserId;
-    private volatile String accessToken;
+    private record Authorization(String token, long deadlineMillis, long refreshAtMillis) {}
+    private volatile Authorization authorization;
+    private volatile Runnable closedCallback = () -> {};
     /** 有界环形队列；满载时主动断开慢连接，背压不会传回 Kafka 消费线程。 */
     private final BlockingQueue<OutboundMessage> outbound;
     private final long sendTimeoutNanos;
@@ -59,11 +61,44 @@ public class ClientConnection implements AutoCloseable {
         return authenticatedUserId;
     }
 
-    public String accessToken() {return accessToken;}
+    public String accessToken() {var current = authorization; return current == null ? null : current.token();}
+    /** Reuses the existing timeout watcher so cleanup is independent of socket.close and authorization I/O. */
+    public void onClosed(Runnable cleanup) {
+        closedCallback = java.util.Objects.requireNonNull(cleanup, "cleanup");
+        if (!open.get()) cleanup.run();
+    }
     public boolean isOpen() {return open.get();}
-    public synchronized void authenticate(long userId,String token) {
+    public synchronized void authenticate(long userId, String token, java.time.Instant expiresAt) {
         authenticate(userId);
-        accessToken=token;
+        authorization = authorization(java.util.Objects.requireNonNull(token, "token"), expiresAt);
+        if (!open.get()) {
+            authorization = null;
+            throw new IllegalStateException("websocket session is closed");
+        }
+    }
+
+    /** One immutable cold-path publication; senders never observe a new token with an old deadline. */
+    private static Authorization authorization(String token, java.time.Instant expiresAt) {
+        long now = System.currentTimeMillis();
+        long expiry = expiresAt.toEpochMilli();
+        return new Authorization(token, Math.min(expiry, now + 5000), Math.min(expiry, now + 3000));
+    }
+
+    public synchronized void renewAuthorization(String checkedToken, java.time.Instant expiresAt) {
+        var current = authorization;
+        if (current == null || !java.util.Objects.equals(current.token(), checkedToken)) return;
+        authorization = authorization(checkedToken, expiresAt);
+        if (!open.get()) authorization = null;
+    }
+
+    public boolean authorizationRefreshDue(long now) {
+        var current = authorization;
+        return current != null && now >= current.refreshAtMillis();
+    }
+
+    public boolean authorizationExpired(long now) {
+        var current = authorization;
+        return current != null && now >= current.deadlineMillis();
     }
 
     public synchronized void authenticate(long userId) {
@@ -87,6 +122,10 @@ public class ClientConnection implements AutoCloseable {
         enqueueLock.lock();
         try {
             if (!open.get()) return false;
+            if (authorizationExpired(System.currentTimeMillis())) {
+                close(CloseStatus.POLICY_VIOLATION.withReason("websocket authorization expired"));
+                return false;
+            }
             if (outbound.remainingCapacity() < payloads.size()) {
                 close(CloseStatus.SERVICE_OVERLOAD);
                 return false;
@@ -125,7 +164,7 @@ public class ClientConnection implements AutoCloseable {
                         close(CloseStatus.SESSION_NOT_RELIABLE.withReason("websocket send timeout"));
                         return;
                     }
-                    log.info("ws.send.end session={} result=OK queueMs={} sendMs={}", session.getId(),
+                    if (log.isDebugEnabled()) log.debug("ws.send.end session={} result=OK queueMs={} sendMs={}", session.getId(),
                             (started - message.queuedNanos) / 1_000_000.0, (System.nanoTime() - started) / 1_000_000.0);
                 } catch (Exception failure) {
                     log.warn("ws.send.end session={} result=FAILED error={}", session.getId(), failure.getClass().getSimpleName());
@@ -162,12 +201,18 @@ public class ClientConnection implements AutoCloseable {
             Thread.currentThread().interrupt();
         } finally {
             sendStateLock.unlock();
+            // Reuse this existing per-socket watcher for cleanup, independent of socket.close().
+            boolean interrupted = Thread.interrupted();
+            try { closedCallback.run(); }
+            finally { if (interrupted) Thread.currentThread().interrupt(); }
         }
     }
 
     private boolean sendWithinTimeout(String payload) throws Exception {
         sendStateLock.lock();
         try {
+            if (authorizationExpired(System.currentTimeMillis()))
+                close(CloseStatus.POLICY_VIOLATION.withReason("websocket authorization expired"));
             if (!open.get() || !session.isOpen()) {
                 return false;
             }
@@ -205,7 +250,8 @@ public class ClientConnection implements AutoCloseable {
         } finally {
             sendStateLock.unlock();
         }
-        accessToken=null;
+        authorization=null;
+        outbound.clear();
         writerThread.interrupt();
         timeoutWatcher.interrupt();
         Thread.ofVirtual().name("websocket-close-" + session.getId()).start(() -> {

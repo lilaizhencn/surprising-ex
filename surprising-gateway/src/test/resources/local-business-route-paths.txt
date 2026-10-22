@@ -22,6 +22,7 @@
 /api/v1/admin/accounts/product-balances
 /api/v1/admin/accounts/product-ledger
 /api/v1/admin/accounts/transfers
+/api/v1/admin/trading/fees/effective
 /api/v1/admin/trading/fees/schedules
 /api/v1/admin/trading/fees/schedules/{feeScheduleId}/disable
 /api/v1/admin/trading/leverage/settings

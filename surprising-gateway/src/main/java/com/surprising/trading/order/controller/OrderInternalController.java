@@ -1,6 +1,6 @@
 package com.surprising.trading.order.controller;
 
-import com.surprising.trading.order.controller.OrderRequestController;
+import com.surprising.trading.order.controller.OrderRequestHandler;
 
 import com.surprising.trading.api.TradingApiPaths;
 import com.surprising.trading.api.model.AmendOrderRequest;
@@ -179,9 +179,9 @@ public class OrderInternalController {
         return requests.historyOrders(userId, instrumentId, limit, orderId, startTime, endTime, cursor, minExportSequence, status);
     }
 
-    private final OrderRequestController requests;
+    private final OrderRequestHandler requests;
 
-    public OrderInternalController(OrderRequestController requests) {
+    public OrderInternalController(OrderRequestHandler requests) {
         this.requests = requests;
     }
 }

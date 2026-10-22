@@ -9,7 +9,7 @@ import com.surprising.trading.api.model.AmendOrderRequest;
 import com.surprising.trading.api.model.CancellationPlanResponse;
 import com.surprising.trading.api.model.AmendOrderResponse;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
-import com.surprising.trading.api.model.AdminCancelBySymbolRequest;
+import com.surprising.trading.api.model.AdminCancelByInstrumentRequest;
 import com.surprising.trading.api.model.AdminCancelOrderResult;
 import com.surprising.trading.api.model.AdminCancelOrdersResponse;
 import com.surprising.trading.api.model.AdminCancelOrdersPreviewResponse;
@@ -65,7 +65,7 @@ public class OrderService {
     public com.surprising.trading.api.model.TradeFillQueryResponse ownFills(long userId, String instrumentId,
             Long orderId, Long startTime, Long endTime, int limit, com.surprising.trading.order.model.TradeReadCursor.Fill cursor) {
         if (tradeProjection == null) throw new ReadViewUnavailableException("TRADE_READ_VIEW_UNAVAILABLE");
-        String instrument = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
+        String instrument = instrumentId == null || instrumentId.isBlank() ? null : normalizeInstrumentId(instrumentId);
         return tradeProjection.ownFills(currentProductLine(), userId, instrument, orderId, startTime, endTime, limit, cursor);
     }
 
@@ -75,7 +75,7 @@ public class OrderService {
         if (requestedProduct != null && requestedProduct != product)
             throw new IllegalArgumentException("product line does not match provider");
         if (tradeProjection == null) throw new ReadViewUnavailableException("TRADE_READ_VIEW_UNAVAILABLE");
-        String instrument = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
+        String instrument = instrumentId == null || instrumentId.isBlank() ? null : normalizeInstrumentId(instrumentId);
         return tradeProjection.search(product, userId, instrument, orderId, limit, cursor, ascending);
     }
     private final com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
@@ -231,7 +231,7 @@ public class OrderService {
             throw new IllegalArgumentException("userId must be positive");
         }
         String clientOrderId = normalizeClientOrderId(request.clientOrderId());
-        String instrumentId = normalizeSymbol(request.instrumentId());
+        String instrumentId = normalizeInstrumentId(request.instrumentId());
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
         ProductLine productLine = currentProductLine();
@@ -332,7 +332,7 @@ public class OrderService {
     public CancellationPlanResponse cancellationPlan(long userId, String instrumentId) {
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         var product = currentProductLine();
-        String instrument = instrumentId == null ? null : normalizeSymbol(instrumentId);
+        String instrument = instrumentId == null ? null : normalizeInstrumentId(instrumentId);
         var view = requireRealtimeQueries().require(product, userId, null);
         var ids = view.openOrders().stream().filter(v -> instrument == null || instrument.equals(v.instrumentId()))
                 .map(com.surprising.aeron.protocol.CoreOrderStateView::orderId).distinct().sorted().toList();
@@ -373,7 +373,7 @@ public class OrderService {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
         String instrumentId = request.instrumentId() == null || request.instrumentId().isBlank()
-                ? null : normalizeSymbol(request.instrumentId());
+                ? null : normalizeInstrumentId(request.instrumentId());
         List<OrderResponse> open = activeOpenOrders(currentProductLine(), request.userId(), instrumentId, limit);
         requireAeron();
         List<CancelOrderRequest> requests = open.stream()
@@ -419,10 +419,10 @@ public class OrderService {
     public OrderQueryResponse openOrders(long userId, String instrumentId, ActiveOrderPageQuery query,
                                          Long minExportSequence) {
         int limit = query.limit();
-        String normalizedSymbol = instrumentId;
+        String normalizedInstrumentId = instrumentId;
         long beforeOrderId = query.beforeId();
         List<OrderResponse> orders = requireRealtimeQueries().require(currentProductLine(),userId,minExportSequence).openOrders().stream()
-                .filter(v->normalizedSymbol==null || normalizedSymbol.equals(v.instrumentId()))
+                .filter(v->normalizedInstrumentId==null || normalizedInstrumentId.equals(v.instrumentId()))
                 .filter(v->beforeOrderId==0 || v.orderId()<beforeOrderId)
                 .sorted(java.util.Comparator.comparingLong(com.surprising.aeron.protocol.CoreOrderStateView::orderId).reversed())
                 .limit(limit+1).map(AeronOrderCommandService::toOrder).toList();
@@ -476,8 +476,8 @@ public class OrderService {
         OrderStatus historyStatus = status == null || status.isBlank() ? null : OrderStatus.valueOf(status.trim().toUpperCase(java.util.Locale.ROOT));
         if (historyStatus != null && !java.util.Set.of(OrderStatus.FILLED, OrderStatus.CANCELED, OrderStatus.REJECTED).contains(historyStatus))
             throw new IllegalArgumentException("history status must be FILLED, CANCELED or REJECTED");
-        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
-        return toQueryResponse(requireProjection().historyOrders(currentProductLine(), userId, normalizedSymbol,
+        String normalizedInstrumentId = instrumentId == null || instrumentId.isBlank() ? null : normalizeInstrumentId(instrumentId);
+        return toQueryResponse(requireProjection().historyOrders(currentProductLine(), userId, normalizedInstrumentId,
                 limit, minimumOrderId, startTimeMillis, endTimeMillis, cursor, minExportSequence, historyStatus),
                 "updatedAt.desc", limit);
     }
@@ -513,13 +513,13 @@ public class OrderService {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
+        String normalizedInstrumentId = instrumentId == null || instrumentId.isBlank() ? null : normalizeInstrumentId(instrumentId);
         OrderStatus normalizedStatus = status == null || status.isBlank()
                 ? null
                 : OrderStatus.valueOf(status.trim().toUpperCase());
         ProductLine resolvedProductLine = productLine == null ? currentProductLine() : productLine;
         boolean ascending = "createdAt.asc".equalsIgnoreCase(sort);
-        return toQueryResponse(requireProjection().search(resolvedProductLine, userId, normalizedSymbol,
+        return toQueryResponse(requireProjection().search(resolvedProductLine, userId, normalizedInstrumentId,
                 normalizedStatus, orderId, cursor, ascending, limit, null),
                 ascending ? "createdAt.asc" : "createdAt.desc", limit);
     }
@@ -554,7 +554,7 @@ public class OrderService {
         }
         String instrumentId = request == null || request.instrumentId() == null || request.instrumentId().isBlank()
                 ? null
-                : normalizeSymbol(request.instrumentId());
+                : normalizeInstrumentId(request.instrumentId());
         int limit = request == null || request.limit() == null ? 100 : request.limit();
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
@@ -595,24 +595,24 @@ public class OrderService {
         if (limit < 1 || limit > 1000) {
             throw new IllegalArgumentException("limit must be in [1, 1000]");
         }
-        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
+        String normalizedInstrumentId = instrumentId == null || instrumentId.isBlank() ? null : normalizeInstrumentId(instrumentId);
         ProductLine resolvedProductLine = productLine == null ? currentProductLine() : productLine;
-        List<OrderResponse> orders = activeOpenOrders(resolvedProductLine, userId, normalizedSymbol, limit);
+        List<OrderResponse> orders = activeOpenOrders(resolvedProductLine, userId, normalizedInstrumentId, limit);
         long quantity = orders.stream().mapToLong(OrderResponse::remainingQuantitySteps).sum();
         int buys = (int) orders.stream().filter(order -> order.side() == OrderSide.BUY).count();
-        return new AdminCancelOrdersPreviewResponse(userId, normalizedSymbol, orders.size(), orders.size(),
+        return new AdminCancelOrdersPreviewResponse(userId, normalizedInstrumentId, orders.size(), orders.size(),
                 quantity, buys, orders.size() - buys, orders);
     }
 
-    public AdminCancelOrdersResponse adminCancelBySymbol(AdminCancelBySymbolRequest request) {
-        return adminCancelBySymbol(request, null);
+    public AdminCancelOrdersResponse adminCancelByInstrument(AdminCancelByInstrumentRequest request) {
+        return adminCancelByInstrument(request, null);
     }
 
-    public AdminCancelOrdersResponse adminCancelBySymbol(AdminCancelBySymbolRequest request, ProductLine productLine) {
+    public AdminCancelOrdersResponse adminCancelByInstrument(AdminCancelByInstrumentRequest request, ProductLine productLine) {
         if (request == null) {
             throw new IllegalArgumentException("request is required");
         }
-        String instrumentId = normalizeSymbol(request.instrumentId());
+        String instrumentId = normalizeInstrumentId(request.instrumentId());
         return adminCancelOrders(new AdminBatchCancelOrdersRequest(null, instrumentId, request.limit(), request.reason()),
                 productLine);
     }
@@ -621,8 +621,8 @@ public class OrderService {
      * 到期生命周期只发起撤单，最终状态仍由撮合结果驱动。
      */
     public int requestLifecycleCancellation(String instrumentId, int limit) {
-        String normalizedSymbol = normalizeSymbol(instrumentId);
-        List<OrderResponse> selected = requireAeron().lifecycleOpenOrders(normalizedSymbol, limit);
+        String normalizedInstrumentId = normalizeInstrumentId(instrumentId);
+        List<OrderResponse> selected = requireAeron().lifecycleOpenOrders(normalizedInstrumentId, limit);
         List<CancelOrderRequest> requests = selected.stream()
                 .map(order -> new CancelOrderRequest(order.userId(), order.orderId()))
                 .toList();
@@ -632,7 +632,7 @@ public class OrderService {
     }
 
     public boolean hasLifecycleActiveOrders(String instrumentId) {
-        return !requireAeron().lifecycleOpenOrders(normalizeSymbol(instrumentId), 1).isEmpty();
+        return !requireAeron().lifecycleOpenOrders(normalizeInstrumentId(instrumentId), 1).isEmpty();
     }
 
     private AeronOrderProjectionRepository requireProjection() {
@@ -805,7 +805,7 @@ public class OrderService {
             throw new IllegalArgumentException("priceTicks must be non-negative and quantitySteps must be positive");
         }
         String clientOrderId = normalizeClientOrderId(request.clientOrderId());
-        String instrumentId = normalizeSymbol(request.instrumentId());
+        String instrumentId = normalizeInstrumentId(request.instrumentId());
         long priceTicks = resolveLimitPrice(request, instrumentId);
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
         if (currentProductLine() == ProductLine.SPOT && positionSide.isHedgeSide()) {
@@ -880,7 +880,7 @@ public class OrderService {
                 request.clientRequestId());
     }
 
-    private String normalizeSymbol(String instrumentId) {
+    private String normalizeInstrumentId(String instrumentId) {
         if (instrumentId == null || instrumentId.isBlank()) {
             throw new IllegalArgumentException("instrumentId is required");
         }

@@ -6,9 +6,16 @@ import com.surprising.gateway.provider.exception.ProductUnavailableException;
 import com.surprising.gateway.provider.model.GatewayProductSetting;
 import com.surprising.gateway.provider.service.GatewayProductSettings;
 import com.surprising.gateway.provider.local.*;
+import com.surprising.aeron.client.CoreCommandOutcome;
+import com.surprising.aeron.client.SurprisingAeronClient;
+import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.product.api.ProductLine;
 import jakarta.annotation.PreDestroy;
 import java.util.*;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.*;
 import org.springframework.core.env.MapPropertySource;
@@ -25,7 +32,7 @@ public final class GatewayProductServices implements AutoCloseable {
     private final GatewayProductsProperties configuration;
     private final GatewayProductSettings settings;
     private final ConfigurableApplicationContext parent;
-    private boolean closed;
+    private volatile boolean closed;
 
     public GatewayProductServices(ConfigurableApplicationContext parent, GatewayProductsProperties configuration,
                                   GatewayProductSettings settings) {
@@ -38,10 +45,15 @@ public final class GatewayProductServices implements AutoCloseable {
         if (closed) return;
         var failures = new EnumMap<ProductLine, String>(ProductLine.class);
         for (var setting : settings.list()) {
+            if (closed || Thread.currentThread().isInterrupted()) break;
             if (!setting.enabled() || products.containsKey(setting.productLine())) continue;
             var product = setting.productLine();
             try {
                 var runtime = start(product);
+                if (closed) {
+                    runtime.context().close();
+                    break;
+                }
                 var updated = new EnumMap<ProductLine, Runtime>(ProductLine.class);
                 updated.putAll(products);
                 updated.put(product, runtime);
@@ -70,25 +82,69 @@ public final class GatewayProductServices implements AutoCloseable {
             var mapping = new RequestMappingHandlerMapping();
             mapping.setApplicationContext(child);
             mapping.afterPropertiesSet();
-            // 必须实际连通 Core；失败的上下文不参与请求路由或 WebSocket 订阅。
-            var response = child.getBean(com.surprising.account.provider.service.AccountAeronGateway.class)
-                    .query(com.surprising.aeron.protocol.CoreMessageType.LANE_METRICS_QUERY, UUID.randomUUID(), new byte[0]);
-            if (response.status() != com.surprising.aeron.protocol.ResponseStatus.OK)
-                throw new IllegalStateException("Core readiness rejected: " + response.resultCode());
+            awaitCoreReadiness(child);
             awaitConsumerAssignments(child);
+            requireActivationOpen(child);
             return new Runtime(child, mapping);
         } catch (RuntimeException | Error failure) {
-            try { child.close(); } catch (RuntimeException cleanup) { failure.addSuppressed(cleanup); }
+            try { child.close(); }
+            catch (RuntimeException cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
             throw failure;
         }
     }
 
+    private void awaitCoreReadiness(AnnotationConfigApplicationContext child) {
+        var account = child.getBean(com.surprising.account.provider.service.AccountAeronGateway.class);
+        long deadline = System.nanoTime() + SurprisingAeronClient.pooledConnectionTimeout().toNanos();
+        RuntimeException connecting = null;
+        while (true) {
+            requireActivationOpen(child);
+            if (connecting != null && System.nanoTime() - deadline >= 0) throw connecting;
+            CoreResponse response;
+            try {
+                // Reuse this child's connecting pool. Ordinary request deadlines remain unchanged.
+                response = account.query(CoreMessageType.LANE_METRICS_QUERY, UUID.randomUUID(), new byte[0]);
+            } catch (RuntimeException failure) {
+                requireActivationOpen(child);
+                if (!isConnecting(failure) || System.nanoTime() - deadline >= 0) throw failure;
+                connecting = failure;
+                try {
+                    TimeUnit.NANOSECONDS.sleep(Math.min(TimeUnit.MILLISECONDS.toNanos(25),
+                            Math.max(1, deadline - System.nanoTime())));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Product activation interrupted", interrupted);
+                }
+                continue;
+            }
+            requireActivationOpen(child);
+            if (response.status() != ResponseStatus.OK)
+                throw new IllegalStateException("Core readiness rejected: " + response.resultCode());
+            return;
+        }
+    }
+
+    private static boolean isConnecting(RuntimeException failure) {
+        Throwable cause = failure;
+        while (cause instanceof CompletionException && cause.getCause() != null) cause = cause.getCause();
+        return cause instanceof CoreCommandOutcome.NotAcceptedException rejected
+                && rejected.rejection().reason() == CoreCommandOutcome.NotAcceptedReason.NOT_CONNECTED;
+    }
+
+    private void requireActivationOpen(AnnotationConfigApplicationContext child) {
+        if (Thread.currentThread().isInterrupted())
+            throw new IllegalStateException("Product activation interrupted");
+        if (closed || !child.isActive()) throw new IllegalStateException("Product activation stopped");
+    }
+
     private void awaitConsumerAssignments(AnnotationConfigApplicationContext child) {
+        requireActivationOpen(child);
         var listeners = child.getBean(org.springframework.kafka.config.KafkaListenerEndpointRegistry.class)
                 .getListenerContainers().stream().filter(org.springframework.kafka.listener.MessageListenerContainer::isAutoStartup).toList();
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
         while (listeners.stream().anyMatch(listener -> !listener.isRunning()
                 || listener.getAssignedPartitions() == null || listener.getAssignedPartitions().isEmpty())) {
+            requireActivationOpen(child);
             if (System.nanoTime() >= deadline) throw new IllegalStateException("Kafka consumers are not assigned");
             try { java.util.concurrent.TimeUnit.MILLISECONDS.sleep(25); }
             catch (InterruptedException ex) {
@@ -137,20 +193,23 @@ public final class GatewayProductServices implements AutoCloseable {
     }
 
     @Override @PreDestroy
-    public synchronized void close() {
+    public void close() {
         closed = true;
-        var contexts = new ArrayList<>(products.values());
-        Collections.reverse(contexts);
-        RuntimeException failure = null;
-        for (var child : contexts) {
-            try { child.context().close(); }
-            catch (RuntimeException ex) {
-                if (failure == null) failure = ex; else failure.addSuppressed(ex);
+        synchronized (this) {
+            var contexts = new ArrayList<>(products.values());
+            Collections.reverse(contexts);
+            RuntimeException failure = null;
+            for (var child : contexts) {
+                try { child.context().close(); }
+                catch (RuntimeException ex) {
+                    if (failure == null) failure = ex;
+                    else if (failure != ex) failure.addSuppressed(ex);
+                }
             }
+            products = Map.of();
+            errors = Map.of();
+            if (failure != null) throw failure;
         }
-        products = Map.of();
-        errors = Map.of();
-        if (failure != null) throw failure;
     }
 
 }

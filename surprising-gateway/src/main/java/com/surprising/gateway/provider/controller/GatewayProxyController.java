@@ -94,7 +94,7 @@ public class GatewayProxyController {
         this.productTransferSecurityService = productTransferSecurityService;
     }
 
-    @GetMapping("/api/v1/gateway/runtime")
+    @GetMapping("/api/v1/runtime")
     public Map<String, List<ProductLine>> runtime() {
         return Map.of("productLines", products.enabled(), "disabledProductLines", products.disabled());
     }

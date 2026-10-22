@@ -117,9 +117,9 @@ class AccountHistoryPagePostgresTest {
         verifyNoInteractions(basic,product,transfers,adjustments,live,commands);
     }
 
-    private AccountRequestController requests(ProductLine line) {
+    private AccountRequestHandler requests(ProductLine line) {
         var properties=new AccountProperties();properties.getKafka().setProductLine(line);
-        return new AccountRequestController(live,new AccountQueryService(basic,product,transfers,adjustments,properties),commands,properties);
+        return new AccountRequestHandler(live,new AccountQueryService(basic,product,transfers,adjustments,properties),commands);
     }
     private JsonNode read(MockMvc mvc,String path,ProductLine line,String sort,String cursor) throws Exception {
         var request=get("/api/v1/accounts/"+path).header("X-User-Id","42").param("userId","99")

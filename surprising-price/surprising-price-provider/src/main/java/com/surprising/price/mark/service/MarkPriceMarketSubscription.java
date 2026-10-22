@@ -46,7 +46,8 @@ public final class MarkPriceMarketSubscription implements AutoCloseable {
         directory = new ValkeyRouteDirectory(redis);
         requests = new ValkeySnapshotRequests(redis);
         receiver = new AeronRealtimeReceiver(env.getRequiredProperty("surprising.realtime.directory"),
-                endpoint, env.getProperty("surprising.realtime.ws.stream", Integer.class, 2103), this::receive);
+                endpoint, env.getProperty("surprising.realtime.ws.stream", Integer.class, 2103), this::receive,
+                failure -> prices.marketContinuityLost());
     }
 
     MarkPriceMarketSubscription(MarkPriceProperties properties, MarkPriceService prices,
@@ -61,6 +62,12 @@ public final class MarkPriceMarketSubscription implements AutoCloseable {
     }
 
     public void renewSubscriptions() {
+        if (receiver.recoveryRequired()) {
+            long version = receiver.recoveryVersion();
+            directory.removeNode(node);
+            prices.resetMarketInputs();
+            receiver.resumeAfterRecovery(version);
+        }
         if (!receiver.ready()) {
             directory.removeNode(node);
             return;
@@ -114,7 +121,7 @@ public final class MarkPriceMarketSubscription implements AutoCloseable {
     @Override
     @PreDestroy
     public void close() {
-        if (receiver != null) receiver.close();
-        if (directory != null) directory.removeNode(node);
+        try { if (receiver != null) receiver.close(); }
+        finally { if (directory != null) directory.removeNode(node); }
     }
 }

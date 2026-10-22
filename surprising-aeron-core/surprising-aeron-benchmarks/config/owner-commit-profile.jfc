@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration version="2.0" label="Surprising owner commit qualification"
-               description="One explicit JDK 25 qualification recording contract"
+               description="Explicit HotSpot JDK 27 runtime and workload diagnostics"
                provider="Surprising-EX">
   <event name="jdk.CPULoad"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
   <event name="jdk.ThreadCPULoad"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
@@ -20,7 +20,6 @@
   <event name="jdk.GCConfiguration"><setting name="enabled">true</setting></event>
   <event name="jdk.YoungGenerationConfiguration"><setting name="enabled">true</setting></event>
   <event name="jdk.ZAllocationStall"><setting name="enabled">true</setting></event>
-  <event name="jdk.G1EvacuationFailure"><setting name="enabled">true</setting></event>
   <event name="jdk.PromotionFailed"><setting name="enabled">true</setting></event>
   <event name="jdk.EvacuationFailed"><setting name="enabled">true</setting></event>
   <event name="jdk.ShenandoahHeapRegionStateChange"><setting name="enabled">true</setting></event>
@@ -35,8 +34,6 @@
   <event name="jdk.JavaThreadStatistics"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
   <event name="jdk.SafepointBegin"><setting name="enabled">true</setting></event>
   <event name="jdk.SafepointStateSynchronization"><setting name="enabled">true</setting></event>
-  <event name="jdk.SafepointCleanup"><setting name="enabled">true</setting></event>
-  <event name="jdk.SafepointCleanupTask"><setting name="enabled">true</setting></event>
   <event name="jdk.SafepointEnd"><setting name="enabled">true</setting></event>
   <event name="jdk.ExecuteVMOperation"><setting name="enabled">true</setting></event>
   <event name="jdk.Compilation"><setting name="enabled">true</setting></event>
@@ -62,17 +59,9 @@
   <event name="jdk.ContainerMemoryUsage"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
   <event name="jdk.SystemProcess"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
   <event name="jdk.DataLoss"><setting name="enabled">true</setting></event>
-  <event name="com.surprising.OwnerCommitMeasurement"><setting name="enabled">true</setting></event>
   <event name="com.surprising.LinearPerpetualWorkload"><setting name="enabled">true</setting></event>
   <event name="com.surprising.LinearPerpetualSaturation"><setting name="enabled">true</setting></event>
   <event name="com.surprising.LinearPerpetualBusinessLatency"><setting name="enabled">true</setting></event>
-  <event name="surprising.SettlementLatency"><setting name="enabled">true</setting></event>
-  <event name="surprising.LaneCommitLatency"><setting name="enabled">true</setting></event>
-  <event name="surprising.CommandBoundaryLatency"><setting name="enabled">true</setting></event>
-  <event name="surprising.OwnerHead"><setting name="enabled">true</setting></event>
-  <event name="surprising.OwnerTurn"><setting name="enabled">true</setting></event>
-  <event name="surprising.OwnerSettlementMerge"><setting name="enabled">true</setting></event>
-  <event name="surprising.OwnerPublication"><setting name="enabled">true</setting><setting name="stackTrace">false</setting></event>
   <event name="surprising.ClientRequestLatency"><setting name="enabled">true</setting><setting name="stackTrace">false</setting></event>
   <event name="surprising.ClientTransportBoundary"><setting name="enabled">true</setting><setting name="stackTrace">false</setting></event>
 </configuration>

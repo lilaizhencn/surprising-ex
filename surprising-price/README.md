@@ -372,3 +372,12 @@ Kafka职责归包：独立快照、审计、结算/排空及推送消费入口�
 陈旧指数价格的原生失败位于 `index.exception.StaleIndexPriceException`，缓存新鲜度及Controller映射保持。
 
 汇率HTTP参数由 `index.controller.ExchangeRateController` 绑定：币种用纯 `index.utils.CurrencyFormats` 转为规范代码，金额必须为正；Service接收原生BigDecimal和规范代码，保留直连/桥接、精确舍入、快照新鲜度与缺失行情判断。后台法币/稳定币配置继续在内部调用同一纯工具作完整性检查。
+
+### 共享契约依赖
+
+Feign与Spring Web仅供RPC/HTTP适配，标记为optional；只引用模型的模块不会传递引入这些框架。实际Feign消费者自行声明OpenFeign starter，HTTP应用自行声明Web starter；模型使用的Jakarta Validation与Jackson注解仍保留。
+
+
+## 行情传输故障与标记价输入（2026-10-22）
+
+标记价行情接收器在坏帧/处理/传输故障时只原子记录输入失效代次；查询和计算立即不再把故障前 book、lastTrade、basis 作为可用输入。租约任务清理旧行情状态并申请新盘口后恢复接收，新的真实成交到达后才重新使用 lastTrade。正常无成交时仍保留原真实成交及时间戳，遵守原有 DEGRADED 语义；传输断档不能靠这一规则延用未知状态。独立有效指数仍可按既有规则生成明确 DEGRADED 的标记价。逐条计算成功日志为 DEBUG。

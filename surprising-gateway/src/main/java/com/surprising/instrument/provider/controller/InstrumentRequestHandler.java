@@ -23,12 +23,12 @@ import org.springframework.stereotype.Component;
  * 网关本地协议的参数绑定、响应转换和HTTP异常映射；路由仍由InstrumentLocalRoutes分发。
  */
 @Component
-public class InstrumentRequestController {
+public class InstrumentRequestHandler {
 
     private final InstrumentService instrumentService;
     private final ObjectMapper objectMapper;
 
-    public InstrumentRequestController(InstrumentService instrumentService,
+    public InstrumentRequestHandler(InstrumentService instrumentService,
                                     ObjectMapper objectMapper) {
         this.instrumentService = instrumentService;
         this.objectMapper = objectMapper;

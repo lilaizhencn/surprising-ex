@@ -18,6 +18,7 @@ final class ReliableTradeKafkaSink implements AutoCloseable {
     private final ProductLine product;
     private final ObjectMapper mapper = new ObjectMapper();
     private long tradeSequence;
+    private long nextFailureLogNanos;
 
     ReliableTradeKafkaSink(
             Producer<String, String> producer, ProductLine product, long tradeSequence) {
@@ -30,7 +31,7 @@ final class ReliableTradeKafkaSink implements AutoCloseable {
         } catch (RuntimeException failure) {
             // A failed constructor is not closed by try-with-resources; retries must not leak producers.
             try { producer.close(java.time.Duration.ofSeconds(10)); }
-            catch (RuntimeException closing) { failure.addSuppressed(closing); }
+            catch (RuntimeException closing) { if (closing != failure) failure.addSuppressed(closing); }
             throw failure;
         }
     }
@@ -63,17 +64,20 @@ final class ReliableTradeKafkaSink implements AutoCloseable {
             }
             producer.commitTransaction();
             // Log success only after the transaction is committed, never in the send callback.
-            for (var frame : frames)
-                log.info("trade.kafka.committed productLine={} tradeId={} topic={} logPosition={}",
+            if (log.isDebugEnabled()) for (var frame : frames)
+                log.debug("trade.kafka.committed productLine={} tradeId={} topic={} logPosition={}",
                         product, frame.entityId(), topic, frame.sequence());
         } catch (RuntimeException failure) {
-            for (var frame : frames)
-                log.warn("trade.kafka.failed productLine={} tradeId={} logPosition={} error={}",
-                        product, frame.entityId(), frame.sequence(), failure.getClass().getSimpleName());
+            long now = System.nanoTime();
+            if (nextFailureLogNanos == 0 || now >= nextFailureLogNanos) {
+                nextFailureLogNanos = now + 5_000_000_000L;
+                log.warn("trade.kafka.failed productLine={} count={} firstLogPosition={} error={}",
+                        product, frames.size(), frames.getFirst().sequence(), failure.getClass().getSimpleName());
+            }
             try {
                 producer.abortTransaction();
             } catch (RuntimeException abortFailure) {
-                failure.addSuppressed(abortFailure);
+                if (abortFailure != failure) failure.addSuppressed(abortFailure);
             }
             throw failure;
         }

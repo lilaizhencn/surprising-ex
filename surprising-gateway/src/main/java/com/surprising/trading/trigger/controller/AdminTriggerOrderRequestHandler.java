@@ -10,14 +10,14 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.stereotype.Component;
 
 /**
- * 本地协议与内部HTTP共用的请求绑定、参数校验及响应转换；业务由实际Service处理，不声明HTTP路由。
+ * HTTP/本地路由共用的协议适配：绑定格式和错误响应；业务由实际Service处理，不声明HTTP路由。
  */
 @Component
-public class AdminTriggerOrderRequestController {
+public class AdminTriggerOrderRequestHandler {
 
     private final TriggerOrderService triggerOrderService;
 
-    public AdminTriggerOrderRequestController(TriggerOrderService triggerOrderService) {
+    public AdminTriggerOrderRequestHandler(TriggerOrderService triggerOrderService) {
         this.triggerOrderService = triggerOrderService;
     }
 

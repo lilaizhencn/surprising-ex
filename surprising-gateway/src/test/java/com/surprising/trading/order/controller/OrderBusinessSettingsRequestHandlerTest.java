@@ -11,11 +11,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
-class OrderBusinessSettingsControllerTest {
+class OrderBusinessSettingsRequestHandlerTest {
     private final OrderBusinessSettingsService settings=mock(OrderBusinessSettingsService.class);
     private final JsonMapper json=JsonMapper.builder().findAndAddModules().build();
-    private final OrderBusinessSettingsController controller=new OrderBusinessSettingsController(settings,json);
-    private final String valid=json.writeValueAsString(new OrderBusinessSettingsController.Update(OrderBusinessSettings.initial(),1L,"valid"));
+    private final OrderBusinessSettingsRequestHandler controller=new OrderBusinessSettingsRequestHandler(settings,json);
+    private final String valid=json.writeValueAsString(new OrderBusinessSettingsRequestHandler.Update(OrderBusinessSettings.initial(),1L,"valid"));
 
     @Test void rejectsCoercionOmissionsUnknownsOverflowAndInvalidLimitsBeforeBusinessChanges() {
         for (String bad : List.of("null","{}",valid.replace("10000","2.5"),

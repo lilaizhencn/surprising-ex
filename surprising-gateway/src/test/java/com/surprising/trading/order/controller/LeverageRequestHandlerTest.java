@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
-class LeverageRequestControllerTest {
+class LeverageRequestHandlerTest {
 
     @Test
     void terminalBusinessRejectionRemainsAConflictAtTheHttpBoundary() {
@@ -26,7 +26,7 @@ class LeverageRequestControllerTest {
         org.mockito.Mockito.when(leverage.set(org.mockito.ArgumentMatchers.any())).thenThrow(failure);
         var request = new LeverageSettingRequest(1, ProductLine.LINEAR_PERPETUAL, "604",
                 MarginMode.CROSS, 2_000_000, "web");
-        assertThatThrownBy(() -> new LeverageRequestController(leverage).set(request, null, null))
+        assertThatThrownBy(() -> new LeverageRequestHandler(leverage).set(request, null, null))
                 .isInstanceOfSatisfying(ResponseStatusException.class,error -> {
                     assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
                     assertThat(error.getCause()).isSameAs(failure);
@@ -38,7 +38,7 @@ class LeverageRequestControllerTest {
     @Test
     void adminSetRequiresTrustedAdminIdentity() {
         LeverageService leverage = mock(LeverageService.class);
-        LeverageRequestController requests = new LeverageRequestController(leverage);
+        LeverageRequestHandler requests = new LeverageRequestHandler(leverage);
         LeverageSettingRequest request = new LeverageSettingRequest(900001L,
                 ProductLine.LINEAR_PERPETUAL, "49", MarginMode.CROSS,
                 10_000_000L, "maker depth QA");

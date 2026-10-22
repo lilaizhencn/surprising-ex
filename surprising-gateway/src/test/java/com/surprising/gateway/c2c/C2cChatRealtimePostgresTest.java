@@ -41,8 +41,8 @@ class C2cChatRealtimePostgresTest {
     private void command(WebSocketSession session,Map<String,?> command) {
         var wire=wires.get(session.getId());
         if("authenticate".equals(command.get("op"))) {
-            String token=(String)command.get("token");long id=new com.surprising.websocket.provider.service.WebSocketJwtAuthenticator(fixture.auth).authenticate(token);
-            wire.authenticate(id,token);wire.send("{\"op\":\"authenticated\",\"userId\":\""+id+"\"}");
+            String token=(String)command.get("token");var principal=new com.surprising.websocket.provider.service.WebSocketJwtAuthenticator(fixture.auth).principal(token);long id=principal.userId();
+            wire.authenticate(id,token,principal.expiresAt());wire.send("{\"op\":\"authenticated\",\"userId\":\""+id+"\"}");
         } else {
             socket.handle(wire,new C2cChatRealtime.Command((String)command.get("op"),null,(String)command.get("conversationId"),
                     (String)command.get("after"),(String)command.get("afterEvent")));

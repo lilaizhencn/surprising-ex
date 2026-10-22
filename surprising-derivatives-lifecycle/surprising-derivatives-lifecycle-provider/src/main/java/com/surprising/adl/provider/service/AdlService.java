@@ -72,7 +72,8 @@ public class AdlService {
         int executed = 0;
         for (CoreAdlCandidateView candidate : aeron.candidates(liquidation.asset(), candidateLimit)) {
             if (remaining <= 0 || executed >= max) break;
-            if (candidate.userId() == liquidation.userId()
+            if (!candidate.instrumentId().equals(liquidation.instrumentId())
+                    || candidate.userId() == liquidation.userId()
                     || Long.signum(candidate.signedQuantitySteps()) == Long.signum(liquidation.signedQuantitySteps())) {
                 continue;
             }

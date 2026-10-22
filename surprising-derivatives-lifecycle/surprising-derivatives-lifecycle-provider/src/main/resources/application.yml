@@ -2,6 +2,9 @@ server:
   port: ${DERIVATIVES_LIFECYCLE_PORT:9087}
 
 spring:
+  jackson:
+    deserialization:
+      accept-float-as-int: false
   application:
     name: surprising-derivatives-lifecycle
   task:

@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /** 产品内部HTTP入口沿用Servlet错误响应；公共网关由LocalBusinessApi映射同一原生失败。 */
-@RestControllerAdvice(basePackages = {"com.surprising.account.provider.controller", "com.surprising.trading.order.controller",
+@RestControllerAdvice(basePackages = {"com.surprising.gateway.provider.controller", "com.surprising.account.provider.controller", "com.surprising.trading.order.controller",
         "com.surprising.trading.trigger.controller", "com.surprising.trading.matching.controller"})
 public class ReadViewHttpErrors {
     @ExceptionHandler(ReadViewUnavailableException.class)

@@ -20,7 +20,7 @@ public record SubscriptionTopic(
         if (channel == null) {
             throw new IllegalArgumentException("channel is required");
         }
-        instrumentId = normalizeSymbol(instrumentId, channel);
+        instrumentId = normalizeInstrumentId(instrumentId, channel);
         period = normalizePeriod(period, channel);
         if (!channel.isPublicChannel() && userId == null) {
             throw new IllegalArgumentException("private channel requires userId");
@@ -38,7 +38,7 @@ public record SubscriptionTopic(
         return new SubscriptionTopic(channel, instrumentId, period, userId, productLine);
     }
 
-    public SubscriptionTopic withSymbol(String instrumentId) {
+    public SubscriptionTopic withInstrumentId(String instrumentId) {
         return new SubscriptionTopic(channel, instrumentId, period, userId, productLine);
     }
 
@@ -56,7 +56,7 @@ public record SubscriptionTopic(
         return authenticatedUserId;
     }
 
-    private static String normalizeSymbol(String instrumentId, WsChannel channel) {
+    private static String normalizeInstrumentId(String instrumentId, WsChannel channel) {
         if (!channel.isPublicChannel() && (instrumentId == null || instrumentId.isBlank())) {
             return WILDCARD;
         }

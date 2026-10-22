@@ -14,7 +14,6 @@ import io.aeron.cluster.RecordingLog;
 import io.aeron.cluster.codecs.*;
 import io.aeron.cluster.service.ClusterCounters;
 import io.aeron.driver.*;
-import java.net.DatagramSocket;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -33,15 +32,18 @@ class CommittedFundingRepairIntegrationTest {
     @Test void archiveFundingPagesStopAtCommitAndSqlFailureCannotAdvanceCheckpoint() throws Exception {
         var repository=mock(CommittedOrderProjectionService.class);
         String directory=temp.resolve("driver").toString();
-        int port;try(var socket=new DatagramSocket(0)){port=socket.getLocalPort();}
-        String control="aeron:udp?endpoint=127.0.0.1:"+port;
+        // This fixture verifies commit/checkpoint and SQL repair on one Driver, not UDP transport.
+        // Use Archive's local control subscription instead of releasing a probed UDP port before bind.
+        String control="aeron:ipc?term-length=64k";
         Path cluster=temp.resolve("cluster"), checkpoint=temp.resolve("history.funding-repair");Files.createDirectories(cluster);
         var config=new TradeExportProperties(cluster,directory,control,checkpoint,0,null,null,null);
         var exporter=new CommittedTradeExporter(config,line,null,repository);
         try(var driver=MediaDriver.launch(new MediaDriver.Context().aeronDirectoryName(directory)
                     .dirDeleteOnShutdown(true).threadingMode(ThreadingMode.SHARED));
             var service=Archive.launch(new Archive.Context().aeronDirectoryName(directory).archiveDir(temp.resolve("archive").toFile())
-                    .controlChannel(control).replicationChannel("aeron:udp?endpoint=127.0.0.1:0").threadingMode(ArchiveThreadingMode.SHARED));
+                    .controlChannelEnabled(false).localControlChannel(control)
+                    .archiveClientContext(new AeronArchive.Context().controlRequestChannel(control).controlResponseChannel("aeron:ipc"))
+                    .replicationChannel("aeron:udp?endpoint=127.0.0.1:0").threadingMode(ArchiveThreadingMode.SHARED));
             var aeron=Aeron.connect(new Aeron.Context().aeronDirectoryName(directory));
             var archive=AeronArchive.connect(new AeronArchive.Context().aeron(aeron).ownsAeronClient(false)
                     .controlRequestChannel(control).controlResponseChannel("aeron:ipc"));

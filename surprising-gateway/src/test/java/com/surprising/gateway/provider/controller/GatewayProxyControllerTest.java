@@ -34,6 +34,25 @@ import static org.mockito.Mockito.when;
 class GatewayProxyControllerTest {
 
     @Test
+    void adminEffectiveFeeReadRequiresTheExistingTradingFeesReadPermission() {
+        var properties = properties();
+        properties.getAdminRoutes().put("trading-fees", new GatewayProperties.BackendRoute(
+                "http://fees:9084", "/api/v1/admin/trading/fees", true));
+        var auth = adminAuthService();
+        doThrow(new IllegalStateException("permission denied")).when(auth)
+                .requireAdminPermission(7L, List.of("ADMIN"), "admin.gateway.trading-fees.read");
+        var proxy = gateway(properties, new RestTemplate(), auth, null, new CapturedApproval());
+        var request = new MockHttpServletRequest("GET", "/api/v1/admin/gateway/trading-fees/effective");
+        request.addHeader("Authorization", "Bearer admin");
+        request.addHeader("X-Product-Line", "LINEAR_PERPETUAL");
+        request.setQueryString("userId=9007199254740993&instrumentId=604&productLine=LINEAR_PERPETUAL");
+        assertThatThrownBy(() -> proxy.proxy("trading-fees", HttpMethod.GET, request, null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        denied -> assertThat(denied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+        org.mockito.Mockito.verify(auth).requireAdminPermission(7L, List.of("ADMIN"), "admin.gateway.trading-fees.read");
+    }
+
+    @Test
     void targetUriUsesAllowlistedBackendAndPreservesQueryString() {
         GatewayProperties properties = properties();
         GatewayProxyController controller = gateway(properties, new RestTemplate());

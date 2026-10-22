@@ -8,8 +8,9 @@ import org.springframework.stereotype.Service;
 public class WebSocketJwtAuthenticator {
     private final AuthService auth;
     public WebSocketJwtAuthenticator(AuthService auth) {this.auth=auth;}
-    public long authenticate(String token) {
+    public com.surprising.gateway.provider.auth.model.AuthModels.JwtPrincipal principal(String token) {
         if(token==null || token.isBlank() || token.length()>4096) throw new IllegalArgumentException("missing websocket token");
-        return auth.authenticateBearer("Bearer "+token).userId();
+        return auth.authenticateBearer("Bearer "+token);
     }
+    public long authenticate(String token) { return principal(token).userId(); }
 }

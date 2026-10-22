@@ -22,15 +22,15 @@ import java.util.concurrent.CompletionStage;
 import org.springframework.stereotype.Component;
 
 /**
- * 本地协议与内部HTTP共用的请求绑定、参数校验及响应转换；业务由实际Service处理，不声明HTTP路由。
+ * HTTP/本地路由共用的协议适配：绑定格式和错误响应；业务由实际Service处理，不声明HTTP路由。
  */
 @Component
-public class TriggerOrderRequestController {
+public class TriggerOrderRequestHandler {
 
     private final TriggerOrderService triggerOrderService;
     private final com.surprising.trading.order.service.OrderService orderResults;
 
-    public TriggerOrderRequestController(TriggerOrderService triggerOrderService,
+    public TriggerOrderRequestHandler(TriggerOrderService triggerOrderService,
             com.surprising.trading.order.service.OrderService orderResults) {
         this.triggerOrderService = triggerOrderService;
         this.orderResults = orderResults;

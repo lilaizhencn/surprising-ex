@@ -5,6 +5,8 @@ import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreLaneMetricsCodec;
+import com.surprising.aeron.protocol.CoreLaneMetricsView;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderBatchResult;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -177,7 +179,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
         if (warmupSeconds > 0) {
             execute(warmupSeconds, false);
         }
-        matches.set(0);
+        auditLaneMetrics("before");
+        long warmupMatches = matches.getAndSet(0);
         failures.set(0);
         firstFailure.set(null);
         capacityMetrics.reset();
@@ -192,9 +195,9 @@ public final class ClusterCapacityMain implements AutoCloseable {
         marketDataCommands.set(0);
         transientOfferRetries.set(0);
         nextPermitNanos.set(System.nanoTime());
-        long started = System.nanoTime();
-        execute(durationSeconds, true);
-        long elapsedNanos = System.nanoTime() - started;
+        MeasurementWindow measurement = execute(durationSeconds, true);
+        long elapsedNanos = measurement.finishedNanos() - measurement.startedNanos();
+        long steadyNanos = measurement.deadlineNanos() - measurement.startedNanos();
         if (activeRequests.get() != 0 || submittedRequests.get() != completedRequests.get()) {
             throw new IllegalStateException("measurement requests not drained");
         }
@@ -202,9 +205,13 @@ public final class ClusterCapacityMain implements AutoCloseable {
             throw new IllegalStateException("global request window exceeded");
         }
         verifyFundsAndBook();
+        auditLaneMetrics("after");
         long matchCount = matches.get();
+        log.info("warmupMatches={} totalRunMatches={}", warmupMatches, Math.addExact(warmupMatches, matchCount));
         double elapsedSeconds = elapsedNanos / 1_000_000_000.0;
         MetricsSnapshot metrics = capacityMetrics.snapshot(elapsedNanos);
+        SteadyMetricsSnapshot steady = capacityMetrics.steadySnapshot(steadyNanos);
+        long drainFinalized = Math.subtractExact(metrics.finalized(), steady.finalized());
         if (workload.asynchronous() && (metrics.offered() != metrics.finalized()
                 || metrics.accepted() != metrics.finalized() || metrics.finalized() != 2 * matchCount
                 || metrics.finalized() % ordersPerRequest != 0
@@ -216,13 +223,21 @@ public final class ClusterCapacityMain implements AutoCloseable {
         }
         log.info("{}", String.format(java.util.Locale.ROOT, "capacity=PASS scope=CLUSTER_NETWORK productLine=%s workload=%s symbols=%d users=%d workers=%d connections=%d "
                         + "targetOfferedPerSec=%d offered=%d accepted=%d finalized=%d matches=%d failures=%d elapsedSeconds=%.3f "
-                        + "finalizedPerSec=%.3f coreMatchEventsPerSec=%.3f requestToTerminalP50Micros=%d "
+                        + "inclusiveFinalizedPerSec=%.3f inclusiveCoreMatchEventsPerSec=%.3f requestToTerminalP50Micros=%d "
                         + "requestToTerminalP99Micros=%d requestToTerminalP999Micros=%d "
                         + "pendingMax=-1 completionQueueMax=-1 fundsDiff=0 bookLevels=0%n",
                 productLine, workload, symbols.size(), userCount, workers, connections, offeredCommandsPerSecond,
                 metrics.offered(), metrics.accepted(), metrics.finalized(), matchCount, failures.get(), elapsedSeconds,
                 metrics.finalizedPerSecond(), matchCount / elapsedSeconds, metrics.p50Micros(), metrics.p99Micros(),
                 metrics.p999Micros()).stripTrailing());
+        log.info("{}", String.format(java.util.Locale.ROOT,
+                "steadyCapacity elapsedSeconds=%.6f terminalBusinessOperations=%d businessOpsPerSec=%.3f "
+                        + "requestToTerminalP50Micros=%d requestToTerminalP90Micros=%d requestToTerminalP95Micros=%d "
+                        + "requestToTerminalP99Micros=%d requestToTerminalP999Micros=%d requestToTerminalMaxMicros=%d%n",
+                steadyNanos / 1e9, steady.finalized(), steady.finalizedPerSecond(), steady.p50Micros(),
+                steady.p90Micros(), steady.p95Micros(), steady.p99Micros(), steady.p999Micros(), steady.maxMicros()).stripTrailing());
+        log.info("drain elapsedNanos={} terminalBusinessOperations={} unfinishedRequests={}",
+                Math.max(0, measurement.finishedNanos() - measurement.deadlineNanos()), drainFinalized, activeRequests.get());
         log.info("{}", String.format(java.util.Locale.ROOT, "marketDataCommands=%d marketDataCommandsPerSec=%.3f totalTerminalCoreMessages=%d%n",
                 marketDataCommands.get(), marketDataCommands.get() / elapsedSeconds,
                 Math.addExact(metrics.finalized() / ordersPerRequest, marketDataCommands.get())).stripTrailing());
@@ -232,8 +247,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
         log.info("totalWindow={} observedRequestMax={} unfinishedRequests={} submittedRequests={} completedRequests={}", asyncInFlight, peakRequests.get(), activeRequests.get(), submittedRequests.get(), completedRequests.get());
         log.info("{}", String.format(java.util.Locale.ROOT, "requestOccupancySampleIntervalSeconds=1 samples=%d mean=%.3f%n",
                 occupancySamples, occupancySamples == 0 ? 0.0 : (double) occupancySum / occupancySamples).stripTrailing());
-        printLatency(workload.stream() ? "sell" : "maker", makerMetrics.snapshot(elapsedNanos));
-        printLatency(workload.stream() ? "buy" : "taker", takerMetrics.snapshot(elapsedNanos));
+        printLatency(workload.stream() ? "sell" : "maker", makerMetrics.steadySnapshot(steadyNanos));
+        printLatency(workload.stream() ? "buy" : "taker", takerMetrics.steadySnapshot(steadyNanos));
         capacityMetrics.printHistogram();
     }
 
@@ -257,8 +272,11 @@ public final class ClusterCapacityMain implements AutoCloseable {
         }
     }
 
-    private void execute(int seconds, boolean measured) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
+    private MeasurementWindow execute(int seconds, boolean measured) throws InterruptedException {
+        // Start the window only after every load worker is ready; initialization is not offered load.
+        AtomicLong deadline = new AtomicLong();
+        long startedNanos;
+        long startedEpochMillis;
         CountDownLatch ready = new CountDownLatch(workers);
         CountDownLatch start = new CountDownLatch(1);
         AtomicBoolean stop = new AtomicBoolean();
@@ -268,15 +286,16 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 executor.submit(() -> {
                     ready.countDown();
                     start.await();
+                    long workerDeadline = deadline.get();
                     long cycle = 0;
-                    while (!stop.get() && System.nanoTime() < deadline) {
+                    while (!stop.get() && System.nanoTime() < workerDeadline) {
                         try {
                             if (workload == Workload.MATCH) {
                                 matchCycle(workerId, cycle++, measured);
                             } else if (workload == Workload.MATCH_ASYNC) {
-                                asyncMatch(workerId, deadline, measured);
+                                asyncMatch(workerId, workerDeadline, measured);
                             } else if (workload.stream()) {
-                                streamMatch(workerId, deadline, measured);
+                                streamMatch(workerId, workerDeadline, measured);
                             } else if (workload == Workload.CANCEL) {
                                 cancelCycle(workerId, measured);
                             } else if (workload == Workload.PLACE_ONLY) {
@@ -294,7 +313,20 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 });
             }
             ready.await();
+            startedNanos = System.nanoTime();
+            startedEpochMillis = System.currentTimeMillis();
+            deadline.set(Math.addExact(startedNanos, TimeUnit.SECONDS.toNanos(seconds)));
+            if (measured) {
+                capacityMetrics.measureBetween(startedNanos, deadline.get());
+                makerMetrics.measureBetween(startedNanos, deadline.get());
+                takerMetrics.measureBetween(startedNanos, deadline.get());
+            }
             start.countDown();
+            if (measured) {
+                log.info("measurementStartEpochMillis={} measurementEndEpochMillis={} measurementDurationNanos={}",
+                        startedEpochMillis, Math.addExact(startedEpochMillis, TimeUnit.SECONDS.toMillis(seconds)),
+                        deadline.get() - startedNanos);
+            }
             executor.shutdown();
             long lastReport = System.nanoTime();
             long lastFinalized = 0;
@@ -311,7 +343,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
                         lastFinalized = finalized;
                     }
                 }
-                if (now > deadline + TimeUnit.SECONDS.toNanos(30)) {
+                if (now > deadline.get() + TimeUnit.SECONDS.toNanos(30)) {
                     stop.set(true);
                     executor.shutdownNow();
                     throw new IllegalStateException("capacity workers did not terminate");
@@ -321,7 +353,11 @@ public final class ClusterCapacityMain implements AutoCloseable {
         if (failures.get() != 0) {
             throw new IllegalStateException("capacity workload failed count=" + failures.get(), firstFailure.get());
         }
+        return new MeasurementWindow(startedNanos, deadline.get(), System.nanoTime());
     }
+
+    /** Fixed offered-load window; finishedNanos includes the separately reported drain. */
+    private record MeasurementWindow(long startedNanos, long deadlineNanos, long finishedNanos) { }
 
     private void matchCycle(int worker, long cycle, boolean measured) {
         String instrumentId = instrumentId(worker, cycle);
@@ -336,9 +372,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
             long takerOrder = nextOrderId.incrementAndGet();
             submitOrder(makerUser, order(instrumentId, makerOrder, makerSide, CoreTimeInForce.GTC), measured);
             submitOrder(takerUser, order(instrumentId, takerOrder, takerSide, CoreTimeInForce.IOC), measured);
-            if (measured) {
-                matches.incrementAndGet();
-            }
+            matches.incrementAndGet();
         }
     }
 
@@ -380,8 +414,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
                     record(response, nanos, measured);
                     if (measured) {
                         takerMetrics.recordFinalized(nanos);
-                        matches.incrementAndGet();
                     }
+                    matches.incrementAndGet();
                 }, System::nanoTime);
                 count++;
                 cycle++;
@@ -442,8 +476,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
                         for (int item = 0; item < ordersPerRequest; item++) {
                             (buy ? takerMetrics : makerMetrics).recordFinalized(nanos);
                         }
-                        matches.addAndGet(fills);
                     }
+                    matches.addAndGet(fills);
                 }, System::nanoTime);
                 count++;
                 if (buy) cycle++;
@@ -641,6 +675,32 @@ public final class ClusterCapacityMain implements AutoCloseable {
         }
     }
 
+    /** Read actual topology and drained queues outside the offered-load window. */
+    private void auditLaneMetrics(String phase) {
+        var response = clients.query(CoreMessageType.LANE_METRICS_QUERY, stableId("lane-metrics:" + phase),
+                0, new byte[0]);
+        if (response.status() != ResponseStatus.OK)
+            throw new IllegalStateException("Lane metrics query failed: " + response.resultCode());
+        CoreLaneMetricsView view = CoreLaneMetricsCodec.decode(response.data());
+        requireDrainedTopology(view, positiveInt("surprising.aeron.matching-engines", 1),
+                positiveInt("surprising.aeron.account-lanes", 2));
+        log.info("actualLaneMetrics phase={} matchingEngines={} accountLanes={} matcherDispatchDepth={} "
+                        + "matchingCompletionDepth={} commandContextDepth={} accountQueueDepths={} "
+                        + "accountQueueHighWater={} committedCoreSequence={}", phase, view.matchingEngineCount(),
+                view.accountLaneCount(), view.matcherDispatchDepth(), view.matchingCompletionDepth(),
+                view.commandContextDepth(), Arrays.toString(view.accountLaneQueueDepths()),
+                Arrays.toString(view.accountLaneQueueHighWaterMarks()), view.committedCoreSequence());
+    }
+
+    static void requireDrainedTopology(CoreLaneMetricsView view, int expectedMatchers, int expectedLanes) {
+        if (view.matchingEngineCount() != expectedMatchers || view.accountLaneCount() != expectedLanes)
+            throw new IllegalStateException("actual Core topology differs from the requested benchmark topology");
+        if (view.matcherDispatchDepth() != 0 || view.matchingCompletionDepth() != 0
+                || view.commandContextDepth() != 0 || Arrays.stream(view.accountLaneQueueDepths()).anyMatch(depth -> depth != 0)
+                || Arrays.stream(view.accountLaneOldestPendingSequences()).anyMatch(sequence -> sequence != 0))
+            throw new IllegalStateException("Core queues were not drained at the measurement boundary");
+    }
+
     private long economicFunds(long userId) {
         var response = clients.query(CoreMessageType.USER_STATE_QUERY, stableId("user-query:" + userId), userId,
                 new byte[0]);
@@ -664,8 +724,6 @@ public final class ClusterCapacityMain implements AutoCloseable {
 
     private PlaceOrderCommand order(
             String instrumentId, long orderId, CoreOrderSide side, CoreTimeInForce timeInForce, long price) {
-        String reservationAsset = productLine == ProductLine.SPOT
-                ? (side == CoreOrderSide.BUY ? "USDT" : "BTC") : settleAsset();
         return new PlaceOrderCommand(orderId, instrumentId, side, price, QUANTITY_STEPS, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, timeInForce, false, "");
     }
 
@@ -714,14 +772,6 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 ? "BTC" : "USDT";
     }
 
-    private static long percentileMicros(List<Long> sorted, double percentile) {
-        if (sorted.isEmpty()) {
-            return 0;
-        }
-        int index = (int) Math.ceil(percentile * sorted.size()) - 1;
-        return TimeUnit.NANOSECONDS.toMicros(sorted.get(Math.max(0, Math.min(index, sorted.size() - 1))));
-    }
-
     private static void runLocalBaseline(String[] args) {
         long seed = args.length > 1 ? Long.parseLong(args[1]) : 9901L;
         if (seed <= 0) throw new IllegalArgumentException("baseline seed must be positive");
@@ -752,6 +802,10 @@ public final class ClusterCapacityMain implements AutoCloseable {
 
         private final long expectedIntervalNanos;
         private final Histogram finalizationLatency = new Histogram(HIGHEST_TRACKABLE_NANOS, 3);
+        private final Histogram steadyFinalizationLatency = new Histogram(HIGHEST_TRACKABLE_NANOS, 3);
+        private long measurementStart = Long.MIN_VALUE;
+        private long measurementEnd = Long.MAX_VALUE;
+        private long steadyFinalized;
         private long offered;
         private long accepted;
         private long finalized;
@@ -769,13 +823,41 @@ public final class ClusterCapacityMain implements AutoCloseable {
             accepted++;
         }
 
-        synchronized void recordFinalized(long acceptanceToFinalizationNanos) {
+        synchronized void measureBetween(long startNanos, long endNanos) {
+            if (endNanos <= startNanos) throw new IllegalArgumentException("measurement window must be positive");
+            measurementStart = startNanos;
+            measurementEnd = endNanos;
+        }
+
+        void recordFinalized(long acceptanceToFinalizationNanos) {
+            recordFinalizedAt(acceptanceToFinalizationNanos, System.nanoTime());
+        }
+
+        synchronized void recordFinalizedAt(long acceptanceToFinalizationNanos, long terminalNanos) {
             if (acceptanceToFinalizationNanos <= 0) {
                 throw new IllegalArgumentException("acceptance-to-finalization latency must be positive");
             }
             finalizationLatency.recordValueWithExpectedInterval(
                     Math.min(acceptanceToFinalizationNanos, HIGHEST_TRACKABLE_NANOS), expectedIntervalNanos);
             finalized++;
+            if (terminalNanos >= measurementStart && terminalNanos < measurementEnd) {
+                steadyFinalizationLatency.recordValueWithExpectedInterval(
+                        Math.min(acceptanceToFinalizationNanos, HIGHEST_TRACKABLE_NANOS), expectedIntervalNanos);
+                steadyFinalized++;
+            }
+        }
+
+        synchronized SteadyMetricsSnapshot steadySnapshot(long elapsedNanos) {
+            if (elapsedNanos <= 0) throw new IllegalArgumentException("elapsed time must be positive");
+            return new SteadyMetricsSnapshot(steadyFinalized,
+                    steadyFinalized * 1_000_000_000.0 / elapsedNanos,
+                    TimeUnit.NANOSECONDS.toMicros(steadyFinalizationLatency.getValueAtPercentile(50)),
+                    TimeUnit.NANOSECONDS.toMicros(steadyFinalizationLatency.getValueAtPercentile(99)),
+                    TimeUnit.NANOSECONDS.toMicros(steadyFinalizationLatency.getValueAtPercentile(99.9)),
+                    steadyFinalizationLatency.getTotalCount(),
+                    TimeUnit.NANOSECONDS.toMicros(steadyFinalizationLatency.getValueAtPercentile(90)),
+                    TimeUnit.NANOSECONDS.toMicros(steadyFinalizationLatency.getValueAtPercentile(95)),
+                    TimeUnit.NANOSECONDS.toMicros(steadyFinalizationLatency.getMaxValue()));
         }
 
         synchronized MetricsSnapshot snapshot(long elapsedNanos) {
@@ -799,7 +881,11 @@ public final class ClusterCapacityMain implements AutoCloseable {
             offered = 0;
             accepted = 0;
             finalized = 0;
+            steadyFinalized = 0;
+            measurementStart = Long.MIN_VALUE;
+            measurementEnd = Long.MAX_VALUE;
             finalizationLatency.reset();
+            steadyFinalizationLatency.reset();
         }
 
         private long micros(double percentile) {
@@ -812,7 +898,12 @@ public final class ClusterCapacityMain implements AutoCloseable {
                            long p90Micros, long p95Micros, long maxMicros) {
     }
 
-    private static void printLatency(String business, MetricsSnapshot m) {
+    /** Terminal increments and latency within the fixed window, excluding warmup and drain. */
+    record SteadyMetricsSnapshot(long finalized, double finalizedPerSecond,
+                                 long p50Micros, long p99Micros, long p999Micros, long correctedSampleCount,
+                                 long p90Micros, long p95Micros, long maxMicros) { }
+
+    private static void printLatency(String business, SteadyMetricsSnapshot m) {
         log.info("latencyBusiness={} samples={} requestToTerminalMicros p50={} p90={} p95={} p99={} p999={} max={}", business, m.finalized(), m.p50Micros(), m.p90Micros(), m.p95Micros(), m.p99Micros(), m.p999Micros(), m.maxMicros());
     }
 

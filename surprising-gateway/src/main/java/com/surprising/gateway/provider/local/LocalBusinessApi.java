@@ -58,7 +58,7 @@ public final class LocalBusinessApi {
         return accountProperties.getKafka().getProductLine();
     }
 
-    public static LocalBusinessApi shared(com.surprising.instrument.provider.controller.InstrumentRequestController instruments,
+    public static LocalBusinessApi shared(com.surprising.instrument.provider.controller.InstrumentRequestHandler instruments,
                                          ObjectMapper mapper, Validator validator,
                                          com.surprising.websocket.provider.service.SubscriptionRegistry websocket) {
         return new LocalBusinessApi(null, null, new InstrumentLocalRoutes(instruments, null), mapper, validator,
@@ -137,7 +137,8 @@ public final class LocalBusinessApi {
                                           HttpHeaders headers, byte[] body, Duration timeout) {
         LocalApiRequest request = new LocalApiRequest(target, method, headers, body, mapper, validator);
         try {
-            if (request.hasAdminTarget() && headers.getFirst("X-Admin-User-Id") == null) {
+            if (request.hasAdminTarget() && (headers.getFirst("X-Admin-User-Id") == null
+                    || headers.getFirst("X-Admin-User-Id").isBlank())) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "admin identity is required");
             }
             Object result = switch (service.toLowerCase(java.util.Locale.ROOT)) {

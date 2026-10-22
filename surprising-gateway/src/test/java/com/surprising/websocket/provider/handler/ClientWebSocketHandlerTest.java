@@ -31,13 +31,15 @@ class ClientWebSocketHandlerTest {
     private final C2cChatRealtime chat=mock(C2cChatRealtime.class);
     private final ClientWebSocketHandler handler=new ClientWebSocketHandler(json,registry,properties,
             new WebSocketJwtAuthenticator(auth),mock(GatewayProductServices.class));
+    private final com.surprising.websocket.provider.service.WebSocketSessionAuthorization authorization = new com.surprising.websocket.provider.service.WebSocketSessionAuthorization(registry, new WebSocketJwtAuthenticator(auth), java.util.Optional.of(chat));
+    private final com.surprising.websocket.provider.task.WebSocketSessionAuthorizationTask authorizationTask = new com.surprising.websocket.provider.task.WebSocketSessionAuthorizationTask(registry, authorization, new com.surprising.websocket.provider.config.WebSocketAuthorizationConfiguration().websocketAuthorizationChecks(properties));
     private final List<String> frames=new CopyOnWriteArrayList<>();
     private final List<WebSocketSession> sessions=new ArrayList<>();
     @BeforeEach void setup() {
         handler.c2c(chat);
         when(auth.authenticateBearer("Bearer qa-7")).thenReturn(new JwtPrincipal(7,"qa","NORMAL",List.of("USER"),Instant.now().plusSeconds(60)));
     }
-    @AfterEach void cleanup() {for(var session:sessions)registry.remove(session.getId());}
+    @AfterEach void cleanup() {authorizationTask.close();for(var session:sessions)registry.remove(session.getId());}
     private WebSocketSession session() throws Exception {
         var session=mock(WebSocketSession.class);when(session.getId()).thenReturn(UUID.randomUUID().toString());when(session.isOpen()).thenReturn(true);
         var headers=new HttpHeaders();headers.set("X-User-Id","99");when(session.getHandshakeHeaders()).thenReturn(headers);
@@ -79,6 +81,68 @@ class ClientWebSocketHandlerTest {
         command(session,Map.of("op","subscribe","channel","orders","productLine","SPOT"));
         awaitFrame("access session is no longer active");
     }
+    @Test void revokedSessionIsClosedAndRoutesRemovedWhileAnotherSessionOfSameUserSurvives() throws Exception {
+        when(auth.authenticateBearer("Bearer qa-other"))
+                .thenReturn(new JwtPrincipal(7,"qa","NORMAL",List.of("USER"),Instant.now().plusSeconds(60)));
+        var revoked = session();
+        var healthy = session();
+        command(revoked, Map.of("op", "authenticate", "token", "qa-7"));
+        command(healthy, Map.of("op", "authenticate", "token", "qa-other"));
+        command(revoked, Map.of("op", "subscribe", "channel", "orders", "productLine", "SPOT"));
+        command(healthy, Map.of("op", "subscribe", "channel", "orders", "productLine", "SPOT"));
+        var topic = new SubscriptionTopic(WsChannel.ORDERS, "*", null, 7L, ProductLine.SPOT);
+        assertThat(registry.subscriberCount(topic)).isEqualTo(2);
+        doThrow(new IllegalArgumentException("access session is no longer active"))
+                .when(auth).authenticateBearer("Bearer qa-7");
+        Thread.sleep(3100);
+        authorizationTask.revalidateSessions();
+        verify(revoked, timeout(1000)).close(argThat(status -> status.getCode() == 1008));
+        verify(healthy, never()).close(any(CloseStatus.class));
+        assertThat(registry.subscriberCount(topic)).isEqualTo(1);
+        org.mockito.Mockito.verify(revoked, timeout(1000)).close(any(CloseStatus.class));
+        long cleanupDeadline = System.nanoTime() + 1_000_000_000L;
+        while (registry.activeConnectionCount() > 1 && System.nanoTime() < cleanupDeadline) Thread.sleep(5);
+        assertThat(registry.activeConnectionCount()).isEqualTo(1);
+        clearInvocations(revoked);
+        registry.publish(topic, "private-after-revocation", Instant.now());
+        awaitFrame("private-after-revocation");
+        verify(revoked, never()).sendMessage(argThat(message -> message.getPayload().toString().contains("private-after-revocation")));
+
+    }
+
+    @Test void expiredTokenCannotQueueMorePrivateMessagesEvenBeforeScheduledRecheck() throws Exception {
+        var session = session();
+        command(session, Map.of("op", "authenticate", "token", "qa-7"));
+        command(session, Map.of("op", "subscribe", "channel", "orders", "productLine", "SPOT"));
+        awaitFrame("subscribed");
+        var connection = registry.connection(session.getId());
+        connection.renewAuthorization("qa-7", Instant.now().minusMillis(1));
+        var topic = new SubscriptionTopic(WsChannel.ORDERS, "*", null, 7L, ProductLine.SPOT);
+        registry.publish(topic, "never-deliver-after-expiry", Instant.now());
+        verify(session, timeout(1000)).close(argThat(status -> status.getCode() == 1008));
+        assertThat(registry.subscriberCount(topic)).isZero();
+        assertThat(connection.queuedMessages()).isZero();
+        assertThat(frames).noneMatch(frame -> frame.contains("never-deliver-after-expiry"));
+    }
+
+    @Test void idleExpiredConnectionIsClosedAndFrozenAccountFailsThePeriodicCheck() throws Exception {
+        var expired = session();
+        command(expired, Map.of("op", "authenticate", "token", "qa-7"));
+        registry.connection(expired.getId()).renewAuthorization("qa-7", Instant.now().minusMillis(1));
+        authorizationTask.revalidateSessions();
+        verify(expired, timeout(1000)).close(argThat(status -> status.getCode() == 1008));
+        var frozen = session();
+        command(frozen, Map.of("op", "authenticate", "token", "qa-7"));
+        command(frozen, Map.of("op", "subscribe", "channel", "orders", "productLine", "SPOT"));
+        doThrow(new IllegalStateException("user is not active")).when(auth).authenticateBearer("Bearer qa-7");
+        Thread.sleep(3100);
+        authorizationTask.revalidateSessions();
+        verify(frozen, timeout(1000)).close(argThat(status -> status.getCode() == 1008));
+        long cleanupDeadline = System.nanoTime() + 1_000_000_000L;
+        while (registry.activeConnectionCount() > 0 && System.nanoTime() < cleanupDeadline) Thread.sleep(5);
+        assertThat(registry.activeConnectionCount()).isZero();
+    }
+
     @Test void disconnectCleansChatSubscriptionsAlongWithMarketSubscriptions() throws Exception {
         var session=session();handler.afterConnectionClosed(session,CloseStatus.NORMAL);
         verify(chat).closed(session.getId());assertThatThrownBy(()->registry.connection(session.getId())).isInstanceOf(IllegalStateException.class);

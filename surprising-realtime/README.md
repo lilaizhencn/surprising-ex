@@ -622,3 +622,10 @@ OptionQuoteService只持有源事件与业务聚合，OptionQuoteException为原
 共享读视图API的失败使用 `realtime.api.exception.ReadViewUnavailableException`，保留 `READ_VIEW_*` / `MARKET_BOOK_UNAVAILABLE` 原因，不选择HTTP状态。Gateway在Controller/本地协议边界映射503；Redis租约、版本门槛、过期/epoch检查和禁止Core回退的读取规则保持。
 
 Kafka职责归包：独立快照、审计、结算/排空及推送消费入口统一放在各自provider.consumer（价格为index.consumer/mark.consumer），业务和缓存继续由原Service/状态所有者负责。监听topic、group、启动条件与处理顺序保持；做市事件唤醒组件为consumer.MakerQuoteWakeups，原唯一信号状态不变。详见 docs/validation/java-mvc-consumer-packages-20261022.json。
+
+
+## 输入流连续性恢复（2026-10-22）
+
+接收器的坏帧、处理异常和传输失效暂停接收，由 router 自有工作线程清掉未完成快照/commit、待路由输入与旧发送积压，更新产品 sourceEpoch，再恢复接收；不会等待下一笔成交才把旧账户投影置为不可用。退休下游 Aeron image 使 gateway/price 同步失效各自旧基线，既有 snapshot/book 重试继续申请权威状态。恢复以故障版本确认，新的故障不能被旧确认覆盖。
+
+逐帧发送、排队与 Kafka 成交提交成功日志为有开关保护的 DEBUG，失败诊断限频，累计计数保留；没有据此声称吞吐或零分配改善。回归包含真实 Redis/Aeron 坏帧后即使没有后续 commit，原 READY read view 也必须失效。

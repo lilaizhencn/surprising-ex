@@ -33,7 +33,6 @@ ISOLATE_STAGE="${ASYNC_ISOLATE_STAGE:-false}"
 # blocking/park overhead.
 SETTLEMENT_WAIT_STRATEGY="${ASYNC_SETTLEMENT_WAIT_STRATEGY:-${AERON_BASELINE_SETTLEMENT_WAIT_STRATEGY}}"
 SETTLEMENT_SPIN_LIMIT="${ASYNC_SETTLEMENT_SPIN_LIMIT:-${AERON_BASELINE_SETTLEMENT_SPIN_LIMIT}}"
-MATCHER_WAIT_STRATEGY="${ASYNC_MATCHER_WAIT_STRATEGY:-${AERON_BASELINE_MATCHER_WAIT_STRATEGY}}"
 MATCHER_PIPELINE_WAIT_STRATEGY="${ASYNC_MATCHER_PIPELINE_WAIT_STRATEGY:-${AERON_BASELINE_MATCHER_PIPELINE_WAIT_STRATEGY:-ADAPTIVE}}"
 OWNER_WAIT_STRATEGY="${ASYNC_OWNER_WAIT_STRATEGY:-${AERON_BASELINE_OWNER_WAIT_STRATEGY:-ADAPTIVE}}"
 OWNER_INPUT_BATCH_SIZE="${ASYNC_OWNER_INPUT_BATCH_SIZE:-64}"
@@ -87,8 +86,8 @@ if [[ "${SKIP_BUILD}" != true ]]; then
 fi
 [[ -s "${SERVICE_JAR}" && -s "${BENCHMARK_JAR}" ]] || { echo "Build artifacts are missing" >&2; exit 2; }
 printf '%s\n' "${JAVA_VERSION}" > "${ROOT}/java-version.txt"
-printf 'windows=%s\nwarmupSeconds=%s\nmeasureSeconds=%s\nnodeXms=%s\nnodeXmx=%s\nclientXms=%s\nclientXmx=%s\ncollector=%s\naccountLanes=%s\nmatchingEngines=%s\nbatchSize=%s\nsymbols=%s\ntradingProfile=%s\nisolateStage=%s\nenableJfr=%s\nmatcherWaitStrategy=%s\nmatcherPipelineWaitStrategy=%s\nsettlementWaitStrategy=%s\nsettlementSpinLimit=%s\nownerWaitStrategy=%s\nownerInputBatchSize=%s\n' \
-  "${WINDOWS_CSV}" "${WARMUP_SECONDS}" "${MEASURE_SECONDS}" "${NODE_XMS}" "${NODE_XMX}" "${CLIENT_XMS}" "${CLIENT_XMX}" "${COLLECTOR}" "${ACCOUNT_LANES}" "${MATCHING_ENGINES}" "${BATCH_SIZE}" "${SYMBOLS}" "${TRADING_PROFILE}" "${ISOLATE_STAGE}" "${ENABLE_JFR}" "${MATCHER_WAIT_STRATEGY}" "${MATCHER_PIPELINE_WAIT_STRATEGY}" "${SETTLEMENT_WAIT_STRATEGY}" "${SETTLEMENT_SPIN_LIMIT}" "${OWNER_WAIT_STRATEGY}" "${OWNER_INPUT_BATCH_SIZE}" > "${ROOT}/strategy.txt"
+printf 'windows=%s\nwarmupSeconds=%s\nmeasureSeconds=%s\nnodeXms=%s\nnodeXmx=%s\nclientXms=%s\nclientXmx=%s\ncollector=%s\naccountLanes=%s\nmatchingEngines=%s\nbatchSize=%s\nsymbols=%s\ntradingProfile=%s\nisolateStage=%s\nenableJfr=%s\nmatcherPipelineWaitStrategy=%s\nsettlementWaitStrategy=%s\nsettlementSpinLimit=%s\nownerWaitStrategy=%s\nownerInputBatchSize=%s\n' \
+  "${WINDOWS_CSV}" "${WARMUP_SECONDS}" "${MEASURE_SECONDS}" "${NODE_XMS}" "${NODE_XMX}" "${CLIENT_XMS}" "${CLIENT_XMX}" "${COLLECTOR}" "${ACCOUNT_LANES}" "${MATCHING_ENGINES}" "${BATCH_SIZE}" "${SYMBOLS}" "${TRADING_PROFILE}" "${ISOLATE_STAGE}" "${ENABLE_JFR}" "${MATCHER_PIPELINE_WAIT_STRATEGY}" "${SETTLEMENT_WAIT_STRATEGY}" "${SETTLEMENT_SPIN_LIMIT}" "${OWNER_WAIT_STRATEGY}" "${OWNER_INPUT_BATCH_SIZE}" > "${ROOT}/strategy.txt"
 printf 'serviceIdleStrategy=%s\n' "${SERVICE_IDLE_STRATEGY}" >> "${ROOT}/strategy.txt"
 
 NODE_PID=""
@@ -118,7 +117,7 @@ start_node() {
     -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.hostnames=127.0.0.1
     -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.node-id=0
     "-Dsurprising.aeron.account-lanes=${NODE_LANES}" "-Dsurprising.aeron.matching-engines=${NODE_MATCHERS}"
-    "-Dsurprising.aeron.owner-command-window=${window}" "-Dsurprising.aeron.matcher-wait-strategy=${MATCHER_WAIT_STRATEGY}"
+    "-Dsurprising.aeron.owner-command-window=${window}"
     "-Dsurprising.aeron.matcher-pipeline-wait-strategy=${MATCHER_PIPELINE_WAIT_STRATEGY}"
     "-Dsurprising.aeron.settlement-wait-strategy=${SETTLEMENT_WAIT_STRATEGY}"
     "-Dsurprising.aeron.settlement-spin-limit=${SETTLEMENT_SPIN_LIMIT}"
@@ -129,7 +128,7 @@ start_node() {
     "-Dsurprising.aeron.data-dir=${dir}/data" "-Daeron.dir=${dir}/aeron" "-Djava.io.tmpdir=${dir}/tmp")
   if [[ -n "${SOCKET_RCVBUF_BYTES}" ]]; then args+=("-Daeron.socket.so_rcvbuf=${SOCKET_RCVBUF_BYTES}"); fi
   if [[ "${ENABLE_JFR}" == true ]]; then
-    args+=(-Dcore.settlementLatencyDiagnostics=true "-XX:StartFlightRecording=settings=${PROFILE},filename=${dir}/node.jfr,maxsize=256m,dumponexit=true")
+    args+=("-XX:StartFlightRecording=settings=${PROFILE},filename=${dir}/node.jfr,maxsize=256m,dumponexit=true")
   fi
   # The shaded service jar owns the production entry point in its manifest.
   args+=(-jar "${SERVICE_JAR}")

@@ -6,6 +6,10 @@
 Core 仍独立。公共接口继续经过 Gateway 的身份、审批与审计，再调用本地业务入口。
 后台“产品与市场”维护产品线接入，数据库热加载，各自隔离连接、缓存、消费者和定时任务。
 托管与划转直接调用对应产品账户方法，无需额外的 SPOT Gateway。
+产品启动探测复用同一子容器和 Core 连接池，仅在尚未连接时重试只读探测；
+重试窗口沿用客户端连接预算，业务请求超时保持不变。窗口耗尽后不再发起新探测，
+当前一次仍由原响应超时结束；实际耗时最多包含连接窗口和最后一次响应等待。
+拒绝、其他连接故障、中断或关闭立即停止后续探测，失败容器统一释放后再由定时激活重试。
 详见 [多产品 Gateway 配置与验证](../docs/multi-product-gateway.md) 和
 [合并及部署说明](../docs/business-application-merge.md)。
 
@@ -120,7 +124,7 @@ curl 'http://localhost:9094/api/v1/admin/system/health' \
 ### 公共行情列表
 
 `GET /api/v1/gateway/instrument/list?productLine=LINEAR_PERPETUAL&status=TRADING&includeMarketSummary=true&includeTrend=true`
-由 `InstrumentRequestService.list` 一次返回合约配置与行情首屏摘要。
+由 `InstrumentRequestHandler.list` 一次返回合约配置与行情首屏摘要。
 `MarketSummaryRepository` 从已关闭的 1 分钟 K 线读取最近 24 小时，给每个币对添加
 `lastPrice`、`change24h`、`high24h`、`low24h`、`volume24h`（基础币）、
 `quoteVolume24h`（计价币）和最多 32 个收盘价组成的 `trend`。无成交时 `trend` 为空，
@@ -148,7 +152,7 @@ Gateway 会拒绝未知 service 名称。它不会把用户输入拼成任意后
 
 做市后台代理服务名 `market-maker` 转发到 `/api/v1/admin/market-maker`，覆盖策略状态、报价质量指标、策略参数覆盖、做市收益归因和策略运行日志。`/strategy-logs` 支持 `createdAt.desc`、`createdAt.asc` 游标分页，返回 `nextCursor`、`hasMore`、`sort`、`limit`。
 
-内部做市账户的杠杆由管理员通过 `POST /api/v1/admin/gateway/trading-leverage/settings` 设置。网关校验管理员身份和高风险写审批，并由 `TradingLocalRoutes -> LeverageRequestService -> LeverageService` 沿用合约、产品线及杠杆范围校验，最终交给 Core 的 `UPDATE_LEVERAGE` 命令；普通用户路由仍只允许修改自己的杠杆。Core 有挂单或持仓时会拒绝改杠杆，清理敞口后可重试；每次尝试使用新的命令 ID，避免旧拒绝结果阻止重试。
+内部做市账户的杠杆由管理员通过 `POST /api/v1/admin/gateway/trading-leverage/settings` 设置。网关校验管理员身份和高风险写审批，并由 `TradingLocalRoutes -> LeverageRequestHandler -> LeverageService` 沿用合约、产品线及杠杆范围校验，最终交给 Core 的 `UPDATE_LEVERAGE` 命令；普通用户路由仍只允许修改自己的杠杆。Core 有挂单或持仓时会拒绝改杠杆，清理敞口后可重试；每次尝试使用新的命令 ID，避免旧拒绝结果阻止重试。
 
 权限点 RBAC 由 `gateway_permissions` 和 `gateway_role_permissions` 驱动。gateway 会对本地 admin 路径校验 `admin.support.read`、`admin.users.read/write`、`admin.audit.read`、`admin.compliance.read/write`、`admin.permissions.write` 等权限，对后台代理路径校验 `admin.gateway.{service}.read/write`。角色和权限点接口位于 `/api/v1/admin/roles` 与 `/api/v1/admin/permissions`。`SUPER_ADMIN` 默认拥有 `admin.*`，`ADMIN` 默认拥有当前运营权限但不能修改权限点，`SUPPORT` 默认只拥有 `admin.support.read` 和 `admin.security.mfa`。
 
@@ -291,7 +295,7 @@ realtime API 7 项和 realtime provider 47 项通过，合计 **579 通过、34 
 
 ### 合并后的本地调用边界（2026-09-22）
 
-公共请求统一从 `GatewayProxyController` / `BinanceApiController` 进入，完成鉴权后由本地路由绑定参数并调用 Service，不再调用其他 Controller。原订单、账户、合约等 Controller 的请求校验、业务编排和结果转换已迁到相应 `*RequestService`；重复的公共/管理 HTTP Controller 已删除。盘口、合约同步和 WebSocket 指标直接调用已有 Service/Registry；没有新增状态、接口或异步阶段。
+公共请求统一从 `GatewayProxyController` / `BinanceApiController` 进入，完成鉴权后由本地路由绑定参数并调用 Service，不再调用其他 Controller。请求格式、身份头和HTTP错误转换由 `controller` 包下的 `*RequestHandler` 统一适配，业务校验与状态变化继续由既有Service承担；重复的公共/管理 HTTP Controller 已删除。盘口、合约同步和 WebSocket 指标直接调用已有 Service/Registry；没有新增状态、接口或异步阶段。
 
 独立 maker 仍需要 HTTP 接入，故保留 `OrderInternalController`、`AccountInternalController`、`MarketDataInternalController`，内部调用无需凭证。账户内部入口还服务跨产品线资金操作，已去掉不再使用的管理端别名。`InstrumentInternalController` 等原有内部查询/划转接口继续保留。管理 WebSocket 指标仅从 gateway 管理路由进入，原始 `/api/v1/admin/websocket/metrics` HTTP 映射已删除。
 
@@ -311,7 +315,7 @@ realtime API 7 项和 realtime provider 47 项通过，合计 **579 通过、34 
 
 ## 前端运行能力
 
-公开只读接口 `GET /api/v1/runtime` 返回当前整合网关实际服务的 `productLines`，来源为 `LocalBusinessApi.productLine()`，与账户和交易配置校验一致。前端据此订阅私有账户状态，避免等待未启用产品线的快照。该接口不包含账户数据或连接配置。
+公开匿名只读接口 `GET /api/v1/runtime` 是唯一产品发现路径，返回 `GatewayProductServices` 已就绪的 `productLines` 和数据库明确关闭的 `disabledProductLines`。启动中或连接失败的产品不算已禁用，不能据此显示零资产。前端据此订阅私有账户状态；接口不包含账户、连接配置或诊断错误，私有/管理代理仍独立鉴权。
 
 ## 公开未平仓量推送
 
@@ -323,7 +327,7 @@ realtime API 7 项和 realtime provider 47 项通过，合计 **579 通过、34 
 status=UNAVAILABLE，不用零代替失败。注册表拥有订阅生命周期，发布器不维护第二份持仓缓存。
 该频道由 gateway 查询出口直接发布，不注册 Aeron 实时路由，不更改 Core 提交或 Kafka topic。
 
-用户实际费率由私有路由 `GET /api/v1/gateway/trading-fees/effective?userId=...&symbol=...&productLine=...` 查询，映射到现有 `TradingFeeRequestService`。普通用户路由与管理员费率修改路由分离，沿用登录与账户归属校验。
+用户实际费率由私有路由 `GET /api/v1/gateway/trading-fees/effective?userId=...&instrumentId=...&productLine=...` 查询，映射到现有 `TradingFeeRequestHandler`。普通用户路由与管理员费率修改路由分离，沿用登录与账户归属校验。
 
 ## 两步登录与安全设置（2026-09-28）
 
@@ -401,7 +405,7 @@ Chrome 桌面及 390px 手机检查双语三验证码弹窗、设置开关及导
 
 `SubscriptionRegistry.publishDepth` 在一次推送内，用 IdentityHashMap 为每个相同的不可变 CoreOrderBookView 基线复用差量计算和 JSON。null 基线统一生成首次快照；不同基线仍单独计算，不仅凭 sequence 推断内容相同。临时映射由当前调用持有，结束即释放，不跨币对、产品或推送保留第二份盘口状态。
 
-每条连接仍单独检查版本、入有界队列；仅 send 成功后更新它的基线，失败按原规则移除慢连接。注册表同步边界保持不变，没有改变 websocket 协议或增加工作线程。
+每条连接单独检查版本、入有界队列；仅 send 成功后更新它的基线，失败移除慢连接。订阅索引与盘口基线只在注册表短锁内修改，Redis 路由登记/退订在锁外执行；同一连接的订阅、退订和断线串行处理。
 
 HotSpot JDK 27，对比 `243158a8` 的该方法与当前实现，使用相同 ObjectMapper、100 个成功接收的 stub 连接、每本盘口 100 档；预热 30 次，测量 200 次推送并录制最多 16MiB JFR。编码次数 20,000 → 200，调用线程分配量 606.521MB → 154.903MB，CPU 时间 832.942ms → 333.210ms。统计含 stub 连接调用成本，不含真实 socket、网络或客户端绘图，不能视为服务器整体 CPU 降幅。
 
@@ -441,7 +445,7 @@ HTTP、Kafka、WebSocket 和事件 DTO 已移除字符串追踪元数据；后�
 
 ## 交易维护的请求、事务与调度
 
-维护入口为 `com.surprising.trading.maintenance.controller.AdminMaintenanceController`，由现有
+维护入口为 `com.surprising.trading.maintenance.controller.AdminMaintenanceRequestHandler`，由现有
 `TradingLocalRoutes` 本地分发，不增加 HTTP 路由。入口检查身份、产品头、游标和64位字符串参数，
 转换为 `model.MaintenanceCommand`；Service检查现货限制、清场范围、价格组合和请求幂等身份。
 
@@ -489,27 +493,27 @@ KYC/OIDC/邮件的协议接入不与业务聚合混放。LoginVerificationModels
 
 实时状态入口归websocket.provider.controller，条件单历史持久化归trading.trigger.repository；保留原路由和用户/产品筛选。验证见 [其余归包记录](../docs/validation/java-mvc-remaining-packages-20261021.json)。
 
-合约目录本地分发仍由 `gateway.provider.local.InstrumentLocalRoutes` 调用 `instrument.provider.controller.InstrumentRequestController`，不新增内部HTTP路由。Controller解析产品选择、分页及HTTP异常；`InstrumentService.publicCatalog/publicLatest` 负责公开可见性和行情聚合。Repository接收原生 `InstrumentPageQuery`，SQL列只在Repository映射；合约编辑仍在原事务中持行锁检查版本并写配置/Outbox。
+合约目录本地分发仍由 `gateway.provider.local.InstrumentLocalRoutes` 调用 `instrument.provider.controller.InstrumentRequestHandler`，不新增内部HTTP路由。RequestHandler解析产品选择、分页及HTTP异常；`InstrumentService.publicCatalog/publicLatest` 负责公开可见性和行情聚合。Repository接收原生 `InstrumentPageQuery`，SQL列只在Repository映射；合约编辑仍在原事务中持行锁检查版本并写配置/Outbox。
 
 C2C后台的原始请求头、method/path/query、User-Agent和IP由 `c2c.controller.C2cAdminRequestBinding` 绑定为 `model.C2cAdminRequest`；审批正文保持原始字节摘要。Service只产生原生 `C2cProblem` 原因，`controller.advice.C2cHttpErrors` 映射HTTP并对未知内部异常脱敏。内部资金/对账状态故障保留PROCESSING回执供核查和原身份续办，不伪造为用户校验拒绝。
 
 账户/订单/成交/条件单读视图未就绪、落后、过期或无效使用原生 `ReadViewUnavailableException`；公共本地分发由 `LocalBusinessApi` 映射原503响应，产品内部HTTP由 `ReadViewHttpErrors` / 行情Controller处理。C2C对账直接读取 `AccountService`，仍分别续租并读取托管/手续费账户，任一不可用都不能按零余额放行。
 
-账户和交易本地协议请求组件统一位于各领域 `controller` 包（`AccountRequestController`、`OrderRequestController`、`LeverageRequestController`、`TradingFeeRequestController` 及管理/条件单请求组件）。它们以@Component共享内部HTTP与本地分发的校验/响应逻辑，不声明额外路由；状态变化、下单及查询业务由原Service承担。
+账户和交易本地协议请求组件统一位于各领域 `controller` 包（`AccountRequestHandler`、`OrderRequestHandler`、`LeverageRequestHandler`、`TradingFeeRequestHandler` 及管理/条件单请求组件）。它们以@Component共享内部HTTP与本地分发的校验/响应逻辑，不声明额外路由；状态变化、下单及查询业务由原Service承担。
 
-划转安全Service的估值不可用/需要验证以原生 `ProductTransferSecurityException` 表示，网关协议入口维持503/428并阻止资金协调器调用。算法单已提交视图中不存在时由Service返回原生NoSuchElementException，订单请求Controller映射404；未就绪仍使用读视图不可用契约，不回退Core或命令存储。
+划转安全Service的估值不可用/需要验证以原生 `ProductTransferSecurityException` 表示，网关协议入口维持503/428并阻止资金协调器调用。算法单已提交视图中不存在时由Service返回原生NoSuchElementException，订单RequestHandler映射404；未就绪仍使用读视图不可用契约，不回退Core或命令存储。
 
 算法单、成交及条件单Repository各读取一个实际业务投影；必要的初始化标记按同产品在同一条SQL中关联，用途已在 `readAssociated` 注释说明。未初始化返回原生不可用，健康空数据返回空页；标记和数据共享SQL快照，不分两次读取，排序在外层明确保持。原始请求绑定的剩余问题仍列于补充整改清单。
 
 交易统计的 `TradingMetricsRepository` 只读取 `core_trading_statistics_snapshot` 并返回 `StoredTradingMetrics` 原生行。`TradingMetricsService` 校验版本、产品、位置、窗口、时间和计数后截取榜单；Controller校验请求范围。响应保留 `committed-trading-v1` 的完整JSON字段及大整数节点，未知统计字段不会被DTO转换丢弃，也不转double。
 
-算法单查询的请求身份、分页、永久合约ID和客户端请求号由 `OrderRequestController` 校验/规范化；`AlgoOrderProjectionRepository` 接收原生查询条件，继续负责持久化父单事实的身份、进度一致性和必要初始化关联。
+算法单查询的请求身份、分页、永久合约ID和客户端请求号由 `OrderRequestHandler` 校验/规范化；`AlgoOrderProjectionRepository` 接收原生查询条件，继续负责持久化父单事实的身份、进度一致性和必要初始化关联。
 
-成交查询由 `OrderRequestController` / `AdminOrderRequestController` 绑定范围、排序及作用域游标，Service 和 `TradeProjectionRepository` 只接收 `TradeReadCursor` 的精确 long/int 坐标；`TradeReadCursors` 保持原有令牌格式。SQL保留同表 maker/taker 双侧事实与必要就绪关联，输出游标依据最后事实行编码。
+成交查询由 `OrderRequestHandler` / `AdminOrderRequestHandler` 绑定范围、排序及作用域游标，Service 和 `TradeProjectionRepository` 只接收 `TradeReadCursor` 的精确 long/int 坐标；`TradeReadCursors` 保持原有令牌格式。SQL保留同表 maker/taker 双侧事实与必要就绪关联，输出游标依据最后事实行编码。
 
-条件单历史查询由 `AdminTriggerOrderRequestController` 校验原始筛选、状态和分页协议，经 `TriggerReadCursors` 绑定为 `CoreTriggerOrderStatus`、`TriggerReadCursor` 和排序方向；Service保留产品归属检查，Repository只处理原生SQL条件和持久化事实。
+条件单历史查询由 `AdminTriggerOrderRequestHandler` 校验原始筛选、状态和分页协议，经 `TriggerReadCursors` 绑定为 `CoreTriggerOrderStatus`、`TriggerReadCursor` 和排序方向；Service保留产品归属检查，Repository只处理原生SQL条件和持久化事实。
 
-合约配置由 `InstrumentRequestController` 在调用业务前通过 `InstrumentConfigurationFormats` 检查标识、表示和连接协议格式；`InstrumentValidator` 聚合产品、保证金、资金费、档位及指数源业务规则。内部配置安装入口和基于持久化配置的状态更新仍显式检查表示完整性，均不依赖HTTP Controller。
+合约配置由 `InstrumentRequestHandler` 在调用业务前通过 `InstrumentConfigurationFormats` 检查标识、表示和连接协议格式；`InstrumentValidator` 聚合产品、保证金、资金费、档位及指数源业务规则。内部配置安装入口和基于持久化配置的状态更新仍显式检查表示完整性，均不依赖HTTP Controller。
 
 网关原 `GatewayProxyService` 的请求绑定、路由和HTTP响应转换已合入 `GatewayProxyController`，兼容协议入口复用同一Controller。账户写限制由 `AuthService` 检查；高风险审批策略、匹配和审计持久化经 `AdminApprovalService`。`AdminOperationRecord` 位于 auth.model，审批摘要基于原始正文，查询字符串保持原样。
 
@@ -523,7 +527,7 @@ C2C后台的原始请求头、method/path/query、User-Agent和IP由 `c2c.contro
 
 Kafka职责归包：独立快照、审计、结算/排空及推送消费入口统一放在各自provider.consumer（价格为index.consumer/mark.consumer），业务和缓存继续由原Service/状态所有者负责。监听topic、group、启动条件与处理顺序保持；做市事件唤醒组件为consumer.MakerQuoteWakeups，原唯一信号状态不变。详见 docs/validation/java-mvc-consumer-packages-20261022.json。
 
-Core订单/杠杆终态拒绝通过 `trading.order.exception.OrderCommandRejectedException` 传递原生CoreResultCode和业务提示。HTTP入口由LeverageRequestController/OrderRejectionHttpAdvice映射409及code，本地网关仍返回原status/message/code JSON；未知结果与未接纳继续走原独立语义。业务异常不引用Spring HTTP类型。
+Core订单/杠杆终态拒绝通过 `trading.order.exception.OrderCommandRejectedException` 传递原生CoreResultCode和业务提示。HTTP入口由LeverageRequestHandler/OrderRejectionHttpAdvice映射409及code，本地网关仍返回原status/message/code JSON；未知结果与未接纳继续走原独立语义。业务异常不引用Spring HTTP类型。
 
 WebSocket具体接入处理器位于 `websocket.provider.handler.ClientWebSocketHandler`，连接/有界发送队列/超时监视位于 `websocket.provider.session.ClientConnection`；SubscriptionRegistry等Service继续拥有订阅与业务路由状态。权限、协议字段、慢连接背压、关闭码和线程生命周期保持。
 
@@ -555,7 +559,7 @@ Binance APIKey请求由 `auth.controller.ApiKeyRequestBinding` 绑定原生 `Api
 
 合规写入的HTTP格式通过 `auth.controller.ComplianceRequestBinding` 绑定；`ComplianceService` 在事务内处理管理员审批消费、KYC结果/人脸状态、AML关闭时间与风险标签冲突。三个合规Repository各自只操作一张表并返回持久化事实。资料引用由 `KycDocumentService` 按用户实际拥有的资料生成并验证；客户端提交的引用提示不作为存储事实。AML重新打开保留原关闭时间，空分数沿用原值。
 
-费率管理入口 `trading.order.controller.TradingFeeRequestController` 绑定费率请求及分页，向Service传递原生 `FeeSchedulePageQuery`；`TradingFeeService` 决定费率关系、有效期、产品归属和发布/导入Core顺序。`OrderFeeRepository` 只执行费率表查询与Kafka事实投影，分页默认100、最大500，支持createdAt/updatedAt/effectiveTime双向排序及精确时间/long游标。订单生效费率仍从JVM快照获取。
+费率管理入口 `trading.order.controller.TradingFeeRequestHandler` 绑定费率请求及分页，向Service传递原生 `FeeSchedulePageQuery`；`TradingFeeService` 决定费率关系、有效期、产品归属和发布/导入Core顺序。`OrderFeeRepository` 只执行费率表查询与Kafka事实投影，分页默认100、最大500，支持createdAt/updatedAt/effectiveTime双向排序及精确时间/long游标。订单生效费率仍从JVM快照获取。
 
 托管充值、提现扣款和退款经 `provider.client.SpotAccountClient` 固定调用本机SPOT Core；客户端只适配原生命令及结果分类。`provider.exception.SpotAccountRejectedException` 表示明确拒绝，`SpotAccountUnknownException` 表示结果未确认，提现Service继续使用原意图和幂等引用对账，协议入口决定HTTP响应。
 
@@ -567,6 +571,30 @@ C2C后台审核的版本文本和原因由 `c2c.controller.C2cAdminController` �
 
 资产配置由 `asset.controller.AssetConfigurationController` 在原鉴权/审批后校验代码、文本及静态字段；`AssetConfigurationService` 锁定资产后检查版本、单位不可变、网络启停与金额精确性，配置和审计同事务提交。审批继续使用原始正文。
 
-活动订单由 `OrderRequestController` 绑定 `ActiveOrderPageQuery`；活动条件单由 `TriggerOrderRequestController` 绑定 `OpenTriggerPageQuery`。游标协议归各自 `utils`，Service仅按原生ID排序和seek，读取既有产品/用户视图并传递最小导出序号。首屏用beforeId=0表示不限制ID上界，避免漏掉Long.MAX_VALUE；历史游标协议保持独立。
+活动订单由 `OrderRequestHandler` 绑定 `ActiveOrderPageQuery`；活动条件单由 `TriggerOrderRequestHandler` 绑定 `OpenTriggerPageQuery`。游标协议归各自 `utils`，Service仅按原生ID排序和seek，读取既有产品/用户视图并传递最小导出序号。首屏用beforeId=0表示不限制ID上界，避免漏掉Long.MAX_VALUE；历史游标协议保持独立。
 
-实时账户格式由 `account.provider.controller.AccountInputBinding` 绑定；`AccountRequestController` 接收HTTP/本地文本后交给Service规范资产、合约和原生仓位枚举，并绑定写请求的referenceId。`MakerQuoteInputsController` 也直接使用原生MarginMode/PositionSide。`AccountService` 保留产品账户归属、衍生品边界、实时状态身份和金额业务；`AccountCommandGateway` 的确定性命令标识、资金指令与响应映射保持原文件不变。
+实时账户格式由 `account.provider.controller.AccountInputBinding` 绑定；`AccountRequestHandler` 接收HTTP/本地文本后交给Service规范资产、合约和原生仓位枚举，并绑定写请求的referenceId。`MakerQuoteInputsController` 也直接使用原生MarginMode/PositionSide。`AccountService` 保留产品账户归属、衍生品边界、实时状态身份和金额业务；`AccountCommandGateway` 的确定性命令标识、资金指令与响应映射保持原文件不变。
+
+### 协议入口与业务查询
+
+HTTP `*InternalController` 和 `gateway.provider.local.*LocalRoutes` 共用 `controller.*RequestHandler` 的参数绑定与HTTP错误转换，然后调用既有Service；handler不拥有业务状态，也不注册额外HTTP路由。资产聚合HTTP入口 `AccountAssetsController` 按产品直接查询 `AccountService`，无需再经过另一个入口。重复路径使用同一PathPattern，HTTP方法由路由匹配。
+
+### 管理请求的整数精度
+
+金额单位和64位ID可用十进制JSON字符串传递，绑定到原有long/Long及ID列表后保持精确。应用YAML关闭 `spring.jackson.deserialization.accept-float-as-int`，小数数值、非整数字符串和超出目标整数范围的值在绑定时拒绝，不截断或饱和；未新增wire模型或改变请求路径。
+
+
+## WebSocket 会话与实时故障恢复（2026-10-22）
+
+- `authenticate` 只接受交易 access token，保存真实过期时间。token 与授权租约通过一个不可变 volatile 快照一致发布；发送队列和 writer 使用最长 5 秒的本地授权租约，无逐条消息数据库查询；租约或 token 到期立即拒绝发送并清队列。
+- `WebSocketSessionAuthorizationTask` 每秒检查连接，3 秒后续验撤销、冻结与到期；`WebSocketSessionAuthorization` 负责校验和清理。配置类装配独立有界工作池，`surprising.websocket.security.authorization-workers` 默认 4、`authorization-queue-capacity` 默认 256。慢校验不占用共享定时线程；队列满不延长租约，按截止时间关闭，任务关闭须确认 worker 退出。
+- 确定失效或无法在租约内完成复核，整条认证连接以 1008 关闭并移除路由，包括同连接的公共订阅；独立匿名连接保持。客户端刷新到有效身份后重新连接、认证和订阅；1008 不应反复用失效 token 重连。慢旧 token 校验不得覆盖已经轮换的新 token。
+- `SubscriptionRegistry` 是本地订阅及每连接盘口基线的唯一持有者。先安装本地收件方，再登记远端 route，最后申请快照，防止首条基线早于收件方；登记失败回滚本地状态及首次远端 lease。Redis I/O 不进入注册表全局锁，失败连接的 lease 清理也在盘口锁外。
+- `AeronRealtimeReceiver` 分开累计 decode、handler、transport 故障，最多每 5 秒输出一条不含载荷/令牌的诊断；连续性失效暂停接收。bridge 清理旧连接、基线和未完成快照后，才按故障版本恢复；重连从新快照开始。指标 `surprising.websocket.realtime.ready` 与 `surprising.websocket.realtime.failures{stage}` 表达降级和故障阶段。
+- bridge 构造失败必须关闭已经启动的 receiver，receiver.close 确认线程退出；超时不能视为已释放。正常逐条发送和命令日志为 DEBUG，异常诊断限频。
+
+对应回归包含会话撤销/冻结/到期、同用户多会话、token 轮换、慢验证与队列饱和、Redis 回调阻塞、首次基线及登记回滚，以及真实 Aeron Driver 的坏帧/handler 故障与关闭；实际执行结果以本轮验证记录为准。
+
+管理端实际费率查询：`GET /api/v1/admin/gateway/trading-fees/effective?userId=...&instrumentId=...&productLine=...`，省略 `instrumentChangeId` 使用最新合约版本。沿用管理员读权限与产品隔离，只调用现有费率选择，不提供不存在的VIP等级规则接口。
+
+现货账户不提供衍生品持仓、持仓列表、持仓保证金及仓位模式查询：这些入口在账户业务能力校验时返回400，不读取风险/持仓状态，也不返回伪造空持仓。衍生品查询沿用原精确状态；读视图未就绪仍为503，配置或系统故障不会统一改为参数错误。

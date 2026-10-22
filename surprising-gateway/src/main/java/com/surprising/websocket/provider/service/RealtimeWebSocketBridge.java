@@ -28,7 +28,12 @@ public final class RealtimeWebSocketBridge
     private final Map<RealtimeRoute, Integer> memberships = new HashMap<>();
     private final AeronRealtimeReceiver receiver;
     private final ObjectMapper mapper;
-    private final SnapshotAssembler snapshots = new SnapshotAssembler();
+    private volatile SnapshotAssembler snapshots = new SnapshotAssembler();
+    private volatile boolean closed;
+    private long nextHeartbeatNanos;
+    private final java.util.concurrent.atomic.AtomicLong nextCleanupLog = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicBoolean continuityLost = new java.util.concurrent.atomic.AtomicBoolean();
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(RealtimeWebSocketBridge.class);
 
     public RealtimeWebSocketBridge(
             SubscriptionRegistry registry,
@@ -48,23 +53,44 @@ public final class RealtimeWebSocketBridge
                                 io.aeron.CommonContext.getAeronDirectoryName()),
                         endpoint,
                         env.getProperty("surprising.realtime.ws.stream", Integer.class, 2103),
-                        this::receive);
-        heartbeat();
-        registry.routeLifecycle(this);
+                        this::receive, failure -> continuityLost.set(true));
+        try {
+            heartbeat();
+            registry.routeLifecycle(this);
+        } catch (RuntimeException | Error failure) {
+            try { receiver.close(); } catch (RuntimeException cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+            try { directory.removeNode(node); } catch (RuntimeException cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+            throw failure;
+        }
     }
 
     @Override
     public synchronized void subscribed(SubscriptionTopic topic) {
         if (topic.channel() == WsChannel.OPEN_INTEREST) return;
-        if (!receiver.ready()) throw new IllegalStateException("realtime receiver unavailable");
+        if (closed || continuityLost.get() || !receiver.ready())
+            throw new IllegalStateException("realtime receiver unavailable");
         RealtimeRoute route = route(topic);
+        int priorCount = memberships.getOrDefault(route, 0);
         long now = System.currentTimeMillis();
+        try {
+            directory.heartbeat(node, endpoint, Duration.ofSeconds(15));
+            directory.register(route, node, now + 15000);
+            renewSnapshot(route, now);
+            memberships.put(route, priorCount + 1);
+        } catch (RuntimeException failure) {
+            // A write can reach Redis before its response fails; clear an orphaned first lease.
+            if (priorCount == 0) {
+                try { directory.unregister(route, node); }
+                catch (RuntimeException cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+            }
+            throw failure;
+        }
+    }
+
+    private void renewSnapshot(RealtimeRoute route, long now) {
         if (route.userId() > 0) refresh.renew(route.productLine(), route.userId(), now + 30000);
         else if (route.channel().equals("BOOK"))
             refresh.renewBook(route.productLine(), route.instrumentId(), now + 30000);
-        directory.heartbeat(node, endpoint, Duration.ofSeconds(15));
-        directory.register(route, node, now + 15000);
-        memberships.merge(route, 1, Integer::sum);
     }
 
     @Override
@@ -80,37 +106,71 @@ public final class RealtimeWebSocketBridge
         memberships.remove(route);
         try {
             directory.unregister(route, node);
-        } catch (RuntimeException ignored) {
-            /* The lease still expires. */
+        } catch (RuntimeException failure) {
+            logCleanupFailure("route", failure);
         }
     }
 
-    public synchronized void heartbeat() {
-        if (!receiver.ready()) {
-            directory.removeNode(node);
-            return;
+    public void heartbeat() {
+        if (closed) return;
+        if (continuityLost.get() || receiver.recoveryRequired()) {
+            long recoveryVersion = receiver.recoveryVersion();
+            // Receiver has paused polling. Close clients before dropping old fences and resuming.
+            registry.resetRealtime();
+            synchronized (this) {
+                snapshots = new SnapshotAssembler();
+                memberships.clear();
+                directory.removeNode(node);
+                continuityLost.set(false);
+                receiver.resumeAfterRecovery(recoveryVersion);
+                nextHeartbeatNanos = 0;
+            }
         }
-        long now = System.currentTimeMillis();
-        directory.heartbeat(node, endpoint, Duration.ofSeconds(15));
-        memberships
-                .keySet()
-                .forEach(
-                        route -> {
-                            directory.register(route, node, now + 15000);
-                            if (route.userId() > 0)
-                                refresh.renew(route.productLine(), route.userId(), now + 30000);
-                            else if (route.channel().equals("BOOK"))
-                                refresh.renewBook(route.productLine(), route.instrumentId(), now + 30000);
-                        });
+        synchronized (this) {
+            if (closed) return;
+            long nanos = System.nanoTime();
+            if (nextHeartbeatNanos != 0 && nanos < nextHeartbeatNanos) return;
+            if (!receiver.ready()) {
+                directory.removeNode(node);
+                nextHeartbeatNanos = nanos + 5_000_000_000L;
+                return;
+            }
+            long now = System.currentTimeMillis();
+            directory.heartbeat(node, endpoint, Duration.ofSeconds(15));
+            memberships.keySet().forEach(route -> {
+                directory.register(route, node, now + 15000);
+                renewSnapshot(route, now);
+            });
+            nextHeartbeatNanos = nanos + 5_000_000_000L;
+        }
     }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void registerMeters(io.micrometer.core.instrument.MeterRegistry meters) {
+        io.micrometer.core.instrument.Gauge.builder("surprising.websocket.realtime.ready", this,
+                bridge -> bridge.ready() ? 1 : 0).register(meters);
+        io.micrometer.core.instrument.Gauge.builder("surprising.websocket.realtime.failures", this,
+                RealtimeWebSocketBridge::decodeFailures).tag("stage", "decode").register(meters);
+        io.micrometer.core.instrument.Gauge.builder("surprising.websocket.realtime.failures", this,
+                RealtimeWebSocketBridge::handlerFailures).tag("stage", "handler").register(meters);
+        io.micrometer.core.instrument.Gauge.builder("surprising.websocket.realtime.failures", this,
+                RealtimeWebSocketBridge::transportFailures).tag("stage", "transport").register(meters);
+    }
+
+    public boolean ready() { return !closed && !continuityLost.get() && receiver.ready(); }
+    public long decodeFailures() { return receiver.decodeFailures(); }
+    public long handlerFailures() { return receiver.handlerFailures(); }
+    public long transportFailures() { return receiver.transportFailures(); }
 
     public UserReadView snapshot(ProductLine product, long user) {
+        if (!ready()) return UserReadView.from(new ValkeyReadViewStore.ReadView("UNAVAILABLE", "", 0, List.of()));
         long now = System.currentTimeMillis();
         refresh.renew(product, user, now + 30000);
         return UserReadView.from(views.read(product, user, now, 15000));
     }
 
     private void receive(RealtimeFrame f) {
+        if (closed || continuityLost.get()) return;
         if (f.kind() == RealtimeFrame.Kind.SNAPSHOT_UNAVAILABLE) {
             registry.publishUserSnapshot(
                     f.productLine(),
@@ -270,14 +330,28 @@ public final class RealtimeWebSocketBridge
 
     public record VersionedEvent(String version, String entityId, Object value) {}
 
+    private void logCleanupFailure(String resource, RuntimeException failure) {
+        long now = System.nanoTime();
+        long next = nextCleanupLog.get();
+        if ((next == 0 || now >= next) && nextCleanupLog.compareAndSet(next, now + 5_000_000_000L))
+            LOG.warn("Realtime {} cleanup failed; lease will expire, error={}", resource, failure.getClass().getSimpleName());
+    }
+
     @PreDestroy
     @Override
     public void close() {
-        registry.routeLifecycle(null);
-        receiver.close();
-        try {
-            directory.removeNode(node);
-        } catch (RuntimeException ignored) {
+        synchronized (this) {
+            if (closed && receiver.terminated()) return;
+            closed = true;
+            registry.routeLifecycle(null);
+            memberships.clear();
+        }
+        try { receiver.close(); }
+        finally {
+            try { directory.removeNode(node); }
+            catch (RuntimeException failure) {
+                logCleanupFailure("node", failure);
+            }
         }
     }
 }

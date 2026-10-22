@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
-class TriggerOrderRequestControllerTest {
+class TriggerOrderRequestHandlerTest {
 
     @Test
     void singlePlacementAndCancellationReadOriginalCommittedResultsWithoutCore() {
@@ -28,7 +28,7 @@ class TriggerOrderRequestControllerTest {
             var properties = new com.surprising.trading.trigger.config.TriggerProperties();
             properties.setProductLine(product);
             var service = new TriggerOrderService(properties, core, null, null);
-            var requests = new TriggerOrderRequestController(service, results);
+            var requests = new TriggerOrderRequestHandler(service, results);
             var placement = service.submissionCommandId(1001, " original-single ");
             org.assertj.core.api.Assertions.assertThat(placement).isEqualTo(
                     com.surprising.trading.order.service.StableOrderIdentity.triggerCommandId(product, 1001, "original-single"));
@@ -53,7 +53,7 @@ class TriggerOrderRequestControllerTest {
         properties.setProductLine(com.surprising.product.api.ProductLine.OPTION);
         var core = mock(TriggerOrderAeronGateway.class);
         var results = mock(com.surprising.trading.order.service.OrderService.class);
-        var requests = new TriggerOrderRequestController(new TriggerOrderService(properties, core, null, null), results);
+        var requests = new TriggerOrderRequestHandler(new TriggerOrderService(properties, core, null, null), results);
         for (String key : java.util.List.of("", " ", "x".repeat(65)))
             assertStatus(() -> requests.submission(1001, key), HttpStatus.BAD_REQUEST);
         assertStatus(() -> requests.submission(0, "original"), HttpStatus.BAD_REQUEST);
@@ -73,7 +73,7 @@ class TriggerOrderRequestControllerTest {
         var receipt = new com.surprising.trading.api.model.OrderCommandReceipt(command,
                 "RESULT_UNKNOWN", "RESULT_UNKNOWN", "pending", null, java.util.List.of(), null, null);
         when(results.commandResult(1001L, command)).thenReturn(receipt);
-        org.assertj.core.api.Assertions.assertThat(new TriggerOrderRequestController(service, results)
+        org.assertj.core.api.Assertions.assertThat(new TriggerOrderRequestHandler(service, results)
                 .ocoSubmission(1001L, "tp-original", "sl-original")).isSameAs(receipt);
         org.mockito.Mockito.verify(results).commandResult(1001L, command);
         org.mockito.Mockito.verifyNoInteractions(core);
@@ -85,7 +85,7 @@ class TriggerOrderRequestControllerTest {
         properties.setProductLine(com.surprising.product.api.ProductLine.OPTION);
         var core = mock(TriggerOrderAeronGateway.class);
         var results = mock(com.surprising.trading.order.service.OrderService.class);
-        var requests = new TriggerOrderRequestController(new TriggerOrderService(properties, core, null, null), results);
+        var requests = new TriggerOrderRequestHandler(new TriggerOrderService(properties, core, null, null), results);
         assertStatus(() -> requests.ocoSubmission(1001L, "tp", "tp"), HttpStatus.BAD_REQUEST);
         assertStatus(() -> requests.ocoSubmission(0, "tp", "sl"), HttpStatus.BAD_REQUEST);
         org.mockito.Mockito.verifyNoInteractions(core, results);
@@ -95,7 +95,7 @@ class TriggerOrderRequestControllerTest {
     void mapsPlacementStateRejectionToConflict() {
         TriggerOrderService service = mock(TriggerOrderService.class);
         when(service.placeAsync(any(PlaceTriggerOrderRequest.class))).thenReturn(CompletableFuture.failedFuture(new IllegalStateException("trigger placement rejected")));
-        com.surprising.trading.trigger.controller.TriggerOrderRequestController requests = new com.surprising.trading.trigger.controller.TriggerOrderRequestController(service, mock(com.surprising.trading.order.service.OrderService.class));
+        com.surprising.trading.trigger.controller.TriggerOrderRequestHandler requests = new com.surprising.trading.trigger.controller.TriggerOrderRequestHandler(service, mock(com.surprising.trading.order.service.OrderService.class));
         assertStatus(() -> requests.place(request()).toCompletableFuture().join(), HttpStatus.CONFLICT);
     }
 
@@ -103,7 +103,7 @@ class TriggerOrderRequestControllerTest {
     void mapsBatchPlacementStateRejectionToConflict() {
         TriggerOrderService service = mock(TriggerOrderService.class);
         when(service.placeBatchAsync(any(BatchPlaceTriggerOrderRequest.class))).thenReturn(CompletableFuture.failedFuture(new IllegalStateException("trigger batch placement rejected")));
-        com.surprising.trading.trigger.controller.TriggerOrderRequestController requests = new com.surprising.trading.trigger.controller.TriggerOrderRequestController(service, mock(com.surprising.trading.order.service.OrderService.class));
+        com.surprising.trading.trigger.controller.TriggerOrderRequestHandler requests = new com.surprising.trading.trigger.controller.TriggerOrderRequestHandler(service, mock(com.surprising.trading.order.service.OrderService.class));
         assertStatus(() -> requests.placeBatch(new BatchPlaceTriggerOrderRequest(java.util.List.of(request()))).toCompletableFuture().join(), HttpStatus.CONFLICT);
     }
 
@@ -111,7 +111,7 @@ class TriggerOrderRequestControllerTest {
     void keepsPlacementValidationRejectionAsBadRequest() {
         TriggerOrderService service = mock(TriggerOrderService.class);
         when(service.placeAsync(any(PlaceTriggerOrderRequest.class))).thenThrow(new IllegalArgumentException("invalid trigger placement"));
-        com.surprising.trading.trigger.controller.TriggerOrderRequestController requests = new com.surprising.trading.trigger.controller.TriggerOrderRequestController(service, mock(com.surprising.trading.order.service.OrderService.class));
+        com.surprising.trading.trigger.controller.TriggerOrderRequestHandler requests = new com.surprising.trading.trigger.controller.TriggerOrderRequestHandler(service, mock(com.surprising.trading.order.service.OrderService.class));
         assertStatus(() -> requests.place(request()), HttpStatus.BAD_REQUEST);
     }
 
@@ -119,7 +119,7 @@ class TriggerOrderRequestControllerTest {
     void keepsBatchPlacementValidationRejectionAsBadRequest() {
         TriggerOrderService service = mock(TriggerOrderService.class);
         when(service.placeBatchAsync(any(BatchPlaceTriggerOrderRequest.class))).thenThrow(new IllegalArgumentException("invalid trigger batch placement"));
-        com.surprising.trading.trigger.controller.TriggerOrderRequestController requests = new com.surprising.trading.trigger.controller.TriggerOrderRequestController(service, mock(com.surprising.trading.order.service.OrderService.class));
+        com.surprising.trading.trigger.controller.TriggerOrderRequestHandler requests = new com.surprising.trading.trigger.controller.TriggerOrderRequestHandler(service, mock(com.surprising.trading.order.service.OrderService.class));
         assertStatus(() -> requests.placeBatch(new BatchPlaceTriggerOrderRequest(java.util.List.of(request()))), HttpStatus.BAD_REQUEST);
     }
 

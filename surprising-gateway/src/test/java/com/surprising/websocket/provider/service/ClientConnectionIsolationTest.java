@@ -29,6 +29,71 @@ import tools.jackson.databind.ObjectMapper;
 
 class ClientConnectionIsolationTest {
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void authorizationPublishesTokenAndDeadlineAtomically(boolean rotatingExpiredToken) throws Exception {
+        var session = new ControlledSession("authorization-publication", false, 1);
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var pause = new java.util.concurrent.atomic.AtomicBoolean();
+        try (var connection = new ClientConnection(session, null, 8, Duration.ofSeconds(1)) {
+            @Override public synchronized void renewAuthorization(String token, Instant expiry) {
+                if (pause.compareAndSet(true, false)) {
+                    entered.countDown();
+                    try { assertThat(release.await(2, TimeUnit.SECONDS)).isTrue(); }
+                    catch (InterruptedException failure) { throw new IllegalStateException(failure); }
+                }
+                super.renewAuthorization(token, expiry);
+            }
+        }; var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            if (rotatingExpiredToken) connection.authenticate(7, "old", Instant.now().minusSeconds(1));
+            pause.set(true);
+            var authenticating = executor.submit(() -> connection.authenticate(7, "new", Instant.now().plusSeconds(60)));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            // The former implementation pauses after publishing token, before its deadline.
+            while (!authenticating.isDone() && entered.getCount() != 0 && System.nanoTime() < deadline) Thread.sleep(1);
+            assertThat(connection.send("public-ticker")).isTrue();
+            release.countDown();
+            authenticating.get(1, TimeUnit.SECONDS);
+            assertThat(connection.isOpen()).isTrue();
+            assertThat(connection.accessToken()).isEqualTo("new");
+            assertThat(connection.authorizationExpired(System.currentTimeMillis())).isFalse();
+            assertThat(session.expectedMessages.await(1, TimeUnit.SECONDS)).isTrue();
+        } finally { release.countDown(); }
+    }
+
+    @Test
+    void receiverFanoutNeverWaitsForBlockedSocketCloseOrLeaseCleanup() throws Exception {
+        var socketClosing = new CountDownLatch(1);
+        var releaseSocket = new CountDownLatch(1);
+        var cleanupEntered = new CountDownLatch(1);
+        var releaseCleanup = new CountDownLatch(1);
+        var session = org.mockito.Mockito.mock(WebSocketSession.class);
+        org.mockito.Mockito.when(session.getId()).thenReturn("independent-close");
+        org.mockito.Mockito.when(session.isOpen()).thenReturn(true);
+        org.mockito.Mockito.doAnswer(call -> { socketClosing.countDown(); releaseSocket.await(); return null; })
+                .when(session).close(org.mockito.ArgumentMatchers.any(CloseStatus.class));
+        var registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
+        var lifecycle = org.mockito.Mockito.mock(SubscriptionRegistry.RouteLifecycle.class);
+        var topic = new SubscriptionTopic(WsChannel.DEPTH, "1", null, null, com.surprising.product.api.ProductLine.SPOT);
+        registry.routeLifecycle(lifecycle);
+        org.mockito.Mockito.doAnswer(call -> { cleanupEntered.countDown(); releaseCleanup.await(); return null; })
+                .when(lifecycle).unsubscribed(topic);
+        try (var connection = new ClientConnection(session, null, 8, Duration.ofSeconds(1));
+             var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            registry.add(connection);
+            registry.subscribe(connection, topic);
+            connection.close(CloseStatus.POLICY_VIOLATION);
+            assertThat(socketClosing.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(cleanupEntered.await(1, TimeUnit.SECONDS)).isTrue();
+            var fanout = executor.submit(() -> registry.publishDepth(topic,
+                    new com.surprising.aeron.protocol.CoreOrderBookView(1, List.of()), "v1", "book", Instant.now()));
+            fanout.get(1, TimeUnit.SECONDS);
+            assertThat(registry.subscriberCount(topic)).isZero();
+            assertThat(registry.activeConnectionCount()).isZero();
+        } finally { releaseSocket.countDown(); releaseCleanup.countDown(); }
+    }
+
     @Test
     void writerPreservesBatchOrder() throws Exception {
         var session = new ControlledSession("batch-writer", false, 2);
@@ -115,11 +180,16 @@ class ClientConnectionIsolationTest {
         registry.subscribe(healthy, topic);
 
         try {
-            for (int index = 0; index < 4; index++) {
+            registry.publish(topic, "event-0", Instant.parse("2026-08-16T00:00:00Z"));
+            assertThat(slowSession.firstSendEntered.await(2, TimeUnit.SECONDS)).isTrue();
+            healthySession.awaitMessageCount(1);
+            // The slow writer is now actually blocked. Keep the healthy socket draining rather
+            // than assuming the OS schedules its writer during an unpaced four-message burst.
+            for (int index = 1; index < 4; index++) {
                 registry.publish(topic, "event-" + index, Instant.parse("2026-08-16T00:00:00Z"));
+                healthySession.awaitMessageCount(index + 1);
             }
 
-            assertThat(slowSession.firstSendEntered.await(2, TimeUnit.SECONDS)).isTrue();
             assertThat(slowSession.closed.await(2, TimeUnit.SECONDS)).isTrue();
             assertThat(healthySession.expectedMessages.await(2, TimeUnit.SECONDS)).isTrue();
             assertThat(slowSession.closeStatus).isEqualTo(CloseStatus.SERVICE_OVERLOAD);
@@ -156,6 +226,12 @@ class ClientConnectionIsolationTest {
             if (blockedSendIndex < 0) {
                 firstSendEntered.countDown();
             }
+        }
+
+        private void awaitMessageCount(int expected) throws InterruptedException {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (messages.size() < expected && System.nanoTime() < deadline) Thread.sleep(1);
+            assertThat(messages).hasSize(expected);
         }
 
         private List<String> payloads() {

@@ -5,7 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import com.surprising.trading.api.TradingApiPaths;
 import com.surprising.trading.api.model.EffectiveTradingFeeResponse;
-import com.surprising.trading.order.controller.TradingFeeRequestController;
+import com.surprising.trading.order.controller.TradingFeeRequestHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -13,8 +13,8 @@ import org.springframework.web.bind.annotation.RestController;
 /** Host-local fee lookup for the maker, using the same selection as order submission. */
 @RestController
 public class TradingFeeInternalController {
-    private final TradingFeeRequestController fees;
-    public TradingFeeInternalController(TradingFeeRequestController fees) { this.fees = fees; }
+    private final TradingFeeRequestHandler fees;
+    public TradingFeeInternalController(TradingFeeRequestHandler fees) { this.fees = fees; }
 
     @GetMapping(TradingApiPaths.INTERNAL_FEE_BASE_PATH + "/effective")
     public EffectiveTradingFeeResponse effective(@RequestParam long userId, @RequestParam String instrumentId,

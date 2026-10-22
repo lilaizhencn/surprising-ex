@@ -8,6 +8,7 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.*;
 import java.util.*;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.*;
 import org.springframework.test.web.servlet.*;
@@ -29,8 +30,34 @@ class AccountInputBoundaryTest {
     void setup(ProductLine line) {
         var properties=new AccountProperties();properties.getKafka().setProductLine(line);
         var commands=new AccountCommandGateway(properties,aeron);service=new AccountService(properties,commands,views);
-        mvc=MockMvcBuilders.standaloneSetup(new AccountInternalController(new AccountRequestController(service,mock(AccountQueryService.class),commands,properties))).build();
+        mvc=MockMvcBuilders.standaloneSetup(new AccountInternalController(new AccountRequestHandler(service,mock(AccountQueryService.class),commands))).setControllerAdvice(new com.surprising.gateway.provider.controller.advice.ReadViewHttpErrors()).build();
     }
+    @ParameterizedTest @ValueSource(strings={"position", "positions", "position-margin", "position-mode"})
+    void spotRejectsUnsupportedPositionQueriesBeforeReadingOrSubmitting(String route) throws Exception {
+        setup(ProductLine.SPOT);
+        mvc.perform(get("/api/v1/accounts/"+route).param("userId","42")
+                .param("instrumentId","1").param("marginMode","CROSS").param("positionSide","NET")
+                .param("productLine","SPOT").header("X-Product-Line","SPOT"))
+                .andExpect(status().isBadRequest())
+                .andExpect(result -> assertThat(result.getResponse().getErrorMessage()).contains("现货账户不支持持仓业务"));
+        verifyNoInteractions(views,aeron);
+    }
+
+    @Test
+    void derivativeReadFailuresKeepTheirInfrastructureClassification() throws Exception {
+        setup(ProductLine.LINEAR_PERPETUAL);
+        when(views.require(ProductLine.LINEAR_PERPETUAL,42,null))
+                .thenThrow(new com.surprising.realtime.api.exception.ReadViewUnavailableException("READ_VIEW_INITIALIZING"));
+        mvc.perform(get("/api/v1/accounts/positions").param("userId","42"))
+                .andExpect(status().isServiceUnavailable());
+        doThrow(new IllegalStateException("account view transport failed"))
+                .when(views).require(ProductLine.LINEAR_PERPETUAL,42,null);
+        assertThatThrownBy(() -> mvc.perform(get("/api/v1/accounts/positions").param("userId","42")))
+                .hasRootCauseInstanceOf(IllegalStateException.class)
+                .hasRootCauseMessage("account view transport failed");
+        verifyNoInteractions(aeron);
+    }
+
     @ParameterizedTest @EnumSource(ProductLine.class)
     void balanceRoutesBindCanonicalAssetAndKeepExactInt64Units(ProductLine line) throws Exception {
         setup(line);when(views.balance(line,42,"USDT",null)).thenReturn(Optional.of(new CoreBalanceView("USDT",Long.MAX_VALUE-10,10)));
@@ -47,7 +74,13 @@ class AccountInputBoundaryTest {
         var result=mvc.perform(get("/api/v1/accounts/position").param("userId","42").param("instrumentId"," 1 ").param("marginMode"," isolated ").param("positionSide"," short ")).andExpect(status().isOk()).andReturn();
         var body=json.readTree(result.getResponse().getContentAsString());assertThat(body.path("signedQuantitySteps").asLong()).isEqualTo(-11);assertThat(body.path("marginMode").asText()).isEqualTo("ISOLATED");assertThat(body.path("positionSide").asText()).isEqualTo("SHORT");
         when(views.require(line,42,null)).thenReturn(new UserReadView("READY","v",1,new CoreUserStateView(line,42,1,CorePositionMode.HEDGE,List.of(),List.of(),List.of(shortPosition,new CorePositionView("1","USDT",CoreMarginMode.CROSS,CorePositionSide.LONG,5,100,500,0,100))),List.of(),List.of(),1,List.of()));
-        var filtered=mvc.perform(get("/api/v1/accounts/positions").param("userId","42").param("positionSide","short")).andExpect(status().isOk()).andReturn();assertThat(json.readTree(filtered.getResponse().getContentAsString()).path("count").asInt()).isEqualTo(1);verifyNoInteractions(aeron);
+        var filtered=mvc.perform(get("/api/v1/accounts/positions").param("userId","42").param("positionSide","short")).andExpect(status().isOk()).andReturn();assertThat(json.readTree(filtered.getResponse().getContentAsString()).path("count").asInt()).isEqualTo(1);
+        when(views.position(line,42,"1",CoreMarginMode.CROSS,CorePositionSide.NET,null)).thenReturn(Optional.of(new CorePositionView("1","USDT",CoreMarginMode.CROSS,CorePositionSide.NET,7,100,900,0,111)));
+        var margin=mvc.perform(get("/api/v1/accounts/position-margin").param("userId","42").param("instrumentId","1")).andExpect(status().isOk()).andReturn();
+        assertThat(json.readTree(margin.getResponse().getContentAsString()).path("marginUnits").asLong()).isEqualTo(111);
+        var mode=mvc.perform(get("/api/v1/accounts/position-mode").param("userId","42").param("productLine",line.name())).andExpect(status().isOk()).andReturn();
+        assertThat(json.readTree(mode.getResponse().getContentAsString()).path("positionMode").asText()).isEqualTo("HEDGE");
+        verifyNoInteractions(aeron);
     }
     @ParameterizedTest @EnumSource(ProductLine.class)
     void adjustmentRetainsOriginalStableIdAndCanonicalPayload(ProductLine line) throws Exception {

@@ -96,7 +96,6 @@ start_node() {
     "-Dsurprising.aeron.account-lanes=${AERON_BASELINE_ACCOUNT_LANES}"
     "-Dsurprising.aeron.matching-engines=${AERON_BASELINE_MATCHING_ENGINES}"
     "-Dsurprising.aeron.owner-command-window=${AERON_BASELINE_WINDOW}"
-    -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN
     -Dsurprising.aeron.matcher-pipeline-wait-strategy=BUSY_SPIN
     -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN
     -Dsurprising.aeron.settlement-spin-limit=0
@@ -216,7 +215,6 @@ run_local_jmh_case() {
 -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC \
 -Dsurprising.aeron.account-lanes=${AERON_BASELINE_ACCOUNT_LANES} \
 -Dsurprising.aeron.matching-engines=${AERON_BASELINE_MATCHING_ENGINES} \
--Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN \
 -Dsurprising.aeron.matcher-pipeline-wait-strategy=BUSY_SPIN \
 -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN \
 -Dsurprising.aeron.owner-wait-strategy=BUSY_SPIN"

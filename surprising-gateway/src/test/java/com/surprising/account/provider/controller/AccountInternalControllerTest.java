@@ -33,7 +33,7 @@ class AccountInternalControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new AccountInternalController(new com.surprising.account.provider.controller.AccountRequestController(accountService, history, commandGateway, properties));
+        controller = new AccountInternalController(new com.surprising.account.provider.controller.AccountRequestHandler(accountService, history, commandGateway));
     }
 
     @Test

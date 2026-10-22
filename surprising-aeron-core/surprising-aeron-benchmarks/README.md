@@ -114,3 +114,11 @@ D2 复审中，`MatcherTreasuryReceiptBenchmark` 移除发布模式标记，统�
 `TradingCommandDecodeBenchmark.decodeRetainedCommandWindow` 同时保留256个真实输入租约，解码并读取每个撤单/改单/替换项，再终态释放。固定和变长输入各使用三组256帧；变长改单批次有768种有效长度，均落在2048字节容量桶，用于覆盖原512精确长度缓存的淘汰边界。返回校验和消费实际字段和文本，防止只测空壳引用。JMH分数及 `gc.alloc.rate.norm` 均按**每条Core消息**归一；改单批次20项，固定撤单批次20项，变长撤单批次平均10.375项，换算每业务项时必须注明分母。
 
 `ReadyLaneMaskBenchmark.laneNotifications` 是两个真实并发通知发布者和一个Owner收集者，共三线程。JMH group操作数不能解释为成交吞吐，也不能据此声称硬件缓存失效率改善。两项基准已编译并可被JMH发现；正式采样等待同机其他测试停止后按根 `PERFORMANCE_VALIDATION.md` 锁定计划进行。
+
+## 普通订单稳定窗口
+
+`ClusterCapacityMain` 的 `capacity-workload=MATCH_STREAM` 连续异步提交买卖各半的 GTC 普通订单；`capacity-async-in-flight=256` 是所有发压 worker 的总窗口，不是每线程窗口。正式普通订单和 `ClusterOperationalBenchmark` 的混合业务分开记录。
+
+所有发压 worker 就绪后才开始预热或测量。`measurementStartEpochMillis/measurementEndEpochMillis` 标明固定稳定窗口，`steadyCapacity` 只统计窗口内观察到的终态及延迟，`drain` 单列截止之后完成的订单；`capacity` 的 `inclusive*` 速率包含排空，仅作完整执行诊断。全程仍核对 offered=accepted=finalized、请求提交=完成、空盘口和资金。预热后及排空后读取真实 `LANE_METRICS_QUERY`，拒绝拓扑不符或队列未排空，不能只凭 JVM 参数认定 Lane/Matcher 数量。
+
+JFR 配置 `owner-commit-profile.jfc` 只启用当前 JDK 27 和源码确实定义的事件。普通订单三段来源是 `ClientTransportBoundary` 的 queued→offered（客户端排队）、offered→delivered（网络及 Core）、queued→delivered（端到端），按命令 ID 的 1/64 采样；它们不等于 Owner、Matcher、Lane 的内部独立耗时。混合/scale 的业务延迟使用对应 `LinearPerpetual*` 或 `ClientRequestLatency` 事件。分析器不再要求已无定义的 OwnerCommitMeasurement，也不接收无生产读取者的诊断开关。

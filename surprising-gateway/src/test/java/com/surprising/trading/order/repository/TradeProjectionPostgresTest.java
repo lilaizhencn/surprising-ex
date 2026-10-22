@@ -131,12 +131,12 @@ class TradeProjectionPostgresTest {
     }
     private com.surprising.trading.api.model.TradeFillQueryResponse fills(ProductLine line,long user,String instrument,
             Long order,Long start,Long end,int limit,String cursor) {
-        return new com.surprising.trading.order.controller.OrderRequestController(service(line),null,null)
+        return new com.surprising.trading.order.controller.OrderRequestHandler(service(line),null,null)
                 .ownFills(user,instrument,order,start,end,limit,cursor).getBody();
     }
     private com.surprising.trading.api.model.AdminTradeQueryResponse search(ProductLine line,Long user,String instrument,
             Long order,int limit,String cursor,String sort) {
-        return new com.surprising.trading.order.controller.AdminOrderRequestController(service(line))
+        return new com.surprising.trading.order.controller.AdminOrderRequestHandler(service(line))
                 .trades("1",null,line.name(),user,instrument,order,limit,cursor,sort);
     }
 

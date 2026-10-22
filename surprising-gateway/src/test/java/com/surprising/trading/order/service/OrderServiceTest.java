@@ -155,9 +155,9 @@ class OrderServiceTest {
         var service = service(product,aeronOrders, queries, null);
         when(queries.require(product,1001L,9L)).thenReturn(new com.surprising.realtime.api.UserReadView(
             "READY","v",1,null,List.of(),List.of(),9,List.of()));
-        assertThat(service.openOrders(1001L, null, com.surprising.trading.order.controller.OrderRequestController.activePage(10, null), 9L).orders()).isEmpty();
+        assertThat(service.openOrders(1001L, null, com.surprising.trading.order.controller.OrderRequestHandler.activePage(10, null), 9L).orders()).isEmpty();
         when(queries.require(product,1001L,9L)).thenThrow(new com.surprising.realtime.api.exception.ReadViewUnavailableException("READ_VIEW_UNAVAILABLE"));
-        assertThatThrownBy(()->service.openOrders(1001L, null, com.surprising.trading.order.controller.OrderRequestController.activePage(10, null), 9L))
+        assertThatThrownBy(()->service.openOrders(1001L, null, com.surprising.trading.order.controller.OrderRequestHandler.activePage(10, null), 9L))
             .isInstanceOf(com.surprising.realtime.api.exception.ReadViewUnavailableException.class);
         verifyNoInteractions(aeronOrders,projection);
     }
@@ -426,7 +426,7 @@ class OrderServiceTest {
                 .thenReturn(ProjectionReadResult.ok(java.util.List.of(open), null, false, 12L, 0L));
 
         assertThat(service.getByClientOrderId(1001L, "client-91")).isEqualTo(open);
-        assertThat(service.openOrders(1001L, "1", com.surprising.trading.order.controller.OrderRequestController.activePage(10, null), null).orders()).containsExactly(open);
+        assertThat(service.openOrders(1001L, "1", com.surprising.trading.order.controller.OrderRequestHandler.activePage(10, null), null).orders()).containsExactly(open);
         var history = service.historyOrders(1001L, "1", 10, null, null, null);
         assertThat(history.orders()).containsExactly(open);
         assertThat(history.sort()).isEqualTo("updatedAt.desc");
@@ -543,12 +543,12 @@ class OrderServiceTest {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
         when(realtimeQueries.require(ProductLine.LINEAR_PERPETUAL, 1001L, null)).thenReturn(readView(openOrders(3)));
 
-        OrderQueryResponse first = service.openOrders(1001L, "1", com.surprising.trading.order.controller.OrderRequestController.activePage(2, null), null);
+        OrderQueryResponse first = service.openOrders(1001L, "1", com.surprising.trading.order.controller.OrderRequestHandler.activePage(2, null), null);
 
         assertThat(first.orders()).hasSize(2);
         assertThat(first.hasMore()).isTrue();
         assertThat(first.nextCursor()).isNotBlank();
-        var second = service.openOrders(1001L, "1", com.surprising.trading.order.controller.OrderRequestController.activePage(2, first.nextCursor()), null);
+        var second = service.openOrders(1001L, "1", com.surprising.trading.order.controller.OrderRequestHandler.activePage(2, first.nextCursor()), null);
         assertThat(second.orders()).extracting(OrderResponse::orderId).containsExactly(10_000L);
         assertThat(second.hasMore()).isFalse();
         verifyNoInteractions(aeronOrders, projection);

@@ -16,6 +16,28 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
 class LocalBusinessApiTest {
+    @Test void adminEffectiveFeesRequireTrustedIdentityAndPreserveTheExactTargetAccount() {
+        String path = "/api/v1/admin/trading/fees/effective?userId=9007199254740993&instrumentId=604&productLine=LINEAR_PERPETUAL";
+        assertThat(invoke("trading-fees", path, HttpMethod.GET, userHeaders(), null).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        var headers = new HttpHeaders();
+        headers.set("X-Admin-User-Id", " ");
+        headers.set("X-Product-Line", "LINEAR_PERPETUAL");
+        assertThat(invoke("trading-fees", path, HttpMethod.GET, headers, null).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        verifyNoInteractions(fees);
+        headers.set("X-Admin-User-Id", "7");
+        var effective = new com.surprising.trading.api.model.EffectiveTradingFeeResponse(9_007_199_254_740_993L,
+                ProductLine.LINEAR_PERPETUAL, "604", 12L, -5L, 20L, "USER_INSTRUMENT", java.time.Instant.EPOCH);
+        when(fees.effective(9_007_199_254_740_993L, "604", 0, "LINEAR_PERPETUAL", "LINEAR_PERPETUAL"))
+                .thenReturn(effective);
+        var response = invoke("trading-fees", path, HttpMethod.GET, headers, null);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(mapper.readTree(response.getBody()).get("userId").longValue()).isEqualTo(9_007_199_254_740_993L);
+        assertThat(mapper.readTree(response.getBody()).get("makerFeeRatePpm").longValue()).isEqualTo(-5L);
+        verify(fees).effective(9_007_199_254_740_993L, "604", 0, "LINEAR_PERPETUAL", "LINEAR_PERPETUAL");
+    }
+
     @Test void algoRecoveryAndParentReadsRequireTheAuthenticatedOwner() {
         var response = new com.surprising.trading.api.model.AlgoOrderSubmissionResponse(42,ProductLine.SPOT,"a+b",
                 Long.MAX_VALUE,new java.util.UUID(4,5),"RESULT_UNKNOWN","RESULT_UNKNOWN",null);
@@ -43,7 +65,7 @@ class LocalBusinessApiTest {
         verifyNoMoreInteractions(orders);
         verifyNoInteractions(adminOrders);
     }
-    private final com.surprising.trading.trigger.controller.TriggerOrderRequestController triggers = mock(com.surprising.trading.trigger.controller.TriggerOrderRequestController.class);
+    private final com.surprising.trading.trigger.controller.TriggerOrderRequestHandler triggers = mock(com.surprising.trading.trigger.controller.TriggerOrderRequestHandler.class);
 
     @Test void triggerReceiptRoutesBindUserAndPreserveOriginalIdentities() {
         var receipt = new com.surprising.trading.api.model.OrderCommandReceipt(new java.util.UUID(4, 5),
@@ -67,7 +89,7 @@ class LocalBusinessApiTest {
         verify(adminOrders).metrics("7","LINEAR_PERPETUAL","LINEAR_PERPETUAL",60,1);
         assertThat(invoke("trading-orders","/api/v1/admin/trading/orders/metrics",HttpMethod.GET,userHeaders(),null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
-    private final com.surprising.trading.order.controller.AdminOrderRequestController adminOrders = mock(com.surprising.trading.order.controller.AdminOrderRequestController.class);
+    private final com.surprising.trading.order.controller.AdminOrderRequestHandler adminOrders = mock(com.surprising.trading.order.controller.AdminOrderRequestHandler.class);
 
     @Test void executionAuditRouteRequiresAdminAndPreservesExactOrderIdentityAndProductScope() {
         var headers = new HttpHeaders(); headers.set("X-Admin-User-Id","7"); headers.set("X-Product-Line","LINEAR_PERPETUAL");
@@ -237,17 +259,19 @@ class LocalBusinessApiTest {
 
     private final com.surprising.websocket.provider.service.SubscriptionRegistry websocket = mock(com.surprising.websocket.provider.service.SubscriptionRegistry.class);
 
-    private final com.surprising.trading.order.controller.OrderRequestController orders = mock(com.surprising.trading.order.controller.OrderRequestController.class);
+    private final com.surprising.trading.order.controller.OrderRequestHandler orders = mock(com.surprising.trading.order.controller.OrderRequestHandler.class);
 
-    private final com.surprising.trading.order.controller.LeverageRequestController leverage = mock(com.surprising.trading.order.controller.LeverageRequestController.class);
+    private final com.surprising.trading.order.controller.TradingFeeRequestHandler fees = mock(com.surprising.trading.order.controller.TradingFeeRequestHandler.class);
+
+    private final com.surprising.trading.order.controller.LeverageRequestHandler leverage = mock(com.surprising.trading.order.controller.LeverageRequestHandler.class);
 
     private final com.surprising.trading.matching.service.MatchingMarketDataService market = mock(com.surprising.trading.matching.service.MatchingMarketDataService.class);
 
-    private final com.surprising.account.provider.controller.AccountRequestController accounts = mock(com.surprising.account.provider.controller.AccountRequestController.class);
+    private final com.surprising.account.provider.controller.AccountRequestHandler accounts = mock(com.surprising.account.provider.controller.AccountRequestHandler.class);
 
-    private final com.surprising.instrument.provider.controller.InstrumentRequestController instruments = mock(com.surprising.instrument.provider.controller.InstrumentRequestController.class);
+    private final com.surprising.instrument.provider.controller.InstrumentRequestHandler instruments = mock(com.surprising.instrument.provider.controller.InstrumentRequestHandler.class);
 
-    private final com.surprising.trading.maintenance.controller.AdminMaintenanceController maintenance = mock(com.surprising.trading.maintenance.controller.AdminMaintenanceController.class);
+    private final com.surprising.trading.maintenance.controller.AdminMaintenanceRequestHandler maintenance = mock(com.surprising.trading.maintenance.controller.AdminMaintenanceRequestHandler.class);
 
     private final AccountProperties accountProperties = new AccountProperties();
 
@@ -261,7 +285,7 @@ class LocalBusinessApiTest {
     }
 
     private LocalBusinessApi api() {
-        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, triggers, mock(com.surprising.trading.trigger.controller.AdminTriggerOrderRequestController.class), leverage, mock(com.surprising.trading.order.controller.TradingFeeRequestController.class), orders, adminOrders, mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments, mock(com.surprising.trading.order.controller.OrderBusinessSettingsController.class)), mapper, Validation.buildDefaultValidatorFactory().getValidator(), websocket, accountProperties, tradingProperties);
+        return new LocalBusinessApi(new TradingLocalRoutes(maintenance, triggers, mock(com.surprising.trading.trigger.controller.AdminTriggerOrderRequestHandler.class), leverage, fees, orders, adminOrders, mock(com.surprising.trading.order.service.InstrumentCoreSyncService.class), market), new AccountLocalRoutes(accounts), new InstrumentLocalRoutes(instruments, mock(com.surprising.trading.order.controller.OrderBusinessSettingsRequestHandler.class)), mapper, Validation.buildDefaultValidatorFactory().getValidator(), websocket, accountProperties, tradingProperties);
     }
 
     private ResponseEntity<byte[]> invoke(String service, String path, HttpMethod method, HttpHeaders headers, String body) {

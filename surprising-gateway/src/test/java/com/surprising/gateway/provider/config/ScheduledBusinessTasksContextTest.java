@@ -47,6 +47,8 @@ class ScheduledBusinessTasksContextTest {
             context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("test", Map.of(
                     "surprising.c2c.enabled", enabled, "surprising.realtime.enabled", enabled)));
             context.registerBean("appMediaDriver", Object.class, Object::new);
+            context.registerBean(io.micrometer.core.instrument.MeterRegistry.class,
+                    io.micrometer.core.instrument.simple.SimpleMeterRegistry::new);
             context.registerBean(C2cSettlement.class, () -> settlement);
             context.registerBean(InstrumentCoreSyncService.class, () -> instruments);
             context.registerBean(OpenInterestPublisher.class, () -> openInterest);

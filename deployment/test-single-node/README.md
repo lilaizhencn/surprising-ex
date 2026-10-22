@@ -41,6 +41,9 @@ mvn -pl \
 内部服务调用无需配置业务 token 或账户签名密钥。公共 gateway 登录、管理员权限和业务校验继续生效。
 Core 先启动，随后业务应用完成 liveness，再启动价格和其他后台服务。
 
+做市配置从 YAML 初始化，后台公共设置、策略及参考盘口的热更新只保留在当前 maker 进程，重启后丢弃；历史做市配置表不再读取。
+部署前将需要保留的参数写入启动 YAML（可用 `SPRING_CONFIG_ADDITIONAL_LOCATION=file:/绝对路径/maker.yml` 加载），或在重启后通过后台重新配置。默认引擎关闭、策略为空；启用前核对账户资金，重启后检查实际双边盘口。详见 [做市配置与迁移](../../surprising-maker/README.md#单实例部署与配置迁移)。
+
 将同一 Git 提交的代码和 `target` 产物放到服务器 `/opt/surprising-ex`，并创建：
 
 ```bash

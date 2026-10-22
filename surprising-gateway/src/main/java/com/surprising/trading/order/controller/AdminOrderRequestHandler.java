@@ -2,7 +2,7 @@ package com.surprising.trading.order.controller;
 
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.AdminBatchCancelOrdersRequest;
-import com.surprising.trading.api.model.AdminCancelBySymbolRequest;
+import com.surprising.trading.api.model.AdminCancelByInstrumentRequest;
 import com.surprising.trading.api.model.AdminCancelOrderRequest;
 import com.surprising.trading.api.model.AdminCancelOrderResult;
 import com.surprising.trading.api.model.AdminCancelOrdersResponse;
@@ -15,10 +15,10 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.stereotype.Component;
 
 /**
- * 本地协议与内部HTTP共用的请求绑定、参数校验及响应转换；业务由实际Service处理，不声明HTTP路由。
+ * HTTP/本地路由共用的协议适配：绑定格式和错误响应；业务由实际Service处理，不声明HTTP路由。
  */
 @Component
-public class AdminOrderRequestController {
+public class AdminOrderRequestHandler {
     public tools.jackson.databind.node.ObjectNode metrics(String adminUserId,String productHeader,String productValue,int window,int limit) {
         requireAdmin(adminUserId);
         try {
@@ -31,7 +31,7 @@ public class AdminOrderRequestController {
 
     private final OrderService orderService;
 
-    public AdminOrderRequestController(OrderService orderService) {
+    public AdminOrderRequestHandler(OrderService orderService) {
         this.orderService = orderService;
     }
 
@@ -106,11 +106,11 @@ public class AdminOrderRequestController {
         }
     }
 
-    public AdminCancelOrdersResponse cancelBySymbol(String adminUserId, String productLineHeader, String productLineValue, AdminCancelBySymbolRequest request) {
+    public AdminCancelOrdersResponse cancelByInstrument(String adminUserId, String productLineHeader, String productLineValue, AdminCancelByInstrumentRequest request) {
         requireAdmin(adminUserId);
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
-            return orderService.adminCancelBySymbol(request, productLine);
+            return orderService.adminCancelByInstrument(request, productLine);
         } catch (ProjectionReadResult.ResponseTooLargeException ex) {
             throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {

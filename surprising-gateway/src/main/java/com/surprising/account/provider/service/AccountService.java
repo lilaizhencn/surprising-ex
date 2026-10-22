@@ -5,7 +5,6 @@ import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.BalanceAdjustmentRequest;
 import com.surprising.account.api.model.BalanceQueryResponse;
 import com.surprising.account.api.model.BalanceResponse;
-import com.surprising.account.api.model.ExpiringPositionSettlementAccountCommand;
 import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
 import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
 import com.surprising.account.api.model.PositionMarginResponse;
@@ -18,19 +17,11 @@ import com.surprising.account.api.model.ProductBalanceQueryResponse;
 import com.surprising.account.api.model.ProductBalanceResponse;
 import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
-import com.surprising.account.api.model.PerpetualAccountStateUpdatedEvent;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.trading.api.model.MarginMode;
-import com.surprising.instrument.api.model.DeliverySettlementEvent;
-import com.surprising.instrument.api.model.ContractSettlementMethod;
-import com.surprising.instrument.api.model.ContractType;
-import com.surprising.instrument.api.model.InstrumentResponse;
-import com.surprising.instrument.api.model.OptionExerciseEvent;
-import com.surprising.instrument.api.model.OptionExerciseStyle;
-import com.surprising.instrument.api.model.OptionType;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -74,12 +65,11 @@ public class AccountService {
 
     public BalanceResponse balance(long userId, String asset) {
         requireUserId(userId);
-        String normalizedAsset = asset;
-        var balance = realtimeQueries.balance(currentProductLine(), userId, normalizedAsset, null);
+        var balance = realtimeQueries.balance(currentProductLine(), userId, asset, null);
         return balance
                 .map(value -> new BalanceResponse(userId, value.asset(), value.availableUnits(), value.lockedUnits(),
                         Math.addExact(value.availableUnits(), value.lockedUnits()), Instant.now()))
-                .orElseGet(() -> new BalanceResponse(userId, normalizedAsset, 0L, 0L, 0L, Instant.now()));
+                .orElseGet(() -> new BalanceResponse(userId, asset, 0L, 0L, 0L, Instant.now()));
     }
 
     public BalanceQueryResponse balances(long userId) {
@@ -110,12 +100,11 @@ public class AccountService {
         requireUserId(userId);
         ProductLine product = accountType.productLine().orElseThrow();
         requireCurrentProduct(product);
-        String normalizedAsset = asset;
-        var selected = realtimeQueries.balance(product, userId, normalizedAsset, null);
+        var selected = realtimeQueries.balance(product, userId, asset, null);
         BalanceResponse balance = selected
                 .map(value -> new BalanceResponse(userId, value.asset(), value.availableUnits(), value.lockedUnits(),
                         Math.addExact(value.availableUnits(), value.lockedUnits()), Instant.now()))
-                .orElseGet(() -> new BalanceResponse(userId, normalizedAsset, 0L, 0L, 0L, Instant.now()));
+                .orElseGet(() -> new BalanceResponse(userId, asset, 0L, 0L, 0L, Instant.now()));
         return new ProductBalanceResponse(userId, accountType, balance.asset(),
                 balance.availableUnits(), balance.lockedUnits(), balance.equityUnits(), balance.updatedAt());
     }
@@ -168,30 +157,25 @@ public class AccountService {
     public PositionResponse position(long userId, String instrumentId, MarginMode marginMode, com.surprising.trading.api.model.PositionSide positionSide) {
         requireUserId(userId);
         requireDerivativeProduct(currentProductLine());
-        String normalizedSymbol = instrumentId;
-        MarginMode normalizedMarginMode = marginMode;
-        com.surprising.trading.api.model.PositionSide normalizedPositionSide = positionSide;
-        var position = realtimeQueries.position(currentProductLine(), userId, normalizedSymbol,
-                    com.surprising.aeron.protocol.CoreMarginMode.valueOf(normalizedMarginMode.name()),
-                    com.surprising.aeron.protocol.CorePositionSide.valueOf(normalizedPositionSide.name()), null)
+        var position = realtimeQueries.position(currentProductLine(), userId, instrumentId,
+                    com.surprising.aeron.protocol.CoreMarginMode.valueOf(marginMode.name()),
+                    com.surprising.aeron.protocol.CorePositionSide.valueOf(positionSide.name()), null)
                     .map(value -> toCorePositionResponse(userId, value));
-        return position.orElseGet(() -> new PositionResponse(userId, normalizedSymbol,
-                        normalizedMarginMode, normalizedPositionSide, 0L, 0L, 0L, Instant.EPOCH));
+        return position.orElseGet(() -> new PositionResponse(userId, instrumentId,
+                        marginMode, positionSide, 0L, 0L, 0L, Instant.EPOCH));
     }
 
     public PositionMarginResponse positionMargin(long userId, String instrumentId, MarginMode marginMode) {
         requireUserId(userId);
         requireDerivativeProduct(currentProductLine());
-        String normalizedSymbol = instrumentId;
-        MarginMode normalizedMarginMode = marginMode;
-        var position = realtimeQueries.position(currentProductLine(), userId, normalizedSymbol,
-                    com.surprising.aeron.protocol.CoreMarginMode.valueOf(normalizedMarginMode.name()),
+        var position = realtimeQueries.position(currentProductLine(), userId, instrumentId,
+                    com.surprising.aeron.protocol.CoreMarginMode.valueOf(marginMode.name()),
                     com.surprising.aeron.protocol.CorePositionSide.NET, null)
                     .map(value -> new PositionMarginResponse(userId, value.instrumentId(), value.marginAsset(),
-                            normalizedMarginMode, com.surprising.trading.api.model.PositionSide.NET,
+                            marginMode, com.surprising.trading.api.model.PositionSide.NET,
                             value.positionMarginUnits(), Instant.now()));
         return position.orElseGet(() -> new PositionMarginResponse(
-                        userId, normalizedSymbol, "", normalizedMarginMode,
+                        userId, instrumentId, "", marginMode,
                         com.surprising.trading.api.model.PositionSide.NET, 0L, Instant.EPOCH));
     }
 
@@ -202,10 +186,9 @@ public class AccountService {
     public PositionQueryResponse positions(long userId, com.surprising.trading.api.model.PositionSide positionSide) {
         requireUserId(userId);
         requireDerivativeProduct(currentProductLine());
-        com.surprising.trading.api.model.PositionSide normalized = positionSide;
         CoreUserStateView snapshot = accountSnapshot(currentProductLine(), userId);
         List<PositionResponse> rows = snapshot.positions().stream()
-                .filter(value -> normalized == null || value.positionSide().name().equals(normalized.name()))
+                .filter(value -> positionSide == null || value.positionSide().name().equals(positionSide.name()))
                 .map(value -> toCorePositionResponse(userId, value))
                 .toList();
         return new PositionQueryResponse(rows.size(), rows);
@@ -270,7 +253,7 @@ public class AccountService {
     private void requireDerivativeProduct(ProductLine productLine) {
         requireCurrentProduct(productLine);
         if (productLine == ProductLine.SPOT) {
-            throw new IllegalStateException("现货账户不支持持仓业务");
+            throw new IllegalArgumentException("现货账户不支持持仓业务");
         }
     }
 
@@ -285,13 +268,5 @@ public class AccountService {
             throw new IllegalArgumentException("userId must be positive");
         }
     }
-
-
-
-
-
-
-
-
 
 }

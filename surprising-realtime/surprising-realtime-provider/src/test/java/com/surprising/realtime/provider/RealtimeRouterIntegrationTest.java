@@ -336,6 +336,115 @@ class RealtimeRouterIntegrationTest {
         }
     }
 
+    @Test
+    void badFrameInvalidatesAReadySourceEvenWhenNoLaterCommitArrives() throws Exception {
+        int port = port();
+        Process server = new ProcessBuilder(System.getProperty("realtime.test.server", "redis-server"),
+                "--bind", "127.0.0.1", "--port", Integer.toString(port), "--save", "", "--appendonly", "no")
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        var factory = new LettuceConnectionFactory(new org.springframework.data.redis.connection.RedisStandaloneConfiguration("127.0.0.1", port));
+        factory.afterPropertiesSet();
+        factory.start();
+        try {
+            var redis = new StringRedisTemplate(factory);
+            await(() -> { try (var connection = factory.getConnection()) { return connection.ping() != null; }
+                catch (RuntimeException failure) { return false; } });
+            String directory = temporary.resolve("receiver-recovery").toString();
+            try (var driver = MediaDriver.launch(new MediaDriver.Context().aeronDirectoryName(directory)
+                    .dirDeleteOnStart(true).dirDeleteOnShutdown(true));
+                 var router = new RealtimeRouter(new RealtimeRouterProperties(directory, "aeron:ipc", 2101, 2103,
+                         Map.of(ProductLine.SPOT, "aeron:ipc")), redis);
+                 var aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(directory));
+                 var publication = aeron.addExclusivePublication("aeron:ipc", 2101)) {
+                await(publication::isConnected);
+                await(() -> redis.opsForValue().get("rt:source:SPOT") != null);
+                String epoch = redis.opsForValue().get("rt:source:SPOT");
+                var views = new ValkeyReadViewStore(redis);
+                var snapshot = List.of(frame(RealtimeFrame.Kind.SNAPSHOT_BEGIN, 42, 100, 0, 1, "", "", new byte[0]),
+                        frame(RealtimeFrame.Kind.USER, 42, 100, 1, 1, "", "user", user(7)),
+                        frame(RealtimeFrame.Kind.SNAPSHOT_END, 42, 100, 2, 1, "", "", number(1)));
+                assertThat(views.install(snapshot, System.currentTimeMillis(), epoch)).isTrue();
+                assertThat(views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000).status()).isEqualTo("READY");
+                var corrupt = new UnsafeBuffer(new byte[16]);
+                await(() -> publication.offer(corrupt) > 0);
+                await(() -> !Objects.equals(epoch, redis.opsForValue().get("rt:source:SPOT")));
+                assertThat(router.failures()).isPositive();
+                assertThat(views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000).status()).isNotEqualTo("READY");
+            }
+        } finally {
+            factory.destroy();
+            server.destroy();
+            server.waitFor(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void receiverInputOverflowInvalidatesOldEpochAndRecoversOnlyFromCompleteBaseline() throws Exception {
+        int port = port();
+        Process server = new ProcessBuilder(System.getProperty("realtime.test.server", "redis-server"),
+                "--bind", "127.0.0.1", "--port", Integer.toString(port), "--save", "", "--appendonly", "no")
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        var factory = new LettuceConnectionFactory(new org.springframework.data.redis.connection.RedisStandaloneConfiguration("127.0.0.1", port));
+        factory.afterPropertiesSet();
+        factory.start();
+        var releaseOwner = new CountDownLatch(1);
+        try {
+            var redis = org.mockito.Mockito.spy(new StringRedisTemplate(factory));
+            await(() -> { try (var connection = factory.getConnection()) { return connection.ping() != null; }
+                catch (RuntimeException failure) { return false; } });
+            var ownerBlocked = new CountDownLatch(1);
+            var blockNextLookup = new java.util.concurrent.atomic.AtomicBoolean(true);
+            org.mockito.Mockito.doAnswer(call -> {
+                if (blockNextLookup.compareAndSet(true, false)) {
+                    ownerBlocked.countDown();
+                    assertThat(releaseOwner.await(20, TimeUnit.SECONDS)).isTrue();
+                }
+                return call.callRealMethod();
+            }).when(redis).executePipelined(org.mockito.ArgumentMatchers.<org.springframework.data.redis.core.RedisCallback<?>>any());
+            String directory = temporary.resolve("input-overflow").toString();
+            var control = new LinkedBlockingQueue<RealtimeFrame>();
+            try (var driver = MediaDriver.launch(new MediaDriver.Context().aeronDirectoryName(directory)
+                    .dirDeleteOnStart(true).dirDeleteOnShutdown(true));
+                 var controlReceiver = new AeronRealtimeReceiver(directory, "aeron:ipc", 2102, control::add);
+                 var router = new RealtimeRouter(new RealtimeRouterProperties(directory, "aeron:ipc", 2101, 2103,
+                         Map.of(ProductLine.SPOT, "aeron:ipc")), redis);
+                 var aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(directory));
+                 var publication = aeron.addExclusivePublication("aeron:ipc", 2101)) {
+                await(() -> publication.isConnected() && controlReceiver.ready());
+                await(() -> redis.opsForValue().get("rt:source:SPOT") != null);
+                String epoch = redis.opsForValue().get("rt:source:SPOT");
+                var views = new ValkeyReadViewStore(redis);
+                assertThat(views.install(List.of(
+                        frame(RealtimeFrame.Kind.SNAPSHOT_BEGIN, 42, 100, 0, 1, "", "", new byte[0]),
+                        frame(RealtimeFrame.Kind.USER, 42, 100, 1, 1, "", "user", user(7)),
+                        frame(RealtimeFrame.Kind.SNAPSHOT_END, 42, 100, 2, 1, "", "", number(1))),
+                        System.currentTimeMillis(), epoch)).isTrue();
+                assertThat(views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000).status()).isEqualTo("READY");
+                offer(publication, frame(RealtimeFrame.Kind.MARK, 0, 1, 0, 0, "1", "", new byte[] {'{','}'}));
+                assertThat(ownerBlocked.await(2, TimeUnit.SECONDS)).isTrue();
+                // The owner is deterministically paused: 8192 slots fill before the next frame.
+                for (int index = 0; index < 8193; index++)
+                    offer(publication, frame(RealtimeFrame.Kind.MARK, 0, 2 + index, 0, 0, "1", "", new byte[] {'{','}'}));
+                await(() -> router.dropped() > 0 && router.failures() > 0);
+                releaseOwner.countDown();
+                await(() -> !Objects.equals(epoch, redis.opsForValue().get("rt:source:SPOT")));
+                assertThat(views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000).status()).isNotEqualTo("READY");
+                new ValkeySnapshotRequests(redis).renew(ProductLine.SPOT, 42, System.currentTimeMillis() + 30000);
+                var request = control.poll(10, TimeUnit.SECONDS);
+                assertThat(request).isNotNull();
+                snapshot(publication, request.snapshotId(), 200, 2, 9);
+                await(() -> views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000).status().equals("READY"));
+                assertThat(views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000).snapshotVersion())
+                        .isEqualTo(RealtimeVersion.fence(200));
+            }
+        } finally {
+            releaseOwner.countDown();
+            factory.destroy();
+            server.destroy();
+            server.waitFor(5, TimeUnit.SECONDS);
+        }
+    }
+
     private static void commit(
             ExclusivePublication p, long position, long previous, long end, long balance)
             throws Exception {

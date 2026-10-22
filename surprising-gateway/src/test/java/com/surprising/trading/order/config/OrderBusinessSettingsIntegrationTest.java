@@ -6,7 +6,7 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.model.OrderBusinessSettings;
 import com.surprising.trading.order.repository.OrderBusinessSettingsRepository;
 import com.surprising.trading.order.service.OrderBusinessSettingsService;
-import com.surprising.trading.order.controller.OrderBusinessSettingsController;
+import com.surprising.trading.order.controller.OrderBusinessSettingsRequestHandler;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -43,8 +43,8 @@ class OrderBusinessSettingsIntegrationTest {
         assertThat(secondProps.getRisk().protection()).isEqualTo(settings.risk());
         assertThat(secondProps.getAlgo().getScanDelayMs()).isEqualTo(100);
         assertThat(secondProps.getAlgo().isEnabled()).isFalse();
-        var controller = new OrderBusinessSettingsController(second,json);
-        String stale=json.writeValueAsString(new OrderBusinessSettingsController.Update(settings,before.configurationVersion(),"stale"));
+        var controller = new OrderBusinessSettingsRequestHandler(second,json);
+        String stale=json.writeValueAsString(new OrderBusinessSettingsRequestHandler.Update(settings,before.configurationVersion(),"stale"));
         assertThatThrownBy(()->controller.save(line,json.readTree(stale),"42"))
                 .isInstanceOf(ResponseStatusException.class).hasMessageContaining("409");
         var saved=first.current(line);

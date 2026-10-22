@@ -551,3 +551,7 @@ Kafka职责归包：独立快照、审计、结算/排空及推送消费入口�
 外部参考行情适配位于 `provider.client.RestReferenceMarketProvider`；做市报价业务仍由原Service/Task拥有。
 
 管理运行日志由 `AdminMarketMakerController.eventPage` 绑定 `MarketMakerRunEventPageQuery`，包含原生时间、序号、方向和限制；Repository只负责2048条有界诊断事件、产品过滤及seek。指标、日志、策略配置的10个共享契约归 `model.MarketMakerAdminModels`，Service保留做市运行和指标业务；非法HTTP分页直接返回400。
+
+### 管理请求的整数精度
+
+金额单位和64位ID可用十进制JSON字符串传递，绑定到原有long/Long及ID列表后保持精确。应用YAML关闭 `spring.jackson.deserialization.accept-float-as-int`，小数数值、非整数字符串和超出目标整数范围的值在绑定时拒绝，不截断或饱和；未新增wire模型或改变请求路径。

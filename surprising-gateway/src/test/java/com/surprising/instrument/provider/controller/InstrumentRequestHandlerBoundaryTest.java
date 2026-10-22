@@ -19,9 +19,9 @@ import org.springframework.http.*;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
-class InstrumentRequestControllerBoundaryTest {
+class InstrumentRequestHandlerBoundaryTest {
     private final InstrumentService service = mock(InstrumentService.class);
-    private final InstrumentRequestController controller = new InstrumentRequestController(service, JsonMapper.builder().findAndAddModules().build());
+    private final InstrumentRequestHandler controller = new InstrumentRequestHandler(service, JsonMapper.builder().findAndAddModules().build());
 
     @Test void nativeVersionConflictRemains409AndInternalStateFailuresAreNotMisreportedAs404() {
         var request = mock(InstrumentUpsertRequest.class);
@@ -88,7 +88,7 @@ class InstrumentRequestControllerBoundaryTest {
                     HttpMethod.GET, new HttpHeaders(), null, Duration.ofSeconds(1));
             assertThat(response.getStatusCode().value()).isEqualTo(404);
         }
-        assertThat(InstrumentRequestController.class.getAnnotation(org.springframework.web.bind.annotation.RestController.class)).isNull();
+        assertThat(InstrumentRequestHandler.class.getAnnotation(org.springframework.web.bind.annotation.RestController.class)).isNull();
     }
 
     private static void assertBadRequest(org.assertj.core.api.ThrowableAssert.ThrowingCallable call) {

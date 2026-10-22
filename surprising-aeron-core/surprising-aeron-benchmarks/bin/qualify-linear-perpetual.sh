@@ -34,7 +34,6 @@ if [[ "${JAVA_VERSION}" != *'version "27'* \
 fi
 
 HEAP="${QUALIFICATION_HEAP:-4g}"
-MATCHER_WAIT_STRATEGY="${MATCHER_WAIT_STRATEGY:-BUSY_SPIN}"
 MATCHING_ENGINES="${MATCHING_ENGINES:-1}"
 PROJECTION_BUSY_SPIN="${PROJECTION_BUSY_SPIN:-false}"
 SETTLEMENT_WAIT_STRATEGY="${SETTLEMENT_WAIT_STRATEGY:-BUSY_SPIN}"
@@ -72,7 +71,6 @@ MAIN_JVM_ARGS=(
   "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED"
   "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
   "-Dsurprising.aeron.matching-engines=${MATCHING_ENGINES}"
-  "-Dsurprising.aeron.matcher-wait-strategy=${MATCHER_WAIT_STRATEGY}"
   "-Dsurprising.aeron.settlement-wait-strategy=${SETTLEMENT_WAIT_STRATEGY}"
   "-Dsurprising.aeron.matching-completion-spins=${MATCHING_COMPLETION_SPINS}"
   "-Dsurprising.aeron.projection-busy-spin=${PROJECTION_BUSY_SPIN}"

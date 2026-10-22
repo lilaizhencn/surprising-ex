@@ -53,7 +53,6 @@ export PRICE_CONSUMER_REQUIRED_INSTRUMENT_IDS="${PRICE_CONSUMER_REQUIRED_INSTRUM
 export JVM_XMS="${JVM_XMS:-512m}"
 export JVM_XMX="${JVM_XMX:-1g}"
 # 持续录制使用低开销 default；临时深入采样再通过 jcmd 开启限时 profile。
-export CORE_LATENCY_DIAGNOSTICS="${CORE_LATENCY_DIAGNOSTICS:-true}"
 export JFR_ENABLED="${JFR_ENABLED:-true}"
 export JFR_SETTINGS="${JFR_SETTINGS:-default}"
 export JFR_MAX_SIZE="${JFR_MAX_SIZE:-64m}"

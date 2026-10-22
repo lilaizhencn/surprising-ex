@@ -62,6 +62,7 @@ public class SubscriptionRegistry {
     public void add(ClientConnection connection) {
         sessions.put(connection.id(), connection);
         sessionTopics.put(connection.id(), ConcurrentHashMap.newKeySet());
+        connection.onClosed(() -> remove(connection));
     }
 
     public ClientConnection connection(String sessionId) {
@@ -72,50 +73,103 @@ public class SubscriptionRegistry {
         return connection;
     }
 
-    public synchronized void remove(String sessionId) {
-        ClientConnection connection = sessions.remove(sessionId);
-        Set<SubscriptionTopic> topics = sessionTopics.remove(sessionId);
-        if (topics != null && connection != null) {
-            for (SubscriptionTopic topic : topics) {
-                removeDepthBaseline(topic, sessionId);
-                if (routeLifecycle != null) routeLifecycle.unsubscribed(topic);
-                Set<ClientConnection> connections = subscribers.get(topic);
-                if (connections != null) {
-                    connections.remove(connection);
-                    if (connections.isEmpty()) {
-                        subscribers.remove(topic, connections);
-                    }
-                }
+    /** Connection changes are serialized per socket; Redis lifecycle callbacks never hold this monitor. */
+    public void remove(String sessionId) {
+        ClientConnection connection = sessions.get(sessionId);
+        if (connection != null) remove(connection);
+    }
+
+    private void remove(ClientConnection connection) {
+        synchronized (connection) {
+            List<SubscriptionTopic> removed;
+            synchronized (this) {
+                sessions.remove(connection.id(), connection);
+                Set<SubscriptionTopic> topics = sessionTopics.remove(connection.id());
+                removed = topics == null ? List.of() : List.copyOf(topics);
+                for (SubscriptionTopic topic : removed) removeSubscription(connection, topic);
+            }
+            connection.close();
+            RouteLifecycle lifecycle = routeLifecycle;
+            if (lifecycle != null) for (SubscriptionTopic topic : removed) lifecycle.unsubscribed(topic);
+        }
+    }
+
+    /** Fanout only detaches recipients; its socket watcher performs external lease cleanup. */
+    private void disconnect(ClientConnection connection) {
+        synchronized (this) {
+            if (sessions.remove(connection.id(), connection)) {
+                Set<SubscriptionTopic> topics = sessionTopics.get(connection.id());
+                if (topics != null) for (SubscriptionTopic topic : topics) removeSubscription(connection, topic);
             }
         }
-        if (connection != null) {
-            connection.close();
+        connection.close();
+    }
+
+    public void subscribe(ClientConnection connection, SubscriptionTopic topic) {
+        synchronized (connection) {
+            RouteLifecycle lifecycle;
+            synchronized (this) {
+                if (sessions.get(connection.id()) != connection)
+                    throw new IllegalStateException("websocket session is not registered");
+                Set<SubscriptionTopic> topics = sessionTopics.get(connection.id());
+                if (topics.contains(topic)) return;
+                if (topics.size() >= properties.getSession().getMaxSubscriptions())
+                    throw new IllegalStateException("maximum websocket subscriptions exceeded");
+                // Install the local recipient first: a synchronous first Core baseline must not be lost.
+                topics.add(topic);
+                subscribers.computeIfAbsent(topic, ignored -> ConcurrentHashMap.newKeySet()).add(connection);
+                lifecycle = routeLifecycle;
+            }
+            try {
+                if (lifecycle != null) lifecycle.subscribed(topic);
+            } catch (RuntimeException failure) {
+                synchronized (this) {
+                    var topics = sessionTopics.get(connection.id());
+                    if (topics != null) topics.remove(topic);
+                    removeSubscription(connection, topic);
+                }
+                throw failure;
+            }
         }
     }
 
-    public synchronized void subscribe(ClientConnection connection, SubscriptionTopic topic) {
-        Set<SubscriptionTopic> topics = sessionTopics.computeIfAbsent(connection.id(), key -> ConcurrentHashMap.newKeySet());
-        if (topics.size() >= properties.getSession().getMaxSubscriptions() && !topics.contains(topic)) {
-            throw new IllegalStateException("maximum websocket subscriptions exceeded");
+    public void unsubscribe(ClientConnection connection, SubscriptionTopic topic) {
+        synchronized (connection) {
+            boolean removed;
+            synchronized (this) {
+                Set<SubscriptionTopic> topics = sessionTopics.get(connection.id());
+                removed = topics != null && topics.remove(topic);
+                if (removed) removeSubscription(connection, topic);
+            }
+            RouteLifecycle lifecycle = routeLifecycle;
+            if (removed && lifecycle != null) lifecycle.unsubscribed(topic);
         }
-        if (!topics.contains(topic) && routeLifecycle != null) routeLifecycle.subscribed(topic);
-        topics.add(topic);
-        subscribers.computeIfAbsent(topic, key -> ConcurrentHashMap.newKeySet()).add(connection);
     }
 
-    public synchronized void unsubscribe(ClientConnection connection, SubscriptionTopic topic) {
+    private void removeSubscription(ClientConnection connection, SubscriptionTopic topic) {
         removeDepthBaseline(topic, connection.id());
-        Set<SubscriptionTopic> topics = sessionTopics.get(connection.id());
-        if (topics != null) {
-            if (topics.remove(topic) && routeLifecycle != null) routeLifecycle.unsubscribed(topic);
-        }
         Set<ClientConnection> connections = subscribers.get(topic);
         if (connections != null) {
             connections.remove(connection);
-            if (connections.isEmpty()) {
-                subscribers.remove(topic, connections);
-            }
+            if (connections.isEmpty()) subscribers.remove(topic, connections);
         }
+    }
+
+    public List<ClientConnection> connections() {
+        return List.copyOf(sessions.values());
+    }
+
+    /** Failure notification is local only: no Redis calls on the receiver/conductor thread. */
+    public void invalidateRealtime() {
+        synchronized (this) { depthBaselines.clear(); }
+        for (ClientConnection connection : connections())
+            connection.close(org.springframework.web.socket.CloseStatus.SERVICE_RESTARTED);
+    }
+
+    /** Lease cleanup runs on the recovery task after clients have already been closed. */
+    public void resetRealtime() {
+        invalidateRealtime();
+        for (ClientConnection connection : connections()) remove(connection.id());
     }
 
     public void publish(SubscriptionTopic topic, Object payload, Instant eventTime) {
@@ -129,38 +183,39 @@ public class SubscriptionRegistry {
         if (baselines.isEmpty()) depthBaselines.remove(topic);
     }
 
-    public synchronized void publishDepth(SubscriptionTopic topic,
+    public void publishDepth(SubscriptionTopic topic,
             CoreOrderBookView book,
             String version, String entityId, Instant eventTime) {
-        if (topic.channel() != WsChannel.DEPTH || topic.productLine() == null)
-            throw new IllegalArgumentException("depth requires an explicit product line");
-        var connections = subscribers.get(topic);
-        if (connections == null || connections.isEmpty()) return;
-        fanoutBatches.increment();
-        fanoutMessages.increment();
-        var baselines = depthBaselines.computeIfAbsent(topic, ignored -> new HashMap<>());
-        // Invocation-local: the same immutable baseline produces the same wire message.
-        // Identity keys avoid hashing/comparing all levels and never conflate distinct books.
-        var encodedByBaseline = new java.util.IdentityHashMap<CoreOrderBookView, String>();
-        for (ClientConnection connection : connections) {
-            var previous = baselines.get(connection.id());
-            if (previous != null && book.exportSequence() <= previous.exportSequence()) continue;
-            String message = encodedByBaseline.get(previous);
-            if (message == null) {
-                var update = DepthUpdate.between(previous, book);
-                message = encode(WsServerMessage.event(topic,
-                        new RealtimeWebSocketBridge.VersionedEvent(version, entityId, update), eventTime));
-                encodedByBaseline.put(previous, message);
-            }
-            if (connection.send(message)) {
-                baselines.put(connection.id(), book);
-            } else {
-                backpressureRejections.increment();
-                remove(connection.id());
+        List<ClientConnection> failed = null;
+        synchronized (this) {
+            if (topic.channel() != WsChannel.DEPTH || topic.productLine() == null)
+                throw new IllegalArgumentException("depth requires an explicit product line");
+            var connections = subscribers.get(topic);
+            if (connections == null || connections.isEmpty()) return;
+            fanoutBatches.increment();
+            fanoutMessages.increment();
+            var baselines = depthBaselines.computeIfAbsent(topic, ignored -> new HashMap<>());
+            var encodedByBaseline = new java.util.IdentityHashMap<CoreOrderBookView, String>();
+            for (ClientConnection connection : connections) {
+                var previous = baselines.get(connection.id());
+                if (previous != null && book.exportSequence() <= previous.exportSequence()) continue;
+                String message = encodedByBaseline.get(previous);
+                if (message == null) {
+                    var update = DepthUpdate.between(previous, book);
+                    message = encode(WsServerMessage.event(topic,
+                            new RealtimeWebSocketBridge.VersionedEvent(version, entityId, update), eventTime));
+                    encodedByBaseline.put(previous, message);
+                }
+                if (connection.send(message)) baselines.put(connection.id(), book);
+                else {
+                    backpressureRejections.increment();
+                    if (failed == null) failed = new ArrayList<>();
+                    failed.add(connection);
+                }
             }
         }
-        // Removing a failed first subscriber can detach the initially empty map.
-        if (!baselines.isEmpty()) depthBaselines.put(topic, baselines);
+        // Disconnect and lease cleanup may perform external I/O; never under the global book lock.
+        if (failed != null) for (ClientConnection connection : failed) disconnect(connection);
     }
 
     /** 将同一 Kafka 拉取批次的事件一次性投递到每个连接的有界环形队列。 */
@@ -194,7 +249,7 @@ public class SubscriptionRegistry {
         sessionTopics.forEach((sessionId,topics)->{
             boolean subscribed=topics.stream().anyMatch(t->t.productLine()==product && t.userId()!=null && t.userId()==userId);
             ClientConnection connection=sessions.get(sessionId);
-            if(subscribed && connection!=null && !connection.send(encoded))remove(sessionId);
+            if(subscribed && connection!=null && !connection.send(encoded))disconnect(connection);
         });
     }
 
@@ -304,13 +359,13 @@ public class SubscriptionRegistry {
     private boolean hasSubscribers(SubscriptionTopic topic) {
         if (subscriberCount(topic) > 0) return true;
         return !topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.instrumentId())
-                && subscriberCount(topic.withSymbol(SubscriptionTopic.WILDCARD)) > 0;
+                && subscriberCount(topic.withInstrumentId(SubscriptionTopic.WILDCARD)) > 0;
     }
 
     private void fanout(SubscriptionTopic topic, List<String> messages) {
         sendEncodedBatch(topic, messages);
         if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.instrumentId())) {
-            sendEncodedBatch(topic.withSymbol(SubscriptionTopic.WILDCARD), messages);
+            sendEncodedBatch(topic.withInstrumentId(SubscriptionTopic.WILDCARD), messages);
         }
     }
 
@@ -322,7 +377,7 @@ public class SubscriptionRegistry {
                     ? connection.send(messages.getFirst()) : connection.sendBatch(messages);
             if (!accepted) {
                 backpressureRejections.increment();
-                remove(connection.id());
+                disconnect(connection);
             }
         }
     }

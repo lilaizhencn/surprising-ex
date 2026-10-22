@@ -23,7 +23,6 @@ JVM_CORE_XMX="${JVM_CORE_XMX:-$JVM_XMX}"
 JVM_GATEWAY_XMX="${JVM_GATEWAY_XMX:-$JVM_XMX}"
 JVM_PROVIDER_XMX="${JVM_PROVIDER_XMX:-$JVM_XMX}"
 JVM_GC="${JVM_GC:-ZGC}"
-CORE_LATENCY_DIAGNOSTICS="${CORE_LATENCY_DIAGNOSTICS:-false}"
 JFR_ENABLED="${JFR_ENABLED:-false}"
 JFR_SETTINGS="${JFR_SETTINGS:-profile}"
 JFR_STACK_DEPTH="${JFR_STACK_DEPTH:-128}"
@@ -90,7 +89,6 @@ case "$CORE_ONLY" in true|false) ;; *) fail 'CORE_ONLY must be true or false' ;;
 [[ "$CORE_ONLY" != true || "$ACTION" != test ]] || fail 'CORE_ONLY does not run the full HTTP lifecycle test'
 case "$BUILD_CHANGED" in true|false) ;; *) fail 'BUILD_CHANGED must be true or false' ;; esac
 case "$JVM_GC" in ZGC|G1) ;; *) fail 'JVM_GC must be ZGC or G1' ;; esac
-case "$CORE_LATENCY_DIAGNOSTICS" in true|false) ;; *) fail 'CORE_LATENCY_DIAGNOSTICS must be true or false' ;; esac
 case "$JFR_ENABLED" in true|false) ;; *) fail 'JFR_ENABLED must be true or false' ;; esac
 case "$JFR_SETTINGS" in profile|default) ;; *) fail 'JFR_SETTINGS must be profile or default' ;; esac
 [[ "$JFR_STACK_DEPTH" =~ ^[0-9]+$ ]] && (( JFR_STACK_DEPTH >= 1 && JFR_STACK_DEPTH <= 2048 )) || fail 'JFR_STACK_DEPTH must be in [1,2048]'
@@ -312,9 +310,6 @@ java_args_for() {
     JVM_ARGS+=("-XX:+UseZGC")
   else
     JVM_ARGS+=("-XX:+UseG1GC")
-  fi
-  if [[ "$service" == core-node* ]]; then
-    JVM_ARGS+=("-Dcore.settlementLatencyDiagnostics=$CORE_LATENCY_DIAGNOSTICS")
   fi
   if [[ -n "${LOGGING_CONFIG:-}" && "$service" != core-probe ]]; then
     JVM_ARGS+=("-Dlogback.configurationFile=${LOGGING_CONFIG#file:}")
