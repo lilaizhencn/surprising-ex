@@ -3,30 +3,19 @@ package com.surprising.aeron.service.orchestration.retention;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.service.orchestration.result.FundsCommandIndex;
-import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.change.LaneCommitDelta;
-import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
-import com.surprising.aeron.service.state.model.CoreLiquidationState;
-import com.surprising.aeron.service.state.model.CoreOrderState;
-import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
-import com.surprising.aeron.service.state.order.OrderRuntime;
-import com.surprising.aeron.service.state.order.ReservationRuntime;
-import com.surprising.aeron.service.state.order.RuntimeOrderCommitStateTransitions.TerminalPruneBatch;
-import com.surprising.aeron.service.state.risk.LiquidationRuntime;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.UUID;
 
 /**
- * 保存当前产品线的近期终态身份及长期资金命令指纹。终态订单从已提交 Lane 回执直接进入有界墓碑 FIFO，资金索引由 Ledger 执行 I/O；候选表保留恢复输入中的待清理实体，当前 accept 入口不再发现或新增候选。
+ * 保存当前产品线的近期终态身份及长期资金命令指纹。终态订单从已提交 Lane 回执直接进入有界墓碑 FIFO，资金索引由 Ledger 执行 I/O；候选表只保留恢复输入中的实体身份，并参与订单编号占用检查，不负责候选发现或批量清理。
  */
 public final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderSink, AutoCloseable {
 
@@ -34,8 +23,6 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
 
     /** 近期四类终态身份共用的六万五千五百三十六项保留上限。 */
     static final int MAX_TOMBSTONES = 65_536;
-    /** 单次确认清理最多四千零九十六个候选。 */
-    static final int MAX_PRUNE_PER_ACK = 4_096;
     /** 终态保留段快照版本二。 */
     private static final int VERSION = 2;
     /** 快照客户号的最大 UTF-8 字节数二百五十六。 */
@@ -101,91 +88,6 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
      */
     @Override
     public void completeSequence() {
-        trimTombstones();
-    }
-
-    /**
-     * 从候选表顺序选择已确认导出且在独立 Core 状态里仍可清理的实体，最多取请求预算与四千零九十六的较小值；这里只返回清理批次，不改业务状态。
-     * @param state 允许当前线程读取的独立或在线业务状态
-     * @param acknowledgedSequence 外部已确认导出的非负序号水位
-     * @param limit 请求的正清理条数，受单次上限约束
-     */
-    TerminalPruneBatch eligible(TradingCoreState state, long acknowledgedSequence, int limit) {
-        if (state == null || acknowledgedSequence < 0 || limit <= 0) {
-            throw new IllegalArgumentException("invalid terminal prune request");
-        }
-        // 本批选中的普通订单 ID
-        ArrayList<Long> orders = new ArrayList<>();
-        // 本批选中的算法父单 ID
-        ArrayList<Long> algos = new ArrayList<>();
-        // 本批选中的触发单 ID
-        ArrayList<Long> triggers = new ArrayList<>();
-        // 本批选中的强平记录 ID
-        ArrayList<Long> liquidations = new ArrayList<>();
-        // 当前请求与单次上限取小后的剩余清理预算
-        int remaining = Math.min(limit, MAX_PRUNE_PER_ACK);
-        for (RetainedEntity /* 当前候选，清理前再次核对确认水位和业务状态 */ candidate : candidates.values()) {
-            if (remaining == 0) break;
-            if (candidate.exportSequence() > acknowledgedSequence || !isStillPrunable(state, candidate)) continue;
-            switch (candidate.key().type()) {
-                case ORDER -> orders.add(candidate.key().id());
-                case ALGO -> algos.add(candidate.key().id());
-                case TRIGGER -> triggers.add(candidate.key().id());
-                case LIQUIDATION -> liquidations.add(candidate.key().id());
-            }
-            remaining--;
-        }
-        return new TerminalPruneBatch(orders, algos, triggers, liquidations);
-    }
-
-    /**
-     * 按相同确认水位和预算，在在线运行时中检查候选是否仍可清理，调用方须处于允许读取这些状态的所有权边界。
-     * @param state 允许当前线程读取的独立或在线业务状态
-     * @param acknowledgedSequence 外部已确认导出的非负序号水位
-     * @param limit 请求的正清理条数，受单次上限约束
-     */
-    TerminalPruneBatch eligible(
-            TradingRuntimeState state, long acknowledgedSequence, int limit) {
-        if (state == null || acknowledgedSequence < 0 || limit <= 0) {
-            throw new IllegalArgumentException("invalid terminal prune request");
-        }
-        // 本批选中的普通订单 ID
-        ArrayList<Long> orders = new ArrayList<>();
-        // 本批选中的算法父单 ID
-        ArrayList<Long> algos = new ArrayList<>();
-        // 本批选中的触发单 ID
-        ArrayList<Long> triggers = new ArrayList<>();
-        // 本批选中的强平记录 ID
-        ArrayList<Long> liquidations = new ArrayList<>();
-        // 当前请求与单次上限取小后的剩余清理预算
-        int remaining = Math.min(limit, MAX_PRUNE_PER_ACK);
-        for (RetainedEntity /* 当前候选，清理前再次核对确认水位和业务状态 */ candidate : candidates.values()) {
-            if (remaining == 0) break;
-            if (candidate.exportSequence() > acknowledgedSequence || !isStillPrunable(state, candidate)) continue;
-            switch (candidate.key().type()) {
-                case ORDER -> orders.add(candidate.key().id());
-                case ALGO -> algos.add(candidate.key().id());
-                case TRIGGER -> triggers.add(candidate.key().id());
-                case LIQUIDATION -> liquidations.add(candidate.key().id());
-            }
-            remaining--;
-        }
-        return new TerminalPruneBatch(orders, algos, triggers, liquidations);
-    }
-
-    /**
-     * 业务清理已完成后，将四类批次实体从候选转成墓碑，再统一裁剪窗口；不在此删除实际账户或订单。
-     * @param batch 业务侧已完成清理的非空候选批次
-     * @param acknowledgedSequence 外部已确认导出的非负序号水位
-     */
-    void complete(TerminalPruneBatch batch, long acknowledgedSequence) {
-        if (batch == null || acknowledgedSequence < 0) {
-            throw new IllegalArgumentException("invalid completed terminal prune");
-        }
-        complete(EntityType.ORDER, batch.orderIds(), acknowledgedSequence);
-        complete(EntityType.ALGO, batch.algoOrderIds(), acknowledgedSequence);
-        complete(EntityType.TRIGGER, batch.triggerOrderIds(), acknowledgedSequence);
-        complete(EntityType.LIQUIDATION, batch.liquidationIds(), acknowledgedSequence);
         trimTombstones();
     }
 
@@ -511,95 +413,6 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
             }
         } catch (/* 编码或解码的 I/O 异常，按所在边界包装 */ IOException exception) {
             throw new IllegalArgumentException("invalid terminal retention payload", exception);
-        }
-    }
-
-    /**
-     * 从独立 Core 状态检查实体仍存在且已终态；普通订单还要求没有剩余预留，其他类型调用各自终态判断。
-     * @param state 允许当前线程读取的独立或在线业务状态
-     * @param candidate 要重新核对可清理状态的候选
-     */
-    private boolean isStillPrunable(TradingCoreState state, RetainedEntity candidate) {
-        return switch (candidate.key().type()) {
-            case ORDER -> {
-                // 当前检查的可空普通订单
-                CoreOrderState order = state.orders().get(candidate.key().id());
-                // 独立状态中该订单对应的可空用户
-                var user = order == null ? null : state.users().get(order.userId());
-                // 该订单的可空预留，仍有金额时不能清理
-                var reservation = user == null ? null : user.reservations().get(order.orderId());
-                yield order != null && order.status().terminal()
-                        && (reservation == null || reservation.remainingUnits() == 0);
-            }
-            case ALGO -> {
-                // 当前检查的可空算法父单
-                CoreAlgoOrderState algo = state.algoOrders().get(candidate.key().id());
-                yield algo != null && algo.terminal();
-            }
-            case TRIGGER -> {
-                // 当前检查的可空条件单
-                CoreTriggerOrderState trigger = state.triggerOrders().get(candidate.key().id());
-                yield trigger != null && !trigger.status().open();
-            }
-            case LIQUIDATION -> {
-                // 当前检查的可空强平记录
-                CoreLiquidationState liquidation = state.riskState().liquidations().get(candidate.key().id());
-                yield liquidation != null && liquidation.terminal();
-            }
-        };
-    }
-
-    /**
-     * 从在线状态检查同类条件；强平允许已取消，或已完成且缺口为零。这里只判断，不修改持仓、预留或清理索引。
-     * @param state 允许当前线程读取的独立或在线业务状态
-     * @param candidate 要重新核对可清理状态的候选
-     */
-    private boolean isStillPrunable(TradingRuntimeState state, RetainedEntity candidate) {
-        return switch (candidate.key().type()) {
-            case ORDER -> {
-                // 当前检查的可空普通订单
-                OrderRuntime order = state.order(candidate.key().id());
-                // 该订单的可空预留，仍有金额时不能清理
-                ReservationRuntime reservation = order == null ? null : state.reservation(order.orderId());
-                yield order != null && order.status().terminal()
-                        && (reservation == null || reservation.reservedUnits() == 0);
-            }
-            case ALGO -> {
-                // 当前检查的可空算法父单
-                CoreAlgoOrderState algo = state.algoOrder(candidate.key().id());
-                yield algo != null && algo.terminal();
-            }
-            case TRIGGER -> {
-                // 当前检查的可空条件单
-                CoreTriggerOrderState trigger = state.triggerOrder(candidate.key().id());
-                yield trigger != null && !trigger.status().open();
-            }
-            case LIQUIDATION -> {
-                // 当前检查的可空强平记录
-                LiquidationRuntime liquidation = state.liquidation(candidate.key().id());
-                yield liquidation != null && (liquidation.status() == CoreLiquidationState.Status.CANCELED
-                        || liquidation.status() == CoreLiquidationState.Status.COMPLETED
-                        && liquidation.deficitUnits() == 0);
-            }
-        };
-    }
-
-    /**
-     * 逐项从候选表移除并核对导出序号，再写入相同实体墓碑；候选缺失或超确认水位时报错，移除发生在检查之前，不保证异常时原表不变。
-     * @param type 四类终态实体之一
-     * @param ids 当前类别已经完成清理的实体 ID 序列
-     * @param acknowledgedSequence 外部已确认导出的非负序号水位
-     */
-    private void complete(EntityType type, List<Long> ids, long acknowledgedSequence) {
-        for (long /* 当前按类别完成清理的实体 ID */ id : ids) {
-            // 当前构造、解码或比较的实体组合键
-            EntityKey key = new EntityKey(type, id);
-            // 当前候选，清理前再次核对确认水位和业务状态
-            RetainedEntity candidate = candidates.remove(key);
-            if (candidate == null || candidate.exportSequence() > acknowledgedSequence) {
-                throw new IllegalStateException("terminal entity was not eligible for pruning: " + key);
-            }
-            tombstones.put(type.code, id, candidate.userId(), candidate.clientId(), candidate.exportSequence());
         }
     }
 

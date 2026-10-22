@@ -261,6 +261,10 @@ flowchart TD
 恢复时使用快照中的这些参数。兼容性由 `SectionedCoreSnapshotCodec`、`MatcherSnapshotCodec` 等快照编解码器的格式版本检查；
 修改路由算法或这些参数的含义时，须同步评估快照版本和恢复约束。
 
+终态订单身份从已提交 Lane 回执经 `TerminalStateRetention.accept / acceptBatch` 写入墓碑，
+`completeSequence` 在本序号接收完成后裁剪保留窗口；资金命令指纹仍由 `FundsIndexWork` 交给 Ledger 管理。
+候选表按现有快照格式读写并参与订单编号占用检查，不提供独立的导出确认后清理入口。
+
 ## 包结构：业务包配合步骤导航
 
 `state` 根包保留 `TradingCoreState`（恢复和导出状态）与 `TradingRuntimeState`（在线状态入口）；
