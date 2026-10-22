@@ -370,3 +370,5 @@ Kafka职责归包：独立快照、审计、结算/排空及推送消费入口�
 法币拉取由 `index.client.FiatRateClient`处理HTTP和提供方响应，返回原生 `index.model.FiatRateSnapshot`；`ExchangeRateService`继续拥有精确金额换算、倒数、精度、缓存写入与数据库落账。
 
 陈旧指数价格的原生失败位于 `index.exception.StaleIndexPriceException`，缓存新鲜度及Controller映射保持。
+
+汇率HTTP参数由 `index.controller.ExchangeRateController` 绑定：币种用纯 `index.utils.CurrencyFormats` 转为规范代码，金额必须为正；Service接收原生BigDecimal和规范代码，保留直连/桥接、精确舍入、快照新鲜度与缺失行情判断。后台法币/稳定币配置继续在内部调用同一纯工具作完整性检查。

@@ -6,6 +6,7 @@ import com.surprising.price.api.model.ExchangeRateQueryResponse;
 import com.surprising.price.api.model.ExchangeRateResponse;
 import com.surprising.price.index.service.ExchangeRateService;
 import java.math.BigDecimal;
+import com.surprising.price.index.utils.CurrencyFormats;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -25,7 +26,7 @@ public class ExchangeRateController {
     public ExchangeRateResponse latest(@RequestParam("baseCurrency") String baseCurrency,
                                        @RequestParam("quoteCurrency") String quoteCurrency) {
         try {
-            return exchangeRateService.latest(baseCurrency, quoteCurrency);
+            return exchangeRateService.latest(CurrencyFormats.normalize(baseCurrency), CurrencyFormats.normalize(quoteCurrency));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -36,7 +37,7 @@ public class ExchangeRateController {
     @GetMapping(PriceApiPaths.EXCHANGE_RATE_BASE_PATH + "/rates")
     public ExchangeRateQueryResponse rates(@RequestParam("baseCurrency") String baseCurrency) {
         try {
-            return exchangeRateService.rates(baseCurrency);
+            return exchangeRateService.rates(CurrencyFormats.normalize(baseCurrency));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -47,7 +48,10 @@ public class ExchangeRateController {
                                                @RequestParam("fromCurrency") String fromCurrency,
                                                @RequestParam("toCurrency") String toCurrency) {
         try {
-            return exchangeRateService.convert(amount, fromCurrency, toCurrency);
+            if (amount == null || amount.signum() <= 0) {
+                throw new IllegalArgumentException("amount must be positive");
+            }
+            return exchangeRateService.convert(amount, CurrencyFormats.normalize(fromCurrency), CurrencyFormats.normalize(toCurrency));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

@@ -15,7 +15,7 @@ import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Locale;
+import com.surprising.price.index.utils.CurrencyFormats;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
@@ -60,7 +60,7 @@ public class ExchangeRateService {
         if (!fiat.isEnabled()) {
             return;
         }
-        String baseCurrency = normalizeCurrency(fiat.getBaseCurrency());
+        String baseCurrency = CurrencyFormats.normalize(fiat.getBaseCurrency());
         try {
             saveOpenExchangeRateApiRates(baseCurrency, fiat, fiatRateClient.fetch(baseCurrency, fiat));
         } catch (Exception ex) {
@@ -74,8 +74,8 @@ public class ExchangeRateService {
         if (!properties.getFiat().isEnabled() || !stableCoin.isEnabled()) {
             return;
         }
-        String stableCurrency = normalizeCurrency(stableCoin.getCurrency());
-        String fiatCurrency = normalizeCurrency(stableCoin.getFiatCurrency());
+        String stableCurrency = CurrencyFormats.normalize(stableCoin.getCurrency());
+        String fiatCurrency = CurrencyFormats.normalize(stableCoin.getFiatCurrency());
         try {
             BigDecimal rate = externalSpotPriceClient.fetchTickerPrice(
                     stableCoin.getBaseUrl(), stableCoin.getPath(), stableCoin.getParser());
@@ -93,11 +93,11 @@ public class ExchangeRateService {
     }
 
     public ExchangeRateResponse latest(String baseCurrency, String quoteCurrency) {
-        return resolveDirect(normalizeCurrency(baseCurrency), normalizeCurrency(quoteCurrency)).toResponse();
+        return resolveDirect(baseCurrency, quoteCurrency).toResponse();
     }
 
     public ExchangeRateQueryResponse rates(String baseCurrency) {
-        String normalized = normalizeCurrency(baseCurrency);
+        String normalized = baseCurrency;
         List<ExchangeRateResponse> rates = snapshotCache.byBaseCurrency(normalized).stream()
                 .filter(this::freshEnough)
                 .toList();
@@ -105,11 +105,8 @@ public class ExchangeRateService {
     }
 
     public ExchangeRateConvertResponse convert(BigDecimal amount, String fromCurrency, String toCurrency) {
-        if (amount == null || amount.signum() <= 0) {
-            throw new IllegalArgumentException("amount must be positive");
-        }
-        String from = normalizeCurrency(fromCurrency);
-        String to = normalizeCurrency(toCurrency);
+        String from = fromCurrency;
+        String to = toCurrency;
         if (from.equals(to)) {
             return new ExchangeRateConvertResponse(from, to, amount, amount, BigDecimal.ONE,
                     from + "->" + to, Instant.now());
@@ -120,7 +117,7 @@ public class ExchangeRateService {
             return convertWithRate(amount, direct.rate(), from, to, direct.route(), direct.rateTime());
         }
 
-        String bridge = normalizeCurrency(properties.getFiat().getBaseCurrency());
+        String bridge = CurrencyFormats.normalize(properties.getFiat().getBaseCurrency());
         ResolvedRate first = resolveDirect(from, bridge);
         ResolvedRate second = resolveDirect(bridge, to);
         BigDecimal rate = first.rate().multiply(second.rate())
@@ -135,7 +132,7 @@ public class ExchangeRateService {
         Instant updatedAt = Instant.now();
         saveRateAndInverse(baseCurrency, baseCurrency, BigDecimal.ONE, provider, rateTime, updatedAt);
         for (String quote : fiat.getQuoteCurrencies()) {
-            String quoteCurrency = normalizeCurrency(quote);
+            String quoteCurrency = CurrencyFormats.normalize(quote);
             String value = snapshot.rates().get(quoteCurrency);
             if (value != null) {
                 BigDecimal rate = new BigDecimal(value);
@@ -201,16 +198,11 @@ public class ExchangeRateService {
     }
 
     private boolean involvesStableCoin(String baseCurrency, String quoteCurrency) {
-        String stable = normalizeCurrency(properties.getFiat().getStableCoin().getCurrency());
+        String stable = CurrencyFormats.normalize(properties.getFiat().getStableCoin().getCurrency());
         return stable.equals(baseCurrency) || stable.equals(quoteCurrency);
     }
 
-    private String normalizeCurrency(String currency) {
-        if (currency == null || !currency.matches("[A-Za-z]{2,10}")) {
-            throw new IllegalArgumentException("invalid currency: " + currency);
-        }
-        return currency.toUpperCase(Locale.ROOT);
-    }
+
 
     private record ResolvedRate(BigDecimal rate, String route, String provider, Instant rateTime, Instant updatedAt) {
 

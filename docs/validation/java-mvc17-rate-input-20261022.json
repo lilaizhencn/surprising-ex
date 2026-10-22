@@ -1,0 +1,367 @@
+{
+  "verified_at_utc": "2026-10-22T02:23:19.893904+00:00",
+  "ids": [
+    "ADD-092"
+  ],
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-price/surprising-price-provider",
+        "-Dtest=ExchangeRateInputBoundaryTest,ExchangeRateFetchBoundaryTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [],
+      "log_sha256": "fb81aeb71957674a2473d9963d64d300dada67e73239c9c53880ebdddf9837a5",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "boundary-fixed": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-price/surprising-price-provider",
+        "-Dtest=ExchangeRateInputBoundaryTest,ExchangeRateFetchBoundaryTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.price.index.service.ExchangeRateFetchBoundaryTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.controller.ExchangeRateInputBoundaryTest",
+          "tests": 23,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "d530f1bcd7887db37c934cd4b5a853a4c51d0823ea56a36bf2dda5dbe464fbc8",
+      "tests": 27,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0
+    },
+    "exact-decimal-fixed": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-price/surprising-price-provider",
+        "-Dtest=ExchangeRateInputBoundaryTest,ExchangeRateFetchBoundaryTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.price.index.service.ExchangeRateFetchBoundaryTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.controller.ExchangeRateInputBoundaryTest",
+          "tests": 23,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "48c4a9f0a4f8ef3a99c74e09034461ec6d7af14c8d09ec01de74b6a027b8117c",
+      "tests": 27,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative-amount": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-price/surprising-price-provider",
+        "-Dtest=ExchangeRateInputBoundaryTest#nonPositiveAmountNeverReachesBusiness",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.price.index.controller.ExchangeRateInputBoundaryTest",
+          "tests": 3,
+          "failures": 3,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "76945fc40e4df5486cd48ccdad4cbcb7d1c4c81a1d5fabc1baa47f04f1db6c76",
+      "tests": 3,
+      "failures": 3,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded-clean": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-price/surprising-price-provider",
+        "clean",
+        "install"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceServiceTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceCorePublisherTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.settings.PriceMaintenanceSchedulingTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexInstrumentConfigServiceTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.service.ExchangeRateFetchBoundaryTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.controller.ExchangeRateInputBoundaryTest",
+          "tests": 23,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.settings.PriceSettingsSchedulingEventTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.service.LatestIndexPriceCacheTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.client.ExternalSpotPriceClientTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceCalculatorTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.SurprisingPriceApplicationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.settings.PriceBusinessSettingsControllerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.config.IndexKafkaProducerConfigurationTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.client.ExternalSpotWebSocketManagerTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.consumer.MarkPriceConsumerTest",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceMarketSubscriptionTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexInstrumentConfigLoaderTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceAuditConsumerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexPriceAuditConsumerTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.probe.MarketProbeControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.PublicTradeEventMapperTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.settings.PriceBusinessSettingsIntegrationTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.repository.MarkPriceTickRepositoryTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexPriceCalculatorTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.config.MarkKafkaConfigurationTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceEncodingServiceTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.service.OptionPricePipelineTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.settings.PriceSettingsBoundaryPostgresTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.probe.MarketProbeServiceTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexPriceServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.config.IndexPriceApplicationYamlTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.index.repository.IndexPriceRepositoryBoundaryTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.price.mark.config.MarkPriceApplicationYamlTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "629b291fcf617d94dbd98b86919781a3c1e0bcd2b4280743cf3690910ad9d4e4",
+      "tests": 167,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "proof": {
+    "service": "仅去HTTP绑定和搬移纯格式工具的等价转换后完整类体逐字相同，直连/桥接/逆汇率/精度/时效保持",
+    "configured_facts": "法币/稳定币/桥接配置仍调用纯工具；非法内部配置测试拒绝，未削弱输入以外完整性检查",
+    "precision": "实际HTTP含大于2^53且18位小数金额，用BigDecimal树读取并断言两腿汇率及结果舍入",
+    "negative_control": "省略正数检查后三项真实HTTP测试均检出错误调用，finally恢复原字节后最终完整模块通过"
+  },
+  "scope": "Price provider全部167项；本次不改变交易资金、Core、产品路由或topic，未作真实六产品部署/性能验收。",
+  "new_type": "CurrencyFormats为HTTP/后台配置共享纯工具，无业务状态。",
+  "resources": "本批HTTP测试服务器已finally关闭；目标PG继续供其余批次使用。"
+}
