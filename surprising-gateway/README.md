@@ -564,3 +564,5 @@ API Key管理的标签、权限、IP白名单和密钥格式由 `auth.controller
 C2C后台审核的版本文本和原因由 `c2c.controller.C2cAdminController` 绑定，Service接收 `C2cAdminReviewModels` 原生long版本命令，审批/审计继续绑定原始正文。收款详情由Controller使用 `C2cPaymentFormats` 生成格式事实，原生 `C2cPaymentAccountInput` 不接受客户端标记；Service在事务内按当前方式要求、资料/二维码所有权和审核状态作业务判断，存量解密资料在审核时重新核实当前规则。
 
 认证身份与权限格式由 `auth.controller.AuthRequestBinding` 在实际HTTP入口绑定；角色和权限纯工具归 `auth.utils.AuthCodeFormats`，两个Repository各自只操作角色表或权限表。`AuthService` 保留邮箱/手机号注册策略、密码核验、MFA、冻结/封禁、会话和权限保护；规范化后的角色先参与自身管理员保护。审批仍使用原始正文，格式错误在消费审批之前返回。
+
+资产配置由 `asset.controller.AssetConfigurationController` 在原鉴权/审批后校验代码、文本及静态字段；`AssetConfigurationService` 锁定资产后检查版本、单位不可变、网络启停与金额精确性，配置和审计同事务提交。审批继续使用原始正文。

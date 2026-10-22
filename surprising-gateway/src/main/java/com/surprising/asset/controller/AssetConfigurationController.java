@@ -42,7 +42,7 @@ public class AssetConfigurationController {
     @PostMapping
     public Asset save(@RequestHeader("Authorization") String authorization, @RequestBody byte[] body, HttpServletRequest request) {
         long operatorId = requireWrite(authorization, request, body);
-        return execute(() -> service.save(json.readValue(body, AssetRequest.class), operatorId));
+        return execute(() -> service.save(validateAsset(json.readValue(body, AssetRequest.class)), operatorId));
     }
 
     @GetMapping("/{assetId}/networks")
@@ -56,7 +56,7 @@ public class AssetConfigurationController {
                                @RequestBody byte[] body, HttpServletRequest request) {
         long operatorId = requireWrite(authorization, request, body);
         return execute(() -> {
-            NetworkRequest config = json.readValue(body, NetworkRequest.class);
+            NetworkRequest config = validateNetwork(json.readValue(body, NetworkRequest.class));
             funding.validateNetwork(assetId, config);
             return service.saveNetwork(assetId, config, operatorId);
         });
@@ -83,6 +83,43 @@ public class AssetConfigurationController {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
         } catch (DataIntegrityViolationException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "asset or network already exists, or configuration violates constraints", ex);
+        }
+    }
+
+    private static AssetRequest validateAsset(AssetRequest request) {
+        if (request == null) throw new IllegalArgumentException("configuration is required");
+        requireText(request.reason(), "reason", 500);
+        requireText(request.asset(), "asset", 20);
+        if (!request.asset().matches("[A-Z0-9]{2,20}")) throw new IllegalArgumentException("invalid asset code");
+        requireText(request.displayName(), "displayName", 100);
+        if (request.logoUrl() == null || request.logoUrl().length() > 500
+                || !(request.logoUrl().isEmpty() || request.logoUrl().startsWith("/assets/")
+                || request.logoUrl().startsWith("https://"))) {
+            throw new IllegalArgumentException("logoUrl must be an asset path or HTTPS URL");
+        }
+        return request;
+    }
+
+    private static NetworkRequest validateNetwork(NetworkRequest request) {
+        if (request == null) throw new IllegalArgumentException("configuration is required");
+        requireText(request.reason(), "reason", 500);
+        requireText(request.networkCode(), "networkCode", 32);
+        if (!request.networkCode().matches("[A-Z0-9][A-Z0-9_-]{0,31}")) throw new IllegalArgumentException("invalid network code");
+        requireText(request.displayName(), "displayName", 100);
+        if (request.contractAddress() == null || request.contractAddress().length() > 128
+                || !request.contractAddress().equals(request.contractAddress().trim())
+                || (request.nativeAsset() != request.contractAddress().isEmpty())) {
+            throw new IllegalArgumentException("native asset requires empty contract; token requires a contract address");
+        }
+        if (request.chainDecimals() < 0 || request.chainDecimals() > 36 || request.confirmations() <= 0) {
+            throw new IllegalArgumentException("invalid chain decimals or confirmations");
+        }
+        return request;
+    }
+
+    private static void requireText(String value, String field, int max) {
+        if (value == null || value.isBlank() || value.length() > max || !value.equals(value.trim())) {
+            throw new IllegalArgumentException("invalid " + field);
         }
     }
 }

@@ -1,0 +1,138 @@
+{
+  "verified_at_utc": "2026-10-22T02:29:25.292961+00:00",
+  "ids": [
+    "ADD-086"
+  ],
+  "stages": {
+    "boundary": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=Asset*Test",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.asset.AssetInputBoundaryPostgresTest",
+          "tests": 16,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.asset.AssetConfigurationControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.asset.AssetConfigurationIntegrationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "9654403431e7e1d79248fadbce157d5fef0359b0501908b43df53f24c2a5061a",
+      "tests": 20,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative-audit-transaction": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=AssetInputBoundaryPostgresTest#auditFailureRollsBackConfigurationMutation",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.asset.AssetInputBoundaryPostgresTest",
+          "tests": 1,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "2a0727ef58e52d602f8e3e66077818d559ee73f9907c237ba51f8dbc1b29821e",
+      "tests": 1,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded-clean": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=Asset*Test,WalletFundingServiceTest,MultiProductMoneyIntegrationTest,LocalMoneyCommandsTest",
+        "clean",
+        "install"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.service.WalletFundingServiceTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalMoneyCommandsTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.asset.AssetInputBoundaryPostgresTest",
+          "tests": 16,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.MultiProductMoneyIntegrationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.asset.AssetConfigurationControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.asset.AssetConfigurationIntegrationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "d5fcbbde326d59f68dce5dbe4696a4214ec04e0309cd1a56b3875aaa0777ea0f",
+      "tests": 35,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "proof": {
+    "entire_service_file": "只移除搬至Controller的原字节校验块、空请求和原因文本校验后整文件相同；保存事务、锁、精度、版本、状态与审计保留",
+    "http": "16项真实HTTP/事务PG：无效资产/网络不写配置或审计，不调用资金网络验证；单位和金额精度业务拒绝；审计故障回滚",
+    "negative_control": "移除保存事务后1项检出配置残留，finally恢复原字节，最终clean扩大回归通过"
+  },
+  "scope": "配置及资金接口/六Core资金回归，未启动外部wallet或真实六产品部署；无性能结论。",
+  "new_types": "无新增生产类、状态、缓存或接口，校验由现有Controller承担。",
+  "resources": "目标独占PG最终统一清理，反证数据仅存此DB。"
+}

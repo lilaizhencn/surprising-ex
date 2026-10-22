@@ -36,16 +36,7 @@ public class AssetConfigurationService {
 
     @Transactional
     public Asset save(AssetRequest request, long operatorId) {
-        if (request == null) throw new IllegalArgumentException("configuration is required");
-        requireOperatorAndReason(operatorId, request.reason());
-        requireText(request.asset(), "asset", 20);
-        if (!request.asset().matches("[A-Z0-9]{2,20}")) throw new IllegalArgumentException("invalid asset code");
-        requireText(request.displayName(), "displayName", 100);
-        if (request.logoUrl() == null || request.logoUrl().length() > 500
-                || !(request.logoUrl().isEmpty() || request.logoUrl().startsWith("/assets/")
-                || request.logoUrl().startsWith("https://"))) {
-            throw new IllegalArgumentException("logoUrl must be an asset path or HTTPS URL");
-        }
+        requireOperator(operatorId);
         requireScale(request.scaleUnits());
         if (!request.listed() && request.tradingEnabled()) throw new IllegalArgumentException("unlisted asset cannot enable trading");
         Asset before = null;
@@ -69,20 +60,8 @@ public class AssetConfigurationService {
 
     @Transactional
     public Network saveNetwork(int assetId, NetworkRequest request, long operatorId) {
-        if (request == null) throw new IllegalArgumentException("configuration is required");
-        requireOperatorAndReason(operatorId, request.reason());
+        requireOperator(operatorId);
         Asset asset = assets.lock(assetId).orElseThrow(() -> new IllegalArgumentException("asset not found"));
-        requireText(request.networkCode(), "networkCode", 32);
-        if (!request.networkCode().matches("[A-Z0-9][A-Z0-9_-]{0,31}")) throw new IllegalArgumentException("invalid network code");
-        requireText(request.displayName(), "displayName", 100);
-        if (request.contractAddress() == null || request.contractAddress().length() > 128
-                || !request.contractAddress().equals(request.contractAddress().trim())
-                || (request.nativeAsset() != request.contractAddress().isEmpty())) {
-            throw new IllegalArgumentException("native asset requires empty contract; token requires a contract address");
-        }
-        if (request.chainDecimals() < 0 || request.chainDecimals() > 36 || request.confirmations() <= 0) {
-            throw new IllegalArgumentException("invalid chain decimals or confirmations");
-        }
         if (!asset.listed() && (request.depositEnabled() || request.withdrawalEnabled())) {
             throw new IllegalStateException("unlisted asset cannot enable deposit or withdrawal");
         }
@@ -148,16 +127,11 @@ public class AssetConfigurationService {
         if (expected != current) throw new IllegalStateException("configuration changed; reload before saving");
     }
 
-    private static void requireOperatorAndReason(long operatorId, String reason) {
+    private static void requireOperator(long operatorId) {
         if (operatorId <= 0) throw new IllegalArgumentException("authenticated administrator is required");
-        requireText(reason, "reason", 500);
     }
 
-    private static void requireText(String value, String field, int max) {
-        if (value == null || value.isBlank() || value.length() > max || !value.equals(value.trim())) {
-            throw new IllegalArgumentException("invalid " + field);
-        }
-    }
+
 
     private String encode(Object value) { return value == null ? null : json.writeValueAsString(value); }
 }
