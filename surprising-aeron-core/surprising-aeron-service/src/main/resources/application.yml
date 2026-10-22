@@ -1,5 +1,13 @@
 surprising:
   aeron:
+    # 首次启动的交易拓扑；恢复时使用快照保存的拓扑，不重新分配已有账户。
+    matching-engines: 1
+    risk-engines: 0
+    account-lanes: 2
+    account-lane-seed: 7640891576956012809
+    matcher-window-size: 4096
+    matching-completion-capacity: 4096
+    account-lane-queue-capacity: 4096
     cpu-affinity:
       # 仅绑定 Owner、Matcher 0、Account Lane 0/1；macOS 始终跳过。
       enabled: false

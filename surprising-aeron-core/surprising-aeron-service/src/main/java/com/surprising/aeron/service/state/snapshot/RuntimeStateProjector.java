@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state.snapshot;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.service.state.TradingCoreState.ClientOrderKey;
 import com.surprising.aeron.service.state.TradingCoreState;
@@ -43,13 +44,13 @@ public final class RuntimeStateProjector {
     }
 
     /**
-     * 读取现有拓扑配置及 p10-characterization 系统属性，随后按指定身份表恢复运行时。
+     * 通过统一配置入口绑定独立运行的拓扑，随后按指定身份表恢复运行时。
      * @param source 已经过快照或上游业务校验的只读交易状态
      * @param identities 本次恢复使用并绑定账户 Lane 的身份表，不是在本方法内新建的副本
      */
     public static TradingRuntimeState project(TradingCoreState source, RuntimeIdentityRegistry identities) {
         return project(source, identities,
-                LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization")));
+                CoreConfiguration.standaloneLaneTopology());
     }
 
     /**

@@ -38,16 +38,20 @@ flowchart TD
 
 | 阅读步骤 | 类和入口 | 实际职责 |
 | --- | --- | --- |
-| 1–2 配置 | [`SurprisingCoreApplication`](src/main/java/com/surprising/aeron/service/SurprisingCoreApplication.java)、[`CoreConfiguration`](src/main/java/com/surprising/aeron/service/config/CoreConfiguration.java) | 加载 Spring 配置，绑定 `surprising.aeron`，创建产品拓扑和 CPU 配置；不创建初始业务余额 |
+| 1–2 配置 | [`SurprisingCoreApplication`](src/main/java/com/surprising/aeron/service/SurprisingCoreApplication.java)、[`CoreConfiguration`](src/main/java/com/surprising/aeron/service/config/CoreConfiguration.java) | 加载 Spring 配置，绑定 `surprising.aeron`，创建集群拓扑、交易拓扑和 CPU 配置；不创建初始业务余额 |
 | 3–5 Aeron 资源 | [`AeronCoreLifecycle`](src/main/java/com/surprising/aeron/service/bootstrap/AeronCoreLifecycle.java) | 启动 Driver、Archive、Consensus 和 Service Container，等待关闭并逆序释放资源 |
 | 6–8 恢复与 Owner | [`AeronTradingClusterService`](src/main/java/com/surprising/aeron/service/cluster/AeronTradingClusterService.java)、[`TradingOwnerLoop`](src/main/java/com/surprising/aeron/service/orchestration/TradingOwnerLoop.java)、[`TradingCoreOwner`](src/main/java/com/surprising/aeron/service/orchestration/TradingCoreOwner.java) | 回调线程读取快照分块；在 Owner 线程创建或恢复交易运行时 |
 | 9 工作资源 | [`TradingCoreRuntime`](src/main/java/com/surprising/aeron/service/orchestration/TradingCoreRuntime.java)、[`TradingRuntimeState`](src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java) | 激活恢复后的拓扑与状态；启动工作资源后才收窄 Owner 的 CPU mask |
 | 10 回放 | `AeronTradingClusterService.onSessionMessage` → `TradingOwnerLoop.enqueue` | 把已复制日志及其时间、位置交给 Owner；回放与在线命令沿用同一交易规则 |
 
-配置有两种读取方式，不能混用：`CoreConfiguration` 绑定的产品线、成员地址、目录和
-CPU 配置可以来自 Spring 配置源；`TradingExecutionMode`、`LaneTopology` 等直接读取的
-JVM system property 要通过 `java -D...` 设置。当前 [application.yml](src/main/resources/application.yml)
-只提供默认关闭的 CPU 亲和性配置；节点启动还必须指定产品线。
+`CoreConfiguration` 统一绑定产品线、成员地址、目录、交易拓扑和 CPU 配置。
+Matcher 数量、账户 Lane 数量、路由种子与队列容量的默认值见 [application.yml](src/main/resources/application.yml)，
+可通过外部 YAML、环境变量、JVM `-D` 或 Spring 命令行参数覆盖；节点启动还必须指定产品线。
+例如账户 Lane 数可通过 `SURPRISING_AERON_ACCOUNTLANES=4` 或 `--surprising.aeron.account-lanes=4` 覆盖。
+`laneTopology` Bean → `TradingOwnerLoop` → `TradingCoreOwner` → `TradingCoreRuntime` → Matcher 与账户状态，
+整条启动路径共用同一份拓扑，`LaneTopology` 本身不读取外部配置。
+非 Spring 的工具和基准通过 `CoreConfiguration.standaloneLaneTopology()` 使用同一套绑定字段，
+读取系统属性与环境变量，不隐式加载节点 YAML。`TradingExecutionMode` 等其他 JVM 属性仍通过 `java -D...` 设置。
 币对、余额和标记价通过业务命令进入日志，重启从快照与日志恢复，不从数据库自动补载。
 
 | 线程 / 模式 | 负责的状态或工作 |

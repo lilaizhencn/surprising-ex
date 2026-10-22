@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.lane;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -35,9 +36,9 @@ class LaneTopologyTest {
         String previous = System.getProperty(key);
         try {
             System.setProperty(key, "2");
-            assertThat(LaneTopology.configured(false).accountLaneCount()).isEqualTo(2);
+            assertThat(CoreConfiguration.standaloneLaneTopology().accountLaneCount()).isEqualTo(2);
             System.setProperty(key, "8");
-            assertThat(LaneTopology.configured(false).accountLaneCount()).isEqualTo(8);
+            assertThat(CoreConfiguration.standaloneLaneTopology().accountLaneCount()).isEqualTo(8);
         } finally {
             if (previous == null) System.clearProperty(key);
             else System.setProperty(key, previous);

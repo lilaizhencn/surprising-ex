@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state.index;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.account.CoreUserState;
@@ -49,7 +50,7 @@ public final class PositionUserIndex {
      * @param state 初次构建或恢复重建所依据的完整业务状态
      */
     public PositionUserIndex(TradingCoreState state) {
-        this.topology = LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization"));
+        this.topology = CoreConfiguration.standaloneLaneTopology();
         rebuild(state);
     }
 
@@ -60,7 +61,7 @@ public final class PositionUserIndex {
      */
     public PositionUserIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
         this(state, identities,
-                LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization")));
+                CoreConfiguration.standaloneLaneTopology());
     }
 
     /**

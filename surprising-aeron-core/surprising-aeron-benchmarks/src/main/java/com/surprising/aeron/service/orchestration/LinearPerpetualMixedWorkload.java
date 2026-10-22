@@ -1,4 +1,5 @@
 package com.surprising.aeron.service.orchestration;
+import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
@@ -143,7 +144,7 @@ public final class LinearPerpetualMixedWorkload {
                 routedHftTakers.add(rawHftTakers.get((index + takerShift) % symbolCount));
             }
             List<Long> hftTakers = List.copyOf(routedHftTakers);
-            LaneTopology laneTopology = LaneTopology.configured(false);
+            LaneTopology laneTopology = CoreConfiguration.standaloneLaneTopology();
             for (int index = 0; index < symbolCount; index++) {
                 if (laneTopology.accountLaneId(hftMakers.get(index))
                         == laneTopology.accountLaneId(hftTakers.get(index))) {

@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
@@ -1096,7 +1097,7 @@ public final class LinearPerpetualBenchmarkSupport {
 
     public static List<Long> usersAcrossLanes(int accountLanes, int count, long startUserId) {
         configureAccountLanes(accountLanes);
-        LaneTopology topology = LaneTopology.configured(false);
+        LaneTopology topology = CoreConfiguration.standaloneLaneTopology();
         List<Long> users = new ArrayList<>(count);
         long candidate = startUserId;
         for (int index = 0; index < count; index++) {

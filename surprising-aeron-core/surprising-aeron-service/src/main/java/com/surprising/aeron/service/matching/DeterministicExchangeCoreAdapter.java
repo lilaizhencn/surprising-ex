@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.matching;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.protocol.CoreBookLevelView;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.exception.FatalMatchingDivergenceException;
@@ -186,7 +187,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 按系统属性读取拓扑，立即在当前线程创建全套同步订单簿。
+     * 通过统一配置入口绑定独立运行的拓扑，立即在当前线程创建全套同步订单簿。
      */
     public DeterministicExchangeCoreAdapter() {
         this(true);
@@ -197,7 +198,16 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * @param startImmediately 是否在构造时同步激活全部引擎
      */
     public DeterministicExchangeCoreAdapter(boolean startImmediately) {
-        this(startImmediately, /* 注入函数收到的真实持久化动作，默认立即调用。 */ submission -> submission.get());
+        this(CoreConfiguration.standaloneLaneTopology(), startImmediately);
+    }
+
+    /**
+     * 使用账户运行时共用的显式拓扑创建空白 Matcher，不再自行读取配置。
+     * @param topology 启动入口绑定并校验的不可变交易拓扑
+     * @param startImmediately 是否立即创建引擎，假时留给后续激活
+     */
+    public DeterministicExchangeCoreAdapter(LaneTopology topology, boolean startImmediately) {
+        this(topology, startImmediately, /* 实际持久化动作在调用线程直接执行。 */ submission -> submission.get());
     }
 
     /**
@@ -207,19 +217,21 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     DeterministicExchangeCoreAdapter(
             Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
                     snapshotPersistence) {
-        this(true, snapshotPersistence);
+        this(CoreConfiguration.standaloneLaneTopology(), true, snapshotPersistence);
     }
 
     /**
-     * 读取拓扑、创建上下文和证据账本、保存非空快照函数；要求立即启动时同步构造全部引擎并标记已激活。
+     * 接收拓扑、创建上下文和证据账本、保存非空快照函数；要求立即启动时同步构造全部引擎并标记已激活。
+     * @param topology 启动入口绑定并校验的不可变交易拓扑
      * @param startImmediately 是否在构造时同步激活全部引擎
      * @param snapshotPersistence 接收真实持久化动作并返回完成 Future 的非空函数
      */
     private DeterministicExchangeCoreAdapter(
+            LaneTopology topology,
             boolean startImmediately,
             Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
                     snapshotPersistence) {
-        this.topology = LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization"));
+        this.topology = java.util.Objects.requireNonNull(topology, "topology");
         initializeCommandScopes();
         this.matcherEvidence = new MatcherEvidenceLedger(topology);
         this.snapshotPersistence = java.util.Objects.requireNonNull(snapshotPersistence, "snapshotPersistence");

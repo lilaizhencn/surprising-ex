@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state.identity;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.service.state.TradingRuntimeState;
@@ -46,7 +47,7 @@ class RuntimeIdentityRegistryTest {
         // 本用例身份所属用户十七
         long user = 17;
         // 决定用户账户 Lane 的固定拓扑
-        var topology = LaneTopology.configured(false);
+        var topology = CoreConfiguration.standaloneLaneTopology();
         // 按测试用户路由构造或从冷运行时取得的所属账户 Lane
         var lane = new AccountLaneState(topology.accountLaneId(user), 16);
         // 独立算出的预期哈希，或 Owner 已准备的预期持仓键
@@ -90,7 +91,7 @@ class RuntimeIdentityRegistryTest {
         // 本用例身份所属用户十七
         long user = 17;
         // 按测试用户路由构造或从冷运行时取得的所属账户 Lane
-        var lane = new AccountLaneState(LaneTopology.configured(false).accountLaneId(user), 16);
+        var lane = new AccountLaneState(CoreConfiguration.standaloneLaneTopology().accountLaneId(user), 16);
         try (/* 模拟独立 Lane 操作或普通冷读的单线程执行器，用例结束关闭 */ var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
             // 本用例反复保留、发布消费和退休的确定性持仓键
             long key = executor.submit(() -> registry.retainPositionInLane(lane, user, "1:LONG")).get();
@@ -128,7 +129,7 @@ class RuntimeIdentityRegistryTest {
         // 本用例身份所属用户十七
         long user = 17;
         // 按测试用户路由构造或从冷运行时取得的所属账户 Lane
-        var lane = new AccountLaneState(LaneTopology.configured(false).accountLaneId(user), 16);
+        var lane = new AccountLaneState(CoreConfiguration.standaloneLaneTopology().accountLaneId(user), 16);
         // 首次客户端准备结果，或第一个用户/名称的实际持仓键
         var first = registry.prepareClientKeyInLane(lane, user, "客户-retired");
         registry.prepareClientKeyInLane(lane, user, "客户-retired");
@@ -191,7 +192,7 @@ class RuntimeIdentityRegistryTest {
         // 当前身份所属用户；哈希参考计算中为随机非负用户
         long userId = 17;
         // 决定用户账户 Lane 的固定拓扑
-        var topology = LaneTopology.configured(false);
+        var topology = CoreConfiguration.standaloneLaneTopology();
         try (/* 仅供身份归属测试的冷账户运行时，资源作用域退出时关闭 */ var runtime = new TradingRuntimeState(topology)) {
             identities.bindClientLanes(runtime);
             // 按测试用户路由构造或从冷运行时取得的所属账户 Lane

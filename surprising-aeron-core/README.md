@@ -55,7 +55,7 @@ sequenceDiagram
     participant Owner as TradingOwnerLoop
     participant Runtime as TradingCoreRuntime
     Main->>Spring: 1. 非 Web 启动，加载配置并扫描组件
-    Spring->>Spring: 2. 绑定 surprising.aeron，创建拓扑与亲和性配置
+    Spring->>Spring: 2. 绑定 surprising.aeron，创建 ClusterTopology / LaneTopology / CPU 配置
     Main->>Life: 3. startAndAwaitShutdown
     Life->>Aeron: 4. 启动 ClusteredMediaDriver
     Life->>Service: 5. 启动 ClusteredServiceContainer
@@ -71,7 +71,7 @@ sequenceDiagram
 | 步骤 | 源码与职责 |
 | --- | --- |
 | 1 | [`SurprisingCoreApplication.main`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/SurprisingCoreApplication.java)：`WebApplicationType.NONE`，创建 Spring 上下文 |
-| 2 | [`CoreConfiguration`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/config/CoreConfiguration.java)：绑定配置、校验必填产品线，创建 `ClusterTopology` 和 `TradingCpuAffinity` |
+| 2 | [`CoreConfiguration`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/config/CoreConfiguration.java)：绑定配置、校验必填产品线，创建 `ClusterTopology`、`LaneTopology` 和 `TradingCpuAffinity` |
 | 3–5 | [`AeronCoreLifecycle.startAndAwaitShutdown`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/bootstrap/AeronCoreLifecycle.java)：配置并启动 Driver/Archive/Consensus，再启动 Service Container；资源由 try-with-resources 逆序关闭 |
 | 6 | [`AeronTradingClusterService.onStart`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/cluster/AeronTradingClusterService.java)：重置解码槽、启动响应出口、读取快照后启动 Owner |
 | 7–8 | [`TradingOwnerLoop.start`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/orchestration/TradingOwnerLoop.java)：在 Owner 线程执行 `TradingCoreOwner.start`、恢复和激活；回调线程不直接修改账户 |
@@ -91,8 +91,10 @@ sequenceDiagram
 | `surprising.aeron.data-dir` | 同上 | `data/aeron`；节点目录为 `<data-dir>/<product>/node<N>` |
 | `surprising.aeron.cpu-affinity.*` | `CoreConfiguration`，见 [`application.yml`](surprising-aeron-service/src/main/resources/application.yml) | 默认关闭；开启需配置四个不同 CPU；macOS 跳过绑定 |
 | `surprising.aeron.execution-mode` | `TradingExecutionMode.configured()`，JVM `-D` | `FUSED`；另可选 `PIPELINED`，区分大小写 |
-| `surprising.aeron.matching-engines` / `account-lanes` | `LaneTopology.configured()`，JVM `-D` | `1` / `2`，须为允许范围内的 2 次幂；恢复使用快照拓扑 |
-| `surprising.aeron.risk-engines` | `LaneTopology.configured()`，JVM `-D` | `0`；不代表另启同数量风险线程，账户风控经账户 Lane 执行 |
+| `surprising.aeron.matching-engines` / `account-lanes` | `CoreConfiguration.laneTopology()`，Spring YAML、环境变量、JVM 属性或命令行 | `1` / `2`，须为允许范围内的 2 次幂；恢复使用快照拓扑 |
+| `surprising.aeron.risk-engines` | 同上 | `0`；不代表另启同数量风险线程，账户风控经账户 Lane 执行 |
+| `surprising.aeron.account-lane-seed` | 同上 | `7640891576956012809`；随快照保存，不按新配置重新路由已有账户 |
+| `surprising.aeron.matcher-window-size` / `matching-completion-capacity` / `account-lane-queue-capacity` | 同上 | 均为 `4096`，须为允许范围内的 2 次幂 |
 | `surprising.aeron.core.threading-mode` | `AeronCoreLifecycle`，`-D` 优先，其次 `AERON_CORE_THREADING_MODE` | CPU ≥ 12 时 `DEDICATED`，否则 `SHARED_NETWORK` |
 | `surprising.aeron.service.idle-strategy` | 同上，`-D` 优先，其次 `AERON_SERVICE_IDLE_STRATEGY` | 未配置沿用 Aeron 默认；可选 `BACKOFF`、`YIELDING` |
 | `surprising.aeron.max-concurrent-sessions` | `AeronCoreLifecycle`，JVM `-D` | `64`，范围 `[1,1024]` |

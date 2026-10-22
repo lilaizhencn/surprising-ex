@@ -1,5 +1,6 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.lane.LaneTopology;
 import java.util.List;
@@ -90,7 +91,7 @@ class ClusterMixedCapacityTest {
     }
 
     @Test void baselinePopulationFor256SymbolsCoversFourLanesAndHftPairsCrossLanes() {
-        var users=ClusterMixedCapacityMain.users();var topology=LaneTopology.configured(false);
+        var users=ClusterMixedCapacityMain.users();var topology=CoreConfiguration.standaloneLaneTopology();
         assertThat(users).hasSize(1769).doesNotHaveDuplicates();
         int laneMask = topology.accountLaneCount() - 1;
         for(int i=0;i<users.size();i++)assertThat(topology.accountLaneId(users.get(i))).isEqualTo(i & laneMask);

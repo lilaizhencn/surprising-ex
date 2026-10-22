@@ -1,5 +1,6 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.client.AeronClientCapacity;
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.*;
@@ -135,7 +136,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     }
 
     static List<Long> users() {
-        var topology=LaneTopology.configured(false);
+        var topology=CoreConfiguration.standaloneLaneTopology();
         var result=new ArrayList<Long>(USERS+3*SYMBOLS+1);
         long candidate=100_000;
         int laneMask = topology.accountLaneCount() - 1;
@@ -150,7 +151,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     // Setup-only coverage gate: require repeated Lane and matcher routes in the workload.
     // The measured run also covers batch codec, terminal index churn and realtime emission.
     void verifyRoutingCollisionCoverage() {
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = CoreConfiguration.standaloneLaneTopology();
         long accounts = 0, symbols = 0;
         int accountCollisions = 0, symbolCollisions = 0;
         for (int i = 0; i < SYMBOLS; i++) {

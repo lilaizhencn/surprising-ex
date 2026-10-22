@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.orchestration.trade;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.service.orchestration.result.ResponseArena;
@@ -90,7 +91,7 @@ public class AccountLaneCommitBenchmark {
             System.setProperty("surprising.aeron.settlement-wait-strategy", waitStrategy);
             previousAccountLanes = System.getProperty("surprising.aeron.account-lanes");
             System.setProperty("surprising.aeron.account-lanes", Integer.toString(accountLanes));
-            LaneTopology topology = LaneTopology.configured(false);
+            LaneTopology topology = CoreConfiguration.standaloneLaneTopology();
             runtime = new TradingRuntimeState(topology);
             users = new long[accountLanes];
             commits = new LaneCommitEvent[maxInFlight];

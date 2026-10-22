@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
+import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -756,9 +758,20 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * @param productLine 必须明确隔离的所属产品线
      */
     public TradingCoreRuntime(ProductLine productLine) {
+        this(productLine, CoreConfiguration.standaloneLaneTopology());
+    }
+
+    /**
+     * 按启动边界传入的拓扑创建空白运行时，账户和 Matcher 使用同一个值。
+     * @param productLine 本运行时唯一处理的产品线
+     * @param startupTopology 首次启动使用的不可变交易拓扑
+     */
+    public TradingCoreRuntime(ProductLine productLine,
+            LaneTopology startupTopology) {
         this(productLine, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
                 TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
-                0, Map.of(), Map.of(), null, null);
+                0, Map.of(), Map.of(), null, null,
+                java.util.Objects.requireNonNull(startupTopology, "startupTopology"));
     }
 
     /**
@@ -813,6 +826,44 @@ public final class TradingCoreRuntime implements AutoCloseable {
             Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> restoredPendingTransfers,
             MatcherSnapshotCapture matcherSnapshotCapture,
             SnapshotEncoder snapshotEncoder) {
+        this(productLine, appliedCommandCount, commandResults, lastSourceSequences, snapshotState,
+                terminalRetention, matcherSnapshot, projectionSequence, restoredFeePolicies,
+                restoredPendingTransfers, matcherSnapshotCapture, snapshotEncoder,
+                matcherSnapshot == null
+                        ? CoreConfiguration.standaloneLaneTopology()
+                        : matcherSnapshot.topology());
+    }
+
+    /**
+     * 组装运行时；首次启动使用传入拓扑，恢复时只使用 Matcher 快照保存的拓扑。
+     * @param productLine 本运行时唯一处理的产品线
+     * @param appliedCommandCount 初始或恢复的 Core 序号
+     * @param commandResults 已恢复的近期命令结果
+     * @param lastSourceSequences 已恢复的来源消费水位
+     * @param snapshotState 同一冻结点的业务状态
+     * @param terminalRetention 同一冻结点的终态身份和资金指纹
+     * @param matcherSnapshot 恢复的 Matcher 快照，首次启动时为空
+     * @param projectionSequence 已恢复的投影水位
+     * @param restoredFeePolicies 已恢复的费率配置
+     * @param restoredPendingTransfers 已恢复的待完成划转
+     * @param matcherSnapshotCapture 可空的 Matcher 快照捕获函数
+     * @param snapshotEncoder 可空的分块编码函数
+     * @param startupTopology 启动边界传入的拓扑，恢复时由快照中的拓扑决定
+     */
+    private TradingCoreRuntime(
+            ProductLine productLine,
+            long appliedCommandCount,
+            LinkedHashMap<UUID, StoredResult> commandResults,
+            LinkedHashMap<SourceKey, Long> lastSourceSequences,
+            TradingCoreState snapshotState,
+            TerminalStateRetention terminalRetention,
+            MatcherSnapshot matcherSnapshot,
+            long projectionSequence,
+            Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> restoredFeePolicies,
+            Map<Long, com.surprising.aeron.service.state.account.TransferRuntime> restoredPendingTransfers,
+            MatcherSnapshotCapture matcherSnapshotCapture,
+            SnapshotEncoder snapshotEncoder,
+            LaneTopology startupTopology) {
         this.productLine = productLine;
         this.appliedCommandCount = appliedCommandCount;
         this.committedCoreSequence = appliedCommandCount;
@@ -824,17 +875,16 @@ public final class TradingCoreRuntime implements AutoCloseable {
         // 初始状态及恢复费用、划转组合得到的业务哈希
         long restoredBusinessStateHash = canonicalBusinessStateHash(
                 snapshotState.businessStateHash(), restoredFeePolicies, restoredPendingTransfers);
-        // 恢复快照指定或当前配置决定的 Lane 拓扑
+        // 首次启动共用注入拓扑；恢复时不按节点当前配置重新分配账户。
         var topology = matcherSnapshot == null
-                ? com.surprising.aeron.service.lane.LaneTopology.configured(
-                        Boolean.getBoolean("surprising.aeron.p10-characterization"))
+                ? startupTopology
                 : matcherSnapshot.topology();
-        this.identities = new RuntimeIdentityRegistry();
+        this.identities = new RuntimeIdentityRegistry(topology);
         this.runtimeState = com.surprising.aeron.service.state.snapshot.RuntimeStateProjector.project(
                 snapshotState, identities, topology);
         this.activeOrderIndex = new ActiveOrderIndex(snapshotState, identities);
         this.matchingAdapter = matcherSnapshot == null
-                ? new DeterministicExchangeCoreAdapter(false)
+                ? new DeterministicExchangeCoreAdapter(topology, false)
                 : new DeterministicExchangeCoreAdapter(snapshotState, snapshotState.orders().values().stream().filter(/* 从恢复状态筛出的订单，仅 OPEN 订单交给 Matcher 重建 */ order -> order.status() == com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN).toList(),
                         appliedCommandCount, matcherSnapshot, false, restoredBusinessStateHash);
         this.pendingMatching = new PendingMatchingRing(
@@ -1817,7 +1867,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 返回 Matcher 与账户路由共用的 Lane 拓扑。
      */
-    com.surprising.aeron.service.lane.LaneTopology laneTopology() {
+    LaneTopology laneTopology() {
         return matchingAdapter.topology();
     }
 

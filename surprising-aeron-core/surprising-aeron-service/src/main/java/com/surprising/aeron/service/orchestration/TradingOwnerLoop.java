@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
+import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
@@ -72,15 +74,16 @@ public final class TradingOwnerLoop implements Runnable {
     }
 
     /**
-     * Spring 装配入口，取拓扑产品线并传入已经校验的 CPU 配置。
+     * Spring 装配入口，接收统一绑定的交易拓扑与 CPU 配置。
      * @param topology 本节点产品线和集群成员拓扑
      * @param egress Owner 终态要交入的已有响应出口
      * @param affinity 启动前已校验的 CPU 亲和性配置
+     * @param laneTopology 统一配置绑定后创建的首次启动拓扑
      */
     @Autowired
     public TradingOwnerLoop(ClusterTopology topology, ClusterServiceEgress egress,
-            TradingCpuAffinity affinity) {
-        this(topology.productLine(), egress, affinity);
+            TradingCpuAffinity affinity, LaneTopology laneTopology) {
+        this(topology.productLine(), egress, affinity, laneTopology);
     }
 
     /**
@@ -100,9 +103,22 @@ public final class TradingOwnerLoop implements Runnable {
      */
     public TradingOwnerLoop(ProductLine productLine, ClusterServiceEgress egress,
             TradingCpuAffinity affinity) {
+        this(productLine, egress, affinity,
+                CoreConfiguration.standaloneLaneTopology());
+    }
+
+    /**
+     * 保存启动边界传入的配置，交给 Core Owner 创建共享同一拓扑的运行时。
+     * @param productLine 本 Owner 唯一处理的产品线
+     * @param egress 已装配的响应出口
+     * @param affinity 工作线程的 CPU 配置
+     * @param laneTopology 首次启动使用的交易拓扑
+     */
+    public TradingOwnerLoop(ProductLine productLine, ClusterServiceEgress egress,
+            TradingCpuAffinity affinity, LaneTopology laneTopology) {
         this.affinityConfiguration = java.util.Objects.requireNonNull(affinity);
         this.egress = egress;
-        coreOwner = new TradingCoreOwner(productLine, this::publishResponse);
+        coreOwner = new TradingCoreOwner(productLine, this::publishResponse, laneTopology);
         input = coreOwner.ingress();
     }
 

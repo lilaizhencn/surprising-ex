@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state.identity;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.service.state.TradingRuntimeState;
@@ -91,7 +92,20 @@ public final class RuntimeIdentityRegistry {
     /** 按内部标的编号存规范数字文本的已发布数组，不以永久 ID 作为下标。 */
     private volatile String[] symbols = new String[16];
     /** 核对异步客户端身份操作是否在用户所属 Lane 的固定路由规则。 */
-    private LaneTopology clientTopology = LaneTopology.configured(false);
+    private LaneTopology clientTopology;
+
+    /** 独立工具入口使用统一配置绑定的账户拓扑。 */
+    public RuntimeIdentityRegistry() {
+        this(CoreConfiguration.standaloneLaneTopology());
+    }
+
+    /**
+     * 接收运行时已经确定的账户拓扑，避免身份表重新读取外部配置。
+     * @param topology 与账户和 Matcher 共用的启动或恢复拓扑
+     */
+    public RuntimeIdentityRegistry(LaneTopology topology) {
+        clientTopology = java.util.Objects.requireNonNull(topology, "topology");
+    }
     /** 客户端身份权威表所在运行时，尚未绑定时为空。 */
     private TradingRuntimeState clientRuntime;
 

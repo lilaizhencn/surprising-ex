@@ -1,22 +1,93 @@
 package com.surprising.aeron.service.config;
 
 import com.surprising.aeron.service.cluster.ClusterTopology;
+import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.product.api.ProductLine;
 import java.nio.file.Path;
 import java.util.Arrays;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.StandardEnvironment;
 
 /**
  * 接收 surprising.aeron 下的启动配置，并把它们组装成一个节点可直接使用的配置对象。
- * 这里只描述节点属于哪条产品线、连接哪些成员以及如何绑定 CPU，不加载订单或账户数据。
+ * 统一绑定节点、交易分片、队列与 CPU 配置，不加载订单或账户数据。
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(CoreConfiguration.class)
 @ConfigurationProperties(prefix = "surprising.aeron")
 public class CoreConfiguration {
+
+    /** 首次启动使用的 Matcher 数量，恢复时由快照保存的拓扑决定。 */
+    private int matchingEngines = LaneTopology.DEFAULT_MATCHING_ENGINE_COUNT;
+    /** 原生风险引擎数量，不表示启动同数量的账户风控线程。 */
+    private int riskEngines = LaneTopology.DEFAULT_RISK_ENGINE_COUNT;
+    /** 首次启动时按用户划分的账户 Lane 数量。 */
+    private int accountLanes = LaneTopology.DEFAULT_ACCOUNT_LANE_COUNT;
+    /** 固定用户到账户 Lane 映射的种子，随快照保存。 */
+    private long accountLaneSeed = LaneTopology.DEFAULT_ACCOUNT_LANE_SEED;
+    /** Matcher 可同时登记的在途命令槽位数。 */
+    private int matcherWindowSize = LaneTopology.DEFAULT_MATCHER_WINDOW_SIZE;
+    /** Matcher 完成队列容量。 */
+    private int matchingCompletionCapacity = LaneTopology.DEFAULT_QUEUE_CAPACITY;
+    /** 每个账户 Lane 的输入队列容量。 */
+    private int accountLaneQueueCapacity = LaneTopology.DEFAULT_QUEUE_CAPACITY;
+
+    /** 返回首次启动的 Matcher 数量。 */
+    public int getMatchingEngines() { return matchingEngines; }
+    /** @param count 配置的 Matcher 数量，创建拓扑时校验范围和二次幂约束 */
+    public void setMatchingEngines(int count) { matchingEngines = count; }
+    /** 返回原生风险引擎数量。 */
+    public int getRiskEngines() { return riskEngines; }
+    /** @param count 配置的原生风险引擎数量，允许为零 */
+    public void setRiskEngines(int count) { riskEngines = count; }
+    /** 返回首次启动的账户 Lane 数量。 */
+    public int getAccountLanes() { return accountLanes; }
+    /** @param count 配置的账户 Lane 数量，创建拓扑时校验 */
+    public void setAccountLanes(int count) { accountLanes = count; }
+    /** 返回固定用户路由使用的种子。 */
+    public long getAccountLaneSeed() { return accountLaneSeed; }
+    /** @param seed 首次启动使用的用户路由种子 */
+    public void setAccountLaneSeed(long seed) { accountLaneSeed = seed; }
+    /** 返回 Matcher 在途窗口大小。 */
+    public int getMatcherWindowSize() { return matcherWindowSize; }
+    /** @param capacity Matcher 在途窗口槽位数，创建拓扑时校验 */
+    public void setMatcherWindowSize(int capacity) { matcherWindowSize = capacity; }
+    /** 返回 Matcher 完成队列容量。 */
+    public int getMatchingCompletionCapacity() { return matchingCompletionCapacity; }
+    /** @param capacity Matcher 完成队列槽位数，创建拓扑时校验 */
+    public void setMatchingCompletionCapacity(int capacity) { matchingCompletionCapacity = capacity; }
+    /** 返回每个账户 Lane 的输入队列容量。 */
+    public int getAccountLaneQueueCapacity() { return accountLaneQueueCapacity; }
+    /** @param capacity 账户 Lane 输入队列槽位数，创建拓扑时校验 */
+    public void setAccountLaneQueueCapacity(int capacity) { accountLaneQueueCapacity = capacity; }
+
+    /** 从已绑定的配置创建并校验启动拓扑，Owner、账户和 Matcher 共用该值。 */
+    @Bean
+    public LaneTopology laneTopology() {
+        return toLaneTopology();
+    }
+
+    /** 将绑定值转换成已校验的不可变拓扑，不依赖 Spring Bean 生命周期。 */
+    public LaneTopology toLaneTopology() {
+        return new LaneTopology(matchingEngines, riskEngines, matchingEngines - 1,
+                accountLanes, accountLaneSeed, matcherWindowSize,
+                matchingCompletionCapacity, accountLaneQueueCapacity);
+    }
+
+    /**
+     * 非 Spring 的工具和基准入口使用相同配置字段与 Binder，读取系统属性及环境变量；
+     * 不启动应用上下文，也不隐式加载节点的 YAML。Spring 节点直接注入已绑定的拓扑 Bean。
+     */
+    public static LaneTopology standaloneLaneTopology() {
+        return Binder.get(new StandardEnvironment())
+                .bind("surprising.aeron", Bindable.of(CoreConfiguration.class))
+                .orElseGet(CoreConfiguration::new).toLaneTopology();
+    }
 
     /** CPU 绑定配置；先接收配置值，真正绑定线程时还会检查平台和可用 CPU。 */
     private final CpuAffinity cpuAffinity = new CpuAffinity();

@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
@@ -530,7 +531,7 @@ public final class TradingRuntimeState implements AutoCloseable {
      * 按当前配置构造被动账户运行时；是否允许特征化拓扑由 JVM 属性决定。
      */
     public TradingRuntimeState() {
-        this(LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization")));
+        this(CoreConfiguration.standaloneLaneTopology());
     }
 
     /**

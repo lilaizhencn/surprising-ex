@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
+import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.client.RealtimeOutbox;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
@@ -66,6 +68,8 @@ public final class TradingCoreOwner {
 
     /** 本 Owner 唯一产品线，决定账户、规则、Matcher 和恢复隔离。 */
     private final ProductLine productLine;
+    /** 首次启动的配置拓扑；恢复快照后由恢复运行时携带自己的拓扑。 */
+    private final LaneTopology startupTopology;
     /** 当前权威交易运行时，由 Owner 线程访问，未启动或退出后为 null。 */
     private TradingCoreRuntime state;
     /** 外层交接的角色、复制时间及日志位置，不含网络发送能力。 */
@@ -92,10 +96,23 @@ public final class TradingCoreOwner {
      * @param responseSink 必须存在的已提交响应出口
      */
     public TradingCoreOwner(ProductLine productLine, ResponseSink responseSink) {
+        this(productLine, responseSink,
+                CoreConfiguration.standaloneLaneTopology());
+    }
+
+    /**
+     * 用启动边界已经绑定的拓扑创建 Owner，不在交易状态内重新读取配置。
+     * @param productLine 本 Owner 唯一处理的产品线
+     * @param responseSink 已提交响应的出口
+     * @param startupTopology 首次启动时账户和 Matcher 共用的不可变拓扑
+     */
+    public TradingCoreOwner(ProductLine productLine, ResponseSink responseSink,
+            LaneTopology startupTopology) {
         if (productLine == null) {
             throw new IllegalArgumentException("product line is required");
         }
         this.productLine = productLine;
+        this.startupTopology = java.util.Objects.requireNonNull(startupTopology, "startupTopology");
         this.responseSink = java.util.Objects.requireNonNull(responseSink, "response sink");
         this.realtimeBoundary = new TradingRealtimeBoundary(productLine);
         this.executionMode = TradingExecutionMode.configured();
@@ -113,7 +130,7 @@ public final class TradingCoreOwner {
      */
     public void start(OwnerLogContext logContext) {
         this.logContext = logContext;
-        if (state == null) state = new TradingCoreRuntime(productLine);
+        if (state == null) state = new TradingCoreRuntime(productLine, startupTopology);
         processingLogCallback = false;
         commandPipeline.reset();
         if (fusedDecoder != null) fusedDecoder.clearCommandSlot();

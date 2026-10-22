@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -168,7 +169,7 @@ class CoreRiskStateTest {
         TradingCoreState completed = continueRiskScans(firstBatch);
         assertThat(completed.riskState().scan().complete()).isTrue();
         // 本地测试配置的 Lane 分配规则，用来独立算出最终游标应落在哪个用户。
-        LaneTopology topology = LaneTopology.configured(false);
+        LaneTopology topology = CoreConfiguration.standaloneLaneTopology();
         // 属于最后一个账户 Lane 的最大用户编号，作为最终用户游标的期望值。
         long expectedLastUserId = 0;
         for (/* 批量构造或遍历风险账户时的用户编号，每个编号对应一份独立账户状态。 */ long userId = 1; userId <= 1_300; userId++) {

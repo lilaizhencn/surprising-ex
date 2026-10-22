@@ -51,38 +51,17 @@ public record LaneTopology(
         }
     }
 
-    /** 按当前 JVM 配置创建正常运行使用的拓扑，未指定的项采用本类默认值。 */
+    /** 创建固定默认拓扑；外部配置统一由 CoreConfiguration 绑定并传入。 */
     public static LaneTopology productionDefault() {
-        return configured(false);
+        return new LaneTopology(DEFAULT_MATCHING_ENGINE_COUNT, DEFAULT_RISK_ENGINE_COUNT,
+                DEFAULT_MATCHING_ENGINE_COUNT - 1, DEFAULT_ACCOUNT_LANE_COUNT, DEFAULT_ACCOUNT_LANE_SEED,
+                DEFAULT_MATCHER_WINDOW_SIZE, DEFAULT_QUEUE_CAPACITY, DEFAULT_QUEUE_CAPACITY);
     }
 
     /** 创建只有一个 Matcher 和一个账户 Lane 的固定测试拓扑，便于核对基础行为。 */
     public static LaneTopology characterization() {
         return new LaneTopology(1, 0, 0, 1, DEFAULT_ACCOUNT_LANE_SEED,
                 DEFAULT_MATCHER_WINDOW_SIZE, DEFAULT_QUEUE_CAPACITY, DEFAULT_QUEUE_CAPACITY);
-    }
-
-    /**
-     * 从 JVM 系统属性读取分片数和队列容量，随后交给构造器统一校验。
-     * @param allowCharacterization 当前实现没有读取此参数；不会因此自动切换成单 Lane 测试拓扑
-     */
-    public static LaneTopology configured(boolean allowCharacterization) {
-        // 按币对拆分订单簿的 Matcher 数量。
-        int matching = Integer.getInteger("surprising.aeron.matching-engines", DEFAULT_MATCHING_ENGINE_COUNT);
-        // 仅接收风险引擎数量配置，不在这里创建风险工作线程。
-        int risk = Integer.getInteger("surprising.aeron.risk-engines", DEFAULT_RISK_ENGINE_COUNT);
-        // 按用户划分账户状态所有权的 Lane 数量。
-        int accounts = Integer.getInteger("surprising.aeron.account-lanes", DEFAULT_ACCOUNT_LANE_COUNT);
-        // 固定用户到 Lane 的映射，后续会随快照保存。
-        long seed = Long.getLong("surprising.aeron.account-lane-seed", DEFAULT_ACCOUNT_LANE_SEED);
-        // Matcher 最多允许同时登记的在途命令槽位数。
-        int window = Integer.getInteger("surprising.aeron.matcher-window-size", DEFAULT_MATCHER_WINDOW_SIZE);
-        // Matcher 已完成但还没有被收集的结果队列容量。
-        int completion = Integer.getInteger("surprising.aeron.matching-completion-capacity", DEFAULT_QUEUE_CAPACITY);
-        // 每个账户 Lane 可保留的待执行任务数量。
-        int laneQueue = Integer.getInteger("surprising.aeron.account-lane-queue-capacity", DEFAULT_QUEUE_CAPACITY);
-        return new LaneTopology(matching, risk, matching - 1, accounts, seed,
-                window, completion, laneQueue);
     }
 
     /**

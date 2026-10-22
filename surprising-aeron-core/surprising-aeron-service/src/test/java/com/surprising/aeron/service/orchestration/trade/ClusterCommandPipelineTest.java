@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.orchestration.trade;
 
+import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
@@ -2672,12 +2673,12 @@ class ClusterCommandPipelineTest {
     }
 
     /**
-     * 按 productionDefault 拓扑找一个账户 Lane 位不同的后继用户；不直接读取当前 Fixture 的实际拓扑。
+     * 按独立入口的统一配置找一个账户 Lane 位不同的后继用户。
      * @param user 请求所属用户编号
      */
     private static long disjointUser(long user) {
-        // 用于测试选人的生产默认拓扑，不是直接读取当前 Fixture 的配置
-        var topology = LaneTopology.productionDefault();
+        // 用于测试选人的独立入口配置拓扑
+        var topology = CoreConfiguration.standaloneLaneTopology();
         // 原用户在该默认拓扑中的账户 Lane 单个位图
         long lane = topology.accountLaneMask(user);
         for (/* 从原用户加一开始逐个尝试的候选用户编号 */ long next = user + 1;; next++) {
