@@ -6,9 +6,14 @@ import com.surprising.gateway.provider.auth.utils.ClientIpResolver;
 import com.surprising.gateway.provider.config.GatewayProperties;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
+import java.util.Set;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
 
-/** Binance签名协议的请求字段与原始签名字节绑定，不访问账号或密钥仓储。 */
+/** API Key管理格式及Binance签名原始字节绑定，不访问账号或密钥仓储。 */
 public final class ApiKeyRequestBinding {
+    private static final Set<String> PERMISSIONS = Set.of("READ", "TRADE", "WITHDRAW");
     private final ClientIpResolver addresses;
     public ApiKeyRequestBinding(GatewayProperties properties) { addresses = new ClientIpResolver(properties); }
 
@@ -53,6 +58,52 @@ public final class ApiKeyRequestBinding {
             return requestBody;
         }
         return ApiSignatureFormats.canonicalParameters(request.getParameterMap());
+    }
+
+    public String label(String label) {
+        String normalizedLabel = label == null ? "" : label.trim();
+        if (normalizedLabel.isBlank() || normalizedLabel.length() > 80) {
+            throw new IllegalArgumentException("api key label must be 1-80 characters");
+        }
+        return normalizedLabel;
+    }
+
+    public String normalizePermissions(List<String> permissions) {
+        Set<String> normalized = new LinkedHashSet<>();
+        if (permissions != null) {
+            permissions.forEach(value -> {
+                String item = value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
+                if (!PERMISSIONS.contains(item)) throw new IllegalArgumentException("unsupported api key permission");
+                normalized.add(item);
+            });
+        }
+        normalized.add("READ");
+        return String.join(",", normalized);
+    }
+
+    public String normalizeIpAllowlist(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return "";
+        }
+        if (values.size() > 100) {
+            throw new IllegalArgumentException("api key IP allowlist cannot contain more than 100 addresses");
+        }
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String value : values) {
+            String item = value == null ? "" : value.trim();
+            if (item.isBlank() || item.length() > 64 || !addresses.isValidRule(item)) {
+                throw new IllegalArgumentException("api key IP allowlist contains an invalid address");
+            }
+            normalized.add(item);
+        }
+        return String.join(",", normalized);
+    }
+
+    public String requireApiKey(String value) {
+        if (value == null || !value.matches("sx_[A-Za-z0-9_-]{20,80}")) {
+            throw new IllegalArgumentException("api key is invalid");
+        }
+        return value;
     }
 
 }

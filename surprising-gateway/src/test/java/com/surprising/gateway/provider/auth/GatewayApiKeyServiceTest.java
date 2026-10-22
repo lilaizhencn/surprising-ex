@@ -73,14 +73,14 @@ class GatewayApiKeyServiceTest {
 
     @Test
     void normalizesAndValidatesIpAllowlist() {
-        assertThat(service.normalizeIpAllowlist(List.of("203.0.113.10", "203.0.113.0/24", "203.0.113.10")))
+        assertThat(new ApiKeyRequestBinding(new GatewayProperties()).normalizeIpAllowlist(List.of("203.0.113.10", "203.0.113.0/24", "203.0.113.10")))
                 .isEqualTo("203.0.113.10,203.0.113.0/24");
     }
 
     @Test
     void rejectsHostNamesInIpAllowlist() {
         org.assertj.core.api.Assertions.assertThatThrownBy(
-                        () -> service.normalizeIpAllowlist(List.of("api.example.com")))
+                        () -> new ApiKeyRequestBinding(new GatewayProperties()).normalizeIpAllowlist(List.of("api.example.com")))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

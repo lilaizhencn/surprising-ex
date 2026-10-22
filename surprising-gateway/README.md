@@ -558,3 +558,5 @@ Binance APIKey请求由 `auth.controller.ApiKeyRequestBinding` 绑定原生 `Api
 费率管理入口 `trading.order.controller.TradingFeeRequestController` 绑定费率请求及分页，向Service传递原生 `FeeSchedulePageQuery`；`TradingFeeService` 决定费率关系、有效期、产品归属和发布/导入Core顺序。`OrderFeeRepository` 只执行费率表查询与Kafka事实投影，分页默认100、最大500，支持createdAt/updatedAt/effectiveTime双向排序及精确时间/long游标。订单生效费率仍从JVM快照获取。
 
 托管充值、提现扣款和退款经 `provider.client.SpotAccountClient` 固定调用本机SPOT Core；客户端只适配原生命令及结果分类。`provider.exception.SpotAccountRejectedException` 表示明确拒绝，`SpotAccountUnknownException` 表示结果未确认，提现Service继续使用原意图和幂等引用对账，协议入口决定HTTP响应。
+
+API Key管理的标签、权限、IP白名单和密钥格式由 `auth.controller.ApiKeyRequestBinding` 绑定，复用已有纯IP解析工具；共享请求/响应归 `auth.model.ApiKeyModels`。`GatewayApiKeyService` 保留身份与二次验证、密钥生成/加密、签名、权限及IP访问裁决，Repository只操作密钥表。秘密仅首次创建返回，列表与修改/撤销响应不返回秘密。
